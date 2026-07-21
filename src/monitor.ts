@@ -33,6 +33,7 @@ import {
   formatActivityLabel,
   getTokenSniperActivity,
   summarizeSniper,
+  getGmgnStatus,
 } from './gmgn';
 import {
   isRecentlyMigrated,
@@ -212,13 +213,26 @@ export function startMonitor(): void {
     `[monitor] Starting — poll every ${config.pollIntervalMs}ms, activity filter: ${config.filters.enableActivityFilter}`
   );
 
+  // Restore wallets that were auto-disabled after failed RPC/GMGN scans
+  recoverDisabledWallets();
+
+  // Start polling immediately so trading isn't blocked behind slow GMGN/RPC
+  // activity scans. Refresh activity in the background, then apply filter.
+  void pollAllWallets();
+
   void (async () => {
     if (config.filters.enableActivityFilter) {
       await refreshAllWalletActivity();
-      // Disable inactive; keep them in list for dashboard. Persist with status.
       filterActiveWallets({ persistActiveOnly: false });
+      const watching = getWalletsForPolling().length;
+      if (watching === 0 && config.smartWallets.length > 0) {
+        console.warn(
+          `[monitor] ⚠ 0 wallets eligible to poll after activity refresh — ` +
+            `recovering recently-active disabled wallets`
+        );
+        recoverDisabledWallets();
+      }
     }
-    void pollAllWallets();
   })();
 
   pollTimer = setInterval(() => {
@@ -230,6 +244,9 @@ export function startMonitor(): void {
     void (async () => {
       await refreshAllWalletActivity();
       filterActiveWallets({ persistActiveOnly: false });
+      if (getWalletsForPolling().length === 0 && config.smartWallets.length > 0) {
+        recoverDisabledWallets();
+      }
     })();
   }, ACTIVITY_REFRESH_MS);
 
@@ -313,7 +330,12 @@ async function pollAllWallets(): Promise<void> {
  */
 export async function checkWalletLastTrade(
   address: string
-): Promise<{ lastTradedAt: number | null; tradesLast30d: number; signature?: string }> {
+): Promise<{
+  lastTradedAt: number | null;
+  tradesLast30d: number;
+  signature?: string;
+  failed?: boolean;
+}> {
   try {
     const pubkey = new PublicKey(address);
     const conn = getConnection();
@@ -343,7 +365,8 @@ export async function checkWalletLastTrade(
     };
   } catch (err) {
     console.warn(`[monitor] Activity check failed for ${address.slice(0, 8)}…:`, err);
-    return { lastTradedAt: null, tradesLast30d: 0 };
+    // Do NOT invent zeros — callers must keep prior lastTradedAt / tradesLast30d
+    return { lastTradedAt: null, tradesLast30d: 0, failed: true };
   }
 }
 
@@ -355,11 +378,20 @@ export async function refreshWalletActivity(
   let tradesLast30d = 0;
   let signature: string | undefined;
   let source: 'gmgn' | 'onchain' | 'mixed' = 'onchain';
+  let fetchFailed = false;
 
-  // Prefer GMGN when configured
+  // Prefer GMGN when configured — skip when no key / circuit open (avoids 403 storms)
   let gmgnWinRate: number | undefined;
   let tradesLast7d: number | undefined;
-  if (config.gmgn.preferGmgnActivity) {
+  const gmgnStatus = getGmgnStatus();
+  const gmgnUsable =
+    config.gmgn.preferGmgnActivity &&
+    gmgnStatus.hasApiKey &&
+    (gmgnStatus.rateLimitedUntil == null ||
+      gmgnStatus.rateLimitedUntil <= Date.now()) &&
+    (gmgnStatus.discovery?.consecutiveFailures ?? 0) < 8;
+
+  if (gmgnUsable) {
     try {
       const gmgn = await getWalletActivity(wallet.address);
       if (gmgn.lastTradeTime != null) {
@@ -390,15 +422,32 @@ export async function refreshWalletActivity(
   // On-chain fallback / enrichment when GMGN missing or incomplete
   if (lastTradedAt == null || tradesLast30d === 0) {
     const onchain = await checkWalletLastTrade(wallet.address);
-    if (lastTradedAt == null) {
-      lastTradedAt = onchain.lastTradedAt;
-      signature = onchain.signature;
-      source = source === 'gmgn' ? 'mixed' : 'onchain';
+    if (onchain.failed) {
+      fetchFailed = true;
+    } else {
+      if (lastTradedAt == null) {
+        lastTradedAt = onchain.lastTradedAt;
+        signature = onchain.signature;
+        source = source === 'gmgn' ? 'mixed' : 'onchain';
+      }
+      if (tradesLast30d === 0) {
+        tradesLast30d = onchain.tradesLast30d;
+      }
+      if (!signature) signature = onchain.signature;
     }
-    if (tradesLast30d === 0) {
-      tradesLast30d = onchain.tradesLast30d;
-    }
-    if (!signature) signature = onchain.signature;
+  }
+
+  const target = config.smartWallets.find((w) => w.address === wallet.address);
+
+  // On fetch failure keep prior activity so we don't auto-disable everyone
+  if (fetchFailed && target) {
+    lastTradedAt = target.lastTradedAt ?? target.lastActive ?? null;
+    tradesLast30d = target.tradesLast30d ?? 0;
+    console.warn(
+      `[monitor] Keeping prior activity for ${wallet.name} ` +
+        `(last=${lastTradedAt ? new Date(lastTradedAt).toISOString() : 'unknown'}, ` +
+        `txs30d=${tradesLast30d}) — RPC/GMGN check failed`
+    );
   }
 
   const daysSinceTrade =
@@ -410,7 +459,11 @@ export async function refreshWalletActivity(
   let isActive = true;
   let reason: string | undefined;
 
-  if (lastTradedAt == null) {
+  if (fetchFailed && lastTradedAt == null) {
+    // Unknown — don't mark inactive
+    isActive = true;
+    reason = 'activity check failed — status unknown';
+  } else if (lastTradedAt == null) {
     isActive = false;
     reason = 'no activity found';
   } else if (daysSinceTrade != null && daysSinceTrade > minActivityDays) {
@@ -425,14 +478,16 @@ export async function refreshWalletActivity(
     reason = `only ${tradesLast30d} txs (need ${minTradesLast30d})`;
   }
 
-  const target = config.smartWallets.find((w) => w.address === wallet.address);
   if (target) {
-    target.lastTradedAt = lastTradedAt ?? undefined;
-    target.lastActive = lastTradedAt ?? undefined;
-    target.tradesLast30d = tradesLast30d;
-    if (tradesLast7d != null) target.tradesLast7d = tradesLast7d;
-    if (gmgnWinRate != null) target.winRate = gmgnWinRate;
-    target.lastCheckedAt = Date.now();
+    if (!fetchFailed) {
+      target.lastTradedAt = lastTradedAt ?? undefined;
+      target.lastActive = lastTradedAt ?? undefined;
+      target.tradesLast30d = tradesLast30d;
+      if (tradesLast7d != null) target.tradesLast7d = tradesLast7d;
+      if (gmgnWinRate != null) target.winRate = gmgnWinRate;
+      target.lastCheckedAt = Date.now();
+    }
+    // On failure: leave prior fields alone (do not stamp lastCheckedAt with zeros)
   }
 
   if (lastTradedAt != null) {
@@ -469,6 +524,53 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
 }
 
 /**
+ * True when wallet looks active enough to poll.
+ * tradesLast30d === 0 is treated as "unknown" (RPC/GMGN often wipe this on failure),
+ * so a recent lastTradedAt alone is enough to stay eligible.
+ */
+function passesActivityRules(wallet: SmartWallet): boolean {
+  const { minActivityDays, minTradesLast30d } = config.filters;
+  // Not yet checked — allow until first successful activity scan
+  if (wallet.lastCheckedAt == null) return true;
+  const last = wallet.lastTradedAt ?? wallet.lastActive;
+  if (last == null) return false;
+  const daysSince = (Date.now() - last) / MS_PER_DAY;
+  if (daysSince > minActivityDays) return false;
+  const trades = wallet.tradesLast30d ?? 0;
+  // 0 = unknown / failed fetch — don't treat as inactive
+  if (trades > 0 && trades < minTradesLast30d) return false;
+  return true;
+}
+
+/**
+ * Re-enable wallets that still look recently active but were disabled after
+ * failed activity scans (common when public RPC is 429'd).
+ */
+export function recoverDisabledWallets(): { recovered: number } {
+  let recovered = 0;
+  const maxDays = config.filters.minActivityDays;
+  for (const wallet of config.smartWallets) {
+    if (wallet.enabled) continue;
+    const last = wallet.lastTradedAt ?? wallet.lastActive;
+    if (last == null) continue;
+    const daysSince = (Date.now() - last) / MS_PER_DAY;
+    if (daysSince > maxDays) continue;
+    // Recent last trade — re-enable even if tradesLast30d was wiped to 0
+    wallet.enabled = true;
+    recovered += 1;
+    console.log(
+      `[monitor] Re-enabled ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
+        `last trade ${daysSince.toFixed(1)}d ago`
+    );
+  }
+  if (recovered > 0) {
+    persistWallets();
+    console.log(`[monitor] Recovered ${recovered} wallet(s) for polling`);
+  }
+  return { recovered };
+}
+
+/**
  * Auto-filter: disable wallets that fail activity rules.
  * Set pruneInactive=true to remove disabled wallets and persist active only.
  */
@@ -483,22 +585,17 @@ export function filterActiveWallets(
     };
   }
 
-  const { minActivityDays, minTradesLast30d } = config.filters;
   let disabled = 0;
 
   for (const wallet of config.smartWallets) {
-    // Skip wallets not yet checked — don't disable blindly
+    // Skip wallets not yet successfully checked — don't disable blindly
     if (wallet.lastCheckedAt == null) continue;
 
-    const last = wallet.lastTradedAt;
-    const trades = wallet.tradesLast30d ?? 0;
+    const active = passesActivityRules(wallet);
+    const last = wallet.lastTradedAt ?? wallet.lastActive;
     const daysSince =
       last != null ? (Date.now() - last) / MS_PER_DAY : Infinity;
-
-    const active =
-      last != null &&
-      daysSince <= minActivityDays &&
-      trades >= minTradesLast30d;
+    const trades = wallet.tradesLast30d ?? 0;
 
     if (!active && wallet.enabled) {
       wallet.enabled = false;
@@ -509,8 +606,11 @@ export function filterActiveWallets(
           `${trades} txs/30d`
       );
     } else if (active && !wallet.enabled) {
-      // Re-enable if they became active again
+      // Re-enable if they became active again / were falsely disabled
       wallet.enabled = true;
+      console.log(
+        `[monitor] Re-enabled ${wallet.name} (${wallet.address.slice(0, 8)}…) — activity OK`
+      );
     }
   }
 
@@ -538,17 +638,7 @@ export function getWalletsForPolling(): SmartWallet[] {
   let list = enabled;
 
   if (config.filters.enableActivityFilter) {
-    const { minActivityDays, minTradesLast30d } = config.filters;
-    list = enabled.filter((w) => {
-      // Not yet checked — allow until first activity scan
-      if (w.lastCheckedAt == null) return true;
-      if (w.lastTradedAt == null && w.lastActive == null) return false;
-      const last = w.lastTradedAt ?? w.lastActive ?? 0;
-      const daysSince = (Date.now() - last) / MS_PER_DAY;
-      if (daysSince > minActivityDays) return false;
-      if ((w.tradesLast30d ?? 0) < minTradesLast30d) return false;
-      return true;
-    });
+    list = enabled.filter((w) => passesActivityRules(w));
   }
 
   // Recent activity first so monitor polls hot wallets sooner
@@ -562,13 +652,7 @@ export function getWalletsForPolling(): SmartWallet[] {
 export function isWalletActive(wallet: SmartWallet): boolean {
   if (!wallet.enabled) return false;
   if (!config.filters.enableActivityFilter) return true;
-  if (wallet.lastCheckedAt == null) return true;
-  const last = wallet.lastTradedAt ?? wallet.lastActive;
-  if (last == null) return false;
-  const daysSince = (Date.now() - last) / MS_PER_DAY;
-  if (daysSince > config.filters.minActivityDays) return false;
-  if ((wallet.tradesLast30d ?? 0) < config.filters.minTradesLast30d) return false;
-  return true;
+  return passesActivityRules(wallet);
 }
 
 async function pollWallet(wallet: SmartWallet): Promise<void> {

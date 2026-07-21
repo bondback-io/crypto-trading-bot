@@ -47,6 +47,7 @@ import {
   filterActiveWallets,
   clearMonitorRiskHalt,
   clearTradedMints,
+  recoverDisabledWallets,
 } from './monitor';
 import {
   updateRiskConfig,
@@ -1572,11 +1573,28 @@ export function createServer(): express.Application {
     try {
       const reports = await refreshAllWalletActivity();
       const filter = filterActiveWallets({ persistActiveOnly: false });
-      res.json({ reports, filter, wallets: getWalletsWithActivity() });
+      const recovered = recoverDisabledWallets();
+      res.json({
+        reports,
+        filter,
+        recovered,
+        wallets: getWalletsWithActivity(),
+        watchedWallets: getMonitorStatus().watchedWallets,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: message });
     }
+  });
+
+  /** Re-enable wallets that still look recently active (after bad RPC scans). */
+  app.post('/api/wallets/recover', (_req: Request, res: Response) => {
+    const recovered = recoverDisabledWallets();
+    res.json({
+      ...recovered,
+      wallets: getWalletsWithActivity(),
+      watchedWallets: getMonitorStatus().watchedWallets,
+    });
   });
 
   app.post('/api/wallets/prune-inactive', (_req: Request, res: Response) => {
