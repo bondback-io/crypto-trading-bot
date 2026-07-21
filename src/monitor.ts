@@ -1,0 +1,1600 @@
+/**
+ * Smart wallet monitor — polls on-chain activity, detects buys,
+ * applies filters/strategy toggles, and emits trade signals.
+ */
+
+import {
+  ParsedInstruction,
+  ParsedTransactionWithMeta,
+  PartiallyDecodedInstruction,
+  PublicKey,
+} from '@solana/web3.js';
+import { config, SmartWallet, persistWallets } from './config';
+import { getConnection } from './connection';
+import { executeBuy, refreshPositionPrices } from './trade';
+import { paperTrader } from './paperTrader';
+import { getDiscoveryStatus } from './walletDiscovery';
+import {
+  getTokenOverview,
+  getSmartMoneySignal,
+  summarizeBirdeye,
+  getBirdeyeStatus,
+} from './birdeye';
+import {
+  recordEarlyBuyer,
+  recordPumpSmartActivity,
+  shouldPrioritizeEarlyCurve,
+  getPumpSmartStatus,
+  markLaunchMigrated,
+  isEarlyCurveBuy,
+} from './pumpSmartActivity';
+import {
+  getWalletActivity,
+  formatActivityLabel,
+  getTokenSniperActivity,
+  summarizeSniper,
+} from './gmgn';
+import {
+  isRecentlyMigrated,
+  markAsMigrated,
+  getMigrationStatus,
+  onMigrationPriority,
+  MigrationEvent,
+} from './migrationListener';
+import {
+  resolveTokenMeta,
+  formatTokenLabel,
+  mintPrefix,
+  cacheTokenMeta,
+} from './tokenMeta';
+import {
+  isReBuyWatching,
+  recordConfirmationBuy,
+  evaluateConfirmation,
+  markReBought,
+  refreshCandidateMarketData,
+  getReBuyCandidates,
+  updateCandidatePrice,
+  getReBuyStatus,
+} from './reBuy';
+import {
+  calculatePositionSizeSol,
+  isRiskHalted,
+  onRiskHalt,
+  getRiskStatus,
+  clearRiskHalt,
+} from './risk';
+import {
+  fetchTokenMetrics,
+  summarizeTokenMetrics,
+} from './tokenMetrics';
+import {
+  evaluateAntiRug,
+  summarizeAntiRug,
+  formatAntiRugSkipLog,
+  type AntiRugReport,
+} from './antiRug';
+import {
+  fetchBondingCurve,
+  summarizeBondingCurve,
+  formatBondingCurveLog,
+} from './bondingCurve';
+
+export interface WalletBuyEvent {
+  wallet: string;
+  walletName: string;
+  mint: string;
+  /** Token ticker */
+  symbol: string;
+  /** Full token name */
+  name: string;
+  signature: string;
+  timestamp: number;
+  isPumpFun: boolean;
+  isMigration: boolean;
+  solSpent?: number;
+  /** Cached on-chain / Dex metrics when available */
+  metrics?: ReturnType<typeof summarizeTokenMetrics>;
+  /** Anti-rug risk summary for dashboard */
+  antiRug?: ReturnType<typeof summarizeAntiRug>;
+  /** Pump.fun bonding curve progress */
+  bondingCurve?: ReturnType<typeof summarizeBondingCurve>;
+  /** GMGN sniper / bundler metrics */
+  sniper?: ReturnType<typeof summarizeSniper>;
+  /** Birdeye liquidity / volume / smart-money summary */
+  birdeye?: ReturnType<typeof summarizeBirdeye>;
+  /** Early bonding-curve buy (low progress %) */
+  earlyBuy?: boolean;
+  /** Early buyer count on this mint */
+  earlyBuyerCount?: number;
+}
+
+export interface WalletLastActivity {
+  timestamp: number;
+  signature?: string;
+  symbol?: string;
+  name?: string;
+  type: 'buy' | 'poll' | 'onchain';
+  tradesLast30d?: number;
+}
+
+export interface WalletActivityReport {
+  address: string;
+  name: string;
+  lastTradedAt: number | null;
+  tradesLast30d: number;
+  daysSinceTrade: number | null;
+  isActive: boolean;
+  reason?: string;
+}
+
+export interface TradeSignal {
+  mint: string;
+  symbol: string;
+  name: string;
+  wallets: string[];
+  walletNames: string[];
+  isMigration: boolean;
+  timestamp: number;
+  metrics?: ReturnType<typeof summarizeTokenMetrics>;
+  antiRug?: ReturnType<typeof summarizeAntiRug>;
+  bondingCurve?: ReturnType<typeof summarizeBondingCurve>;
+  sniper?: ReturnType<typeof summarizeSniper>;
+  /** Birdeye liquidity / volume / smart-money summary */
+  birdeye?: ReturnType<typeof summarizeBirdeye>;
+  /** Near-migration bonding curve priority (pre-graduation) */
+  nearMigration?: boolean;
+  /** Early bonding-curve smart money priority */
+  earlyBuy?: boolean;
+  earlyBuyerCount?: number;
+}
+
+type SignalHandler = (signal: TradeSignal) => void;
+
+const recentBuys = new Map<string, WalletBuyEvent[]>();
+const lastSignature = new Map<string, string>();
+const walletLastActivity = new Map<string, WalletLastActivity>();
+const tradedMints = new Set<string>();
+
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let activityTimer: ReturnType<typeof setInterval> | null = null;
+let running = false;
+let paused = false;
+let onSignalHandler: SignalHandler | null = null;
+
+const ACTIVITY_REFRESH_MS = 15 * 60 * 1000; // re-check activity every 15 min
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export function onSignal(handler: SignalHandler): void {
+  onSignalHandler = handler;
+}
+
+export function startMonitor(): void {
+  if (running) return;
+  running = true;
+  paused = false;
+
+  console.log(
+    `[monitor] Starting — poll every ${config.pollIntervalMs}ms, activity filter: ${config.filters.enableActivityFilter}`
+  );
+
+  void (async () => {
+    if (config.filters.enableActivityFilter) {
+      await refreshAllWalletActivity();
+      // Disable inactive; keep them in list for dashboard. Persist with status.
+      filterActiveWallets({ persistActiveOnly: false });
+    }
+    void pollAllWallets();
+  })();
+
+  pollTimer = setInterval(() => {
+    void pollAllWallets();
+  }, config.pollIntervalMs);
+
+  activityTimer = setInterval(() => {
+    if (paused || !config.filters.enableActivityFilter) return;
+    void (async () => {
+      await refreshAllWalletActivity();
+      filterActiveWallets({ persistActiveOnly: false });
+    })();
+  }, ACTIVITY_REFRESH_MS);
+
+  // When migration listener sees a tracked wallet in a migrate tx → priority buy
+  onMigrationPriority((event) => {
+    void handleMigrationPriorityEvent(event);
+  });
+
+  onRiskHalt((reason) => {
+    console.warn(`[monitor] Risk halt → pausing: ${reason}`);
+    pauseMonitor();
+  });
+}
+
+export function stopMonitor(): void {
+  running = false;
+  paused = false;
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (activityTimer) {
+    clearInterval(activityTimer);
+    activityTimer = null;
+  }
+  console.log('[monitor] Stopped');
+}
+
+export function pauseMonitor(): void {
+  if (!running) return;
+  paused = true;
+  console.log('[monitor] Paused');
+}
+
+export function resumeMonitor(): void {
+  if (!running) return;
+  if (isRiskHalted()) {
+    console.warn(
+      '[monitor] Resume blocked — clear risk halt first (POST /api/risk/clear-halt)'
+    );
+    return;
+  }
+  paused = false;
+  console.log('[monitor] Resumed');
+}
+
+export function isMonitorPaused(): boolean {
+  return paused;
+}
+
+async function pollAllWallets(): Promise<void> {
+  if (paused) return;
+
+  const wallets = getWalletsForPolling();
+
+  await Promise.allSettled(wallets.map((wallet) => pollWallet(wallet)));
+
+  const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
+  if (openMints.length > 0) {
+    await refreshPositionPrices(openMints);
+    paperTrader.checkPositions();
+  }
+
+  // After sells / price updates — evaluate dip re-buy opportunities
+  await evaluateReBuyOpportunities();
+
+  pruneOldBuys();
+}
+
+/**
+ * Check last trade time + recent tx count for a wallet (on-chain).
+ * Uses getSignaturesForAddress — works without GMGN.
+ */
+export async function checkWalletLastTrade(
+  address: string
+): Promise<{ lastTradedAt: number | null; tradesLast30d: number; signature?: string }> {
+  try {
+    const pubkey = new PublicKey(address);
+    const conn = getConnection();
+    const cutoff30d = Math.floor((Date.now() - 30 * MS_PER_DAY) / 1000);
+
+    const signatures = await conn.getSignaturesForAddress(pubkey, {
+      limit: 100,
+    });
+
+    if (signatures.length === 0) {
+      return { lastTradedAt: null, tradesLast30d: 0 };
+    }
+
+    const newest = signatures[0];
+    const lastTradedAt = newest.blockTime
+      ? newest.blockTime * 1000
+      : Date.now();
+
+    const tradesLast30d = signatures.filter(
+      (s) => s.blockTime != null && s.blockTime >= cutoff30d
+    ).length;
+
+    return {
+      lastTradedAt,
+      tradesLast30d,
+      signature: newest.signature,
+    };
+  } catch (err) {
+    console.warn(`[monitor] Activity check failed for ${address.slice(0, 8)}…:`, err);
+    return { lastTradedAt: null, tradesLast30d: 0 };
+  }
+}
+
+/** Refresh activity metadata for one wallet (GMGN first, on-chain fallback) */
+export async function refreshWalletActivity(
+  wallet: SmartWallet
+): Promise<WalletActivityReport> {
+  let lastTradedAt: number | null = null;
+  let tradesLast30d = 0;
+  let signature: string | undefined;
+  let source: 'gmgn' | 'onchain' | 'mixed' = 'onchain';
+
+  // Prefer GMGN when configured
+  let gmgnWinRate: number | undefined;
+  let tradesLast7d: number | undefined;
+  if (config.gmgn.preferGmgnActivity) {
+    try {
+      const gmgn = await getWalletActivity(wallet.address);
+      if (gmgn.lastTradeTime != null) {
+        lastTradedAt = gmgn.lastTradeTime;
+        source = 'gmgn';
+      }
+      if (gmgn.tradeCount != null) {
+        tradesLast30d = gmgn.tradeCount ?? 0;
+      }
+      if (gmgn.tradeCount7d != null) {
+        tradesLast7d = gmgn.tradeCount7d;
+        if (tradesLast30d === 0) tradesLast30d = gmgn.tradeCount7d;
+      }
+      if (gmgn.winRate != null) {
+        gmgnWinRate = gmgn.winRate;
+      }
+      if (gmgn.name && wallet.name.startsWith(wallet.address.slice(0, 4))) {
+        wallet.name = gmgn.name;
+      }
+    } catch (err) {
+      console.warn(
+        `[monitor] GMGN activity failed for ${wallet.name}:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  // On-chain fallback / enrichment when GMGN missing or incomplete
+  if (lastTradedAt == null || tradesLast30d === 0) {
+    const onchain = await checkWalletLastTrade(wallet.address);
+    if (lastTradedAt == null) {
+      lastTradedAt = onchain.lastTradedAt;
+      signature = onchain.signature;
+      source = source === 'gmgn' ? 'mixed' : 'onchain';
+    }
+    if (tradesLast30d === 0) {
+      tradesLast30d = onchain.tradesLast30d;
+    }
+    if (!signature) signature = onchain.signature;
+  }
+
+  const daysSinceTrade =
+    lastTradedAt != null
+      ? (Date.now() - lastTradedAt) / MS_PER_DAY
+      : null;
+
+  const { minActivityDays, minTradesLast30d } = config.filters;
+  let isActive = true;
+  let reason: string | undefined;
+
+  if (lastTradedAt == null) {
+    isActive = false;
+    reason = 'no activity found';
+  } else if (daysSinceTrade != null && daysSinceTrade > minActivityDays) {
+    isActive = false;
+    reason = `inactive ${daysSinceTrade.toFixed(1)}d > ${minActivityDays}d`;
+  } else if (
+    tradesLast30d > 0 &&
+    tradesLast30d < minTradesLast30d
+  ) {
+    // Only enforce trade-count when we have a meaningful count
+    isActive = false;
+    reason = `only ${tradesLast30d} txs (need ${minTradesLast30d})`;
+  }
+
+  const target = config.smartWallets.find((w) => w.address === wallet.address);
+  if (target) {
+    target.lastTradedAt = lastTradedAt ?? undefined;
+    target.lastActive = lastTradedAt ?? undefined;
+    target.tradesLast30d = tradesLast30d;
+    if (tradesLast7d != null) target.tradesLast7d = tradesLast7d;
+    if (gmgnWinRate != null) target.winRate = gmgnWinRate;
+    target.lastCheckedAt = Date.now();
+  }
+
+  if (lastTradedAt != null) {
+    walletLastActivity.set(wallet.address, {
+      timestamp: lastTradedAt,
+      signature,
+      type: source === 'gmgn' ? 'buy' : 'onchain',
+      tradesLast30d,
+    });
+  }
+
+  return {
+    address: wallet.address,
+    name: wallet.name,
+    lastTradedAt,
+    tradesLast30d,
+    daysSinceTrade,
+    isActive,
+    reason,
+  };
+}
+
+/** Refresh activity for all tracked wallets */
+export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]> {
+  console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
+  const reports: WalletActivityReport[] = [];
+
+  for (const wallet of config.smartWallets) {
+    const report = await refreshWalletActivity(wallet);
+    reports.push(report);
+  }
+
+  return reports;
+}
+
+/**
+ * Auto-filter: disable wallets that fail activity rules.
+ * Set pruneInactive=true to remove disabled wallets and persist active only.
+ */
+export function filterActiveWallets(
+  options: { persistActiveOnly?: boolean; pruneInactive?: boolean } = {}
+): { kept: number; disabled: number; removed: number } {
+  if (!config.filters.enableActivityFilter) {
+    return {
+      kept: config.smartWallets.filter((w) => w.enabled).length,
+      disabled: 0,
+      removed: 0,
+    };
+  }
+
+  const { minActivityDays, minTradesLast30d } = config.filters;
+  let disabled = 0;
+
+  for (const wallet of config.smartWallets) {
+    // Skip wallets not yet checked — don't disable blindly
+    if (wallet.lastCheckedAt == null) continue;
+
+    const last = wallet.lastTradedAt;
+    const trades = wallet.tradesLast30d ?? 0;
+    const daysSince =
+      last != null ? (Date.now() - last) / MS_PER_DAY : Infinity;
+
+    const active =
+      last != null &&
+      daysSince <= minActivityDays &&
+      trades >= minTradesLast30d;
+
+    if (!active && wallet.enabled) {
+      wallet.enabled = false;
+      disabled += 1;
+      console.log(
+        `[monitor] Auto-disabled ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
+          `last trade ${daysSince === Infinity ? 'never' : daysSince.toFixed(0) + 'd ago'}, ` +
+          `${trades} txs/30d`
+      );
+    } else if (active && !wallet.enabled) {
+      // Re-enable if they became active again
+      wallet.enabled = true;
+    }
+  }
+
+  let removed = 0;
+  if (options.pruneInactive || options.persistActiveOnly) {
+    const before = config.smartWallets.length;
+    config.smartWallets = config.smartWallets.filter((w) => w.enabled);
+    removed = before - config.smartWallets.length;
+    persistWallets({ activeOnly: true });
+  } else {
+    persistWallets();
+  }
+
+  const kept = config.smartWallets.filter((w) => w.enabled).length;
+  console.log(
+    `[monitor] Activity filter: ${kept} active, ${disabled} disabled, ${removed} pruned`
+  );
+  return { kept, disabled, removed };
+}
+
+/** Wallets that are enabled and pass activity filter (for polling).
+ *  Prioritizes wallets with more recent activity. */
+export function getWalletsForPolling(): SmartWallet[] {
+  const enabled = config.smartWallets.filter((w) => w.enabled);
+  let list = enabled;
+
+  if (config.filters.enableActivityFilter) {
+    const { minActivityDays, minTradesLast30d } = config.filters;
+    list = enabled.filter((w) => {
+      // Not yet checked — allow until first activity scan
+      if (w.lastCheckedAt == null) return true;
+      if (w.lastTradedAt == null && w.lastActive == null) return false;
+      const last = w.lastTradedAt ?? w.lastActive ?? 0;
+      const daysSince = (Date.now() - last) / MS_PER_DAY;
+      if (daysSince > minActivityDays) return false;
+      if ((w.tradesLast30d ?? 0) < minTradesLast30d) return false;
+      return true;
+    });
+  }
+
+  // Recent activity first so monitor polls hot wallets sooner
+  return list.slice().sort((a, b) => {
+    const aT = a.lastTradedAt ?? a.lastActive ?? 0;
+    const bT = b.lastTradedAt ?? b.lastActive ?? 0;
+    return bT - aT;
+  });
+}
+
+export function isWalletActive(wallet: SmartWallet): boolean {
+  if (!wallet.enabled) return false;
+  if (!config.filters.enableActivityFilter) return true;
+  if (wallet.lastCheckedAt == null) return true;
+  const last = wallet.lastTradedAt ?? wallet.lastActive;
+  if (last == null) return false;
+  const daysSince = (Date.now() - last) / MS_PER_DAY;
+  if (daysSince > config.filters.minActivityDays) return false;
+  if ((wallet.tradesLast30d ?? 0) < config.filters.minTradesLast30d) return false;
+  return true;
+}
+
+async function pollWallet(wallet: SmartWallet): Promise<void> {
+  try {
+    let pubkey: PublicKey;
+    try {
+      pubkey = new PublicKey(wallet.address);
+    } catch {
+      console.warn(`[monitor] Skipping invalid address for ${wallet.name}`);
+      return;
+    }
+
+    const conn = getConnection();
+    const signatures = await conn.getSignaturesForAddress(pubkey, { limit: 10 });
+
+    if (signatures.length === 0) {
+      walletLastActivity.set(wallet.address, {
+        timestamp: Date.now(),
+        type: 'poll',
+      });
+      return;
+    }
+
+    const lastSeen = lastSignature.get(wallet.address);
+    const newSigs: string[] = [];
+
+    for (const sig of signatures) {
+      if (sig.signature === lastSeen) break;
+      newSigs.push(sig.signature);
+    }
+
+    if (newSigs.length === 0) return;
+
+    lastSignature.set(wallet.address, signatures[0].signature);
+
+    for (const sig of newSigs.reverse()) {
+      const tx = await conn.getParsedTransaction(sig, {
+        maxSupportedTransactionVersion: 0,
+      });
+      if (!tx) continue;
+
+      const buys = parseBuysFromTransaction(tx, wallet, sig);
+      for (const buy of buys) {
+        walletLastActivity.set(wallet.address, {
+          timestamp: buy.timestamp,
+          signature: buy.signature,
+          symbol: buy.symbol,
+          name: buy.name,
+          type: 'buy',
+        });
+        await handleBuyEvent(buy);
+      }
+    }
+  } catch (err) {
+    console.error(`[monitor] Error polling ${wallet.name}:`, err);
+  }
+}
+
+function parseBuysFromTransaction(
+  tx: ParsedTransactionWithMeta,
+  wallet: SmartWallet,
+  signature: string
+): WalletBuyEvent[] {
+  const events: WalletBuyEvent[] = [];
+  const blockTime = (tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
+
+  const instructions = tx.transaction.message.instructions;
+  const innerInstructions = tx.meta?.innerInstructions ?? [];
+
+  const allInstructions: (ParsedInstruction | PartiallyDecodedInstruction)[] = [
+    ...instructions,
+    ...innerInstructions.flatMap((inner) => inner.instructions),
+  ];
+
+  const programIds = allInstructions.map((ix) => getProgramId(ix));
+  const onPumpCurve = programIds.includes(config.pumpFunProgramId);
+  const onPumpSwap = programIds.includes(config.pumpSwapProgramId);
+  const isPumpFun = onPumpCurve || onPumpSwap;
+  const isMigration = onPumpSwap;
+
+  const preBalances = tx.meta?.preTokenBalances ?? [];
+  const postBalances = tx.meta?.postTokenBalances ?? [];
+
+  for (const post of postBalances) {
+    if (post.owner !== wallet.address) continue;
+
+    const mint = post.mint;
+    if (mint === config.solMint) continue;
+
+    const pre = preBalances.find(
+      (p) => p.mint === mint && p.owner === wallet.address
+    );
+
+    const preAmount = pre?.uiTokenAmount.uiAmount ?? 0;
+    const postAmount = post.uiTokenAmount.uiAmount ?? 0;
+
+    if (postAmount <= preAmount) continue;
+
+    const prefix = mintPrefix(mint);
+    const symbol = prefix;
+    const name = prefix;
+
+    events.push({
+      wallet: wallet.address,
+      walletName: wallet.name,
+      mint,
+      symbol,
+      name,
+      signature,
+      timestamp: blockTime,
+      isPumpFun,
+      isMigration,
+    });
+  }
+
+  return events;
+}
+
+function getProgramId(
+  ix: ParsedInstruction | PartiallyDecodedInstruction
+): string {
+  if ('programId' in ix) {
+    return ix.programId.toBase58();
+  }
+  return '';
+}
+
+/**
+ * High-priority buy when migration WS detects a tracked smart wallet
+ * or a volume spike on Pump.fun → PumpSwap/Raydium migrate.
+ */
+async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void> {
+  if (paused) return;
+  if (!config.strategy.enableMigrationPriority) {
+    console.log(
+      `[monitor] Migration priority signal ignored (toggle OFF) for ${event.mint.slice(0, 8)}…`
+    );
+    return;
+  }
+
+  // Volume-spike-only (no smart wallet) is weaker — still trade if enabled
+  const strong =
+    event.smartWalletsInvolved.length > 0 || event.volumeSpike;
+
+  if (!strong) {
+    console.log(
+      `[monitor] Migration event skipped — no smart wallet / volume spike for ${event.mint.slice(0, 8)}…`
+    );
+    return;
+  }
+
+  if (tradedMints.has(event.mint)) {
+    console.log(
+      `[monitor] Migration priority skipped — already traded ${event.mint.slice(0, 8)}…`
+    );
+    return;
+  }
+
+  const token = await resolveTokenMeta(event.mint);
+  const label = formatTokenLabel(token.symbol, token.name, event.mint);
+  const walletNames =
+    event.smartWalletNames.length > 0
+      ? event.smartWalletNames
+      : ['volume-spike'];
+  const wallets =
+    event.smartWalletsInvolved.length > 0
+      ? event.smartWalletsInvolved
+      : ['volume-spike'];
+
+  const signal: TradeSignal = {
+    mint: event.mint,
+    symbol: token.symbol,
+    name: token.name,
+    wallets,
+    walletNames,
+    isMigration: true,
+    timestamp: Date.now(),
+  };
+
+  console.log(
+    `[monitor] ⚡ STRONG BUY — migration + ${event.priorityReason ?? 'priority'} ` +
+      `on ${label} (pool=${event.poolAddress?.slice(0, 8) ?? '?'}… vol=${event.volumeSol} SOL)`
+  );
+
+  markLaunchMigrated(event.mint);
+  recordPumpSmartActivity({
+    kind: 'migration',
+    mint: event.mint,
+    symbol: token.symbol,
+    name: token.name,
+    wallets,
+    walletNames,
+    isPumpFun: true,
+    isMigration: true,
+    priority: true,
+    notes: event.priorityReason ?? 'migration_ws',
+  });
+
+  if (!(await passesFilters(signal))) return;
+
+  onSignalHandler?.(signal);
+  tradedMints.add(event.mint);
+
+  const sizeMult = config.strategy.migrationSizeMultiplier ?? 1.5;
+  const solAmount = resolveTradeSize('migration');
+  const slippageBps =
+    config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
+
+  console.log(
+    `[monitor] Migration size ${solAmount.toFixed(4)} SOL ` +
+      `(risk sizing; flat×${sizeMult} fallback unused when risk on)`
+  );
+
+  const result = await executeBuy(signal.mint, signal.symbol, {
+    sourceWallets: signal.wallets,
+    sourceNames: signal.walletNames,
+    name: signal.name,
+    solAmount,
+    slippageBps,
+    priority: true,
+    strategyKind: 'migration',
+    antiRug: signal.antiRug
+      ? {
+          riskScore: signal.antiRug.riskScore,
+          riskLevel: signal.antiRug.riskLevel,
+          flags: signal.antiRug.flags,
+          ok: signal.antiRug.ok,
+        }
+      : undefined,
+  });
+  if (result.success) {
+    console.log(
+      `[monitor] Migration priority trade executed (${result.mode}): ${label} ` +
+        `@ ${solAmount.toFixed(3)} SOL`
+    );
+  } else {
+    console.error(`[monitor] Migration priority trade failed: ${result.error}`);
+    tradedMints.delete(event.mint);
+  }
+}
+
+async function enrichBuyEvent(buy: WalletBuyEvent): Promise<WalletBuyEvent> {
+  const token = await resolveTokenMeta(buy.mint, {
+    symbol: buy.symbol,
+    name: buy.name,
+  });
+  buy.symbol = token.symbol;
+  buy.name = token.name;
+  cacheTokenMeta(buy.mint, token.symbol, token.name);
+  return buy;
+}
+
+async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
+  await enrichBuyEvent(buy);
+  const label = formatTokenLabel(buy.symbol, buy.name, buy.mint);
+
+  // Enrich with migration listener data
+  if (buy.isMigration) {
+    markAsMigrated(buy.mint, buy.signature, [
+      { address: buy.wallet, name: buy.walletName },
+    ]);
+  }
+  const recentlyMigrated = isRecentlyMigrated(buy.mint);
+  const isMigration = buy.isMigration || recentlyMigrated;
+
+  console.log(
+    `[monitor] 🔔 ${buy.walletName} bought ${label} (${buy.mint.slice(0, 8)}…) ` +
+      `[pump: ${buy.isPumpFun}, migration: ${isMigration}]`
+  );
+
+  // Attach token metrics + anti-rug + bonding curve for dashboard (cached)
+  try {
+    const metrics = await fetchTokenMetrics(buy.mint);
+    buy.metrics = summarizeTokenMetrics(metrics);
+    const report = await evaluateAntiRug(buy.mint);
+    buy.antiRug = summarizeAntiRug(report);
+    if (report.sniper) buy.sniper = report.sniper;
+    if (report.birdeye) buy.birdeye = report.birdeye;
+  } catch {
+    // non-fatal
+  }
+
+  // Dedicated sniper fetch if anti-rug didn't attach (filter off / fail)
+  if (!buy.sniper && config.filters.enableSniperFilter !== false) {
+    try {
+      const sniper = await getTokenSniperActivity(buy.mint);
+      if (sniper.source !== 'none') {
+        buy.sniper = summarizeSniper(sniper);
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
+  // Birdeye fallback if anti-rug didn't attach overview
+  if (!buy.birdeye) {
+    try {
+      const overview = await getTokenOverview(buy.mint);
+      const signal = await getSmartMoneySignal(buy.mint);
+      buy.birdeye = summarizeBirdeye(overview, signal);
+    } catch {
+      // non-fatal — dashboard shows Dex metrics only
+    }
+  }
+
+  // Bonding curve for Pump.fun (pre-migration) candidates
+  const onCurve =
+    buy.isPumpFun && !isMigration && !recentlyMigrated;
+  if (onCurve || buy.isPumpFun) {
+    try {
+      const curve = await fetchBondingCurve(buy.mint);
+      if (curve.source !== 'none') {
+        buy.bondingCurve = summarizeBondingCurve(curve);
+        console.log(formatBondingCurveLog(label, curve));
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
+  // Early-buyer tracking on new Pump.fun launches
+  if (buy.isPumpFun && !isMigration) {
+    const progress = buy.bondingCurve?.progressPct ?? null;
+    const earlyCount = recordEarlyBuyer({
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallet: buy.wallet,
+      walletName: buy.walletName,
+      signature: buy.signature,
+      progressPct: progress,
+    });
+    buy.earlyBuyerCount = earlyCount;
+    buy.earlyBuy = isEarlyCurveBuy(progress);
+  }
+
+  if (isMigration) markLaunchMigrated(buy.mint);
+
+  if (!recentBuys.has(buy.mint)) {
+    recentBuys.set(buy.mint, []);
+  }
+  const buys = recentBuys.get(buy.mint)!;
+
+  if (!buys.some((b) => b.wallet === buy.wallet && b.signature === buy.signature)) {
+    buys.push({
+      ...buy,
+      isMigration,
+      metrics: buy.metrics,
+      antiRug: buy.antiRug,
+      bondingCurve: buy.bondingCurve,
+      sniper: buy.sniper,
+      birdeye: buy.birdeye,
+      earlyBuy: buy.earlyBuy,
+      earlyBuyerCount: buy.earlyBuyerCount,
+    });
+  }
+
+  // Feed re-buy confirmation if we're watching this mint after a profit sell
+  if (config.strategy.reBuyEnabled && isReBuyWatching(buy.mint)) {
+    recordConfirmationBuy(buy.mint, buy.wallet, buy.walletName);
+    const price = paperTrader.getTokenPrice(buy.mint);
+    if (price != null) updateCandidatePrice(buy.mint, price);
+    const triggered = await tryExecuteReBuy(buy.mint);
+    if (triggered) return; // re-buy path handled entry
+  }
+
+  let signal: TradeSignal | null = null;
+  let priority = false;
+
+  // Migration + smart wallet activity = strong buy (larger size, tighter slip)
+  if (config.strategy.enableMigrationPriority && isMigration) {
+    signal = {
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallets: [buy.wallet],
+      walletNames: [buy.walletName],
+      isMigration: true,
+      timestamp: Date.now(),
+      bondingCurve: buy.bondingCurve,
+      birdeye: buy.birdeye,
+      earlyBuy: false,
+      earlyBuyerCount: buy.earlyBuyerCount,
+    };
+    priority = true;
+    console.log(
+      `[monitor] 🚀 STRONG BUY — migration + smart wallet ${buy.walletName} on ${label}`
+    );
+    recordPumpSmartActivity({
+      kind: 'migration',
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallets: [buy.wallet],
+      walletNames: [buy.walletName],
+      isPumpFun: true,
+      isMigration: true,
+      priority: true,
+      curveProgressPct: buy.bondingCurve?.progressPct ?? null,
+      birdeye: buy.birdeye,
+      notes: `migration + ${buy.walletName}`,
+    });
+  } else if (
+    config.strategy.enableBondingCurvePriority !== false &&
+    buy.isPumpFun &&
+    !isMigration &&
+    buy.bondingCurve?.nearMigration
+  ) {
+    // Near-migration curve + smart money = prioritize like migration
+    priority = true;
+    signal = {
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallets: [buy.wallet],
+      walletNames: [buy.walletName],
+      isMigration: false,
+      nearMigration: true,
+      timestamp: Date.now(),
+      bondingCurve: buy.bondingCurve,
+      birdeye: buy.birdeye,
+      earlyBuy: buy.earlyBuy,
+      earlyBuyerCount: buy.earlyBuyerCount,
+    };
+    console.log(
+      `[monitor] 📈 STRONG BUY — near-migration curve ${buy.bondingCurve.progressPct.toFixed(1)}% ` +
+        `+ smart wallet ${buy.walletName} on ${label}`
+    );
+    recordPumpSmartActivity({
+      kind: 'near_migration',
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallets: [buy.wallet],
+      walletNames: [buy.walletName],
+      isPumpFun: true,
+      isMigration: false,
+      priority: true,
+      nearMigration: true,
+      curveProgressPct: buy.bondingCurve.progressPct,
+      birdeye: buy.birdeye,
+      notes: `near-mig ${buy.bondingCurve.progressPct.toFixed(0)}%`,
+    });
+  } else if (buy.isPumpFun && !isMigration) {
+    // Early-curve smart money priority (pre-migration launches)
+    const walletMeta = config.smartWallets.find(
+      (w) => w.address === buy.wallet
+    );
+    const earlyGate = shouldPrioritizeEarlyCurve({
+      isPumpFun: true,
+      isMigration: false,
+      progressPct: buy.bondingCurve?.progressPct,
+      nearMigration: buy.bondingCurve?.nearMigration,
+      smartMoneyScore: buy.birdeye?.smartMoneyScore,
+      earlyBuyerCount: buy.earlyBuyerCount ?? 1,
+      walletTags: walletMeta?.tags,
+    });
+
+    if (earlyGate.prioritize) {
+      priority = true;
+      signal = {
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        wallets: [buy.wallet],
+        walletNames: [buy.walletName],
+        isMigration: false,
+        nearMigration: false,
+        earlyBuy: true,
+        earlyBuyerCount: buy.earlyBuyerCount,
+        timestamp: Date.now(),
+        bondingCurve: buy.bondingCurve,
+        birdeye: buy.birdeye,
+      };
+      console.log(
+        `[monitor] 🎯 STRONG BUY — early Pump.fun curve (${earlyGate.reason}) ` +
+          `+ smart wallet ${buy.walletName} on ${label}`
+      );
+      recordPumpSmartActivity({
+        kind: 'early_buy',
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        wallets: [buy.wallet],
+        walletNames: [buy.walletName],
+        isPumpFun: true,
+        isMigration: false,
+        priority: true,
+        curveProgressPct: buy.bondingCurve?.progressPct ?? null,
+        birdeye: buy.birdeye,
+        notes: earlyGate.reason,
+      });
+    } else if (config.strategy.enableConvergence) {
+      signal = checkConvergence(buy.mint);
+      if (signal?.nearMigration) {
+        priority = true;
+        console.log(
+          `[monitor] 📈 STRONG BUY — convergence + near-migration curve ` +
+            `${signal.bondingCurve?.progressPct?.toFixed(1) ?? '?'}% on ${label}`
+        );
+      } else if (signal?.earlyBuy) {
+        priority = true;
+        console.log(
+          `[monitor] 🎯 STRONG BUY — convergence + early curve on ${label}`
+        );
+      }
+      if (signal) {
+        recordPumpSmartActivity({
+          kind: signal.nearMigration
+            ? 'near_migration'
+            : signal.earlyBuy
+              ? 'early_buy'
+              : 'convergence',
+          mint: signal.mint,
+          symbol: signal.symbol,
+          name: signal.name,
+          wallets: signal.wallets,
+          walletNames: signal.walletNames,
+          isPumpFun: true,
+          isMigration: false,
+          priority,
+          nearMigration: Boolean(signal.nearMigration),
+          curveProgressPct: signal.bondingCurve?.progressPct ?? null,
+          birdeye: signal.birdeye ?? buy.birdeye,
+        });
+      } else {
+        // Still log non-priority pump curve activity for dashboard
+        recordPumpSmartActivity({
+          kind: buy.earlyBuy ? 'early_buy' : 'curve_buy',
+          mint: buy.mint,
+          symbol: buy.symbol,
+          name: buy.name,
+          wallets: [buy.wallet],
+          walletNames: [buy.walletName],
+          isPumpFun: true,
+          isMigration: false,
+          priority: false,
+          curveProgressPct: buy.bondingCurve?.progressPct ?? null,
+          birdeye: buy.birdeye,
+          notes: earlyGate.reason,
+        });
+      }
+    } else {
+      signal = {
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        wallets: [buy.wallet],
+        walletNames: [buy.walletName],
+        isMigration,
+        earlyBuy: buy.earlyBuy,
+        earlyBuyerCount: buy.earlyBuyerCount,
+        timestamp: Date.now(),
+        bondingCurve: buy.bondingCurve,
+        birdeye: buy.birdeye,
+      };
+      recordPumpSmartActivity({
+        kind: buy.earlyBuy ? 'early_buy' : 'curve_buy',
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        wallets: [buy.wallet],
+        walletNames: [buy.walletName],
+        isPumpFun: true,
+        isMigration: false,
+        priority: false,
+        curveProgressPct: buy.bondingCurve?.progressPct ?? null,
+        birdeye: buy.birdeye,
+      });
+    }
+  } else if (config.strategy.enableConvergence) {
+    signal = checkConvergence(buy.mint);
+    if (signal?.nearMigration) {
+      priority = true;
+      console.log(
+        `[monitor] 📈 STRONG BUY — convergence + near-migration curve ` +
+          `${signal.bondingCurve?.progressPct?.toFixed(1) ?? '?'}% on ${label}`
+      );
+    }
+  } else {
+    signal = {
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      wallets: [buy.wallet],
+      walletNames: [buy.walletName],
+      isMigration,
+      timestamp: Date.now(),
+      bondingCurve: buy.bondingCurve,
+      birdeye: buy.birdeye,
+    };
+  }
+
+  if (!signal) return;
+
+  // Prefer enriched name/symbol from this buy if signal still has placeholders
+  signal.symbol = buy.symbol || signal.symbol;
+  signal.name = buy.name || signal.name;
+
+  if (!(await passesFilters(signal))) return;
+
+  // Block normal re-entry; re-buy path uses tryExecuteReBuy instead
+  if (tradedMints.has(buy.mint)) {
+    if (isReBuyWatching(buy.mint)) {
+      console.log(
+        `[monitor] ${label} already traded — waiting for re-buy confirmation (dip + wallets/volume)`
+      );
+    } else {
+      console.log(`[monitor] Signal skipped — already traded ${label}`);
+    }
+    return;
+  }
+
+  console.log(
+    `[monitor] ✅ SIGNAL${priority ? ' (priority)' : ''}: ${signal.walletNames.join(' + ')} → ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}`
+  );
+
+  onSignalHandler?.(signal);
+
+  tradedMints.add(buy.mint);
+
+  const buyOpts: {
+    sourceWallets?: string[];
+    sourceNames?: string[];
+    name?: string;
+    solAmount?: number;
+    slippageBps?: number;
+    priority?: boolean;
+    strategyKind?: 'migration' | 'normal';
+    antiRug?: {
+      riskScore: number;
+      riskLevel: string;
+      flags: string[];
+      ok: boolean;
+    };
+  } = {
+    sourceWallets: signal.wallets,
+    sourceNames: signal.walletNames,
+    name: signal.name,
+    strategyKind:
+      signal.isMigration || signal.nearMigration || signal.earlyBuy
+        ? 'migration'
+        : 'normal',
+    solAmount: resolveTradeSize(
+      signal.isMigration || signal.nearMigration || signal.earlyBuy
+        ? 'migration'
+        : 'normal'
+    ),
+    antiRug: signal.antiRug
+      ? {
+          riskScore: signal.antiRug.riskScore,
+          riskLevel: signal.antiRug.riskLevel,
+          flags: signal.antiRug.flags,
+          ok: signal.antiRug.ok,
+        }
+      : undefined,
+  };
+
+  if (
+    priority &&
+    (signal.isMigration
+      ? config.strategy.enableMigrationPriority
+      : signal.earlyBuy
+        ? config.strategy.enableEarlyCurvePriority !== false
+        : config.strategy.enableBondingCurvePriority !== false)
+  ) {
+    buyOpts.solAmount = resolveTradeSize('migration');
+    buyOpts.slippageBps =
+      config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
+    buyOpts.priority = true;
+    buyOpts.strategyKind = 'migration';
+  }
+
+  const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
+
+  if (result.success) {
+    console.log(
+      `[monitor] Copy trade executed (${result.mode}): ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}`
+    );
+  } else {
+    console.error(`[monitor] Copy trade failed: ${result.error}`);
+    tradedMints.delete(buy.mint);
+  }
+}
+
+/**
+ * Refresh market data for watched mints and execute when confirmation is met.
+ */
+async function evaluateReBuyOpportunities(): Promise<void> {
+  if (!config.strategy.reBuyEnabled || paused) return;
+
+  const active = getReBuyCandidates().filter(
+    (c) => c.status === 'watching' || c.status === 'dip_armed'
+  );
+  if (active.length === 0) return;
+
+  for (const c of active) {
+    // Prefer cached paper price; refresh from DexScreener periodically
+    const cached = paperTrader.getTokenPrice(c.mint);
+    if (cached != null) {
+      updateCandidatePrice(c.mint, cached);
+    }
+    await refreshCandidateMarketData(c.mint);
+
+    // Seed confirmation wallets from recentBuys in convergence window
+    const recent = recentBuys.get(c.mint) ?? [];
+    const windowMs = config.convergenceWindowMs;
+    const cutoff = Date.now() - windowMs;
+    for (const b of recent) {
+      if (b.timestamp >= cutoff) {
+        recordConfirmationBuy(c.mint, b.wallet, b.walletName);
+      }
+    }
+
+    await tryExecuteReBuy(c.mint);
+  }
+}
+
+/**
+ * If dip + confirmation are ready, execute a re-buy (paper or live).
+ * Returns true if a re-buy was attempted/executed.
+ */
+async function tryExecuteReBuy(mint: string): Promise<boolean> {
+  if (!config.strategy.reBuyEnabled) return false;
+
+  const conf = evaluateConfirmation(mint);
+  if (!conf.ready) {
+    // Periodic debug at low rate for armed candidates
+    const c = getReBuyCandidates().find((x) => x.mint === mint);
+    if (c?.status === 'dip_armed' && Math.random() < 0.15) {
+      console.log(`[rebuy] ${c.symbol}: ${conf.reason}`);
+    }
+    return false;
+  }
+
+  // Already holding — don't double up
+  if (paperTrader.getOpenPositions().some((p) => p.mint === mint)) {
+    console.log(`[rebuy] Skip — already holding open position on ${mint.slice(0, 8)}…`);
+    return false;
+  }
+
+  const candidate = getReBuyCandidates().find((c) => c.mint === mint);
+  if (!candidate) return false;
+
+  const label = formatTokenLabel(candidate.symbol, candidate.name, mint);
+  const reason = conf.reason;
+
+  console.log(
+    `[monitor] 🔁 ${reason} — ${label} ` +
+      `(dip ${conf.dipPct?.toFixed(1) ?? '?'}% from peak, ` +
+      `${conf.walletCount} wallets` +
+      (conf.volumeChangePct != null
+        ? `, vol ${conf.volumeChangePct >= 0 ? '+' : ''}${conf.volumeChangePct.toFixed(0)}%`
+        : '') +
+      `)`
+  );
+
+  const signal: TradeSignal = {
+    mint,
+    symbol: candidate.symbol,
+    name: candidate.name,
+    wallets: candidate.confirmationWallets,
+    walletNames: candidate.confirmationWalletNames,
+    isMigration: isRecentlyMigrated(mint),
+    timestamp: Date.now(),
+  };
+
+  if (!(await passesFilters(signal))) {
+    console.log(`[rebuy] Filters blocked re-buy for ${label}`);
+    return false;
+  }
+
+  onSignalHandler?.(signal);
+
+  const result = await executeBuy(mint, candidate.symbol, {
+    sourceWallets: signal.wallets,
+    sourceNames: signal.walletNames,
+    name: candidate.name,
+    solAmount: resolveTradeSize(signal.isMigration ? 'migration' : 'normal'),
+    strategyKind: signal.isMigration ? 'migration' : 'normal',
+    antiRug: signal.antiRug
+      ? {
+          riskScore: signal.antiRug.riskScore,
+          riskLevel: signal.antiRug.riskLevel,
+          flags: signal.antiRug.flags,
+          ok: signal.antiRug.ok,
+        }
+      : undefined,
+  });
+
+  if (result.success) {
+    markReBought(mint, reason);
+    tradedMints.add(mint);
+    console.log(
+      `[monitor] Re-buy executed (${result.mode}): ${label} — ${reason}`
+    );
+    return true;
+  }
+
+  console.error(`[monitor] Re-buy failed: ${result.error}`);
+  return false;
+}
+
+function resolveTradeSize(kind: 'migration' | 'normal'): number {
+  return calculatePositionSizeSol({
+    equitySol: paperTrader.getEquitySol(),
+    kind,
+  });
+}
+
+async function passesFilters(signal: TradeSignal): Promise<boolean> {
+  const { filters, strategy } = config;
+
+  if (isRiskHalted()) {
+    console.log(`[monitor] Signal rejected — risk halt active`);
+    return false;
+  }
+
+  // Refresh risk limits (may auto-pause)
+  paperTrader.evaluateAndMaybeHaltRisk();
+  if (isRiskHalted() || paused) {
+    console.log(`[monitor] Signal rejected — risk/paused`);
+    return false;
+  }
+
+  if (strategy.enableMigrationOnly && !signal.isMigration) {
+    console.log(`[monitor] Signal rejected — migration-only enabled for ${signal.symbol}`);
+    return false;
+  }
+
+  const openCount = paperTrader.getOpenPositions().length;
+  if (openCount >= filters.maxConcurrentPositions) {
+    console.log(
+      `[monitor] Signal rejected — max concurrent positions (${filters.maxConcurrentPositions})`
+    );
+    return false;
+  }
+
+  const dailyPnl = paperTrader.getDailyPnlSol();
+  if (dailyPnl <= -filters.dailyLossLimitSol) {
+    console.log(
+      `[monitor] Signal rejected — daily loss limit hit (${dailyPnl.toFixed(4)} SOL)`
+    );
+    return false;
+  }
+
+  if (filters.minWinRate > 0) {
+    const winRate = paperTrader.getWinRatePct();
+    if (winRate < filters.minWinRate) {
+      console.log(
+        `[monitor] Signal rejected — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
+      );
+      return false;
+    }
+  }
+
+  // On-chain / Dex metrics + comprehensive anti-rug
+  const needsMetrics =
+    config.filters.enableAntiRug !== false ||
+    (filters.minLiquidity ?? 0) > 0 ||
+    (filters.maxDevHoldPct ?? 0) > 0 ||
+    (filters.maxDevPercent ?? 0) > 0 ||
+    (filters.maxTopHolderPct ?? 0) > 0 ||
+    (filters.maxHolderConcentration ?? 0) > 0 ||
+    filters.skipIfMintAuthority;
+
+  if (needsMetrics) {
+    try {
+      if (config.filters.enableAntiRug !== false) {
+        const report: AntiRugReport = await evaluateAntiRug(signal.mint);
+        signal.antiRug = summarizeAntiRug(report);
+        signal.metrics = report.metricsSummary;
+        if (report.sniper) signal.sniper = report.sniper;
+        if (report.birdeye) signal.birdeye = report.birdeye;
+        if (!report.ok) {
+          console.log(formatAntiRugSkipLog(signal.symbol, report));
+          for (const reason of report.skipReasons) {
+            console.log(`[monitor] ${reason}`);
+          }
+          paperTrader.addLog(
+            'info',
+            `Anti-rug skip ${signal.symbol}: ${report.skipReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
+            { mint: signal.mint, symbol: signal.symbol }
+          );
+          return false;
+        }
+        console.log(
+          `[anti-rug] OK ${signal.symbol}: score=${report.riskScore} (${report.riskLevel}) ` +
+            `liq=$${report.checks.liquidityUsd?.toFixed(0) ?? '?'} ` +
+            `dev=${report.checks.devHoldPct?.toFixed(1) ?? '?'}% ` +
+            `top10=${report.checks.top10HoldPct?.toFixed(1) ?? '?'}% ` +
+            `lp=${report.checks.liquidityLockedOrBurned == null ? '?' : report.checks.liquidityLockedOrBurned ? 'locked' : 'unlocked'} ` +
+            `sources=${report.sources.join('+')}`
+        );
+      } else {
+        // Legacy metrics-only path when anti-rug master switch is off
+        const { evaluateTokenMetricsFilters } = await import('./tokenMetrics');
+        const metrics = await fetchTokenMetrics(signal.mint);
+        signal.metrics = summarizeTokenMetrics(metrics);
+        const verdict = evaluateTokenMetricsFilters(metrics);
+        if (!verdict.ok) {
+          console.log(
+            `[monitor] Signal rejected — token metrics for ${signal.symbol}: ` +
+              verdict.reasons.join('; ')
+          );
+          return false;
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[monitor] Anti-rug / metrics fetch failed for ${signal.mint.slice(0, 8)}…:`,
+        err instanceof Error ? err.message : err
+      );
+      if (
+        config.filters.enableAntiRug !== false ||
+        (filters.minLiquidity ?? 0) > 0 ||
+        (filters.maxDevPercent ?? filters.maxDevHoldPct ?? 0) > 0
+      ) {
+        console.log(`[monitor] Skipped - anti-rug / metrics unavailable`);
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function checkConvergence(mint: string): TradeSignal | null {
+  const buys = recentBuys.get(mint);
+  if (!buys || buys.length === 0) return null;
+
+  const now = Date.now();
+  const windowStart = now - config.convergenceWindowMs;
+  const recent = buys.filter((b) => b.timestamp >= windowStart);
+  const uniqueWallets = [...new Set(recent.map((b) => b.wallet))];
+
+  if (uniqueWallets.length < config.filters.convergenceRequired) return null;
+
+  const walletNames = uniqueWallets.map((addr) => {
+    const w = config.smartWallets.find((sw) => sw.address === addr);
+    return w?.name ?? addr.slice(0, 8);
+  });
+
+  const isMigration = recent.some((b) => b.isMigration);
+  const latestCurve = [...recent]
+    .reverse()
+    .find((b) => b.bondingCurve)?.bondingCurve;
+  const nearMigration =
+    !isMigration &&
+    config.strategy.enableBondingCurvePriority !== false &&
+    !!latestCurve?.nearMigration;
+  const earlyBuy =
+    !isMigration &&
+    !nearMigration &&
+    recent.some((b) => b.earlyBuy || isEarlyCurveBuy(b.bondingCurve?.progressPct));
+  const earlyBuyerCount = Math.max(
+    ...recent.map((b) => b.earlyBuyerCount ?? 0),
+    uniqueWallets.length
+  );
+  const latestBirdeye = [...recent].reverse().find((b) => b.birdeye)?.birdeye;
+
+  return {
+    mint,
+    symbol: recent[0].symbol,
+    name: recent[0].name || recent[0].symbol,
+    wallets: uniqueWallets,
+    walletNames,
+    isMigration,
+    nearMigration,
+    earlyBuy,
+    earlyBuyerCount,
+    bondingCurve: latestCurve,
+    antiRug: recent[0].antiRug,
+    metrics: recent[0].metrics,
+    sniper: recent[0].sniper,
+    birdeye: latestBirdeye ?? recent[0].birdeye,
+    timestamp: now,
+  };
+}
+
+function pruneOldBuys(): void {
+  const cutoff = Date.now() - config.convergenceWindowMs * 2;
+
+  for (const [mint, buys] of recentBuys.entries()) {
+    const filtered = buys.filter((b) => b.timestamp >= cutoff);
+    if (filtered.length === 0) {
+      recentBuys.delete(mint);
+    } else {
+      recentBuys.set(mint, filtered);
+    }
+  }
+}
+
+export function getRecentActivity(): WalletBuyEvent[] {
+  const all: WalletBuyEvent[] = [];
+  for (const buys of recentBuys.values()) {
+    all.push(...buys);
+  }
+  return all.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
+}
+
+export function getWalletLastActivity(address: string): WalletLastActivity | null {
+  return walletLastActivity.get(address) ?? null;
+}
+
+export function getWalletsWithActivity() {
+  return config.smartWallets.map((w) => {
+    const activity = walletLastActivity.get(w.address) ?? null;
+    const lastTradedAt = w.lastTradedAt ?? activity?.timestamp ?? null;
+    const daysSince =
+      lastTradedAt != null
+        ? (Date.now() - lastTradedAt) / MS_PER_DAY
+        : null;
+    const active = isWalletActive(w);
+
+    return {
+      ...w,
+      lastActivity: activity,
+      lastTradedAt,
+      tradesLast30d: w.tradesLast30d ?? activity?.tradesLast30d,
+      daysSinceTrade: daysSince,
+      isActive: active,
+      activityLabel: formatActivityLabel(lastTradedAt, active),
+    };
+  });
+}
+
+export function getMonitorStatus(): {
+  running: boolean;
+  paused: boolean;
+  watchedWallets: number;
+  recentSignals: number;
+  dailyPnlSol: number;
+  openPositions: number;
+  migration: ReturnType<typeof getMigrationStatus>;
+  autoSell: boolean;
+  activityFilter: boolean;
+  rebuy: ReturnType<typeof getReBuyStatus>;
+  risk: ReturnType<typeof getRiskStatus>;
+  walletDiscovery: ReturnType<typeof getDiscoveryStatus>;
+  birdeye: ReturnType<typeof getBirdeyeStatus>;
+  pumpSmart: ReturnType<typeof getPumpSmartStatus>;
+} {
+  const risk = getRiskStatus({
+    equitySol: paperTrader.getEquitySol(),
+    dailyPnlSol: paperTrader.getDailyPnlSol(),
+    weeklyPnlSol: paperTrader.getWeeklyPnlSol(),
+  });
+
+  return {
+    running,
+    paused,
+    watchedWallets: getWalletsForPolling().length,
+    recentSignals: recentBuys.size,
+    dailyPnlSol: paperTrader.getDailyPnlSol(),
+    openPositions: paperTrader.getOpenPositions().length,
+    migration: getMigrationStatus(),
+    autoSell: config.strategy.enableAutoSell,
+    activityFilter: config.filters.enableActivityFilter,
+    rebuy: getReBuyStatus(),
+    risk,
+    walletDiscovery: getDiscoveryStatus(),
+    birdeye: getBirdeyeStatus(),
+    pumpSmart: getPumpSmartStatus(),
+  };
+}
+
+/** Allow resume after operator acknowledges risk halt */
+export function clearMonitorRiskHalt(): void {
+  clearRiskHalt();
+}

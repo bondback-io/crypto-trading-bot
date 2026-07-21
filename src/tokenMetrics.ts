@@ -1,0 +1,520 @@
+/**
+ * On-chain + DexScreener/GMGN token metrics for buy filters.
+ * Liquidity, holder concentration, mint/dev authority activity — with TTL cache.
+ */
+
+import { PublicKey } from '@solana/web3.js';
+import { config } from './config';
+import { getConnection } from './connection';
+import { logger, errorToMeta, loggedFetch } from './logger';
+
+export interface HolderBucket {
+  address: string;
+  amountUi: number;
+  pctOfSupply: number;
+  isAuthority?: boolean;
+}
+
+export interface TokenMetrics {
+  mint: string;
+  symbol?: string;
+  name?: string;
+  /** USD liquidity from DexScreener (best pool) */
+  liquidityUsd: number | null;
+  volume24hUsd: number | null;
+  priceUsd: number | null;
+  /** Circulating / total supply (UI amount) */
+  supplyUi: number | null;
+  holderCountEstimate: number | null;
+  /** Largest holder % of supply */
+  topHolderPct: number | null;
+  /** Sum of top-10 holders % */
+  top10HoldPct: number | null;
+  /** Mint authority pubkey if set */
+  mintAuthority: string | null;
+  /** Freeze authority pubkey if set */
+  freezeAuthority: string | null;
+  /** Best-effort "dev" = mint auth → freeze → largest holder */
+  devWallet: string | null;
+  /** Dev / authority share of supply if they hold tokens */
+  devHoldPct: number | null;
+  /** Recent signatures from dev wallet (count) */
+  devRecentTxCount: number | null;
+  /** True if dev traded in lookback window */
+  devActiveRecently: boolean;
+  topHolders: HolderBucket[];
+  source: 'dexscreener+rpc' | 'rpc' | 'cache' | 'partial';
+  fetchedAt: number;
+  error?: string;
+}
+
+export interface TokenMetricsFilterResult {
+  ok: boolean;
+  reasons: string[];
+  metrics: TokenMetrics;
+}
+
+interface CacheEntry {
+  data: TokenMetrics;
+  expiresAt: number;
+}
+
+const cache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<TokenMetrics>>();
+
+const DEFAULT_TTL_MS = 90_000;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function cacheTtlMs(): number {
+  return config.tokenMetrics?.cacheTtlMs ?? DEFAULT_TTL_MS;
+}
+
+function isValidMint(m: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m);
+}
+
+function emptyMetrics(mint: string, error?: string): TokenMetrics {
+  return {
+    mint,
+    liquidityUsd: null,
+    volume24hUsd: null,
+    priceUsd: null,
+    supplyUi: null,
+    holderCountEstimate: null,
+    topHolderPct: null,
+    top10HoldPct: null,
+    mintAuthority: null,
+    freezeAuthority: null,
+    devWallet: null,
+    devHoldPct: null,
+    devRecentTxCount: null,
+    devActiveRecently: false,
+    topHolders: [],
+    source: 'partial',
+    fetchedAt: Date.now(),
+    error,
+  };
+}
+
+/** Public cache peek (no network) */
+export function getCachedTokenMetrics(mint: string): TokenMetrics | null {
+  const hit = cache.get(mint);
+  if (!hit) return null;
+  if (hit.expiresAt < Date.now()) {
+    cache.delete(mint);
+    return null;
+  }
+  return { ...hit.data, source: 'cache' };
+}
+
+export function clearTokenMetricsCache(mint?: string): void {
+  if (mint) cache.delete(mint);
+  else cache.clear();
+}
+
+/**
+ * Fetch liquidity, holders, and dev/authority activity for a mint.
+ * Results are cached to respect RPC / DexScreener rate limits.
+ */
+export async function fetchTokenMetrics(
+  mint: string,
+  options: { force?: boolean } = {}
+): Promise<TokenMetrics> {
+  if (!isValidMint(mint)) {
+    return emptyMetrics(mint, 'Invalid mint');
+  }
+
+  if (!options.force) {
+    const cached = getCachedTokenMetrics(mint);
+    if (cached) return cached;
+
+    const pending = inflight.get(mint);
+    if (pending) return pending;
+  }
+
+  const job = (async () => {
+    const base = emptyMetrics(mint);
+    try {
+      const [dex, onchain] = await Promise.all([
+        fetchDexMetrics(mint),
+        fetchOnChainHolderMetrics(mint),
+      ]);
+
+      const merged: TokenMetrics = {
+        ...base,
+        ...onchain,
+        symbol: dex.symbol ?? onchain.symbol,
+        name: dex.name ?? onchain.name,
+        liquidityUsd: dex.liquidityUsd ?? onchain.liquidityUsd ?? null,
+        volume24hUsd: dex.volume24hUsd ?? null,
+        priceUsd: dex.priceUsd ?? null,
+        source: 'dexscreener+rpc',
+        fetchedAt: Date.now(),
+      };
+
+      // Optional GMGN enrichment
+      if (config.gmgn?.apiKey || process.env.GMGN_API_KEY) {
+        const gmgn = await fetchGmgnTokenHints(mint).catch(() => null);
+        if (gmgn) {
+          if (gmgn.holderCount != null) {
+            merged.holderCountEstimate = gmgn.holderCount;
+          }
+          if (gmgn.liquidityUsd != null && (merged.liquidityUsd ?? 0) <= 0) {
+            merged.liquidityUsd = gmgn.liquidityUsd;
+          }
+        }
+      }
+
+      // Dev recent activity
+      if (merged.devWallet) {
+        const activity = await fetchDevActivity(merged.devWallet);
+        merged.devRecentTxCount = activity.count;
+        merged.devActiveRecently = activity.active;
+      }
+
+      cache.set(mint, {
+        data: merged,
+        expiresAt: Date.now() + cacheTtlMs(),
+      });
+      return merged;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const fail = emptyMetrics(mint, message);
+      // Short negative cache
+      cache.set(mint, {
+        data: fail,
+        expiresAt: Date.now() + Math.min(cacheTtlMs(), 30_000),
+      });
+      return fail;
+    } finally {
+      inflight.delete(mint);
+    }
+  })();
+
+  inflight.set(mint, job);
+  return job;
+}
+
+async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
+  try {
+    const res = await loggedFetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+      {
+        context: 'DexScreener',
+        label: 'token metrics',
+        timeoutMs: 8_000,
+        headers: { Accept: 'application/json' },
+      }
+    );
+    if (!res.ok) {
+      logger.warn('DexScreener', 'token metrics HTTP', {
+        mint: mint.slice(0, 12),
+        status: res.status,
+      });
+      return {};
+    }
+    const data = (await res.json()) as {
+      pairs?: Array<{
+        chainId?: string;
+        liquidity?: { usd?: number };
+        volume?: { h24?: number };
+        priceUsd?: string;
+        baseToken?: { symbol?: string; name?: string };
+      }>;
+    };
+    const pairs = (data.pairs ?? []).filter((p) => p.chainId === 'solana');
+    if (pairs.length === 0) return {};
+
+    let best = pairs[0];
+    let bestLiq = Number(best.liquidity?.usd ?? 0);
+    for (const p of pairs) {
+      const liq = Number(p.liquidity?.usd ?? 0);
+      if (liq > bestLiq) {
+        best = p;
+        bestLiq = liq;
+      }
+    }
+
+    return {
+      symbol: best.baseToken?.symbol,
+      name: best.baseToken?.name,
+      liquidityUsd: bestLiq > 0 ? bestLiq : null,
+      volume24hUsd: Number(best.volume?.h24 ?? 0) || null,
+      priceUsd: Number(best.priceUsd ?? 0) || null,
+    };
+  } catch (err) {
+    logger.error('DexScreener', 'token metrics failed', {
+      mint: mint.slice(0, 12),
+      ...errorToMeta(err),
+    });
+    return {};
+  }
+}
+
+async function fetchOnChainHolderMetrics(
+  mint: string
+): Promise<Partial<TokenMetrics>> {
+  const conn = getConnection();
+  const mintKey = new PublicKey(mint);
+
+  let supplyUi: number | null = null;
+  let mintAuthority: string | null = null;
+  let freezeAuthority: string | null = null;
+  let decimals = 6;
+
+  try {
+    const supply = await conn.getTokenSupply(mintKey);
+    decimals = supply.value.decimals;
+    supplyUi = Number(supply.value.uiAmount ?? 0);
+  } catch {
+    // continue
+  }
+
+  try {
+    const info = await conn.getParsedAccountInfo(mintKey);
+    const parsed = (info.value?.data as { parsed?: { info?: Record<string, unknown> } } | undefined)
+      ?.parsed?.info;
+    if (parsed) {
+      const ma = parsed.mintAuthority as string | { address?: string } | null;
+      const fa = parsed.freezeAuthority as string | { address?: string } | null;
+      mintAuthority =
+        typeof ma === 'string' ? ma : ma?.address ? String(ma.address) : null;
+      freezeAuthority =
+        typeof fa === 'string' ? fa : fa?.address ? String(fa.address) : null;
+      if (typeof parsed.decimals === 'number') decimals = parsed.decimals;
+    }
+  } catch {
+    // continue
+  }
+
+  const topHolders: HolderBucket[] = [];
+  let topHolderPct: number | null = null;
+  let top10HoldPct: number | null = null;
+
+  try {
+    const largest = await conn.getTokenLargestAccounts(mintKey);
+    const accounts = largest.value ?? [];
+    const supply =
+      supplyUi && supplyUi > 0
+        ? supplyUi
+        : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
+
+    // Resolve owners for top accounts (token account → owner)
+    for (const acc of accounts.slice(0, 10)) {
+      const amountUi = Number(acc.uiAmount ?? 0);
+      let owner = acc.address.toBase58();
+      try {
+        const tok = await conn.getParsedAccountInfo(acc.address);
+        const info = (
+          tok.value?.data as {
+            parsed?: { info?: { owner?: string } };
+          } | undefined
+        )?.parsed?.info;
+        if (info?.owner) owner = info.owner;
+      } catch {
+        // keep token account address
+      }
+
+      const pct = (amountUi / supply) * 100;
+      const isAuthority =
+        owner === mintAuthority || owner === freezeAuthority;
+      topHolders.push({
+        address: owner,
+        amountUi,
+        pctOfSupply: Math.round(pct * 100) / 100,
+        isAuthority,
+      });
+    }
+
+    if (topHolders.length > 0) {
+      topHolderPct = topHolders[0].pctOfSupply;
+      top10HoldPct =
+        Math.round(
+          topHolders.reduce((s, h) => s + h.pctOfSupply, 0) * 100
+        ) / 100;
+    }
+
+    if (supplyUi == null && supply > 0) supplyUi = supply;
+  } catch (err) {
+    console.warn(
+      `[tokenMetrics] getTokenLargestAccounts failed for ${mint.slice(0, 8)}…:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  const authHold = topHolders.find((h) => h.isAuthority);
+  const devWallet =
+    mintAuthority || freezeAuthority || topHolders[0]?.address || null;
+  let devHoldPct: number | null = authHold?.pctOfSupply ?? null;
+  if (devHoldPct == null && devWallet) {
+    const match = topHolders.find((h) => h.address === devWallet);
+    if (match) devHoldPct = match.pctOfSupply;
+  }
+
+  void decimals;
+
+  return {
+    supplyUi,
+    mintAuthority,
+    freezeAuthority,
+    topHolders,
+    topHolderPct,
+    top10HoldPct,
+    holderCountEstimate: topHolders.length > 0 ? null : null,
+    devWallet,
+    devHoldPct,
+    source: 'rpc',
+  };
+}
+
+async function fetchDevActivity(
+  address: string
+): Promise<{ count: number; active: boolean }> {
+  const lookbackMs = config.tokenMetrics?.devActivityLookbackMs ?? 2 * MS_PER_DAY;
+  try {
+    const conn = getConnection();
+    const sigs = await conn.getSignaturesForAddress(new PublicKey(address), {
+      limit: 20,
+    });
+    const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
+    const recent = sigs.filter(
+      (s) => s.blockTime != null && s.blockTime >= cutoff && !s.err
+    );
+    return {
+      count: recent.length,
+      active: recent.length > 0,
+    };
+  } catch {
+    return { count: 0, active: false };
+  }
+}
+
+async function fetchGmgnTokenHints(
+  mint: string
+): Promise<{ holderCount?: number; liquidityUsd?: number } | null> {
+  const base = (config.gmgn?.baseUrl || 'https://gmgn.ai').replace(/\/$/, '');
+  const key = config.gmgn?.apiKey || process.env.GMGN_API_KEY || '';
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+  if (key) headers['Authorization'] = `Bearer ${key}`;
+
+  try {
+    const res = await loggedFetch(`${base}/defi/quotation/v1/tokens/sol/${mint}`, {
+      context: 'GMGN',
+      label: 'token hints',
+      timeoutMs: 6_000,
+      headers,
+    });
+    if (!res.ok) {
+      logger.warn('GMGN', 'token hints HTTP', {
+        mint: mint.slice(0, 12),
+        status: res.status,
+      });
+      return null;
+    }
+    const json = (await res.json()) as {
+      data?: Record<string, unknown>;
+    };
+    const row = json.data ?? {};
+    return {
+      holderCount: Number(row.holder_count ?? row.holders ?? 0) || undefined,
+      liquidityUsd: Number(row.liquidity ?? row.liquidity_usd ?? 0) || undefined,
+    };
+  } catch (err) {
+    logger.error('GMGN', 'token hints failed', {
+      mint: mint.slice(0, 12),
+      ...errorToMeta(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Apply configured filters to metrics (liquidity, dev concentration).
+ */
+export function evaluateTokenMetricsFilters(
+  metrics: TokenMetrics
+): TokenMetricsFilterResult {
+  const filters = config.filters;
+  const reasons: string[] = [];
+
+  const minLiq = filters.minLiquidity ?? 0;
+  if (minLiq > 0) {
+    const liq = metrics.liquidityUsd ?? 0;
+    if (liq < minLiq) {
+      reasons.push(
+        `liquidity $${liq.toFixed(0)} < min $${minLiq}`
+      );
+    }
+  }
+
+  const maxDev = filters.maxDevHoldPct ?? 0;
+  if (maxDev > 0 && metrics.devHoldPct != null) {
+    if (metrics.devHoldPct > maxDev) {
+      reasons.push(
+        `dev concentration ${metrics.devHoldPct.toFixed(1)}% > max ${maxDev}%`
+      );
+    }
+  }
+
+  const maxTop = filters.maxTopHolderPct ?? 0;
+  if (maxTop > 0 && metrics.topHolderPct != null) {
+    if (metrics.topHolderPct > maxTop) {
+      reasons.push(
+        `top holder ${metrics.topHolderPct.toFixed(1)}% > max ${maxTop}%`
+      );
+    }
+  }
+
+  const maxConc = filters.maxHolderConcentration ?? 0;
+  if (maxConc > 0 && metrics.top10HoldPct != null) {
+    if (metrics.top10HoldPct > maxConc) {
+      reasons.push(
+        `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% > max ${maxConc}%`
+      );
+    }
+  }
+
+  // Optional: skip if mint authority still active and filter enabled
+  if (
+    filters.skipIfMintAuthority &&
+    metrics.mintAuthority
+  ) {
+    reasons.push(`mint authority still set (${metrics.mintAuthority.slice(0, 8)}…)`);
+  }
+
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    metrics,
+  };
+}
+
+/** Compact summary for signals / dashboard */
+export function summarizeTokenMetrics(m: TokenMetrics): {
+  liquidityUsd: number | null;
+  topHolderPct: number | null;
+  top10HoldPct: number | null;
+  devHoldPct: number | null;
+  devActiveRecently: boolean;
+  mintAuthority: string | null;
+  source: string;
+} {
+  return {
+    liquidityUsd: m.liquidityUsd,
+    topHolderPct: m.topHolderPct,
+    top10HoldPct: m.top10HoldPct,
+    devHoldPct: m.devHoldPct,
+    devActiveRecently: m.devActiveRecently,
+    mintAuthority: m.mintAuthority,
+    source: m.source,
+  };
+}
+
+export function getTokenMetricsCacheStats() {
+  return {
+    size: cache.size,
+    ttlMs: cacheTtlMs(),
+  };
+}

@@ -1,0 +1,41 @@
+{
+  "name": "solana-smart-money-copy-bot",
+  "version": "1.0.0",
+  "description": "Solana smart money copy trading bot for Pump.fun launches and migrations",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:prod": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.cjs --env production",
+    "pm2:stop": "pm2 stop solana-copy-bot",
+    "pm2:restart": "npm run build && pm2 restart solana-copy-bot --update-env",
+    "pm2:logs": "pm2 logs solana-copy-bot",
+    "pm2:delete": "pm2 delete solana-copy-bot"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "solana",
+    "copy-trading",
+    "pump.fun",
+    "jupiter"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@jup-ag/api": "^6.0.41",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

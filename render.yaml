@@ -1,0 +1,34 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# New → Blueprint → select this repo, or create a Web Service manually.
+services:
+  - type: web
+    name: solana-copy-bot
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      # PORT is set automatically by Render — do not override unless needed
+      - key: TRADING_MODE
+        value: paper
+      - key: RPC_URL
+        sync: false
+      - key: RPC_FALLBACKS
+        sync: false
+      - key: GMGN_API_KEY
+        sync: false
+      - key: BIRDEYE_API_KEY
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false
+      - key: TRADING_WALLET_1
+        sync: false
+    disk:
+      name: bot-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

@@ -1,0 +1,3393 @@
+/**
+ * Dashboard HTML — served at /dashboard
+ * Tabbed Tailwind UI (Overview / Wallets / Signals / Backtester / Config / Logs)
+ */
+
+export const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Money Copy Bot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            panel: '#0f172a',
+            card: '#1e293b',
+            line: '#334155',
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f172a;
+      --card: #1e293b;
+      --line: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #34d399;
+      --red: #f87171;
+      --blue: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .mint {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    /* Never let .mint shrink form controls */
+    .mint input, .mint select, .mint textarea,
+    label.mint input, label.mint select, label.mint textarea {
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+      font-size: 13px !important;
+      color: var(--text) !important;
+      line-height: 1.25 !important;
+    }
+    .log-entry { font-size: 12px; padding: 6px 0; border-bottom: 1px solid #1e293b; }
+    .log-buy { color: #34d399; } .log-sell { color: #f87171; } .log-error { color: #f87171; }
+    .log-info { color: #94a3b8; } .log-signal { color: #60a5fa; }
+    .switch { position: relative; width: 44px; height: 24px; display: inline-block; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: #334155; border-radius: 9999px; transition: .2s; }
+    .slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: #059669; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    .dot-running { background: #34d399; box-shadow: 0 0 8px #34d399; }
+    .dot-paused { background: #fbbf24; }
+    .dot-stopped { background: #f87171; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
+    .badge-paper { background: #1d4ed833; color: #93c5fd; }
+    .badge-live { background: #7f1d1d55; color: #fca5a5; }
+    .bt-pnl-cell { line-height: 1.35; white-space: nowrap; }
+    .bt-pnl-cell .bt-pnl-sol { font-weight: 700; font-size: 13px; }
+    .bt-pnl-cell .bt-pnl-usd { font-size: 11px; opacity: 0.85; }
+    .bt-pnl-cell .bt-pnl-pct { font-size: 11px; opacity: 0.9; }
+    .bt-takes { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
+    .bt-chip {
+      display: inline-block; padding: 1px 7px; border-radius: 9999px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.01em;
+      border: 1px solid transparent;
+    }
+    .bt-chip-partial { background: #1e3a5f88; color: #93c5fd; border-color: #3b82f655; }
+    .bt-chip-initial { background: #14532d66; color: #86efac; border-color: #22c55e55; }
+    .bt-chip-bag { background: #42200666; color: #fdba74; border-color: #f59e0b55; }
+    .bt-chip-trail { background: #312e8166; color: #c4b5fd; border-color: #8b5cf655; }
+    .bt-chip-tp { background: #064e3b66; color: #6ee7b7; border-color: #34d39955; }
+    .bt-chip-sl { background: #450a0a66; color: #fca5a5; border-color: #ef444455; }
+    .bt-chip-forced { background: #27272a88; color: #a1a1aa; border-color: #52525b55; }
+    .bt-chip-other { background: #1e293b88; color: #94a3b8; border-color: #33415555; }
+    .bt-path { font-size: 10px; color: var(--muted); margin-top: 3px; max-width: 220px; }
+    #bt-results-table tbody tr.bt-row-win { background: linear-gradient(90deg, rgba(52,211,153,0.07), transparent 40%); }
+    #bt-results-table tbody tr.bt-row-loss { background: linear-gradient(90deg, rgba(248,113,113,0.07), transparent 40%); }
+    .field label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+    .field .val { color: #60a5fa; font-weight: 600; }
+    .field input[type=range] { width: 100%; }
+    .chart-wrap { position: relative; height: 220px; width: 100%; }
+    .chart-empty { color: #64748b; font-size: 13px; padding: 32px 0; text-align: center; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #1e293b; vertical-align: middle; }
+    th { color: #94a3b8; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* Form controls — cover typed + untyped inputs */
+    input:not([type]),
+    input[type="text"],
+    input[type="search"],
+    input[type="number"],
+    input[type="email"],
+    input[type="url"],
+    input[type="password"],
+    select,
+    textarea {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 0.5rem;
+      padding: 0.45rem 0.65rem;
+      font-size: 13px;
+      font-family: inherit;
+      line-height: 1.25;
+      min-height: 2.1rem;
+      outline: none;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    input:not([type]):focus,
+    input[type="text"]:focus,
+    input[type="search"]:focus,
+    input[type="number"]:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+    input::placeholder, textarea::placeholder { color: #64748b; opacity: 1; }
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+      min-width: 4.25rem;
+      text-align: right;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    select {
+      cursor: pointer;
+      padding-right: 1.75rem;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%9494a3' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.65rem center;
+    }
+    textarea { min-height: 4.5rem; resize: vertical; width: 100%; }
+    input[type="checkbox"] {
+      width: 1rem;
+      height: 1rem;
+      min-height: 0;
+      accent-color: #059669;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    input[type="range"] {
+      min-height: 0;
+      background: transparent;
+      border: none;
+      padding: 0;
+      box-shadow: none;
+    }
+
+    /* Compact labeled control groups */
+    .ctl {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .ctl > span {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: .02em;
+      white-space: nowrap;
+    }
+    .ctl input, .ctl select {
+      width: 100%;
+      min-width: 4.5rem;
+    }
+    .ctl-sm { width: 4.75rem; }
+    .ctl-md { width: 5.75rem; }
+    .ctl-lg { width: 7.5rem; }
+    .ctl-check {
+      flex-direction: row;
+      align-items: center;
+      gap: 0.4rem;
+      padding-top: 1.1rem;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .filters-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 0.55rem 0.65rem;
+    }
+    .filters-row .search-q {
+      flex: 1 1 220px;
+      min-width: 180px;
+    }
+
+    .btn { display: inline-flex; align-items: center; gap: 0.35rem; border-radius: 0.5rem; padding: 0.45rem 0.75rem; font-size: 12px; font-weight: 600; border: 1px solid transparent; cursor: pointer; min-height: 2.1rem; }
+    .btn-primary { background: #059669; color: white; }
+    .btn-primary:hover { background: #047857; }
+    .btn-secondary { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+    .btn-secondary:hover { background: #334155; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-warning { background: #b45309; color: white; }
+    button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button:not(.btn):not(.danger):not(.secondary):not(.warning) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
+    .stat { font-size: 1.5rem; font-weight: 700; color: #34d399; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0; border-bottom: 1px solid #1e293b; gap: 12px; }
+    .toggle-row:last-child { border-bottom: none; }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 0.75rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      flex-wrap: wrap;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+    }
+
+    /* Help tooltips — hover/focus the ? icon */
+    .tip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border-radius: 9999px;
+      background: #334155;
+      color: #cbd5e1;
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      cursor: help;
+      flex-shrink: 0;
+      position: relative;
+      border: 1px solid #475569;
+      text-transform: none;
+      letter-spacing: 0;
+      vertical-align: middle;
+    }
+    .tip::before { content: '?'; }
+    .tip::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      transform: translateX(-50%);
+      width: max-content;
+      max-width: min(280px, 70vw);
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #0f172a;
+      border: 1px solid #38bdf8;
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 500;
+      line-height: 1.35;
+      text-transform: none;
+      letter-spacing: 0;
+      white-space: normal;
+      text-align: left;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .12s ease;
+      z-index: 80;
+    }
+    .tip:hover::after,
+    .tip:focus::after,
+    .tip:focus-visible::after {
+      opacity: 1;
+      visibility: visible;
+    }
+    /* Flip tip downward when near top of viewport (approx via tip-below) */
+    .tip.tip-below::after {
+      bottom: auto;
+      top: calc(100% + 8px);
+    }
+    .has-tip { cursor: help; }
+
+    /* Token name → hover CA + click to copy */
+    .token-ca {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      cursor: pointer;
+      border-bottom: 1px dashed #475569;
+    }
+    .token-ca:hover { color: #7dd3fc; border-bottom-color: #38bdf8; }
+    .token-ca .ca-pop {
+      position: absolute;
+      left: 0;
+      bottom: calc(100% + 8px);
+      z-index: 90;
+      min-width: 220px;
+      max-width: min(420px, 80vw);
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #0f172a;
+      border: 1px solid #38bdf8;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity .12s ease;
+    }
+    .token-ca:hover .ca-pop,
+    .token-ca:focus .ca-pop,
+    .token-ca:focus-within .ca-pop {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+    .token-ca .ca-pop .ca-label {
+      font-size: 10px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 4px;
+    }
+    .token-ca .ca-pop .ca-addr {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: #e2e8f0;
+      word-break: break-all;
+      line-height: 1.35;
+    }
+    .token-ca .ca-pop .ca-hint {
+      margin-top: 6px;
+      font-size: 10px;
+      color: #38bdf8;
+    }
+    .token-ca.copied .ca-pop .ca-hint { color: #34d399; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+    <!-- Header -->
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
+        <p class="text-slate-500 text-sm">Pump.fun · migrations · anti-rug · snipers</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 card !py-2 !px-3">
+        <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
+        <strong id="status-text" class="text-sm has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
+        <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = simulated fills. LIVE = real swaps with trading wallet keys">PAPER</span>
+        <span class="text-slate-500 text-xs hidden sm:inline">·</span>
+        <span class="text-xs text-slate-400 has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance" class="text-slate-100">—</strong></span>
+        <span class="text-xs text-slate-400 has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl" class="text-slate-100">—</strong></span>
+        <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active" class="text-slate-100">—</strong></span>
+        <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
+        <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
+        <button onclick="setMode('paper')" class="btn btn-secondary" title="Switch to paper trading — no real funds risked">Paper</button>
+        <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="flex flex-wrap gap-1.5 mb-4 sticky top-0 z-20 bg-[#0b1220]/95 backdrop-blur py-2 -mx-1 px-1">
+      <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Dashboard home: balance, positions, PnL charts, paper funding">Overview</button>
+      <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy">Smart Wallets</button>
+      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, migrations, and re-buy watches">Signals &amp; Trades</button>
+      <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
+      <button data-tab="config" onclick="showTab('config', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
+      <button data-tab="logs" onclick="showTab('logs', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade events and system/API error logs for debugging">Logs</button>
+    </nav>
+
+    <!-- ========== TAB: Overview ========== -->
+    <section data-tab-panel="overview" class="space-y-4">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="card"><div class="stat-label">Balance <span class="tip tip-below" tabindex="0" data-tip="Available SOL for new buys (paper balance or live trading wallet)."></span></div><div class="stat" id="ov-balance-mirror">—</div><div class="mint mt-1">Daily <span id="ov-daily-mirror">—</span></div></div>
+        <div class="card"><div class="stat-label">Open Positions <span class="tip tip-below" tabindex="0" data-tip="How many tokens you currently hold waiting for TP, SL, or trailing exit."></span></div><div class="stat" id="open-count">—</div></div>
+        <div class="card"><div class="stat-label">Net PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of realized profit/loss from closed trades this session/day."></span></div><div class="stat" id="stat-pnl">—</div><div class="mint mt-1" id="stat-return">—</div></div>
+        <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="card !py-3"><div class="stat-label">Wallets <span class="tip tip-below" tabindex="0" data-tip="Number of smart wallets currently tracked for copy signals."></span></div><div class="text-lg font-semibold" id="watched">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Recent buy/sell signals generated from wallet activity."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Total executed buys + sells (paper or live)."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300" id="stat-detail">—</div></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Risk <span class="tip" tabindex="0" data-tip="Live risk-engine status: drawdown, daily/weekly loss limits, and whether trading is halted."></span></div>
+        <div class="mint" id="risk-status">—</div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Open Positions <span class="tip" tabindex="0" data-tip="Active holdings with cost, unrealized PnL, trailing stop, take-profit, and stop-loss levels."></span></div>
+          <div class="overflow-x-auto max-h-72 overflow-y-auto">
+            <table id="positions-table">
+              <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">Recent Signals <span class="tip" tabindex="0" data-tip="Latest wallet buys and bot reactions (copy, skip, anti-rug block)."></span></div>
+          <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+        <div class="overflow-x-auto max-h-56 overflow-y-auto">
+          <table id="closed-table">
+            <thead><tr><th>Token</th><th>Name</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Cumulative PnL <span class="tip" tabindex="0" data-tip="Running equity curve from closed trades over time."></span></div>
+          <div class="chart-wrap"><canvas id="chart-cumulative"></canvas></div>
+          <div class="chart-empty" id="chart-cumulative-empty" style="display:none">No closed trades yet</div>
+        </div>
+        <div class="grid gap-4">
+          <div class="card">
+            <div class="section-title">By Wallet <span class="tip" tabindex="0" data-tip="PnL attributed to each smart wallet that triggered your copies."></span></div>
+            <div class="chart-wrap" style="height:160px"><canvas id="chart-wallet"></canvas></div>
+            <div class="chart-empty" id="chart-wallet-empty" style="display:none">No wallet trades yet</div>
+          </div>
+          <div class="card">
+            <div class="section-title">Win / Loss <span class="tip" tabindex="0" data-tip="Count of winning vs losing closed trades."></span></div>
+            <div class="chart-wrap" style="height:160px"><canvas id="chart-winloss"></canvas></div>
+            <div class="chart-empty" id="chart-winloss-empty" style="display:none">No closed trades yet</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Paper Funding <span class="tip" tabindex="0" data-tip="Add simulated SOL, reset paper balance, or wipe paper history. Does not affect live wallets."></span></div>
+          <div class="filters-row">
+            <div class="ctl ctl-md">
+              <span>Amount (SOL) <span class="tip" tabindex="0" data-tip="How much paper SOL to add when you Top Up."></span></span>
+              <input type="number" id="paper-topup-amount" min="0.01" step="0.1" value="1" />
+            </div>
+            <button class="btn btn-primary" onclick="paperTopUp()" title="Add the amount above to your paper balance">Top Up</button>
+            <button class="btn btn-warning" onclick="paperReset(false)" title="Reset paper balance to starting amount; keep trade history">Reset</button>
+            <button class="btn btn-danger" onclick="paperReset(true)" title="Wipe paper balance AND trade history">Full Reset</button>
+          </div>
+          <div class="mint mt-2" id="paper-fund-status"></div>
+        </div>
+        <div class="card">
+          <div class="section-title">Migrations / Re-Buy <span class="tip" tabindex="0" data-tip="Pump.fun graduations to Raydium/PumpSwap and dip re-entry watches after take-profit."></span></div>
+          <div class="mint mb-2" id="mig-live-status">WS: —</div>
+          <div id="migrations" class="max-h-28 overflow-y-auto text-sm mb-2"></div>
+          <div class="mint" id="rebuy-status">—</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Smart Wallets ========== -->
+    <section data-tab-panel="wallets" class="hidden space-y-4">
+      <div class="card">
+        <div class="flex flex-wrap gap-3 items-center justify-between mb-2">
+          <div class="section-title !mb-0">Discovery Status <span class="tip" tabindex="0" data-tip="Health of wallet discovery APIs (GMGN/Kolscan/Birdeye): last fetch, errors, and auto-refresh interval."></span></div>
+          <span class="mint" id="discovery-status">—</span>
+        </div>
+        <div class="filters-row">
+          <label class="ctl ctl-md">
+            <span>Auto-refresh (min) <span class="tip" tabindex="0" data-tip="How often to refresh top smart wallets in the background. 0 = disabled."></span></span>
+            <input type="number" id="disc-auto-min" value="15" min="0" max="120" />
+          </label>
+          <button class="btn btn-secondary" onclick="saveDiscoveryConfig()" title="Save the auto-refresh interval">Save interval</button>
+          <button class="btn btn-secondary" onclick="refreshDiscoveryStatus()" title="Poll discovery health without starting a full search">Refresh status</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Wallet Search <span class="tip" tabindex="0" data-tip="Filter the smart-wallet pool by win rate, trade frequency, recent activity, Pump.fun focus, and sniper risk."></span></div>
+        <div class="filters-row mb-3">
+          <input type="search" id="wallet-search-q" placeholder='Search e.g. "active scalpers"' class="search-q" title="Free-text intent: scalpers, pump, active, or wallet name fragments" />
+          <label class="ctl ctl-sm">
+            <span>Win% ≥ <span class="tip" tabindex="0" data-tip="Minimum historical win rate required."></span></span>
+            <input type="number" id="search-min-win" value="45" min="0" max="100" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Trades 7d ≥ <span class="tip" tabindex="0" data-tip="Minimum trades in the last 7 days — higher = more active scalpers."></span></span>
+            <input type="number" id="search-min-trades" value="20" min="0" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Activity ≤ days <span class="tip" tabindex="0" data-tip="Only wallets that traded within this many days."></span></span>
+            <input type="number" id="search-max-days" value="7" min="1" max="30" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Max sniper <span class="tip" tabindex="0" data-tip="Exclude wallets tagged as heavy snipers above this score (0–100)."></span></span>
+            <input type="number" id="search-max-sniper" value="50" min="0" max="100" />
+          </label>
+          <label class="ctl-check" title="Prefer wallets with Pump.fun / migration history"><input type="checkbox" id="search-pump-focus" /> Pump.fun</label>
+          <label class="ctl-check" title="Only high-frequency traders (scalpers)"><input type="checkbox" id="search-scalper-only" /> Scalpers only</label>
+          <button class="btn btn-primary" onclick="searchWallets()" title="Run search with the filters above">Search</button>
+          <button class="btn btn-secondary" onclick="suggestScalpers()" title="One-click: active wallets with high 7d trade count and solid win rate">Suggest scalpers</button>
+          <span class="mint self-center" id="search-status"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="search-wallets-table">
+            <thead><tr><th>Name</th><th>Address</th><th title="Time since last known trade">Last trade</th><th title="Win rate %">Win%</th><th title="Trades in last 7 days">7d trades</th><th title="Estimated Pump.fun related trades">Pump.fun</th><th></th></tr></thead>
+            <tbody><tr><td colspan="7" class="text-slate-500">Search or suggest scalpers</td></tr></tbody>
+          </table>
+        </div>
+        <div id="scalper-suggestions" class="mt-3 hidden">
+          <div class="mint mb-2">Auto-suggest: consistent scalpers <span class="tip" tabindex="0" data-tip="Quick-add chips for wallets that look like consistent high-frequency scalpers."></span></div>
+          <div id="scalper-chips" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Discover Smart Wallets <span class="tip" tabindex="0" data-tip="Pull candidate wallets from Kolscan, GMGN, Birdeye, DexScreener, or curated lists. Use All sources when GMGN is blocked."></span></div>
+        <div class="filters-row mb-3">
+          <label class="ctl ctl-lg">
+            <span>Source <span class="tip" tabindex="0" data-tip="All = merge every source. Kolscan works without API keys. Birdeye needs BIRDEYE_API_KEY."></span></span>
+            <select id="discover-source" onchange="onDiscoverSourceChange()">
+              <option value="all">All sources (best)</option>
+              <option value="kolscan">Kolscan leaderboard</option>
+              <option value="gmgn">GMGN</option>
+              <option value="birdeye">Birdeye</option>
+              <option value="dexscreener">DexScreener flows</option>
+              <option value="manual">Manual / curated</option>
+              <option value="pump">Pump.fun smart money</option>
+            </select>
+          </label>
+          <label class="ctl ctl-md">
+            <span>Period <span class="tip" tabindex="0" data-tip="Leaderboard window for PnL / activity ranking."></span></span>
+            <select id="discover-period">
+              <option value="7d">7D</option>
+              <option value="30d">30D</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Limit <span class="tip" tabindex="0" data-tip="Max candidates to return (20–50)."></span></span>
+            <select id="discover-limit">
+              <option value="20">20</option>
+              <option value="30" selected>30</option>
+              <option value="40">40</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min win % <span class="tip" tabindex="0" data-tip="Drop wallets below this win rate when the source supports it."></span></span>
+            <input type="number" id="discover-min-wr" value="35" min="0" max="100" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min trades 7d <span class="tip" tabindex="0" data-tip="Prefer wallets that traded at least this many times recently."></span></span>
+            <input type="number" id="discover-min-trades" value="15" min="0" />
+          </label>
+        </div>
+        <div class="filters-row mb-3">
+          <label class="ctl-check" title="Bias results toward Pump.fun / early-curve traders"><input type="checkbox" id="discover-pump" /> Pump.fun focus</label>
+          <label class="ctl-check" title="Sort high 7d trade-count wallets first"><input type="checkbox" id="discover-scalpers" checked /> Prefer scalpers</label>
+          <button class="btn btn-primary" onclick="discoverWallets(false)" title="Run discovery (may use cache)">Discover</button>
+          <button class="btn btn-secondary" onclick="discoverWallets(true)" title="Bypass cache and re-fetch all sources">Force refresh</button>
+          <button class="btn btn-secondary" onclick="importDiscoveredAll()" title="Add every new (untracked) candidate to Tracked Smart Wallets">Import all new</button>
+          <span class="mint self-center" id="discover-status"></span>
+          <span class="mint self-center" id="discover-key-status"></span>
+        </div>
+        <div class="mint mb-2" id="discover-related"></div>
+        <div id="discover-empty" class="hidden mb-3" style="padding:12px;border:1px dashed #334155;border-radius:8px;background:#0f172a">
+          <div class="font-medium mb-1" style="color:#f87171">No wallets found</div>
+          <div class="mint mb-2" id="discover-empty-msg">Try another source or add wallets manually.</div>
+          <ul class="mint text-sm mb-2" style="margin-left:1.1rem;list-style:disc">
+            <li>Switch source to <b>All sources</b> or <b>Kolscan</b> (works when GMGN is blocked)</li>
+            <li>Lower Min win % / Min trades, or uncheck Pump.fun focus</li>
+            <li>Add a <b>BIRDEYE_API_KEY</b> in .env for Birdeye traders</li>
+            <li>Paste addresses below and click <b>Add manual</b></li>
+          </ul>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-secondary" onclick="discoverWallets(true)">Refresh</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('discover-source').value='all';discoverWallets(true)">Try All sources</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('discover-manual-text').focus()">Manual add</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="discover-wallets-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th title="Which API or list provided this wallet">Source</th>
+                <th>Address</th>
+                <th title="Time since last known trade">Last trade</th>
+                <th title="Win rate %">Win%</th>
+                <th title="Trades in last 7 days">7d trades</th>
+                <th title="Pump.fun related trade count (estimated)">Pump.fun</th>
+                <th title="0–100 smart-flow strength score">Flow</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="9" class="text-slate-500">Choose a source and click Discover</td></tr></tbody>
+          </table>
+        </div>
+        <div class="mt-3" id="discover-manual-box">
+          <div class="mint mb-1">Manual add (Name:Address or raw address — one per line) <span class="tip" tabindex="0" data-tip="Paste Solana addresses to import. Format: Name:Address or address alone."></span></div>
+          <textarea id="discover-manual-text" rows="2" placeholder="Cented:CyaE1Vxv…&#10;Bi4rd5FH…"></textarea>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button class="btn btn-primary" onclick="addManualDiscovered()" title="Parse the box and add wallets to tracking">Add manual</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('discover-source').value='manual';discoverWallets(true)" title="Show the offline curated candidate list">Load curated list</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Top Smart Wallets (GMGN quick) <span class="tip" tabindex="0" data-tip="Shortcut to GMGN top PnL wallets. Falls back to curated/Kolscan if GMGN is blocked."></span></div>
+        <div class="flex flex-wrap gap-2 items-center mb-3">
+          <select id="top-period" title="Rank by 7-day or 30-day PnL">
+            <option value="7d">7D PnL</option>
+            <option value="30d">30D PnL</option>
+          </select>
+          <button class="btn btn-primary" onclick="loadTopWallets()" title="Fetch top wallets for the selected period">Load Top</button>
+          <button class="btn btn-secondary" onclick="importAllTop()" title="Import all new wallets from the loaded list">Import All New</button>
+          <span class="mint" id="top-status"></span>
+          <span class="mint" id="gmgn-key-status"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="top-wallets-table">
+            <thead><tr><th>Name</th><th>Address</th><th>Win%</th><th>PnL</th><th>Trades</th><th></th></tr></thead>
+            <tbody><tr><td colspan="6" class="text-slate-500">Click Load Top Wallets</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex flex-wrap gap-2 items-center mb-3">
+          <div class="section-title !mb-0">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
+          <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain">Refresh Activity</button>
+          <button class="btn btn-warning" onclick="pruneInactive()" title="Disable or remove wallets that have been inactive too long">Prune Inactive</button>
+          <span class="mint" id="gmgn-status"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="wallets-table">
+            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th>Last Active</th><th>Win%</th><th title="7d trades / Pump.fun trades">7d / Pump</th><th>Status</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="mt-4">
+          <div class="section-title">Scalper Wallets <span class="tip" tabindex="0" data-tip="Tracked wallets tagged as scalpers (high trade frequency)."></span></div>
+          <div class="overflow-x-auto">
+            <table id="scalper-wallets-table">
+              <thead><tr><th>Name</th><th>Address</th><th>Last Active</th><th>Win%</th><th>7d trades</th><th>Status</th><th></th></tr></thead>
+              <tbody><tr><td colspan="7" class="text-slate-500">No scalpers tracked yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <form class="filters-row mt-3" id="add-wallet-form" title="Add a single wallet by name + Solana address">
+          <input type="text" name="name" placeholder="Wallet name" required class="ctl-md" style="width:9rem" />
+          <input type="text" name="address" placeholder="Solana address" required class="search-q" />
+          <select name="category" class="ctl-md" title="Category used for grouping and strategy hints">
+            <option value="smart">smart</option>
+            <option value="scalper">scalper</option>
+            <option value="sniper">sniper</option>
+            <option value="kol">kol</option>
+          </select>
+          <button type="submit" class="btn btn-primary" title="Save this wallet to the tracked list">Add Wallet</button>
+        </form>
+        <div class="mt-3">
+          <div class="mint mb-1">Bulk import (addresses or Name:Address, one per line) <span class="tip" tabindex="0" data-tip="Import many wallets at once. Optional category applies to all lines."></span></div>
+          <textarea id="bulk-import-text" rows="3" placeholder="CyaE1Vxv...&#10;Theo:Bi4rd5FH..."></textarea>
+          <div class="filters-row mt-2">
+            <select id="bulk-import-cat" class="ctl-md" title="Force category for all imported lines, or auto-detect">
+              <option value="">auto category</option>
+              <option value="scalper">scalper</option>
+              <option value="smart">smart</option>
+              <option value="sniper">sniper</option>
+              <option value="kol">kol</option>
+            </select>
+            <button type="button" class="btn btn-secondary" onclick="bulkImportWallets()" title="Parse and import all valid addresses">Bulk import</button>
+            <span class="mint self-center" id="bulk-import-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Live Trading Wallets <span class="tip" tabindex="0" data-tip="Slots that hold real keys via env vars (main/burner). Private keys never leave the server."></span></div>
+        <p class="mint mb-2">Keys stay in env vars — never sent to the browser.</p>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <button class="btn btn-secondary" onclick="loadTradingWallets()" title="Reload trading wallet slots and balances">Refresh</button>
+          <span class="mint" id="live-wallet-status"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="trading-wallets-table">
+            <thead><tr><th>Name</th><th title="main = primary, burner = disposable">Role</th><th title="Environment variable that stores the secret key">Env</th><th>Pubkey</th><th>Balance</th><th>Key</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <form class="filters-row mt-3" id="add-trading-wallet-form" title="Register a new trading slot that reads its key from an env var">
+          <input type="text" name="name" placeholder="Name" required style="width:8rem" />
+          <input type="text" name="envVar" placeholder="ENV_VAR" required style="width:10rem" title="Name of the env var containing the base58 secret key" />
+          <select name="role" class="ctl-md"><option value="main">main</option><option value="burner">burner</option></select>
+          <button type="submit" class="btn btn-primary" title="Add this trading wallet slot">Add Slot</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Signals & Trades ========== -->
+    <section data-tab-panel="signals" class="hidden space-y-4">
+      <div class="card">
+        <div class="section-title">Pump.fun Smart Activity <span class="tip" tabindex="0" data-tip="Live early-curve buys, near-migration plays, and smart-money scores on Pump.fun launches."></span></div>
+        <div class="filters-row mb-2">
+          <label class="ctl ctl-md">
+            <span>Filter <span class="tip" tabindex="0" data-tip="Show all events, only early buys, near-migration, migrations, or priority signals."></span></span>
+            <select id="pump-act-filter">
+              <option value="all">All</option>
+              <option value="early">Early buys</option>
+              <option value="near">Near migration</option>
+              <option value="migration">Migrations</option>
+              <option value="priority">Priority only</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min SM <span class="tip" tabindex="0" data-tip="Minimum Birdeye smart-money score (0–100) to show a launch."></span></span>
+            <input type="number" id="pump-act-min-sm" value="0" min="0" max="100" />
+          </label>
+          <button class="btn btn-secondary" onclick="refreshPumpActivity()" title="Reload the activity table">Refresh</button>
+          <button class="btn btn-primary" onclick="discoverPumpSmart()" title="Scan for Pump.fun smart wallets and hot launches">Discover Pump SM</button>
+          <span class="mint self-center" id="pump-act-status">—</span>
+        </div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="pump-activity-table">
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th title="early / near-migration / migration">Kind</th>
+                <th title="Bonding curve progress %">Curve</th>
+                <th title="Distinct smart wallets seen">Wallets</th>
+                <th title="Birdeye smart-money score">Birdeye SM</th>
+                <th>Notes</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="7" class="text-slate-500">Waiting for Pump.fun smart wallet activity…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="mint mt-2" id="pump-hot-launches"></div>
+      </div>
+      <div class="card">
+        <div class="section-title">Recent Signals (risk / curve / sniper) <span class="tip" tabindex="0" data-tip="Why buys were taken or skipped: anti-rug, sniper score, curve stage, convergence."></span></div>
+        <div id="activity-signals" class="max-h-80 overflow-y-auto text-sm"></div>
+      </div>
+      <div class="card">
+        <div class="section-title">Re-Buy Watch <span class="tip" tabindex="0" data-tip="After a take-profit, watches for a dip + confirmation buys from smart wallets before re-entering."></span></div>
+        <div class="overflow-x-auto">
+          <table id="rebuy-table">
+            <thead><tr><th>Token</th><th>Status</th><th title="Current dip from peak">Dip</th><th title="Confirming smart wallets">Wallets</th><th>Volume</th><th>Reason</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title">Recent Migrations <span class="tip" tabindex="0" data-tip="Tokens graduating off Pump.fun bonding curve onto Raydium/PumpSwap — often high-priority entries."></span></div>
+        <div class="mint mb-1" id="mig-live-status-signals">Live feed is on Overview · open that tab for WS status</div>
+        <p class="text-sm text-slate-400">Migration events, re-buy watches, and open positions update live from the same APIs.</p>
+      </div>
+      <div class="card">
+        <div class="section-title">Trade Log Preview <span class="tip" tabindex="0" data-tip="Short feed of recent buys/sells. Full history is on the Logs tab."></span></div>
+        <div id="logs" class="max-h-48 overflow-y-auto"></div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Backtester ========== -->
+    <section data-tab-panel="backtester" class="hidden space-y-4">
+      <div class="card">
+        <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
+        <div class="filters-row mb-3">
+          <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
+          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Cap how many simulated entries are opened."></span></span><input type="number" id="bt-max" value="15" min="1" max="50" /></label>
+          <label class="ctl ctl-md"><span>Simulations <span class="tip" tabindex="0" data-tip="Repeat the run N times (useful when synthetic noise is allowed)."></span></span><input type="number" id="bt-sims" value="1" min="1" max="20" /></label>
+          <label class="ctl ctl-md"><span>Start SOL <span class="tip" tabindex="0" data-tip="Starting paper bankroll for the simulation."></span></span><input type="number" id="bt-start-bal" value="10" min="0.5" max="100" step="0.5" /></label>
+          <label class="ctl ctl-lg"><span>Strategy <span class="tip" tabindex="0" data-tip="Auto = bot defaults. Convergence = multi-wallet. Migration = grads only. Single = first wallet buy."></span></span>
+            <select id="bt-strategy">
+              <option value="auto">Auto</option>
+              <option value="convergence">Convergence</option>
+              <option value="migration">Migration plays</option>
+              <option value="single">Single wallet</option>
+            </select>
+          </label>
+        </div>
+        <div class="filters-row mb-3">
+          <label class="ctl ctl-md"><span>Min liquidity $ <span class="tip" tabindex="0" data-tip="Skip tokens below this liquidity."></span></span><input type="number" id="bt-min-liq" value="0" min="0" step="1000" /></label>
+          <label class="ctl ctl-md"><span>Min MC $ <span class="tip" tabindex="0" data-tip="Skip tokens below this market cap at entry."></span></span><input type="number" id="bt-min-mc" value="0" min="0" step="1000" /></label>
+          <label class="ctl ctl-md"><span>Min volume $ <span class="tip" tabindex="0" data-tip="Skip tokens below this 24h volume."></span></span><input type="number" id="bt-min-vol" value="0" min="0" step="1000" /></label>
+          <label class="ctl ctl-md"><span>Max risk score <span class="tip" tabindex="0" data-tip="0 = no filter. Otherwise skip tokens with risk above this (0–100)."></span></span><input type="number" id="bt-max-risk" value="0" min="0" max="100" step="5" /></label>
+        </div>
+        <div class="filters-row mb-3">
+          <label class="ctl-check" title="Use live DexScreener/GMGN market data when available"><input type="checkbox" id="bt-live" checked /> Live data</label>
+          <label class="ctl-check" title="Only simulate Pump.fun → DEX graduation plays"><input type="checkbox" id="bt-mig-only" /> Migration plays only</label>
+          <label class="ctl-check" title="Only include Pump.fun / pump-tagged launches"><input type="checkbox" id="bt-pump-only" /> Pump.fun only</label>
+          <label class="ctl-check" title="Allow dip re-entry after take-profit in the sim"><input type="checkbox" id="bt-rebuy" /> Re-buy enabled</label>
+          <label class="ctl-check" title="If live data is thin, generate synthetic price paths so the sim still runs"><input type="checkbox" id="bt-synthetic" checked /> Allow synthetic</label>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center mb-2">
+          <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Start the simulation with current filters">Run Backtest</button>
+          <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
+          <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV">Export CSV</button>
+          <span class="mint" id="bt-status">—</span>
+        </div>
+        <div id="bt-progress-wrap" class="hidden mb-2" title="Simulation progress">
+          <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span id="bt-progress-label">Starting…</span>
+            <span id="bt-progress-pct">0%</span>
+          </div>
+          <div style="height:8px;background:#1e293b;border-radius:4px;overflow:hidden">
+            <div id="bt-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#34d399,#10b981);transition:width .2s"></div>
+          </div>
+        </div>
+        <div id="bt-result" class="mint mt-1"></div>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="% of simulated trades that closed green."></span></div><div class="stat" id="bt-stat-wr">—</div></div>
+        <div class="card"><div class="stat-label">Total PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of all simulated trade PnL in SOL."></span></div><div class="stat" id="bt-stat-pnl">—</div></div>
+        <div class="card"><div class="stat-label">Avg Win / Loss <span class="tip tip-below" tabindex="0" data-tip="Average size of winning vs losing trades."></span></div><div class="stat text-base" id="bt-stat-avg">—</div></div>
+        <div class="card"><div class="stat-label">Best / Worst <span class="tip tip-below" tabindex="0" data-tip="Best and worst single-trade PnL %."></span></div><div class="stat text-base" id="bt-stat-bw">—</div></div>
+        <div class="card"><div class="stat-label">Avg Hold <span class="tip tip-below" tabindex="0" data-tip="Average time from entry to exit."></span></div><div class="stat text-base" id="bt-stat-hold">—</div></div>
+        <div class="card"><div class="stat-label">Avg Max DD <span class="tip tip-below" tabindex="0" data-tip="Average worst peak-to-trough drawdown while a trade was open."></span></div><div class="stat text-base" id="bt-stat-dd">—</div></div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Cumulative Equity Curve <span class="tip" tabindex="0" data-tip="Paper bankroll over the simulation as trades close."></span></div>
+          <div class="chart-wrap" style="height:260px"><canvas id="bt-chart-pnl"></canvas></div>
+          <div class="chart-empty mint" id="bt-chart-empty">Run a backtest to see the equity curve</div>
+        </div>
+        <div class="card">
+          <div class="section-title">Win / Loss &amp; PnL Distribution <span class="tip" tabindex="0" data-tip="Left: win vs loss count. Right: histogram of trade PnL % buckets."></span></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-wl"></canvas></div>
+            <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-dist"></canvas></div>
+          </div>
+          <div class="chart-empty mint" id="bt-chart-wl-empty">No distribution yet</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Trade Results (PnL SOL/USD · staged takes · wallet MC · delay) <span class="tip" tabindex="0" data-tip="PnL shows SOL and USD. Takes chips show whether partial / recovered initial happened before the remainder. Green/red row tint = win/loss. Hover Reason for full exit explanation."></span></div>
+        <div class="overflow-x-auto max-h-[28rem] overflow-y-auto">
+          <table id="bt-results-table">
+            <thead>
+              <tr>
+                <th title="Hover token to show contract address · click to copy">Token</th>
+                <th title="PnL %">PnL %</th>
+                <th title="Profit/loss in SOL and USD">PnL SOL / USD</th>
+                <th title="Staged profit takes: partial → recover initial → remainder">Takes</th>
+                <th title="Estimated market cap when the smart wallet bought">Wallet MC</th>
+                <th title="Estimated market cap when your copy filled (after delay)">Your MC</th>
+                <th title="Market cap at exit">Exit MC</th>
+                <th title="Time from smart-wallet buy until your copy fill">Delay</th>
+                <th title="Your hold time (copy fill → exit)">Hold</th>
+                <th title="Max drawdown while open">Max DD</th>
+                <th title="Estimated liquidity at your entry">Liq</th>
+                <th title="Risk score">Risk</th>
+                <th title="Smart wallets at entry">Wallets</th>
+                <th title="Hover for full explanation">Reason</th>
+                <th title="Smart wallet entry date &amp; time">Wallet entry</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="15" class="text-slate-500">No backtest results yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Config ========== -->
+    <section data-tab-panel="config" class="hidden space-y-4">
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
+          <div class="form-grid grid grid-cols-1 sm:grid-cols-2 gap-3" id="trade-config">
+            <div class="field">
+              <label title="SOL spent per copy buy (before risk-sizing overrides)">Trade Amount (SOL) — <span class="val" id="v-tradeAmountSol">0.15</span></label>
+              <input type="range" id="tradeAmountSol" min="0.01" max="2" step="0.01" value="0.15" />
+            </div>
+            <div class="field">
+              <label title="Minimum take-profit % before a sell is considered">Min Profit % — <span class="val" id="v-minProfitPercent">50</span></label>
+              <input type="range" id="minProfitPercent" min="10" max="200" step="5" value="50" />
+            </div>
+            <div class="field">
+              <label title="Hard ceiling — with profit strategy ON this caps full exit before trail; trail can still run the bag past this until stop hits">Max Profit % — <span class="val" id="v-maxProfitPercent">100</span></label>
+              <input type="range" id="maxProfitPercent" min="20" max="500" step="5" value="100" />
+            </div>
+            <div class="field">
+              <label title="Hard stop-loss % from entry (negative)">Stop Loss % — <span class="val" id="v-stopLossPercent">-35</span></label>
+              <input type="range" id="stopLossPercent" min="-80" max="-5" step="5" value="-35" />
+            </div>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveTradeConfig()" title="Persist trade size and TP/SL settings">Save Trade</button></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Profit Strategy <span class="tip" tabindex="0" data-tip="Tiered exits: partial at a milestone → recover initial investment → leave a bag running with a trailing stop. Max Profit % above is the hard ceiling."></span></div>
+          <p class="text-sm text-slate-400 mb-2">
+            Flow: <strong>partial</strong> at milestone → <strong>recover initial</strong> → keep a <strong>bag</strong> → <strong>trail</strong> after high profit. Backtester uses the same rules.
+          </p>
+          <div class="toggle-row"><span title="Master switch for advanced tiered profit-taking (overrides simple TP when on)">Enable profit strategy</span><label class="switch"><input type="checkbox" id="ps-enabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="On high-risk tokens: take profits earlier and use tighter stops/trails">Risk-based adjustment</span><label class="switch"><input type="checkbox" id="ps-risk-adjust" checked /><span class="slider"></span></label></div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md"><span>Partial at +% <span class="tip" tabindex="0" data-tip="First milestone. Example: 80 = sell a chunk when up 80%."></span></span><input type="number" id="ps-partial-at" value="80" min="10" max="500" step="5" /></label>
+            <label class="ctl ctl-md"><span>Partial sell % <span class="tip" tabindex="0" data-tip="% of the *initial* position size to sell at the partial milestone (e.g. 50)."></span></span><input type="number" id="ps-partial-sell" value="50" min="5" max="90" step="5" /></label>
+            <label class="ctl ctl-md"><span>Recover initial @+% <span class="tip" tabindex="0" data-tip="At this profit %, sell enough tokens to get your initial SOL back (e.g. 100% = 2x price → sell ~half)."></span></span><input type="number" id="ps-take-initial" value="100" min="20" max="500" step="5" /></label>
+            <label class="ctl ctl-md"><span>Bag % <span class="tip" tabindex="0" data-tip="% of initial position left to run after recover/partials (e.g. 30)."></span></span><input type="number" id="ps-bag" value="30" min="5" max="80" step="5" /></label>
+            <label class="ctl ctl-md"><span>Trail after +% <span class="tip" tabindex="0" data-tip="Arm trailing stop once unrealized profit hits this % (e.g. 150)."></span></span><input type="number" id="ps-trail-after" value="150" min="30" max="1000" step="10" /></label>
+            <label class="ctl ctl-md"><span>Trail % <span class="tip" tabindex="0" data-tip="Trail distance from peak after armed (e.g. 25 = exit if price drops 25% from peak)."></span></span><input type="number" id="ps-trail-pct" value="25" min="5" max="80" step="1" /></label>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveProfitStrategy()" title="Save profit strategy settings">Save Profit Strategy</button>
+            <span class="mint ml-2" id="ps-status"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Paper Prices <span class="tip" tabindex="0" data-tip="When on, paper positions mark-to-market with live prices. Full sims are in Backtester."></span></div>
+          <p class="text-sm text-slate-400 mb-2">Advanced simulation lives in the <strong>Backtester</strong> tab.</p>
+          <div class="toggle-row"><span title="Update open paper positions using live price feeds">Paper live prices</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button class="btn btn-secondary" onclick="togglePaperLiveData()" title="Save the paper live-prices toggle">Save Live Price</button>
+            <button class="btn btn-primary" onclick="showTab('backtester', document.querySelector('[data-tab=backtester]'))">Open Backtester</button>
+            <span class="mint" id="paper-live-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Filters &amp; Anti-Rug <span class="tip" tabindex="0" data-tip="Gates that must pass before a buy: convergence, liquidity, holder risk, honeypot, snipers."></span></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="field"><label title="Distinct smart wallets that must buy before you copy">Convergence — <span class="val" id="v-convergenceRequired">2</span></label><input type="range" id="convergenceRequired" min="1" max="5" step="1" value="2" /></div>
+            <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">5</span></label><input type="range" id="maxConcurrentPositions" min="1" max="20" step="1" value="5" /></div>
+            <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
+            <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
+            <div class="field"><label title="Minimum pool liquidity in USD">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="0" max="100000" step="1000" value="5000" /></div>
+            <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
+            <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">40</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="40" /></div>
+            <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">40</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="40" /></div>
+            <div class="field"><label title="Composite rug/risk score ceiling (0-100)">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="20" max="100" step="5" value="70" /></div>
+            <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
+            <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
+            <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
+          </div>
+          <div class="mt-2 space-y-0">
+            <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Require source wallets to meet activity / trade-count filters">Activity filter</span><label class="switch"><input type="checkbox" id="enableActivityFilter" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Skip if mint authority is still active (can mint more)">Skip if mint authority</span><label class="switch"><input type="checkbox" id="skipIfMintAuthority" /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Block tokens with high sniper/bundler/insider launch risk">Sniper / bundler filter</span><label class="switch"><input type="checkbox" id="enableSniperFilter" checked /><span class="slider"></span></label></div>
+          </div>
+          <div class="mt-2">
+            <label class="ctl ctl-lg">
+              <span>Sniper sensitivity <span class="tip" tabindex="0" data-tip="How strict the sniper/bundler thresholds are. High = more skips."></span></span>
+              <select id="sniperSensitivity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+            </label>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveFilterConfig()" title="Save filter and anti-rug settings">Save Filters</button></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Strategy <span class="tip" tabindex="0" data-tip="When and how aggressively to enter: convergence, migrations, early curve, auto-sell, re-buy."></span></div>
+          <div class="toggle-row"><span title="Require N wallets before buying">Convergence</span><label class="switch"><input type="checkbox" id="enableConvergence" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Only trade migration/graduation events">Migration Only</span><label class="switch"><input type="checkbox" id="enableMigrationOnly" /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Boost size / priority when a migration is detected">Migration Priority</span><label class="switch"><input type="checkbox" id="enableMigrationPriority" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Prioritize tokens near bonding-curve completion">Near-migration curve priority</span><label class="switch"><input type="checkbox" id="enableBondingCurvePriority" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Prioritize early-curve buys when smart wallets pile in">Early-curve smart money priority</span><label class="switch"><input type="checkbox" id="enableEarlyCurvePriority" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Automatically sell on TP / SL / trailing rules">Auto-Sell</span><label class="switch"><input type="checkbox" id="enableAutoSell" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="After TP, watch for a dip + confirmation buys to re-enter">Re-Buy on Dip</span><label class="switch"><input type="checkbox" id="reBuyEnabled" checked /><span class="slider"></span></label></div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md"><span>Priority x <span class="tip" tabindex="0" data-tip="Size multiplier for priority migration entries."></span></span><input type="number" id="migrationSizeMultiplier" value="1.5" min="1" max="3" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Slip bps <span class="tip" tabindex="0" data-tip="Extra slippage (basis points) allowed on migration buys."></span></span><input type="number" id="migrationSlippageBps" value="100" min="50" max="500" step="10" /></label>
+            <label class="ctl ctl-md"><span>Near-mig % <span class="tip" tabindex="0" data-tip="Curve progress % that counts as near-migration."></span></span><input type="number" id="nearMigrationCurvePct" value="80" min="50" max="99" step="1" /></label>
+            <label class="ctl ctl-md"><span>Early max % <span class="tip" tabindex="0" data-tip="Max curve % still considered early-curve."></span></span><input type="number" id="earlyCurveMaxPct" value="35" min="5" max="60" step="1" /></label>
+            <label class="ctl ctl-md"><span>Min BE SM <span class="tip" tabindex="0" data-tip="Min Birdeye smart-money score for early-curve priority."></span></span><input type="number" id="minEarlyBirdeyeSmartMoneyScore" value="40" min="0" max="100" step="5" /></label>
+            <label class="ctl ctl-sm"><span>Early wallets <span class="tip" tabindex="0" data-tip="Min distinct smart wallets on early curve to prioritize."></span></span><input type="number" id="earlyCurveMinSmartWallets" value="1" min="1" max="5" /></label>
+            <label class="ctl ctl-md"><span>Rebuy profit % <span class="tip" tabindex="0" data-tip="Original trade must have hit this profit before re-buy watch arms."></span></span><input type="number" id="reBuyMinProfitPct" value="100" /></label>
+            <label class="ctl ctl-md"><span>Dip % <span class="tip" tabindex="0" data-tip="Required pullback from peak before considering re-entry (negative)."></span></span><input type="number" id="reBuyDipPercent" value="-30" /></label>
+            <label class="ctl ctl-sm"><span>Wallets <span class="tip" tabindex="0" data-tip="Confirming smart wallets needed to re-buy the dip."></span></span><input type="number" id="confirmationThreshold" value="4" /></label>
+            <label class="ctl ctl-sm"><span>Vol +% <span class="tip" tabindex="0" data-tip="Extra volume increase % required to confirm the re-buy."></span></span><input type="number" id="reBuyVolumeIncreasePct" value="50" /></label>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveStrategyConfig()" title="Save strategy toggles and parameters">Save Strategy</button></div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
+          <div class="toggle-row"><span title="Enable the risk engine (limits, sizing, trails)">Risk engine</span><label class="switch"><input type="checkbox" id="riskEnabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Size buys from risk % of bankroll instead of fixed SOL">Risk-% sizing</span><label class="switch"><input type="checkbox" id="useRiskSizing" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Scale out in tiers as profit grows">Tiered selling</span><label class="switch"><input type="checkbox" id="tieredSellEnabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Pause the monitor when daily/weekly loss or DD limits trip">Auto-pause on limit</span><label class="switch"><input type="checkbox" id="autoPauseOnLimit" checked /><span class="slider"></span></label></div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md"><span>Risk %/trade <span class="tip" tabindex="0" data-tip="% of bankroll risked per trade when risk-sizing is on."></span></span><input type="number" id="riskPercentPerTrade" value="1.5" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Trail activate @+% <span class="tip" tabindex="0" data-tip="Profit % that arms the trailing stop."></span></span><input type="number" id="trailingActivationProfit" value="30" /></label>
+            <label class="ctl ctl-sm"><span>Trail % <span class="tip" tabindex="0" data-tip="Trail distance from peak once armed."></span></span><input type="number" id="trailingStopPct" value="20" /></label>
+            <label class="ctl ctl-sm"><span>Max DD % <span class="tip" tabindex="0" data-tip="Account max drawdown before risk halt."></span></span><input type="number" id="maxDrawdownPct" value="25" /></label>
+            <label class="ctl ctl-md"><span>Weekly loss SOL <span class="tip" tabindex="0" data-tip="Weekly realized loss cap."></span></span><input type="number" id="weeklyLossLimitSol" value="5" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Min trade SOL <span class="tip" tabindex="0" data-tip="Floor size after risk sizing."></span></span><input type="number" id="minTradeSol" value="0.02" step="0.01" /></label>
+            <label class="ctl ctl-md"><span>Max trade SOL <span class="tip" tabindex="0" data-tip="Ceiling size after risk sizing."></span></span><input type="number" id="maxTradeSol" value="1" step="0.01" /></label>
+            <label class="ctl ctl-md"><span>Normal risk % <span class="tip" tabindex="0" data-tip="Risk % for normal (non-migration) entries."></span></span><input type="number" id="normalRiskPct" value="1.5" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Normal trail % <span class="tip" tabindex="0" data-tip="Trail % for normal entries."></span></span><input type="number" id="normalTrailPct" value="20" /></label>
+            <label class="ctl ctl-md"><span>Mig risk % <span class="tip" tabindex="0" data-tip="Risk % for migration priority entries."></span></span><input type="number" id="migRiskPct" value="2" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Mig trail % <span class="tip" tabindex="0" data-tip="Trail % for migration entries."></span></span><input type="number" id="migTrailPct" value="25" /></label>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-3">
+            <button class="btn btn-primary" onclick="saveRiskConfig()" title="Save risk management settings">Save Risk</button>
+            <button class="btn btn-warning" onclick="clearRiskHalt()" title="Clear a risk halt so trading can resume">Clear halt</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">MEV / RPC <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and Solana RPC health for live execution."></span></div>
+          <div class="mint mb-2" id="mev-status">—</div>
+          <div class="toggle-row"><span title="Enable MEV-aware send path">MEV protection</span><label class="switch"><input type="checkbox" id="enableMEVProtection" /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Send swaps via Jito bundles when possible">Jito bundles</span><label class="switch"><input type="checkbox" id="useJitoBundles" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Detect recent buy clustering that looks like sandwich setup">Sandwich protection</span><label class="switch"><input type="checkbox" id="sandwichProtection" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Cancel the trade if sandwich risk is high">Abort on sandwich risk</span><label class="switch"><input type="checkbox" id="abortOnSandwichRisk" checked /><span class="slider"></span></label></div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-lg"><span>Tip lamports <span class="tip" tabindex="0" data-tip="Base Jito tip in lamports."></span></span><input type="number" id="jitoTipLamports" value="10000" /></label>
+            <label class="ctl ctl-sm"><span>Tip x <span class="tip" tabindex="0" data-tip="Multiplier applied to the tip in competitive conditions."></span></span><input type="number" id="tipMultiplier" value="1.5" step="0.1" /></label>
+            <label class="ctl ctl-sm"><span>Prio x <span class="tip" tabindex="0" data-tip="Priority fee multiplier."></span></span><input type="number" id="priorityFeeMultiplier" value="1.5" step="0.1" /></label>
+            <label class="ctl ctl-sm"><span>Max buyers <span class="tip" tabindex="0" data-tip="Recent same-block buyers before sandwich abort."></span></span><input type="number" id="sandwichMaxRecentBuys" value="3" /></label>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
+          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Latency and success rate for each configured RPC endpoint."></span></div>
+          <div id="rpc-summary" class="mint mb-2">—</div>
+          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div class="mint mt-2" id="jito-status"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Logs ========== -->
+    <section data-tab-panel="logs" class="hidden space-y-4">
+      <div class="card">
+        <div class="filters-row mb-3">
+          <div class="section-title !mb-0">Trade Logs <span class="tip" tabindex="0" data-tip="Chronological buy/sell/signal/info events from the trading engine."></span></div>
+          <select id="log-filter-type" onchange="applyLogFilter()" title="Filter by event type">
+            <option value="all">All types</option>
+            <option value="buy">Buys</option>
+            <option value="sell">Sells</option>
+            <option value="error">Errors</option>
+            <option value="info">Info</option>
+            <option value="signal">Signals</option>
+            <option value="risk">Risk / skips</option>
+          </select>
+          <input type="search" id="log-filter-q" placeholder="Filter text..." oninput="applyLogFilter()" title="Search log text" class="search-q" />
+        </div>
+        <div id="logs-full" class="max-h-[40vh] overflow-y-auto"></div>
+      </div>
+
+      <div class="card">
+        <div class="filters-row mb-3">
+          <div class="section-title !mb-0">System / Fetch Errors <span class="tip" tabindex="0" data-tip="API/RPC/fetch failures (GMGN, Birdeye, Jupiter, etc.) for debugging connectivity."></span></div>
+          <select id="syslog-level" onchange="loadSystemLogs()" title="Filter by log level">
+            <option value="all">All levels</option>
+            <option value="error" selected>Errors</option>
+            <option value="warn">Warnings</option>
+            <option value="info">Info</option>
+          </select>
+          <select id="syslog-context" onchange="loadSystemLogs()" title="Filter by subsystem">
+            <option value="">All contexts</option>
+            <option value="GMGN">GMGN</option>
+            <option value="RPC">RPC</option>
+            <option value="Jupiter">Jupiter</option>
+            <option value="Jito">Jito</option>
+            <option value="DexScreener">DexScreener</option>
+            <option value="RugCheck">RugCheck</option>
+            <option value="Pump">Pump</option>
+            <option value="MarketData">MarketData</option>
+            <option value="Server">Server</option>
+          </select>
+          <input type="search" id="syslog-q" placeholder="Search…" oninput="debounceSysLogs()" title="Search system log messages" class="search-q" />
+          <button type="button" class="btn btn-secondary" onclick="loadSystemLogs()" title="Reload system logs">Refresh</button>
+          <button type="button" class="btn btn-warning" onclick="clearSystemLogs()" title="Clear in-memory system logs (disk log kept)">Clear</button>
+          <span class="mint self-center" id="syslog-stats">—</span>
+        </div>
+        <div id="system-logs" class="max-h-[50vh] overflow-y-auto text-sm font-mono"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // --- Tabs ---
+    function showTab(name, btn) {
+      document.querySelectorAll('[data-tab-panel]').forEach(el => {
+        el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
+      });
+      document.querySelectorAll('[data-tab]').forEach(el => {
+        const on = el.getAttribute('data-tab') === name;
+        el.classList.toggle('bg-emerald-600', on);
+        el.classList.toggle('text-white', on);
+        el.classList.toggle('bg-slate-800', !on);
+        el.classList.toggle('text-slate-300', !on);
+      });
+      try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
+      if ((name === 'overview' || name === 'backtester') && window._chartsNeedResize) {
+        window._chartsNeedResize = false;
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+      }
+      if (name === 'backtester') {
+        setTimeout(() => {
+          if (window._lastBacktestCharts) updateBacktestCharts(window._lastBacktestCharts);
+          window.dispatchEvent(new Event('resize'));
+        }, 80);
+      }
+      if (name === 'logs') loadSystemLogs();
+    }
+
+    function applyLogFilter() {
+      const type = (document.getElementById('log-filter-type') || {}).value || 'all';
+      const q = ((document.getElementById('log-filter-q') || {}).value || '').toLowerCase();
+      document.querySelectorAll('#logs .log-entry, #logs-full .log-entry').forEach(el => {
+        const t = el.getAttribute('data-type') || '';
+        const text = (el.textContent || '').toLowerCase();
+        const typeOk = type === 'all' || t === type || (type === 'risk' && /anti-rug|sniper|skipped|risk/i.test(text));
+        const qOk = !q || text.includes(q);
+        el.style.display = typeOk && qOk ? '' : 'none';
+      });
+    }
+
+    let _sysLogTimer = null;
+    function debounceSysLogs() {
+      clearTimeout(_sysLogTimer);
+      _sysLogTimer = setTimeout(loadSystemLogs, 250);
+    }
+
+    function fmtSysMeta(meta) {
+      if (!meta) return '';
+      try {
+        return JSON.stringify(meta);
+      } catch (_) {
+        return String(meta);
+      }
+    }
+
+    async function loadSystemLogs() {
+      const box = document.getElementById('system-logs');
+      const statsEl = document.getElementById('syslog-stats');
+      if (!box) return;
+      const level = (document.getElementById('syslog-level') || {}).value || 'all';
+      const context = (document.getElementById('syslog-context') || {}).value || '';
+      const q = (document.getElementById('syslog-q') || {}).value || '';
+      try {
+        const params = new URLSearchParams({ limit: '100', level });
+        if (context) params.set('context', context);
+        if (q) params.set('q', q);
+        const data = await fetchJSON('/api/system-logs?' + params.toString());
+        const entries = data.entries || [];
+        if (statsEl && data.stats) {
+          statsEl.textContent =
+            data.stats.errors + ' err · ' + data.stats.warnings + ' warn · ' + data.stats.total + ' buffered';
+        }
+        box.innerHTML = entries.length === 0
+          ? '<div class="mint">No matching system logs</div>'
+          : entries.map(e => {
+            const color = e.level === 'error' ? '#f87171' : e.level === 'warn' ? '#fbbf24' : '#94a3b8';
+            return '<div class="log-entry" style="border-left:3px solid ' + color + ';padding-left:8px;margin:4px 0">' +
+              '<span class="mint">' + new Date(e.ts).toLocaleTimeString() + '</span> ' +
+              '<strong style="color:' + color + '">[' + e.level + ']</strong> ' +
+              '<span style="color:#60a5fa">[' + e.context + ']</span> ' +
+              '<span>' + (e.message || '') + '</span>' +
+              (e.meta ? '<div class="mint" style="word-break:break-all">' + fmtSysMeta(e.meta) + '</div>' : '') +
+              '</div>';
+          }).join('');
+      } catch (err) {
+        box.innerHTML = '<div style="color:#f87171">' + (err.message || err) + '</div>';
+      }
+    }
+
+    async function clearSystemLogs() {
+      if (!confirm('Clear in-memory system logs? (app.log on disk is kept)')) return;
+      await fetchJSON('/api/system-logs/clear', { method: 'POST' });
+      loadSystemLogs();
+    }
+    const rangeFields = [
+      'tradeAmountSol','minProfitPercent','maxProfitPercent','stopLossPercent',
+      'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
+      'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
+      'minActivityDays','minTradesLast30d'
+    ];
+    rangeFields.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => {
+        const v = document.getElementById('v-' + id);
+        if (v) v.textContent = el.value;
+      });
+    });
+
+    async function fetchJSON(url, opts) {
+      const timeoutMs = (opts && opts.timeoutMs) || 20000;
+      const fetchOpts = Object.assign({}, opts || {});
+      delete fetchOpts.timeoutMs;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, Object.assign({}, fetchOpts, { signal: ctrl.signal }));
+        let data = null;
+        try { data = await r.json(); } catch (_) { data = null; }
+        if (!r.ok) {
+          const msg = (data && data.error) || ('HTTP ' + r.status);
+          throw new Error(msg);
+        }
+        return data;
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (err && err.name === 'AbortError') {
+          throw new Error('Request timed out — GMGN may be blocked; try again for curated fallback');
+        }
+        if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+          throw new Error('Cannot reach bot server — is it running on this port?');
+        }
+        throw err instanceof Error ? err : new Error(msg);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function fmtAgo(ts) {
+      if (!ts) return 'never';
+      const s = Math.max(0, (Date.now() - ts) / 1000);
+      if (s < 60) return Math.round(s) + 's ago';
+      if (s < 3600) return Math.round(s / 60) + 'm ago';
+      return Math.round(s / 3600) + 'h ago';
+    }
+
+    function updateDiscoveryUi(gmgn) {
+      const el = document.getElementById('discovery-status');
+      if (!el || !gmgn) return;
+      const d = gmgn.discovery || {};
+      const cfg = gmgn.discoveryConfig || {};
+      const err = d.lastError ? ' · err: ' + d.lastError : '';
+      const rl = d.rateLimitedUntil && d.rateLimitedUntil > Date.now()
+        ? ' · rate-limited until ' + new Date(d.rateLimitedUntil).toLocaleTimeString()
+        : '';
+      el.textContent =
+        'last fetch ' + fmtAgo(d.lastFetchAt) +
+        ' · ok ' + fmtAgo(d.lastSuccessAt) +
+        ' · ' + (d.lastWalletCount || 0) + ' wallets' +
+        ' · src ' + (d.lastSource || '—') +
+        ' · auto ' + Math.round((cfg.autoRefreshMs || d.autoRefreshMs || 0) / 60000) + 'm' +
+        err + rl;
+      const gmin = document.getElementById('disc-auto-min');
+      if (gmin && document.activeElement !== gmin) {
+        gmin.value = String(Math.round((cfg.autoRefreshMs || 0) / 60000));
+      }
+      const gstat = document.getElementById('gmgn-status');
+      if (gstat) {
+        gstat.textContent = gmgn.hasApiKey ? 'GMGN key OK' : 'No API key (public/curated fallback)';
+      }
+      const keyEl = document.getElementById('gmgn-key-status');
+      if (keyEl) {
+        keyEl.textContent = gmgn.hasApiKey ? 'API key ✓' : 'No API key (public/curated)';
+      }
+    }
+
+    async function refreshDiscoveryStatus() {
+      try {
+        const data = await fetchJSON('/api/gmgn/status');
+        updateDiscoveryUi(data);
+      } catch (err) {
+        const el = document.getElementById('discovery-status');
+        if (el) el.textContent = err.message;
+      }
+    }
+
+    async function saveDiscoveryConfig() {
+      const min = Number(document.getElementById('disc-auto-min').value) || 0;
+      try {
+        const data = await fetchJSON('/api/gmgn/discovery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ autoRefreshMs: min * 60 * 1000 }),
+        });
+        updateDiscoveryUi(data.gmgn);
+        document.getElementById('discovery-status').textContent += ' · saved';
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function fmtLastTraded(ts, daysSince, activityLabel) {
+      if (activityLabel) return activityLabel;
+      if (!ts) return '<span class="mint">Never</span>';
+      const d = daysSince != null ? daysSince.toFixed(1) + 'd ago' : '';
+      return \`\${new Date(ts).toLocaleString()}\${d ? ' <span class="mint">(' + d + ')</span>' : ''}\`;
+    }
+
+    ['bt-hours','bt-max'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => {
+        const v = document.getElementById('v-' + id);
+        if (v) v.textContent = el.value;
+      });
+    });
+
+    let chartBacktestPnl = null;
+    let chartBacktestWl = null;
+    let chartBacktestDist = null;
+    let _btProgressTimer = null;
+
+    function fmtUsdShort(n) {
+      if (n == null || !Number.isFinite(Number(n))) return '—';
+      const v = Number(n);
+      if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+      if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+      return '$' + v.toFixed(0);
+    }
+
+    function fmtHold(ms) {
+      if (ms == null || !Number.isFinite(Number(ms)) || ms < 0) return '—';
+      const v = Number(ms);
+      if (v < 1000) return '<1s';
+      if (v < 60_000) return Math.round(v / 1000) + 's';
+      if (v < 3_600_000) {
+        const m = Math.floor(v / 60_000);
+        const s = Math.round((v % 60_000) / 1000);
+        return s > 0 ? m + 'm ' + s + 's' : m + 'm';
+      }
+      const h = Math.floor(v / 3_600_000);
+      const m = Math.round((v % 3_600_000) / 60_000);
+      return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+    }
+
+    function fmtCopyDelay(ms) {
+      if (ms == null || !Number.isFinite(Number(ms))) return '—';
+      const v = Number(ms);
+      if (v < 60_000) return Math.round(v / 1000) + 's';
+      const m = Math.floor(v / 60_000);
+      const s = Math.round((v % 60_000) / 1000);
+      return s > 0 ? m + 'm ' + s + 's' : m + 'm';
+    }
+
+    function fmtWalletEntry(ts) {
+      if (!ts) return '—';
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) return '—';
+      return d.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    function fmtPnlSolUsd(t) {
+      const sol = Number(t.pnlSol || 0);
+      const usd = t.pnlUsd != null
+        ? Number(t.pnlUsd)
+        : sol * Number(t.solUsd || 150);
+      const color = sol >= 0 ? 'var(--green)' : 'var(--red)';
+      const sign = sol >= 0 ? '+' : '';
+      const rate = t.solUsd != null ? ' @ $' + Number(t.solUsd).toFixed(0) + '/SOL' : '';
+      return '<div class="bt-pnl-cell" style="color:' + color + '" title="Cost ' +
+        (t.costSol != null ? Number(t.costSol).toFixed(3) + ' SOL' : '—') + rate + '">' +
+        '<div class="bt-pnl-sol">' + sign + sol.toFixed(4) + ' SOL</div>' +
+        '<div class="bt-pnl-usd">' + sign + '$' + Math.abs(usd).toFixed(2) + '</div>' +
+        '</div>';
+    }
+
+    function fmtExitTakes(t) {
+      const takes = Array.isArray(t.exitTakes) ? t.exitTakes : [];
+      const path = t.profitPath || '';
+      if (!takes.length && !path) {
+        return '<span class="mint">Full exit</span>';
+      }
+      const chipClass = (stage) => {
+        if (stage === 'partial') return 'bt-chip-partial';
+        if (stage === 'recover_initial') return 'bt-chip-initial';
+        if (stage === 'bag_trim') return 'bt-chip-bag';
+        if (stage === 'trail') return 'bt-chip-trail';
+        if (stage === 'take_profit') return 'bt-chip-tp';
+        if (stage === 'stop_loss') return 'bt-chip-sl';
+        if (stage === 'forced') return 'bt-chip-forced';
+        return 'bt-chip-other';
+      };
+      const short = (stage, label) => {
+        if (stage === 'partial') return 'Partial';
+        if (stage === 'recover_initial') return 'Initial✓';
+        if (stage === 'bag_trim') return 'Bag';
+        if (stage === 'trail') return 'Trail';
+        if (stage === 'take_profit') return 'TP';
+        if (stage === 'stop_loss') return 'SL';
+        if (stage === 'forced') return 'Forced';
+        return (label || 'Exit').slice(0, 12);
+      };
+      const chips = takes.map(function (take) {
+        const tipParts = [take.label || take.stage];
+        if (take.solOut != null) tipParts.push(Number(take.solOut).toFixed(4) + ' SOL out');
+        if (take.pnlSol != null) tipParts.push((take.pnlSol >= 0 ? '+' : '') + Number(take.pnlSol).toFixed(4) + ' PnL');
+        return '<span class="bt-chip ' + chipClass(take.stage) + '" title="' +
+          tipParts.join(' · ').replace(/"/g, '&quot;') + '">' +
+          short(take.stage, take.label) + '</span>';
+      }).join('');
+      const flags = [];
+      if (t.recoveredInitial) flags.push('initial banked');
+      if (t.partialTaken) flags.push('partial first');
+      return '<div class="bt-takes">' + (chips || '<span class="mint">—</span>') + '</div>' +
+        (path ? '<div class="bt-path" title="' + path.replace(/"/g, '&quot;') + '">' + path.replace(/</g, '&lt;') + '</div>' : '') +
+        (flags.length ? '<div class="bt-path">' + flags.join(' · ') + '</div>' : '');
+    }
+
+    function ensureBacktestCharts() {
+      if (typeof Chart === 'undefined') return;
+      Chart.defaults.color = '#c9d1d9';
+      Chart.defaults.borderColor = '#30363d';
+      if (!chartBacktestPnl) {
+        const canvas = document.getElementById('bt-chart-pnl');
+        if (canvas) {
+          chartBacktestPnl = new Chart(canvas, {
+            type: 'line',
+            data: {
+              labels: [],
+              datasets: [{
+                label: 'Cumulative PnL (SOL)',
+                data: [],
+                borderColor: '#34d399',
+                backgroundColor: 'rgba(52,211,153,0.12)',
+                fill: true,
+                tension: 0.25,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    afterBody: (items) => {
+                      const i = items[0]?.dataIndex;
+                      const pts = window._lastBacktestCharts?.cumulativePnl?.points || [];
+                      const p = pts[i];
+                      return p ? [p.symbol + ': ' + (p.pnlSol >= 0 ? '+' : '') + Number(p.pnlSol).toFixed(4) + ' SOL'] : [];
+                    },
+                  },
+                },
+              },
+              scales: {
+                x: { ticks: { maxTicksLimit: 8 } },
+                y: { ticks: { callback: (v) => Number(v).toFixed(2) } },
+              },
+            },
+          });
+        }
+      }
+      if (!chartBacktestWl) {
+        const canvas = document.getElementById('bt-chart-wl');
+        if (canvas) {
+          chartBacktestWl = new Chart(canvas, {
+            type: 'bar',
+            data: {
+              labels: ['Wins', 'Losses'],
+              datasets: [{
+                label: 'Count',
+                data: [0, 0],
+                backgroundColor: ['rgba(52,211,153,0.7)', 'rgba(248,113,113,0.7)'],
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+            },
+          });
+        }
+      }
+      if (!chartBacktestDist) {
+        const canvas = document.getElementById('bt-chart-dist');
+        if (canvas) {
+          chartBacktestDist = new Chart(canvas, {
+            type: 'bar',
+            data: {
+              labels: [],
+              datasets: [{
+                label: 'Trades',
+                data: [],
+                backgroundColor: 'rgba(96,165,250,0.65)',
+              }],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+            },
+          });
+        }
+      }
+    }
+
+    function updateBacktestCharts(charts) {
+      ensureBacktestCharts();
+      const empty = document.getElementById('bt-chart-empty');
+      const emptyWl = document.getElementById('bt-chart-wl-empty');
+      const series = charts && charts.cumulativePnl;
+      if (chartBacktestPnl && series && (series.values || []).length) {
+        if (empty) empty.style.display = 'none';
+        chartBacktestPnl.data.labels = series.labels || [];
+        chartBacktestPnl.data.datasets[0].data = series.values || [];
+        chartBacktestPnl.update();
+      } else if (empty) empty.style.display = '';
+
+      if (chartBacktestWl && charts && charts.winLoss) {
+        if (emptyWl) emptyWl.style.display = 'none';
+        chartBacktestWl.data.datasets[0].data = charts.winLoss.counts || [0, 0];
+        chartBacktestWl.update();
+      }
+      if (chartBacktestDist && charts && charts.pnlDistribution) {
+        if (emptyWl) emptyWl.style.display = 'none';
+        chartBacktestDist.data.labels = charts.pnlDistribution.labels || [];
+        chartBacktestDist.data.datasets[0].data = charts.pnlDistribution.counts || [];
+        chartBacktestDist.update();
+      }
+      window._lastBacktestCharts = charts;
+    }
+
+    function setBtProgress(pct, label) {
+      const wrap = document.getElementById('bt-progress-wrap');
+      const bar = document.getElementById('bt-progress-bar');
+      const lab = document.getElementById('bt-progress-label');
+      const pctEl = document.getElementById('bt-progress-pct');
+      if (wrap) wrap.classList.remove('hidden');
+      if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+      if (lab) lab.textContent = label || '';
+      if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+    }
+
+    function hideBtProgress() {
+      const wrap = document.getElementById('bt-progress-wrap');
+      if (wrap) wrap.classList.add('hidden');
+    }
+
+    async function pollBacktestProgress() {
+      try {
+        const p = await fetchJSON('/backtest/progress');
+        if (p && p.running) {
+          setBtProgress(p.pct || 0, p.message || p.phase);
+        } else if (p && p.phase === 'done') {
+          setBtProgress(100, p.message || 'Done');
+        }
+      } catch (_) {}
+    }
+
+    function renderBacktestResult(data) {
+      const status = document.getElementById('bt-status');
+      const out = document.getElementById('bt-result');
+      const sum = data.summary || {};
+      const stats = data.stats || {};
+      if (status) {
+        status.textContent =
+          (data.dataSource || '—') + ' · ' + (data.tradesExecuted || 0) + ' trades' +
+          (data.simulationsRun > 1 ? ' · ' + data.simulationsRun + ' sims' : '') +
+          (sum.reBuyTrades ? ' · ' + sum.reBuyTrades + ' rebuys' : '');
+      }
+      if (out) {
+        out.innerHTML =
+          '<strong>' + (data.message || '') + '</strong><br/>' +
+          'Period: ' + new Date(data.period.fromMs).toLocaleString() + ' → ' +
+          new Date(data.period.toMs).toLocaleString() +
+          ' (' + Number(data.period.hours).toFixed(1) + 'h)';
+        if (data.aggregate) {
+          out.innerHTML +=
+            '<br/>Avg across sims: WR ' + data.aggregate.avgWinRatePct.toFixed(0) +
+            '% · PnL ' + data.aggregate.avgNetPnlSol.toFixed(4) + ' SOL';
+        }
+      }
+      const wr = document.getElementById('bt-stat-wr');
+      if (wr) wr.textContent = (sum.winRatePct != null ? sum.winRatePct : stats.winRatePct || 0).toFixed(0) + '%';
+      const pnl = document.getElementById('bt-stat-pnl');
+      if (pnl) {
+        const n = sum.totalPnlSol != null ? sum.totalPnlSol : stats.netPnlSol || 0;
+        const usd = sum.totalPnlUsd != null
+          ? sum.totalPnlUsd
+          : n * Number(sum.solUsd || 150);
+        const rate = sum.solUsd != null ? sum.solUsd : null;
+        pnl.innerHTML =
+          '<div>' + (n >= 0 ? '+' : '') + Number(n).toFixed(4) + ' SOL</div>' +
+          '<div style="font-size:12px;opacity:.85">' + (usd >= 0 ? '+' : '') + '$' + Math.abs(Number(usd)).toFixed(2) +
+          (rate != null ? ' <span class="mint">@ $' + Number(rate).toFixed(0) + '</span>' : '') +
+          '</div>';
+        pnl.style.color = n >= 0 ? 'var(--green)' : 'var(--red)';
+      }
+      const avg = document.getElementById('bt-stat-avg');
+      if (avg) {
+        avg.innerHTML =
+          '<span style="color:var(--green)">+' + Number(sum.avgWinPct || 0).toFixed(0) + '%</span> / ' +
+          '<span style="color:var(--red)">' + Number(sum.avgLossPct || 0).toFixed(0) + '%</span>';
+      }
+      const bw = document.getElementById('bt-stat-bw');
+      if (bw) {
+        const best = sum.bestTrade;
+        const worst = sum.worstTrade;
+        bw.innerHTML =
+          (best ? '<span style="color:var(--green)">' + best.symbol + ' ' + (best.pnlPct >= 0 ? '+' : '') + best.pnlPct.toFixed(0) + '%</span>' : '—') +
+          ' / ' +
+          (worst ? '<span style="color:var(--red)">' + worst.symbol + ' ' + worst.pnlPct.toFixed(0) + '%</span>' : '—');
+      }
+      const hold = document.getElementById('bt-stat-hold');
+      if (hold) hold.textContent = fmtHold(sum.avgHoldingMs);
+      const dd = document.getElementById('bt-stat-dd');
+      if (dd) {
+        dd.textContent = (sum.avgMaxDrawdownPct != null ? Number(sum.avgMaxDrawdownPct).toFixed(1) : '0') + '%';
+        dd.style.color = 'var(--red)';
+      }
+
+      const tbody = document.querySelector('#bt-results-table tbody');
+      const trades = data.trades || [];
+      if (tbody) {
+        tbody.innerHTML = trades.length === 0
+          ? '<tr><td colspan="15" style="color:var(--muted)">No trades in this run</td></tr>'
+          : trades.map(t => {
+              const pct = Number(t.pnlPct || 0);
+              const sol = Number(t.pnlSol || 0);
+              const color = pct >= 0 ? 'var(--green)' : 'var(--red)';
+              const rowClass = sol > 0 ? 'bt-row-win' : (sol < 0 ? 'bt-row-loss' : '');
+              const walletTs = t.smartWalletEnteredAt || t.launchedAt || t.openedAt;
+              const walletMc = t.smartWalletEntryMarketCapUsd != null
+                ? t.smartWalletEntryMarketCapUsd
+                : t.entryMarketCapUsd != null ? t.entryMarketCapUsd : t.marketCapUsd;
+              const yourMc = t.entryMarketCapUsd != null ? t.entryMarketCapUsd : t.marketCapUsd;
+              const exitMc = t.exitMarketCapUsd != null ? t.exitMarketCapUsd : null;
+              const liq = t.liquidityUsd;
+              const reason = t.reason || '—';
+              const reasonTip = (t.reasonDetail || reason).replace(/"/g, '&quot;');
+              return '<tr class="' + rowClass + '">' +
+                '<td>' + fmtBacktestToken(t.symbol, t.name, t.mint) +
+                (t.migrated ? ' 🚀' : t.isPumpFun ? ' 🎯' : '') +
+                (t.isReBuy ? ' <span class="mint">rebuy</span>' : '') + '</td>' +
+                '<td style="color:' + color + ';font-weight:700">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</td>' +
+                '<td>' + fmtPnlSolUsd(t) + '</td>' +
+                '<td>' + fmtExitTakes(t) + '</td>' +
+                '<td class="mint" title="Smart wallet entry MC">' + fmtUsdShort(walletMc) + '</td>' +
+                '<td class="mint" title="Your copy fill MC">' + fmtUsdShort(yourMc) + '</td>' +
+                '<td class="mint">' + fmtUsdShort(exitMc) + '</td>' +
+                '<td class="mint" title="Copy delay after smart wallet">' + fmtCopyDelay(t.copyDelayMs) + '</td>' +
+                '<td class="mint">' + fmtHold(t.holdingTimeMs) + '</td>' +
+                '<td style="color:var(--red)">' + Number(t.maxDrawdownPct || 0).toFixed(1) + '%</td>' +
+                '<td class="mint" title="' +
+                  (t.smartWalletLiquidityUsd != null
+                    ? 'Wallet liq ~' + fmtUsdShort(t.smartWalletLiquidityUsd) + ' · Your entry liq'
+                    : 'Liquidity at your entry') +
+                '">' + fmtUsdShort(liq) + '</td>' +
+                '<td class="mint">' + (t.riskScoreHint != null ? t.riskScoreHint : '—') + '</td>' +
+                '<td class="mint">' + (t.smartWalletCount != null ? t.smartWalletCount : (t.sourceNames || []).length) +
+                ((t.sourceNames || []).length ? ' (' + t.sourceNames.slice(0, 2).join(', ') + ')' : '') + '</td>' +
+                '<td class="mint" title="' + reasonTip + '">' + reason.replace(/</g, '&lt;') + '</td>' +
+                '<td class="mint" title="Smart wallet entry">' + fmtWalletEntry(walletTs) + '</td>' +
+                '</tr>';
+            }).join('');
+      }
+      if (data.charts) updateBacktestCharts(data.charts);
+      window._lastBacktest = data;
+    }
+
+    function fmtBacktestToken(symbol, name, mint) {
+      const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
+      const label = tick.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const ca = String(mint || '').trim();
+      if (!ca) return '<strong>' + label + '</strong>';
+      const attr = ca.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const shown = ca.replace(/</g, '&lt;');
+      return '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr + '" title="Click to copy contract address" onclick="copyContractAddress(event)">' +
+        '<strong>' + label + '</strong>' +
+        '<span class="ca-pop">' +
+          '<div class="ca-label">Contract address</div>' +
+          '<div class="ca-addr">' + shown + '</div>' +
+          '<div class="ca-hint">Click to copy</div>' +
+        '</span>' +
+      '</span>';
+    }
+
+    async function copyContractAddress(ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      const el = ev && (ev.currentTarget || ev.target);
+      const host = el && el.closest ? el.closest('.token-ca') : el;
+      const ca = host && host.getAttribute ? String(host.getAttribute('data-mint') || '').trim() : '';
+      if (!ca) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(ca);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = ca;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        if (host) {
+          host.classList.add('copied');
+          const hint = host.querySelector('.ca-hint');
+          if (hint) hint.textContent = 'Copied!';
+          setTimeout(() => {
+            host.classList.remove('copied');
+            if (hint) hint.textContent = 'Click to copy';
+          }, 1400);
+        }
+        const st = document.getElementById('bt-status');
+        if (st) st.textContent = 'Copied CA: ' + ca.slice(0, 8) + '…' + ca.slice(-4);
+      } catch (err) {
+        alert('Could not copy: ' + ca);
+      }
+    }
+
+    async function runBacktest() {
+      const status = document.getElementById('bt-status');
+      const out = document.getElementById('bt-result');
+      const btn = document.getElementById('bt-run-btn');
+      if (status) status.textContent = 'Running…';
+      if (out) out.textContent = '';
+      if (btn) btn.disabled = true;
+      setBtProgress(2, 'Starting simulation…');
+      clearInterval(_btProgressTimer);
+      _btProgressTimer = setInterval(pollBacktestProgress, 400);
+      try {
+        const data = await fetchJSON('/backtest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hours: Number(document.getElementById('bt-hours').value),
+            maxTrades: Number(document.getElementById('bt-max').value),
+            simulations: Number((document.getElementById('bt-sims') || {}).value) || 1,
+            startingBalanceSol: Number((document.getElementById('bt-start-bal') || {}).value) || undefined,
+            strategyType: (document.getElementById('bt-strategy') || {}).value || 'auto',
+            minLiquidityUsd: Number((document.getElementById('bt-min-liq') || {}).value) || 0,
+            minMarketCapUsd: Number((document.getElementById('bt-min-mc') || {}).value) || 0,
+            minVolumeUsd: Number((document.getElementById('bt-min-vol') || {}).value) || 0,
+            maxRiskScore: Number((document.getElementById('bt-max-risk') || {}).value) || 0,
+            useLiveData: document.getElementById('bt-live').checked,
+            migrationsOnly: document.getElementById('bt-mig-only').checked,
+            pumpFunOnly: (document.getElementById('bt-pump-only') || {}).checked,
+            reBuyEnabled: (document.getElementById('bt-rebuy') || {}).checked,
+            allowSynthetic: (document.getElementById('bt-synthetic') || { checked: true }).checked,
+          }),
+          timeoutMs: 180000,
+        });
+        setBtProgress(100, 'Complete');
+        renderBacktestResult(data);
+        showTab('backtester', document.querySelector('[data-tab=backtester]'));
+        setTimeout(hideBtProgress, 1500);
+      } catch (err) {
+        if (status) status.textContent = err.message;
+        hideBtProgress();
+      } finally {
+        clearInterval(_btProgressTimer);
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function loadLastBacktest() {
+      const status = document.getElementById('bt-status');
+      try {
+        const data = await fetchJSON('/backtest/last');
+        renderBacktestResult(data);
+        if (status) status.textContent = 'Loaded last run · ' + (data.dataSource || '');
+      } catch (err) {
+        if (status) status.textContent = err.message || 'No saved backtest';
+      }
+    }
+
+    function exportBacktestCsv() {
+      if (!window._lastBacktest || !(window._lastBacktest.trades || []).length) {
+        alert('Run a backtest first');
+        return;
+      }
+      window.location.href = '/backtest/export.csv';
+    }
+
+    async function togglePaperLiveData() {
+      const enabled = document.getElementById('paper-live-data').checked;
+      await fetchJSON('/api/paper/live-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const el = document.getElementById('paper-live-status') || document.getElementById('bt-status');
+      if (el) el.textContent = 'Live prices ' + (enabled ? 'ON' : 'OFF');
+    }
+
+    function fmtPnl(n) {
+      if (n == null) return '—';
+      if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+      if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(0) + 'K';
+      return '$' + n.toFixed(0);
+    }
+
+    let chartCumulative = null;
+    let chartWallet = null;
+    let chartWinLoss = null;
+
+    const chartDefaults = {
+      color: '#c9d1d9',
+      borderColor: '#30363d',
+      font: { size: 11 },
+    };
+
+    function ensureCharts() {
+      if (typeof Chart === 'undefined') return;
+      Chart.defaults.color = chartDefaults.color;
+      Chart.defaults.borderColor = chartDefaults.borderColor;
+      Chart.defaults.font.size = chartDefaults.font.size;
+
+      if (!chartCumulative) {
+        chartCumulative = new Chart(document.getElementById('chart-cumulative'), {
+          type: 'line',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'Cumulative PnL (SOL)',
+              data: [],
+              borderColor: '#58a6ff',
+              backgroundColor: 'rgba(88,166,255,0.15)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 3,
+              pointBackgroundColor: '#58a6ff',
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 10 } },
+              y: { title: { display: true, text: 'SOL' } },
+            },
+          },
+        });
+      }
+
+      if (!chartWallet) {
+        chartWallet = new Chart(document.getElementById('chart-wallet'), {
+          type: 'bar',
+          data: {
+            labels: [],
+            datasets: [{
+              label: 'PnL (SOL)',
+              data: [],
+              backgroundColor: [],
+              borderRadius: 4,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { title: { display: true, text: 'SOL' } },
+            },
+          },
+        });
+      }
+
+      if (!chartWinLoss) {
+        chartWinLoss = new Chart(document.getElementById('chart-winloss'), {
+          type: 'bar',
+          data: {
+            labels: ['Wins', 'Losses'],
+            datasets: [
+              {
+                label: 'Count',
+                data: [0, 0],
+                backgroundColor: ['#3fb950', '#f85149'],
+                borderRadius: 4,
+                yAxisID: 'y',
+              },
+              {
+                label: 'PnL (SOL)',
+                data: [0, 0],
+                backgroundColor: ['rgba(63,185,80,0.35)', 'rgba(248,81,73,0.35)'],
+                borderRadius: 4,
+                yAxisID: 'y1',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+              y: { position: 'left', title: { display: true, text: 'Count' }, beginAtZero: true },
+              y1: { position: 'right', title: { display: true, text: 'SOL' }, grid: { drawOnChartArea: false } },
+            },
+          },
+        });
+      }
+    }
+
+    function updateCharts(charts) {
+      ensureCharts();
+      if (!chartCumulative || !charts) return;
+
+      const hasTrades = (charts.tradeCount || 0) > 0;
+      document.getElementById('chart-cumulative-empty').style.display = hasTrades ? 'none' : 'block';
+      document.getElementById('chart-wallet-empty').style.display =
+        (charts.perWallet?.labels?.length || 0) > 0 ? 'none' : 'block';
+      document.getElementById('chart-winloss-empty').style.display = hasTrades ? 'none' : 'block';
+      document.getElementById('chart-cumulative').style.display = hasTrades ? 'block' : 'none';
+      document.getElementById('chart-wallet').style.display =
+        (charts.perWallet?.labels?.length || 0) > 0 ? 'block' : 'none';
+      document.getElementById('chart-winloss').style.display = hasTrades ? 'block' : 'none';
+
+      if (hasTrades) {
+        chartCumulative.data.labels = charts.cumulativePnl.labels;
+        chartCumulative.data.datasets[0].data = charts.cumulativePnl.values;
+        const last = charts.cumulativePnl.values[charts.cumulativePnl.values.length - 1] || 0;
+        chartCumulative.data.datasets[0].borderColor = last >= 0 ? '#3fb950' : '#f85149';
+        chartCumulative.data.datasets[0].backgroundColor =
+          last >= 0 ? 'rgba(63,185,80,0.15)' : 'rgba(248,81,73,0.15)';
+        chartCumulative.update('none');
+
+        chartWinLoss.data.datasets[0].data = charts.winLoss.counts;
+        chartWinLoss.data.datasets[1].data = charts.winLoss.pnlSol;
+        chartWinLoss.update('none');
+      }
+
+      if (charts.perWallet?.labels?.length) {
+        chartWallet.data.labels = charts.perWallet.labels;
+        chartWallet.data.datasets[0].data = charts.perWallet.pnlSol;
+        chartWallet.data.datasets[0].backgroundColor = charts.perWallet.pnlSol.map(
+          (v) => (v >= 0 ? '#3fb950' : '#f85149')
+        );
+        chartWallet.update('none');
+      }
+    }
+
+    function fmtToken(symbol, name, mint) {
+      const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
+      const full = (name || '').trim();
+      if (!full || full.toLowerCase() === tick.toLowerCase()) return tick;
+      return tick;
+    }
+
+    function fmtTokenName(symbol, name, mint) {
+      const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
+      const full = (name || '').trim();
+      if (!full || full.toLowerCase() === tick.toLowerCase()) return '<span class="mint">—</span>';
+      return full;
+    }
+
+    async function paperTopUp() {
+      const amountSol = Number(document.getElementById('paper-topup-amount').value);
+      const status = document.getElementById('paper-fund-status');
+      if (!Number.isFinite(amountSol) || amountSol <= 0) {
+        status.textContent = 'Enter a positive SOL amount.';
+        return;
+      }
+      try {
+        const data = await fetchJSON('/api/paper/topup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amountSol }),
+        });
+        status.textContent = ' · Topped up +' + amountSol + ' → ' + data.balance.toFixed(4) + ' SOL';
+        refresh();
+      } catch (err) {
+        status.textContent = ' · ' + err.message;
+      }
+    }
+
+    async function paperReset(clearHistory) {
+      const msg = clearHistory
+        ? 'Full reset: restore starting balance, clear open positions, AND wipe closed history + logs?'
+        : 'Reset paper balance to starting SOL and clear open positions? (closed history kept)';
+      if (!confirm(msg)) return;
+      const status = document.getElementById('paper-fund-status');
+      try {
+        const data = await fetchJSON('/api/paper/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clearHistory: !!clearHistory }),
+        });
+        status.textContent =
+          ' · Reset to ' + data.balanceSol.toFixed(4) + ' SOL' +
+          (data.clearedOpen ? ' (cleared ' + data.clearedOpen + ' open)' : '') +
+          (clearHistory ? ' · history cleared' : '');
+        refresh();
+      } catch (err) {
+        status.textContent = ' · ' + err.message;
+      }
+    }
+
+    async function refreshPumpActivity() {
+      const filter = (document.getElementById('pump-act-filter') || {}).value || 'all';
+      const minSm = Number((document.getElementById('pump-act-min-sm') || {}).value) || 0;
+      const q = new URLSearchParams({ limit: '40' });
+      if (filter === 'early') q.set('early', '1');
+      if (filter === 'near') q.set('nearMigration', '1');
+      if (filter === 'migration') q.set('migration', '1');
+      if (filter === 'priority') q.set('priority', '1');
+      if (minSm > 0) q.set('minSm', String(minSm));
+      try {
+        const data = await fetchJSON('/api/pump-activity?' + q.toString());
+        const tbody = document.querySelector('#pump-activity-table tbody');
+        const rows = data.events || [];
+        if (tbody) {
+          tbody.innerHTML = rows.length === 0
+            ? '<tr><td colspan="7" style="color:var(--muted)">No Pump.fun smart activity yet — waiting for tracked wallet buys on curve</td></tr>'
+            : rows.map(e => {
+                const kindColor = e.kind === 'migration' || e.isMigration
+                  ? 'var(--green)'
+                  : e.kind === 'near_migration' || e.nearMigration
+                    ? 'var(--green)'
+                    : e.earlyBuy || e.kind === 'early_buy'
+                      ? '#3b82f6'
+                      : 'var(--muted)';
+                return '<tr>' +
+                  '<td><strong>' + fmtToken(e.symbol, e.name, e.mint) + '</strong>' +
+                  (e.priority ? ' <span class="mint">prio</span>' : '') + '</td>' +
+                  '<td style="color:' + kindColor + '">' + (e.kind || '—') + '</td>' +
+                  '<td>' + (e.curveProgressPct != null ? Number(e.curveProgressPct).toFixed(0) + '%' : '—') +
+                  (e.nearMigration ? ' · near' : '') + '</td>' +
+                  '<td>' + (e.walletNames || []).slice(0, 3).join(', ') +
+                  (e.earlyBuyerCount > 1 ? ' <span class="mint">×' + e.earlyBuyerCount + '</span>' : '') + '</td>' +
+                  '<td>' + (e.smartMoneyScore != null ? e.smartMoneyScore : '—') +
+                  (e.birdeye && e.birdeye.volume24hUsd != null ? ' · $' + Number(e.birdeye.volume24hUsd).toFixed(0) : '') + '</td>' +
+                  '<td class="mint">' + (e.notes || (e.birdeye && e.birdeye.flags ? e.birdeye.flags.slice(0, 2).join(' · ') : '—')) + '</td>' +
+                  '<td class="mint">' + new Date(e.timestamp).toLocaleTimeString() + '</td>' +
+                  '</tr>';
+              }).join('');
+        }
+        const hot = document.getElementById('pump-hot-launches');
+        if (hot && data.launches) {
+          const launches = data.launches.filter(l => (l.earlyBuyers || []).length > 0 || l.migrated).slice(0, 6);
+          hot.textContent = launches.length
+            ? 'Tracked launches: ' + launches.map(l =>
+                (l.symbol || l.mint.slice(0, 6)) +
+                ' (' + (l.earlyBuyers || []).length + ' early' +
+                (l.lastProgressPct != null ? ' · ' + Number(l.lastProgressPct).toFixed(0) + '%' : '') +
+                (l.migrated ? ' · mig' : '') + ')'
+              ).join(' · ')
+            : '';
+        }
+        const st = document.getElementById('pump-act-status');
+        if (st && data.status) {
+          st.textContent =
+            (data.status.eventCount || 0) + ' events · early max ' +
+            (data.status.earlyCurveMaxPct ?? 35) + '% · min SM ' +
+            (data.status.minEarlyBirdeyeSmartMoneyScore ?? 40);
+        }
+      } catch (err) {
+        const st = document.getElementById('pump-act-status');
+        if (st) st.textContent = 'Pump activity error: ' + (err.message || err);
+      }
+    }
+
+    async function discoverPumpSmart() {
+      const st = document.getElementById('pump-act-status');
+      if (st) st.textContent = 'Discovering Pump.fun smart money…';
+      try {
+        const data = await fetchJSON('/api/discover-pump-smart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 20, force: true }),
+          timeoutMs: 45000,
+        });
+        window._discoveredWallets = data.wallets || [];
+        if (st) {
+          st.textContent = data.message ||
+            ((data.wallets || []).length + ' wallets · ' + (data.hotLaunches || []).length + ' hot launches');
+        }
+        const hot = document.getElementById('pump-hot-launches');
+        if (hot) {
+          const hl = data.hotLaunches || [];
+          hot.textContent = hl.length
+            ? 'Hot launches: ' + hl.slice(0, 8).map(t =>
+                t.symbol +
+                (t.progressPct != null ? ' ' + Number(t.progressPct).toFixed(0) + '%' : '') +
+                (t.smartMoneyScore != null ? ' SM' + t.smartMoneyScore : '') +
+                (t.nearMigration ? ' near-mig' : '')
+              ).join(' · ')
+            : 'No hot launches (need Birdeye key for trending)';
+        }
+        const src = document.getElementById('discover-source');
+        if (src) src.value = 'pump';
+        discoverWallets(true);
+      } catch (err) {
+        if (st) st.textContent = 'Discover failed: ' + (err.message || err);
+      }
+    }
+
+    async function refresh() {
+      const [status, positions, logs, activity, cfg, wallets, migrations, paper] = await Promise.all([
+        fetchJSON('/api/status'),
+        fetchJSON('/api/positions'),
+        fetchJSON('/api/logs?limit=50'),
+        fetchJSON('/api/activity'),
+        fetchJSON('/api/config'),
+        fetchJSON('/wallets'),
+        fetchJSON('/api/migrations'),
+        fetchJSON('/paper-status'),
+      ]);
+
+      updateCharts(paper.charts);
+      if (paper.useLiveData != null) {
+        document.getElementById('paper-live-data').checked = !!paper.useLiveData;
+        document.getElementById('bt-live').checked = !!paper.useLiveData;
+      }
+
+      const dot = document.getElementById('status-dot');
+      const statusText = document.getElementById('status-text');
+      if (!status.monitor.running) {
+        dot.className = 'dot dot-stopped'; statusText.textContent = 'Stopped';
+      } else if (status.monitor.paused) {
+        dot.className = 'dot dot-paused'; statusText.textContent = 'Paused';
+      } else {
+        dot.className = 'dot dot-running'; statusText.textContent = 'Running';
+      }
+
+      document.getElementById('btn-pause').textContent = status.monitor.paused ? 'Resume' : 'Pause';
+
+      const badge = document.getElementById('mode-badge');
+      badge.textContent = status.mode.toUpperCase();
+      badge.className = 'badge ' + (status.mode === 'live' ? 'badge-live' : 'badge-paper');
+      const tw = status.tradingWallet;
+      const liveStatus = document.getElementById('live-wallet-status');
+      if (liveStatus && tw) {
+        liveStatus.textContent = 'Active: ' + tw.name + (tw.publicKey ? ' · ' + tw.publicKey.slice(0,8) + '…' : ' · no key');
+      }
+
+      const risk = status.monitor?.risk;
+      const riskEl = document.getElementById('risk-status');
+      if (riskEl && risk) {
+        riskEl.textContent =
+          (risk.halted ? '⛔ HALTED (' + risk.haltReason + ') · ' : '') +
+          'Equity ' + (risk.equitySol ?? 0).toFixed(3) + ' SOL · DD ' + (risk.drawdownPct ?? 0).toFixed(1) +
+          '% · Day PnL ' + (risk.dailyPnlSol ?? 0).toFixed(3) +
+          ' · Week PnL ' + (risk.weeklyPnlSol ?? 0).toFixed(3) +
+          (risk.tieredSellEnabled ? ' · tiered ON' : '') +
+          (risk.useRiskSizing ? ' · risk sizing ON' : '');
+      }
+
+      const beKey = document.getElementById('discover-key-status');
+      const be = status.monitor?.birdeye || cfg?.birdeye;
+      if (beKey && be && document.activeElement !== beKey) {
+        beKey.textContent = be.hasApiKey
+          ? 'Birdeye key ✓ (token + smart money)'
+          : 'No BIRDEYE_API_KEY (Dex fallback)';
+      }
+
+      document.getElementById('balance').textContent = status.balance != null ? status.balance.toFixed(4) : '—';
+      document.getElementById('daily-pnl').textContent = status.monitor.dailyPnlSol.toFixed(4);
+      const _ob = document.getElementById('ov-balance-mirror');
+      if (_ob) _ob.textContent = document.getElementById('balance').textContent;
+      const _od = document.getElementById('ov-daily-mirror');
+      if (_od) _od.textContent = document.getElementById('daily-pnl').textContent;
+
+      // RPC status
+      const rpc = status.rpc || {};
+      const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
+      document.getElementById('rpc-active').textContent = rpc.active || '—';
+      document.getElementById('rpc-latency').textContent =
+        activeEp.latencyMs != null ? activeEp.latencyMs + 'ms' : '—';
+      document.getElementById('rpc-summary').textContent =
+        'Active: ' + (rpc.active || '—') +
+        ' · Endpoints: ' + ((rpc.endpoints || []).length) +
+        ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
+      const rpcBody = document.querySelector('#rpc-table tbody');
+      if (rpcBody) {
+        rpcBody.innerHTML = (rpc.endpoints || []).length === 0
+          ? '<tr><td colspan="5" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
+          : rpc.endpoints.map(e => \`
+            <tr>
+              <td title="\${e.url}">\${e.label}</td>
+              <td>\${e.healthy ? '✅' : '❌'}</td>
+              <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
+              <td>\${e.successRate.toFixed(0)}% (\${e.successCount}/\${e.successCount + e.failureCount})</td>
+              <td>\${e.isActive ? '●' : ''}</td>
+            </tr>\`).join('');
+      }
+      const jito = status.jito || {};
+      const mev = status.mev || {};
+      const js = mev.jitoStats || {};
+      document.getElementById('jito-status').textContent =
+        'Jito: ' + (jito.enabled ? 'ON' : 'OFF') +
+        ' · tip ' + (jito.tipLamports ?? '—') + ' lamports' +
+        ' · bundles ' + (js.bundlesSucceeded ?? 0) + '/' + (js.bundlesAttempted ?? 0) +
+        (js.lastError ? ' · last err: ' + js.lastError : '');
+
+      const mevEl = document.getElementById('mev-status');
+      if (mevEl) {
+        const sand = mev.lastSandwichCheck;
+        mevEl.textContent =
+          (mev.enableMEVProtection ? 'MEV ON' : 'MEV OFF') +
+          ' · jito bundles ' + (mev.useJitoBundles ? 'yes' : 'no') +
+          ' · sandwich ' + (mev.sandwichProtection ? 'yes' : 'no') +
+          ' · tip x' + (mev.tipMultiplier ?? 1) +
+          ' · prio x' + (mev.priorityFeeMultiplier ?? 1) +
+          (sand ? ' · last check: ' + (sand.safe ? 'safe' : 'RISK') + ' (' + sand.suspiciousBuys + ' buyers)' : '');
+      }
+
+      document.getElementById('watched').textContent = status.monitor.watchedWallets;
+      document.getElementById('open-count').textContent = status.monitor.openPositions;
+      document.getElementById('signals').textContent = status.monitor.recentSignals;
+      document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';
+
+      const s = status.stats || {};
+      document.getElementById('stat-trades').textContent = s.totalTrades ?? 0;
+      document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
+      const pnlEl = document.getElementById('stat-pnl');
+      pnlEl.textContent = (s.netPnlSol ?? 0).toFixed(4);
+      pnlEl.style.color = (s.netPnlSol ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const retEl = document.getElementById('stat-return');
+      retEl.textContent = (s.returnPct ?? 0).toFixed(1) + '%';
+      retEl.style.color = (s.returnPct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('migrations').innerHTML =
+        (migrations.recent || []).length === 0
+          ? '<div style="color:var(--muted)">No recent migrations detected — listening for Pump.fun graduation…</div>'
+          : migrations.recent.map(m => \`
+            <div class="log-entry">
+              \${m.priority ? '⚡' : '🚀'}
+              <strong>\${(m.program || 'mig').toUpperCase()}</strong>
+              mint <span class="mint" title="\${m.mint}">\${m.mint.slice(0,8)}…\${m.mint.slice(-4)}</span>
+              \${m.poolAddress ? '· pool <span class="mint" title="' + m.poolAddress + '">' + m.poolAddress.slice(0,8) + '…</span>' : ''}
+              \${m.volumeSpike ? '· <strong>vol spike ' + (m.volumeSol ?? 0).toFixed(1) + ' SOL</strong>' : (m.volumeSol ? '· ' + m.volumeSol.toFixed(1) + ' SOL' : '')}
+              \${m.smartWalletNames?.length ? '· ' + m.smartWalletNames.join(', ') : ''}
+              \${m.priorityReason ? '<span class="mint">(' + m.priorityReason + ')</span>' : ''}
+              <span class="mint">\${m.source || ''} · \${new Date(m.timestamp || m.detectedAt).toLocaleString()}</span>
+            </div>
+          \`).join('');
+
+      const migStatus = migrations.status || {};
+      const migLive = document.getElementById('mig-live-status');
+      if (migLive) {
+        migLive.textContent =
+          (migStatus.wsMode ? 'WS live' : 'poll fallback') +
+          ' · ' + (migStatus.recentCount ?? 0) + ' tracked' +
+          (migStatus.reconnectAttempts ? ' · reconnects:' + migStatus.reconnectAttempts : '') +
+          (migStatus.priorityEnabled ? ' · priority ON' : ' · priority OFF');
+      }
+      document.getElementById('stat-detail').textContent =
+        'Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
+        '% · Migrations: ' + (migStatus.recentCount ?? 0) +
+        (migStatus.wsMode ? ' (WS live)' : ' (poll)');
+
+      if (!window._cfgLoaded) {
+        window._cfgLoaded = true;
+        Object.entries(cfg.trade).forEach(([k,v]) => { const el = document.getElementById(k); if (el) { el.value = v; document.getElementById('v-'+k).textContent = v; }});
+        Object.entries(cfg.filters).forEach(([k,v]) => {
+          if (typeof v === 'boolean') {
+            const el = document.getElementById(k);
+            if (el) el.checked = v;
+          } else {
+            const el = document.getElementById(k);
+            if (el) { el.value = v; const lab = document.getElementById('v-'+k); if (lab) lab.textContent = v; }
+          }
+        });
+        document.getElementById('enableConvergence').checked = cfg.strategy.enableConvergence;
+        document.getElementById('enableMigrationOnly').checked = cfg.strategy.enableMigrationOnly;
+        document.getElementById('enableMigrationPriority').checked = !!cfg.strategy.enableMigrationPriority;
+        const curvePri = document.getElementById('enableBondingCurvePriority');
+        if (curvePri) curvePri.checked = cfg.strategy.enableBondingCurvePriority !== false;
+        const earlyPri = document.getElementById('enableEarlyCurvePriority');
+        if (earlyPri) earlyPri.checked = cfg.strategy.enableEarlyCurvePriority !== false;
+        document.getElementById('enableAutoSell').checked = cfg.strategy.enableAutoSell !== false;
+        document.getElementById('enableActivityFilter').checked = cfg.filters.enableActivityFilter !== false;
+        const skipAuth = document.getElementById('skipIfMintAuthority');
+        if (skipAuth) skipAuth.checked = !!cfg.filters.skipIfMintAuthority;
+        const sniperEl = document.getElementById('enableSniperFilter');
+        if (sniperEl) sniperEl.checked = cfg.filters.enableSniperFilter !== false;
+        const sensEl = document.getElementById('sniperSensitivity');
+        if (sensEl && cfg.filters.sniperSensitivity) {
+          sensEl.value = cfg.filters.sniperSensitivity;
+        }
+        if (cfg.strategy.migrationSizeMultiplier != null) {
+          document.getElementById('migrationSizeMultiplier').value = cfg.strategy.migrationSizeMultiplier;
+        }
+        if (cfg.strategy.migrationSlippageBps != null) {
+          document.getElementById('migrationSlippageBps').value = cfg.strategy.migrationSlippageBps;
+        }
+        const nearPct = document.getElementById('nearMigrationCurvePct');
+        if (nearPct && cfg.strategy.nearMigrationCurvePct != null) {
+          nearPct.value = cfg.strategy.nearMigrationCurvePct;
+        }
+        const earlyMax = document.getElementById('earlyCurveMaxPct');
+        if (earlyMax && cfg.strategy.earlyCurveMaxPct != null) {
+          earlyMax.value = cfg.strategy.earlyCurveMaxPct;
+        }
+        const minSm = document.getElementById('minEarlyBirdeyeSmartMoneyScore');
+        if (minSm && cfg.strategy.minEarlyBirdeyeSmartMoneyScore != null) {
+          minSm.value = cfg.strategy.minEarlyBirdeyeSmartMoneyScore;
+        }
+        const earlyW = document.getElementById('earlyCurveMinSmartWallets');
+        if (earlyW && cfg.strategy.earlyCurveMinSmartWallets != null) {
+          earlyW.value = cfg.strategy.earlyCurveMinSmartWallets;
+        }
+        document.getElementById('reBuyEnabled').checked = cfg.strategy.reBuyEnabled !== false;
+        if (cfg.strategy.reBuyMinProfitPct != null) {
+          document.getElementById('reBuyMinProfitPct').value = cfg.strategy.reBuyMinProfitPct;
+        }
+        if (cfg.strategy.reBuyDipPercent != null) {
+          document.getElementById('reBuyDipPercent').value = cfg.strategy.reBuyDipPercent;
+        }
+        if (cfg.strategy.confirmationThreshold != null) {
+          document.getElementById('confirmationThreshold').value = cfg.strategy.confirmationThreshold;
+        }
+        if (cfg.strategy.reBuyVolumeIncreasePct != null) {
+          document.getElementById('reBuyVolumeIncreasePct').value = cfg.strategy.reBuyVolumeIncreasePct;
+        }
+        if (cfg.risk) {
+          document.getElementById('riskEnabled').checked = cfg.risk.enabled !== false;
+          document.getElementById('useRiskSizing').checked = cfg.risk.useRiskSizing !== false;
+          document.getElementById('tieredSellEnabled').checked = cfg.risk.tieredSellEnabled !== false;
+          document.getElementById('autoPauseOnLimit').checked = cfg.risk.autoPauseOnLimit !== false;
+          document.getElementById('riskPercentPerTrade').value = cfg.risk.riskPercentPerTrade;
+          document.getElementById('trailingStopPct').value = cfg.risk.trailingStopPercent ?? cfg.risk.trailingStopPct;
+          if (document.getElementById('trailingActivationProfit')) {
+            document.getElementById('trailingActivationProfit').value = cfg.risk.trailingActivationProfit ?? 30;
+          }
+          document.getElementById('maxDrawdownPct').value = cfg.risk.maxDrawdownPct;
+          document.getElementById('weeklyLossLimitSol').value = cfg.risk.weeklyLossLimitSol;
+          document.getElementById('minTradeSol').value = cfg.risk.minTradeSol;
+          document.getElementById('maxTradeSol').value = cfg.risk.maxTradeSol;
+          document.getElementById('normalRiskPct').value = cfg.risk.normal.riskPercentPerTrade;
+          document.getElementById('normalTrailPct').value = cfg.risk.normal.trailingStopPct;
+          document.getElementById('migRiskPct').value = cfg.risk.migration.riskPercentPerTrade;
+          document.getElementById('migTrailPct').value = cfg.risk.migration.trailingStopPct;
+        }
+        if (cfg.profitStrategy) {
+          const ps = cfg.profitStrategy;
+          const en = document.getElementById('ps-enabled');
+          if (en) en.checked = ps.enabled !== false;
+          const ra = document.getElementById('ps-risk-adjust');
+          if (ra) ra.checked = ps.riskBasedAdjustment !== false;
+          const setN = (id, v) => {
+            const el = document.getElementById(id);
+            if (el && v != null) el.value = v;
+          };
+          setN('ps-partial-at', ps.partialSellAt);
+          setN('ps-partial-sell', ps.partialSellPercent);
+          setN('ps-take-initial', ps.takeInitialPercent);
+          setN('ps-bag', ps.bagPercent);
+          setN('ps-trail-after', ps.trailingStopAfter);
+          setN('ps-trail-pct', ps.trailingStopPct);
+        }
+        if (cfg.mev) {
+          document.getElementById('enableMEVProtection').checked = !!cfg.mev.enableMEVProtection;
+          document.getElementById('useJitoBundles').checked = cfg.mev.useJitoBundles !== false;
+          document.getElementById('sandwichProtection').checked = cfg.mev.sandwichProtection !== false;
+          document.getElementById('abortOnSandwichRisk').checked = cfg.mev.abortOnSandwichRisk !== false;
+          document.getElementById('tipMultiplier').value = cfg.mev.tipMultiplier;
+          document.getElementById('priorityFeeMultiplier').value = cfg.mev.priorityFeeMultiplier;
+          document.getElementById('sandwichMaxRecentBuys').value = cfg.mev.sandwichMaxRecentBuys;
+        }
+        if (cfg.rpc && status.jito) {
+          document.getElementById('jitoTipLamports').value = status.jito.baseTipLamports || status.jito.tipLamports || 10000;
+        }
+      }
+
+      const wtbody = document.querySelector('#wallets-table tbody');
+      const scalpers = wallets.filter(w =>
+        w.category === 'scalper' ||
+        (w.tags && w.tags.some(t => /scalp/i.test(t))) ||
+        (w.tradesLast7d != null && w.tradesLast7d >= 20)
+      );
+      const renderWalletRow = (w, cols) => \`
+          <tr>
+            <td>\${w.name}\${w.notes ? '<div class="mint">' + w.notes + '</div>' : ''}</td>
+            \${cols > 7 ? '<td class="mint">' + (w.category || 'smart') + '</td>' : ''}
+            <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+            <td>\${fmtLastTraded(w.lastTradedAt || w.lastActive, w.daysSinceTrade, w.activityLabel)}</td>
+            <td>\${w.winRate != null ? w.winRate.toFixed(0) + '%' : '—'}</td>
+            <td>\${w.tradesLast7d != null ? w.tradesLast7d : (w.tradesLast30d != null ? w.tradesLast30d + ' (30d)' : '—')}\${cols > 7 ? ' / ' + (w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—') : ''}</td>
+            <td>\${w.isActive ? '✅ ' + (w.activityLabel || 'Active') : '⛔ ' + (w.activityLabel || 'Inactive')}</td>
+            <td>
+              <button class="secondary" onclick="toggleWallet('\${w.address}', \${!w.enabled})">\${w.enabled ? 'Disable' : 'Enable'}</button>
+              <button class="danger" onclick="removeWallet('\${w.address}')">Remove</button>
+            </td>
+          </tr>\`;
+      wtbody.innerHTML = wallets.length === 0
+        ? '<tr><td colspan="8" style="color:var(--muted)">No wallets — search above or add one below</td></tr>'
+        : wallets.map(w => renderWalletRow(w, 8)).join('');
+      const stbody = document.querySelector('#scalper-wallets-table tbody');
+      if (stbody) {
+        stbody.innerHTML = scalpers.length === 0
+          ? '<tr><td colspan="7" style="color:var(--muted)">No scalpers tracked yet</td></tr>'
+          : scalpers.map(w => renderWalletRow(w, 7)).join('');
+      }
+      if (status.gmgn) updateDiscoveryUi(status.gmgn);
+      else if (cfg && cfg.gmgn) updateDiscoveryUi(cfg.gmgn);
+
+      const trailArmAt = (cfg && cfg.risk && cfg.risk.trailingActivationProfit != null)
+        ? cfg.risk.trailingActivationProfit
+        : 30;
+      const ptbody = document.querySelector('#positions-table tbody');
+      ptbody.innerHTML = positions.open.length === 0
+        ? '<tr><td colspan="9" style="color:var(--muted)">No open positions</td></tr>'
+        : positions.open.map(p => {
+          const pnl = p.pnlPct;
+          const pnlCell = pnl == null
+            ? '—'
+            : '<span style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+              (pnl >= 0 ? '+' : '') + pnl.toFixed(1) + '%</span>';
+          let trailCell;
+          if (p.trailingActive) {
+            const stop = p.trailingStopPriceSol != null
+              ? p.trailingStopPriceSol.toExponential(2)
+              : '—';
+            const peak = p.highWaterMarkSol != null
+              ? p.highWaterMarkSol.toExponential(2)
+              : '—';
+            trailCell =
+              '<span style="color:var(--green)">ACTIVE ' + (p.trailingStopPct ?? '—') + '%</span>' +
+              '<div class="mint">stop ' + stop + ' · peak ' + peak + '</div>';
+          } else {
+            trailCell =
+              '<span class="mint">off until +' + trailArmAt + '%</span>' +
+              '<div class="mint">then ' + (p.trailingStopPct ?? '—') + '% from peak</div>';
+          }
+          const mode = p.tradeMode === 'live' ? ' <span class="mint">[live]</span>' : '';
+          const ar = p.antiRug;
+          const be = ar?.birdeye;
+          const riskBit = ar
+            ? '<div class="mint" style="color:' +
+              (ar.riskLevel === 'high' || ar.riskLevel === 'critical' ? 'var(--red)' : 'var(--muted)') +
+              '">risk ' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + ar.flags[0] : '') + '</div>' +
+              (be && (be.liquidityUsd != null || be.volume24hUsd != null)
+                ? '<div class="mint">BE liq $' +
+                  (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
+                  (be.volume24hUsd != null ? ' · vol $' + Number(be.volume24hUsd).toFixed(0) : '') +
+                  (be.smartMoneyScore != null ? ' · SM ' + be.smartMoneyScore : '') +
+                  '</div>'
+                : '')
+            : '';
+          return \`
+          <tr>
+            <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong>\${mode}\${riskBit}</td>
+            <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
+            <td class="mint" title="\${p.mint}">\${p.mint.slice(0,8)}…</td>
+            <td>\${p.costSol.toFixed(4)} SOL</td>
+            <td>\${pnlCell}</td>
+            <td>\${trailCell}</td>
+            <td>+\${p.takeProfitPct.toFixed(0)}%</td>
+            <td>\${p.stopLossPct}%</td>
+            <td>\${new Date(p.openedAt).toLocaleTimeString()}</td>
+          </tr>\`;
+        }).join('');
+
+      const ctbody = document.querySelector('#closed-table tbody');
+      const closed = (positions.closed || []).slice().reverse().slice(0, 25);
+      ctbody.innerHTML = closed.length === 0
+        ? '<tr><td colspan="5" style="color:var(--muted)">No closed trades yet</td></tr>'
+        : closed.map(p => \`
+          <tr>
+            <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong></td>
+            <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
+            <td style="color:\${(p.pnlSol||0)>=0?'var(--green)':'var(--red)'}">
+              \${(p.pnlSol||0)>=0?'+':''}\${(p.pnlSol||0).toFixed(4)} SOL
+              <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>
+            </td>
+            <td class="mint">\${p.reason || '—'}</td>
+            <td>\${p.closedAt ? new Date(p.closedAt).toLocaleString() : '—'}</td>
+          </tr>\`).join('');
+
+      const rb = positions.rebuy || {};
+      const rbStatus = rb.status || status.monitor?.rebuy || {};
+      const rbEl = document.getElementById('rebuy-status');
+      if (rbEl) {
+        rbEl.textContent =
+          (rbStatus.enabled ? 'ON' : 'OFF') +
+          ' · watching ' + (rbStatus.watching ?? 0) +
+          ' · dip-armed ' + (rbStatus.dipArmed ?? 0) +
+          ' · sells tracked ' + (rbStatus.sellHistoryCount ?? (positions.sellHistory || []).length);
+      }
+      const rtbody = document.querySelector('#rebuy-table tbody');
+      const candidates = rb.candidates || [];
+      if (rtbody) {
+        rtbody.innerHTML = candidates.length === 0
+          ? '<tr><td colspan="6" style="color:var(--muted)">No re-buy watches — profitable TP sells start monitoring</td></tr>'
+          : candidates.slice(0, 15).map(c => \`
+            <tr>
+              <td><strong>\${fmtToken(c.symbol, c.name, c.mint)}</strong></td>
+              <td>\${c.status}</td>
+              <td>\${c.dipPctFromPeak != null ? c.dipPctFromPeak.toFixed(1) + '%' : '—'}</td>
+              <td>\${(c.confirmationWallets || []).length}\${c.confirmationWalletNames?.length ? ' (' + c.confirmationWalletNames.slice(0,3).join(', ') + ')' : ''}</td>
+              <td>\${c.volumeChangePct != null ? ((c.volumeChangePct>=0?'+':'') + c.volumeChangePct.toFixed(0) + '%') : '—'}</td>
+              <td class="mint">\${c.lastReason || '—'}</td>
+            </tr>\`).join('');
+      }
+
+      const activityHtml = activity.length === 0
+        ? '<div style="color:var(--muted)">No recent buys detected</div>'
+        : activity.map(a => {
+            const m = a.metrics || {};
+            const ar = a.antiRug || {};
+            const riskColor = ar.riskLevel === 'critical' || ar.riskLevel === 'high'
+              ? 'var(--red)'
+              : ar.riskLevel === 'medium' ? '#e6a817' : 'var(--green)';
+            const riskBadge = ar.riskScore != null
+              ? \` <span style="color:\${riskColor};font-weight:600">risk \${ar.riskScore}\${ar.riskLevel ? ' (' + ar.riskLevel + ')' : ''}</span>\`
+              : '';
+            const flagBits = (ar.flags || []).slice(0, 3).join(' · ');
+            const bc = a.bondingCurve || {};
+            const sn = a.sniper || a.antiRug || {};
+            const curveBadge = bc.progressPct != null
+              ? \` <span style="color:\${bc.nearMigration ? 'var(--green)' : 'var(--muted)'};font-weight:600">curve \${Number(bc.progressPct).toFixed(0)}%\${bc.nearMigration ? ' · near-mig' : ''}\${bc.solRaised != null ? ' · ' + Number(bc.solRaised).toFixed(1) + ' SOL' : ''}</span>\`
+              : '';
+            const sniperBadge = (sn.sniperScore != null || sn.sniperCount != null)
+              ? \` <span style="color:\${sn.highRisk || sn.sniperHighRisk ? 'var(--red)' : 'var(--muted)'}">sniper \${sn.sniperScore != null ? sn.sniperScore : '?'}\${sn.sniperCount != null ? ' · n=' + sn.sniperCount : ''}\${sn.bundlerPct != null ? ' · bundler ' + Number(sn.bundlerPct).toFixed(0) + '%' : ''}\${sn.insiderPct != null ? ' · insider ' + Number(sn.insiderPct).toFixed(0) + '%' : ''}</span>\`
+              : '';
+            const be = a.birdeye || ar.birdeye || {};
+            const beLiq = be.liquidityUsd != null ? Number(be.liquidityUsd) : (m.liquidityUsd != null ? Number(m.liquidityUsd) : null);
+            const beVol = be.volume24hUsd != null ? Number(be.volume24hUsd) : null;
+            const beHold = be.holder != null ? Number(be.holder) : null;
+            const beSm = be.smartMoneyScore != null ? Number(be.smartMoneyScore) : null;
+            const birdeyeBadge = (beLiq != null || beVol != null || beSm != null)
+              ? \` <span style="color:var(--muted)">BE liq $\${beLiq != null ? beLiq.toFixed(0) : '?'}\${beVol != null ? ' · vol24h $' + beVol.toFixed(0) : ''}\${beHold != null ? ' · holders ' + beHold : ''}\${beSm != null ? ' · SM ' + beSm : ''}\${be.source && be.source !== 'none' ? ' · ' + be.source : ''}</span>\`
+              : '';
+            const metricsLine = (m.liquidityUsd != null || m.devHoldPct != null || ar.riskScore != null || bc.progressPct != null || sn.sniperScore != null || beLiq != null || beVol != null)
+              ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : (m.topHolderPct != null ? Number(m.topHolderPct).toFixed(1) + '%' : '?')}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
+              : '';
+            return \`
+          <div class="log-entry">
+            <strong>\${a.walletName}</strong> bought
+            <strong>\${fmtToken(a.symbol, a.name, a.mint)}</strong>
+            \${a.name && a.name !== a.symbol ? '<span class="mint">(' + a.name + ')</span>' : ''}
+            \${a.isMigration ? '🚀' : a.earlyBuy ? '🌱' : a.isPumpFun ? '🎯' : ''}
+            \${a.earlyBuy && a.earlyBuyerCount ? '<span class="mint">early×' + a.earlyBuyerCount + '</span>' : ''}
+            \${metricsLine}
+            <span class="mint">\${a.mint ? a.mint.slice(0,8)+'…' : ''} · \${new Date(a.timestamp).toLocaleTimeString()}</span>
+          </div>\`;
+          }).join('');
+
+      const actEl = document.getElementById('activity');
+      if (actEl) actEl.innerHTML = activityHtml;
+      const actSig = document.getElementById('activity-signals');
+      if (actSig) actSig.innerHTML = activityHtml;
+
+      const ps = status.monitor?.pumpSmart;
+      const pumpStat = document.getElementById('pump-act-status');
+      if (pumpStat && ps) {
+        pumpStat.textContent =
+          (ps.eventCount || 0) + ' events · ' +
+          (ps.earlyBuys || 0) + ' early · ' +
+          (ps.nearMigration || 0) + ' near-mig · ' +
+          (ps.migrations || 0) + ' mig' +
+          (ps.enableEarlyCurvePriority === false ? ' · early OFF' : '');
+      }
+      refreshPumpActivity().catch(() => {});
+
+      const logHtml = logs.map(l => \`
+        <div class="log-entry log-\${l.type}" data-type="\${l.type}">\${new Date(l.timestamp).toLocaleTimeString()} — \${l.message}</div>\`).join('');
+      const logsEl = document.getElementById('logs');
+      if (logsEl) logsEl.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
+      const logsFull = document.getElementById('logs-full');
+      if (logsFull) logsFull.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
+      if (typeof applyLogFilter === 'function') applyLogFilter();
+    }
+
+    async function setMode(mode) {
+      if (mode === 'live' && !confirm('Switch to LIVE trading? Real funds will be used with the selected trading wallet.')) return;
+      try {
+        await fetchJSON('/api/config/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+        refresh();
+        loadTradingWallets();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function loadTradingWallets() {
+      const statusEl = document.getElementById('live-wallet-status');
+      try {
+        const data = await fetchJSON('/api/trading-wallets');
+        const tbody = document.querySelector('#trading-wallets-table tbody');
+        tbody.innerHTML = (data.wallets || []).length === 0
+          ? '<tr><td colspan="7" style="color:var(--muted)">No trading wallet slots</td></tr>'
+          : data.wallets.map(w => \`
+            <tr style="\${w.isActive ? 'outline:1px solid var(--accent, #3b82f6)' : ''}">
+              <td><strong>\${w.name}</strong>\${w.isActive ? ' <span class="mint">(active)</span>' : ''}</td>
+              <td>\${w.role}</td>
+              <td class="mint">\${w.envVar}</td>
+              <td class="mint" title="\${w.publicKey || ''}">\${w.publicKey ? w.publicKey.slice(0,8) + '…' + w.publicKey.slice(-4) : '—'}</td>
+              <td>\${w.balanceSol != null ? w.balanceSol.toFixed(4) : '—'}</td>
+              <td>\${w.hasKey ? '✅' : '❌ missing'}</td>
+              <td>
+                \${w.isActive
+                  ? '<span class="mint">Selected</span>'
+                  : \`<button onclick="selectTradingWallet('\${w.id}')">Use for live</button>\`}
+                \${w.role === 'main' ? '' : \`<button class="danger" onclick="removeTradingWalletSlot('\${w.id}')">Remove</button>\`}
+              </td>
+            </tr>\`).join('');
+        if (statusEl) {
+          const active = (data.wallets || []).find(w => w.isActive);
+          statusEl.textContent = active
+            ? 'Active: ' + active.name + (active.hasKey ? '' : ' — set ' + active.envVar + ' in .env')
+            : 'No active wallet';
+        }
+      } catch (err) {
+        if (statusEl) statusEl.textContent = err.message;
+      }
+    }
+
+    async function selectTradingWallet(id) {
+      try {
+        const data = await fetchJSON('/api/trading-wallets/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        if (!data.hasKey) {
+          alert('Selected, but no key loaded — add the env var in .env and restart the bot.');
+        }
+        await loadTradingWallets();
+        refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function removeTradingWalletSlot(id) {
+      if (!confirm('Remove this trading wallet slot? (Does not delete your .env key)')) return;
+      try {
+        await fetchJSON('/api/trading-wallets/' + encodeURIComponent(id), { method: 'DELETE' });
+        await loadTradingWallets();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function togglePause() {
+      await fetchJSON('/api/monitor/toggle', { method: 'POST' });
+      refresh();
+    }
+
+    async function saveTradeConfig() {
+      const body = {};
+      ['tradeAmountSol','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
+        body[k] = Number(document.getElementById(k).value);
+      });
+      await fetchJSON('/api/config/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      alert('Trade settings saved');
+    }
+
+    async function saveFilterConfig() {
+      const body = {
+        enableActivityFilter: document.getElementById('enableActivityFilter').checked,
+        skipIfMintAuthority: document.getElementById('skipIfMintAuthority').checked,
+        enableAntiRug: document.getElementById('enableAntiRug').checked,
+        checkHoneypot: document.getElementById('checkHoneypot').checked,
+        skipIfDevRecentSells: document.getElementById('skipIfDevRecentSells').checked,
+        requireLiquidityLocked: document.getElementById('requireLiquidityLocked').checked,
+        enableSniperFilter: document.getElementById('enableSniperFilter').checked,
+        sniperSensitivity: document.getElementById('sniperSensitivity').value,
+      };
+      ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
+       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
+       'minActivityDays','minTradesLast30d'].forEach(k => {
+        const el = document.getElementById(k);
+        if (el) body[k] = Number(el.value);
+      });
+      body.maxDevPercent = body.maxDevHoldPct;
+      await fetchJSON('/api/config/filters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      alert('Filters saved');
+    }
+
+    function onDiscoverSourceChange() {
+      const source = (document.getElementById('discover-source') || {}).value;
+      const box = document.getElementById('discover-manual-box');
+      if (box) box.style.opacity = source === 'manual' ? '1' : '0.95';
+    }
+
+    function fmtLastTrade(ts) {
+      if (!ts) return '—';
+      const s = Math.max(0, (Date.now() - Number(ts)) / 1000);
+      if (s < 60) return Math.round(s) + 's ago';
+      if (s < 3600) return Math.round(s / 60) + 'm ago';
+      if (s < 86400) return Math.round(s / 3600) + 'h ago';
+      return Math.round(s / 86400) + 'd ago';
+    }
+
+    async function discoverWallets(force) {
+      const status = document.getElementById('discover-status');
+      const keyEl = document.getElementById('discover-key-status');
+      const related = document.getElementById('discover-related');
+      const empty = document.getElementById('discover-empty');
+      const emptyMsg = document.getElementById('discover-empty-msg');
+      const source = document.getElementById('discover-source').value;
+      const period = document.getElementById('discover-period').value;
+      const limit = Number((document.getElementById('discover-limit') || {}).value || 30);
+      const minWinRate = Number((document.getElementById('discover-min-wr') || {}).value || 35);
+      const preferScalpers = !!(document.getElementById('discover-scalpers') || {}).checked;
+      const pumpFunFocus = !!(document.getElementById('discover-pump') || {}).checked;
+      if (empty) empty.classList.add('hidden');
+      status.textContent = 'Discovering via ' + source + ' (limit ' + limit + ')…';
+      try {
+        let data;
+        if (source === 'pump') {
+          data = await fetchJSON('/api/discover-pump-smart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit, force: !!force }),
+            timeoutMs: 60000,
+          });
+        } else {
+          const body = {
+            source,
+            period,
+            limit,
+            minWinRate,
+            force: !!force,
+            defaultSource: source === 'all' || source === 'kolscan' ? 'gmgn' : source,
+            pumpFunFocus,
+          };
+          if (source === 'manual') {
+            body.manualText = (document.getElementById('discover-manual-text') || {}).value || '';
+          }
+          data = await fetchJSON('/api/discover-wallets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            timeoutMs: 60000,
+          });
+        }
+        let rows = data.wallets || [];
+        if (preferScalpers) {
+          rows = rows.slice().sort((a, b) => {
+            const aS = (a.tradesLast7d || a.tradeCount || 0) >= 20 ? 1 : 0;
+            const bS = (b.tradesLast7d || b.tradeCount || 0) >= 20 ? 1 : 0;
+            if (bS !== aS) return bS - aS;
+            return (b.tradesLast7d || 0) - (a.tradesLast7d || 0);
+          });
+        }
+        window._discoveredWallets = rows;
+        window._topWallets = rows.map(w => ({
+          name: w.name,
+          address: w.address,
+          winRate: w.winRate,
+          lastActiveAt: w.lastActiveAt,
+          tradesLast7d: w.tradesLast7d,
+          pumpFunTradeCount: w.pumpFunTradeCount || (w.metrics && w.metrics.pumpFunTrades),
+          tags: w.tags,
+          notes: w.notes,
+          alreadyTracked: w.alreadyTracked,
+          realizedPnlUsd: w.realizedPnlUsd,
+          source: w.source,
+        }));
+        status.textContent =
+          (data.message || data.source) +
+          (data.cached ? ' (cache)' : '') +
+          ' · ' + rows.length + ' wallets' +
+          (data.error ? ' · ' + data.error : '');
+        if (keyEl) {
+          const hasBird = data.discovery && data.discovery.hasBirdeyeKey;
+          keyEl.textContent = hasBird
+            ? 'Birdeye key ✓'
+            : (source === 'birdeye' ? 'No Birdeye key — using fallbacks' : 'GMGN may be CF-blocked · Kolscan/curated OK');
+        }
+        if (related) {
+          const toks = data.relatedTokens || data.hotLaunches || [];
+          related.textContent = toks.length
+            ? 'Hot: ' + toks.slice(0, 6).map(t => t.symbol + (t.volumeUsd || t.volume24hUsd ? ' $' + Math.round(t.volumeUsd || t.volume24hUsd).toLocaleString() : '') + (t.progressPct != null ? ' · ' + Number(t.progressPct).toFixed(0) + '%' : '')).join(' · ')
+            : '';
+        }
+        const tbody = document.querySelector('#discover-wallets-table tbody');
+        if (rows.length === 0) {
+          if (empty) empty.classList.remove('hidden');
+          if (emptyMsg) emptyMsg.textContent = data.error || data.message || 'No candidates returned from this source.';
+          tbody.innerHTML = '<tr><td colspan="9" style="color:var(--muted)">No wallets found — see tips above</td></tr>';
+        } else {
+          if (empty) empty.classList.add('hidden');
+          tbody.innerHTML = rows.map(w => {
+            const flow = w.smartFlowScore != null ? w.smartFlowScore : (w.metrics && w.metrics.smartFlowScore);
+            const pump = w.pumpFunTradeCount != null ? w.pumpFunTradeCount : (w.metrics && w.metrics.pumpFunTrades);
+            const trades = w.tradesLast7d ?? w.tradeCount ?? '—';
+            return \`
+            <tr>
+              <td>\${w.name}</td>
+              <td class="mint">\${w.source}</td>
+              <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+              <td>\${fmtLastTrade(w.lastActiveAt)}</td>
+              <td>\${w.winRate != null ? w.winRate + '%' : '—'}</td>
+              <td>\${trades}</td>
+              <td>\${pump != null && pump !== '' ? pump : '—'}</td>
+              <td>\${flow != null ? flow : '—'}</td>
+              <td>\${w.alreadyTracked
+                ? '<span class="mint">Tracked</span>'
+                : \`<button onclick="addDiscoveredWallet('\${w.address}')">Add</button>\`
+              }</td>
+            </tr>\`;
+          }).join('');
+        }
+      } catch (err) {
+        status.textContent = err.message;
+        if (empty) {
+          empty.classList.remove('hidden');
+          if (emptyMsg) emptyMsg.textContent = err.message || 'Discover request failed.';
+        }
+      }
+    }
+
+    async function addManualDiscovered() {
+      const text = ((document.getElementById('discover-manual-text') || {}).value || '').trim();
+      if (!text) {
+        alert('Paste at least one address (Name:Address or raw)');
+        return;
+      }
+      const status = document.getElementById('discover-status');
+      status.textContent = 'Adding manual wallets…';
+      try {
+        const data = await fetchJSON('/api/discover-wallets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'manual', manualText: text, limit: 50, force: true }),
+          timeoutMs: 20000,
+        });
+        const list = data.wallets || [];
+        let n = 0;
+        for (const w of list) {
+          if (w.alreadyTracked) continue;
+          try {
+            await fetchJSON('/wallets/add', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: w.name,
+                address: w.address,
+                winRate: w.winRate,
+                lastActive: w.lastActiveAt,
+                tradesLast7d: w.tradesLast7d,
+                notes: w.notes || 'Manual add',
+                tags: w.tags || ['manual'],
+                source: 'manual',
+              }),
+            });
+            n++;
+          } catch (_) {}
+        }
+        status.textContent = 'Added ' + n + ' manual wallet(s)';
+        document.getElementById('discover-source').value = 'manual';
+        await discoverWallets(true);
+        refresh();
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    function findDiscovered(address) {
+      return (window._discoveredWallets || []).find(w => w.address === address)
+        || (window._topWallets || []).find(w => w.address === address);
+    }
+
+    async function addDiscoveredWallet(address) {
+      const w = findDiscovered(address);
+      if (!w) { alert('Candidate not found'); return; }
+      await fetchJSON('/wallets/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: w.name,
+          address: w.address,
+          winRate: w.winRate,
+          lastActive: w.lastActiveAt,
+          tradesLast7d: w.tradesLast7d,
+          notes: w.notes,
+          tags: w.tags,
+          category: (w.tags || []).some(t => /scalp/i.test(t)) ? 'scalper' : 'smart',
+          source: w.source || 'manual',
+        }),
+      });
+      document.getElementById('discover-status').textContent = 'Added ' + w.name;
+      await discoverWallets(true);
+      refresh();
+    }
+
+    async function importDiscoveredAll() {
+      const list = (window._discoveredWallets || []).filter(w => !w.alreadyTracked);
+      if (!list.length) { alert('No new wallets to import'); return; }
+      let n = 0;
+      for (const w of list) {
+        try {
+          await fetchJSON('/wallets/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: w.name,
+              address: w.address,
+              winRate: w.winRate,
+              lastActive: w.lastActiveAt,
+              tradesLast7d: w.tradesLast7d,
+              notes: w.notes,
+              tags: w.tags,
+              source: w.source || 'manual',
+            }),
+          });
+          n++;
+        } catch (_) {}
+      }
+      document.getElementById('discover-status').textContent = 'Imported ' + n + ' wallet(s)';
+      await discoverWallets(true);
+      refresh();
+    }
+
+    async function loadTopWallets() {
+      const period = document.getElementById('top-period').value;
+      const status = document.getElementById('top-status');
+      const keyEl = document.getElementById('gmgn-key-status');
+      status.textContent = 'Loading (GMGN → curated fallback if needed)…';
+      try {
+        const data = await fetchJSON(
+          '/gmgn/top-wallets?period=' + period + '&minWinRate=45&limit=20',
+          { timeoutMs: 25000 }
+        );
+        if (keyEl && data.gmgn) {
+          keyEl.textContent = data.gmgn.hasApiKey ? 'API key ✓' : 'No API key (public/curated)';
+          updateDiscoveryUi(data.gmgn);
+        }
+        const n = (data.wallets || []).length;
+        status.textContent =
+          (data.source || '—') +
+          (data.cached ? ' (cache)' : '') +
+          ' · ' + (data.period || period) +
+          ' · ' + n + ' wallets' +
+          (data.error ? ' · ' + data.error : '');
+        window._topWallets = data.wallets || [];
+        const tbody = document.querySelector('#top-wallets-table tbody');
+        tbody.innerHTML = n === 0
+          ? '<tr><td colspan="6" style="color:var(--muted)">No candidates</td></tr>'
+          : (data.wallets || []).map(w => \`
+            <tr>
+              <td>\${w.name}\${w.source === 'curated' ? ' <span class="mint">curated</span>' : ''}</td>
+              <td class="mint">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+              <td>\${w.winRate}%</td>
+              <td>\${fmtPnl(w.realizedPnlUsd ?? w.realizedPnl7d ?? w.realizedPnl30d)}</td>
+              <td>\${w.tradesLast7d ?? w.tradeCount ?? '—'}</td>
+              <td>\${w.alreadyTracked
+                ? '<span class="mint">Tracked</span>'
+                : \`<button onclick="addTopWallet('\${w.name.replace(/'/g, "\\\\'")}','\${w.address}')">Add to tracked</button>\`
+              }</td>
+            </tr>\`).join('');
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    function renderSearchResults(data) {
+      const status = document.getElementById('search-status');
+      status.textContent = data.message || (data.source + ' · ' + (data.candidates || []).length);
+      if (data.gmgn) updateDiscoveryUi(data.gmgn);
+      window._searchCandidates = data.candidates || [];
+      window._suggestedScalpers = data.suggestedScalpers || [];
+      const tbody = document.querySelector('#search-wallets-table tbody');
+      const rows = data.candidates || [];
+      tbody.innerHTML = rows.length === 0
+        ? '<tr><td colspan="7" style="color:var(--muted)">No matches</td></tr>'
+        : rows.map(w => \`
+          <tr>
+            <td>\${w.name}</td>
+            <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+            <td>\${w.activityLabel || '—'}</td>
+            <td>\${w.winRate}%</td>
+            <td>\${w.tradesLast7d ?? '—'}</td>
+            <td>\${w.pumpFunTradeCount ?? 0}</td>
+            <td>\${w.alreadyTracked
+              ? \`<button class="danger" onclick="removeSearchWallet('\${w.address}')">Remove</button>\`
+              : \`<button onclick="addSearchWallet('\${w.address}')">Add</button>\`
+            }</td>
+          </tr>\`).join('');
+
+      const sug = data.suggestedScalpers || [];
+      const box = document.getElementById('scalper-suggestions');
+      const chips = document.getElementById('scalper-chips');
+      if (sug.length) {
+        box.classList.remove('hidden');
+        chips.innerHTML = sug.map(w => \`
+          <button class="secondary" title="\${w.address}" onclick="addSearchWallet('\${w.address}', true)">
+            \${w.name} · \${w.winRate}% · \${w.tradesLast7d ?? '?'} tx/7d
+            \${w.alreadyTracked ? '✓' : '+'}
+          </button>\`).join('');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    async function searchWallets() {
+      const status = document.getElementById('search-status');
+      status.textContent = 'Searching…';
+      const q = document.getElementById('wallet-search-q').value.trim();
+      const minWin = Number(document.getElementById('search-min-win').value) || 45;
+      const minTrades = Number(document.getElementById('search-min-trades').value) || 20;
+      const maxDays = Number(document.getElementById('search-max-days').value) || 7;
+      const maxSniper = Number(document.getElementById('search-max-sniper').value);
+      const pump = document.getElementById('search-pump-focus').checked;
+      const scalperOnly = document.getElementById('search-scalper-only').checked;
+      try {
+        const params = new URLSearchParams({
+          query: q,
+          minWinRate: String(minWin),
+          minTrades7d: String(minTrades),
+          maxDaysInactive: String(maxDays),
+          activityDays: String(maxDays),
+          pumpFunFocus: pump ? 'true' : 'false',
+          scalperOnly: scalperOnly ? 'true' : 'false',
+          period: '7d',
+          limit: '20',
+        });
+        if (Number.isFinite(maxSniper)) params.set('maxSniperScore', String(maxSniper));
+        const data = await fetchJSON('/search-wallets?' + params.toString());
+        renderSearchResults(data);
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    async function suggestScalpers() {
+      document.getElementById('wallet-search-q').value = 'consistent scalpers';
+      document.getElementById('search-min-win').value = '45';
+      document.getElementById('search-min-trades').value = '20';
+      document.getElementById('search-max-days').value = '7';
+      document.getElementById('search-pump-focus').checked = false;
+      document.getElementById('search-scalper-only').checked = true;
+      const status = document.getElementById('search-status');
+      status.textContent = 'Loading scalper suggestions…';
+      try {
+        const data = await fetchJSON('/search-wallets/suggest?limit=10');
+        renderSearchResults(data);
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    function findSearchCandidate(address) {
+      const lists = [
+        window._searchCandidates || [],
+        window._suggestedScalpers || [],
+        window._topWallets || [],
+      ];
+      for (const list of lists) {
+        const hit = list.find(w => w.address === address);
+        if (hit) return hit;
+      }
+      return null;
+    }
+
+    async function addSearchWallet(address, fromChip) {
+      const w = findSearchCandidate(address);
+      if (!w && !fromChip) {
+        alert('Candidate not found');
+        return;
+      }
+      const payload = w ? {
+        name: w.name,
+        address: w.address,
+        winRate: w.winRate,
+        lastActive: w.lastTradeTime || w.lastActiveAt,
+        lastTradeTime: w.lastTradeTime || w.lastActiveAt,
+        tradesLast7d: w.tradesLast7d,
+        pumpFunTradeCount: w.pumpFunTradeCount,
+        notes: w.notes || (w.tags || []).join(', '),
+        tags: w.tags,
+        category: (w.tags || []).some(t => /scalp/i.test(t)) || (w.tradesLast7d || 0) >= 20
+          ? 'scalper'
+          : 'smart',
+        source: 'gmgn',
+      } : { name: address.slice(0, 8), address };
+      try {
+        await fetchJSON('/wallets/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        document.getElementById('search-status').textContent = 'Added ' + (w ? w.name : address.slice(0, 8));
+        if (w) w.alreadyTracked = true;
+        await searchWallets();
+        refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function removeSearchWallet(address) {
+      if (!confirm('Remove this wallet from tracked list?')) return;
+      try {
+        await fetchJSON('/wallets/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address }),
+        });
+        document.getElementById('search-status').textContent = 'Removed';
+        await searchWallets();
+        refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function addTopWallet(name, address) {
+      try {
+        await fetchJSON('/gmgn/top-wallets/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, address }),
+        });
+        document.getElementById('top-status').textContent = 'Added ' + name;
+        await loadTopWallets();
+        refresh();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function importAllTop() {
+      const period = document.getElementById('top-period').value;
+      if (!confirm('Import all new top wallets for ' + period + '?')) return;
+      const status = document.getElementById('top-status');
+      status.textContent = 'Importing…';
+      try {
+        const data = await fetchJSON('/api/gmgn/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ minWinRate: 45, period }),
+        });
+        status.textContent = 'Added ' + data.added.length + ' (' + data.source + ')';
+        await loadTopWallets();
+        refresh();
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    async function refreshActivity() {
+      const status = document.getElementById('gmgn-status');
+      status.textContent = 'Refreshing wallet activity (GMGN + on-chain)…';
+      try {
+        const data = await fetchJSON('/api/wallets/refresh-activity', { method: 'POST' });
+        status.textContent = 'Active: ' + data.filter.kept + ' · Disabled: ' + data.filter.disabled;
+        refresh();
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    async function pruneInactive() {
+      if (!confirm('Remove all inactive wallets and persist active only?')) return;
+      const data = await fetchJSON('/api/wallets/prune-inactive', { method: 'POST' });
+      document.getElementById('gmgn-status').textContent =
+        'Pruned ' + data.removed + ' · Kept ' + data.kept;
+      refresh();
+    }
+
+    async function saveStrategyConfig() {
+      await fetchJSON('/api/config/strategy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enableConvergence: document.getElementById('enableConvergence').checked,
+          enableMigrationOnly: document.getElementById('enableMigrationOnly').checked,
+          enableMigrationPriority: document.getElementById('enableMigrationPriority').checked,
+          enableBondingCurvePriority: document.getElementById('enableBondingCurvePriority').checked,
+          nearMigrationCurvePct: Number(document.getElementById('nearMigrationCurvePct').value),
+          enableEarlyCurvePriority: document.getElementById('enableEarlyCurvePriority').checked,
+          earlyCurveMaxPct: Number(document.getElementById('earlyCurveMaxPct').value),
+          minEarlyBirdeyeSmartMoneyScore: Number(document.getElementById('minEarlyBirdeyeSmartMoneyScore').value),
+          earlyCurveMinSmartWallets: Number(document.getElementById('earlyCurveMinSmartWallets').value),
+          enableAutoSell: document.getElementById('enableAutoSell').checked,
+          migrationSizeMultiplier: Number(document.getElementById('migrationSizeMultiplier').value),
+          migrationSlippageBps: Number(document.getElementById('migrationSlippageBps').value),
+          reBuyEnabled: document.getElementById('reBuyEnabled').checked,
+          reBuyMinProfitPct: Number(document.getElementById('reBuyMinProfitPct').value),
+          reBuyDipPercent: Number(document.getElementById('reBuyDipPercent').value),
+          confirmationThreshold: Number(document.getElementById('confirmationThreshold').value),
+          reBuyVolumeIncreasePct: Number(document.getElementById('reBuyVolumeIncreasePct').value),
+        }),
+      });
+      alert('Strategy saved');
+    }
+
+    async function saveRiskConfig() {
+      await fetchJSON('/api/risk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: document.getElementById('riskEnabled').checked,
+          useRiskSizing: document.getElementById('useRiskSizing').checked,
+          tieredSellEnabled: document.getElementById('tieredSellEnabled').checked,
+          autoPauseOnLimit: document.getElementById('autoPauseOnLimit').checked,
+          riskPercentPerTrade: Number(document.getElementById('riskPercentPerTrade').value),
+          trailingStopPercent: Number(document.getElementById('trailingStopPct').value),
+          trailingStopPct: Number(document.getElementById('trailingStopPct').value),
+          trailingActivationProfit: Number(document.getElementById('trailingActivationProfit').value),
+          maxDrawdownPct: Number(document.getElementById('maxDrawdownPct').value),
+          weeklyLossLimitSol: Number(document.getElementById('weeklyLossLimitSol').value),
+          minTradeSol: Number(document.getElementById('minTradeSol').value),
+          maxTradeSol: Number(document.getElementById('maxTradeSol').value),
+          normal: {
+            riskPercentPerTrade: Number(document.getElementById('normalRiskPct').value),
+            trailingStopPct: Number(document.getElementById('normalTrailPct').value),
+          },
+          migration: {
+            riskPercentPerTrade: Number(document.getElementById('migRiskPct').value),
+            trailingStopPct: Number(document.getElementById('migTrailPct').value),
+          },
+        }),
+      });
+      alert('Risk settings saved');
+      refresh();
+    }
+
+    async function saveProfitStrategy() {
+      const status = document.getElementById('ps-status');
+      try {
+        const data = await fetchJSON('/api/profit-strategy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: document.getElementById('ps-enabled').checked,
+            riskBasedAdjustment: document.getElementById('ps-risk-adjust').checked,
+            partialSellAt: Number(document.getElementById('ps-partial-at').value),
+            partialSellPercent: Number(document.getElementById('ps-partial-sell').value),
+            takeInitialPercent: Number(document.getElementById('ps-take-initial').value),
+            bagPercent: Number(document.getElementById('ps-bag').value),
+            trailingStopAfter: Number(document.getElementById('ps-trail-after').value),
+            trailingStopPct: Number(document.getElementById('ps-trail-pct').value),
+          }),
+        });
+        if (status) {
+          status.textContent = data.profitStrategy?.enabled
+            ? 'Saved · strategy ON'
+            : 'Saved · strategy OFF';
+        }
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function saveMevConfig() {
+      await fetchJSON('/api/mev', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enableMEVProtection: document.getElementById('enableMEVProtection').checked,
+          useJitoBundles: document.getElementById('useJitoBundles').checked,
+          sandwichProtection: document.getElementById('sandwichProtection').checked,
+          abortOnSandwichRisk: document.getElementById('abortOnSandwichRisk').checked,
+          tipMultiplier: Number(document.getElementById('tipMultiplier').value),
+          priorityFeeMultiplier: Number(document.getElementById('priorityFeeMultiplier').value),
+          sandwichMaxRecentBuys: Number(document.getElementById('sandwichMaxRecentBuys').value),
+          tipLamports: Number(document.getElementById('jitoTipLamports').value),
+          jitoEnabled: document.getElementById('useJitoBundles').checked &&
+            document.getElementById('enableMEVProtection').checked,
+        }),
+      });
+      alert('MEV settings saved');
+      refresh();
+    }
+
+    async function clearRiskHalt() {
+      await fetchJSON('/api/risk/clear-halt', { method: 'POST' });
+      refresh();
+    }
+
+    async function toggleWallet(address, enabled) {
+      await fetchJSON('/api/wallets/' + encodeURIComponent(address), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }),
+      });
+      refresh();
+    }
+
+    async function removeWallet(address) {
+      if (!confirm('Remove this wallet?')) return;
+      await fetchJSON('/wallets/remove', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }),
+      });
+      refresh();
+    }
+
+    document.getElementById('add-wallet-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const category = fd.get('category') || 'smart';
+      const tags = category === 'scalper' ? ['scalper'] : category === 'sniper' ? ['sniper'] : category === 'kol' ? ['kol'] : [];
+      try {
+        await fetchJSON('/wallets/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: fd.get('name'),
+            address: fd.get('address'),
+            category,
+            tags,
+            source: 'manual',
+          }),
+        });
+        e.target.reset();
+        refresh();
+      } catch (err) { alert(err.message); }
+    });
+
+    async function bulkImportWallets() {
+      const text = document.getElementById('bulk-import-text').value;
+      const cat = document.getElementById('bulk-import-cat').value;
+      const status = document.getElementById('bulk-import-status');
+      status.textContent = 'Importing…';
+      try {
+        const data = await fetchJSON('/wallets/bulk-import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, category: cat || undefined }),
+        });
+        status.textContent =
+          'Added ' + (data.added||[]).length +
+          ', updated ' + (data.updated||[]).length +
+          ', skipped ' + (data.skipped||[]).length;
+        document.getElementById('bulk-import-text').value = '';
+        refresh();
+      } catch (err) {
+        status.textContent = err.message;
+      }
+    }
+
+    document.getElementById('add-trading-wallet-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try {
+        await fetchJSON('/api/trading-wallets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: fd.get('name'),
+            envVar: fd.get('envVar'),
+            role: fd.get('role'),
+          }),
+        });
+        e.target.reset();
+        await loadTradingWallets();
+      } catch (err) { alert(err.message); }
+    });
+
+    document.getElementById('wallet-search-q').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); searchWallets(); }
+    });
+
+    const discoverSourceEl = document.getElementById('discover-source');
+    if (discoverSourceEl) {
+      discoverSourceEl.addEventListener('change', () => {
+        const box = document.getElementById('discover-manual-box');
+        if (box) box.classList.toggle('hidden', discoverSourceEl.value !== 'manual');
+      });
+    }
+
+    loadTradingWallets();
+    refresh();
+    setInterval(refresh, 5000);
+    const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
+    showTab(savedTab || 'overview');
+  </script>
+
+</body>
+</html>`;
