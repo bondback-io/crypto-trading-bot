@@ -4,10 +4,9 @@
  */
 
 import fs from 'fs';
-import path from 'path';
+import { dataFile, ensureDataDir } from './dataDir';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const FILE = path.join(DATA_DIR, 'trading-wallets.json');
+const FILE = dataFile('trading-wallets.json');
 
 /** Only these env name patterns may be used as key sources */
 export const ALLOWED_KEY_ENV =
@@ -50,9 +49,7 @@ const DEFAULT_WALLETS: TradingWalletSlot[] = [
 ];
 
 function ensureDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+  ensureDataDir();
 }
 
 export function isAllowedKeyEnvVar(name: string): boolean {

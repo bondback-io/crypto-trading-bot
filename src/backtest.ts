@@ -5,7 +5,6 @@
  */
 
 import fs from 'fs';
-import path from 'path';
 import { config, randomTakeProfitPct } from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
@@ -24,6 +23,7 @@ import {
   evaluateProfitAction,
   type ProfitPositionView,
 } from './profitStrategy';
+import { dataFile, ensureDataDir } from './dataDir';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -257,14 +257,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 function historyFilePath(): string {
-  return path.join(process.cwd(), 'data', 'backtest-history.json');
-}
-
-function ensureDataDir(): void {
-  const dir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  return dataFile('backtest-history.json');
 }
 
 export function getLastBacktest(): BacktestResult | null {

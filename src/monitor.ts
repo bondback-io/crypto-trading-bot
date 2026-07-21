@@ -154,13 +154,47 @@ type SignalHandler = (signal: TradeSignal) => void;
 const recentBuys = new Map<string, WalletBuyEvent[]>();
 const lastSignature = new Map<string, string>();
 const walletLastActivity = new Map<string, WalletLastActivity>();
+/** Mints we already bought (or intentionally blocked from re-entry). */
 const tradedMints = new Set<string>();
+/** In-flight buy claims — prevents concurrent duplicate opens while filters await. */
+const pendingBuys = new Set<string>();
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let paused = false;
+let pollInFlight = false;
 let onSignalHandler: SignalHandler | null = null;
+
+/**
+ * Atomically reserve a mint before any slow await on the buy path.
+ * Returns false if already pending, already held, or previously traded
+ * (unless allowRetrade for the post-TP re-buy path).
+ */
+function beginBuy(
+  mint: string,
+  opts?: { allowRetrade?: boolean }
+): boolean {
+  if (pendingBuys.has(mint)) return false;
+  if (paperTrader.hasOpenMint(mint)) {
+    tradedMints.add(mint);
+    return false;
+  }
+  if (!opts?.allowRetrade && tradedMints.has(mint)) return false;
+  pendingBuys.add(mint);
+  return true;
+}
+
+function finishBuy(mint: string, success: boolean): void {
+  pendingBuys.delete(mint);
+  if (success) tradedMints.add(mint);
+}
+
+/** Clear traded/pending mint locks (e.g. after paper reset). */
+export function clearTradedMints(): void {
+  tradedMints.clear();
+  pendingBuys.clear();
+}
 
 const ACTIVITY_REFRESH_MS = 15 * 60 * 1000; // re-check activity every 15 min
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -248,21 +282,29 @@ export function isMonitorPaused(): boolean {
 
 async function pollAllWallets(): Promise<void> {
   if (paused) return;
-
-  const wallets = getWalletsForPolling();
-
-  await Promise.allSettled(wallets.map((wallet) => pollWallet(wallet)));
-
-  const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
-  if (openMints.length > 0) {
-    await refreshPositionPrices(openMints);
-    paperTrader.checkPositions();
+  if (pollInFlight) {
+    console.log('[monitor] Skipping poll — previous cycle still running');
+    return;
   }
+  pollInFlight = true;
+  try {
+    const wallets = getWalletsForPolling();
 
-  // After sells / price updates — evaluate dip re-buy opportunities
-  await evaluateReBuyOpportunities();
+    await Promise.allSettled(wallets.map((wallet) => pollWallet(wallet)));
 
-  pruneOldBuys();
+    const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
+    if (openMints.length > 0) {
+      await refreshPositionPrices(openMints);
+      paperTrader.checkPositions();
+    }
+
+    // After sells / price updates — evaluate dip re-buy opportunities
+    await evaluateReBuyOpportunities();
+
+    pruneOldBuys();
+  } finally {
+    pollInFlight = false;
+  }
 }
 
 /**
@@ -678,13 +720,21 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     return;
   }
 
-  if (tradedMints.has(event.mint)) {
+  if (tradedMints.has(event.mint) || pendingBuys.has(event.mint)) {
     console.log(
       `[monitor] Migration priority skipped — already traded ${event.mint.slice(0, 8)}…`
     );
     return;
   }
 
+  if (!beginBuy(event.mint)) {
+    console.log(
+      `[monitor] Migration priority skipped — buy already in progress for ${event.mint.slice(0, 8)}…`
+    );
+    return;
+  }
+
+  try {
   const token = await resolveTokenMeta(event.mint);
   const label = formatTokenLabel(token.symbol, token.name, event.mint);
   const walletNames =
@@ -725,10 +775,12 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     notes: event.priorityReason ?? 'migration_ws',
   });
 
-  if (!(await passesFilters(signal))) return;
+  if (!(await passesFilters(signal))) {
+    finishBuy(event.mint, false);
+    return;
+  }
 
   onSignalHandler?.(signal);
-  tradedMints.add(event.mint);
 
   const sizeMult = config.strategy.migrationSizeMultiplier ?? 1.5;
   const solAmount = resolveTradeSize('migration');
@@ -757,6 +809,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
         }
       : undefined,
   });
+  finishBuy(event.mint, result.success);
   if (result.success) {
     console.log(
       `[monitor] Migration priority trade executed (${result.mode}): ${label} ` +
@@ -764,7 +817,10 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     );
   } else {
     console.error(`[monitor] Migration priority trade failed: ${result.error}`);
-    tradedMints.delete(event.mint);
+  }
+  } catch (err) {
+    finishBuy(event.mint, false);
+    throw err;
   }
 }
 
@@ -1126,10 +1182,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   signal.symbol = buy.symbol || signal.symbol;
   signal.name = buy.name || signal.name;
 
-  if (!(await passesFilters(signal))) return;
-
-  // Block normal re-entry; re-buy path uses tryExecuteReBuy instead
-  if (tradedMints.has(buy.mint)) {
+  // Claim mint BEFORE slow filter awaits so concurrent wallet/migration
+  // handlers cannot both open the same token.
+  if (!beginBuy(buy.mint)) {
     if (isReBuyWatching(buy.mint)) {
       console.log(
         `[monitor] ${label} already traded — waiting for re-buy confirmation (dip + wallets/volume)`
@@ -1140,13 +1195,17 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     return;
   }
 
+  try {
+  if (!(await passesFilters(signal))) {
+    finishBuy(buy.mint, false);
+    return;
+  }
+
   console.log(
     `[monitor] ✅ SIGNAL${priority ? ' (priority)' : ''}: ${signal.walletNames.join(' + ')} → ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}`
   );
 
   onSignalHandler?.(signal);
-
-  tradedMints.add(buy.mint);
 
   const buyOpts: {
     sourceWallets?: string[];
@@ -1201,6 +1260,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   }
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
+  finishBuy(buy.mint, result.success);
 
   if (result.success) {
     console.log(
@@ -1208,7 +1268,10 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     );
   } else {
     console.error(`[monitor] Copy trade failed: ${result.error}`);
-    tradedMints.delete(buy.mint);
+  }
+  } catch (err) {
+    finishBuy(buy.mint, false);
+    throw err;
   }
 }
 
@@ -1263,13 +1326,22 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
   }
 
   // Already holding — don't double up
-  if (paperTrader.getOpenPositions().some((p) => p.mint === mint)) {
+  if (paperTrader.hasOpenMint(mint)) {
     console.log(`[rebuy] Skip — already holding open position on ${mint.slice(0, 8)}…`);
     return false;
   }
 
+  if (!beginBuy(mint, { allowRetrade: true })) {
+    console.log(`[rebuy] Skip — buy already in progress for ${mint.slice(0, 8)}…`);
+    return false;
+  }
+
+  try {
   const candidate = getReBuyCandidates().find((c) => c.mint === mint);
-  if (!candidate) return false;
+  if (!candidate) {
+    finishBuy(mint, false);
+    return false;
+  }
 
   const label = formatTokenLabel(candidate.symbol, candidate.name, mint);
   const reason = conf.reason;
@@ -1296,6 +1368,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
 
   if (!(await passesFilters(signal))) {
     console.log(`[rebuy] Filters blocked re-buy for ${label}`);
+    finishBuy(mint, false);
     return false;
   }
 
@@ -1317,9 +1390,9 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       : undefined,
   });
 
+  finishBuy(mint, result.success);
   if (result.success) {
     markReBought(mint, reason);
-    tradedMints.add(mint);
     console.log(
       `[monitor] Re-buy executed (${result.mode}): ${label} — ${reason}`
     );
@@ -1328,6 +1401,10 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
 
   console.error(`[monitor] Re-buy failed: ${result.error}`);
   return false;
+  } catch (err) {
+    finishBuy(mint, false);
+    throw err;
+  }
 }
 
 function resolveTradeSize(kind: 'migration' | 'normal'): number {
@@ -1361,6 +1438,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   if (openCount >= filters.maxConcurrentPositions) {
     console.log(
       `[monitor] Signal rejected — max concurrent positions (${filters.maxConcurrentPositions})`
+    );
+    return false;
+  }
+
+  if (paperTrader.hasOpenMint(signal.mint)) {
+    console.log(
+      `[monitor] Signal rejected — already holding ${signal.symbol || signal.mint.slice(0, 8)}`
     );
     return false;
   }

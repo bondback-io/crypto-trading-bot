@@ -25,6 +25,10 @@ import {
 } from './mev';
 import { paperTrader } from './paperTrader';
 import { logger, errorToMeta } from './logger';
+import {
+  fetchLiveTokenSnapshot,
+  marketCapAtPrice,
+} from './marketData';
 
 const jupiter = createJupiterApiClient();
 
@@ -142,6 +146,30 @@ export interface BuyOptions {
     flags: string[];
     ok: boolean;
   };
+  entryMarketCapUsd?: number;
+}
+
+async function resolveEntryMarketCapUsd(
+  mint: string,
+  fillPriceSol: number,
+  provided?: number
+): Promise<number | undefined> {
+  if (provided != null && Number.isFinite(provided) && provided > 0) {
+    return provided;
+  }
+  try {
+    const snap = await fetchLiveTokenSnapshot(mint);
+    if (!snap?.marketCapUsd) return undefined;
+    if (snap.priceSol != null && snap.priceSol > 0 && fillPriceSol > 0) {
+      return (
+        marketCapAtPrice(snap.marketCapUsd, snap.priceSol, fillPriceSol) ??
+        snap.marketCapUsd
+      );
+    }
+    return snap.marketCapUsd;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function executeBuy(
@@ -153,6 +181,14 @@ export async function executeBuy(
   const slippageBps = meta?.slippageBps ?? config.paper.slippageBps;
   const strategyKind =
     meta?.strategyKind ?? (meta?.priority ? 'migration' : 'normal');
+
+  if (paperTrader.hasOpenMint(mint)) {
+    return {
+      success: false,
+      mode: config.mode,
+      error: `Already holding open position on ${mint.slice(0, 8)}…`,
+    };
+  }
 
   if (meta?.priority) {
     console.log(
@@ -166,6 +202,11 @@ export async function executeBuy(
   }
 
   const priceSol = quoteToPriceSol(quote);
+  const entryMarketCapUsd = await resolveEntryMarketCapUsd(
+    mint,
+    priceSol,
+    meta?.entryMarketCapUsd
+  );
 
   if (config.mode === 'paper') {
     const position = paperTrader.simulateBuy(
@@ -180,6 +221,7 @@ export async function executeBuy(
         slippageBps,
         strategyKind,
         antiRug: meta?.antiRug,
+        entryMarketCapUsd,
       }
     );
     if (!position) {
@@ -241,19 +283,26 @@ export async function executeBuy(
     // Track for dynamic trailing / TP-SL (does not touch paper balance)
     const outRaw = quote.outAmount;
     const amountTokens = Number(outRaw) / 1e6;
-    const position = paperTrader.registerLivePosition({
-      mint,
-      symbol,
-      name: meta?.name,
-      entryPriceSol: priceSol,
-      costSol: solAmount,
-      amountTokens: Number.isFinite(amountTokens) ? amountTokens : 0,
-      tokenAmountRaw: outRaw,
-      strategyKind,
-      sourceWallets: meta?.sourceWallets,
-      sourceNames: meta?.sourceNames,
-      antiRug: meta?.antiRug,
-    });
+    let position;
+    try {
+      position = paperTrader.registerLivePosition({
+        mint,
+        symbol,
+        name: meta?.name,
+        entryPriceSol: priceSol,
+        costSol: solAmount,
+        amountTokens: Number.isFinite(amountTokens) ? amountTokens : 0,
+        tokenAmountRaw: outRaw,
+        strategyKind,
+        sourceWallets: meta?.sourceWallets,
+        sourceNames: meta?.sourceNames,
+        antiRug: meta?.antiRug,
+        entryMarketCapUsd,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, mode: 'live', error: message, txId: live.txId };
+    }
 
     return {
       success: true,

@@ -16,6 +16,7 @@ import {
   evaluateProfitAction,
   type ProfitPositionView,
 } from './profitStrategy';
+import { marketCapAtPrice } from './marketData';
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
 
@@ -75,6 +76,10 @@ export interface Position {
     flags: string[];
     ok: boolean;
   };
+  /** Market cap USD at entry fill (DexScreener, scaled to fill price when possible) */
+  entryMarketCapUsd?: number;
+  /** Market cap USD at exit (scaled from entry MC by exit/entry price) */
+  exitMarketCapUsd?: number;
 }
 
 export interface TradeLog {
@@ -158,6 +163,14 @@ export class PaperTrader {
     return this.balanceSol;
   }
 
+  /** True if any open/partial position already holds this mint */
+  hasOpenMint(mint: string): boolean {
+    for (const p of this.positions.values()) {
+      if (p.mint === mint && p.status !== 'closed') return true;
+    }
+    return false;
+  }
+
   getOpenPositions(): Position[] {
     return Array.from(this.positions.values()).map((p) =>
       this.withTrailSnapshot(p)
@@ -202,7 +215,13 @@ export class PaperTrader {
     sourceWallets?: string[];
     sourceNames?: string[];
     antiRug?: Position['antiRug'];
+    entryMarketCapUsd?: number;
   }): Position {
+    if (this.hasOpenMint(input.mint)) {
+      throw new Error(
+        `Already holding open position on ${input.mint.slice(0, 8)}…`
+      );
+    }
     const strategyKind = input.strategyKind ?? 'normal';
     const rules = getStrategyRiskRules(strategyKind);
     const trailPct =
@@ -243,6 +262,12 @@ export class PaperTrader {
       sourceWallets: input.sourceWallets,
       sourceNames: input.sourceNames,
       antiRug: input.antiRug,
+      entryMarketCapUsd:
+        input.entryMarketCapUsd != null &&
+        Number.isFinite(input.entryMarketCapUsd) &&
+        input.entryMarketCapUsd > 0
+          ? input.entryMarketCapUsd
+          : undefined,
     };
 
     this.positions.set(position.id, position);
@@ -321,6 +346,7 @@ export class PaperTrader {
       slippageBps?: number;
       strategyKind?: 'migration' | 'normal';
       antiRug?: Position['antiRug'];
+      entryMarketCapUsd?: number;
     }
   ): Position | null {
     const spendSol = solAmount ?? config.trade.tradeAmountSol;
@@ -329,6 +355,14 @@ export class PaperTrader {
     const label = formatTokenLabel(tokenSymbol, tokenName, mint);
     const strategyKind = meta?.strategyKind ?? 'normal';
     const rules = getStrategyRiskRules(strategyKind);
+
+    if (this.hasOpenMint(mint)) {
+      this.log(
+        'error',
+        `Already holding open position on ${label} — refusing duplicate buy`
+      );
+      return null;
+    }
 
     if (spendSol > this.balanceSol) {
       this.log('error', `Insufficient balance: need ${spendSol} SOL, have ${this.balanceSol.toFixed(4)}`);
@@ -380,13 +414,23 @@ export class PaperTrader {
       sourceWallets: meta?.sourceWallets,
       sourceNames: meta?.sourceNames,
       antiRug: meta?.antiRug,
+      entryMarketCapUsd:
+        meta?.entryMarketCapUsd != null &&
+        Number.isFinite(meta.entryMarketCapUsd) &&
+        meta.entryMarketCapUsd > 0
+          ? meta.entryMarketCapUsd
+          : undefined,
     };
 
     this.positions.set(position.id, position);
+    const mcBit =
+      position.entryMarketCapUsd != null
+        ? ` MC~$${Math.round(position.entryMarketCapUsd).toLocaleString()}`
+        : '';
     this.log(
       'buy',
       `Bought ${label} (${mint.slice(0, 8)}…) — ${amountTokens.toFixed(2)} tokens @ ${entryPrice.toExponential(4)} SOL ` +
-        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%)`,
+        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit})`,
       { mint, symbol: tokenSymbol, name: tokenName, solAmount: spendSol }
     );
 
@@ -462,6 +506,14 @@ export class PaperTrader {
     }
 
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
+    const exitMc =
+      position.entryMarketCapUsd != null && position.entryPriceSol > 0
+        ? marketCapAtPrice(
+            position.entryMarketCapUsd,
+            position.entryPriceSol,
+            exitPrice
+          )
+        : undefined;
 
     if (isPartial && position.amountTokens > 1e-12) {
       position.status = 'partial';
@@ -492,6 +544,7 @@ export class PaperTrader {
         status: 'closed',
         closedAt: Date.now(),
         exitPriceSol: exitPrice,
+        exitMarketCapUsd: exitMc,
         pnlSol,
         pnlPct,
         reason: `partial: ${reason}`,
@@ -513,6 +566,7 @@ export class PaperTrader {
     position.status = 'closed';
     position.closedAt = Date.now();
     position.exitPriceSol = exitPrice;
+    position.exitMarketCapUsd = exitMc;
     position.pnlSol = totalPnl;
     position.pnlPct = totalPct;
     position.reason = reason;
@@ -982,6 +1036,14 @@ export class PaperTrader {
           position.status = 'closed';
           position.closedAt = Date.now();
           position.exitPriceSol = currentPriceSol;
+          position.exitMarketCapUsd =
+            position.entryMarketCapUsd != null && position.entryPriceSol > 0
+              ? marketCapAtPrice(
+                  position.entryMarketCapUsd,
+                  position.entryPriceSol,
+                  currentPriceSol
+                )
+              : undefined;
           position.reason = reason;
           const pnlPct =
             ((currentPriceSol - position.entryPriceSol) /
@@ -1019,6 +1081,46 @@ export class PaperTrader {
     }
 
     this.simulateSell(position.id, currentPriceSol, reason);
+  }
+
+  /**
+   * Manually close an open position (full size).
+   * Paper: simulated sell. Live: on-chain sell then drop tracking.
+   */
+  async forceSellPosition(
+    positionId: string,
+    reason = 'manual force sell'
+  ): Promise<{ ok: boolean; error?: string; position?: Position }> {
+    const position = this.positions.get(positionId);
+    if (!position || position.status === 'closed') {
+      return { ok: false, error: 'Position not found or already closed' };
+    }
+
+    let price = this.priceCache.get(position.mint);
+    if (price == null || !(price > 0)) {
+      try {
+        const { refreshPositionPrices } = await import('./trade');
+        await refreshPositionPrices([position.mint]);
+        price = this.priceCache.get(position.mint);
+      } catch {
+        // fall through
+      }
+    }
+    if (price == null || !(price > 0)) {
+      return { ok: false, error: 'No price available to sell' };
+    }
+
+    await this.closePositionByRules(position, price, reason);
+    const closed =
+      this.closedPositions.find((p) => p.id === positionId) ??
+      (!this.positions.has(positionId) ? position : undefined);
+    if (this.positions.has(positionId)) {
+      return {
+        ok: false,
+        error: 'Sell did not close the position (check live wallet / logs)',
+      };
+    }
+    return { ok: true, position: closed };
   }
 
   /** Start periodic TP/SL checks (optionally refreshes live prices) */

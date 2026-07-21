@@ -1,12 +1,14 @@
 /**
  * Persistent smart wallet storage — loads/saves to data/wallets.json.
+ *
+ * On Render Free this file is wiped on every deploy unless a persistent disk
+ * is mounted (Starter+). See dataDir.ts / README.
  */
 
 import fs from 'fs';
-import path from 'path';
+import { dataFile, ensureDataDir } from './dataDir';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const WALLETS_FILE = path.join(DATA_DIR, 'wallets.json');
+const WALLETS_FILE = dataFile('wallets.json');
 
 export type WalletCategory = 'smart' | 'scalper' | 'sniper' | 'kol';
 
@@ -80,12 +82,6 @@ export const defaultSmartWallets: SmartWallet[] = [
     tags: ['kol'],
   },
 ];
-
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
 
 /** Normalize lastActive ↔ lastTradedAt for persistence */
 export function normalizeWalletRecord(w: WalletRecord): WalletRecord {

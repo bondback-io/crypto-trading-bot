@@ -33,6 +33,7 @@ import {
 } from './connection';
 import { getJitoStatus } from './jito';
 import { getMevStatus, updateMevConfig } from './mev';
+import { getPersistenceStatus } from './dataDir';
 import { paperTrader } from './paperTrader';
 import { updateProfitStrategyConfig } from './profitStrategy';
 import {
@@ -45,6 +46,7 @@ import {
   refreshAllWalletActivity,
   filterActiveWallets,
   clearMonitorRiskHalt,
+  clearTradedMints,
 } from './monitor';
 import {
   updateRiskConfig,
@@ -220,6 +222,7 @@ export function createServer(): express.Application {
       jito: getJitoStatus(),
       mev: getMevStatus(),
       gmgn: getGmgnStatus(),
+      persistence: getPersistenceStatus(),
       tradingWallet: active
         ? {
             id: active.id,
@@ -230,6 +233,10 @@ export function createServer(): express.Application {
           }
         : null,
     });
+  });
+
+  app.get('/api/persistence', (_req: Request, res: Response) => {
+    res.json(getPersistenceStatus());
   });
 
   app.get('/api/rpc', (_req: Request, res: Response) => {
@@ -502,6 +509,7 @@ export function createServer(): express.Application {
       (req.body as { clearHistory?: boolean }).clearHistory
     );
     const result = paperTrader.reset({ clearHistory });
+    clearTradedMints();
     res.json({
       ok: true,
       ...result,
@@ -628,6 +636,36 @@ export function createServer(): express.Application {
         candidates: getReBuyCandidates(),
       },
     });
+  });
+
+  /** Force-sell entire open position (paper simulate or live on-chain). */
+  app.post('/api/positions/:id/sell', async (req: Request, res: Response) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) {
+      res.status(400).json({ error: 'Missing position id' });
+      return;
+    }
+    try {
+      const result = await paperTrader.forceSellPosition(
+        id,
+        'manual force sell'
+      );
+      if (!result.ok) {
+        res.status(400).json({ error: result.error ?? 'Sell failed' });
+        return;
+      }
+      res.json({
+        ok: true,
+        position: result.position,
+        open: paperTrader.getOpenPositions(),
+        closed: paperTrader.getClosedPositions(),
+        balanceSol: paperTrader.getBalance(),
+        stats: paperTrader.getStats(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: message });
+    }
   });
 
   app.get('/api/rebuy', (_req: Request, res: Response) => {

@@ -131,6 +131,25 @@ Wallets are stored in `data/wallets.json` and loaded on startup. Add/remove via 
 
 ## Deploy on Render.com
 
+### Why settings & wallets reset (Free tier)
+
+**Yes — this is a Free-tier limitation, but not an API limit.** Render Free has **no persistent disk**. The container filesystem is wiped:
+
+- on every new deploy / commit
+- when the free instance spins down after idle
+
+The bot *does* hard-save to `data/bot-settings.json` and `data/wallets.json`. Without a disk, those files never survive a restart.
+
+**Fix:** upgrade to **Starter** (or higher) and attach a **1GB disk** mounted at:
+
+```text
+/opt/render/project/src/data
+```
+
+Then re-import wallets and save settings once. They will survive future deploys. `render.yaml` already declares this disk for Blueprint deploys.
+
+Optional env override: `DATA_DIR=/opt/render/project/src/data`
+
 ### Commands (set in Render Web Service)
 
 | Setting | Value |
@@ -151,11 +170,12 @@ Wallets are stored in `data/wallets.json` and loaded on startup. Add/remove via 
 1. Push this repo to GitHub.
 2. In [Render](https://dashboard.render.com): **New → Web Service** → connect the repo.
 3. Runtime: **Node**. Use the build/start commands above.
-4. Add a **persistent disk** (Starter+) mounted at `/opt/render/project/src/data` so `data/wallets.json` and `data/bot-settings.json` survive deploys (see `render.yaml`).
-5. Set environment variables (Environment tab) — see table below.
-6. Deploy. Open `https://<your-service>.onrender.com/dashboard`.
+4. **Plan:** Starter+ (not Free) so you can add a disk.
+5. Add a **persistent disk** mounted at `/opt/render/project/src/data` so `data/wallets.json` and `data/bot-settings.json` survive deploys (see `render.yaml`).
+6. Set environment variables (Environment tab) — see table below.
+7. Deploy. Open `https://<your-service>.onrender.com/dashboard`. Confirm the amber persistence banner is gone after you save settings once.
 
-Or use **New → Blueprint** with the included `render.yaml`.
+Or use **New → Blueprint** with the included `render.yaml` (includes the disk).
 
 ### Environment variables (Render)
 
@@ -166,6 +186,7 @@ Or use **New → Blueprint** with the included `render.yaml`.
 | `HOST` | Yes | `0.0.0.0` |
 | `PORT` | Auto | Injected by Render — do not set manually |
 | `TRADING_MODE` | Recommended | `paper` (start here) or `live` |
+| `DATA_DIR` | Optional | Override data path (default `./data`; on Render with disk use `/opt/render/project/src/data`) |
 | `RPC_FALLBACKS` | Optional | Comma-separated backup RPCs |
 | `GMGN_API_KEY` | Optional | Better wallet discovery / activity |
 | `BIRDEYE_API_KEY` | Optional | Token / smart-money signals |
@@ -183,14 +204,16 @@ curl https://<your-service>.onrender.com/health
 # { "status": "ok", "uptime": 123 }
 ```
 
-Detailed readiness (optional): `GET /health/ready`
+Detailed readiness (optional): `GET /health/ready`  
+Persistence status: `GET /api/persistence`
 
 ### Production checklist
 
 - [ ] Build: `npm install --include=dev && npm run build` · Start: `npm start`
 - [ ] `NODE_ENV=production`, `HOST=0.0.0.0`, paid `RPC_URL`
-- [ ] Disk mounted for `data/`
+- [ ] **Not Free** — Starter+ with disk at `/opt/render/project/src/data`
 - [ ] `/health` returns `{ "status": "ok", "uptime": … }`
+- [ ] `/api/persistence` shows `settingsExists` / `walletsExists` true after first save
 - [ ] Start in **paper** mode first
 - [ ] Never commit `.env` or private keys
 

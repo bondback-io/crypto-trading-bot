@@ -366,6 +366,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #38bdf8;
     }
     .token-ca.copied .ca-pop .ca-hint { color: #34d399; }
+    .persist-banner {
+      display: none;
+      margin-bottom: 0.85rem;
+      padding: 0.75rem 1rem;
+      border-radius: 0.65rem;
+      border: 1px solid #b45309;
+      background: rgba(180, 83, 9, 0.15);
+      color: #fbbf24;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .persist-banner strong { color: #fde68a; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -390,6 +402,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
       </div>
     </div>
+
+    <div id="persist-banner" class="persist-banner" role="alert"></div>
 
     <!-- Tabs -->
     <nav class="flex flex-wrap gap-1.5 mb-4 sticky top-0 z-20 bg-[#0b1220]/95 backdrop-blur py-2 -mx-1 px-1">
@@ -423,10 +437,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="grid lg:grid-cols-2 gap-4">
         <div class="card">
-          <div class="section-title">Open Positions <span class="tip" tabindex="0" data-tip="Active holdings with cost, unrealized PnL, trailing stop, take-profit, and stop-loss levels."></span></div>
+          <div class="section-title">Open Positions <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span></div>
           <div class="overflow-x-auto max-h-72 overflow-y-auto">
             <table id="positions-table">
-              <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th></tr></thead>
+              <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -437,15 +451,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="card">
-        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
-        <div class="overflow-x-auto max-h-56 overflow-y-auto">
-          <table id="closed-table">
-            <thead><tr><th>Token</th><th>Name</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
-            <tbody></tbody>
-          </table>
+        <div class="card">
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+          <div class="overflow-x-auto max-h-56 overflow-y-auto">
+            <table id="closed-table">
+              <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
       <div class="grid lg:grid-cols-2 gap-4">
         <div class="card">
@@ -881,7 +895,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 <th title="Staged profit takes: partial → recover initial → remainder">Takes</th>
                 <th title="Estimated market cap when the smart wallet bought">Wallet MC</th>
                 <th title="Estimated market cap when your copy filled (after delay)">Your MC</th>
-                <th title="Market cap at exit">Exit MC</th>
+                <th title="Market cap at exit (scaled from Dex snapshot at last price — path multiples are capped so h24 moons don't invent 50–100× rides)">Exit MC</th>
                 <th title="Time from smart-wallet buy until your copy fill">Delay</th>
                 <th title="Your hold time (copy fill → exit)">Hold</th>
                 <th title="Max drawdown while open">Max DD</th>
@@ -1674,7 +1688,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<td>' + fmtExitTakes(t) + '</td>' +
                 '<td class="mint" title="Smart wallet entry MC">' + fmtUsdShort(walletMc) + '</td>' +
                 '<td class="mint" title="Your copy fill MC">' + fmtUsdShort(yourMc) + '</td>' +
-                '<td class="mint">' + fmtUsdShort(exitMc) + '</td>' +
+                '<td class="mint" title="Exit MC scaled from Dex snapshot (path multiple capped)">' + fmtUsdShort(exitMc) + '</td>' +
                 '<td class="mint" title="Copy delay after smart wallet">' + fmtCopyDelay(t.copyDelayMs) + '</td>' +
                 '<td class="mint">' + fmtHold(t.holdingTimeMs) + '</td>' +
                 '<td style="color:var(--red)">' + Number(t.maxDrawdownPct || 0).toFixed(1) + '%</td>' +
@@ -2023,6 +2037,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    async function forceSellPosition(id, symbol) {
+      const label = symbol || id;
+      if (!confirm('Force sell entire position for ' + label + '?')) return;
+      try {
+        await fetchJSON('/api/positions/' + encodeURIComponent(id) + '/sell', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        refresh();
+      } catch (err) {
+        alert('Force sell failed: ' + (err.message || err));
+      }
+    }
+
     async function refreshPumpActivity() {
       const filter = (document.getElementById('pump-act-filter') || {}).value || 'all';
       const minSm = Number((document.getElementById('pump-act-min-sm') || {}).value) || 0;
@@ -2138,6 +2167,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (paper.useLiveData != null) {
         document.getElementById('paper-live-data').checked = !!paper.useLiveData;
         document.getElementById('bt-live').checked = !!paper.useLiveData;
+      }
+
+      const persistEl = document.getElementById('persist-banner');
+      if (persistEl) {
+        const p = status.persistence;
+        if (p && p.warning) {
+          persistEl.style.display = 'block';
+          persistEl.innerHTML =
+            '<strong>Settings / wallets will reset on deploy</strong> — ' +
+            String(p.warning).replace(/</g, '&lt;') +
+            ' <span class="mint">(' + String(p.dataDir || '').replace(/</g, '&lt;') + ')</span>';
+        } else {
+          persistEl.style.display = 'none';
+          persistEl.textContent = '';
+        }
       }
 
       const dot = document.getElementById('status-dot');
@@ -2427,7 +2471,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         : 30;
       const ptbody = document.querySelector('#positions-table tbody');
       ptbody.innerHTML = positions.open.length === 0
-        ? '<tr><td colspan="9" style="color:var(--muted)">No open positions</td></tr>'
+        ? '<tr><td colspan="11" style="color:var(--muted)">No open positions</td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
           const pnlCell = pnl == null
@@ -2465,28 +2509,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   '</div>'
                 : '')
             : '';
+          const buyMc = fmtUsdShort(p.entryMarketCapUsd);
+          const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
           return \`
           <tr>
             <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong>\${mode}\${riskBit}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td class="mint" title="\${p.mint}">\${p.mint.slice(0,8)}…</td>
+            <td class="mint" title="Market cap at buy">\${buyMc}</td>
             <td>\${p.costSol.toFixed(4)} SOL</td>
             <td>\${pnlCell}</td>
             <td>\${trailCell}</td>
             <td>+\${p.takeProfitPct.toFixed(0)}%</td>
             <td>\${p.stopLossPct}%</td>
             <td>\${new Date(p.openedAt).toLocaleTimeString()}</td>
+            <td><button class="danger" onclick="forceSellPosition('\${p.id}', '\${sellLabel}')" title="Force sell entire position">Sell</button></td>
           </tr>\`;
         }).join('');
 
       const ctbody = document.querySelector('#closed-table tbody');
       const closed = (positions.closed || []).slice().reverse().slice(0, 25);
       ctbody.innerHTML = closed.length === 0
-        ? '<tr><td colspan="5" style="color:var(--muted)">No closed trades yet</td></tr>'
+        ? '<tr><td colspan="7" style="color:var(--muted)">No closed trades yet</td></tr>'
         : closed.map(p => \`
           <tr>
             <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong></td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
+            <td class="mint" title="Market cap at buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
+            <td class="mint" title="Market cap at exit">\${fmtUsdShort(p.exitMarketCapUsd)}</td>
             <td style="color:\${(p.pnlSol||0)>=0?'var(--green)':'var(--red)'}">
               \${(p.pnlSol||0)>=0?'+':''}\${(p.pnlSol||0).toFixed(4)} SOL
               <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>

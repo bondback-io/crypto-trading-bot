@@ -122,6 +122,90 @@ function readMarketCapUsd(row: Record<string, unknown>): number | undefined {
 }
 
 /**
+ * Max price multiple allowed when reconstructing a copy-trade path from
+ * DexScreener % change. Stops h24 moons (+5000%) from inventing 50–100×
+ * entry→exit MC rides inside a ≤90m simulation window.
+ */
+export const MAX_PATH_PRICE_MULTIPLE = 8;
+
+/** Soft cap when scaling a Dex MC snapshot across prices (guards unit bugs). */
+export const MAX_MC_PRICE_RATIO = 20;
+
+export type PriceChangePick = {
+  pct: number;
+  windowMs: number;
+  source: 'm5' | 'h1' | 'h6' | 'h24' | 'none';
+};
+
+/**
+ * Prefer the shortest non-zero Dex change window so reconstructed entry
+ * and path duration stay aligned (avoid h24 % compressed into ~1h).
+ */
+export function pickPriceChangeForPath(
+  pair: Record<string, unknown>
+): PriceChangePick {
+  const pc = pair.priceChange as
+    | { m5?: number; h1?: number; h6?: number; h24?: number }
+    | undefined;
+  const candidates: Array<{
+    source: PriceChangePick['source'];
+    pct: number;
+    windowMs: number;
+  }> = [
+    { source: 'm5', pct: Number(pc?.m5), windowMs: 5 * 60_000 },
+    { source: 'h1', pct: Number(pc?.h1), windowMs: 60 * 60_000 },
+    { source: 'h6', pct: Number(pc?.h6), windowMs: 6 * 60 * 60_000 },
+    { source: 'h24', pct: Number(pc?.h24), windowMs: 24 * 60 * 60_000 },
+  ];
+  for (const c of candidates) {
+    if (Number.isFinite(c.pct) && c.pct !== 0) {
+      return { pct: c.pct, windowMs: c.windowMs, source: c.source };
+    }
+  }
+  return { pct: 0, windowMs: 60 * 60_000, source: 'none' };
+}
+
+/**
+ * Reconstruct path-start price from current price + % change, clamped so
+ * we never invent absurd copy-trade moons from a 24h Dex %.
+ */
+export function reconstructEntryPriceSol(
+  lastPriceSol: number,
+  changePct: number,
+  opts?: { maxMultiple?: number; fallbackFactor?: number }
+): number {
+  const maxMult = opts?.maxMultiple ?? MAX_PATH_PRICE_MULTIPLE;
+  const fallback = opts?.fallbackFactor ?? 0.7;
+  if (!(lastPriceSol > 0) || !Number.isFinite(lastPriceSol)) return 0;
+
+  // Near -100% would explode entry; treat as invalid
+  if (!Number.isFinite(changePct) || changePct <= -95) {
+    return lastPriceSol * fallback;
+  }
+
+  const denom = 1 + changePct / 100;
+  if (!(denom > 0)) return lastPriceSol * fallback;
+
+  let entry = lastPriceSol / denom;
+  if (!(entry > 0) || !Number.isFinite(entry)) {
+    return lastPriceSol * fallback;
+  }
+
+  const lo = lastPriceSol / maxMult;
+  const hi = lastPriceSol * maxMult;
+  return Math.min(hi, Math.max(lo, entry));
+}
+
+/** Effective % change after clamp (for storage / display). */
+export function effectivePriceChangePct(
+  entryPriceSol: number,
+  lastPriceSol: number
+): number {
+  if (!(entryPriceSol > 0) || !Number.isFinite(lastPriceSol)) return 0;
+  return ((lastPriceSol - entryPriceSol) / entryPriceSol) * 100;
+}
+
+/**
  * Scale a reference market cap from refPriceSol → atPriceSol.
  * DexScreener MC is always at the current/last price snapshot.
  */
@@ -140,7 +224,15 @@ export function marketCapAtPrice(
   ) {
     return undefined;
   }
-  return referenceMcUsd * (atPriceSol / referencePriceSol);
+  const ratio = atPriceSol / referencePriceSol;
+  if (!Number.isFinite(ratio) || ratio < 0) return undefined;
+  // Clamp pathological ratios (wrong units / tiny ref price) instead of
+  // reporting hundreds of millions of exit MC from a bad scale factor.
+  const clamped = Math.min(
+    MAX_MC_PRICE_RATIO,
+    Math.max(1 / MAX_MC_PRICE_RATIO, ratio)
+  );
+  return referenceMcUsd * clamped;
 }
 
 /**
@@ -163,7 +255,12 @@ export function liquidityAtPrice(
     return undefined;
   }
   const ratio = atPriceSol / referencePriceSol;
-  return referenceLiqUsd * Math.sqrt(Math.max(ratio, 1e-12));
+  if (!Number.isFinite(ratio) || ratio <= 0) return undefined;
+  const clamped = Math.min(
+    MAX_MC_PRICE_RATIO,
+    Math.max(1 / MAX_MC_PRICE_RATIO, ratio)
+  );
+  return referenceLiqUsd * Math.sqrt(Math.max(clamped, 1e-12));
 }
 
 /**
@@ -206,13 +303,7 @@ export function resolveLaunchPathWindow(opts: {
 export function changeWindowMsFromPair(
   pair: Record<string, unknown>
 ): number {
-  const pc = pair.priceChange as
-    | { m5?: number; h1?: number; h6?: number; h24?: number }
-    | undefined;
-  if (pc?.h1 != null && Number(pc.h1) !== 0) return 60 * 60_000;
-  if (pc?.h6 != null && Number(pc.h6) !== 0) return 6 * 60 * 60_000;
-  if (pc?.h24 != null && Number(pc.h24) !== 0) return 24 * 60 * 60_000;
-  return 6 * 60 * 60_000;
+  return pickPriceChangeForPath(pair).windowMs;
 }
 
 /** Build a realistic candle path from entry → last with bounded noise */
@@ -405,15 +496,9 @@ async function fetchFromDexScreener(
       );
       if (!priceNative || priceNative <= 0) continue;
 
-      const change =
-        Number(
-          (pair.priceChange as { h24?: number } | undefined)?.h24 ??
-            (pair.priceChange as { h6?: number } | undefined)?.h6 ??
-            (pair.priceChange as { h1?: number } | undefined)?.h1 ??
-            0
-        ) || 0;
-
-      const entry = priceNative / (1 + change / 100);
+      const picked = pickPriceChangeForPath(pair as Record<string, unknown>);
+      const entry = reconstructEntryPriceSol(priceNative, picked.pct);
+      const change = effectivePriceChangePct(entry, priceNative);
       const symbol = String(
         (pair.baseToken as { symbol?: string } | undefined)?.symbol ??
           tokenAddress.slice(0, 6)
@@ -426,7 +511,7 @@ async function fetchFromDexScreener(
       const pathWin = resolveLaunchPathWindow({
         launchedAt: createdAt,
         nowMs: Math.min(toMs, Date.now()),
-        changeWindowMs: changeWindowMsFromPair(pair as Record<string, unknown>),
+        changeWindowMs: picked.windowMs,
       });
 
       seen.add(tokenAddress);
@@ -494,9 +579,11 @@ async function fetchFromDexScreener(
       );
       if (priceNative <= 0) continue;
 
-      const change =
-        Number((pair.priceChange as { h24?: number } | undefined)?.h24 ?? 0) || 0;
-      const entry = priceNative / (1 + change / 100);
+      const picked = pickPriceChangeForPath(pair);
+      const entry = reconstructEntryPriceSol(priceNative, picked.pct, {
+        fallbackFactor: 0.6,
+      });
+      const change = effectivePriceChangePct(entry, priceNative);
         const symbol = String(
           (pair.baseToken as { symbol?: string } | undefined)?.symbol ??
             mint.slice(0, 6)
@@ -508,7 +595,7 @@ async function fetchFromDexScreener(
         const pathWin = resolveLaunchPathWindow({
           launchedAt: createdAt,
           nowMs: Math.min(toMs, Date.now()),
-          changeWindowMs: changeWindowMsFromPair(pair),
+          changeWindowMs: picked.windowMs,
         });
 
         seen.add(mint);
@@ -600,13 +687,14 @@ async function fetchFromGmgn(
       const price = Number(row.price ?? row.price_sol ?? 0);
       if (price <= 0) continue;
 
-      const change = Number(row.price_change_percent ?? row.price_change ?? 0);
-      const entry = price / (1 + change / 100);
+      const rawChange = Number(row.price_change_percent ?? row.price_change ?? 0);
+      const entry = reconstructEntryPriceSol(price, rawChange);
+      const change = effectivePriceChangePct(entry, price);
       const symbol = String(row.symbol ?? mint.slice(0, 6));
       const pathWin = resolveLaunchPathWindow({
         launchedAt,
         nowMs: Math.min(toMs, Date.now()),
-        changeWindowMs: 6 * 60 * 60_000,
+        changeWindowMs: 60 * 60_000,
       });
 
       events.push({
@@ -757,16 +845,50 @@ export async function fetchRecentLaunches(
 
 /** Apply live last-price to an open mint (for live paper mode) */
 export async function fetchLivePriceSol(mint: string): Promise<number | null> {
+  const snap = await fetchLiveTokenSnapshot(mint);
+  return snap?.priceSol ?? null;
+}
+
+/**
+ * DexScreener snapshot: price + market cap for an open/minted token.
+ * Picks the deepest Solana pool; MC prefers circulating over FDV.
+ */
+export async function fetchLiveTokenSnapshot(
+  mint: string
+): Promise<{ priceSol: number | null; marketCapUsd: number | null } | null> {
   if (!isValidMint(mint)) return null;
   const data = await fetchJson(
     `https://api.dexscreener.com/latest/dex/tokens/${mint}`
   );
   const pairs =
     (data as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
-  const sol = pairs.find((p) => String(p.chainId) === 'solana');
-  if (!sol) return null;
-  const priceNative = Number((sol as { priceNative?: string }).priceNative ?? 0);
-  return priceNative > 0 ? priceNative : null;
+  const solPairs = pairs.filter((p) => String(p.chainId) === 'solana');
+  if (solPairs.length === 0) return null;
+
+  let best = solPairs[0];
+  let bestLiq = Number(
+    (best.liquidity as { usd?: number } | undefined)?.usd ??
+      best.liquidityUsd ??
+      0
+  );
+  for (const p of solPairs) {
+    const liq = Number(
+      (p.liquidity as { usd?: number } | undefined)?.usd ?? p.liquidityUsd ?? 0
+    );
+    if (liq > bestLiq) {
+      best = p;
+      bestLiq = liq;
+    }
+  }
+
+  const priceNative = Number(
+    (best as { priceNative?: string }).priceNative ?? 0
+  );
+  const marketCapUsd = readMarketCapUsd(best) ?? null;
+  return {
+    priceSol: priceNative > 0 ? priceNative : null,
+    marketCapUsd: marketCapUsd != null && marketCapUsd > 0 ? marketCapUsd : null,
+  };
 }
 
 /** Fetch symbol + name for a mint from DexScreener (best-effort) */

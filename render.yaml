@@ -1,5 +1,8 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 # New → Blueprint → select this repo, or create a Web Service manually.
+#
+# IMPORTANT: Persistent disk requires Starter plan or higher.
+# Free tier wipes data/ on every deploy — settings & wallets will reset.
 services:
   - type: web
     name: solana-copy-bot
@@ -16,6 +19,8 @@ services:
       # PORT is set automatically by Render — do not override unless needed
       - key: TRADING_MODE
         value: paper
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
       - key: RPC_URL
         sync: false
       - key: RPC_FALLBACKS
@@ -28,6 +33,7 @@ services:
         sync: false
       - key: TRADING_WALLET_1
         sync: false
+    # Survives deploys — NOT available on Free
     disk:
       name: bot-data
       mountPath: /opt/render/project/src/data

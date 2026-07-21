@@ -5,6 +5,7 @@
 import dotenv from 'dotenv';
 import { config, setMode, initWallets, hasPersistedSettings } from './config';
 import { env, logEnvSummary, validateDeploymentEnv } from './env';
+import { logPersistenceStatus } from './dataDir';
 import { testConnection } from './connection';
 import { paperTrader } from './paperTrader';
 import { startMonitor, onSignal, TradeSignal } from './monitor';
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   for (const w of validateDeploymentEnv()) {
     console.warn(`[env] ⚠ ${w}`);
   }
+  logPersistenceStatus();
 
   initWallets();
 

@@ -4,13 +4,14 @@
  * Load order: code defaults + env → deep-merge saved file (saved wins).
  * New keys added in code updates keep their defaults; existing saved values
  * are never wiped by a redeploy or code change.
+ *
+ * On Render: attach a persistent disk (Starter+) or files are wiped each deploy.
  */
 
 import fs from 'fs';
-import path from 'path';
+import { dataFile, ensureDataDir } from './dataDir';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'bot-settings.json');
+const SETTINGS_FILE = dataFile('bot-settings.json');
 
 export const SETTINGS_VERSION = 1 as const;
 
@@ -85,9 +86,7 @@ export function loadPersistedSettings(): PersistedBotSettings | null {
 
 export function savePersistedSettings(settings: PersistedBotSettings): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
+    ensureDataDir();
     const payload: PersistedBotSettings = {
       ...settings,
       version: SETTINGS_VERSION,
