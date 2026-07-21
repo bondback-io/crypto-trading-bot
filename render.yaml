@@ -5,7 +5,7 @@ services:
     name: solana-copy-bot
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
     envVars:

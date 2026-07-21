@@ -135,7 +135,7 @@ Wallets are stored in `data/wallets.json` and loaded on startup. Add/remove via 
 
 | Setting | Value |
 |---------|--------|
-| **Build Command** | `npm install && npm run build` |
+| **Build Command** | `npm install --include=dev && npm run build` |
 | **Start Command** | `npm start` |
 | **Health Check Path** | `/health` |
 
@@ -187,7 +187,7 @@ Detailed readiness (optional): `GET /health/ready`
 
 ### Production checklist
 
-- [ ] Build: `npm install && npm run build` · Start: `npm start`
+- [ ] Build: `npm install --include=dev && npm run build` · Start: `npm start`
 - [ ] `NODE_ENV=production`, `HOST=0.0.0.0`, paid `RPC_URL`
 - [ ] Disk mounted for `data/`
 - [ ] `/health` returns `{ "status": "ok", "uptime": … }`
