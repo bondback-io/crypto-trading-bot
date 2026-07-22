@@ -378,17 +378,266 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       line-height: 1.45;
     }
     .persist-banner strong { color: #fde68a; }
+
+    /* ========== Responsive layout (mobile / tablet / desktop) ========== */
+    html { -webkit-text-size-adjust: 100%; }
+    body { overflow-x: hidden; }
+    .page-shell {
+      width: 100%;
+      max-width: 80rem;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 1rem 0.75rem 2.5rem;
+    }
+    .header-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.5rem;
+      flex: 1 1 16rem;
+      max-width: 100%;
+    }
+    .header-actions .btn { flex: 0 0 auto; }
+    .nav-tabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.4rem;
+      margin-bottom: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgba(11, 18, 32, 0.94);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      padding: 0.5rem 0.25rem;
+      margin-left: -0.25rem;
+      margin-right: -0.25rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      border-bottom: 1px solid transparent;
+    }
+    .nav-tabs::-webkit-scrollbar { height: 4px; }
+    .nav-tabs::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .nav-tabs .btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      scroll-snap-align: start;
+    }
+    .overflow-x-auto {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+      max-width: 100%;
+    }
+    .overflow-x-auto table {
+      min-width: 36rem;
+    }
+    #bt-results-table { min-width: 64rem; }
+    #positions-table { min-width: 48rem; }
+    #wallets-table, #search-wallets-table, #discover-wallets-table { min-width: 42rem; }
+    .btn-label-full { display: none; }
+    .btn-label-short { display: inline; }
+    .stat { font-size: clamp(1.15rem, 4vw, 1.5rem); word-break: break-word; }
+    .card { min-width: 0; }
+
+    /* Sticky first column on wide tables (phones) */
+    @media (max-width: 639px) {
+      .overflow-x-auto table th:first-child,
+      .overflow-x-auto table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #1e293b;
+        box-shadow: 4px 0 8px -4px rgba(0,0,0,.45);
+      }
+      .overflow-x-auto table thead th:first-child {
+        z-index: 3;
+        background: #1e293b;
+      }
+    }
+
+    /* Phones */
+    @media (max-width: 639px) {
+      .page-shell { padding: 0.75rem 0.65rem 2rem; }
+      .card { padding: 0.85rem; border-radius: 0.65rem; }
+      .header-bar { flex-direction: column; align-items: stretch; }
+      .header-actions {
+        flex: 1 1 auto;
+        padding: 0.65rem !important;
+      }
+      .header-actions .btn {
+        flex: 1 1 calc(50% - 0.35rem);
+        justify-content: center;
+        min-height: 2.5rem;
+        padding: 0.5rem 0.55rem;
+      }
+      .nav-tabs {
+        scroll-snap-type: x proximity;
+        gap: 0.35rem;
+        padding-bottom: 0.65rem;
+        border-bottom-color: #1e293b;
+      }
+      .nav-tabs .btn {
+        min-height: 2.4rem;
+        padding: 0.45rem 0.7rem;
+        font-size: 12px;
+      }
+      .filters-row {
+        gap: 0.5rem;
+      }
+      .filters-row > .ctl,
+      .filters-row > label.ctl {
+        flex: 1 1 calc(50% - 0.35rem);
+        width: auto !important;
+        min-width: calc(50% - 0.35rem);
+      }
+      .filters-row > .ctl-lg,
+      .filters-row > label.ctl-lg {
+        flex: 1 1 100%;
+        min-width: 100%;
+      }
+      .filters-row .search-q {
+        flex: 1 1 100%;
+        min-width: 100%;
+      }
+      .filters-row > .btn,
+      .filters-row > button {
+        flex: 1 1 calc(50% - 0.35rem);
+        justify-content: center;
+        min-height: 2.5rem;
+      }
+      .filters-row > .ctl-check,
+      .filters-row > label.ctl-check {
+        flex: 1 1 100%;
+        padding-top: 0.35rem;
+        min-height: 2.25rem;
+      }
+      .ctl-sm, .ctl-md, .ctl-lg { width: 100%; }
+      .ctl input, .ctl select { min-width: 0; }
+      .toggle-row {
+        gap: 0.75rem;
+        padding: 0.65rem 0;
+        font-size: 13px;
+      }
+      .chart-wrap { height: 180px; }
+      .tip::after {
+        left: 0;
+        transform: none;
+        max-width: min(260px, calc(100vw - 2rem));
+      }
+      .token-ca .ca-pop {
+        left: 0;
+        right: auto;
+        max-width: min(320px, calc(100vw - 2rem));
+      }
+      th, td { padding: 7px 5px; font-size: 12px; }
+      .persist-banner { font-size: 12px; padding: 0.65rem 0.75rem; }
+      #bt-debug-log { max-height: 12rem; }
+    }
+
+    /* Large phones / small tablets */
+    @media (min-width: 480px) and (max-width: 767px) {
+      .header-actions .btn { flex: 0 1 auto; }
+      .filters-row > .ctl,
+      .filters-row > label.ctl {
+        flex: 1 1 calc(33.333% - 0.45rem);
+        min-width: 6.5rem;
+      }
+    }
+
+    /* Tablets */
+    @media (min-width: 640px) and (max-width: 1023px) {
+      .page-shell { padding: 1.1rem 1rem 2.25rem; }
+      .btn-label-short { display: none; }
+      .btn-label-full { display: inline; }
+      .nav-tabs { flex-wrap: wrap; overflow-x: visible; }
+      .filters-row > .ctl,
+      .filters-row > label.ctl {
+        flex: 0 1 auto;
+      }
+      .ctl-sm { width: 5.25rem; }
+      .ctl-md { width: 6.25rem; }
+      .ctl-lg { width: 8.5rem; }
+      .chart-wrap { height: 200px; }
+      .overflow-x-auto table { min-width: 32rem; }
+    }
+
+    /* Desktop+ */
+    @media (min-width: 1024px) {
+      .page-shell {
+        max-width: 90rem;
+        padding: 1.5rem 1.5rem 3rem;
+      }
+      .btn-label-short { display: none; }
+      .btn-label-full { display: inline; }
+      .nav-tabs {
+        flex-wrap: wrap;
+        overflow-x: visible;
+        gap: 0.5rem;
+        padding: 0.65rem 0.15rem;
+      }
+      .nav-tabs .btn { min-height: 2.25rem; padding: 0.5rem 0.9rem; }
+      .header-actions { flex: 0 1 auto; max-width: none; }
+      .card { padding: 1.15rem; }
+      .filters-row { gap: 0.65rem 0.75rem; }
+      .chart-wrap { height: 240px; }
+      .section-title { margin-bottom: 0.85rem; }
+    }
+
+    /* Wide desktop */
+    @media (min-width: 1400px) {
+      .page-shell {
+        max-width: 96rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
+      }
+    }
+
+    /* Prefer reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; scroll-behavior: auto !important; }
+    }
+
+    /* Safe area (notched phones) */
+    @supports (padding: max(0px)) {
+      .page-shell {
+        padding-left: max(0.75rem, env(safe-area-inset-left));
+        padding-right: max(0.75rem, env(safe-area-inset-right));
+        padding-bottom: max(2rem, env(safe-area-inset-bottom));
+      }
+      .nav-tabs { top: env(safe-area-inset-top, 0px); }
+    }
+
+    /* Override inline chart heights on small screens */
+    @media (max-width: 639px) {
+      .chart-wrap { height: 170px !important; }
+      #logs-full, #system-logs { max-height: 55vh !important; }
+      #activity { max-height: 14rem !important; }
+    }
+    @media (min-width: 1024px) {
+      #logs-full, #system-logs { max-height: 55vh; }
+      .form-grid { gap: 1rem; }
+    }
   </style>
 </head>
 <body class="min-h-screen">
-  <div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+  <div class="page-shell">
     <!-- Header -->
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
-      <div>
-        <h1 class="text-xl sm:text-2xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
-        <p class="text-slate-500 text-sm">Pump.fun · migrations · anti-rug · snipers</p>
+    <div class="header-bar">
+      <div class="min-w-0">
+        <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
+        <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
-      <div class="flex flex-wrap items-center gap-2 card !py-2 !px-3">
+      <div class="header-actions card !py-2 !px-3">
         <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
         <strong id="status-text" class="text-sm has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
         <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = simulated fills. LIVE = real swaps with trading wallet keys">PAPER</span>
@@ -398,7 +647,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active" class="text-slate-100">—</strong></span>
         <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
         <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
-        <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop">Force Refresh Monitoring</button>
+        <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
         <button onclick="setMode('paper')" class="btn btn-secondary" title="Switch to paper trading — no real funds risked">Paper</button>
         <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
       </div>
@@ -407,10 +656,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <div id="persist-banner" class="persist-banner" role="alert"></div>
 
     <!-- Tabs -->
-    <nav class="flex flex-wrap gap-1.5 mb-4 sticky top-0 z-20 bg-[#0b1220]/95 backdrop-blur py-2 -mx-1 px-1">
+    <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Dashboard home: balance, positions, PnL charts, paper funding">Overview</button>
-      <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy">Smart Wallets</button>
-      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, migrations, and re-buy watches">Signals &amp; Trades</button>
+      <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
+      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, migrations, and re-buy watches"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals &amp; Trades</span></button>
       <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
       <button data-tab="config" onclick="showTab('config', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
       <button data-tab="logs" onclick="showTab('logs', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade events and system/API error logs for debugging">Logs</button>
@@ -418,13 +667,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Overview ========== -->
     <section data-tab-panel="overview" class="space-y-4">
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card"><div class="stat-label">Balance <span class="tip tip-below" tabindex="0" data-tip="Available SOL for new buys (paper balance or live trading wallet)."></span></div><div class="stat" id="ov-balance-mirror">—</div><div class="mint mt-1">Daily <span id="ov-daily-mirror">—</span></div></div>
         <div class="card"><div class="stat-label">Open Positions <span class="tip tip-below" tabindex="0" data-tip="How many tokens you currently hold waiting for TP, SL, or trailing exit."></span></div><div class="stat" id="open-count">—</div></div>
         <div class="card"><div class="stat-label">Net PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of realized profit/loss from closed trades this session/day."></span></div><div class="stat" id="stat-pnl">—</div><div class="mint mt-1" id="stat-return">—</div></div>
         <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card"><div class="stat-label">Profit Factor <span class="tip tip-below" tabindex="0" data-tip="Gross wins ÷ gross losses. Above 1.0 means net profitable; 2.0+ is strong."></span></div><div class="stat" id="stat-pf">—</div><div class="mint mt-1" id="stat-pf-hint">—</div></div>
         <div class="card"><div class="stat-label">Max Drawdown <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div><div class="stat" id="stat-maxdd">—</div><div class="mint mt-1" id="stat-avg-hold">—</div></div>
         <div class="card !py-3">
@@ -434,10 +683,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Recent buy/sell signals generated from wallet activity."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
       </div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Total executed buys + sells (paper or live)."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
-        <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300" id="stat-detail">—</div></div>
+        <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
       <div class="card">
@@ -453,7 +702,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Open Positions <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span></div>
           <div class="overflow-x-auto max-h-72 overflow-y-auto">
@@ -479,13 +728,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Cumulative PnL <span class="tip" tabindex="0" data-tip="Running equity curve from closed trades over time."></span></div>
           <div class="chart-wrap"><canvas id="chart-cumulative"></canvas></div>
           <div class="chart-empty" id="chart-cumulative-empty" style="display:none">No closed trades yet</div>
         </div>
-        <div class="grid gap-4">
+        <div class="grid gap-3 sm:gap-4">
           <div class="card">
             <div class="section-title">By Wallet <span class="tip" tabindex="0" data-tip="PnL attributed to each smart wallet that triggered your copies."></span></div>
             <div class="chart-wrap" style="height:160px"><canvas id="chart-wallet"></canvas></div>
@@ -499,7 +748,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="grid md:grid-cols-2 gap-4">
+      <div class="grid sm:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Paper Funding <span class="tip" tabindex="0" data-tip="Add simulated SOL, reset paper balance, or wipe paper history. Does not affect live wallets."></span></div>
           <div class="filters-row">
@@ -692,10 +941,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="flex flex-wrap gap-2 items-center mb-3">
-          <div class="section-title !mb-0">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
-          <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain">Refresh Activity</button>
-          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop">Force Refresh Monitoring</button>
-          <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days">Prune Inactive (&gt;14d)</button>
+          <div class="section-title !mb-0 flex-1 min-w-[10rem]">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
+          <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
+          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
+          <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
           <span class="mint" id="gmgn-status"></span>
         </div>
         <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
@@ -898,8 +1147,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="flex flex-wrap gap-2 items-center mb-2">
           <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Start the simulation with current filters">Run Backtest</button>
           <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
-          <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV">Export CSV</button>
-          <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON">Export JSON</button>
+          <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV"><span class="btn-label-short">CSV</span><span class="btn-label-full">Export CSV</span></button>
+          <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON"><span class="btn-label-short">JSON</span><span class="btn-label-full">Export JSON</span></button>
           <span class="mint" id="bt-status">—</span>
         </div>
         <div id="bt-progress-wrap" class="hidden mb-2" title="Simulation progress">
@@ -916,17 +1165,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough. Check Compare Low/Med/High to add a risk-level breakdown."></span></div>
-        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 mb-3">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win Rate</div><div class="stat" id="bt-stat-wr">—</div><div class="mint mt-1" id="bt-stat-wr-sub">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Profit Factor</div><div class="stat" id="bt-stat-pf">—</div><div class="mint mt-1" id="bt-stat-expect">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Total Net PnL</div><div class="stat" id="bt-stat-pnl">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Max Drawdown</div><div class="stat" id="bt-stat-maxdd">—</div><div class="mint mt-1" id="bt-stat-dd">avg trade DD —</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Sharpe Ratio</div><div class="stat" id="bt-stat-sharpe">—</div><div class="mint mt-1">trade returns</div></div>
-          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Avg Win / Avg Loss</div><div class="stat text-base" id="bt-stat-avg">—</div><div class="mint mt-1" id="bt-stat-avg-sol">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Avg Win / Avg Loss</div><div class="stat text-base sm:text-xl" id="bt-stat-avg">—</div><div class="mint mt-1" id="bt-stat-avg-sol">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Number of Trades</div><div class="stat" id="bt-stat-trades">—</div><div class="mint mt-1" id="bt-stat-trades-sub">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win / Loss Ratio</div><div class="stat" id="bt-stat-wlr">—</div><div class="mint mt-1" id="bt-stat-wl-counts">—</div></div>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mb-3">
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Best / Worst</div><div class="stat text-base" id="bt-stat-bw">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Avg Hold</div><div class="stat text-base" id="bt-stat-hold">—</div><div class="mint mt-1" id="bt-stat-cost">RT cost —</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Return</div><div class="stat" id="bt-stat-return">—</div><div class="mint mt-1" id="bt-stat-risk-used">risk —</div></div>
@@ -978,7 +1227,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Cumulative Equity Curve <span class="tip" tabindex="0" data-tip="Paper bankroll over the simulation as trades close (starts at Start SOL)."></span></div>
           <div class="chart-wrap" style="height:280px"><canvas id="bt-chart-pnl"></canvas></div>
@@ -991,7 +1240,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Strategy Comparison <span class="tip" tabindex="0" data-tip="PnL and win rate for migration vs normal entries."></span></div>
           <div class="chart-wrap" style="height:240px"><canvas id="bt-chart-strategy"></canvas></div>
@@ -1041,7 +1290,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="hidden space-y-4">
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
           <div class="form-grid grid grid-cols-1 sm:grid-cols-2 gap-3" id="trade-config">
@@ -1106,7 +1355,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Filters &amp; Anti-Rug <span class="tip" tabindex="0" data-tip="Gates that must pass before a buy: convergence, liquidity, holder risk, honeypot, snipers."></span></div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1184,7 +1433,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="grid lg:grid-cols-2 gap-4">
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
           <div class="mb-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155">
