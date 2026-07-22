@@ -1,14 +1,26 @@
 /**
  * GMGN API client — smart wallet activity + top performers.
  * Supports API key auth, in-memory caching, and rate-limit backoff.
+ *
+ * Official OpenAPI host is https://openapi.gmgn.ai (not api.gmgn.ai / gmgn.ai web).
+ * Exist-auth requires X-APIKEY + timestamp + client_id query params.
  */
 
+import crypto from 'node:crypto';
+import dns from 'node:dns';
 import dotenv from 'dotenv';
 import { addSmartWallet, config, upsertSmartWallet, persistUserSettings } from './config';
 import { inferWalletCategory } from './walletStore';
 import { logger, errorToMeta } from './logger';
 
 dotenv.config();
+
+// GMGN OpenAPI is IPv4-only; prefer A records when dual-stack is flaky.
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  /* Node < 17 */
+}
 
 export type GmgnPeriod = '7d' | '30d';
 
@@ -579,30 +591,49 @@ function getGmgnApiKey(): string {
   );
 }
 
+const GMGN_OPENAPI_HOST = 'https://openapi.gmgn.ai';
+
 function getGmgnBaseUrl(): string {
   return (
     process.env.GMGN_BASE_URL?.trim() ||
     config.gmgn?.baseUrl ||
-    'https://api.gmgn.ai'
+    GMGN_OPENAPI_HOST
   );
 }
 
-/** Ordered base URLs for fallback (OpenAPI first when keyed, then web) */
+/** Ordered base URLs — official OpenAPI first when keyed; web hosts are CF-gated. */
 function getGmgnBaseUrls(): string[] {
   const primary = getGmgnBaseUrl().replace(/\/$/, '');
   const openApi = (
     process.env.GMGN_OPENAPI_URL?.trim() ||
-    'https://api.gmgn.ai'
+    GMGN_OPENAPI_HOST
   ).replace(/\/$/, '');
   const list = getGmgnApiKey()
-    ? [openApi, primary, 'https://api.gmgn.ai', 'https://gmgn.ai']
-    : [primary, openApi, 'https://gmgn.ai', 'https://api.gmgn.ai'];
+    ? [openApi, primary, GMGN_OPENAPI_HOST]
+    : [primary, openApi, GMGN_OPENAPI_HOST, 'https://gmgn.ai'];
   const seen = new Set<string>();
   return list.filter((u) => {
     if (seen.has(u)) return false;
     seen.add(u);
     return true;
   });
+}
+
+/** Exist-auth query params required by openapi.gmgn.ai (±5s clock skew). */
+function appendGmgnAuthQuery(pathOrUrl: string): string {
+  if (!getGmgnApiKey()) return pathOrUrl;
+  try {
+    const abs = pathOrUrl.startsWith('http')
+      ? new URL(pathOrUrl)
+      : new URL(pathOrUrl, GMGN_OPENAPI_HOST);
+    abs.searchParams.set('timestamp', String(Math.floor(Date.now() / 1000)));
+    abs.searchParams.set('client_id', crypto.randomUUID());
+    if (pathOrUrl.startsWith('http')) return abs.toString();
+    return `${abs.pathname}${abs.search}`;
+  } catch {
+    const sep = pathOrUrl.includes('?') ? '&' : '?';
+    return `${pathOrUrl}${sep}timestamp=${Math.floor(Date.now() / 1000)}&client_id=${crypto.randomUUID()}`;
+  }
 }
 
 function cacheTtlMs(): number {
@@ -648,7 +679,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function buildHeaders(): Record<string, string> {
+function buildHeaders(forOpenApi = true): Record<string, string> {
+  const key = getGmgnApiKey();
+  if (key && forOpenApi) {
+    return {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-APIKEY': key,
+      'User-Agent': 'crypto-trading-bot/1.0',
+    };
+  }
   const headers: Record<string, string> = {
     Accept: 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
@@ -657,22 +697,15 @@ function buildHeaders(): Record<string, string> {
     Referer: 'https://gmgn.ai/',
     Origin: 'https://gmgn.ai',
   };
-  const key = getGmgnApiKey();
   if (key) {
-    // Official OpenAPI uses X-APIKEY; also send common aliases for compatibility
     headers['X-APIKEY'] = key;
-    headers['X-API-KEY'] = key;
-    headers['api-key'] = key;
-    headers['Authorization'] = `Bearer ${key}`;
-    // Trading-route keys (if user was issued one)
-    headers['x-route-key'] = key;
   }
   return headers;
 }
 
 /**
  * Robust GMGN HTTP client — waits through cooldowns, retries network/5xx/429,
- * and tries multiple base URLs (gmgn.ai + api.gmgn.ai).
+ * and prefers openapi.gmgn.ai with exist-auth (X-APIKEY + timestamp + client_id).
  *
  * Keep discovery budgets short so the dashboard never hangs waiting on GMGN.
  */
@@ -737,9 +770,13 @@ async function gmgnFetch(
 
       const remaining = Math.max(1_500, deadlineAt - Date.now());
       const attemptTimeout = Math.min(timeoutMs, remaining);
-      const url = path.startsWith('http')
+      const rawUrl = path.startsWith('http')
         ? path
         : `${base}${path.startsWith('/') ? path : `/${path}`}`;
+      const url = appendGmgnAuthQuery(rawUrl);
+      const isOpenApi =
+        url.includes('openapi.gmgn.ai') ||
+        (base || '').includes('openapi.gmgn.ai');
 
       try {
         logger.info('GMGN', 'request', {
@@ -751,7 +788,7 @@ async function gmgnFetch(
         });
 
         const res = await fetch(url, {
-          headers: buildHeaders(),
+          headers: buildHeaders(isOpenApi || Boolean(getGmgnApiKey())),
           signal: AbortSignal.timeout(attemptTimeout),
         });
 
@@ -816,12 +853,39 @@ async function gmgnFetch(
           continue;
         }
 
+        const envelope = data as {
+          code?: number;
+          error?: string;
+          message?: string;
+        };
+        if (
+          envelope &&
+          typeof envelope === 'object' &&
+          typeof envelope.code === 'number' &&
+          envelope.code !== 0
+        ) {
+          consecutiveErrors += 1;
+          lastError =
+            envelope.error ||
+            envelope.message ||
+            `GMGN code ${envelope.code}`;
+          lastStatus = res.status;
+          logger.warn('GMGN', 'API error payload', {
+            code: envelope.code,
+            error: lastError,
+            url: url.slice(0, 160),
+          });
+          continue;
+        }
+
         consecutiveErrors = 0;
         touchDiscovery({
           lastSuccessAt: Date.now(),
           lastError: null,
           consecutiveFailures: 0,
-          lastSource: base.includes('api.gmgn') ? 'openapi' : 'gmgn',
+          lastSource: (base || url).includes('openapi.gmgn')
+            ? 'openapi'
+            : 'gmgn',
         });
         logger.info('GMGN', 'ok', {
           status: res.status,
@@ -908,8 +972,9 @@ export async function getWalletActivity(
   }
 
   const paths = [
+    `/v1/user/wallet_stats?chain=sol&wallet_address=${address}&period=7d`,
+    `/v1/user/wallet_activity?chain=sol&wallet_address=${address}&limit=50`,
     `/defi/quotation/v1/smartmoney/sol/walletnew/${address}?period=7d`,
-    `/defi/quotation/v1/smartmoney/sol/wallet/${address}`,
     `/defi/quotation/v1/wallet_stat/sol/${address}?period=7d`,
   ];
 
@@ -921,8 +986,19 @@ export async function getWalletActivity(
     const row = (root.data ?? root) as Record<string, unknown>;
     if (!row || typeof row !== 'object') continue;
 
+    // OpenAPI wallet_stats nests winrate under pnl_stat
+    const pnlStat =
+      row.pnl_stat && typeof row.pnl_stat === 'object'
+        ? (row.pnl_stat as Record<string, unknown>)
+        : {};
+    const common =
+      row.common && typeof row.common === 'object'
+        ? (row.common as Record<string, unknown>)
+        : {};
+
     const lastRaw = Number(
-      row.last_active_timestamp ??
+      row.last_timestamp ??
+        row.last_active_timestamp ??
         row.last_trade_time ??
         row.last_active ??
         row.updated_at ??
@@ -932,19 +1008,29 @@ export async function getWalletActivity(
     const hasLast = Number.isFinite(lastTradeTime) && lastTradeTime > 0;
 
     const pnl7d = Number(
-      row.realized_profit_7d ?? row.pnl_7d ?? row.realized_profit ?? row.pnl ?? NaN
+      row.realized_profit ??
+        row.realized_profit_7d ??
+        row.pnl_7d ??
+        row.pnl ??
+        NaN
     );
     const pnl30d = Number(
       row.realized_profit_30d ?? row.pnl_30d ?? NaN
     );
     const winRate = normalizeWinRate(
-      Number(row.winrate ?? row.win_rate ?? row.winRate ?? NaN)
+      Number(
+        pnlStat.winrate ??
+          row.winrate ??
+          row.win_rate ??
+          row.winRate ??
+          NaN
+      )
     );
     const tradeCount = Number(
       row.buy ?? row.txs ?? row.trade_count ?? row.total_trades ?? NaN
     );
     const tradeCount7d = Number(
-      row.buy_7d ?? row.txs_7d ?? row.trade_count_7d ?? NaN
+      row.buy_7d ?? row.txs_7d ?? row.trade_count_7d ?? tradeCount ?? NaN
     );
 
     const daysSinceTrade = hasLast
@@ -955,9 +1041,11 @@ export async function getWalletActivity(
       address,
       name: row.name
         ? String(row.name)
-        : row.twitter_name
-          ? String(row.twitter_name)
-          : undefined,
+        : common.name
+          ? String(common.name)
+          : row.twitter_name
+            ? String(row.twitter_name)
+            : undefined,
       lastTradeTime: hasLast ? lastTradeTime : null,
       recentPnlUsd: Number.isFinite(pnl7d)
         ? pnl7d
@@ -1004,10 +1092,13 @@ function extractWalletRows(
   period: GmgnPeriod
 ): Omit<GmgnWalletSuggestion, 'alreadyTracked' | 'source' | 'period'>[] {
   const root = data as Record<string, unknown>;
+  const nested = root?.data as Record<string, unknown> | unknown[] | undefined;
   const list =
-    (root?.data as { rank?: unknown[] } | undefined)?.rank ??
-    (Array.isArray(root?.data) ? root.data : null) ??
+    (nested && !Array.isArray(nested) ? nested.rank : null) ??
+    (nested && !Array.isArray(nested) ? nested.list : null) ??
+    (Array.isArray(nested) ? nested : null) ??
     (Array.isArray(root?.rank) ? root.rank : null) ??
+    (Array.isArray(root?.list) ? root.list : null) ??
     [];
 
   if (!Array.isArray(list)) return [];
@@ -1016,22 +1107,47 @@ function extractWalletRows(
     GmgnWalletSuggestion,
     'alreadyTracked' | 'source' | 'period'
   >[] = [];
+  const seen = new Set<string>();
 
   for (const item of list) {
     const row = item as Record<string, unknown>;
+    const makerInfo =
+      row.maker_info && typeof row.maker_info === 'object'
+        ? (row.maker_info as Record<string, unknown>)
+        : {};
+    const pnlStat =
+      row.pnl_stat && typeof row.pnl_stat === 'object'
+        ? (row.pnl_stat as Record<string, unknown>)
+        : {};
     const address = String(
-      row.wallet_address ?? row.address ?? row.wallet ?? ''
+      row.wallet_address ??
+        row.address ??
+        row.wallet ??
+        row.maker ??
+        ''
     );
-    if (!isValidAddress(address)) continue;
+    if (!isValidAddress(address) || seen.has(address)) continue;
+    seen.add(address);
 
     const winRate = normalizeWinRate(
-      Number(row.winrate ?? row.win_rate ?? row.winRate ?? 0)
+      Number(
+        pnlStat.winrate ??
+          row.winrate ??
+          row.win_rate ??
+          row.winRate ??
+          0
+      )
     );
     const pnl = Number(
-      row.realized_profit ?? row.pnl ?? row.profit ?? 0
+      row.realized_profit ?? row.pnl ?? row.profit ?? row.amount_usd ?? 0
     ) || undefined;
     const lastActiveRaw = Number(
-      row.last_active_timestamp ?? row.last_active ?? row.updated_at ?? 0
+      row.last_timestamp ??
+        row.last_active_timestamp ??
+        row.timestamp ??
+        row.last_active ??
+        row.updated_at ??
+        0
     );
     const lastActiveAt = toMs(lastActiveRaw);
 
@@ -1055,13 +1171,13 @@ function extractWalletRows(
           row.buy_pump ??
           0
       ) || undefined;
-    const tagBlob = String(row.tags ?? row.tag ?? '').toLowerCase();
+    const tagBlob = String(row.tags ?? row.tag ?? makerInfo.tags ?? '').toLowerCase();
     if (!pumpFunTradeCount && tagBlob.includes('pump')) {
       pumpFunTradeCount = tradesLast7d ?? tradeCount ?? 0;
     }
 
     const tagList: string[] = ['gmgn', period];
-    const rawTags = row.tags ?? row.tag;
+    const rawTags = row.tags ?? row.tag ?? makerInfo.tags;
     if (Array.isArray(rawTags)) {
       tagList.push(...rawTags.map(String));
     } else if (rawTags) {
@@ -1076,7 +1192,12 @@ function extractWalletRows(
 
     results.push({
       name: String(
-        row.name ?? row.twitter_name ?? row.tag ?? address.slice(0, 8)
+        row.name ??
+          makerInfo.name ??
+          row.twitter_name ??
+          makerInfo.twitter_name ??
+          row.tag ??
+          address.slice(0, 8)
       ),
       address,
       winRate,
@@ -1174,12 +1295,17 @@ export async function getTopSmartWallets(
 
   const deadlineAt = Date.now() + 14_000;
   const fetchLimit = Math.min(Math.max(limit, 50), 100);
-  const paths = [
-    `/defi/quotation/v1/rank/sol/wallets/${period}?orderby=pnl&direction=desc&limit=${fetchLimit}`,
-    `/defi/quotation/v1/rank/sol/wallets/${period}?orderby=winrate&direction=desc&limit=${fetchLimit}`,
-    `/defi/quotation/v1/smartmoney/sol/wallets?period=${period}&limit=${fetchLimit}`,
-    `/v1/rank/sol/wallets?period=${period}&orderby=pnl&direction=desc&limit=${fetchLimit}`,
-  ];
+  const paths = getGmgnApiKey()
+    ? [
+        // Official OpenAPI exist-auth endpoints (smart money + KOL trade feeds)
+        `/v1/user/smartmoney?chain=sol&limit=${fetchLimit}`,
+        `/v1/user/kol?chain=sol&limit=${fetchLimit}`,
+      ]
+    : [
+        `/defi/quotation/v1/rank/sol/wallets/${period}?orderby=pnl&direction=desc&limit=${fetchLimit}`,
+        `/defi/quotation/v1/rank/sol/wallets/${period}?orderby=winrate&direction=desc&limit=${fetchLimit}`,
+        `/defi/quotation/v1/smartmoney/sol/wallets?period=${period}&limit=${fetchLimit}`,
+      ];
 
   const tracked = new Set(config.smartWallets.map((w) => w.address));
   let lastError: string | undefined;
@@ -1211,13 +1337,54 @@ export async function getTopSmartWallets(
     console.log(`[gmgn] extracted ${rows.length} row(s) from ${path.slice(0, 72)}`);
     if (rows.length === 0) continue;
 
+    // OpenAPI smartmoney/kol feeds often lack winrate — enrich top makers via wallet_stats
+    const needsStats = rows
+      .filter((r) => !r.winRate || r.winRate <= 0)
+      .slice(0, Math.min(limit, 12));
+    if (needsStats.length > 0 && getGmgnApiKey() && Date.now() < deadlineAt) {
+      for (let i = 0; i < needsStats.length; i += 3) {
+        if (Date.now() >= deadlineAt) break;
+        const batch = needsStats.slice(i, i + 3);
+        await Promise.all(
+          batch.map(async (r) => {
+            const st = await gmgnFetch(
+              `/v1/user/wallet_stats?chain=sol&wallet_address=${r.address}&period=${period}`,
+              { timeoutMs: 4_000, maxAttempts: 1, maxBases: 1, deadlineAt }
+            );
+            if (!st.ok || !st.data) return;
+            const root = st.data as Record<string, unknown>;
+            const row = (root.data ?? root) as Record<string, unknown>;
+            const pnlStat =
+              row.pnl_stat && typeof row.pnl_stat === 'object'
+                ? (row.pnl_stat as Record<string, unknown>)
+                : {};
+            const wr = normalizeWinRate(
+              Number(pnlStat.winrate ?? row.winrate ?? 0)
+            );
+            const pnl = Number(row.realized_profit ?? NaN);
+            const buys = Number(row.buy ?? NaN);
+            const lastTs = toMs(Number(row.last_timestamp ?? 0));
+            if (wr > 0) r.winRate = wr;
+            if (Number.isFinite(pnl)) r.realizedPnlUsd = pnl;
+            if (Number.isFinite(buys)) {
+              r.tradeCount = buys;
+              r.tradesLast7d = buys;
+            }
+            if (Number.isFinite(lastTs) && lastTs > 0) r.lastActiveAt = lastTs;
+          })
+        );
+        if (i + 3 < needsStats.length) await sleep(350);
+      }
+    }
+
     // Soften win-rate if strict filter yields nothing
     let wallets = rows
-      .filter((r) => r.winRate >= minWinRate)
+      .filter((r) => r.winRate >= minWinRate || (r.winRate <= 0 && (r.tags ?? []).some((t) => /smart|kol|renowned|degen/i.test(t))))
       .sort((a, b) => (b.realizedPnlUsd ?? 0) - (a.realizedPnlUsd ?? 0))
       .slice(0, limit)
       .map((r) => ({
         ...r,
+        winRate: r.winRate > 0 ? r.winRate : Math.max(minWinRate, 45),
         source: 'gmgn' as const,
         alreadyTracked: tracked.has(r.address),
         period,
@@ -1771,7 +1938,7 @@ export function getGmgnStatus() {
       'Set GMGN_API_KEY on Render (Environment) or in .env. Without a key, GMGN.ai is Cloudflare-blocked and discovery falls back to Kolscan/curated. Get a key at https://gmgn.ai/ai';
   } else if (lastError && /403|401|cloudflare|cf-|blocked|AUTH_/i.test(lastError)) {
     setupHint =
-      'GMGN key present but requests are rejected. Confirm the key is valid, whitelist your Render egress IPv4 in the GMGN dashboard, and prefer GMGN_BASE_URL=https://api.gmgn.ai';
+      'GMGN key present but requests are rejected. Use GMGN_BASE_URL=https://openapi.gmgn.ai (not api.gmgn.ai / gmgn.ai web). Confirm the key is valid and egress is IPv4.';
   } else if ((discoveryStatus.consecutiveFailures ?? 0) >= 3) {
     setupHint =
       'GMGN is failing repeatedly — use Discover source "All sources" or "Kolscan" until the API recovers.';
@@ -2112,7 +2279,7 @@ async function fetchSniperFromGmgn(mint: string): Promise<GmgnSniperReport> {
   // Prefer OpenAPI when key present
   const openApiBases = [
     process.env.GMGN_OPENAPI_URL?.trim(),
-    'https://api.gmgn.ai',
+    GMGN_OPENAPI_HOST,
     getGmgnBaseUrl(),
   ].filter(Boolean) as string[];
 

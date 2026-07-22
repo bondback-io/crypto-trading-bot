@@ -59,6 +59,8 @@ Edit `.env`:
 | `PORT` | Dashboard port (default `3000`) |
 | `TRADING_MODE` | Optional override: `paper` or `live` |
 | `GMGN_API_KEY` | Optional GMGN API key for wallet activity / top lists |
+| `BIRDEYE_API_KEY` | Optional Birdeye key for token / smart-money signals |
+| `SOLANA_TRACKER_API_KEY` | Optional Solana Tracker key for Axiom / Photon leaderboards |
 | `JITO_ENABLED` | `true` to send live swaps via Jito bundles first |
 | `JITO_BLOCK_ENGINE` | Jito block engine URL (default mainnet) |
 | `JITO_TIP_LAMPORTS` | Tip per bundle (default `10000`) |
@@ -233,6 +235,7 @@ fly secrets set RPC_FALLBACKS="https://backup-rpc-1,https://backup-rpc-2"
 # Optional — better discovery / filters
 fly secrets set GMGN_API_KEY="your-gmgn-key"
 fly secrets set BIRDEYE_API_KEY="your-birdeye-key"
+fly secrets set SOLANA_TRACKER_API_KEY="your-solana-tracker-key"
 
 # Paper mode (default) — no wallet key needed
 # fly secrets set TRADING_MODE="paper"
@@ -270,6 +273,7 @@ fly secrets set \
 | `TRADING_WALLET_2` | Optional | Burner / second live wallet |
 | `GMGN_API_KEY` | Optional | Wallet discovery / activity |
 | `BIRDEYE_API_KEY` | Optional | Token / smart-money signals |
+| `SOLANA_TRACKER_API_KEY` | Optional | Axiom / Photon leaderboards |
 | `DATA_DIR` | Set in `fly.toml` | `/data` (volume mount) |
 | `HOST` / `PORT` | Set in `fly.toml` | `0.0.0.0` / `8080` |
 | `NODE_ENV` | Set in `fly.toml` | `production` |
@@ -490,6 +494,7 @@ Or use **New → Blueprint** with the included `render.yaml` (includes the disk)
 | `RPC_FALLBACKS` | Optional | Comma-separated backup RPCs |
 | `GMGN_API_KEY` | Optional | Better wallet discovery / activity |
 | `BIRDEYE_API_KEY` | Optional | Token / smart-money signals |
+| `SOLANA_TRACKER_API_KEY` | Optional | Axiom / Photon platform leaderboards (free tier at solanatracker.io) |
 | `TRADING_WALLET_1` / `PRIVATE_KEY` | Live only | Base58 secret — never commit |
 | `CORS_ORIGIN` | Optional | Only if calling the API from another domain |
 

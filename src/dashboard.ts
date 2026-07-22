@@ -838,6 +838,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <select id="discover-source" onchange="onDiscoverSourceChange()">
               <option value="all">All sources (best)</option>
               <option value="kolscan">Kolscan leaderboard</option>
+              <option value="axiom">Axiom (Solana Tracker)</option>
+              <option value="photon">Photon (Solana Tracker)</option>
+              <option value="bullx">BullX (offline)</option>
               <option value="gmgn">GMGN</option>
               <option value="birdeye">Birdeye</option>
               <option value="dexscreener">DexScreener flows</option>
@@ -1760,6 +1763,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             'Sources — GMGN: ' + data.sources.gmgn +
             ' · Birdeye: ' + data.sources.birdeye +
             ' · Kolscan: ' + data.sources.kolscan +
+            ' · Axiom: ' + (data.sources.axiom || '—') +
+            ' · Photon: ' + (data.sources.photon || '—') +
+            ' · BullX: ' + (data.sources.bullx || 'offline') +
             ' · DexScreener: ' + data.sources.dexscreener +
             ' · Curated: ' + data.sources.curated;
         }
@@ -3778,7 +3784,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             limit,
             minWinRate,
             force: !!force,
-            defaultSource: source === 'all' || source === 'kolscan' ? 'gmgn' : source,
+            defaultSource: source === 'all' || source === 'kolscan' || source === 'bullx' || source === 'pump' ? 'gmgn' : source,
             pumpFunFocus,
           };
           if (source === 'manual') {
@@ -3821,9 +3827,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (data.error ? ' · ' + data.error : '');
         if (keyEl) {
           const hasBird = data.discovery && data.discovery.hasBirdeyeKey;
-          keyEl.textContent = hasBird
-            ? 'Birdeye key ✓'
-            : (source === 'birdeye' ? 'No Birdeye key — using fallbacks' : 'GMGN may be CF-blocked · Kolscan/curated OK');
+          const hasSt = data.discovery && data.discovery.hasSolanaTrackerKey;
+          if (source === 'axiom' || source === 'photon') {
+            keyEl.textContent = hasSt
+              ? 'Solana Tracker key ✓'
+              : 'Set SOLANA_TRACKER_API_KEY for Axiom/Photon leaderboards';
+          } else if (source === 'bullx') {
+            keyEl.textContent = 'BullX Neo offline — use Axiom or Photon instead';
+          } else if (source === 'birdeye') {
+            keyEl.textContent = hasBird
+              ? 'Birdeye key ✓'
+              : 'No Birdeye key — using fallbacks';
+          } else {
+            keyEl.textContent = hasBird
+              ? 'Birdeye key ✓' + (hasSt ? ' · Tracker ✓' : '')
+              : (hasSt
+                  ? 'Solana Tracker ✓ · GMGN may be CF-blocked · Kolscan OK'
+                  : 'GMGN may be CF-blocked · Kolscan/curated OK · add SOLANA_TRACKER_API_KEY for Axiom/Photon');
+          }
         }
         if (related) {
           const toks = data.relatedTokens || data.hotLaunches || [];

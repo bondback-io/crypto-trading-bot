@@ -669,12 +669,27 @@ export interface BotConfig {
     cacheTtlMs: number;
   };
 
-  /** Multi-source wallet discovery (GMGN / Birdeye / DexScreener / Kolscan / manual) */
+  /** Multi-source wallet discovery (GMGN / Birdeye / Dex / Kolscan / Axiom / Photon / BullX / manual) */
   walletDiscovery: {
-    defaultSource: 'gmgn' | 'birdeye' | 'dexscreener' | 'kolscan' | 'manual' | 'all';
+    defaultSource:
+      | 'gmgn'
+      | 'birdeye'
+      | 'dexscreener'
+      | 'kolscan'
+      | 'axiom'
+      | 'photon'
+      | 'bullx'
+      | 'manual'
+      | 'all';
     cacheTtlMs: number;
     birdeyeApiKey: string;
     birdeyeBaseUrl: string;
+  };
+
+  /** Solana Tracker Data API (Axiom / Photon platform leaderboards) */
+  solanaTracker: {
+    apiKey: string;
+    baseUrl: string;
   };
 
   /** Multi-RPC + Jito + priority fees */
@@ -847,7 +862,7 @@ export const config: BotConfig = {
 
   gmgn: {
     apiKey: process.env.GMGN_API_KEY?.trim() || '',
-    baseUrl: process.env.GMGN_BASE_URL?.trim() || 'https://api.gmgn.ai',
+    baseUrl: process.env.GMGN_BASE_URL?.trim() || 'https://openapi.gmgn.ai',
     cacheTtlMs: 5 * 60 * 1000,
     minRequestGapMs: 350,
     preferGmgnActivity: true,
@@ -879,6 +894,9 @@ export const config: BotConfig = {
         s === 'manual' ||
         s === 'gmgn' ||
         s === 'kolscan' ||
+        s === 'axiom' ||
+        s === 'photon' ||
+        s === 'bullx' ||
         s === 'all'
       ) {
         return s as
@@ -886,6 +904,9 @@ export const config: BotConfig = {
           | 'birdeye'
           | 'dexscreener'
           | 'kolscan'
+          | 'axiom'
+          | 'photon'
+          | 'bullx'
           | 'manual'
           | 'all';
       }
@@ -895,6 +916,13 @@ export const config: BotConfig = {
     birdeyeApiKey: process.env.BIRDEYE_API_KEY?.trim() || '',
     birdeyeBaseUrl:
       process.env.BIRDEYE_BASE_URL?.trim() || 'https://public-api.birdeye.so',
+  },
+
+  solanaTracker: {
+    apiKey: process.env.SOLANA_TRACKER_API_KEY?.trim() || '',
+    baseUrl:
+      process.env.SOLANA_TRACKER_BASE_URL?.trim() ||
+      'https://data.solanatracker.io',
   },
 
   rpc: {
@@ -1721,6 +1749,15 @@ export function getConfigSnapshot() {
           config.walletDiscovery.birdeyeApiKey ||
           process.env.BIRDEYE_API_KEY
       ),
+      hasSolanaTrackerKey: Boolean(
+        config.solanaTracker.apiKey || process.env.SOLANA_TRACKER_API_KEY
+      ),
+    },
+    solanaTracker: {
+      hasApiKey: Boolean(
+        config.solanaTracker.apiKey || process.env.SOLANA_TRACKER_API_KEY
+      ),
+      baseUrl: config.solanaTracker.baseUrl,
     },
     rpc: {
       endpoints: config.rpc.endpoints.map((e) => ({

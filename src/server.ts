@@ -92,6 +92,7 @@ import {
   clearDiscoveryCache,
   type DiscoverySource,
 } from './walletDiscovery';
+import { getSolanaTrackerStatus } from './solanaTracker';
 import {
   getReBuyCandidates,
   getSellHistory,
@@ -1466,6 +1467,9 @@ export function createServer(): express.Application {
         'birdeye',
         'dexscreener',
         'kolscan',
+        'axiom',
+        'photon',
+        'bullx',
         'manual',
         'all',
       ];
@@ -1511,6 +1515,9 @@ export function createServer(): express.Application {
         'birdeye',
         'dexscreener',
         'kolscan',
+        'axiom',
+        'photon',
+        'bullx',
         'manual',
         'all',
       ];
@@ -1540,15 +1547,20 @@ export function createServer(): express.Application {
   });
 
   app.get('/api/discover-wallets/status', (_req: Request, res: Response) => {
+    const st = getSolanaTrackerStatus();
     res.json({
       ...getDiscoveryStatus(),
       gmgn: getGmgnStatus(),
       birdeye: getBirdeyeStatus(),
+      solanaTracker: st,
       sources: {
         gmgn: getGmgnStatus().ok ? 'ok' : getGmgnStatus().hasApiKey ? 'degraded' : 'missing_key',
         birdeye: getBirdeyeStatus().ok ? 'ok' : 'missing_key',
         kolscan: 'ok',
         dexscreener: 'ok',
+        axiom: st.hasApiKey ? 'ok' : 'missing_key',
+        photon: st.hasApiKey ? 'ok' : 'missing_key',
+        bullx: 'offline',
         curated: 'ok',
       },
     });

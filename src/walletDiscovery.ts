@@ -1,6 +1,6 @@
 /**
  * Multi-source smart wallet discovery.
- * Sources: GMGN | Birdeye | DexScreener (smart flows) | manual/curated.
+ * Sources: GMGN | Birdeye | DexScreener | Kolscan | Axiom | Photon | BullX | manual.
  */
 
 import { config } from './config';
@@ -16,14 +16,34 @@ import {
   hasBirdeyeKey,
   birdeyeRequest,
 } from './birdeye';
+import {
+  fetchPlatformLeaderboard,
+  hasSolanaTrackerKey,
+  type SolanaTrackerPlatform,
+} from './solanaTracker';
 
 export type DiscoverySource =
   | 'gmgn'
   | 'birdeye'
   | 'dexscreener'
   | 'kolscan'
+  | 'axiom'
+  | 'photon'
+  | 'bullx'
   | 'manual'
   | 'all';
+
+export const DISCOVERY_SOURCES: DiscoverySource[] = [
+  'gmgn',
+  'birdeye',
+  'dexscreener',
+  'kolscan',
+  'axiom',
+  'photon',
+  'bullx',
+  'manual',
+  'all',
+];
 
 export interface DiscoveredWallet {
   name: string;
@@ -720,6 +740,135 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
   }
 }
 
+/**
+ * Axiom / Photon (and best-effort BullX) via Solana Tracker PnL V2
+ * `GET /v2/pnl/leaderboard/top?platform=…`. Requires SOLANA_TRACKER_API_KEY.
+ * BullX Neo is largely offline; documented ST platforms are axiom / photon / bloom only.
+ */
+async function discoverFromPlatformLeaderboard(
+  source: 'axiom' | 'photon' | 'bullx',
+  limit: number,
+  period: GmgnPeriod = '7d'
+): Promise<DiscoveryResult> {
+  const tracked = trackedSet();
+  const label =
+    source === 'axiom' ? 'Axiom' : source === 'photon' ? 'Photon' : 'BullX';
+  const days: 7 | 30 = period === '30d' ? 30 : 7;
+
+  if (source === 'bullx') {
+    // Documented ST platform enum is axiom | photon | bloom — BullX Neo shut down ~2026.
+    // Still attempt once if a key is present in case historical tags exist.
+    if (!hasSolanaTrackerKey()) {
+      return {
+        source,
+        wallets: [],
+        fetchedAt: Date.now(),
+        cached: false,
+        message:
+          'BullX Neo appears offline/shut down — no public leaderboard API. Use Axiom or Photon (needs SOLANA_TRACKER_API_KEY).',
+        error: 'BullX offline',
+      };
+    }
+  } else if (!hasSolanaTrackerKey()) {
+    return {
+      source,
+      wallets: manualCurated(limit, source),
+      fetchedAt: Date.now(),
+      cached: false,
+      message: `${label} needs SOLANA_TRACKER_API_KEY (free at solanatracker.io/account/data-api) — curated fallback`,
+      error: 'SOLANA_TRACKER_API_KEY not set',
+    };
+  }
+
+  const platform: SolanaTrackerPlatform = source;
+  console.log(
+    `[discovery] Solana Tracker ${label} leaderboard limit=${limit} days=${days}`
+  );
+  const res = await fetchPlatformLeaderboard(platform, { limit, days });
+
+  if (!res.ok || res.traders.length === 0) {
+    const offlineNote =
+      source === 'bullx'
+        ? 'BullX Neo appears offline/shut down; Solana Tracker has no bullx platform filter.'
+        : `${label} empty or failed via Solana Tracker`;
+    return {
+      source,
+      wallets: source === 'bullx' ? [] : manualCurated(limit, source),
+      fetchedAt: Date.now(),
+      cached: false,
+      message: `${offlineNote}${res.error ? ` · ${res.error}` : ''}`,
+      error: res.error || (source === 'bullx' ? 'BullX offline' : 'Empty leaderboard'),
+    };
+  }
+
+  const wallets: DiscoveredWallet[] = res.traders
+    .filter((t) => isValidSolanaAddress(t.wallet))
+    .map((t) => {
+      const tradesLast7d = t.trades;
+      const winRate =
+        t.winRate != null
+          ? Math.round(t.winRate * 10) / 10
+          : undefined;
+      const isScalper = (tradesLast7d ?? 0) >= 20;
+      const score = Math.min(
+        100,
+        Math.round(
+          (winRate ?? 0) * 0.45 +
+            Math.min(35, (tradesLast7d ?? 0) / 3) +
+            (t.realizedPnlUsd && t.realizedPnlUsd > 0 ? 15 : 0) +
+            (isScalper ? 10 : 0)
+        )
+      );
+      return {
+        name: shortName(t.wallet, t.name),
+        address: t.wallet,
+        source,
+        winRate,
+        tradesLast7d,
+        tradeCount: tradesLast7d,
+        pumpFunTradeCount: isScalper
+          ? Math.round((tradesLast7d ?? 0) * 0.55)
+          : Math.round((tradesLast7d ?? 0) * 0.3),
+        realizedPnlUsd: t.realizedPnlUsd,
+        volumeUsd: t.volumeUsd,
+        smartFlowScore: score,
+        tags: [
+          source,
+          'solana-tracker',
+          ...(isScalper ? ['scalper'] : []),
+          'pump.fun',
+          ...(t.platforms ?? []),
+        ],
+        alreadyTracked: tracked.has(t.wallet),
+        notes: `${label} leaderboard via Solana Tracker`,
+        lastActiveAt: t.lastTradeAt ?? Date.now() - 12 * 60 * 60 * 1000,
+        metrics: {
+          winRate: winRate ?? 0,
+          trades7d: tradesLast7d ?? 0,
+          realizedPnlUsd: t.realizedPnlUsd ?? 0,
+          volumeUsd: t.volumeUsd ?? 0,
+          roi: t.roi ?? 0,
+          smartFlowScore: score,
+        },
+      };
+    });
+
+  wallets.sort(
+    (a, b) =>
+      (b.realizedPnlUsd ?? 0) - (a.realizedPnlUsd ?? 0) ||
+      (b.tradesLast7d ?? 0) - (a.tradesLast7d ?? 0) ||
+      (b.winRate ?? 0) - (a.winRate ?? 0)
+  );
+
+  return {
+    source,
+    wallets: wallets.slice(0, limit),
+    fetchedAt: Date.now(),
+    cached: false,
+    message: `${label} (Solana Tracker) · ${Math.min(wallets.length, limit)} wallet(s)`,
+  };
+}
+
 function mergeDiscovered(
   lists: DiscoveredWallet[][],
   limit: number
@@ -796,6 +945,22 @@ async function discoverAll(
   parts.push(dex.wallets);
   if (dex.error) errors.push(`dex: ${dex.error}`);
   console.log(`[discovery] all←dex ${dex.wallets.length}`);
+
+  if (hasSolanaTrackerKey()) {
+    const per = Math.max(8, Math.ceil(limit / 3));
+    const [ax, ph] = await Promise.all([
+      discoverFromPlatformLeaderboard('axiom', per, period),
+      discoverFromPlatformLeaderboard('photon', per, period),
+    ]);
+    parts.push(ax.wallets, ph.wallets);
+    if (ax.error) errors.push(`axiom: ${ax.error}`);
+    if (ph.error) errors.push(`photon: ${ph.error}`);
+    console.log(
+      `[discovery] all←axiom ${ax.wallets.length} photon ${ph.wallets.length}`
+    );
+  } else {
+    console.log('[discovery] all←axiom/photon skipped (no SOLANA_TRACKER_API_KEY)');
+  }
 
   parts.push(manualCurated(limit, 'manual'));
 
@@ -1079,6 +1244,15 @@ export async function findSmartWallets(
     case 'kolscan':
       result = await discoverFromKolscan(limit);
       break;
+    case 'axiom':
+      result = await discoverFromPlatformLeaderboard('axiom', limit, period);
+      break;
+    case 'photon':
+      result = await discoverFromPlatformLeaderboard('photon', limit, period);
+      break;
+    case 'bullx':
+      result = await discoverFromPlatformLeaderboard('bullx', limit, period);
+      break;
     case 'all':
       result = await discoverAll(limit, period, minWinRate, pumpFunFocus);
       break;
@@ -1132,6 +1306,7 @@ export function getDiscoveryStatus() {
   return {
     defaultSource: config.walletDiscovery?.defaultSource ?? 'gmgn',
     hasBirdeyeKey: hasBirdeyeKey(),
+    hasSolanaTrackerKey: hasSolanaTrackerKey(),
     cacheSize: cache.size,
     cacheTtlMs: cacheTtlMs(),
     last: lastDiscovery
