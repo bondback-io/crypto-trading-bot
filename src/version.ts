@@ -32,7 +32,9 @@ function readPackageJson(): {
   for (const file of candidates) {
     try {
       if (!fs.existsSync(file)) continue;
-      return JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      return JSON.parse(
+        fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+      ) as {
         version?: string;
         updatedAt?: string;
         buildUpdatedAt?: string;
