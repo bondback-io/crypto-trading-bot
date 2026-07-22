@@ -13,6 +13,7 @@ import {
   updateTradeConfig,
   updateFilterConfig,
   updateStrategyConfig,
+  updateSelectiveConfig,
   updatePaperConfig,
   persistUserSettings,
   getConfigSnapshot,
@@ -38,6 +39,7 @@ import { paperTrader } from './paperTrader';
 import { updateProfitStrategyConfig } from './profitStrategy';
 import {
   getRecentActivity,
+  getRecentSignals,
   getMonitorStatus,
   getWalletsWithActivity,
   pauseMonitor,
@@ -167,8 +169,8 @@ export function createServer(): express.Application {
   const bootedAt = Date.now();
 
   /**
-   * Render / load-balancer health check — always 200 when the process is up.
-   * Response shape: { status: "ok", uptime }
+   * Cloud / load-balancer health check — always 200 when the process is up.
+   * Used by Fly.io, Render, etc. Response: { status: "ok", uptime }
    */
   app.get('/health', (_req: Request, res: Response) => {
     res.status(200).json({
@@ -462,6 +464,24 @@ export function createServer(): express.Application {
     res.send(csv);
   });
 
+  app.get('/backtest/export.json', async (_req: Request, res: Response) => {
+    const { exportLastBacktestJson, getLastBacktest } = await import(
+      './backtest'
+    );
+    const json = exportLastBacktestJson();
+    if (!json) {
+      res.status(404).json({ ok: false, error: 'No backtest to export' });
+      return;
+    }
+    const id = getLastBacktest()?.id ?? 'backtest';
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${id}-report.json"`
+    );
+    res.send(json);
+  });
+
   app.get('/backtest/history', async (req: Request, res: Response) => {
     const { getBacktestHistory } = await import('./backtest');
     res.json({
@@ -735,6 +755,18 @@ export function createServer(): express.Application {
     res.json(getRecentActivity());
   });
 
+  app.get('/api/signals', (_req: Request, res: Response) => {
+    res.json({
+      signals: getRecentSignals(),
+      trade: {
+        baseTradeAmountSol:
+          config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
+        riskMultiplier: config.trade.riskMultiplier ?? 0.4,
+        convictionMultiplier: config.trade.convictionMultiplier ?? 1.45,
+      },
+    });
+  });
+
   app.get('/api/pump-activity', (req: Request, res: Response) => {
     const kind = String(req.query.kind || 'all') as
       | 'all'
@@ -909,14 +941,38 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/trade', (req: Request, res: Response) => {
-    const { tradeAmountSol, minProfitPercent, maxProfitPercent, stopLossPercent } =
-      req.body as Record<string, number>;
+    const {
+      tradeAmountSol,
+      baseTradeAmountSol,
+      riskMultiplier,
+      convictionMultiplier,
+      minProfitPercent,
+      maxProfitPercent,
+      stopLossPercent,
+    } = req.body as Record<string, number>;
 
     updateTradeConfig({
-      ...(tradeAmountSol !== undefined && { tradeAmountSol: Number(tradeAmountSol) }),
-      ...(minProfitPercent !== undefined && { minProfitPercent: Number(minProfitPercent) }),
-      ...(maxProfitPercent !== undefined && { maxProfitPercent: Number(maxProfitPercent) }),
-      ...(stopLossPercent !== undefined && { stopLossPercent: Number(stopLossPercent) }),
+      ...(baseTradeAmountSol !== undefined && {
+        baseTradeAmountSol: Number(baseTradeAmountSol),
+      }),
+      ...(tradeAmountSol !== undefined && {
+        tradeAmountSol: Number(tradeAmountSol),
+      }),
+      ...(riskMultiplier !== undefined && {
+        riskMultiplier: Number(riskMultiplier),
+      }),
+      ...(convictionMultiplier !== undefined && {
+        convictionMultiplier: Number(convictionMultiplier),
+      }),
+      ...(minProfitPercent !== undefined && {
+        minProfitPercent: Number(minProfitPercent),
+      }),
+      ...(maxProfitPercent !== undefined && {
+        maxProfitPercent: Number(maxProfitPercent),
+      }),
+      ...(stopLossPercent !== undefined && {
+        stopLossPercent: Number(stopLossPercent),
+      }),
     });
 
     res.json(config.trade);
@@ -937,6 +993,8 @@ export function createServer(): express.Application {
       'dailyLossLimitSol',
       'minActivityDays',
       'minTradesLast30d',
+      'minVolume24hUsd',
+      'minHolderCount',
     ] as const;
 
     const partial: Partial<Record<(typeof keys)[number], number>> = {};
@@ -1217,6 +1275,42 @@ export function createServer(): express.Application {
     });
 
     res.json(config.strategy);
+  });
+
+  app.post('/api/config/selective', (req: Request, res: Response) => {
+    const body = req.body as Record<string, unknown>;
+    const partial: Parameters<typeof updateSelectiveConfig>[0] = {};
+    const boolKeys = [
+      'enabled',
+      'requireConvergenceForNormal',
+      'allowSingleWalletMigration',
+    ] as const;
+    const numKeys = [
+      'minConvictionScore',
+      'minWalletsForTrade',
+      'minVolume24hUsd',
+      'minHolderCount',
+      'maxTradesPerHour',
+      'minMsBetweenTrades',
+      'riskScoreSizeCutoff',
+      'minRiskSizeMultiplier',
+      'extraConvergenceAboveRisk',
+      'highRiskConvergenceThreshold',
+    ] as const;
+
+    for (const key of boolKeys) {
+      if (body[key] !== undefined) {
+        partial[key] = Boolean(body[key]);
+      }
+    }
+    for (const key of numKeys) {
+      if (body[key] !== undefined) {
+        partial[key] = Number(body[key]);
+      }
+    }
+
+    const selective = updateSelectiveConfig(partial);
+    res.json(selective);
   });
 
   // --- GMGN smart wallet suggestions ---

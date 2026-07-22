@@ -349,7 +349,10 @@ export class PaperTrader {
       entryMarketCapUsd?: number;
     }
   ): Position | null {
-    const spendSol = solAmount ?? config.trade.tradeAmountSol;
+    const spendSol =
+      solAmount ??
+      config.trade.baseTradeAmountSol ??
+      config.trade.tradeAmountSol;
     const tokenName = (meta?.name || symbol || mintPrefix(mint)).trim();
     const tokenSymbol = (symbol || mintPrefix(mint)).trim();
     const label = formatTokenLabel(tokenSymbol, tokenName, mint);
@@ -579,9 +582,11 @@ export class PaperTrader {
       this.closedPositions = this.closedPositions.slice(-200);
     }
 
+    const perf = this.getStats();
     this.log(
       'sell',
-      `Sold ${label} — PnL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} SOL (${totalPct.toFixed(1)}%) [${reason}]`,
+      `Sold ${label} — PnL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} SOL (${totalPct.toFixed(1)}%) [${reason}] ` +
+        `· WR ${perf.winRatePct.toFixed(0)}% · PF ${perf.profitFactor} · maxDD ${perf.maxDrawdownPct}%`,
       {
         mint: position.mint,
         symbol: position.symbol,
@@ -1200,13 +1205,50 @@ export class PaperTrader {
       }
       return worst;
     }, null);
+
     const start = this.startingBalanceSol;
+    const grossWinSol = wins.reduce((s, p) => s + (p.pnlSol ?? 0), 0);
+    const grossLossSol = Math.abs(
+      losses.reduce((s, p) => s + (p.pnlSol ?? 0), 0)
+    );
+    const profitFactor =
+      grossLossSol > 0
+        ? grossWinSol / grossLossSol
+        : grossWinSol > 0
+          ? 999
+          : 0;
+
+    let peakEquity = start;
+    let equity = start;
+    let maxDrawdownPct = 0;
+    const sortedClosed = [...closed].sort(
+      (a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0)
+    );
+    for (const p of sortedClosed) {
+      equity += p.pnlSol ?? 0;
+      if (equity > peakEquity) peakEquity = equity;
+      if (peakEquity > 0) {
+        const dd = ((peakEquity - equity) / peakEquity) * 100;
+        if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+      }
+    }
+
+    const holdTimes = closed
+      .filter((p) => p.closedAt && p.openedAt)
+      .map((p) => (p.closedAt! - p.openedAt) / 1000);
+    const avgHoldSec =
+      holdTimes.length > 0
+        ? holdTimes.reduce((a, b) => a + b, 0) / holdTimes.length
+        : 0;
 
     return {
       totalTrades: closed.length,
       wins: wins.length,
       losses: losses.length,
       winRatePct: this.getWinRatePct(),
+      profitFactor: Number(profitFactor.toFixed(2)),
+      maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
+      avgHoldSec: Number(avgHoldSec.toFixed(0)),
       netPnlSol,
       dailyPnlSol: this.getDailyPnlSol(),
       avgWinPct,

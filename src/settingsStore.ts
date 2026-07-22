@@ -25,6 +25,7 @@ export interface PersistedBotSettings {
   strategy?: Record<string, unknown>;
   risk?: Record<string, unknown>;
   profitStrategy?: Record<string, unknown>;
+  selective?: Record<string, unknown>;
   paper?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;

@@ -59,11 +59,12 @@ import {
   getReBuyStatus,
 } from './reBuy';
 import {
-  calculatePositionSizeSol,
+  calculateDynamicPositionSize,
   isRiskHalted,
   onRiskHalt,
   getRiskStatus,
   clearRiskHalt,
+  type DynamicSizeResult,
 } from './risk';
 import {
   fetchTokenMetrics,
@@ -80,6 +81,12 @@ import {
   summarizeBondingCurve,
   formatBondingCurveLog,
 } from './bondingCurve';
+import {
+  evaluateSignalConviction,
+  canExecuteTradeNow,
+  recordTradeExecuted,
+  getTradeRateStatus,
+} from './signalQuality';
 
 export interface WalletBuyEvent {
   wallet: string;
@@ -148,6 +155,14 @@ export interface TradeSignal {
   /** Early bonding-curve smart money priority */
   earlyBuy?: boolean;
   earlyBuyerCount?: number;
+  /** High-conviction score 0–100 from selective gating */
+  convictionScore?: number;
+  /** Position size multiplier from risk/conviction scoring */
+  sizeMultiplier?: number;
+  /** Calculated dynamic buy size in SOL */
+  dynamicSizeSol?: number;
+  /** Human-readable sizing reason for logs / dashboard */
+  dynamicSizeReason?: string;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -159,6 +174,24 @@ const walletLastActivity = new Map<string, WalletLastActivity>();
 const tradedMints = new Set<string>();
 /** In-flight buy claims — prevents concurrent duplicate opens while filters await. */
 const pendingBuys = new Set<string>();
+/** Recent evaluated signals with dynamic size (for dashboard). */
+const recentSignals: Array<{
+  mint: string;
+  symbol: string;
+  name: string;
+  timestamp: number;
+  wallets: string[];
+  walletNames: string[];
+  isMigration: boolean;
+  nearMigration?: boolean;
+  earlyBuy?: boolean;
+  convictionScore?: number;
+  riskScore?: number;
+  dynamicSizeSol?: number;
+  dynamicSizeReason?: string;
+  accepted: boolean;
+}> = [];
+const MAX_RECENT_SIGNALS = 40;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
@@ -866,24 +899,26 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
 
   onSignalHandler?.(signal);
 
-  const sizeMult = config.strategy.migrationSizeMultiplier ?? 1.5;
-  const solAmount = resolveTradeSize('migration');
+  const sizing = resolveTradeSize('migration', {
+    riskScore: signal.antiRug?.riskScore,
+    convictionScore: signal.convictionScore,
+    sizeMultiplier: signal.sizeMultiplier,
+  });
+  recordSignalSizing(signal, sizing, true);
+  console.log(`[monitor] ${sizing.reason}`);
+
   const slippageBps =
     config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
-
-  console.log(
-    `[monitor] Migration size ${solAmount.toFixed(4)} SOL ` +
-      `(risk sizing; flat×${sizeMult} fallback unused when risk on)`
-  );
 
   const result = await executeBuy(signal.mint, signal.symbol, {
     sourceWallets: signal.wallets,
     sourceNames: signal.walletNames,
     name: signal.name,
-    solAmount,
+    solAmount: sizing.sizeSol,
     slippageBps,
     priority: true,
     strategyKind: 'migration',
+    sizeReason: sizing.reason,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -895,9 +930,10 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
   });
   finishBuy(event.mint, result.success);
   if (result.success) {
+    recordTradeExecuted();
     console.log(
       `[monitor] Migration priority trade executed (${result.mode}): ${label} ` +
-        `@ ${solAmount.toFixed(3)} SOL`
+        `@ ${sizing.sizeSol.toFixed(3)} SOL`
     );
   } else {
     console.error(`[monitor] Migration priority trade failed: ${result.error}`);
@@ -1291,6 +1327,17 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
 
   onSignalHandler?.(signal);
 
+  const kind: 'migration' | 'normal' =
+    signal.isMigration || signal.nearMigration || signal.earlyBuy
+      ? 'migration'
+      : 'normal';
+
+  let sizing = resolveTradeSize(kind, {
+    riskScore: signal.antiRug?.riskScore,
+    convictionScore: signal.convictionScore,
+    sizeMultiplier: signal.sizeMultiplier,
+  });
+
   const buyOpts: {
     sourceWallets?: string[];
     sourceNames?: string[];
@@ -1299,6 +1346,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     slippageBps?: number;
     priority?: boolean;
     strategyKind?: 'migration' | 'normal';
+    sizeReason?: string;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -1309,15 +1357,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sourceWallets: signal.wallets,
     sourceNames: signal.walletNames,
     name: signal.name,
-    strategyKind:
-      signal.isMigration || signal.nearMigration || signal.earlyBuy
-        ? 'migration'
-        : 'normal',
-    solAmount: resolveTradeSize(
-      signal.isMigration || signal.nearMigration || signal.earlyBuy
-        ? 'migration'
-        : 'normal'
-    ),
+    strategyKind: kind,
+    solAmount: sizing.sizeSol,
+    sizeReason: sizing.reason,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -1336,19 +1378,31 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
         ? config.strategy.enableEarlyCurvePriority !== false
         : config.strategy.enableBondingCurvePriority !== false)
   ) {
-    buyOpts.solAmount = resolveTradeSize('migration');
+    sizing = resolveTradeSize('migration', {
+      riskScore: signal.antiRug?.riskScore,
+      convictionScore: signal.convictionScore,
+      sizeMultiplier: signal.sizeMultiplier,
+    });
+    buyOpts.solAmount = sizing.sizeSol;
+    buyOpts.sizeReason = sizing.reason;
     buyOpts.slippageBps =
       config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
     buyOpts.priority = true;
     buyOpts.strategyKind = 'migration';
   }
 
+  recordSignalSizing(signal, sizing, true);
+  console.log(`[monitor] ${sizing.reason}`);
+
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
 
   if (result.success) {
+    recordTradeExecuted();
     console.log(
-      `[monitor] Copy trade executed (${result.mode}): ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}`
+      `[monitor] Copy trade executed (${result.mode}): ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}` +
+        (signal.convictionScore != null ? ` · conviction ${signal.convictionScore}` : '') +
+        ` · ${sizing.sizeSol.toFixed(4)} SOL`
     );
   } else {
     console.error(`[monitor] Copy trade failed: ${result.error}`);
@@ -1458,11 +1512,20 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
 
   onSignalHandler?.(signal);
 
+  const sizing = resolveTradeSize(signal.isMigration ? 'migration' : 'normal', {
+    riskScore: signal.antiRug?.riskScore,
+    convictionScore: signal.convictionScore,
+    sizeMultiplier: signal.sizeMultiplier,
+  });
+  recordSignalSizing(signal, sizing, true);
+  console.log(`[monitor] ${sizing.reason}`);
+
   const result = await executeBuy(mint, candidate.symbol, {
     sourceWallets: signal.wallets,
     sourceNames: signal.walletNames,
     name: candidate.name,
-    solAmount: resolveTradeSize(signal.isMigration ? 'migration' : 'normal'),
+    solAmount: sizing.sizeSol,
+    sizeReason: sizing.reason,
     strategyKind: signal.isMigration ? 'migration' : 'normal',
     antiRug: signal.antiRug
       ? {
@@ -1476,6 +1539,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
 
   finishBuy(mint, result.success);
   if (result.success) {
+    recordTradeExecuted();
     markReBought(mint, reason);
     console.log(
       `[monitor] Re-buy executed (${result.mode}): ${label} — ${reason}`
@@ -1491,11 +1555,53 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
   }
 }
 
-function resolveTradeSize(kind: 'migration' | 'normal'): number {
-  return calculatePositionSizeSol({
+function resolveTradeSize(
+  kind: 'migration' | 'normal',
+  opts?: {
+    riskScore?: number;
+    convictionScore?: number;
+    sizeMultiplier?: number;
+  }
+): DynamicSizeResult {
+  return calculateDynamicPositionSize({
     equitySol: paperTrader.getEquitySol(),
     kind,
+    riskScore: opts?.riskScore,
+    convictionScore: opts?.convictionScore,
+    sizeMultiplier: opts?.sizeMultiplier,
   });
+}
+
+function recordSignalSizing(
+  signal: TradeSignal,
+  sizing: DynamicSizeResult,
+  accepted: boolean
+): void {
+  signal.dynamicSizeSol = sizing.sizeSol;
+  signal.dynamicSizeReason = sizing.reason;
+  recentSignals.unshift({
+    mint: signal.mint,
+    symbol: signal.symbol,
+    name: signal.name,
+    timestamp: Date.now(),
+    wallets: signal.wallets,
+    walletNames: signal.walletNames,
+    isMigration: signal.isMigration,
+    nearMigration: signal.nearMigration,
+    earlyBuy: signal.earlyBuy,
+    convictionScore: signal.convictionScore,
+    riskScore: signal.antiRug?.riskScore,
+    dynamicSizeSol: sizing.sizeSol,
+    dynamicSizeReason: sizing.reason,
+    accepted,
+  });
+  if (recentSignals.length > MAX_RECENT_SIGNALS) {
+    recentSignals.length = MAX_RECENT_SIGNALS;
+  }
+}
+
+export function getRecentSignals() {
+  return recentSignals.slice(0, 30);
 }
 
 async function passesFilters(signal: TradeSignal): Promise<boolean> {
@@ -1619,6 +1725,48 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     }
   }
 
+  const rate = canExecuteTradeNow();
+  if (!rate.ok) {
+    console.log(`[monitor] Signal rejected — ${rate.reason}`);
+    paperTrader.addLog(
+      'info',
+      `Trade rate limit: ${rate.reason}`,
+      { mint: signal.mint, symbol: signal.symbol }
+    );
+    return false;
+  }
+
+  const conviction = evaluateSignalConviction(signal);
+  signal.convictionScore = conviction.score;
+  signal.sizeMultiplier = conviction.sizeMultiplier;
+  if (!conviction.pass) {
+    const detail = conviction.reasons.join('; ') || 'below threshold';
+    const preview = resolveTradeSize(
+      signal.isMigration || signal.nearMigration || signal.earlyBuy
+        ? 'migration'
+        : 'normal',
+      {
+        riskScore: signal.antiRug?.riskScore,
+        convictionScore: conviction.score,
+        sizeMultiplier: conviction.sizeMultiplier,
+      }
+    );
+    recordSignalSizing(signal, preview, false);
+    console.log(
+      `[monitor] Signal rejected — conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
+    );
+    paperTrader.addLog(
+      'info',
+      `Low conviction ${signal.symbol}: ${detail} (score ${conviction.score}) · would size ${preview.sizeSol.toFixed(4)} SOL`,
+      { mint: signal.mint, symbol: signal.symbol }
+    );
+    return false;
+  }
+  console.log(
+    `[monitor] Conviction OK ${signal.symbol}: score=${conviction.score} ` +
+      `size×${conviction.sizeMultiplier.toFixed(2)} wallets=${signal.wallets.length}`
+  );
+
   return true;
 }
 
@@ -1737,6 +1885,9 @@ export function getMonitorStatus(): {
   walletDiscovery: ReturnType<typeof getDiscoveryStatus>;
   birdeye: ReturnType<typeof getBirdeyeStatus>;
   pumpSmart: ReturnType<typeof getPumpSmartStatus>;
+  tradeRate: ReturnType<typeof getTradeRateStatus>;
+  selectiveEnabled: boolean;
+  recentSizedSignals: number;
 } {
   const risk = getRiskStatus({
     equitySol: paperTrader.getEquitySol(),
@@ -1759,6 +1910,9 @@ export function getMonitorStatus(): {
     walletDiscovery: getDiscoveryStatus(),
     birdeye: getBirdeyeStatus(),
     pumpSmart: getPumpSmartStatus(),
+    tradeRate: getTradeRateStatus(),
+    selectiveEnabled: config.selective?.enabled !== false,
+    recentSizedSignals: recentSignals.length,
   };
 }
 

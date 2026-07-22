@@ -47,16 +47,26 @@ export function isRunningOnRender(): boolean {
   );
 }
 
+export function isRunningOnFly(): boolean {
+  return Boolean(process.env.FLY_APP_NAME || process.env.FLY_MACHINE_ID);
+}
+
+/** True when running on a known cloud host that needs a mounted volume for data/ */
+export function isCloudHost(): boolean {
+  return isRunningOnRender() || isRunningOnFly();
+}
+
 export interface PersistenceStatus {
   dataDir: string;
   writable: boolean;
   onRender: boolean;
+  onFly: boolean;
   settingsExists: boolean;
   walletsExists: boolean;
   tradingWalletsExists: boolean;
   settingsPath: string;
   walletsPath: string;
-  /** True when Render is detected and persisted files are missing — typical Free tier / no disk */
+  /** True when cloud host is detected and persisted files are missing — no volume/disk */
   ephemeralLikely: boolean;
   warning: string | null;
 }
@@ -67,6 +77,7 @@ export function getPersistenceStatus(): PersistenceStatus {
   const walletsPath = dataFile('wallets.json');
   const tradingWalletsPath = dataFile('trading-wallets.json');
   const onRender = isRunningOnRender();
+  const onFly = isRunningOnFly();
 
   let writable = false;
   try {
@@ -84,25 +95,29 @@ export function getPersistenceStatus(): PersistenceStatus {
   const tradingWalletsExists = fs.existsSync(tradingWalletsPath);
 
   const ephemeralLikely =
-    onRender && (!settingsExists || !walletsExists);
+    (onRender || onFly) && (!settingsExists || !walletsExists);
 
   let warning: string | null = null;
   if (!writable) {
     warning =
       `Data directory is not writable (${dataDir}). Settings and wallets cannot be saved.`;
+  } else if (onFly && (!settingsExists || !walletsExists)) {
+    warning =
+      'Fly.io: mount a persistent volume at /data (fly.toml mounts.bot_data) and set DATA_DIR=/data. ' +
+      'Without a volume, settings and wallets reset on every deploy. ' +
+      'Create with: fly volumes create bot_data --region <region> --size 1';
   } else if (onRender && (!settingsExists || !walletsExists)) {
     warning =
       'Render Free has no persistent disk — the filesystem resets on every deploy and after idle spin-down. ' +
       'Upgrade to Starter (or higher), add a 1GB disk mounted at /opt/render/project/src/data, then re-import wallets and save settings. ' +
       'This is not a free-tier API limit; it is ephemeral storage.';
-  } else if (onRender) {
-    warning = null; // files present — disk (or luck within this boot) is working
   }
 
   return {
     dataDir,
     writable,
     onRender,
+    onFly,
     settingsExists,
     walletsExists,
     tradingWalletsExists,
@@ -118,7 +133,7 @@ export function logPersistenceStatus(): void {
   const s = getPersistenceStatus();
   console.log(`[persist] data dir: ${s.dataDir}`);
   console.log(
-    `[persist] writable=${s.writable} onRender=${s.onRender} ` +
+    `[persist] writable=${s.writable} onRender=${s.onRender} onFly=${s.onFly} ` +
       `settings=${s.settingsExists ? 'yes' : 'MISSING'} ` +
       `wallets=${s.walletsExists ? 'yes' : 'MISSING'}`
   );

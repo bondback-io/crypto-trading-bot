@@ -92,32 +92,128 @@ export function getDrawdownPct(equitySol: number): number {
 /**
  * Size a trade from portfolio risk %.
  * Falls back to flat tradeAmountSol when risk sizing disabled.
+ * Prefer calculateDynamicPositionSize for risk/conviction-aware sizing.
  */
 export function calculatePositionSizeSol(options: {
   equitySol: number;
   kind: 'migration' | 'normal';
   flatFallbackSol?: number;
+  riskScore?: number;
+  sizeMultiplier?: number;
 }): number {
-  const risk = config.risk ?? DEFAULT_RISK;
-  const rules = getStrategyRiskRules(options.kind);
-  const flat =
-    options.flatFallbackSol ??
-    config.trade.tradeAmountSol *
-      (options.kind === 'migration'
-        ? config.strategy.migrationSizeMultiplier ?? 1
-        : 1);
+  return calculateDynamicPositionSize(options).sizeSol;
+}
 
-  if (!risk.enabled || !risk.useRiskSizing) {
-    return Math.max(risk.minTradeSol, flat);
+export interface DynamicSizeResult {
+  sizeSol: number;
+  baseSol: number;
+  riskFactor: number;
+  convictionFactor: number;
+  migrationFactor: number;
+  reason: string;
+}
+
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * Dynamic position sizing from baseTradeAmountSol × risk × conviction.
+ * High anti-rug risk score → smaller (down to riskMultiplier × base).
+ * High conviction → larger (up to convictionMultiplier × base).
+ */
+export function calculateDynamicPositionSize(options: {
+  equitySol: number;
+  kind: 'migration' | 'normal';
+  flatFallbackSol?: number;
+  riskScore?: number;
+  convictionScore?: number;
+  sizeMultiplier?: number;
+}): DynamicSizeResult {
+  const risk = config.risk ?? DEFAULT_RISK;
+  const trade = config.trade;
+  const rules = getStrategyRiskRules(options.kind);
+
+  const baseSol =
+    options.flatFallbackSol ??
+    (trade.baseTradeAmountSol ?? trade.tradeAmountSol ?? 0.12);
+
+  const riskFloor = trade.riskMultiplier ?? 0.4;
+  const convCeil = trade.convictionMultiplier ?? 1.45;
+  const maxRisk = config.filters.maxRiskScore || 70;
+
+  // Risk factor: 1.0 at score 0 → riskFloor at maxRiskScore
+  let riskFactor = 1;
+  const riskScore = options.riskScore;
+  if (riskScore != null && Number.isFinite(riskScore)) {
+    const t = clamp01(riskScore / Math.max(1, maxRisk));
+    riskFactor = 1 - t * (1 - riskFloor);
   }
 
-  const pct = rules.riskPercentPerTrade || risk.riskPercentPerTrade;
-  let size = options.equitySol * (pct / 100);
-  if (rules.sizeMultiplier) size *= rules.sizeMultiplier;
+  // Conviction factor: 1.0 below 50 → convCeil at 100
+  let convictionFactor = 1;
+  const conviction = options.convictionScore;
+  if (conviction != null && Number.isFinite(conviction) && convCeil > 1) {
+    const t = clamp01((conviction - 50) / 50);
+    convictionFactor = 1 + t * (convCeil - 1);
+  }
+
+  // Optional external multiplier (selective sizing) — fold into risk side
+  if (options.sizeMultiplier != null && options.sizeMultiplier > 0) {
+    riskFactor *= options.sizeMultiplier;
+  }
+
+  const migrationFactor =
+    options.kind === 'migration'
+      ? config.strategy.migrationSizeMultiplier ?? 1
+      : 1;
+
+  let size = baseSol * riskFactor * convictionFactor * migrationFactor;
+
+  // Optional portfolio %-of-equity override when risk engine sizing is on
+  if (risk.enabled && risk.useRiskSizing && options.equitySol > 0) {
+    const pct = rules.riskPercentPerTrade || risk.riskPercentPerTrade;
+    let equitySize = options.equitySol * (pct / 100);
+    if (rules.sizeMultiplier) equitySize *= rules.sizeMultiplier;
+    // Blend: take the more conservative of equity sizing and dynamic base sizing
+    size = Math.min(size, equitySize * riskFactor * convictionFactor);
+  }
 
   size = Math.max(risk.minTradeSol, Math.min(risk.maxTradeSol, size));
-  const hardCap = Math.max(risk.maxTradeSol, config.trade.tradeAmountSol * 3);
-  return Math.min(size, hardCap);
+  const hardCap = Math.max(risk.maxTradeSol, baseSol * 3);
+  size = Math.min(size, hardCap);
+  size = Math.max(risk.minTradeSol, Number(size.toFixed(4)));
+
+  const parts: string[] = [];
+  if (riskScore != null) {
+    if (riskFactor < 0.75) {
+      parts.push(`high risk score (${Math.round(riskScore)})`);
+    } else if (riskFactor < 0.95) {
+      parts.push(`moderate risk (${Math.round(riskScore)})`);
+    } else {
+      parts.push(`low risk (${Math.round(riskScore)})`);
+    }
+  }
+  if (conviction != null && convictionFactor > 1.05) {
+    parts.push(`high conviction (${Math.round(conviction)})`);
+  } else if (conviction != null && conviction < 55) {
+    parts.push(`low conviction (${Math.round(conviction)})`);
+  }
+  if (options.kind === 'migration' && migrationFactor > 1) {
+    parts.push('migration priority');
+  }
+  if (parts.length === 0) parts.push('base size');
+
+  const reason = `Dynamic size: ${size.toFixed(4)} SOL - ${parts.join(' + ')}`;
+
+  return {
+    sizeSol: size,
+    baseSol,
+    riskFactor: Number(riskFactor.toFixed(3)),
+    convictionFactor: Number(convictionFactor.toFixed(3)),
+    migrationFactor,
+    reason,
+  };
 }
 
 export function evaluateRiskLimits(input: {

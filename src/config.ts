@@ -75,40 +75,55 @@ export interface RiskConfig {
 export const DEFAULT_RISK: RiskConfig = {
   enabled: true,
   useRiskSizing: true,
-  riskPercentPerTrade: 1.5,
-  maxTradeSol: 1,
+  riskPercentPerTrade: 1.2,
+  maxTradeSol: 0.8,
   minTradeSol: 0.02,
-  weeklyLossLimitSol: 5,
-  maxDrawdownPct: 25,
+  weeklyLossLimitSol: 4,
+  maxDrawdownPct: 20,
   autoPauseOnLimit: true,
   tieredSellEnabled: true,
-  trailingStopPct: 20,
-  trailingStopPercent: 20,
-  trailingActivationProfit: 30,
+  trailingStopPct: 18,
+  trailingStopPercent: 18,
+  trailingActivationProfit: 25,
   normal: {
-    riskPercentPerTrade: 1.5,
-    trailingStopPct: 20,
-    hardStopLossPct: -35,
+    riskPercentPerTrade: 1.2,
+    trailingStopPct: 18,
+    hardStopLossPct: -28,
     tiers: [
-      { profitPct: 50, sellPct: 40 },
-      { profitPct: 100, sellPct: 30 },
+      { profitPct: 40, sellPct: 35 },
+      { profitPct: 80, sellPct: 30 },
     ],
   },
   migration: {
-    riskPercentPerTrade: 2,
-    trailingStopPct: 25,
-    hardStopLossPct: -40,
-    sizeMultiplier: 1.25,
+    riskPercentPerTrade: 1.8,
+    trailingStopPct: 22,
+    hardStopLossPct: -32,
+    sizeMultiplier: 1.15,
     tiers: [
-      { profitPct: 50, sellPct: 40 },
-      { profitPct: 100, sellPct: 30 },
+      { profitPct: 40, sellPct: 35 },
+      { profitPct: 80, sellPct: 30 },
     ],
   },
 };
 
 export interface TradeConfig {
-  /** SOL per copy trade (~$10–20) */
+  /**
+   * Base SOL per copy trade before risk/conviction scaling.
+   * Alias: tradeAmountSol (kept in sync for older dashboard/API clients).
+   */
+  baseTradeAmountSol: number;
+  /** Same as baseTradeAmountSol — preferred legacy name */
   tradeAmountSol: number;
+  /**
+   * Floor size multiplier applied at max risk score (e.g. 0.4 = 40% of base).
+   * Lower = smaller positions on high-risk tokens.
+   */
+  riskMultiplier: number;
+  /**
+   * Ceiling size multiplier at max conviction (e.g. 1.5 = +50% on strong signals).
+   * 1 = no conviction boost.
+   */
+  convictionMultiplier: number;
   /** Minimum take-profit % (bot picks random target in [min, max]) */
   minProfitPercent: number;
   maxProfitPercent: number;
@@ -139,14 +154,59 @@ export interface ProfitStrategyConfig {
 
 export const DEFAULT_PROFIT_STRATEGY: ProfitStrategyConfig = {
   enabled: true,
-  takeInitialPercent: 100,
-  partialSellAt: 80,
-  partialSellPercent: 50,
-  trailingStopAfter: 150,
-  trailingStopPct: 25,
-  bagPercent: 30,
+  takeInitialPercent: 90,
+  partialSellAt: 60,
+  partialSellPercent: 45,
+  trailingStopAfter: 120,
+  trailingStopPct: 20,
+  bagPercent: 25,
   riskBasedAdjustment: true,
-  highRiskScoreThreshold: 60,
+  highRiskScoreThreshold: 50,
+};
+
+/** Selective entry gating — high-conviction setups only */
+export interface SelectiveTradingConfig {
+  enabled: boolean;
+  /** Minimum conviction score 0–100 to execute */
+  minConvictionScore: number;
+  /** Block single-wallet entries unless migration/near-migration priority */
+  requireConvergenceForNormal: boolean;
+  /** Allow 1-wallet buys on migration / near-migration events */
+  allowSingleWalletMigration: boolean;
+  /** Floor on distinct smart wallets (before convergenceRequired) */
+  minWalletsForTrade: number;
+  /** Min 24h volume USD (also checked in anti-rug when set on filters) */
+  minVolume24hUsd: number;
+  /** Min holder count from Birdeye/metrics */
+  minHolderCount: number;
+  /** Max buys per rolling hour (0 = unlimited) */
+  maxTradesPerHour: number;
+  /** Min ms between any two buys */
+  minMsBetweenTrades: number;
+  /** Risk score at/above which position size scales down */
+  riskScoreSizeCutoff: number;
+  /** Size multiplier at maxRiskScore (e.g. 0.3 = 30% of normal) */
+  minRiskSizeMultiplier: number;
+  /** Extra wallets required when risk score is high */
+  extraConvergenceAboveRisk: number;
+  /** Risk score threshold for extra convergence requirement */
+  highRiskConvergenceThreshold: number;
+}
+
+export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
+  enabled: true,
+  minConvictionScore: 55,
+  requireConvergenceForNormal: true,
+  allowSingleWalletMigration: true,
+  minWalletsForTrade: 2,
+  minVolume24hUsd: 8_000,
+  minHolderCount: 40,
+  maxTradesPerHour: 6,
+  minMsBetweenTrades: 90_000,
+  riskScoreSizeCutoff: 35,
+  minRiskSizeMultiplier: 0.3,
+  extraConvergenceAboveRisk: 1,
+  highRiskConvergenceThreshold: 45,
 };
 
 export interface FilterConfig {
@@ -200,6 +260,10 @@ export interface FilterConfig {
   minTradesLast30d: number;
   /** Auto-disable / prune wallets that fail activity checks */
   enableActivityFilter: boolean;
+  /** Min 24h volume USD — skip in anti-rug when data available (0 = off) */
+  minVolume24hUsd: number;
+  /** Min holder count — skip in anti-rug when data available (0 = off) */
+  minHolderCount: number;
 }
 
 export interface StrategyConfig {
@@ -257,6 +321,8 @@ export interface BotConfig {
   risk: RiskConfig;
   /** Tiered profit-taking: recover initial → partials → trail + bag */
   profitStrategy: ProfitStrategyConfig;
+  /** High-conviction entry gating and trade-rate limits */
+  selective: SelectiveTradingConfig;
 
   /** GMGN API settings */
   gmgn: {
@@ -366,38 +432,43 @@ export const config: BotConfig = {
   activeTradingWalletId: null,
 
   trade: {
-    tradeAmountSol: 0.15,
-    minProfitPercent: 50,
-    maxProfitPercent: 100,
-    stopLossPercent: -35,
+    baseTradeAmountSol: 0.12,
+    tradeAmountSol: 0.12,
+    riskMultiplier: 0.4,
+    convictionMultiplier: 1.45,
+    minProfitPercent: 45,
+    maxProfitPercent: 90,
+    stopLossPercent: -28,
   },
 
   filters: {
     minWinRate: 0,
-    minLiquidity: 5_000,
-    maxDevHoldPct: 15,
-    maxDevPercent: 15,
-    maxTopHolderPct: 40,
-    maxHolderConcentration: 40,
+    minLiquidity: 10_000,
+    maxDevHoldPct: 12,
+    maxDevPercent: 12,
+    maxTopHolderPct: 35,
+    maxHolderConcentration: 35,
     enableAntiRug: true,
     requireLiquidityLocked: false,
     skipIfDevRecentSells: true,
     checkHoneypot: true,
-    maxEstimatedTaxPct: 25,
-    maxRiskScore: 70,
-    skipIfMintAuthority: false,
+    maxEstimatedTaxPct: 20,
+    maxRiskScore: 55,
+    skipIfMintAuthority: true,
     enableSniperFilter: true,
     sniperSensitivity: 'medium',
     maxSniperCount: 0,
     maxBundlerPct: 0,
     maxInsiderPct: 0,
     maxSniperScore: 0,
-    convergenceRequired: 2,
-    maxConcurrentPositions: 5,
-    dailyLossLimitSol: 2,
+    convergenceRequired: 3,
+    maxConcurrentPositions: 3,
+    dailyLossLimitSol: 1.5,
     minActivityDays: 7,
     minTradesLast30d: 5,
     enableActivityFilter: true,
+    minVolume24hUsd: 8_000,
+    minHolderCount: 40,
   },
 
   strategy: {
@@ -425,6 +496,8 @@ export const config: BotConfig = {
   },
 
   risk: { ...DEFAULT_RISK },
+
+  selective: { ...DEFAULT_SELECTIVE },
 
   profitStrategy: {
     ...DEFAULT_PROFIT_STRATEGY,
@@ -608,6 +681,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       },
     },
     profitStrategy: { ...config.profitStrategy },
+    selective: { ...config.selective },
     paper: { ...config.paper },
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
@@ -652,6 +726,9 @@ export function applyPersistedSettings(): boolean {
       saved.profitStrategy
     );
   }
+  if (saved.selective) {
+    config.selective = deepMerge(config.selective, saved.selective);
+  }
   if (saved.paper) config.paper = deepMerge(config.paper, saved.paper);
   if (saved.mev) config.mev = deepMerge(config.mev, saved.mev);
   if (saved.gmgnDiscovery) {
@@ -687,6 +764,18 @@ export function applyPersistedSettings(): boolean {
   // Keep filter aliases in sync after merge
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;
+  }
+  // Keep trade size aliases in sync
+  if (config.trade.baseTradeAmountSol != null) {
+    config.trade.tradeAmountSol = config.trade.baseTradeAmountSol;
+  } else if (config.trade.tradeAmountSol != null) {
+    config.trade.baseTradeAmountSol = config.trade.tradeAmountSol;
+  }
+  if (config.trade.riskMultiplier == null) {
+    config.trade.riskMultiplier = 0.4;
+  }
+  if (config.trade.convictionMultiplier == null) {
+    config.trade.convictionMultiplier = 1.45;
   }
   if (config.risk.trailingStopPercent != null) {
     config.risk.trailingStopPct = config.risk.trailingStopPercent;
@@ -772,7 +861,7 @@ export function addTradingWallet(input: {
     return {
       ok: false,
       error:
-        'envVar must be PRIVATE_KEY or TRADING_WALLET_* (e.g. TRADING_WALLET_3)',
+        'envVar must be PRIVATE_KEY, WALLET_PRIVATE_KEY, or TRADING_WALLET_* (e.g. TRADING_WALLET_3)',
     };
   }
   if (config.tradingWallets.some((w) => w.envVar === envVar)) {
@@ -823,7 +912,7 @@ export function listTradingWalletSlots(): TradingWalletSlot[] {
 
 /**
  * Resolve secret material for a slot from env only.
- * Main role falls back to PRIVATE_KEY if TRADING_WALLET_1 empty.
+ * Main role falls back to PRIVATE_KEY / WALLET_PRIVATE_KEY if TRADING_WALLET_1 empty.
  * NEVER log the returned value.
  */
 export function resolveTradingWalletSecret(
@@ -834,12 +923,12 @@ export function resolveTradingWalletSecret(
   const primary = process.env[slot.envVar]?.trim();
   if (primary) return primary;
 
-  // Legacy / convenience: main wallet may use PRIVATE_KEY
-  if (
-    (slot.role === 'main' || slot.envVar === 'TRADING_WALLET_1') &&
-    process.env.PRIVATE_KEY?.trim()
-  ) {
-    return process.env.PRIVATE_KEY.trim();
+  // Legacy / convenience aliases for the main trading key
+  if (slot.role === 'main' || slot.envVar === 'TRADING_WALLET_1') {
+    const alias =
+      process.env.PRIVATE_KEY?.trim() ||
+      process.env.WALLET_PRIVATE_KEY?.trim();
+    if (alias) return alias;
   }
 
   return null;
@@ -886,6 +975,26 @@ export function updateConfig(partial: Partial<BotConfig>): void {
 
 export function updateTradeConfig(partial: Partial<TradeConfig>): void {
   Object.assign(config.trade, partial);
+  // Keep base ↔ legacy tradeAmount aliases in sync
+  if (partial.baseTradeAmountSol != null) {
+    config.trade.tradeAmountSol = partial.baseTradeAmountSol;
+    config.trade.baseTradeAmountSol = partial.baseTradeAmountSol;
+  } else if (partial.tradeAmountSol != null) {
+    config.trade.baseTradeAmountSol = partial.tradeAmountSol;
+    config.trade.tradeAmountSol = partial.tradeAmountSol;
+  }
+  if (partial.riskMultiplier != null) {
+    config.trade.riskMultiplier = Math.min(
+      1,
+      Math.max(0.1, Number(partial.riskMultiplier))
+    );
+  }
+  if (partial.convictionMultiplier != null) {
+    config.trade.convictionMultiplier = Math.min(
+      3,
+      Math.max(1, Number(partial.convictionMultiplier))
+    );
+  }
   persistUserSettings();
 }
 
@@ -905,6 +1014,14 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
 export function updateStrategyConfig(partial: Partial<StrategyConfig>): void {
   Object.assign(config.strategy, partial);
   persistUserSettings();
+}
+
+export function updateSelectiveConfig(
+  partial: Partial<SelectiveTradingConfig>
+): SelectiveTradingConfig {
+  config.selective = { ...config.selective, ...partial };
+  persistUserSettings();
+  return { ...config.selective };
 }
 
 export function updatePaperConfig(
@@ -1022,6 +1139,7 @@ export function getConfigSnapshot() {
       },
     },
     profitStrategy: { ...config.profitStrategy },
+    selective: { ...config.selective },
     paper: { ...config.paper },
     trading: {
       activeId: config.activeTradingWalletId,

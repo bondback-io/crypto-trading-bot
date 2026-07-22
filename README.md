@@ -129,6 +129,306 @@ All settings are editable via the dashboard sliders/toggles or the API.
 
 Wallets are stored in `data/wallets.json` and loaded on startup. Add/remove via dashboard or API — changes persist automatically.
 
+## Deploy on Fly.io (persistent 24/7)
+
+This is the **recommended** way to run the bot in the cloud. Fly keeps one machine running with **no idle sleep**, so:
+
+- wallet polling continues day and night
+- Solana migration **WebSockets** stay connected
+- settings and smart wallets survive deploys on a **persistent volume**
+
+You need: a free [Fly.io](https://fly.io) account, this repo on your machine, and a **paid Solana RPC** URL (Helius / QuickNode / etc.).
+
+---
+
+### Step 1 — Install the Fly CLI
+
+**macOS / Linux:**
+
+```bash
+curl -L https://fly.io/install.sh | sh
+```
+
+Then add `fly` to your PATH if the installer prints a reminder (often `export FLYCTL_INSTALL=...` in `~/.bashrc` / `~/.zshrc`).
+
+**Windows (PowerShell):**
+
+```powershell
+pwsh -Command "iwr https://fly.io/install.ps1 -useb | iex"
+```
+
+Confirm it works:
+
+```bash
+fly version
+```
+
+Sign in (opens a browser):
+
+```bash
+fly auth login
+```
+
+---
+
+### Step 2 — Launch the app (`fly launch`)
+
+From the **project root** (where `fly.toml` and `Dockerfile` live):
+
+```bash
+fly launch
+```
+
+Or without deploying yet:
+
+```bash
+fly launch --no-deploy
+```
+
+**Follow the prompts like this (beginner defaults):**
+
+| Prompt | What to choose |
+|--------|----------------|
+| Create app / app name | Accept or pick a unique name (e.g. `solana-copy-bot`) |
+| Existing `fly.toml`? | **Yes — use existing** (do **not** overwrite; we need `auto_stop_machines = "off"`) |
+| Region | Pick one close to you (file default: `sjc`) |
+| Postgres / Redis / Upstash? | **No** |
+| Deploy now? | **No** if you still need a volume + secrets (recommended) |
+
+You can also run: `npm run fly:launch`
+
+---
+
+### Step 3 — Create the persistent volume
+
+Wallets and dashboard settings are saved under `/data`. Create a 1 GB volume in the **same region** as `primary_region` in `fly.toml`:
+
+```bash
+fly volumes create bot_data --region sjc --size 1
+```
+
+(Change `sjc` if you chose another region.)
+
+Check:
+
+```bash
+fly volumes list
+```
+
+---
+
+### Step 4 — Set secrets (env vars)
+
+Non-secret defaults are already in `fly.toml` (`NODE_ENV`, `HOST`, `PORT`, `DATA_DIR=/data`, `TRADING_MODE=paper`).
+
+**Set secrets** (never put these in git or `fly.toml`):
+
+```bash
+# Required — use a paid RPC (public mainnet-beta will 429 and break trading)
+fly secrets set RPC_URL="https://your-helius-or-quicknode-url"
+
+# Strongly recommended
+fly secrets set RPC_FALLBACKS="https://backup-rpc-1,https://backup-rpc-2"
+
+# Optional — better discovery / filters
+fly secrets set GMGN_API_KEY="your-gmgn-key"
+fly secrets set BIRDEYE_API_KEY="your-birdeye-key"
+
+# Paper mode (default) — no wallet key needed
+# fly secrets set TRADING_MODE="paper"
+
+# Live trading only — pick ONE of these for the main key (base58 secret):
+# fly secrets set TRADING_MODE="live"
+# fly secrets set TRADING_WALLET_1="YOUR_BASE58_PRIVATE_KEY"
+#   or aliases:
+# fly secrets set PRIVATE_KEY="YOUR_BASE58_PRIVATE_KEY"
+# fly secrets set WALLET_PRIVATE_KEY="YOUR_BASE58_PRIVATE_KEY"
+
+# Optional second / burner wallet
+# fly secrets set TRADING_WALLET_2="YOUR_BASE58_PRIVATE_KEY"
+```
+
+You can set several at once:
+
+```bash
+fly secrets set \
+  RPC_URL="https://..." \
+  RPC_FALLBACKS="https://...,https://..." \
+  TRADING_MODE="paper"
+```
+
+#### Important environment variables
+
+| Variable | Required? | Description |
+|----------|-----------|-------------|
+| `RPC_URL` | **Yes** | Primary Solana HTTP RPC (paid endpoint) |
+| `RPC_FALLBACKS` | Recommended | Comma-separated backup RPCs |
+| `TRADING_MODE` | Recommended | `paper` (default) or `live` |
+| `TRADING_WALLET_1` | Live only | Preferred live wallet private key (base58) |
+| `PRIVATE_KEY` | Live only | Alias for main wallet key |
+| `WALLET_PRIVATE_KEY` | Live only | Alias for main wallet key |
+| `TRADING_WALLET_2` | Optional | Burner / second live wallet |
+| `GMGN_API_KEY` | Optional | Wallet discovery / activity |
+| `BIRDEYE_API_KEY` | Optional | Token / smart-money signals |
+| `DATA_DIR` | Set in `fly.toml` | `/data` (volume mount) |
+| `HOST` / `PORT` | Set in `fly.toml` | `0.0.0.0` / `8080` |
+| `NODE_ENV` | Set in `fly.toml` | `production` |
+| `CORS_ORIGIN` | Rarely | Only if a separate frontend calls the API |
+| `JITO_ENABLED` / `JITO_UUID` | Optional | Live MEV / Jito |
+
+List secrets (names only, not values):
+
+```bash
+fly secrets list
+```
+
+---
+
+### Step 5 — Deploy
+
+```bash
+fly deploy
+```
+
+Or: `npm run fly:deploy`
+
+Fly builds the `Dockerfile`, starts the machine, mounts `/data`, and runs `node dist/index.js`.
+
+Keep **exactly one** machine:
+
+```bash
+fly scale count 1
+```
+
+---
+
+### Step 6 — Verify it works
+
+```bash
+fly status
+fly logs
+```
+
+Health check:
+
+```bash
+curl https://solana-copy-bot.fly.dev/health
+# expect: {"status":"ok","uptime":123}
+```
+
+(Replace `solana-copy-bot` with your app name.)
+
+Open the dashboard:
+
+```text
+https://<your-app-name>.fly.dev/dashboard
+```
+
+Also check:
+
+```bash
+curl https://<your-app-name>.fly.dev/api/status
+# watchedWallets should be > 0 after wallets are imported/enabled
+curl https://<your-app-name>.fly.dev/api/persistence
+# settingsExists / walletsExists become true after you save settings once
+```
+
+---
+
+### Why this config works for WebSockets + the monitor
+
+| Setting in `fly.toml` | Purpose |
+|------------------------|---------|
+| `auto_stop_machines = "off"` | Machine **never sleeps** — no idle kill |
+| `min_machines_running = 1` | Always keep one instance |
+| Single small VM | Avoid two bots trading the same book |
+| Volume `bot_data` → `/data` | Persist `wallets.json` + `bot-settings.json` |
+| `GET /health` check | Fly knows the process is alive |
+| `kill_timeout = 30s` | Clean SIGTERM on deploy |
+| HTTP service on 8080 | Dashboard + API; Fly upgrades WebSockets for HTTP clients |
+
+Outbound Solana WebSockets (migration listener) are opened **from** your bot to the RPC. They work as long as the machine stays up — which is why idle must stay **off**.
+
+---
+
+### Troubleshooting
+
+**Bot stops trading / “idle” / watches go to 0**
+
+- Confirm `auto_stop_machines = "off"` in `fly.toml` and redeploy.
+- `fly status` — machine should be `started`, not `stopped` / `suspended`.
+- `fly scale count 1` — never run 0 or 2+ machines for this bot.
+- Public RPC rate limits (429) — set a paid `RPC_URL` secret and redeploy.
+
+**Env vars / secrets not applied**
+
+- Secrets are only available **after** the next deploy or machine restart: `fly secrets set ...` then `fly deploy` (or `fly apps restart <app>`).
+- Names are case-sensitive: `RPC_URL` not `rpc_url`.
+- Do not put private keys in `[env]` inside `fly.toml` — use `fly secrets set` only.
+- Check names: `fly secrets list`.
+
+**Build failures**
+
+- Need Node 20+ in Docker (our `Dockerfile` uses `node:20-bookworm-slim`).
+- Local check: `npm run build` then `npm start`.
+- See full build log: `fly logs` during `fly deploy`, or `fly deploy --verbose`.
+- If TypeScript errors appear, fix them locally with `npm run typecheck` before deploying.
+
+**Volume / settings reset after deploy**
+
+- Volume must exist: `fly volumes list` → name `bot_data`.
+- Region of the volume must match the machine region.
+- `DATA_DIR` must be `/data` (already in `fly.toml`).
+- First boot after attaching a volume: re-import wallets and save config once.
+
+**Health check failing / app won’t start**
+
+- App must listen on `0.0.0.0:8080` (already set via `HOST` + `PORT`).
+- `/health` must return HTTP 200 — test with `curl .../health`.
+- Increase grace period if boot is slow (already `45s` in `fly.toml`).
+- SSH in: `fly ssh console` then `ls /data` and `wget -qO- http://127.0.0.1:8080/health`.
+
+**WebSockets / migrations not connecting**
+
+- Machine must stay running (`auto_stop_machines = "off"`).
+- Prefer an RPC that supports WebSockets (Helius/QuickNode).
+- Check logs for `[migration]` and RPC 429 errors: `fly logs`.
+
+**Live mode won’t trade**
+
+- `TRADING_MODE=live` **and** one of `TRADING_WALLET_1` / `PRIVATE_KEY` / `WALLET_PRIVATE_KEY`.
+- Key must be base58 secret (not the public address).
+- Start in **paper** until `/health` and dashboard look healthy.
+
+**Useful commands**
+
+```bash
+fly logs                 # live logs
+fly status               # machine state
+fly apps restart APP     # bounce after secret changes
+fly ssh console          # shell inside the VM
+fly scale show           # confirm count = 1
+npm run fly:logs         # same as fly logs
+npm run fly:status
+```
+
+---
+
+### Production checklist (Fly)
+
+- [ ] `curl -L https://fly.io/install.sh | sh` (or Windows install script)
+- [ ] `fly auth login`
+- [ ] `fly launch` — keep existing `fly.toml`
+- [ ] `fly volumes create bot_data --region <region> --size 1`
+- [ ] `fly secrets set RPC_URL=...` (+ optional keys)
+- [ ] `fly deploy`
+- [ ] `fly scale count 1`
+- [ ] `curl https://<app>.fly.dev/health` → `{"status":"ok",...}`
+- [ ] Dashboard loads; start in **paper** mode
+- [ ] Never commit `.env` or private keys
+
+---
+
 ## Deploy on Render.com
 
 ### Why settings & wallets reset (Free tier)

@@ -23,6 +23,7 @@ import {
   evaluateProfitAction,
   type ProfitPositionView,
 } from './profitStrategy';
+import { calculateDynamicPositionSize } from './risk';
 import { dataFile, ensureDataDir } from './dataDir';
 
 export type BacktestStrategyType =
@@ -146,6 +147,10 @@ export interface BacktestTradeResult {
   /** True if this was a re-buy after prior TP */
   isReBuy?: boolean;
   simulation?: number;
+  /** Strategy bucket used for sizing / breakdown */
+  strategyKind: 'migration' | 'normal';
+  /** Effective fee+slippage bps modeled on this trade (round-trip estimate) */
+  roundTripCostBps?: number;
 }
 
 export interface BacktestProgress {
@@ -159,6 +164,20 @@ export interface BacktestProgress {
   finishedAt: number | null;
 }
 
+export interface StrategyBreakdownMetrics {
+  strategyKind: 'migration' | 'normal';
+  trades: number;
+  wins: number;
+  losses: number;
+  winRatePct: number;
+  totalPnlSol: number;
+  profitFactor: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  avgHoldMs: number;
+  maxDrawdownPct: number;
+}
+
 export interface BacktestSummary {
   winRatePct: number;
   totalPnlSol: number;
@@ -168,7 +187,21 @@ export interface BacktestSummary {
   avgWinSol: number;
   avgLossSol: number;
   avgHoldingMs: number;
+  /** Average per-trade peak-to-trough drawdown while open */
   avgMaxDrawdownPct: number;
+  /** Equity-curve max drawdown across the run */
+  maxDrawdownPct: number;
+  /** Gross wins ÷ gross losses (∞ → 999) */
+  profitFactor: number;
+  /**
+   * Trade-return Sharpe: mean(pnlPct) / std(pnlPct).
+   * Not annualized — useful for comparing runs of similar length.
+   */
+  sharpeRatio: number;
+  /** Average PnL per trade in SOL */
+  expectancySol: number;
+  /** Estimated average round-trip fee+slip cost in bps */
+  avgRoundTripCostBps: number;
   totalPnlUsd: number;
   solUsd: number;
   bestTrade: BacktestTradeResult | null;
@@ -177,6 +210,7 @@ export interface BacktestSummary {
   wins: number;
   losses: number;
   reBuyTrades: number;
+  strategyBreakdown: StrategyBreakdownMetrics[];
 }
 
 export interface BacktestResult {
@@ -216,6 +250,12 @@ export interface BacktestResult {
     pnlDistribution?: {
       labels: string[];
       counts: number[];
+    };
+    strategyBreakdown?: {
+      labels: string[];
+      pnlSol: number[];
+      winRatePct: number[];
+      trades: number[];
     };
   };
   trades: BacktestTradeResult[];
@@ -312,9 +352,68 @@ function storeResult(result: BacktestResult): void {
   persistHistory();
 }
 
+function stdDev(values: number[]): number {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const variance =
+    values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1);
+  return Math.sqrt(variance);
+}
+
+function metricsForTrades(
+  trades: BacktestTradeResult[],
+  strategyKind: 'migration' | 'normal'
+): StrategyBreakdownMetrics {
+  const wins = trades.filter((t) => t.pnlSol > 0);
+  const losses = trades.filter((t) => t.pnlSol <= 0);
+  const grossWin = wins.reduce((s, t) => s + t.pnlSol, 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnlSol, 0));
+  const profitFactor =
+    grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 999 : 0;
+
+  // Equity-curve DD within this bucket (chronological)
+  const sorted = [...trades].sort(
+    (a, b) => (a.closedAt ?? a.openedAt) - (b.closedAt ?? b.openedAt)
+  );
+  let equity = 0;
+  let peak = 0;
+  let maxDd = 0;
+  for (const t of sorted) {
+    equity += t.pnlSol;
+    if (equity > peak) peak = equity;
+    if (peak > 0) {
+      const dd = ((peak - equity) / peak) * 100;
+      if (dd > maxDd) maxDd = dd;
+    }
+  }
+
+  return {
+    strategyKind,
+    trades: trades.length,
+    wins: wins.length,
+    losses: losses.length,
+    winRatePct: trades.length ? (wins.length / trades.length) * 100 : 0,
+    totalPnlSol: Number(
+      trades.reduce((s, t) => s + t.pnlSol, 0).toFixed(6)
+    ),
+    profitFactor: Number(profitFactor.toFixed(2)),
+    avgWinPct: wins.length
+      ? wins.reduce((s, t) => s + t.pnlPct, 0) / wins.length
+      : 0,
+    avgLossPct: losses.length
+      ? losses.reduce((s, t) => s + t.pnlPct, 0) / losses.length
+      : 0,
+    avgHoldMs: trades.length
+      ? trades.reduce((s, t) => s + t.holdingTimeMs, 0) / trades.length
+      : 0,
+    maxDrawdownPct: Number(maxDd.toFixed(2)),
+  };
+}
+
 function buildSummary(
   trades: BacktestTradeResult[],
-  solUsd = 150
+  solUsd = 150,
+  startingBalanceSol = 10
 ): BacktestSummary {
   const wins = trades.filter((t) => t.pnlSol > 0);
   const losses = trades.filter((t) => t.pnlSol <= 0);
@@ -332,10 +431,57 @@ function buildSummary(
       ? null
       : trades.reduce((a, b) => (b.pnlPct < a.pnlPct ? b : a));
 
+  const grossWin = wins.reduce((s, t) => s + t.pnlSol, 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnlSol, 0));
+  const profitFactor =
+    grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 999 : 0;
+
+  // Equity-curve max drawdown from starting balance
+  const sorted = [...trades].sort(
+    (a, b) => (a.closedAt ?? a.openedAt) - (b.closedAt ?? b.openedAt)
+  );
+  let equity = startingBalanceSol;
+  let peak = startingBalanceSol;
+  let maxDrawdownPct = 0;
+  for (const t of sorted) {
+    equity += t.pnlSol;
+    if (equity > peak) peak = equity;
+    if (peak > 0) {
+      const dd = ((peak - equity) / peak) * 100;
+      if (dd > maxDrawdownPct) maxDrawdownPct = dd;
+    }
+  }
+
+  const returns = trades.map((t) => t.pnlPct);
+  const meanRet =
+    returns.length > 0
+      ? returns.reduce((a, b) => a + b, 0) / returns.length
+      : 0;
+  const sd = stdDev(returns);
+  const sharpeRatio = sd > 1e-9 ? meanRet / sd : 0;
+
+  const avgRoundTripCostBps =
+    trades.length > 0
+      ? trades.reduce((s, t) => s + (t.roundTripCostBps ?? 0), 0) /
+        trades.length
+      : 0;
+
+  const migration = metricsForTrades(
+    trades.filter((t) => t.strategyKind === 'migration' || t.migrated),
+    'migration'
+  );
+  const normal = metricsForTrades(
+    trades.filter((t) => t.strategyKind !== 'migration' && !t.migrated),
+    'normal'
+  );
+
   return {
     winRatePct: trades.length ? (wins.length / trades.length) * 100 : 0,
     totalPnlSol,
-    returnPct: 0,
+    returnPct:
+      startingBalanceSol > 0
+        ? (totalPnlSol / startingBalanceSol) * 100
+        : 0,
     avgWinPct: wins.length
       ? wins.reduce((s, t) => s + t.pnlPct, 0) / wins.length
       : 0,
@@ -354,6 +500,13 @@ function buildSummary(
     avgMaxDrawdownPct: trades.length
       ? trades.reduce((s, t) => s + t.maxDrawdownPct, 0) / trades.length
       : 0,
+    maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
+    profitFactor: Number(profitFactor.toFixed(2)),
+    sharpeRatio: Number(sharpeRatio.toFixed(3)),
+    expectancySol: trades.length
+      ? Number((totalPnlSol / trades.length).toFixed(6))
+      : 0,
+    avgRoundTripCostBps: Number(avgRoundTripCostBps.toFixed(1)),
     totalPnlUsd: Number(totalPnlUsd.toFixed(2)),
     solUsd: Number(solUsd.toFixed(2)),
     bestTrade: best,
@@ -362,6 +515,7 @@ function buildSummary(
     wins: wins.length,
     losses: losses.length,
     reBuyTrades: trades.filter((t) => t.isReBuy).length,
+    strategyBreakdown: [migration, normal],
   };
 }
 
@@ -652,10 +806,20 @@ function replayLaunch(
   if (event.candles.length < 2) return [];
 
   const results: BacktestTradeResult[] = [];
-  const strategyKind =
-    event.migrated || config.strategy.enableMigrationPriority
-      ? 'migration'
-      : 'normal';
+  const strategyKind: 'migration' | 'normal' = event.migrated
+    ? 'migration'
+    : 'normal';
+
+  /** Extra adverse slippage when path is volatile (bps) */
+  function impactSlippageBps(): number {
+    const first = event.candles[0]?.priceSol ?? event.entryPriceSol;
+    const last =
+      event.candles[event.candles.length - 1]?.priceSol ?? event.lastPriceSol;
+    const move =
+      first > 0 ? Math.abs(last - first) / first : 0;
+    // 0–120 bps extra impact for big path moves
+    return Math.min(120, Math.round(move * 80));
+  }
 
   const runOne = (
     fromIdx: number,
@@ -670,11 +834,26 @@ function replayLaunch(
     const copyDelayMs = simulateCopyDelayMs();
     const openedAt = smartWalletEnteredAt + copyDelayMs;
     const botEntryPriceSol = priceAtTime(event, fromIdx, openedAt);
+
+    const sizing = calculateDynamicPositionSize({
+      equitySol: trader.getEquitySol(),
+      kind: strategyKind,
+      riskScore: event.riskScoreHint,
+      convictionScore: event.migrated
+        ? 70
+        : Math.min(80, 40 + (sourceNames.length - 1) * 12),
+    });
+    const impactBps = impactSlippageBps();
+    const effectiveSlipBps =
+      (config.paper.slippageBps ?? 150) + impactBps;
+    const roundTripCostBps =
+      (config.paper.feeBps ?? 30) * 2 + effectiveSlipBps + (config.paper.slippageBps ?? 150);
+
     const position = trader.simulateBuy(
       event.mint,
       event.symbol,
       botEntryPriceSol,
-      config.trade.tradeAmountSol,
+      sizing.sizeSol,
       {
         sourceWallets: sourceNames.map(
           (_, i) => `bt-${simulation}-${isReBuy ? 'rb' : 'e'}-${i}`
@@ -682,6 +861,7 @@ function replayLaunch(
         sourceNames,
         name: event.name || event.symbol,
         strategyKind,
+        slippageBps: effectiveSlipBps,
       }
     );
     if (!position) return { trade: null, exitIdx: fromIdx };
@@ -953,14 +1133,11 @@ function replayLaunch(
       typeof closed.pnlSol === 'number' && closed.id === position.id
         ? closed.pnlSol
         : totalPnlSol;
+    // Always report realized PnL% vs cost — never cap or invent from price alone
     const pnlPct =
       position.initialCostSol > 0
         ? (pnlSol / position.initialCostSol) * 100
-        : closed.pnlPct ??
-          ((exitPriceSol - entryPriceSol) / entryPriceSol) * 100;
-
-    // Clamp display PnL% to respect that we never target above max (unless trail runaway)
-    // Keep raw pnlPct for accuracy — max cap only forces exit, doesn't clamp reported PnL
+        : 0;
 
     // Prefer explicit exit timestamp from the candle where we sold
     const closedAt = Math.max(openedAt, exitAtMs);
@@ -1067,6 +1244,8 @@ function replayLaunch(
         estimateRiskScoreHint(liquidityUsd ?? event.liquidityUsd, event.volumeUsd),
       isReBuy,
       simulation,
+      strategyKind,
+      roundTripCostBps,
     };
     return { trade, exitIdx };
   };
@@ -1326,12 +1505,21 @@ export async function runBacktest(
       lastTrader ?? new PaperTrader(startingBalance, { mode: 'backtest' });
     const stats = trader.getStats();
     const baseCharts = trader.getChartData();
-    const summary = buildSummary(lastTrades, solUsd);
-    summary.returnPct = stats.returnPct;
+    const summary = buildSummary(lastTrades, solUsd, startingBalance);
+    // Prefer summary return (trade-based); fall back to paper equity return
+    if (!Number.isFinite(summary.returnPct) || summary.totalTrades === 0) {
+      summary.returnPct = stats.returnPct;
+    }
 
     const charts = {
       ...baseCharts,
       pnlDistribution: buildPnlDistribution(lastTrades),
+      strategyBreakdown: {
+        labels: summary.strategyBreakdown.map((s) => s.strategyKind),
+        pnlSol: summary.strategyBreakdown.map((s) => s.totalPnlSol),
+        winRatePct: summary.strategyBreakdown.map((s) => s.winRatePct),
+        trades: summary.strategyBreakdown.map((s) => s.trades),
+      },
     };
 
     const aggregate =
@@ -1353,6 +1541,9 @@ export async function runBacktest(
         : `Backtest complete: ${lastTrades.length} trades` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
           `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)} @ $${solUsd.toFixed(0)}/SOL), win rate ${stats.winRatePct.toFixed(0)}%` +
+          ` · PF ${summary.profitFactor}` +
+          ` · Sharpe ${summary.sharpeRatio}` +
+          ` · maxDD ${summary.maxDrawdownPct}%` +
           (summary.reBuyTrades ? ` · ${summary.reBuyTrades} rebuys` : '') +
           (aggregate
             ? ` · avg WR ${aggregate.avgWinRatePct.toFixed(0)}%`
@@ -1463,6 +1654,8 @@ export function tradesToCsv(trades: BacktestTradeResult[]): string {
     'wallets',
     'isReBuy',
     'source',
+    'strategyKind',
+    'roundTripCostBps',
   ];
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v);
@@ -1509,6 +1702,8 @@ export function tradesToCsv(trades: BacktestTradeResult[]): string {
       (t.sourceNames || []).join('|'),
       t.isReBuy ?? false,
       t.source,
+      t.strategyKind ?? (t.migrated ? 'migration' : 'normal'),
+      t.roundTripCostBps ?? '',
     ]
       .map(esc)
       .join(',')
@@ -1519,6 +1714,63 @@ export function tradesToCsv(trades: BacktestTradeResult[]): string {
 export function exportLastBacktestCsv(): string | null {
   if (!lastResult) return null;
   return tradesToCsv(lastResult.trades);
+}
+
+/** Full backtest report as JSON (metrics + trades + options) */
+export function exportLastBacktestJson(): string | null {
+  if (!lastResult) return null;
+  const report = {
+    id: lastResult.id,
+    ranAt: lastResult.ranAt,
+    message: lastResult.message,
+    options: lastResult.options,
+    period: lastResult.period,
+    dataSource: lastResult.dataSource,
+    eventsConsidered: lastResult.eventsConsidered,
+    tradesExecuted: lastResult.tradesExecuted,
+    simulationsRun: lastResult.simulationsRun,
+    metrics: {
+      winRatePct: lastResult.summary.winRatePct,
+      profitFactor: lastResult.summary.profitFactor,
+      totalPnlSol: lastResult.summary.totalPnlSol,
+      totalPnlUsd: lastResult.summary.totalPnlUsd,
+      returnPct: lastResult.summary.returnPct,
+      maxDrawdownPct: lastResult.summary.maxDrawdownPct,
+      avgMaxDrawdownPct: lastResult.summary.avgMaxDrawdownPct,
+      sharpeRatio: lastResult.summary.sharpeRatio,
+      avgWinPct: lastResult.summary.avgWinPct,
+      avgLossPct: lastResult.summary.avgLossPct,
+      avgWinSol: lastResult.summary.avgWinSol,
+      avgLossSol: lastResult.summary.avgLossSol,
+      expectancySol: lastResult.summary.expectancySol,
+      avgHoldingMs: lastResult.summary.avgHoldingMs,
+      avgRoundTripCostBps: lastResult.summary.avgRoundTripCostBps,
+      totalTrades: lastResult.summary.totalTrades,
+      wins: lastResult.summary.wins,
+      losses: lastResult.summary.losses,
+      reBuyTrades: lastResult.summary.reBuyTrades,
+      strategyBreakdown: lastResult.summary.strategyBreakdown,
+      bestTrade: lastResult.summary.bestTrade
+        ? {
+            symbol: lastResult.summary.bestTrade.symbol,
+            pnlPct: lastResult.summary.bestTrade.pnlPct,
+            pnlSol: lastResult.summary.bestTrade.pnlSol,
+          }
+        : null,
+      worstTrade: lastResult.summary.worstTrade
+        ? {
+            symbol: lastResult.summary.worstTrade.symbol,
+            pnlPct: lastResult.summary.worstTrade.pnlPct,
+            pnlSol: lastResult.summary.worstTrade.pnlSol,
+          }
+        : null,
+    },
+    stats: lastResult.stats,
+    aggregate: lastResult.aggregate,
+    trades: lastResult.trades,
+    skipped: lastResult.skipped,
+  };
+  return JSON.stringify(report, null, 2);
 }
 
 /**

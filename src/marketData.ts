@@ -315,29 +315,54 @@ export function buildPricePath(
   steps = 24
 ): MarketCandle[] {
   const candles: MarketCandle[] = [];
-  // Prefer the requested window; only pad if path is impossibly short
   const raw = Math.max(0, endMs - startMs);
-  const duration = Math.max(raw, steps * 5_000); // ≥5s per step
-  // Never invent ATH/ATL beyond the known endpoints (plus modest drawdown room)
+  // Prefer ≥30s/step so hold times stay realistic; pad short windows lightly
+  const duration = Math.max(raw, steps * 30_000);
   const hi = Math.max(entryPriceSol, lastPriceSol);
-  const lo = Math.min(entryPriceSol, lastPriceSol) * 0.85;
+  const lo = Math.min(entryPriceSol, lastPriceSol);
+  // Path magnitude drives local volatility (bigger moves → choppier mid-path)
+  const movePct =
+    entryPriceSol > 0
+      ? Math.abs(lastPriceSol - entryPriceSol) / entryPriceSol
+      : 0;
+  const vol = Math.min(0.12, 0.03 + movePct * 0.08);
+  // Modest room below path low for temporary drawdowns (not free moons)
+  const floor = lo * Math.max(0.82, 1 - vol * 1.5);
+  const ceiling = hi * Math.min(1.08, 1 + vol * 0.6);
 
+  let px = entryPriceSol;
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const base = entryPriceSol + (lastPriceSol - entryPriceSol) * t;
-    const noise =
-      1 + (Math.sin(i * 1.7) * 0.05 + (Math.random() - 0.5) * 0.08);
-    // Mild dip mid-path only — do not spike above the known high
-    const dip =
-      i > steps * 0.3 && i < steps * 0.55 && Math.random() < 0.3 ? 0.92 : 1;
-    const rawPx = base * noise * dip;
+    // Geometric (log) blend — more realistic than linear for meme paths
+    const logBlend =
+      entryPriceSol > 0 && lastPriceSol > 0
+        ? Math.exp(
+            Math.log(entryPriceSol) * (1 - t) + Math.log(lastPriceSol) * t
+          )
+        : entryPriceSol + (lastPriceSol - entryPriceSol) * t;
+    // Mean-revert noise toward the blend; occasional dump-then-recover
+    const shock =
+      1 +
+      Math.sin(i * 2.1 + movePct * 3) * vol * 0.7 +
+      (Math.random() - 0.5) * vol * 1.2;
+    const dump =
+      i > steps * 0.25 &&
+      i < steps * 0.55 &&
+      Math.random() < 0.22 + movePct * 0.15
+        ? 0.88 + Math.random() * 0.07
+        : 1;
+    // Pull previous price toward blend (prevents random walk exploding)
+    const target = logBlend * shock * dump;
+    px = px * 0.35 + target * 0.65;
+    px = Math.min(ceiling, Math.max(floor, px));
     candles.push({
       time: startMs + duration * t,
-      priceSol: Math.min(hi, Math.max(lo, rawPx)),
+      priceSol: px,
     });
   }
 
-  // Ensure last candle matches lastPrice
+  candles[0].priceSol = entryPriceSol;
+  candles[0].time = startMs;
   candles[candles.length - 1].priceSol = lastPriceSol;
   candles[candles.length - 1].time = startMs + duration;
   return candles;

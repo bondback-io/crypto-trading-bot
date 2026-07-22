@@ -305,6 +305,8 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
     filters.maxTopHolderPct ??
     40;
   const minLiq = filters.minLiquidity ?? 0;
+  const minVol = filters.minVolume24hUsd ?? 0;
+  const minHolders = filters.minHolderCount ?? 0;
   const maxTax = filters.maxEstimatedTaxPct ?? 25;
   const maxScore = filters.maxRiskScore ?? 70;
   const requireLock = filters.requireLiquidityLocked === true;
@@ -702,6 +704,40 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
         });
         skipReasons.push(
           `Skipped - low liquidity ($${checks.liquidityUsd.toFixed(0)} < min $${minLiq})`
+        );
+      }
+
+      if (
+        minVol > 0 &&
+        checks.birdeyeVolume24hUsd != null &&
+        checks.birdeyeVolume24hUsd < minVol
+      ) {
+        score += 18;
+        flags.push({
+          id: 'birdeye_low_volume',
+          severity: 'high',
+          label: 'Low 24h volume',
+          detail: `$${checks.birdeyeVolume24hUsd.toFixed(0)} < $${minVol}`,
+        });
+        skipReasons.push(
+          `Skipped - low 24h volume ($${checks.birdeyeVolume24hUsd.toFixed(0)} < min $${minVol})`
+        );
+      }
+
+      if (
+        minHolders > 0 &&
+        checks.birdeyeHolder != null &&
+        checks.birdeyeHolder < minHolders
+      ) {
+        score += 15;
+        flags.push({
+          id: 'birdeye_low_holders',
+          severity: 'high',
+          label: 'Low holder count',
+          detail: `${checks.birdeyeHolder} < ${minHolders}`,
+        });
+        skipReasons.push(
+          `Skipped - low holders (${checks.birdeyeHolder} < min ${minHolders})`
         );
       }
 

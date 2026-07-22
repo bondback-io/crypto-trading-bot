@@ -74,12 +74,12 @@ export function effectiveProfitParams(
   // High-risk: take profits earlier, tighter trail, harsher SL
   return {
     ...base,
-    takeInitialPercent: Math.max(40, base.takeInitialPercent * 0.85),
-    partialSellAt: Math.max(30, base.partialSellAt * 0.85),
-    trailingStopAfter: Math.max(60, base.trailingStopAfter * 0.8),
-    trailingStopPct: Math.max(10, base.trailingStopPct - 5),
+    takeInitialPercent: Math.max(35, base.takeInitialPercent * 0.8),
+    partialSellAt: Math.max(25, base.partialSellAt * 0.75),
+    trailingStopAfter: Math.max(50, base.trailingStopAfter * 0.75),
+    trailingStopPct: Math.max(8, base.trailingStopPct - 6),
     bagPercent: Math.max(15, base.bagPercent - 5),
-    stopLossTightenPct: 0.2, // pull SL 20% closer to entry (e.g. -35 → -28)
+    stopLossTightenPct: 0.25,
   };
 }
 

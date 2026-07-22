@@ -13,7 +13,7 @@ export interface EnvConfig {
   nodeEnv: NodeEnv;
   isProduction: boolean;
   port: number;
-  /** Bind address — use 0.0.0.0 on Railway/Render/PM2 */
+  /** Bind address — use 0.0.0.0 on Fly / Railway / Render / PM2 */
   host: string;
   /** Comma-separated allowed origins; empty = same-origin only (no CORS headers) */
   corsOrigins: string[];
@@ -79,11 +79,12 @@ export function validateDeploymentEnv(): string[] {
   if (env.tradingMode === 'live') {
     const hasKey = Boolean(
       process.env.TRADING_WALLET_1?.trim() ||
-        process.env.PRIVATE_KEY?.trim()
+        process.env.PRIVATE_KEY?.trim() ||
+        process.env.WALLET_PRIVATE_KEY?.trim()
     );
     if (!hasKey) {
       warnings.push(
-        'TRADING_MODE=live but no TRADING_WALLET_1 / PRIVATE_KEY in env'
+        'TRADING_MODE=live but no TRADING_WALLET_1 / PRIVATE_KEY / WALLET_PRIVATE_KEY in env'
       );
     }
   }

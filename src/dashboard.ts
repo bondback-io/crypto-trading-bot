@@ -424,10 +424,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
       </div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="card"><div class="stat-label">Profit Factor <span class="tip tip-below" tabindex="0" data-tip="Gross wins ÷ gross losses. Above 1.0 means net profitable; 2.0+ is strong."></span></div><div class="stat" id="stat-pf">—</div><div class="mint mt-1" id="stat-pf-hint">—</div></div>
+        <div class="card"><div class="stat-label">Max Drawdown <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div><div class="stat" id="stat-maxdd">—</div><div class="mint mt-1" id="stat-avg-hold">—</div></div>
         <div class="card !py-3"><div class="stat-label">Wallets <span class="tip tip-below" tabindex="0" data-tip="Number of smart wallets currently tracked for copy signals."></span></div><div class="text-lg font-semibold" id="watched">—</div></div>
         <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Recent buy/sell signals generated from wallet activity."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Total executed buys + sells (paper or live)."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
-        <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300" id="stat-detail">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
+        <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300" id="stat-detail">—</div></div>
       </div>
 
       <div class="card">
@@ -790,6 +795,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="activity-signals" class="max-h-80 overflow-y-auto text-sm"></div>
       </div>
       <div class="card">
+        <div class="section-title">Dynamic Position Sizing <span class="tip" tabindex="0" data-tip="Calculated buy size for each evaluated signal from base × risk × conviction."></span></div>
+        <div class="mint mb-2" id="sizing-status">—</div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="sizing-signals-table">
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th>Size SOL</th>
+                <th>Conviction</th>
+                <th>Risk</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="7" class="text-slate-500">No sized signals yet</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
         <div class="section-title">Re-Buy Watch <span class="tip" tabindex="0" data-tip="After a take-profit, watches for a dip + confirmation buys from smart wallets before re-entering."></span></div>
         <div class="overflow-x-auto">
           <table id="rebuy-table">
@@ -844,6 +869,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Start the simulation with current filters">Run Backtest</button>
           <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
           <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV">Export CSV</button>
+          <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON">Export JSON</button>
           <span class="mint" id="bt-status">—</span>
         </div>
         <div id="bt-progress-wrap" class="hidden mb-2" title="Simulation progress">
@@ -858,13 +884,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="bt-result" class="mint mt-1"></div>
       </div>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="% of simulated trades that closed green."></span></div><div class="stat" id="bt-stat-wr">—</div></div>
-        <div class="card"><div class="stat-label">Total PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of all simulated trade PnL in SOL."></span></div><div class="stat" id="bt-stat-pnl">—</div></div>
-        <div class="card"><div class="stat-label">Avg Win / Loss <span class="tip tip-below" tabindex="0" data-tip="Average size of winning vs losing trades."></span></div><div class="stat text-base" id="bt-stat-avg">—</div></div>
-        <div class="card"><div class="stat-label">Best / Worst <span class="tip tip-below" tabindex="0" data-tip="Best and worst single-trade PnL %."></span></div><div class="stat text-base" id="bt-stat-bw">—</div></div>
-        <div class="card"><div class="stat-label">Avg Hold <span class="tip tip-below" tabindex="0" data-tip="Average time from entry to exit."></span></div><div class="stat text-base" id="bt-stat-hold">—</div></div>
-        <div class="card"><div class="stat-label">Avg Max DD <span class="tip tip-below" tabindex="0" data-tip="Average worst peak-to-trough drawdown while a trade was open."></span></div><div class="stat text-base" id="bt-stat-dd">—</div></div>
+      <div class="card">
+        <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough."></span></div>
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3 mb-3">
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win Rate</div><div class="stat" id="bt-stat-wr">—</div><div class="mint mt-1" id="bt-stat-trades">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Profit Factor</div><div class="stat" id="bt-stat-pf">—</div><div class="mint mt-1" id="bt-stat-expect">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Total PnL</div><div class="stat" id="bt-stat-pnl">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Max Drawdown</div><div class="stat" id="bt-stat-maxdd">—</div><div class="mint mt-1" id="bt-stat-dd">avg trade DD —</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Sharpe Ratio</div><div class="stat" id="bt-stat-sharpe">—</div><div class="mint mt-1">trade returns</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Avg Win / Loss</div><div class="stat text-base" id="bt-stat-avg">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Best / Worst</div><div class="stat text-base" id="bt-stat-bw">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Avg Hold</div><div class="stat text-base" id="bt-stat-hold">—</div><div class="mint mt-1" id="bt-stat-cost">RT cost —</div></div>
+        </div>
+        <div class="section-title !text-sm">Strategy Breakdown (migration vs normal)</div>
+        <div class="overflow-x-auto mb-2">
+          <table id="bt-strategy-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>PnL SOL</th>
+                <th>Profit Factor</th>
+                <th>Avg Win %</th>
+                <th>Avg Loss %</th>
+                <th>Max DD</th>
+                <th>Avg Hold</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="9" class="text-slate-500">Run a backtest to see strategy breakdown</td></tr></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="grid lg:grid-cols-2 gap-4">
@@ -874,12 +924,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="chart-empty mint" id="bt-chart-empty">Run a backtest to see the equity curve</div>
         </div>
         <div class="card">
-          <div class="section-title">Win / Loss &amp; PnL Distribution <span class="tip" tabindex="0" data-tip="Left: win vs loss count. Right: histogram of trade PnL % buckets."></span></div>
-          <div class="grid grid-cols-2 gap-2">
-            <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-wl"></canvas></div>
-            <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-dist"></canvas></div>
-          </div>
+          <div class="section-title">Strategy Comparison <span class="tip" tabindex="0" data-tip="PnL and win rate for migration vs normal entries."></span></div>
+          <div class="chart-wrap" style="height:260px"><canvas id="bt-chart-strategy"></canvas></div>
+          <div class="chart-empty mint" id="bt-chart-strategy-empty">No strategy data yet</div>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <div class="card">
+          <div class="section-title">Win / Loss Counts <span class="tip" tabindex="0" data-tip="Wins vs losses across the run."></span></div>
+          <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-wl"></canvas></div>
           <div class="chart-empty mint" id="bt-chart-wl-empty">No distribution yet</div>
+        </div>
+        <div class="card">
+          <div class="section-title">PnL % Distribution <span class="tip" tabindex="0" data-tip="Histogram of realized trade PnL % after fees."></span></div>
+          <div class="chart-wrap" style="height:220px"><canvas id="bt-chart-dist"></canvas></div>
         </div>
       </div>
 
@@ -921,8 +980,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
           <div class="form-grid grid grid-cols-1 sm:grid-cols-2 gap-3" id="trade-config">
             <div class="field">
-              <label title="SOL spent per copy buy (before risk-sizing overrides)">Trade Amount (SOL) — <span class="val" id="v-tradeAmountSol">0.15</span></label>
-              <input type="range" id="tradeAmountSol" min="0.01" max="2" step="0.01" value="0.15" />
+              <label title="Base SOL per copy buy before risk/conviction scaling">Base Trade (SOL) — <span class="val" id="v-tradeAmountSol">0.12</span></label>
+              <input type="range" id="tradeAmountSol" min="0.01" max="2" step="0.01" value="0.12" />
+            </div>
+            <div class="field">
+              <label title="Size floor multiplier at max risk score (lower = smaller on risky tokens)">Risk Multiplier — <span class="val" id="v-riskMultiplier">0.40</span></label>
+              <input type="range" id="riskMultiplier" min="0.1" max="1" step="0.05" value="0.4" />
+            </div>
+            <div class="field">
+              <label title="Size boost at max conviction (1 = none, 1.5 = +50%)">Conviction Multiplier — <span class="val" id="v-convictionMultiplier">1.45</span></label>
+              <input type="range" id="convictionMultiplier" min="1" max="2.5" step="0.05" value="1.45" />
             </div>
             <div class="field">
               <label title="Minimum take-profit % before a sell is considered">Min Profit % — <span class="val" id="v-minProfitPercent">50</span></label>
@@ -937,6 +1004,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="range" id="stopLossPercent" min="-80" max="-5" step="5" value="-35" />
             </div>
           </div>
+          <p class="mint mt-2">Dynamic size = base × risk factor × conviction factor (± migration). High risk → closer to risk multiplier; high conviction → up to conviction multiplier.</p>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveTradeConfig()" title="Persist trade size and TP/SL settings">Save Trade</button></div>
         </div>
 
@@ -988,6 +1056,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
             <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
+            <div class="field"><label title="Minimum 24h volume USD (anti-rug)">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">8000</span></label><input type="range" id="minVolume24hUsd" min="0" max="100000" step="1000" value="8000" /></div>
+            <div class="field"><label title="Minimum holder count (anti-rug)">Min Holders — <span class="val" id="v-minHolderCount">40</span></label><input type="range" id="minHolderCount" min="0" max="500" step="10" value="40" /></div>
           </div>
           <div class="mt-2 space-y-0">
             <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
@@ -1005,6 +1075,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveFilterConfig()" title="Save filter and anti-rug settings">Save Filters</button></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Selective Trading <span class="tip" tabindex="0" data-tip="High-conviction gating: score signals, limit trade frequency, scale size by risk."></span></div>
+          <div class="toggle-row"><span title="Only take high-conviction setups">Selective mode</span><label class="switch"><input type="checkbox" id="sel-enabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Block single-wallet entries unless migration priority">Require convergence (normal)</span><label class="switch"><input type="checkbox" id="sel-require-convergence" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Allow 1-wallet buys on migration / near-migration">Single-wallet migration OK</span><label class="switch"><input type="checkbox" id="sel-allow-single-mig" checked /><span class="slider"></span></label></div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md"><span>Min conviction <span class="tip" tabindex="0" data-tip="Score 0–100 required to execute (after anti-rug)."></span></span><input type="number" id="sel-min-conviction" value="55" min="20" max="90" step="5" /></label>
+            <label class="ctl ctl-sm"><span>Min wallets <span class="tip" tabindex="0" data-tip="Floor on distinct smart wallets."></span></span><input type="number" id="sel-min-wallets" value="2" min="1" max="5" step="1" /></label>
+            <label class="ctl ctl-sm"><span>Max/hr <span class="tip" tabindex="0" data-tip="Max buys per rolling hour (0=off)."></span></span><input type="number" id="sel-max-per-hour" value="6" min="0" max="30" step="1" /></label>
+            <label class="ctl ctl-md"><span>Cooldown sec <span class="tip" tabindex="0" data-tip="Min seconds between buys."></span></span><input type="number" id="sel-cooldown-sec" value="90" min="0" max="600" step="15" /></label>
+            <label class="ctl ctl-sm"><span>Risk size @ <span class="tip" tabindex="0" data-tip="Risk score where size scaling starts."></span></span><input type="number" id="sel-risk-cutoff" value="35" min="0" max="80" step="5" /></label>
+            <label class="ctl ctl-sm"><span>Min size × <span class="tip" tabindex="0" data-tip="Position size multiplier at max risk score."></span></span><input type="number" id="sel-min-size-mult" value="0.3" min="0.1" max="1" step="0.05" /></label>
+          </div>
+          <div class="mt-3"><button class="btn btn-primary" onclick="saveSelectiveConfig()" title="Save selective trading settings">Save Selective</button></div>
         </div>
 
         <div class="card">
@@ -1224,10 +1310,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       loadSystemLogs();
     }
     const rangeFields = [
-      'tradeAmountSol','minProfitPercent','maxProfitPercent','stopLossPercent',
+      'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
       'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
-      'minActivityDays','minTradesLast30d'
+      'minActivityDays','minTradesLast30d','minVolume24hUsd','minHolderCount'
     ];
     rangeFields.forEach(id => {
       const el = document.getElementById(id);
@@ -1347,6 +1433,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let chartBacktestPnl = null;
     let chartBacktestWl = null;
     let chartBacktestDist = null;
+    let chartBacktestStrategy = null;
     let _btProgressTimer = null;
 
     function fmtUsdShort(n) {
@@ -1543,12 +1630,53 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           });
         }
       }
+      if (!chartBacktestStrategy) {
+        const canvas = document.getElementById('bt-chart-strategy');
+        if (canvas) {
+          chartBacktestStrategy = new Chart(canvas, {
+            type: 'bar',
+            data: {
+              labels: ['migration', 'normal'],
+              datasets: [
+                {
+                  label: 'PnL (SOL)',
+                  data: [0, 0],
+                  backgroundColor: 'rgba(52,211,153,0.7)',
+                  yAxisID: 'y',
+                },
+                {
+                  label: 'Win rate %',
+                  data: [0, 0],
+                  backgroundColor: 'rgba(96,165,250,0.55)',
+                  yAxisID: 'y1',
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom' } },
+              scales: {
+                y: { beginAtZero: true, position: 'left', title: { display: true, text: 'SOL' } },
+                y1: {
+                  beginAtZero: true,
+                  max: 100,
+                  position: 'right',
+                  grid: { drawOnChartArea: false },
+                  title: { display: true, text: 'Win %' },
+                },
+              },
+            },
+          });
+        }
+      }
     }
 
     function updateBacktestCharts(charts) {
       ensureBacktestCharts();
       const empty = document.getElementById('bt-chart-empty');
       const emptyWl = document.getElementById('bt-chart-wl-empty');
+      const emptyStrat = document.getElementById('bt-chart-strategy-empty');
       const series = charts && charts.cumulativePnl;
       if (chartBacktestPnl && series && (series.values || []).length) {
         if (empty) empty.style.display = 'none';
@@ -1568,6 +1696,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         chartBacktestDist.data.datasets[0].data = charts.pnlDistribution.counts || [];
         chartBacktestDist.update();
       }
+      if (chartBacktestStrategy && charts && charts.strategyBreakdown) {
+        const sb = charts.strategyBreakdown;
+        if ((sb.labels || []).length) {
+          if (emptyStrat) emptyStrat.style.display = 'none';
+          chartBacktestStrategy.data.labels = sb.labels;
+          chartBacktestStrategy.data.datasets[0].data = sb.pnlSol || [];
+          chartBacktestStrategy.data.datasets[1].data = sb.winRatePct || [];
+          chartBacktestStrategy.update();
+        }
+      } else if (emptyStrat) emptyStrat.style.display = '';
       window._lastBacktestCharts = charts;
     }
 
@@ -1623,6 +1761,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const wr = document.getElementById('bt-stat-wr');
       if (wr) wr.textContent = (sum.winRatePct != null ? sum.winRatePct : stats.winRatePct || 0).toFixed(0) + '%';
+      const tradesEl = document.getElementById('bt-stat-trades');
+      if (tradesEl) {
+        tradesEl.textContent =
+          (sum.totalTrades ?? data.tradesExecuted ?? 0) + ' trades · ' +
+          (sum.wins ?? 0) + 'W / ' + (sum.losses ?? 0) + 'L';
+      }
+      const pfEl = document.getElementById('bt-stat-pf');
+      if (pfEl) {
+        const pf = sum.profitFactor != null ? sum.profitFactor : (stats.profitFactor || 0);
+        pfEl.textContent = pf >= 999 ? '∞' : Number(pf).toFixed(2);
+        pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1 ? 'var(--muted)' : 'var(--red)';
+      }
+      const expectEl = document.getElementById('bt-stat-expect');
+      if (expectEl && sum.expectancySol != null) {
+        expectEl.textContent = 'Expectancy ' + (sum.expectancySol >= 0 ? '+' : '') + Number(sum.expectancySol).toFixed(4) + ' SOL';
+      }
       const pnl = document.getElementById('bt-stat-pnl');
       if (pnl) {
         const n = sum.totalPnlSol != null ? sum.totalPnlSol : stats.netPnlSol || 0;
@@ -1630,12 +1784,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? sum.totalPnlUsd
           : n * Number(sum.solUsd || 150);
         const rate = sum.solUsd != null ? sum.solUsd : null;
+        const ret = sum.returnPct != null ? Number(sum.returnPct).toFixed(1) + '%' : '';
         pnl.innerHTML =
           '<div>' + (n >= 0 ? '+' : '') + Number(n).toFixed(4) + ' SOL</div>' +
           '<div style="font-size:12px;opacity:.85">' + (usd >= 0 ? '+' : '') + '$' + Math.abs(Number(usd)).toFixed(2) +
           (rate != null ? ' <span class="mint">@ $' + Number(rate).toFixed(0) + '</span>' : '') +
+          (ret ? ' · ' + ret : '') +
           '</div>';
         pnl.style.color = n >= 0 ? 'var(--green)' : 'var(--red)';
+      }
+      const sharpe = document.getElementById('bt-stat-sharpe');
+      if (sharpe) {
+        const s = sum.sharpeRatio != null ? Number(sum.sharpeRatio) : 0;
+        sharpe.textContent = s.toFixed(2);
+        sharpe.style.color = s >= 1 ? 'var(--green)' : s >= 0 ? 'var(--muted)' : 'var(--red)';
+      }
+      const maxDd = document.getElementById('bt-stat-maxdd');
+      if (maxDd) {
+        const m = sum.maxDrawdownPct != null ? Number(sum.maxDrawdownPct) : (stats.maxDrawdownPct || 0);
+        maxDd.textContent = m.toFixed(1) + '%';
+        maxDd.style.color = m <= 15 ? 'var(--green)' : m <= 30 ? 'var(--muted)' : 'var(--red)';
       }
       const avg = document.getElementById('bt-stat-avg');
       if (avg) {
@@ -1656,8 +1824,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (hold) hold.textContent = fmtHold(sum.avgHoldingMs);
       const dd = document.getElementById('bt-stat-dd');
       if (dd) {
-        dd.textContent = (sum.avgMaxDrawdownPct != null ? Number(sum.avgMaxDrawdownPct).toFixed(1) : '0') + '%';
-        dd.style.color = 'var(--red)';
+        dd.textContent = 'avg trade DD ' + (sum.avgMaxDrawdownPct != null ? Number(sum.avgMaxDrawdownPct).toFixed(1) : '0') + '%';
+      }
+      const costEl = document.getElementById('bt-stat-cost');
+      if (costEl) {
+        costEl.textContent = sum.avgRoundTripCostBps != null
+          ? 'RT cost ~' + Number(sum.avgRoundTripCostBps).toFixed(0) + ' bps'
+          : 'RT cost —';
+      }
+
+      const stratBody = document.querySelector('#bt-strategy-table tbody');
+      if (stratBody) {
+        const rows = sum.strategyBreakdown || [];
+        stratBody.innerHTML = rows.length === 0
+          ? '<tr><td colspan="9" class="text-slate-500">No strategy breakdown</td></tr>'
+          : rows.map(r => \`
+            <tr>
+              <td><strong>\${r.strategyKind}</strong></td>
+              <td>\${r.trades}</td>
+              <td>\${Number(r.winRatePct || 0).toFixed(0)}%</td>
+              <td style="color:\${r.totalPnlSol >= 0 ? 'var(--green)' : 'var(--red)'}">\${r.totalPnlSol >= 0 ? '+' : ''}\${Number(r.totalPnlSol).toFixed(4)}</td>
+              <td>\${r.profitFactor >= 999 ? '∞' : Number(r.profitFactor).toFixed(2)}</td>
+              <td style="color:var(--green)">+\${Number(r.avgWinPct || 0).toFixed(0)}%</td>
+              <td style="color:var(--red)">\${Number(r.avgLossPct || 0).toFixed(0)}%</td>
+              <td>\${Number(r.maxDrawdownPct || 0).toFixed(1)}%</td>
+              <td>\${fmtHold(r.avgHoldMs)}</td>
+            </tr>\`).join('');
       }
 
       const tbody = document.querySelector('#bt-results-table tbody');
@@ -1821,6 +2013,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       window.location.href = '/backtest/export.csv';
+    }
+
+    function exportBacktestJson() {
+      if (!window._lastBacktest || !(window._lastBacktest.trades || []).length) {
+        alert('Run a backtest first');
+        return;
+      }
+      window.location.href = '/backtest/export.json';
     }
 
     async function togglePaperLiveData() {
@@ -2152,7 +2352,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function refresh() {
-      const [status, positions, logs, activity, cfg, wallets, migrations, paper] = await Promise.all([
+      const [status, positions, logs, activity, cfg, wallets, migrations, paper, sized] = await Promise.all([
         fetchJSON('/api/status'),
         fetchJSON('/api/positions'),
         fetchJSON('/api/logs?limit=50'),
@@ -2161,6 +2361,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/wallets'),
         fetchJSON('/api/migrations'),
         fetchJSON('/paper-status'),
+        fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
       ]);
 
       updateCharts(paper.charts);
@@ -2284,6 +2485,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const s = status.stats || {};
       document.getElementById('stat-trades').textContent = s.totalTrades ?? 0;
       document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
+      const pfEl = document.getElementById('stat-pf');
+      const pf = s.profitFactor ?? 0;
+      if (pfEl) {
+        pfEl.textContent = pf >= 999 ? '∞' : pf.toFixed(2);
+        pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1 ? 'var(--muted)' : 'var(--red)';
+      }
+      const pfHint = document.getElementById('stat-pf-hint');
+      if (pfHint) pfHint.textContent = pf >= 1.5 ? 'Strong' : pf >= 1 ? 'Profitable' : pf > 0 ? 'Weak' : '—';
+      const ddEl = document.getElementById('stat-maxdd');
+      const maxDd = s.maxDrawdownPct ?? 0;
+      if (ddEl) {
+        ddEl.textContent = maxDd.toFixed(1) + '%';
+        ddEl.style.color = maxDd <= 15 ? 'var(--green)' : maxDd <= 25 ? 'var(--muted)' : 'var(--red)';
+      }
+      const holdEl = document.getElementById('stat-avg-hold');
+      if (holdEl && s.avgHoldSec) {
+        const m = Math.round(s.avgHoldSec / 60);
+        holdEl.textContent = 'Avg hold ' + (m >= 60 ? Math.round(m / 60) + 'h' : m + 'm');
+      }
+      const trEl = document.getElementById('stat-trade-rate');
+      const tr = status.monitor?.tradeRate;
+      if (trEl && tr) {
+        trEl.textContent = tr.maxTradesPerHour > 0
+          ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
+          : tr.tradesLastHour + '/hr';
+      }
       const pnlEl = document.getElementById('stat-pnl');
       pnlEl.textContent = (s.netPnlSol ?? 0).toFixed(4);
       pnlEl.style.color = (s.netPnlSol ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
@@ -2316,13 +2543,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (migStatus.priorityEnabled ? ' · priority ON' : ' · priority OFF');
       }
       document.getElementById('stat-detail').textContent =
-        'Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
+        'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
+        ' · maxDD ' + maxDd.toFixed(1) + '%' +
+        ' · Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
         '% · Migrations: ' + (migStatus.recentCount ?? 0) +
+        (status.monitor?.selectiveEnabled ? ' · selective ON' : '') +
         (migStatus.wsMode ? ' (WS live)' : ' (poll)');
 
       if (!window._cfgLoaded) {
         window._cfgLoaded = true;
-        Object.entries(cfg.trade).forEach(([k,v]) => { const el = document.getElementById(k); if (el) { el.value = v; document.getElementById('v-'+k).textContent = v; }});
+        Object.entries(cfg.trade).forEach(([k,v]) => {
+          const el = document.getElementById(k);
+          if (el) { el.value = v; const lab = document.getElementById('v-'+k); if (lab) lab.textContent = v; }
+        });
+        // Prefer baseTradeAmountSol for the main size slider (alias of tradeAmountSol)
+        if (cfg.trade.baseTradeAmountSol != null) {
+          const el = document.getElementById('tradeAmountSol');
+          const lab = document.getElementById('v-tradeAmountSol');
+          if (el) el.value = cfg.trade.baseTradeAmountSol;
+          if (lab) lab.textContent = cfg.trade.baseTradeAmountSol;
+        }
         Object.entries(cfg.filters).forEach(([k,v]) => {
           if (typeof v === 'boolean') {
             const el = document.getElementById(k);
@@ -2419,6 +2659,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setN('ps-bag', ps.bagPercent);
           setN('ps-trail-after', ps.trailingStopAfter);
           setN('ps-trail-pct', ps.trailingStopPct);
+        }
+        if (cfg.selective) {
+          const sel = cfg.selective;
+          const setChk = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = v !== false;
+          };
+          setChk('sel-enabled', sel.enabled);
+          setChk('sel-require-convergence', sel.requireConvergenceForNormal);
+          setChk('sel-allow-single-mig', sel.allowSingleWalletMigration);
+          const setN = (id, v) => {
+            const el = document.getElementById(id);
+            if (el && v != null) el.value = v;
+          };
+          setN('sel-min-conviction', sel.minConvictionScore);
+          setN('sel-min-wallets', sel.minWalletsForTrade);
+          setN('sel-max-per-hour', sel.maxTradesPerHour);
+          setN('sel-cooldown-sec', Math.round((sel.minMsBetweenTrades ?? 0) / 1000));
+          setN('sel-risk-cutoff', sel.riskScoreSizeCutoff);
+          setN('sel-min-size-mult', sel.minRiskSizeMultiplier);
         }
         if (cfg.mev) {
           document.getElementById('enableMEVProtection').checked = !!cfg.mev.enableMEVProtection;
@@ -2619,6 +2879,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const actSig = document.getElementById('activity-signals');
       if (actSig) actSig.innerHTML = activityHtml;
 
+      const sizingTbody = document.querySelector('#sizing-signals-table tbody');
+      const sizingStatus = document.getElementById('sizing-status');
+      const sizedSignals = (sized && sized.signals) || [];
+      const st = sized && sized.trade ? sized.trade : (cfg.trade || {});
+      if (sizingStatus) {
+        sizingStatus.textContent =
+          'Base ' + (st.baseTradeAmountSol ?? st.tradeAmountSol ?? '—') + ' SOL' +
+          ' · risk×' + (st.riskMultiplier ?? '—') +
+          ' · conviction×' + (st.convictionMultiplier ?? '—') +
+          ' · ' + sizedSignals.length + ' recent';
+      }
+      if (sizingTbody) {
+        sizingTbody.innerHTML = sizedSignals.length === 0
+          ? '<tr><td colspan="7" class="text-slate-500">No sized signals yet</td></tr>'
+          : sizedSignals.map(s => \`
+            <tr>
+              <td><strong>\${fmtToken(s.symbol, s.name, s.mint)}</strong></td>
+              <td style="color:var(--accent,#60a5fa);font-weight:600">\${s.dynamicSizeSol != null ? Number(s.dynamicSizeSol).toFixed(4) : '—'}</td>
+              <td>\${s.convictionScore != null ? s.convictionScore : '—'}</td>
+              <td>\${s.riskScore != null ? s.riskScore : '—'}</td>
+              <td style="color:\${s.accepted ? 'var(--green)' : 'var(--muted)'}">\${s.accepted ? 'taken' : 'skipped'}</td>
+              <td class="mint" title="\${s.dynamicSizeReason || ''}">\${s.dynamicSizeReason || '—'}</td>
+              <td class="mint">\${new Date(s.timestamp).toLocaleTimeString()}</td>
+            </tr>\`).join('');
+      }
+
       const ps = status.monitor?.pumpSmart;
       const pumpStat = document.getElementById('pump-act-status');
       if (pumpStat && ps) {
@@ -2718,9 +3004,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function saveTradeConfig() {
       const body = {};
-      ['tradeAmountSol','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
+      ['tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
         body[k] = Number(document.getElementById(k).value);
       });
+      body.baseTradeAmountSol = body.tradeAmountSol;
       await fetchJSON('/api/config/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       alert('Trade settings saved');
     }
@@ -2738,13 +3025,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       };
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
        'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
-       'minActivityDays','minTradesLast30d'].forEach(k => {
+       'minActivityDays','minTradesLast30d','minVolume24hUsd','minHolderCount'].forEach(k => {
         const el = document.getElementById(k);
         if (el) body[k] = Number(el.value);
       });
       body.maxDevPercent = body.maxDevHoldPct;
       await fetchJSON('/api/config/filters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       alert('Filters saved');
+    }
+
+    async function saveSelectiveConfig() {
+      await fetchJSON('/api/config/selective', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: document.getElementById('sel-enabled').checked,
+          requireConvergenceForNormal: document.getElementById('sel-require-convergence').checked,
+          allowSingleWalletMigration: document.getElementById('sel-allow-single-mig').checked,
+          minConvictionScore: Number(document.getElementById('sel-min-conviction').value),
+          minWalletsForTrade: Number(document.getElementById('sel-min-wallets').value),
+          maxTradesPerHour: Number(document.getElementById('sel-max-per-hour').value),
+          minMsBetweenTrades: Number(document.getElementById('sel-cooldown-sec').value) * 1000,
+          riskScoreSizeCutoff: Number(document.getElementById('sel-risk-cutoff').value),
+          minRiskSizeMultiplier: Number(document.getElementById('sel-min-size-mult').value),
+        }),
+      });
+      alert('Selective trading settings saved');
     }
 
     function onDiscoverSourceChange() {

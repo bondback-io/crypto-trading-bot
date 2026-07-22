@@ -137,6 +137,8 @@ export interface BuyOptions {
   sourceNames?: string[];
   name?: string;
   solAmount?: number;
+  /** Human-readable dynamic sizing reason (logged on buy) */
+  sizeReason?: string;
   slippageBps?: number;
   priority?: boolean;
   strategyKind?: 'migration' | 'normal';
@@ -177,7 +179,10 @@ export async function executeBuy(
   symbol: string,
   meta?: BuyOptions
 ): Promise<SwapResult> {
-  const solAmount = meta?.solAmount ?? config.trade.tradeAmountSol;
+  const solAmount =
+    meta?.solAmount ??
+    config.trade.baseTradeAmountSol ??
+    config.trade.tradeAmountSol;
   const slippageBps = meta?.slippageBps ?? config.paper.slippageBps;
   const strategyKind =
     meta?.strategyKind ?? (meta?.priority ? 'migration' : 'normal');
@@ -190,6 +195,10 @@ export async function executeBuy(
     };
   }
 
+  const sizeLog =
+    meta?.sizeReason ??
+    `Dynamic size: ${solAmount.toFixed(4)} SOL - ${strategyKind}${meta?.priority ? ' priority' : ''}`;
+  console.log(`[trade] ${sizeLog}`);
   if (meta?.priority) {
     console.log(
       `[trade] Priority buy sizing: ${solAmount} SOL @ ${slippageBps} bps slip (${strategyKind})`

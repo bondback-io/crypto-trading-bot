@@ -1,0 +1,61 @@
+# =============================================================================
+# Fly.io — Solana smart-money copy bot (24/7, no idle)
+# https://fly.io/docs/reference/configuration/
+#
+# Goals:
+#   • Never auto-stop (monitor + outbound Solana migration WebSockets stay up)
+#   • Persist wallets/settings on a volume at /data
+#   • Single machine only (in-memory positions must not be duplicated)
+#   • HTTP health check at GET /health
+# =============================================================================
+
+app = 'solana-copy-bot'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+# Non-secret defaults (secrets go via `fly secrets set`)
+[env]
+  NODE_ENV = 'production'
+  HOST = '0.0.0.0'
+  PORT = '8080'
+  DATA_DIR = '/data'
+  TRADING_MODE = 'paper'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Fly Proxy supports WebSocket upgrades by default on http_service.
+  # Outbound Solana RPC WebSockets are client connections from this process —
+  # they only stay alive if the machine never sleeps:
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 100
+    soft_limit = 50
+
+  [[http_service.checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '45s'
+    method = 'GET'
+    path = '/health'
+
+# One small VM — scale count must stay at 1
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+# Persistent disk for bot-settings.json + wallets.json
+[mounts]
+  source = 'bot_data'
+  destination = '/data'
+
+# Graceful SIGTERM so monitor / WS can shut down cleanly on deploy
+kill_signal = 'SIGTERM'
+kill_timeout = '30s'

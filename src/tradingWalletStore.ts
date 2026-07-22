@@ -10,7 +10,7 @@ const FILE = dataFile('trading-wallets.json');
 
 /** Only these env name patterns may be used as key sources */
 export const ALLOWED_KEY_ENV =
-  /^(PRIVATE_KEY|TRADING_WALLET_[A-Z0-9_]+)$/;
+  /^(PRIVATE_KEY|WALLET_PRIVATE_KEY|TRADING_WALLET_[A-Z0-9_]+)$/;
 
 export type TradingWalletRole = 'main' | 'burner' | 'custom';
 

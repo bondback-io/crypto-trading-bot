@@ -28,7 +28,10 @@ async function main(): Promise<void> {
   console.log('  Pump.fun launches & migrations');
   console.log('═══════════════════════════════════════════════════');
   console.log(`  Mode: ${config.mode.toUpperCase()}`);
-  console.log(`  Buy size: ${config.trade.tradeAmountSol} SOL`);
+  console.log(
+    `  Buy size: base ${config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol} SOL` +
+      ` (risk×${config.trade.riskMultiplier ?? 0.4}, conviction×${config.trade.convictionMultiplier ?? 1.45})`
+  );
   console.log(`  Convergence: ${config.filters.convergenceRequired}+ wallets`);
   console.log(`  Take profit: ${config.trade.minProfitPercent}–${config.trade.maxProfitPercent}%`);
   console.log(`  Stop loss: ${config.trade.stopLossPercent}%`);
