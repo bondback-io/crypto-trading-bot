@@ -225,6 +225,110 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button:not(.btn):not(.danger):not(.secondary):not(.warning) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
+    .card-open-positions {
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(14, 165, 233, 0.06) 42%, rgba(30, 41, 59, 0.95) 100%),
+        #1e293b;
+      border: 1px solid rgba(52, 211, 153, 0.45);
+      box-shadow:
+        0 0 0 1px rgba(14, 165, 233, 0.12),
+        0 10px 28px rgba(2, 6, 23, 0.45),
+        inset 0 1px 0 rgba(148, 163, 184, 0.08);
+      padding: 1.1rem 1.15rem 1.15rem;
+      overflow: hidden;
+    }
+    .card-open-positions::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: linear-gradient(180deg, #34d399, #38bdf8);
+    }
+    .card-open-positions .section-title-open {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.9rem;
+    }
+    .card-open-positions .section-title-open .title-left {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+    }
+    .card-open-positions .section-title-open .title-text {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #ecfdf5;
+    }
+    .card-open-positions .pos-count-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.18);
+      border: 1px solid rgba(52, 211, 153, 0.4);
+      color: #6ee7b7;
+    }
+    .card-open-positions .pos-count-badge[data-empty="1"] {
+      background: rgba(71, 85, 105, 0.35);
+      border-color: rgba(100, 116, 139, 0.45);
+      color: #94a3b8;
+    }
+    .card-open-positions .positions-scroll {
+      overflow-x: auto;
+      max-height: 22rem;
+      overflow-y: auto;
+      border-radius: 0.55rem;
+      border: 1px solid rgba(51, 65, 85, 0.7);
+      background: rgba(15, 23, 42, 0.55);
+    }
+    .card-open-positions #positions-table {
+      min-width: 52rem;
+      margin: 0;
+    }
+    .card-open-positions #positions-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: rgba(15, 23, 42, 0.96);
+      color: #cbd5e1;
+      border-bottom: 1px solid rgba(52, 211, 153, 0.25);
+      padding: 0.65rem 0.55rem;
+    }
+    .card-open-positions #positions-table tbody td {
+      padding: 0.65rem 0.55rem;
+      border-bottom-color: rgba(51, 65, 85, 0.55);
+    }
+    .card-open-positions #positions-table tbody tr:hover {
+      background: rgba(56, 189, 248, 0.06);
+    }
+    .positions-empty {
+      text-align: center;
+      padding: 1.75rem 1rem;
+      color: #94a3b8;
+    }
+    .positions-empty strong {
+      display: block;
+      color: #e2e8f0;
+      font-size: 14px;
+      font-weight: 650;
+      margin-bottom: 0.35rem;
+    }
+    .positions-empty span {
+      font-size: 12px;
+      color: #64748b;
+    }
     .stat { font-size: 1.5rem; font-weight: 700; color: #34d399; }
     .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0; border-bottom: 1px solid #1e293b; gap: 12px; }
     .toggle-row:last-child { border-bottom: none; }
@@ -705,22 +809,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
-      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
-        <div class="card">
-          <div class="section-title">Open Positions <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span></div>
-          <div class="overflow-x-auto max-h-72 overflow-y-auto">
-            <table id="positions-table">
-              <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
+      <div class="card card-open-positions" id="open-positions-panel">
+        <div class="section-title-open">
+          <div class="title-left">
+            <span class="title-text">Open Positions</span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span>
           </div>
+          <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
         </div>
+        <div class="positions-scroll">
+          <table id="positions-table">
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Recent Signals <span class="tip" tabindex="0" data-tip="Latest wallet buys and bot reactions (copy, skip, anti-rug block)."></span></div>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
-      </div>
-
         <div class="card">
           <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
@@ -730,6 +839,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </table>
           </div>
         </div>
+      </div>
 
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
@@ -3409,8 +3519,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? cfg.risk.trailingActivationProfit
         : 30;
       const ptbody = document.querySelector('#positions-table tbody');
-      ptbody.innerHTML = positions.open.length === 0
-        ? '<tr><td colspan="11" style="color:var(--muted)">No open positions</td></tr>'
+      const posBadge = document.getElementById('open-positions-badge');
+      const openN = positions.open.length;
+      if (posBadge) {
+        posBadge.textContent = openN + (openN === 1 ? ' open' : ' open');
+        posBadge.setAttribute('data-empty', openN === 0 ? '1' : '0');
+      }
+      ptbody.innerHTML = openN === 0
+        ? '<tr><td colspan="11"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
           const pnlCell = pnl == null
