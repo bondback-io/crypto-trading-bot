@@ -847,7 +847,7 @@ export const config: BotConfig = {
 
   gmgn: {
     apiKey: process.env.GMGN_API_KEY?.trim() || '',
-    baseUrl: process.env.GMGN_BASE_URL?.trim() || 'https://gmgn.ai',
+    baseUrl: process.env.GMGN_BASE_URL?.trim() || 'https://api.gmgn.ai',
     cacheTtlMs: 5 * 60 * 1000,
     minRequestGapMs: 350,
     preferGmgnActivity: true,

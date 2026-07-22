@@ -304,7 +304,7 @@ export function getPumpSmartActivity(options: {
   nearMigrationOnly?: boolean;
   migrationOnly?: boolean;
 } = {}): PumpSmartActivityEvent[] {
-  const lim = Math.min(Math.max(options.limit ?? 40, 1), MAX_EVENTS);
+  const lim = Math.min(Math.max(options.limit ?? 40, 1), 100);
   let list = [...events];
 
   if (options.kind && options.kind !== 'all') {

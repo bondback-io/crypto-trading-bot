@@ -583,18 +583,20 @@ function getGmgnBaseUrl(): string {
   return (
     process.env.GMGN_BASE_URL?.trim() ||
     config.gmgn?.baseUrl ||
-    'https://gmgn.ai'
+    'https://api.gmgn.ai'
   );
 }
 
-/** Ordered base URLs for fallback (web + OpenAPI) */
+/** Ordered base URLs for fallback (OpenAPI first when keyed, then web) */
 function getGmgnBaseUrls(): string[] {
   const primary = getGmgnBaseUrl().replace(/\/$/, '');
   const openApi = (
     process.env.GMGN_OPENAPI_URL?.trim() ||
     'https://api.gmgn.ai'
   ).replace(/\/$/, '');
-  const list = [primary, openApi, 'https://gmgn.ai', 'https://api.gmgn.ai'];
+  const list = getGmgnApiKey()
+    ? [openApi, primary, 'https://api.gmgn.ai', 'https://gmgn.ai']
+    : [primary, openApi, 'https://gmgn.ai', 'https://api.gmgn.ai'];
   const seen = new Set<string>();
   return list.filter((u) => {
     if (seen.has(u)) return false;
@@ -657,9 +659,13 @@ function buildHeaders(): Record<string, string> {
   };
   const key = getGmgnApiKey();
   if (key) {
-    headers['Authorization'] = `Bearer ${key}`;
+    // Official OpenAPI uses X-APIKEY; also send common aliases for compatibility
+    headers['X-APIKEY'] = key;
     headers['X-API-KEY'] = key;
     headers['api-key'] = key;
+    headers['Authorization'] = `Bearer ${key}`;
+    // Trading-route keys (if user was issued one)
+    headers['x-route-key'] = key;
   }
   return headers;
 }
@@ -1485,7 +1491,7 @@ export async function searchWallets(
   const query = (filters.query ?? '').trim();
   const intent = parseSearchIntent(query);
   const period: GmgnPeriod = filters.period ?? '7d';
-  const limit = Math.min(Math.max(filters.limit ?? 20, 1), 50);
+  const limit = Math.min(Math.max(filters.limit ?? 20, 1), 100);
   const disc = config.gmgn?.discovery;
   const minWinRate = filters.minWinRate ?? disc?.minWinRate ?? 45;
   const minTrades7d = filters.minTrades7d ?? disc?.minTrades7d ?? 20;
@@ -1757,8 +1763,21 @@ export function clearGmgnCache(): void {
 }
 
 export function getGmgnStatus() {
+  const hasApiKey = Boolean(getGmgnApiKey());
+  const lastError = discoveryStatus.lastError;
+  let setupHint: string | null = null;
+  if (!hasApiKey) {
+    setupHint =
+      'Set GMGN_API_KEY on Render (Environment) or in .env. Without a key, GMGN.ai is Cloudflare-blocked and discovery falls back to Kolscan/curated. Get a key at https://gmgn.ai/ai';
+  } else if (lastError && /403|401|cloudflare|cf-|blocked|AUTH_/i.test(lastError)) {
+    setupHint =
+      'GMGN key present but requests are rejected. Confirm the key is valid, whitelist your Render egress IPv4 in the GMGN dashboard, and prefer GMGN_BASE_URL=https://api.gmgn.ai';
+  } else if ((discoveryStatus.consecutiveFailures ?? 0) >= 3) {
+    setupHint =
+      'GMGN is failing repeatedly — use Discover source "All sources" or "Kolscan" until the API recovers.';
+  }
   return {
-    hasApiKey: Boolean(getGmgnApiKey()),
+    hasApiKey,
     baseUrl: getGmgnBaseUrl(),
     baseUrls: getGmgnBaseUrls(),
     cacheTtlMs: cacheTtlMs(),
@@ -1769,6 +1788,8 @@ export function getGmgnStatus() {
       rateLimitedUntil > Date.now() ? rateLimitedUntil : null,
     discovery: { ...discoveryStatus },
     discoveryConfig: { ...config.gmgn.discovery },
+    setupHint,
+    ok: hasApiKey && (discoveryStatus.consecutiveFailures ?? 0) < 3,
   };
 }
 

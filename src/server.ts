@@ -1471,7 +1471,7 @@ export function createServer(): express.Application {
       ];
       const result = await findSmartWallets({
         source: allowed.includes(source) ? source : 'gmgn',
-        limit: req.query.limit != null ? Number(req.query.limit) : 40,
+        limit: req.query.limit != null ? Number(req.query.limit) : 100,
         period: req.query.period === '30d' ? '30d' : '7d',
         minWinRate:
           req.query.minWinRate != null ? Number(req.query.minWinRate) : undefined,
@@ -1521,7 +1521,7 @@ export function createServer(): express.Application {
       const result = await findSmartWallets({
         source:
           body.source && allowed.includes(body.source) ? body.source : undefined,
-        limit: body.limit ?? 40,
+        limit: body.limit ?? 100,
         period: body.period,
         minWinRate: body.minWinRate,
         manualText: body.manualText,
@@ -1540,7 +1540,18 @@ export function createServer(): express.Application {
   });
 
   app.get('/api/discover-wallets/status', (_req: Request, res: Response) => {
-    res.json(getDiscoveryStatus());
+    res.json({
+      ...getDiscoveryStatus(),
+      gmgn: getGmgnStatus(),
+      birdeye: getBirdeyeStatus(),
+      sources: {
+        gmgn: getGmgnStatus().ok ? 'ok' : getGmgnStatus().hasApiKey ? 'degraded' : 'missing_key',
+        birdeye: getBirdeyeStatus().ok ? 'ok' : 'missing_key',
+        kolscan: 'ok',
+        dexscreener: 'ok',
+        curated: 'ok',
+      },
+    });
   });
 
   app.post('/api/discover-wallets/clear-cache', (_req: Request, res: Response) => {

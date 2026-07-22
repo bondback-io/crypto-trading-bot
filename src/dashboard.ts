@@ -778,6 +778,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title !mb-0">Discovery Status <span class="tip" tabindex="0" data-tip="Health of wallet discovery APIs (GMGN/Kolscan/Birdeye): last fetch, errors, and auto-refresh interval."></span></div>
           <span class="mint" id="discovery-status">—</span>
         </div>
+        <div class="mint text-sm mb-2" id="discovery-sources-status">Sources — checking…</div>
+        <div class="mint text-amber-300 text-sm mb-1 hidden" id="discovery-setup-hint" style="display:none;color:#fbbf24"></div>
+        <div class="mint text-amber-300 text-sm mb-2 hidden" id="birdeye-setup-hint" style="display:none;color:#fbbf24"></div>
+        <div class="mint text-xs mb-2" id="birdeye-key-status">—</div>
         <div class="filters-row">
           <label class="ctl ctl-md">
             <span>Auto-refresh (min) <span class="tip" tabindex="0" data-tip="How often to refresh top smart wallets in the background. 0 = disabled."></span></span>
@@ -849,12 +853,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </select>
           </label>
           <label class="ctl ctl-sm">
-            <span>Limit <span class="tip" tabindex="0" data-tip="Max candidates to return (20–50)."></span></span>
+            <span>Limit <span class="tip" tabindex="0" data-tip="Max candidates to return (20–100)."></span></span>
             <select id="discover-limit">
               <option value="20">20</option>
-              <option value="30" selected>30</option>
+              <option value="30">30</option>
               <option value="40">40</option>
               <option value="50">50</option>
+              <option value="75">75</option>
+              <option value="100" selected>100</option>
             </select>
           </label>
           <label class="ctl ctl-sm">
@@ -1703,13 +1709,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rl = d.rateLimitedUntil && d.rateLimitedUntil > Date.now()
         ? ' · rate-limited until ' + new Date(d.rateLimitedUntil).toLocaleTimeString()
         : '';
+      const keyPart = gmgn.hasApiKey ? 'GMGN key ✓' : 'GMGN key MISSING';
       el.textContent =
-        'last fetch ' + fmtAgo(d.lastFetchAt) +
+        keyPart +
+        ' · last fetch ' + fmtAgo(d.lastFetchAt) +
         ' · ok ' + fmtAgo(d.lastSuccessAt) +
         ' · ' + (d.lastWalletCount || 0) + ' wallets' +
         ' · src ' + (d.lastSource || '—') +
         ' · auto ' + Math.round((cfg.autoRefreshMs || d.autoRefreshMs || 0) / 60000) + 'm' +
         err + rl;
+      const hint = document.getElementById('discovery-setup-hint');
+      if (hint) {
+        const parts = [];
+        if (gmgn.setupHint) parts.push(gmgn.setupHint);
+        hint.textContent = parts.join(' ');
+        hint.style.display = parts.length ? 'block' : 'none';
+      }
       const gmin = document.getElementById('disc-auto-min');
       if (gmin && document.activeElement !== gmin) {
         gmin.value = String(Math.round((cfg.autoRefreshMs || 0) / 60000));
@@ -1726,8 +1741,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function refreshDiscoveryStatus() {
       try {
-        const data = await fetchJSON('/api/gmgn/status');
-        updateDiscoveryUi(data);
+        const data = await fetchJSON('/api/discover-wallets/status');
+        if (data.gmgn) updateDiscoveryUi(data.gmgn);
+        const beHint = document.getElementById('birdeye-setup-hint');
+        const beLine = document.getElementById('birdeye-key-status');
+        if (beLine && data.birdeye) {
+          beLine.textContent = data.birdeye.hasApiKey
+            ? 'Birdeye key ✓'
+            : 'No BIRDEYE_API_KEY';
+        }
+        if (beHint && data.birdeye) {
+          beHint.textContent = data.birdeye.setupHint || '';
+          beHint.style.display = data.birdeye.setupHint ? 'block' : 'none';
+        }
+        const srcEl = document.getElementById('discovery-sources-status');
+        if (srcEl && data.sources) {
+          srcEl.textContent =
+            'Sources — GMGN: ' + data.sources.gmgn +
+            ' · Birdeye: ' + data.sources.birdeye +
+            ' · Kolscan: ' + data.sources.kolscan +
+            ' · DexScreener: ' + data.sources.dexscreener +
+            ' · Curated: ' + data.sources.curated;
+        }
       } catch (err) {
         const el = document.getElementById('discovery-status');
         if (el) el.textContent = err.message;
@@ -3721,7 +3756,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const emptyMsg = document.getElementById('discover-empty-msg');
       const source = document.getElementById('discover-source').value;
       const period = document.getElementById('discover-period').value;
-      const limit = Number((document.getElementById('discover-limit') || {}).value || 30);
+      const limit = Number((document.getElementById('discover-limit') || {}).value || 100);
       const minWinRate = Number((document.getElementById('discover-min-wr') || {}).value || 35);
       const preferScalpers = !!(document.getElementById('discover-scalpers') || {}).checked;
       const pumpFunFocus = !!(document.getElementById('discover-pump') || {}).checked;
@@ -4514,6 +4549,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     loadTradingWallets();
+    refreshDiscoveryStatus();
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();

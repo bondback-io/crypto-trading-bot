@@ -98,12 +98,17 @@ export function hasBirdeyeKey(): boolean {
 }
 
 export function getBirdeyeStatus() {
+  const hasApiKey = hasBirdeyeKey();
   return {
-    hasApiKey: hasBirdeyeKey(),
+    hasApiKey,
     baseUrl: getBirdeyeBaseUrl(),
     cacheTtlMs: cacheTtlMs(),
     overviewCacheSize: overviewCache.size,
     signalCacheSize: signalCache.size,
+    setupHint: hasApiKey
+      ? null
+      : 'Set BIRDEYE_API_KEY on Render (Environment) or in .env. Create a key at https://birdeye.so → Data API / BDS Dashboard → Security. Required header is X-API-KEY.',
+    ok: hasApiKey,
   };
 }
 
@@ -303,7 +308,7 @@ export async function getTrendingTokens(
   source: 'birdeye' | 'cache' | 'none';
   error?: string;
 }> {
-  const lim = Math.min(Math.max(limit, 1), 50);
+  const lim = Math.min(Math.max(limit, 1), 100);
   if (!options.force && trendingCache.data && trendingCache.expiresAt > Date.now()) {
     return {
       tokens: trendingCache.data.slice(0, lim),

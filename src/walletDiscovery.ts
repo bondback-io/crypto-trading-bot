@@ -107,8 +107,9 @@ async function discoverFromBirdeyeGainers(
   limit: number
 ): Promise<DiscoveredWallet[] | null> {
   const paths = [
-    `/trader/gainers-losers?type=gainers&sort_by=PnL&sort_type=desc&offset=0&limit=${Math.min(limit, 50)}`,
-    `/trader/gainers-losers?type=gainer&time_frame=7d&sort_by=PnL&sort_type=desc&limit=${Math.min(limit, 50)}`,
+    `/trader/gainers-losers?type=gainers&sort_by=PnL&sort_type=desc&offset=0&limit=${Math.min(limit, 100)}`,
+    `/trader/gainers-losers?type=gainer&time_frame=7d&sort_by=PnL&sort_type=desc&limit=${Math.min(limit, 100)}`,
+    `/trader/gainers-losers?type=gainers&time_frame=24h&sort_by=PnL&sort_type=desc&offset=0&limit=${Math.min(limit, 100)}`,
   ];
   const tracked = trackedSet();
 
@@ -1019,7 +1020,7 @@ export async function findSmartWallets(
     options.source ??
     config.walletDiscovery?.defaultSource ??
     'gmgn';
-  const limit = Math.min(Math.max(options.limit ?? 40, 1), 50);
+  const limit = Math.min(Math.max(options.limit ?? 40, 1), 100);
   const period: GmgnPeriod = options.period ?? '7d';
   const minWinRate =
     options.minWinRate ?? config.gmgn?.discovery?.minWinRate ?? 40;
