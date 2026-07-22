@@ -2001,19 +2001,25 @@ export function createServer(): express.Application {
     const toActivate = [...added, ...updated];
     const monitoring = syncWalletsToMonitoring(toActivate, 'bulk-import');
 
-    // Background activity refresh so Last Active fills in soon
+    // Background activity refresh so Last Active fills in soon (throttled)
     if (toActivate.length > 0) {
       void (async () => {
-        for (const addr of toActivate) {
-          const w = config.smartWallets.find((x) => x.address === addr);
-          if (w) {
+        const concurrency = 3;
+        let i = 0;
+        const workers = Array.from({ length: concurrency }, async () => {
+          while (i < toActivate.length) {
+            const idx = i++;
+            const addr = toActivate[idx];
+            const w = config.smartWallets.find((x) => x.address === addr);
+            if (!w) continue;
             try {
               await refreshWalletActivity(w);
             } catch {
               /* ignore per-wallet failures */
             }
           }
-        }
+        });
+        await Promise.all(workers);
         console.log(
           `[monitor] Bulk-import activity refresh done for ${toActivate.length} wallet(s)`
         );

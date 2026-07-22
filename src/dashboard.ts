@@ -2900,7 +2900,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function refresh() {
-      const [status, positions, logs, activity, cfg, wallets, migrations, paper, sized] = await Promise.all([
+      if (window._refreshInFlight) return;
+      window._refreshInFlight = true;
+      try {
+      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized] = await Promise.all([
         fetchJSON('/api/status'),
         fetchJSON('/api/positions'),
         fetchJSON('/api/logs?limit=50'),
@@ -2911,8 +2914,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/paper-status'),
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
       ]);
+      const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
 
-      updateCharts(paper.charts);
+      updateCharts(paper && paper.charts);
       if (paper.useLiveData != null) {
         document.getElementById('paper-live-data').checked = !!paper.useLiveData;
         document.getElementById('bt-live').checked = !!paper.useLiveData;
@@ -2975,8 +2979,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : 'No BIRDEYE_API_KEY (Dex fallback)';
       }
 
-      document.getElementById('balance').textContent = status.balance != null ? status.balance.toFixed(4) : '—';
-      document.getElementById('daily-pnl').textContent = status.monitor.dailyPnlSol.toFixed(4);
+      document.getElementById('balance').textContent = status.balance != null ? Number(status.balance).toFixed(4) : '—';
+      document.getElementById('daily-pnl').textContent =
+        status.monitor && status.monitor.dailyPnlSol != null
+          ? Number(status.monitor.dailyPnlSol).toFixed(4)
+          : '—';
       const _ob = document.getElementById('ov-balance-mirror');
       if (_ob) _ob.textContent = document.getElementById('balance').textContent;
       const _od = document.getElementById('ov-daily-mirror');
@@ -3001,7 +3008,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <td title="\${e.url}">\${e.label}</td>
               <td>\${e.healthy ? '✅' : '❌'}</td>
               <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
-              <td>\${e.successRate.toFixed(0)}% (\${e.successCount}/\${e.successCount + e.failureCount})</td>
+              <td>\${e.successRate != null ? Number(e.successRate).toFixed(0) : '—'}% (\${e.successCount || 0}/\${(e.successCount || 0) + (e.failureCount || 0)})</td>
               <td>\${e.isActive ? '●' : ''}</td>
             </tr>\`).join('');
       }
@@ -3049,10 +3056,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const watchListEl = document.getElementById('watching-list');
       if (watchListEl) {
         const list = status.monitor.watchingList || [];
+        const maxShow = 40;
+        const shown = list.slice(0, maxShow);
         watchListEl.textContent = list.length
-          ? list
+          ? shown
               .map((w) => w.name + (w.source ? ' (' + w.source + ')' : ''))
-              .join(' · ')
+              .join(' · ') +
+            (list.length > maxShow ? ' · … +' + (list.length - maxShow) + ' more' : '')
           : 'No wallets currently on the poll list — import wallets or Force Refresh Monitoring.';
       }
       document.getElementById('open-count').textContent = status.monitor.openPositions;
@@ -3318,12 +3328,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </tr>\`;
       wtbody.innerHTML = wallets.length === 0
         ? '<tr><td colspan="9" style="color:var(--muted)">No wallets — search above or add one below</td></tr>'
-        : wallets.map(w => renderWalletRow(w, 9)).join('');
+        : wallets.slice(0, 200).map(w => renderWalletRow(w, 9)).join('') +
+          (wallets.length > 200
+            ? '<tr><td colspan="9" class="mint">Showing 200 of ' + wallets.length + ' wallets</td></tr>'
+            : '');
       const stbody = document.querySelector('#scalper-wallets-table tbody');
       if (stbody) {
         stbody.innerHTML = scalpers.length === 0
           ? '<tr><td colspan="7" style="color:var(--muted)">No scalpers tracked yet</td></tr>'
-          : scalpers.map(w => renderWalletRow(w, 7)).join('');
+          : scalpers.slice(0, 100).map(w => renderWalletRow(w, 7)).join('');
       }
       if (status.gmgn) updateDiscoveryUi(status.gmgn);
       else if (cfg && cfg.gmgn) updateDiscoveryUi(cfg.gmgn);
@@ -3519,13 +3532,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       refreshPumpActivity().catch(() => {});
 
-      const logHtml = logs.map(l => \`
+      const logHtml = (Array.isArray(logs) ? logs : []).map(l => \`
         <div class="log-entry log-\${l.type}" data-type="\${l.type}">\${new Date(l.timestamp).toLocaleTimeString()} — \${l.message}</div>\`).join('');
       const logsEl = document.getElementById('logs');
       if (logsEl) logsEl.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
       const logsFull = document.getElementById('logs-full');
       if (logsFull) logsFull.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
       if (typeof applyLogFilter === 'function') applyLogFilter();
+      } catch (err) {
+        console.error('[dashboard] refresh failed:', err);
+        const detail = document.getElementById('stat-detail');
+        if (detail) {
+          detail.textContent = 'Refresh error: ' + ((err && err.message) || String(err));
+        }
+      } finally {
+        window._refreshInFlight = false;
+      }
     }
 
     async function setMode(mode) {
@@ -4399,9 +4421,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function resetToDefaults() {
       const msg = document.getElementById('persist-reset-msg');
       if (!confirm(
-        'Reset ALL saved settings to defaults?\n\n' +
+        'Reset ALL saved settings to defaults?\\n\\n' +
         'This deletes data/config.json, wallets.json, paperBalance.json, and backtestHistory.json, ' +
-        'then reloads code defaults (default wallets, paper balance, empty backtest history).\n\n' +
+        'then reloads code defaults (default wallets, paper balance, empty backtest history).\\n\\n' +
         'This cannot be undone.'
       )) return;
       if (msg) msg.textContent = 'Resetting…';

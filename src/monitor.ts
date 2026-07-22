@@ -365,8 +365,12 @@ async function pollAllWallets(): Promise<void> {
   pollInFlight = true;
   try {
     const wallets = getWalletsForPolling();
-
-    await Promise.allSettled(wallets.map((wallet) => pollWallet(wallet)));
+    // Cap concurrent RPC polls so bulk imports don't freeze the API
+    const batchSize = 12;
+    for (let i = 0; i < wallets.length; i += batchSize) {
+      const batch = wallets.slice(i, i + batchSize);
+      await Promise.allSettled(batch.map((wallet) => pollWallet(wallet)));
+    }
 
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
     if (openMints.length > 0) {
@@ -2220,7 +2224,7 @@ export function getMonitorStatus(): {
     trackedWallets: tracked,
     enabledWallets: enabled,
     watchingLabel: `Watching ${watching.length} of ${tracked} wallets`,
-    watchingList: watching.map((w) => ({
+    watchingList: watching.slice(0, 50).map((w) => ({
       name: w.name,
       address: w.address,
       source: w.source,
