@@ -684,7 +684,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Recent buy/sell signals generated from wallet activity."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Total executed buys + sells (paper or live)."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades. Closed count is shown in Closed Trades below."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
@@ -1372,7 +1372,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">5</span></label><input type="range" id="maxConcurrentPositions" min="1" max="20" step="1" value="5" /></div>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
-            <div class="field"><label title="Minimum pool liquidity in USD">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="0" max="100000" step="1000" value="5000" /></div>
+            <div class="field"><label title="Minimum pool liquidity in USD">Min Liquidity USD — <span class="val" id="v-minLiquidity">2000</span></label><input type="range" id="minLiquidity" min="0" max="100000" step="500" value="2000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">40</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="40" /></div>
             <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">40</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="40" /></div>
@@ -1380,8 +1380,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
             <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
-            <div class="field"><label title="Minimum 24h volume USD (anti-rug)">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">8000</span></label><input type="range" id="minVolume24hUsd" min="0" max="100000" step="1000" value="8000" /></div>
-            <div class="field"><label title="Minimum holder count (anti-rug)">Min Holders — <span class="val" id="v-minHolderCount">40</span></label><input type="range" id="minHolderCount" min="0" max="500" step="10" value="40" /></div>
+            <div class="field"><label title="Minimum 24h volume USD (anti-rug)">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">1000</span></label><input type="range" id="minVolume24hUsd" min="0" max="100000" step="500" value="1000" /></div>
+            <div class="field"><label title="Minimum holder count (anti-rug)">Min Holders — <span class="val" id="v-minHolderCount">10</span></label><input type="range" id="minHolderCount" min="0" max="500" step="5" value="10" /></div>
           </div>
           <div class="mt-2 space-y-0">
             <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
@@ -3112,6 +3112,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       const s = status.stats || {};
       document.getElementById('stat-trades').textContent = s.totalTrades ?? 0;
+      // Prefer showing open+closed breakdown when available
+      const openN = s.openTrades ?? status.monitor?.openPositions ?? 0;
+      const closedN = s.closedTrades;
+      if (closedN != null || openN) {
+        const tip = document.querySelector('#stat-trades')?.parentElement?.querySelector('.tip');
+        if (tip) tip.setAttribute('data-tip',
+          (openN || 0) + ' open · ' + (closedN ?? Math.max(0, (s.totalTrades || 0) - (openN || 0))) + ' closed');
+      }
       document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
       const pfEl = document.getElementById('stat-pf');
       const pf = s.profitFactor ?? 0;

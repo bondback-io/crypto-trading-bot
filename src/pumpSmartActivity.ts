@@ -84,7 +84,9 @@ function minSmScore(): number {
 export function isEarlyCurveBuy(
   progressPct: number | null | undefined
 ): boolean {
-  if (progressPct == null || !Number.isFinite(progressPct)) return false;
+  // Unknown progress (curve fetch miss) — treat as early-eligible so
+  // single smart-wallet Pump buys still form priority signals.
+  if (progressPct == null || !Number.isFinite(progressPct)) return true;
   return progressPct >= 0 && progressPct <= earlyMaxPct();
 }
 
@@ -117,29 +119,33 @@ export function shouldPrioritizeEarlyCurve(input: {
   const pumpTagged = (input.walletTags ?? []).some((t) =>
     /pump|migrat|launch/i.test(t)
   );
+  const progressLabel =
+    input.progressPct == null || !Number.isFinite(input.progressPct)
+      ? 'unknown%'
+      : `${input.progressPct.toFixed(0)}%`;
 
   if (buyers >= Math.max(2, minBuyers)) {
     return {
       prioritize: true,
-      reason: `early_multi_wallet (${buyers}) @ ${input.progressPct?.toFixed(0)}%`,
+      reason: `early_multi_wallet (${buyers}) @ ${progressLabel}`,
     };
   }
   if (minSmScore() > 0 && sm >= minSmScore()) {
     return {
       prioritize: true,
-      reason: `early_birdeye_sm ${sm} @ ${input.progressPct?.toFixed(0)}%`,
+      reason: `early_birdeye_sm ${sm} @ ${progressLabel}`,
     };
   }
   if (pumpTagged && buyers >= minBuyers) {
     return {
       prioritize: true,
-      reason: `early_pump_wallet @ ${input.progressPct?.toFixed(0)}%`,
+      reason: `early_pump_wallet @ ${progressLabel}`,
     };
   }
   if (minBuyers <= 1) {
     return {
       prioritize: true,
-      reason: `early_smart_buy @ ${input.progressPct?.toFixed(0)}%`,
+      reason: `early_smart_buy @ ${progressLabel}`,
     };
   }
 

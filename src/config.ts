@@ -207,18 +207,18 @@ export interface SelectiveTradingConfig {
 
 export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   enabled: true,
-  minConvictionScore: 55,
+  minConvictionScore: 45,
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
-  minWalletsForTrade: 2,
-  minVolume24hUsd: 8_000,
-  minHolderCount: 40,
-  maxTradesPerHour: 6,
-  minMsBetweenTrades: 90_000,
-  riskScoreSizeCutoff: 35,
-  minRiskSizeMultiplier: 0.3,
+  minWalletsForTrade: 1,
+  minVolume24hUsd: 1_000,
+  minHolderCount: 10,
+  maxTradesPerHour: 12,
+  minMsBetweenTrades: 45_000,
+  riskScoreSizeCutoff: 40,
+  minRiskSizeMultiplier: 0.35,
   extraConvergenceAboveRisk: 1,
-  highRiskConvergenceThreshold: 45,
+  highRiskConvergenceThreshold: 50,
 };
 
 /**
@@ -348,20 +348,20 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -28,
     },
     filters: {
-      minLiquidity: 10_000,
+      minLiquidity: 2_000,
       maxDevHoldPct: 12,
       maxDevPercent: 12,
       maxTopHolderPct: 35,
       maxHolderConcentration: 35,
       maxEstimatedTaxPct: 20,
-      maxRiskScore: 55,
-      skipIfMintAuthority: true,
+      maxRiskScore: 65,
+      skipIfMintAuthority: false,
       sniperSensitivity: 'medium',
-      convergenceRequired: 3,
-      maxConcurrentPositions: 3,
-      dailyLossLimitSol: 1.5,
-      minVolume24hUsd: 8_000,
-      minHolderCount: 40,
+      convergenceRequired: 2,
+      maxConcurrentPositions: 5,
+      dailyLossLimitSol: 2,
+      minVolume24hUsd: 1_000,
+      minHolderCount: 10,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -399,18 +399,18 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     selective: {
       enabled: true,
-      minConvictionScore: 55,
+      minConvictionScore: 45,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
-      minWalletsForTrade: 2,
-      minVolume24hUsd: 8_000,
-      minHolderCount: 40,
-      maxTradesPerHour: 6,
-      minMsBetweenTrades: 90_000,
-      riskScoreSizeCutoff: 35,
-      minRiskSizeMultiplier: 0.3,
+      minWalletsForTrade: 1,
+      minVolume24hUsd: 1_000,
+      minHolderCount: 10,
+      maxTradesPerHour: 12,
+      minMsBetweenTrades: 45_000,
+      riskScoreSizeCutoff: 40,
+      minRiskSizeMultiplier: 0.35,
       extraConvergenceAboveRisk: 1,
-      highRiskConvergenceThreshold: 45,
+      highRiskConvergenceThreshold: 50,
     },
     profitStrategy: {
       takeInitialPercent: 90,
@@ -497,11 +497,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minConvictionScore: 40,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
-      minWalletsForTrade: 2,
-      minVolume24hUsd: 3_000,
-      minHolderCount: 20,
-      maxTradesPerHour: 12,
-      minMsBetweenTrades: 45_000,
+      minWalletsForTrade: 1,
+      minVolume24hUsd: 1_000,
+      minHolderCount: 10,
+      maxTradesPerHour: 14,
+      minMsBetweenTrades: 30_000,
       riskScoreSizeCutoff: 50,
       minRiskSizeMultiplier: 0.45,
       extraConvergenceAboveRisk: 0,
@@ -777,7 +777,7 @@ export const config: BotConfig = {
 
   filters: {
     minWinRate: 0,
-    minLiquidity: 10_000,
+    minLiquidity: 2_000,
     maxDevHoldPct: 12,
     maxDevPercent: 12,
     maxTopHolderPct: 35,
@@ -787,22 +787,24 @@ export const config: BotConfig = {
     skipIfDevRecentSells: true,
     checkHoneypot: true,
     maxEstimatedTaxPct: 20,
-    maxRiskScore: 55,
-    skipIfMintAuthority: true,
+    maxRiskScore: 65,
+    // Pump.fun bonding-curve tokens keep mint authority until migration —
+    // hard-skipping them blocks almost all early copy signals.
+    skipIfMintAuthority: false,
     enableSniperFilter: true,
     sniperSensitivity: 'medium',
     maxSniperCount: 0,
     maxBundlerPct: 0,
     maxInsiderPct: 0,
     maxSniperScore: 0,
-    convergenceRequired: 3,
-    maxConcurrentPositions: 3,
-    dailyLossLimitSol: 1.5,
-    minActivityDays: 7,
-    minTradesLast30d: 5,
+    convergenceRequired: 2,
+    maxConcurrentPositions: 5,
+    dailyLossLimitSol: 2,
+    minActivityDays: 14,
+    minTradesLast30d: 3,
     enableActivityFilter: true,
-    minVolume24hUsd: 8_000,
-    minHolderCount: 40,
+    minVolume24hUsd: 1_000,
+    minHolderCount: 10,
   },
 
   strategy: {
@@ -1041,6 +1043,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
+    migrations: { ...settingsMigrations },
   };
 }
 
@@ -1209,10 +1212,86 @@ export function applyPersistedSettings(): boolean {
   }
 
   applySettingsSnapshot(saved, 'merge');
+  settingsMigrations = { ...(saved.migrations ?? {}) };
+
+  if (applyPaperSignalRelaxMigration()) {
+    settingsMigrations[PAPER_SIGNAL_RELAX_MIGRATION] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied paperSignalRelax_v2 — loosened mint-authority / liq / vol / holder gates so early Pump.fun paper signals can fire'
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
   return true;
+}
+
+/** One-shot: older defaults hard-blocked almost all pre-migration Pump copies. */
+const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
+let settingsMigrations: Record<string, boolean> = {};
+
+function applyPaperSignalRelaxMigration(): boolean {
+  if (settingsMigrations[PAPER_SIGNAL_RELAX_MIGRATION]) return false;
+
+  let changed = false;
+  if (config.filters.skipIfMintAuthority) {
+    config.filters.skipIfMintAuthority = false;
+    changed = true;
+  }
+  if ((config.filters.minLiquidity ?? 0) >= 8_000) {
+    config.filters.minLiquidity = 2_000;
+    changed = true;
+  }
+  if ((config.filters.minVolume24hUsd ?? 0) >= 5_000) {
+    config.filters.minVolume24hUsd = 1_000;
+    changed = true;
+  }
+  if ((config.filters.minHolderCount ?? 0) >= 30) {
+    config.filters.minHolderCount = 10;
+    changed = true;
+  }
+  if ((config.filters.convergenceRequired ?? 3) >= 3) {
+    config.filters.convergenceRequired = 2;
+    changed = true;
+  }
+  if ((config.filters.maxConcurrentPositions ?? 0) < 5) {
+    config.filters.maxConcurrentPositions = 5;
+    changed = true;
+  }
+  if ((config.filters.maxRiskScore ?? 0) > 0 && config.filters.maxRiskScore < 65) {
+    config.filters.maxRiskScore = 65;
+    changed = true;
+  }
+  if ((config.selective.minWalletsForTrade ?? 2) > 1) {
+    config.selective.minWalletsForTrade = 1;
+    changed = true;
+  }
+  if ((config.selective.minConvictionScore ?? 55) >= 55) {
+    config.selective.minConvictionScore = 45;
+    changed = true;
+  }
+  if ((config.selective.minVolume24hUsd ?? 0) >= 5_000) {
+    config.selective.minVolume24hUsd = 1_000;
+    changed = true;
+  }
+  if ((config.selective.minHolderCount ?? 0) >= 30) {
+    config.selective.minHolderCount = 10;
+    changed = true;
+  }
+  if (
+    (config.selective.maxTradesPerHour ?? 0) > 0 &&
+    (config.selective.maxTradesPerHour ?? 0) < 12
+  ) {
+    config.selective.maxTradesPerHour = 12;
+    changed = true;
+  }
+  if ((config.selective.minMsBetweenTrades ?? 0) >= 90_000) {
+    config.selective.minMsBetweenTrades = 45_000;
+    changed = true;
+  }
+  return changed;
 }
 
 /**

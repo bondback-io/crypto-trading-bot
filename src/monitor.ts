@@ -1534,9 +1534,35 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           birdeye: signal.birdeye ?? buy.birdeye,
         });
       } else {
-        // Still log non-priority pump curve activity for dashboard
+        // Single tracked wallet on Pump.fun — still form a candidate signal
+        // (anti-rug + conviction decide take/skip). Without this, activity
+        // appears but Signals/Trades stay empty until N-wallet convergence.
+        const treatEarly =
+          Boolean(buy.earlyBuy) ||
+          buy.bondingCurve?.progressPct == null ||
+          isEarlyCurveBuy(buy.bondingCurve?.progressPct);
+        signal = {
+          mint: buy.mint,
+          symbol: buy.symbol,
+          name: buy.name,
+          wallets: [buy.wallet],
+          walletNames: [buy.walletName],
+          isMigration: false,
+          nearMigration: Boolean(buy.bondingCurve?.nearMigration),
+          earlyBuy: treatEarly,
+          earlyBuyerCount: buy.earlyBuyerCount ?? 1,
+          timestamp: Date.now(),
+          bondingCurve: buy.bondingCurve,
+          birdeye: buy.birdeye,
+        };
+        priority = treatEarly;
+        console.log(
+          `[monitor] ${priority ? '🎯' : '📡'} Pump single-wallet candidate ` +
+            `${buy.walletName} on ${label}` +
+            (treatEarly ? ' (early/unknown curve)' : '')
+        );
         recordPumpSmartActivity({
-          kind: buy.earlyBuy ? 'early_buy' : 'curve_buy',
+          kind: treatEarly ? 'early_buy' : 'curve_buy',
           mint: buy.mint,
           symbol: buy.symbol,
           name: buy.name,
@@ -1544,10 +1570,10 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           walletNames: [buy.walletName],
           isPumpFun: true,
           isMigration: false,
-          priority: false,
+          priority,
           curveProgressPct: buy.bondingCurve?.progressPct ?? null,
           birdeye: buy.birdeye,
-          notes: earlyGate.reason,
+          notes: earlyGate.reason || 'single_wallet_candidate',
         });
       }
     } else {
@@ -2003,20 +2029,44 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         if (report.sniper) signal.sniper = report.sniper;
         if (report.birdeye) signal.birdeye = report.birdeye;
         if (!report.ok) {
-          console.log(formatAntiRugSkipLog(signal.symbol, report));
-          for (const reason of report.skipReasons) {
-            console.log(`[monitor] ${reason}`);
+          const softEarly =
+            Boolean(signal.earlyBuy || signal.nearMigration) ||
+            Boolean(signal.bondingCurve && !signal.isMigration);
+          const hardReasons = report.skipReasons.filter((reason) => {
+            if (!softEarly) return true;
+            // Pre-migration Pump tokens normally keep mint authority and thin metrics.
+            if (/mint authority/i.test(reason)) return false;
+            if (/low 24h volume/i.test(reason)) return false;
+            if (/low holders/i.test(reason)) return false;
+            if (/low liquidity/i.test(reason)) return false;
+            return true;
+          });
+          if (hardReasons.length === 0) {
+            console.log(
+              `[monitor] Anti-rug soft-pass ${signal.symbol}: early/curve signal — ` +
+                `ignored ${report.skipReasons.join('; ') || 'soft flags'} (score ${report.riskScore})`
+            );
+            paperTrader.addLog(
+              'info',
+              `Anti-rug soft-pass ${signal.symbol}: early Pump curve — ${report.skipReasons.join('; ') || 'soft flags'}`,
+              { mint: signal.mint, symbol: signal.symbol }
+            );
+          } else {
+            console.log(formatAntiRugSkipLog(signal.symbol, report));
+            for (const reason of report.skipReasons) {
+              console.log(`[monitor] ${reason}`);
+            }
+            paperTrader.addLog(
+              'info',
+              `Anti-rug skip ${signal.symbol}: ${hardReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
+              { mint: signal.mint, symbol: signal.symbol }
+            );
+            recordRejectedSignal(
+              signal,
+              `anti-rug: ${hardReasons[0] || 'high risk'} (score ${report.riskScore})`
+            );
+            return false;
           }
-          paperTrader.addLog(
-            'info',
-            `Anti-rug skip ${signal.symbol}: ${report.skipReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
-            { mint: signal.mint, symbol: signal.symbol }
-          );
-          recordRejectedSignal(
-            signal,
-            `anti-rug: ${report.skipReasons[0] || 'high risk'} (score ${report.riskScore})`
-          );
-          return false;
         }
         console.log(
           `[anti-rug] OK ${signal.symbol}: score=${report.riskScore} (${report.riskLevel}) ` +

@@ -407,6 +407,24 @@ export function isNearMigrationPriority(
   return state.nearMigration;
 }
 
+/**
+ * Spot price in SOL per whole token from virtual reserves (6dp tokens).
+ * Used for paper simulation when Jupiter has no route yet.
+ */
+export function estimateBondingCurvePriceSol(
+  state: BondingCurveState | null | undefined
+): number | null {
+  if (!state || state.source === 'none') return null;
+  const vSol = state.virtualSolReserves;
+  const vTok = state.virtualTokenReserves;
+  if (!(vSol > 0) || !(vTok > 0)) return null;
+  const sol = vSol / 1e9;
+  const tokens = vTok / 1e6;
+  if (!(tokens > 0)) return null;
+  const price = sol / tokens;
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
 /** Human log line */
 export function formatBondingCurveLog(
   symbol: string,

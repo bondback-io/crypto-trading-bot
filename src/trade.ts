@@ -29,6 +29,10 @@ import {
   fetchLiveTokenSnapshot,
   marketCapAtPrice,
 } from './marketData';
+import {
+  fetchBondingCurve,
+  estimateBondingCurvePriceSol,
+} from './bondingCurve';
 
 const jupiter = createJupiterApiClient();
 
@@ -206,11 +210,48 @@ export async function executeBuy(
   }
 
   const quote = await getQuote(mint, solAmount, slippageBps);
-  if (!quote) {
-    return { success: false, mode: config.mode, error: 'No quote available' };
+  let priceSol = quote ? quoteToPriceSol(quote) : null;
+
+  // Paper: brand-new Pump.fun mints often have no Jupiter route yet —
+  // fall back to bonding-curve / Dex price so signals still open positions.
+  if (priceSol == null || !(priceSol > 0)) {
+    if (config.mode === 'paper') {
+      try {
+        const curve = await fetchBondingCurve(mint);
+        const curvePx = estimateBondingCurvePriceSol(curve);
+        if (curvePx != null && curvePx > 0) {
+          priceSol = curvePx;
+          console.log(
+            `[trade] Paper price from bonding curve: ${priceSol.toExponential(4)} SOL/token`
+          );
+        }
+      } catch {
+        /* non-fatal */
+      }
+      if (priceSol == null || !(priceSol > 0)) {
+        try {
+          const snap = await fetchLiveTokenSnapshot(mint);
+          if (snap?.priceSol != null && snap.priceSol > 0) {
+            priceSol = snap.priceSol;
+            console.log(
+              `[trade] Paper price from market snapshot: ${priceSol.toExponential(4)} SOL/token`
+            );
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
   }
 
-  const priceSol = quoteToPriceSol(quote);
+  if (priceSol == null || !(priceSol > 0)) {
+    return {
+      success: false,
+      mode: config.mode,
+      error: quote ? 'Invalid quote price' : 'No quote available',
+    };
+  }
+
   const entryMarketCapUsd = await resolveEntryMarketCapUsd(
     mint,
     priceSol,
@@ -239,12 +280,15 @@ export async function executeBuy(
     return {
       success: true,
       mode: 'paper',
-      quote,
+      quote: quote ?? undefined,
       positionId: position.id,
       mevProtected: false,
     };
   }
 
+  if (!quote) {
+    return { success: false, mode: 'live', error: 'No quote available' };
+  }
   const keypair = getKeypair();
   if (!keypair) {
     const slot = getActiveTradingWallet();

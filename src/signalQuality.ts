@@ -193,9 +193,10 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     reasons.push(`conviction ${score} < min ${minRequired}`);
   }
 
-  const hardFail = !walletOk ||
-    (minVol > 0 && vol != null && vol < minVol) ||
-    (minHolders > 0 && holders != null && holders < minHolders);
+  const hardFail =
+    !walletOk ||
+    (!priority && minVol > 0 && vol != null && vol < minVol) ||
+    (!priority && minHolders > 0 && holders != null && holders < minHolders);
 
   return {
     pass: !hardFail && score >= minRequired,

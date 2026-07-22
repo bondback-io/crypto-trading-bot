@@ -1593,7 +1593,9 @@ export class PaperTrader {
         : 0;
 
     return {
-      totalTrades: closed.length,
+      totalTrades: closed.length + this.positions.size,
+      closedTrades: closed.length,
+      openTrades: this.positions.size,
       wins: wins.length,
       losses: losses.length,
       winRatePct: this.getWinRatePct(),

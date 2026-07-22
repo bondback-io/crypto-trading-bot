@@ -20,11 +20,11 @@ import {
 const SETTINGS_FILE = dataFile(PERSIST_FILES.config);
 const LEGACY_SETTINGS_FILE = dataFile(PERSIST_FILES.legacyConfig);
 
-export const SETTINGS_VERSION = 1 as const;
+export const SETTINGS_VERSION = 2 as const;
 
 /** Serializable user settings (no secrets, no wallets) */
 export interface PersistedBotSettings {
-  version: typeof SETTINGS_VERSION;
+  version: number;
   updatedAt: number;
   mode?: 'paper' | 'live';
   riskLevel?: 'low' | 'medium' | 'high';
@@ -45,6 +45,8 @@ export interface PersistedBotSettings {
   bondingCurve?: Record<string, unknown>;
   convergenceWindowMs?: number;
   pollIntervalMs?: number;
+  /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
+  migrations?: Record<string, boolean>;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
