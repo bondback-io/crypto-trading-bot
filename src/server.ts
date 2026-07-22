@@ -368,7 +368,7 @@ export function createServer(): express.Application {
         hours: body.hours != null ? Number(body.hours) : undefined,
         fromMs: body.fromMs != null ? Number(body.fromMs) : undefined,
         toMs: body.toMs != null ? Number(body.toMs) : undefined,
-        maxTrades: body.maxTrades != null ? Number(body.maxTrades) : 20,
+        maxTrades: body.maxTrades != null ? Number(body.maxTrades) : 25,
         simulations:
           body.simulations != null ? Number(body.simulations) : undefined,
         migrationsOnly: body.migrationsOnly,
@@ -432,7 +432,7 @@ export function createServer(): express.Application {
         reBuyEnabled:
           req.query.reBuy === '1' || req.query.reBuy === 'true',
         minVolumeUsd: Number(req.query.minVolume) || 0,
-        maxTrades: Number(req.query.maxTrades) || 20,
+        maxTrades: Number(req.query.maxTrades) || 25,
         simulations: Number(req.query.simulations) || 1,
         strategyType: (req.query.strategy as
           | 'convergence'

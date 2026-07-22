@@ -41,7 +41,7 @@ export interface LaunchEvent {
   isPumpFun?: boolean;
   /** Price path for replay (oldest → newest) */
   candles: MarketCandle[];
-  source: 'dexscreener' | 'gmgn' | 'synthetic';
+  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'synthetic';
   url?: string;
   /** SOL/USD used when this event was built (for PnL $ display) */
   solUsd?: number;
@@ -102,12 +102,14 @@ export function estimateRiskScoreHint(
 ): number {
   const liq = liquidityUsd ?? 0;
   const vol = volumeUsd ?? 0;
-  let score = 40;
-  if (liq <= 0) score += 35;
-  else if (liq < 5_000) score += 30;
-  else if (liq < 20_000) score += 15;
-  else if (liq >= 50_000) score -= 10;
-  if (vol > 0 && liq > 0 && vol / liq < 0.1) score += 10;
+  let score = 35;
+  if (liq <= 0) score += 30;
+  else if (liq < 3_000) score += 25;
+  else if (liq < 10_000) score += 12;
+  else if (liq < 20_000) score += 6;
+  else if (liq >= 50_000) score -= 12;
+  if (vol > 0 && liq > 0 && vol / liq < 0.1) score += 8;
+  if (vol >= 50_000) score -= 5;
   if (vol >= 100_000) score -= 5;
   return Math.max(0, Math.min(100, Math.round(score)));
 }
@@ -577,38 +579,45 @@ async function fetchFromDexScreener(
         solUsd,
       });
 
-      if (events.length >= 25) break;
+      if (events.length >= 60) break;
     }
-    if (events.length >= 25) break;
+    if (events.length >= 60) break;
   }
 
-  // Also search pump.fun related
-  if (events.length < 8) {
-    const search = await fetchJson(
-      'https://api.dexscreener.com/latest/dex/search?q=pump%20solana'
-    );
-    const pairs =
-      (search as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
-    for (const pair of pairs.slice(0, 30)) {
-      if (String(pair.chainId) !== 'solana') continue;
-      const mint = String(
-        (pair.baseToken as { address?: string } | undefined)?.address ?? ''
+  // Always search pump/solana pairs to widen the pool (boosts alone are thin)
+  {
+    const queries = [
+      'pump%20solana',
+      'pumpswap',
+      'raydium%20solana',
+    ];
+    for (const q of queries) {
+      if (events.length >= 60) break;
+      const search = await fetchJson(
+        `https://api.dexscreener.com/latest/dex/search?q=${q}`
       );
-      if (!isValidMint(mint) || seen.has(mint)) continue;
+      const pairs =
+        (search as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
+      for (const pair of pairs.slice(0, 40)) {
+        if (String(pair.chainId) !== 'solana') continue;
+        const mint = String(
+          (pair.baseToken as { address?: string } | undefined)?.address ?? ''
+        );
+        if (!isValidMint(mint) || seen.has(mint)) continue;
 
-      const createdAt = Number(pair.pairCreatedAt ?? 0);
-      if (!createdAt || createdAt < fromMs || createdAt > toMs) continue;
+        const createdAt = Number(pair.pairCreatedAt ?? 0);
+        if (!createdAt || createdAt < fromMs || createdAt > toMs) continue;
 
-      const priceNative = Number(
-        (pair as { priceNative?: string }).priceNative ?? 0
-      );
-      if (priceNative <= 0) continue;
+        const priceNative = Number(
+          (pair as { priceNative?: string }).priceNative ?? 0
+        );
+        if (priceNative <= 0) continue;
 
-      const picked = pickPriceChangeForPath(pair);
-      const entry = reconstructEntryPriceSol(priceNative, picked.pct, {
-        fallbackFactor: 0.6,
-      });
-      const change = effectivePriceChangePct(entry, priceNative);
+        const picked = pickPriceChangeForPath(pair);
+        const entry = reconstructEntryPriceSol(priceNative, picked.pct, {
+          fallbackFactor: 0.6,
+        });
+        const change = effectivePriceChangePct(entry, priceNative);
         const symbol = String(
           (pair.baseToken as { symbol?: string } | undefined)?.symbol ??
             mint.slice(0, 6)
@@ -622,46 +631,46 @@ async function fetchFromDexScreener(
           nowMs: Math.min(toMs, Date.now()),
           changeWindowMs: picked.windowMs,
         });
+        const liqUsd =
+          Number(
+            (pair.liquidity as { usd?: number } | undefined)?.usd ?? 0
+          ) || undefined;
+        const volUsd =
+          Number((pair.volume as { h24?: number } | undefined)?.h24 ?? 0) ||
+          undefined;
 
         seen.add(mint);
         events.push({
           mint,
           symbol,
           name,
-        launchedAt: createdAt,
-        migrated: String(pair.dexId).toLowerCase().includes('raydium'),
-        entryPriceSol: entry > 0 ? entry : priceNative * 0.6,
-        lastPriceSol: priceNative,
-        priceChangePct: change,
-        liquidityUsd: Number(
-          (pair.liquidity as { usd?: number } | undefined)?.usd ?? 0
-        ) || undefined,
-        volumeUsd: Number(
-          (pair.volume as { h24?: number } | undefined)?.h24 ?? 0
-        ) || undefined,
-        marketCapUsd: readMarketCapUsd(pair as Record<string, unknown>),
-        riskScoreHint: estimateRiskScoreHint(
-          Number((pair.liquidity as { usd?: number } | undefined)?.usd ?? 0) ||
-            undefined,
-          Number((pair.volume as { h24?: number } | undefined)?.h24 ?? 0) ||
-            undefined
-        ),
-        isPumpFun:
-          String(pair.dexId ?? '')
-            .toLowerCase()
-            .includes('pump') ||
-          String(pair.url ?? '').includes('pump.fun'),
-        candles: buildPricePath(
-          entry > 0 ? entry : priceNative * 0.6,
-          priceNative,
-          pathWin.startMs,
-          pathWin.endMs,
-          24
-        ),
-        source: 'dexscreener',
-        url: String(pair.url ?? ''),
-        solUsd,
-      });
+          launchedAt: createdAt,
+          migrated: String(pair.dexId).toLowerCase().includes('raydium'),
+          entryPriceSol: entry > 0 ? entry : priceNative * 0.6,
+          lastPriceSol: priceNative,
+          priceChangePct: change,
+          liquidityUsd: liqUsd,
+          volumeUsd: volUsd,
+          marketCapUsd: readMarketCapUsd(pair as Record<string, unknown>),
+          riskScoreHint: estimateRiskScoreHint(liqUsd, volUsd),
+          isPumpFun:
+            String(pair.dexId ?? '')
+              .toLowerCase()
+              .includes('pump') ||
+            String(pair.url ?? '').includes('pump.fun'),
+          candles: buildPricePath(
+            entry > 0 ? entry : priceNative * 0.6,
+            priceNative,
+            pathWin.startMs,
+            pathWin.endMs,
+            36
+          ),
+          source: 'dexscreener',
+          url: String(pair.url ?? ''),
+          solUsd,
+        });
+        if (events.length >= 60) break;
+      }
     }
   }
 
@@ -823,48 +832,145 @@ export async function fetchRecentLaunches(
   const toMs = options.toMs ?? Date.now();
   const fromMs = options.fromMs ?? toMs - 24 * 60 * 60 * 1000;
   const allowSynthetic = options.allowSynthetic !== false;
-  const maxResults = options.maxResults ?? 30;
+  const maxResults = options.maxResults ?? 60;
 
   console.log(
     `[marketData] Fetching launches ${new Date(fromMs).toISOString()} → ${new Date(toMs).toISOString()}`
   );
 
   let events: LaunchEvent[] = [];
-  let source = 'none';
+  const sources: string[] = [];
 
   try {
     const dex = await fetchFromDexScreener(fromMs, toMs);
     if (dex.length > 0) {
       events = dex;
-      source = 'dexscreener';
+      sources.push('dexscreener');
     }
   } catch (err) {
     console.warn('[marketData] DexScreener failed:', err);
   }
 
-  if (events.length < 5) {
-    try {
-      const gmgn = await fetchFromGmgn(fromMs, toMs);
-      if (gmgn.length > 0) {
-        const seen = new Set(events.map((e) => e.mint));
-        for (const e of gmgn) {
-          if (!seen.has(e.mint)) events.push(e);
+  // Always try GMGN to widen coverage (not only when Dex is nearly empty)
+  try {
+    const gmgn = await fetchFromGmgn(fromMs, toMs);
+    if (gmgn.length > 0) {
+      const seen = new Set(events.map((e) => e.mint));
+      let added = 0;
+      for (const e of gmgn) {
+        if (!seen.has(e.mint)) {
+          events.push(e);
+          seen.add(e.mint);
+          added += 1;
         }
-        source = events.some((e) => e.source === 'dexscreener')
-          ? 'dexscreener+gmgn'
-          : 'gmgn';
       }
-    } catch (err) {
-      console.warn('[marketData] GMGN failed:', err);
+      if (added > 0) sources.push('gmgn');
+    }
+  } catch (err) {
+    console.warn('[marketData] GMGN failed:', err);
+  }
+
+  // Optional Birdeye trending enrichment
+  try {
+    const { hasBirdeyeKey, getTrendingTokens } = await import('./birdeye');
+    if (hasBirdeyeKey()) {
+      const trend = await getTrendingTokens(30, { interval: '1h' });
+      if (trend.tokens.length > 0) {
+        const seen = new Set(events.map((e) => e.mint));
+        let added = 0;
+        for (const t of trend.tokens) {
+          const mint = String(t.mint || '');
+          if (!isValidMint(mint) || seen.has(mint)) continue;
+          const launchedAt =
+            Number(t.liquidityUsd || 0) > 0 ? toMs - 60 * 60_000 : 0;
+          // Only keep if we can get a Dex pair in window
+          const snap = await fetchJson(
+            `https://api.dexscreener.com/latest/dex/tokens/${mint}`
+          );
+          const pairs =
+            (snap as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
+          const sol = pairs.find((p) => String(p.chainId) === 'solana');
+          if (!sol) continue;
+          const createdAt = Number(sol.pairCreatedAt ?? 0);
+          if (!createdAt || createdAt < fromMs || createdAt > toMs) continue;
+          const priceNative = Number(
+            (sol as { priceNative?: string }).priceNative ?? 0
+          );
+          if (!(priceNative > 0)) continue;
+          const picked = pickPriceChangeForPath(sol);
+          const entry = reconstructEntryPriceSol(priceNative, picked.pct);
+          const pathWin = resolveLaunchPathWindow({
+            launchedAt: createdAt,
+            nowMs: Math.min(toMs, Date.now()),
+            changeWindowMs: picked.windowMs,
+          });
+          const liqUsd =
+            Number(
+              (sol.liquidity as { usd?: number } | undefined)?.usd ?? 0
+            ) || undefined;
+          const volUsd =
+            Number((sol.volume as { h24?: number } | undefined)?.h24 ?? 0) ||
+            undefined;
+          seen.add(mint);
+          events.push({
+            mint,
+            symbol: String(t.symbol || mint.slice(0, 6)),
+            name: String(t.name || t.symbol || mint.slice(0, 6)),
+            launchedAt: createdAt || launchedAt,
+            migrated: String(sol.dexId ?? '')
+              .toLowerCase()
+              .includes('raydium'),
+            entryPriceSol: entry > 0 ? entry : priceNative * 0.7,
+            lastPriceSol: priceNative,
+            priceChangePct: effectivePriceChangePct(entry, priceNative),
+            liquidityUsd: liqUsd,
+            volumeUsd: volUsd,
+            marketCapUsd: readMarketCapUsd(sol),
+            riskScoreHint: estimateRiskScoreHint(liqUsd, volUsd),
+            isPumpFun: String(sol.dexId ?? '')
+              .toLowerCase()
+              .includes('pump'),
+            candles: buildPricePath(
+              entry > 0 ? entry : priceNative * 0.7,
+              priceNative,
+              pathWin.startMs,
+              pathWin.endMs,
+              36
+            ),
+            source: 'birdeye',
+            url: String(sol.url ?? ''),
+            solUsd: solUsdFromPair(sol) ?? 150,
+          });
+          added += 1;
+          if (added >= 20) break;
+        }
+        if (added > 0) sources.push('birdeye');
+      }
+    }
+  } catch (err) {
+    console.warn('[marketData] Birdeye trending enrich failed:', err);
+  }
+
+  // Pad with synthetic when live pool is thin (not only when empty)
+  if (allowSynthetic && events.length < Math.min(maxResults, 12)) {
+    const need = Math.min(maxResults, 20) - events.length;
+    if (need > 0) {
+      const synth = generateSyntheticLaunches(fromMs, toMs, need);
+      events.push(...synth);
+      sources.push('synthetic');
     }
   }
 
   if (events.length === 0 && allowSynthetic) {
-    events = generateSyntheticLaunches(fromMs, toMs, 12);
-    source = 'synthetic';
+    events = generateSyntheticLaunches(fromMs, toMs, 16);
+    sources.push('synthetic');
   }
 
+  const source = sources.length > 0 ? sources.join('+') : 'none';
   events.sort((a, b) => a.launchedAt - b.launchedAt);
+  console.log(
+    `[marketData] Launch pool: ${events.length} event(s) from ${source}`
+  );
   return { events: events.slice(0, maxResults), source };
 }
 

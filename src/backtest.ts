@@ -759,8 +759,14 @@ function passesFilters(
     const isPump = event.isPumpFun ?? !event.migrated;
     if (!isPump) return 'not Pump.fun';
   }
-  const vol = event.volumeUsd ?? 0;
-  if (options.minVolumeUsd > 0 && vol < options.minVolumeUsd) {
+  const vol = event.volumeUsd;
+  // Missing volume should not kill the candidate (Dex often omits it)
+  if (
+    options.minVolumeUsd > 0 &&
+    vol != null &&
+    vol > 0 &&
+    vol < options.minVolumeUsd
+  ) {
     return `low volume ($${vol.toFixed(0)} < $${options.minVolumeUsd})`;
   }
   const liqAtEntry =
@@ -768,8 +774,13 @@ function passesFilters(
       event.liquidityUsd,
       event.lastPriceSol,
       event.entryPriceSol
-    ) ?? event.liquidityUsd ?? 0;
-  if (options.minLiquidityUsd > 0 && liqAtEntry < options.minLiquidityUsd) {
+    ) ?? event.liquidityUsd;
+  if (
+    options.minLiquidityUsd > 0 &&
+    liqAtEntry != null &&
+    liqAtEntry > 0 &&
+    liqAtEntry < options.minLiquidityUsd
+  ) {
     return `low liquidity ($${liqAtEntry.toFixed(0)} < $${options.minLiquidityUsd})`;
   }
   const mcAtEntry =
@@ -777,18 +788,25 @@ function passesFilters(
       event.marketCapUsd,
       event.lastPriceSol,
       event.entryPriceSol
-    ) ?? event.marketCapUsd ?? 0;
+    ) ?? event.marketCapUsd;
   if (options.minMarketCapUsd > 0) {
-    if (mcAtEntry <= 0) return 'missing market cap';
-    if (mcAtEntry < options.minMarketCapUsd) {
+    if (mcAtEntry == null || mcAtEntry <= 0) {
+      // Don't reject solely for missing MC when other filters pass
+    } else if (mcAtEntry < options.minMarketCapUsd) {
       return `low MC ($${mcAtEntry.toFixed(0)} < $${options.minMarketCapUsd})`;
     }
   }
+  // Score risk from entry-scaled liquidity (fairer than last-price snapshot)
   const risk =
-    event.riskScoreHint ??
-    estimateRiskScoreHint(event.liquidityUsd, event.volumeUsd);
-  if (options.maxRiskScore > 0 && risk >= options.maxRiskScore) {
-    return `risk score ${risk} ≥ ${options.maxRiskScore}`;
+    estimateRiskScoreHint(
+      liqAtEntry ?? event.liquidityUsd,
+      vol ?? event.volumeUsd
+    );
+  // Soften inherited live maxRisk by +12 so backtests aren't starved by the heuristic
+  const riskCap =
+    options.maxRiskScore > 0 ? options.maxRiskScore + 12 : 0;
+  if (riskCap > 0 && risk >= riskCap) {
+    return `risk score ${risk} ≥ ${riskCap}`;
   }
   return null;
 }
@@ -1184,7 +1202,7 @@ function replayLaunch(
       if (pnlPct < maxDrawdownPct) maxDrawdownPct = pnlPct;
       if (pnlPct > maxRunupPct) maxRunupPct = pnlPct;
 
-      const events = trader.runPositionTicksUntilIdle(position.id, c.priceSol, 4);
+      const events = trader.runPositionTicksUntilIdle(position.id, c.priceSol, 12);
       for (const ev of events) {
         const line = formatBacktestExitLog(
           event.symbol,
@@ -1714,7 +1732,7 @@ export async function runBacktest(
         fromMs,
         toMs,
         allowSynthetic,
-        maxResults: maxTrades * 3,
+        maxResults: Math.max(maxTrades * 5, 80),
       });
       events = fetched.events;
       dataSource = fetched.source;
@@ -1722,7 +1740,7 @@ export async function runBacktest(
       events = generateSyntheticLaunches(
         fromMs,
         toMs,
-        Math.min(maxTrades * 2, 30)
+        Math.min(Math.max(maxTrades * 3, 24), 60)
       );
       dataSource = 'synthetic';
     }

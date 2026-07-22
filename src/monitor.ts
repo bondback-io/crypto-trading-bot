@@ -193,6 +193,11 @@ const recentSignals: Array<{
 }> = [];
 const MAX_RECENT_SIGNALS = 40;
 
+/** Longer-lived feed for dashboard (separate from convergence window prune). */
+const activityFeed: WalletBuyEvent[] = [];
+const MAX_ACTIVITY_FEED = 200;
+const ACTIVITY_FEED_TTL_MS = 6 * 60 * 60 * 1000;
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
@@ -1345,7 +1350,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   const buys = recentBuys.get(buy.mint)!;
 
   if (!buys.some((b) => b.wallet === buy.wallet && b.signature === buy.signature)) {
-    buys.push({
+    const event: WalletBuyEvent = {
       ...buy,
       isMigration,
       metrics: buy.metrics,
@@ -1355,7 +1360,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       birdeye: buy.birdeye,
       earlyBuy: buy.earlyBuy,
       earlyBuyerCount: buy.earlyBuyerCount,
-    });
+    };
+    buys.push(event);
+    pushActivityFeed(event);
   }
 
   // Feed re-buy confirmation if we're watching this mint after a profit sell
@@ -1898,6 +1905,21 @@ function recordSignalSizing(
   }
 }
 
+/** Record a filter reject on the sizing panel so Signals tab isn't blank. */
+function recordRejectedSignal(signal: TradeSignal, reason: string): void {
+  const kind: 'migration' | 'normal' =
+    signal.isMigration || signal.nearMigration || signal.earlyBuy
+      ? 'migration'
+      : 'normal';
+  const preview = resolveTradeSize(kind, {
+    riskScore: signal.antiRug?.riskScore,
+    convictionScore: signal.convictionScore,
+    sizeMultiplier: signal.sizeMultiplier,
+  });
+  preview.reason = reason;
+  recordSignalSizing(signal, preview, false);
+}
+
 export function getRecentSignals() {
   return recentSignals.slice(0, 30);
 }
@@ -1907,6 +1929,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   if (isRiskHalted()) {
     console.log(`[monitor] Signal rejected — risk halt active`);
+    recordRejectedSignal(signal, 'risk halt');
     return false;
   }
 
@@ -1914,11 +1937,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   paperTrader.evaluateAndMaybeHaltRisk();
   if (isRiskHalted() || paused) {
     console.log(`[monitor] Signal rejected — risk/paused`);
+    recordRejectedSignal(signal, paused ? 'monitor paused' : 'risk halt');
     return false;
   }
 
   if (strategy.enableMigrationOnly && !signal.isMigration) {
     console.log(`[monitor] Signal rejected — migration-only enabled for ${signal.symbol}`);
+    recordRejectedSignal(signal, 'migration-only mode');
     return false;
   }
 
@@ -1927,6 +1952,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     console.log(
       `[monitor] Signal rejected — max concurrent positions (${filters.maxConcurrentPositions})`
     );
+    recordRejectedSignal(signal, `max positions (${filters.maxConcurrentPositions})`);
     return false;
   }
 
@@ -1934,6 +1960,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     console.log(
       `[monitor] Signal rejected — already holding ${signal.symbol || signal.mint.slice(0, 8)}`
     );
+    recordRejectedSignal(signal, 'already holding');
     return false;
   }
 
@@ -1942,6 +1969,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     console.log(
       `[monitor] Signal rejected — daily loss limit hit (${dailyPnl.toFixed(4)} SOL)`
     );
+    recordRejectedSignal(signal, 'daily loss limit');
     return false;
   }
 
@@ -1951,6 +1979,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       console.log(
         `[monitor] Signal rejected — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
       );
+      recordRejectedSignal(signal, `win rate ${winRate.toFixed(0)}%`);
       return false;
     }
   }
@@ -1983,6 +2012,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             `Anti-rug skip ${signal.symbol}: ${report.skipReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
             { mint: signal.mint, symbol: signal.symbol }
           );
+          recordRejectedSignal(
+            signal,
+            `anti-rug: ${report.skipReasons[0] || 'high risk'} (score ${report.riskScore})`
+          );
           return false;
         }
         console.log(
@@ -2004,6 +2037,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             `[monitor] Signal rejected — token metrics for ${signal.symbol}: ` +
               verdict.reasons.join('; ')
           );
+          recordRejectedSignal(
+            signal,
+            `metrics: ${verdict.reasons[0] || 'failed'}`
+          );
           return false;
         }
       }
@@ -2018,6 +2055,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         (filters.maxDevPercent ?? filters.maxDevHoldPct ?? 0) > 0
       ) {
         console.log(`[monitor] Skipped - anti-rug / metrics unavailable`);
+        recordRejectedSignal(signal, 'anti-rug / metrics unavailable');
         return false;
       }
     }
@@ -2031,6 +2069,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `Trade rate limit: ${rate.reason}`,
       { mint: signal.mint, symbol: signal.symbol }
     );
+    recordRejectedSignal(signal, rate.reason || 'rate limit');
     return false;
   }
 
@@ -2121,6 +2160,23 @@ function checkConvergence(mint: string): TradeSignal | null {
   };
 }
 
+function pushActivityFeed(event: WalletBuyEvent): void {
+  activityFeed.unshift(event);
+  if (activityFeed.length > MAX_ACTIVITY_FEED) {
+    activityFeed.length = MAX_ACTIVITY_FEED;
+  }
+}
+
+function pruneActivityFeed(): void {
+  const cutoff = Date.now() - ACTIVITY_FEED_TTL_MS;
+  while (
+    activityFeed.length > 0 &&
+    activityFeed[activityFeed.length - 1].timestamp < cutoff
+  ) {
+    activityFeed.pop();
+  }
+}
+
 function pruneOldBuys(): void {
   const cutoff = Date.now() - config.convergenceWindowMs * 2;
 
@@ -2132,9 +2188,15 @@ function pruneOldBuys(): void {
       recentBuys.set(mint, filtered);
     }
   }
+  pruneActivityFeed();
 }
 
 export function getRecentActivity(): WalletBuyEvent[] {
+  pruneActivityFeed();
+  if (activityFeed.length > 0) {
+    return activityFeed.slice(0, 80);
+  }
+  // Fallback if feed empty (e.g. mid-restart)
   const all: WalletBuyEvent[] = [];
   for (const buys of recentBuys.values()) {
     all.push(...buys);
@@ -2231,7 +2293,7 @@ export function getMonitorStatus(): {
       enabled: w.enabled,
       isActive: isWalletActive(w),
     })),
-    recentSignals: recentBuys.size,
+    recentSignals: Math.max(recentBuys.size, activityFeed.length),
     dailyPnlSol: paperTrader.getDailyPnlSol(),
     openPositions: paperTrader.getOpenPositions().length,
     migration: getMigrationStatus(),

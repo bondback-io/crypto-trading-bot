@@ -46,7 +46,8 @@ function holderCount(signal: TradeSignal): number | null {
 function isPrioritySignal(signal: TradeSignal): boolean {
   if (signal.isMigration) return true;
   if (signal.nearMigration) return true;
-  if (signal.earlyBuy && (signal.earlyBuyerCount ?? 0) >= 2) return true;
+  // Early-curve smart buys are priority even with a single wallet
+  if (signal.earlyBuy) return true;
   return false;
 }
 
@@ -78,7 +79,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const allowSingle =
     priority &&
     sel.allowSingleWalletMigration !== false &&
-    (signal.isMigration || signal.nearMigration);
+    (signal.isMigration || signal.nearMigration || signal.earlyBuy);
 
   if (walletCount >= requiredWallets) {
     score += clamp(15 + (walletCount - requiredWallets) * 5, 15, 30);
@@ -105,8 +106,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     score += 18;
     reasons.push('near-migration curve');
   } else if (signal.earlyBuy) {
-    score += 10;
-    if ((signal.earlyBuyerCount ?? 0) >= 2) score += 5;
+    score += 16;
+    if ((signal.earlyBuyerCount ?? 0) >= 2) score += 6;
+    reasons.push('early-curve priority');
   }
 
   // --- Risk quality inverse (0–25) ---
@@ -132,10 +134,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     } else if (vol != null) {
       score += clamp((vol / minVol) * 4, 0, 4);
       reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
-    } else if (priority) {
-      score += 3;
     } else {
-      reasons.push('volume unknown');
+      // Unknown volume (Birdeye/Dex miss) — don't hard-fail early pumps
+      score += priority ? 5 : 3;
     }
   } else if (vol != null && vol > 0) {
     score += vol >= 10_000 ? 8 : 4;
@@ -155,8 +156,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     if (holders != null && holders >= minHolders) score += 5;
     else if (holders != null) {
       reasons.push(`holders ${holders} < ${minHolders}`);
-    } else if (!priority) {
-      reasons.push('holder count unknown');
+    } else {
+      // Unknown holders — don't hard-fail
+      score += priority ? 3 : 2;
     }
   }
 
