@@ -249,6 +249,32 @@ export function startMonitor(): void {
   // Restore wallets that were auto-disabled after failed RPC/GMGN scans
   recoverDisabledWallets();
 
+  // If activity filter wiped the watch list, re-enable all tracked imports
+  const enabledCount = config.smartWallets.filter((w) => w.enabled).length;
+  if (enabledCount === 0 && config.smartWallets.length > 0) {
+    console.warn(
+      `[monitor] ⚠ ${config.smartWallets.length} tracked wallet(s) but 0 enabled — ` +
+        `force-enabling all for monitoring`
+    );
+    forceRefreshMonitoring();
+  } else {
+    // Ensure every enabled tracked wallet is on the poll list (imported wallets)
+    const bootSync = syncWalletsToMonitoring(
+      config.smartWallets.filter((w) => w.enabled).map((w) => w.address),
+      'monitor-start'
+    );
+    console.log(
+      `[monitor] Boot watch list: ${bootSync.watching}/${bootSync.tracked} — ` +
+        bootSync.wallets
+          .slice(0, 20)
+          .map((w) => w.name)
+          .join(', ') +
+        (bootSync.wallets.length > 20
+          ? ` … +${bootSync.wallets.length - 20} more`
+          : '')
+    );
+  }
+
   // Start polling immediately so trading isn't blocked behind slow GMGN/RPC
   // activity scans. Refresh activity in the background, then apply filter.
   void pollAllWallets();
@@ -560,13 +586,28 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
  * True when wallet looks active enough to poll.
  * tradesLast30d === 0 is treated as "unknown" (RPC/GMGN often wipe this on failure),
  * so a recent lastTradedAt alone is enough to stay eligible.
+ * Newly imported wallets keep a grace period so they stay on the watch list
+ * until we have a real inactivity signal.
  */
+function importGraceActive(wallet: SmartWallet): boolean {
+  const discovered = wallet.discoveredAt ?? 0;
+  if (!discovered) return false;
+  // 14 days after import/discovery — keep watching even if activity is unknown
+  return Date.now() - discovered < 14 * MS_PER_DAY;
+}
+
 function passesActivityRules(wallet: SmartWallet): boolean {
   const { minActivityDays, minTradesLast30d } = config.filters;
   // Not yet checked — allow until first successful activity scan
   if (wallet.lastCheckedAt == null) return true;
+
   const last = wallet.lastTradedAt ?? wallet.lastActive;
-  if (last == null) return false;
+  // Unknown activity after a check: keep watching during import grace
+  // (imported GMGN/Birdeye/manual wallets often have no on-chain hit yet)
+  if (last == null) {
+    return importGraceActive(wallet);
+  }
+
   const daysSince = (Date.now() - last) / MS_PER_DAY;
   if (daysSince > minActivityDays) return false;
   const trades = wallet.tradesLast30d ?? 0;
@@ -623,6 +664,10 @@ export function filterActiveWallets(
   for (const wallet of config.smartWallets) {
     // Skip wallets not yet successfully checked — don't disable blindly
     if (wallet.lastCheckedAt == null) continue;
+    // Never auto-disable freshly imported wallets still in grace
+    if (importGraceActive(wallet) && (wallet.lastTradedAt == null && wallet.lastActive == null)) {
+      continue;
+    }
 
     const active = passesActivityRules(wallet);
     const last = wallet.lastTradedAt ?? wallet.lastActive;
@@ -671,7 +716,16 @@ export function getWalletsForPolling(): SmartWallet[] {
   let list = enabled;
 
   if (config.filters.enableActivityFilter) {
-    list = enabled.filter((w) => passesActivityRules(w));
+    const filtered = enabled.filter((w) => passesActivityRules(w));
+    // Never drop to an empty poll set while enabled wallets exist —
+    // fall back to all enabled (imported wallets must stay watched)
+    list = filtered.length > 0 ? filtered : enabled;
+    if (filtered.length === 0 && enabled.length > 0) {
+      console.warn(
+        `[monitor] Activity filter would watch 0/${enabled.length} — ` +
+          `falling back to all enabled wallets`
+      );
+    }
   }
 
   // Recent activity first so monitor polls hot wallets sooner
@@ -680,6 +734,246 @@ export function getWalletsForPolling(): SmartWallet[] {
     const bT = b.lastTradedAt ?? b.lastActive ?? 0;
     return bT - aT;
   });
+}
+
+/**
+ * Ensure wallets are enabled and subscribed to the monitoring poll loop.
+ * Call after GMGN / Birdeye / manual / bulk import with the new addresses.
+ * Pass no addresses to only refresh the poll loop / status.
+ */
+export function syncWalletsToMonitoring(
+  addresses?: string[],
+  reason = 'import'
+): {
+  addedToWatch: string[];
+  watching: number;
+  tracked: number;
+  enabled: number;
+  wallets: Array<{ name: string; address: string; source?: string }>;
+} {
+  const targets = (addresses ?? []).map((a) => a.trim()).filter(Boolean);
+  const addedToWatch: string[] = [];
+  const now = Date.now();
+
+  for (const address of targets) {
+    const wallet = config.smartWallets.find((w) => w.address === address);
+    if (!wallet) {
+      console.warn(
+        `[monitor] sync skipped — ${address.slice(0, 8)}… not in tracked list (${reason})`
+      );
+      continue;
+    }
+
+    const wasDisabled = !wallet.enabled;
+    wallet.enabled = true;
+    if (wallet.discoveredAt == null) {
+      wallet.discoveredAt = now;
+    }
+    // Fresh import: allow grace until a real activity sample exists
+    if (wallet.lastTradedAt == null && wallet.lastActive == null) {
+      wallet.lastCheckedAt = undefined;
+    }
+
+    addedToWatch.push(wallet.address);
+    console.log(
+      `[monitor] ✅ Added to monitoring: ${wallet.name} (${wallet.address.slice(0, 8)}…)` +
+        (wasDisabled ? ' [re-enabled]' : '') +
+        ` · source=${wallet.source ?? 'unknown'} · reason=${reason}`
+    );
+  }
+
+  if (addedToWatch.length > 0) {
+    persistWallets();
+  }
+
+  const watchingList = getWalletsForPolling();
+  console.log(
+    `[monitor] Watching ${watchingList.length}/${config.smartWallets.length} wallet(s)` +
+      ` after ${reason}` +
+      (addedToWatch.length
+        ? ` · synced ${addedToWatch.length} address(es)`
+        : ' · poll refresh only')
+  );
+
+  // Kick the poll loop so new wallets are picked up immediately
+  if (running && !paused && watchingList.length > 0) {
+    void pollAllWallets();
+  } else if (!running && addedToWatch.length > 0) {
+    console.warn(
+      '[monitor] Wallets synced but monitor is not running — start the bot to begin polling'
+    );
+  }
+
+  return {
+    addedToWatch,
+    watching: watchingList.length,
+    tracked: config.smartWallets.length,
+    enabled: config.smartWallets.filter((w) => w.enabled).length,
+    wallets: watchingList.map((w) => ({
+      name: w.name,
+      address: w.address,
+      source: w.source,
+    })),
+  };
+}
+
+/**
+ * Force re-subscribe: re-enable all tracked wallets, recover disabled,
+ * refresh poll set, and run an immediate poll cycle.
+ */
+export function forceRefreshMonitoring(): {
+  ok: boolean;
+  recovered: number;
+  reenabled: number;
+  watching: number;
+  tracked: number;
+  enabled: number;
+  running: boolean;
+  paused: boolean;
+  wallets: Array<{
+    name: string;
+    address: string;
+    source?: string;
+    enabled: boolean;
+    isActive: boolean;
+  }>;
+  message: string;
+} {
+  console.log('[monitor] Force refresh monitoring — re-subscribing all tracked wallets…');
+
+  const { recovered } = recoverDisabledWallets();
+  let reenabled = 0;
+  const allAddresses: string[] = [];
+  for (const wallet of config.smartWallets) {
+    allAddresses.push(wallet.address);
+    if (!wallet.enabled) {
+      wallet.enabled = true;
+      reenabled += 1;
+      if (wallet.lastTradedAt == null && wallet.lastActive == null) {
+        wallet.lastCheckedAt = undefined;
+      }
+      console.log(
+        `[monitor] ✅ Force re-enabled for monitoring: ${wallet.name} (${wallet.address.slice(0, 8)}…)`
+      );
+    }
+  }
+
+  if (reenabled > 0) persistWallets();
+
+  const sync = syncWalletsToMonitoring(allAddresses, 'force-refresh');
+  const watchingList = getWalletsForPolling();
+
+  const message =
+    `Force refresh: watching ${watchingList.length}/${config.smartWallets.length} wallets` +
+    (recovered ? ` · recovered ${recovered}` : '') +
+    (reenabled ? ` · re-enabled ${reenabled}` : '') +
+    (running ? (paused ? ' · monitor paused' : ' · poll kicked') : ' · monitor stopped');
+
+  console.log(`[monitor] ${message}`);
+  if (watchingList.length > 0) {
+    console.log(
+      `[monitor] Tracked watch list: ` +
+        watchingList
+          .slice(0, 30)
+          .map((w) => w.name)
+          .join(', ') +
+        (watchingList.length > 30 ? ` … +${watchingList.length - 30} more` : '')
+    );
+  }
+
+  return {
+    ok: true,
+    recovered,
+    reenabled,
+    watching: watchingList.length,
+    tracked: config.smartWallets.length,
+    enabled: config.smartWallets.filter((w) => w.enabled).length,
+    running,
+    paused,
+    wallets: config.smartWallets.map((w) => ({
+      name: w.name,
+      address: w.address,
+      source: w.source,
+      enabled: w.enabled,
+      isActive: isWalletActive(w),
+    })),
+    message,
+  };
+}
+
+/**
+ * Remove wallets with no (or stale) activity for longer than maxDaysInactive.
+ * Default 14 days. Wallets never traded are pruned only after their
+ * discoveredAt/import age exceeds the same window (import grace).
+ */
+export function pruneInactiveWallets(
+  maxDaysInactive = 14
+): {
+  removed: number;
+  kept: number;
+  pruned: Array<{ name: string; address: string; reason: string }>;
+} {
+  const cutoff = Date.now() - maxDaysInactive * MS_PER_DAY;
+  const pruned: Array<{ name: string; address: string; reason: string }> = [];
+  const kept: typeof config.smartWallets = [];
+
+  for (const wallet of config.smartWallets) {
+    const last = wallet.lastTradedAt ?? wallet.lastActive ?? null;
+    if (last != null) {
+      if (last < cutoff) {
+        const days = ((Date.now() - last) / MS_PER_DAY).toFixed(1);
+        pruned.push({
+          name: wallet.name,
+          address: wallet.address,
+          reason: `last activity ${days}d ago (>${maxDaysInactive}d)`,
+        });
+        console.log(
+          `[monitor] Pruned inactive ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
+            `last activity ${days}d ago`
+        );
+        continue;
+      }
+      kept.push(wallet);
+      continue;
+    }
+
+    // Never traded — only prune after import/discovery age exceeds window
+    const ageRef = wallet.discoveredAt ?? wallet.lastCheckedAt ?? 0;
+    if (ageRef > 0 && ageRef < cutoff) {
+      const days = ((Date.now() - ageRef) / MS_PER_DAY).toFixed(1);
+      pruned.push({
+        name: wallet.name,
+        address: wallet.address,
+        reason: `never traded · imported/checked ${days}d ago`,
+      });
+      console.log(
+        `[monitor] Pruned ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
+          `never traded, age ${days}d`
+      );
+      continue;
+    }
+
+    kept.push(wallet);
+  }
+
+  config.smartWallets = kept;
+  persistWallets({ activeOnly: false });
+
+  const watching = getWalletsForPolling();
+  console.log(
+    `[monitor] Prune >${maxDaysInactive}d: removed ${pruned.length}, kept ${kept.length}, ` +
+      `now watching ${watching.length}`
+  );
+
+  if (running && !paused) {
+    void pollAllWallets();
+  }
+
+  return {
+    removed: pruned.length,
+    kept: kept.length,
+    pruned,
+  };
 }
 
 export function isWalletActive(wallet: SmartWallet): boolean {
@@ -1849,23 +2143,33 @@ export function getWalletLastActivity(address: string): WalletLastActivity | nul
 }
 
 export function getWalletsWithActivity() {
+  const watchingSet = new Set(getWalletsForPolling().map((w) => w.address));
   return config.smartWallets.map((w) => {
     const activity = walletLastActivity.get(w.address) ?? null;
-    const lastTradedAt = w.lastTradedAt ?? activity?.timestamp ?? null;
+    const lastTradedAt =
+      w.lastTradedAt ?? w.lastActive ?? activity?.timestamp ?? null;
     const daysSince =
       lastTradedAt != null
         ? (Date.now() - lastTradedAt) / MS_PER_DAY
         : null;
     const active = isWalletActive(w);
+    const activityLabel = formatActivityLabel(lastTradedAt, active);
+    const lastActiveDisplay =
+      lastTradedAt != null
+        ? `${new Date(lastTradedAt).toLocaleString()} (${activityLabel})`
+        : activityLabel;
 
     return {
       ...w,
       lastActivity: activity,
       lastTradedAt,
+      lastActive: lastTradedAt ?? w.lastActive,
       tradesLast30d: w.tradesLast30d ?? activity?.tradesLast30d,
       daysSinceTrade: daysSince,
       isActive: active,
-      activityLabel: formatActivityLabel(lastTradedAt, active),
+      activityLabel,
+      lastActiveDisplay,
+      watching: watchingSet.has(w.address),
     };
   });
 }
@@ -1874,6 +2178,16 @@ export function getMonitorStatus(): {
   running: boolean;
   paused: boolean;
   watchedWallets: number;
+  trackedWallets: number;
+  enabledWallets: number;
+  watchingLabel: string;
+  watchingList: Array<{
+    name: string;
+    address: string;
+    source?: string;
+    enabled: boolean;
+    isActive: boolean;
+  }>;
   recentSignals: number;
   dailyPnlSol: number;
   openPositions: number;
@@ -1895,10 +2209,24 @@ export function getMonitorStatus(): {
     weeklyPnlSol: paperTrader.getWeeklyPnlSol(),
   });
 
+  const watching = getWalletsForPolling();
+  const tracked = config.smartWallets.length;
+  const enabled = config.smartWallets.filter((w) => w.enabled).length;
+
   return {
     running,
     paused,
-    watchedWallets: getWalletsForPolling().length,
+    watchedWallets: watching.length,
+    trackedWallets: tracked,
+    enabledWallets: enabled,
+    watchingLabel: `Watching ${watching.length} of ${tracked} wallets`,
+    watchingList: watching.map((w) => ({
+      name: w.name,
+      address: w.address,
+      source: w.source,
+      enabled: w.enabled,
+      isActive: isWalletActive(w),
+    })),
     recentSignals: recentBuys.size,
     dailyPnlSol: paperTrader.getDailyPnlSol(),
     openPositions: paperTrader.getOpenPositions().length,

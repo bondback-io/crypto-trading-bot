@@ -31,10 +31,22 @@ import {
   SETTINGS_VERSION,
   type PersistedBotSettings,
 } from './settingsStore';
+import { resetAllPersistedData } from './dataDir';
 
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
 export { hasPersistedSettings };
 export type TradingMode = 'paper' | 'live';
+export type RiskLevel = 'low' | 'medium' | 'high';
+
+export const HIGH_RISK_WARNING =
+  '⚠️ High risk mode increases position size and reduces filters — use with caution';
+
+/** Human labels for dashboard */
+export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
+  low: 'Low — tight filters, smaller size, stricter stops',
+  medium: 'Medium — balanced (recommended default)',
+  high: 'High — aggressive entries, larger size, wider stops',
+};
 
 export interface SellTier {
   profitPct: number;
@@ -209,6 +221,310 @@ export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   highRiskConvergenceThreshold: 45,
 };
 
+/**
+ * Recommended parameter packs applied when the user picks a risk level.
+ * Covers trade sizing, filters, risk engine, selective gating, and profit strategy.
+ */
+export interface RiskLevelPreset {
+  label: string;
+  description: string;
+  warning?: string;
+  trade: Partial<TradeConfig>;
+  filters: Partial<FilterConfig>;
+  risk: Partial<RiskConfig> & {
+    normal?: Partial<StrategyRiskRules>;
+    migration?: Partial<StrategyRiskRules>;
+  };
+  selective: Partial<SelectiveTradingConfig>;
+  profitStrategy: Partial<ProfitStrategyConfig>;
+  strategy: Partial<StrategyConfig>;
+}
+
+export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
+  low: {
+    label: 'Low',
+    description:
+      'Tight filters, smaller positions, stricter stops — fewer trades, capital preservation.',
+    trade: {
+      baseTradeAmountSol: 0.06,
+      tradeAmountSol: 0.06,
+      riskMultiplier: 0.25,
+      convictionMultiplier: 1.2,
+      minProfitPercent: 35,
+      maxProfitPercent: 70,
+      stopLossPercent: -20,
+    },
+    filters: {
+      minLiquidity: 15_000,
+      maxDevHoldPct: 10,
+      maxDevPercent: 10,
+      maxTopHolderPct: 30,
+      maxHolderConcentration: 30,
+      maxEstimatedTaxPct: 15,
+      maxRiskScore: 40,
+      skipIfMintAuthority: true,
+      sniperSensitivity: 'high',
+      convergenceRequired: 3,
+      maxConcurrentPositions: 2,
+      dailyLossLimitSol: 0.8,
+      minVolume24hUsd: 15_000,
+      minHolderCount: 80,
+      requireLiquidityLocked: false,
+      checkHoneypot: true,
+      skipIfDevRecentSells: true,
+      enableAntiRug: true,
+      enableSniperFilter: true,
+    },
+    risk: {
+      riskPercentPerTrade: 0.8,
+      maxTradeSol: 0.4,
+      minTradeSol: 0.02,
+      weeklyLossLimitSol: 2,
+      maxDrawdownPct: 12,
+      trailingStopPct: 14,
+      trailingStopPercent: 14,
+      trailingActivationProfit: 20,
+      normal: {
+        riskPercentPerTrade: 0.8,
+        trailingStopPct: 14,
+        hardStopLossPct: -20,
+        tiers: [
+          { profitPct: 30, sellPct: 40 },
+          { profitPct: 60, sellPct: 30 },
+        ],
+      },
+      migration: {
+        riskPercentPerTrade: 1.1,
+        trailingStopPct: 16,
+        hardStopLossPct: -24,
+        sizeMultiplier: 1.05,
+        tiers: [
+          { profitPct: 30, sellPct: 40 },
+          { profitPct: 60, sellPct: 30 },
+        ],
+      },
+    },
+    selective: {
+      enabled: true,
+      minConvictionScore: 65,
+      requireConvergenceForNormal: true,
+      allowSingleWalletMigration: true,
+      minWalletsForTrade: 3,
+      minVolume24hUsd: 15_000,
+      minHolderCount: 80,
+      maxTradesPerHour: 3,
+      minMsBetweenTrades: 180_000,
+      riskScoreSizeCutoff: 25,
+      minRiskSizeMultiplier: 0.2,
+      extraConvergenceAboveRisk: 1,
+      highRiskConvergenceThreshold: 35,
+    },
+    profitStrategy: {
+      takeInitialPercent: 70,
+      partialSellAt: 45,
+      partialSellPercent: 50,
+      trailingStopAfter: 90,
+      trailingStopPct: 15,
+      bagPercent: 20,
+      riskBasedAdjustment: true,
+      highRiskScoreThreshold: 40,
+    },
+    strategy: {
+      migrationSizeMultiplier: 1.2,
+      confirmationThreshold: 5,
+      reBuyMinProfitPct: 80,
+    },
+  },
+  medium: {
+    label: 'Medium',
+    description: 'Balanced filters and sizing — recommended default.',
+    trade: {
+      baseTradeAmountSol: 0.12,
+      tradeAmountSol: 0.12,
+      riskMultiplier: 0.4,
+      convictionMultiplier: 1.45,
+      minProfitPercent: 45,
+      maxProfitPercent: 90,
+      stopLossPercent: -28,
+    },
+    filters: {
+      minLiquidity: 10_000,
+      maxDevHoldPct: 12,
+      maxDevPercent: 12,
+      maxTopHolderPct: 35,
+      maxHolderConcentration: 35,
+      maxEstimatedTaxPct: 20,
+      maxRiskScore: 55,
+      skipIfMintAuthority: true,
+      sniperSensitivity: 'medium',
+      convergenceRequired: 3,
+      maxConcurrentPositions: 3,
+      dailyLossLimitSol: 1.5,
+      minVolume24hUsd: 8_000,
+      minHolderCount: 40,
+      requireLiquidityLocked: false,
+      checkHoneypot: true,
+      skipIfDevRecentSells: true,
+      enableAntiRug: true,
+      enableSniperFilter: true,
+    },
+    risk: {
+      riskPercentPerTrade: 1.2,
+      maxTradeSol: 0.8,
+      minTradeSol: 0.02,
+      weeklyLossLimitSol: 4,
+      maxDrawdownPct: 20,
+      trailingStopPct: 18,
+      trailingStopPercent: 18,
+      trailingActivationProfit: 25,
+      normal: {
+        riskPercentPerTrade: 1.2,
+        trailingStopPct: 18,
+        hardStopLossPct: -28,
+        tiers: [
+          { profitPct: 40, sellPct: 35 },
+          { profitPct: 80, sellPct: 30 },
+        ],
+      },
+      migration: {
+        riskPercentPerTrade: 1.8,
+        trailingStopPct: 22,
+        hardStopLossPct: -32,
+        sizeMultiplier: 1.15,
+        tiers: [
+          { profitPct: 40, sellPct: 35 },
+          { profitPct: 80, sellPct: 30 },
+        ],
+      },
+    },
+    selective: {
+      enabled: true,
+      minConvictionScore: 55,
+      requireConvergenceForNormal: true,
+      allowSingleWalletMigration: true,
+      minWalletsForTrade: 2,
+      minVolume24hUsd: 8_000,
+      minHolderCount: 40,
+      maxTradesPerHour: 6,
+      minMsBetweenTrades: 90_000,
+      riskScoreSizeCutoff: 35,
+      minRiskSizeMultiplier: 0.3,
+      extraConvergenceAboveRisk: 1,
+      highRiskConvergenceThreshold: 45,
+    },
+    profitStrategy: {
+      takeInitialPercent: 90,
+      partialSellAt: 60,
+      partialSellPercent: 45,
+      trailingStopAfter: 120,
+      trailingStopPct: 20,
+      bagPercent: 25,
+      riskBasedAdjustment: true,
+      highRiskScoreThreshold: 50,
+    },
+    strategy: {
+      migrationSizeMultiplier: 1.5,
+      confirmationThreshold: 4,
+      reBuyMinProfitPct: 100,
+    },
+  },
+  high: {
+    label: 'High',
+    description:
+      'Aggressive entries, larger positions, wider stops — higher variance.',
+    warning: HIGH_RISK_WARNING,
+    trade: {
+      baseTradeAmountSol: 0.22,
+      tradeAmountSol: 0.22,
+      riskMultiplier: 0.55,
+      convictionMultiplier: 1.7,
+      minProfitPercent: 50,
+      maxProfitPercent: 150,
+      stopLossPercent: -40,
+    },
+    filters: {
+      minLiquidity: 5_000,
+      maxDevHoldPct: 18,
+      maxDevPercent: 18,
+      maxTopHolderPct: 45,
+      maxHolderConcentration: 45,
+      maxEstimatedTaxPct: 30,
+      maxRiskScore: 70,
+      skipIfMintAuthority: false,
+      sniperSensitivity: 'low',
+      convergenceRequired: 2,
+      maxConcurrentPositions: 5,
+      dailyLossLimitSol: 3,
+      minVolume24hUsd: 3_000,
+      minHolderCount: 20,
+      requireLiquidityLocked: false,
+      checkHoneypot: true,
+      skipIfDevRecentSells: true,
+      enableAntiRug: true,
+      enableSniperFilter: true,
+    },
+    risk: {
+      riskPercentPerTrade: 2.2,
+      maxTradeSol: 1.5,
+      minTradeSol: 0.03,
+      weeklyLossLimitSol: 8,
+      maxDrawdownPct: 35,
+      trailingStopPct: 25,
+      trailingStopPercent: 25,
+      trailingActivationProfit: 35,
+      normal: {
+        riskPercentPerTrade: 2.0,
+        trailingStopPct: 25,
+        hardStopLossPct: -40,
+        tiers: [
+          { profitPct: 50, sellPct: 30 },
+          { profitPct: 100, sellPct: 25 },
+        ],
+      },
+      migration: {
+        riskPercentPerTrade: 2.8,
+        trailingStopPct: 28,
+        hardStopLossPct: -45,
+        sizeMultiplier: 1.4,
+        tiers: [
+          { profitPct: 50, sellPct: 30 },
+          { profitPct: 100, sellPct: 25 },
+        ],
+      },
+    },
+    selective: {
+      enabled: true,
+      minConvictionScore: 40,
+      requireConvergenceForNormal: true,
+      allowSingleWalletMigration: true,
+      minWalletsForTrade: 2,
+      minVolume24hUsd: 3_000,
+      minHolderCount: 20,
+      maxTradesPerHour: 12,
+      minMsBetweenTrades: 45_000,
+      riskScoreSizeCutoff: 50,
+      minRiskSizeMultiplier: 0.45,
+      extraConvergenceAboveRisk: 0,
+      highRiskConvergenceThreshold: 60,
+    },
+    profitStrategy: {
+      takeInitialPercent: 120,
+      partialSellAt: 80,
+      partialSellPercent: 40,
+      trailingStopAfter: 180,
+      trailingStopPct: 28,
+      bagPercent: 35,
+      riskBasedAdjustment: true,
+      highRiskScoreThreshold: 65,
+    },
+    strategy: {
+      migrationSizeMultiplier: 1.8,
+      confirmationThreshold: 3,
+      reBuyMinProfitPct: 80,
+    },
+  },
+};
+
 export interface FilterConfig {
   /** Minimum wallet win-rate % to include in signals (0 = disabled) */
   minWinRate: number;
@@ -309,6 +625,8 @@ export interface StrategyConfig {
 
 export interface BotConfig {
   mode: TradingMode;
+  /** Overall aggression preset — drives recommended trade/filter/risk knobs */
+  riskLevel: RiskLevel;
   smartWallets: SmartWallet[];
   /** Live execution wallets (keys via env only) */
   tradingWallets: TradingWalletSlot[];
@@ -427,6 +745,7 @@ export interface BotConfig {
 
 export const config: BotConfig = {
   mode: 'paper',
+  riskLevel: 'medium',
   smartWallets: [],
   tradingWallets: [],
   activeTradingWalletId: null,
@@ -666,6 +985,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     version: SETTINGS_VERSION,
     updatedAt: Date.now(),
     mode: config.mode,
+    riskLevel: config.riskLevel,
     trade: { ...config.trade },
     filters: { ...config.filters },
     strategy: { ...config.strategy },
@@ -701,71 +1021,22 @@ export function persistUserSettings(): void {
   savePersistedSettings(buildPersistedSettingsSnapshot());
 }
 
+function cloneJson<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v)) as T;
+}
+
 /**
- * Apply data/bot-settings.json on top of code/env defaults.
- * Saved keys win; new keys from code updates keep their defaults.
+ * Code/env defaults captured before any data/config.json merge.
+ * Used by Reset to Defaults to restore in-memory settings after files are wiped.
  */
-export function applyPersistedSettings(): boolean {
-  const saved = loadPersistedSettings();
-  if (!saved) {
-    console.log('[settings] No bot-settings.json — using code/env defaults');
-    return false;
-  }
+const CODE_DEFAULT_SETTINGS: PersistedBotSettings = cloneJson(
+  buildPersistedSettingsSnapshot()
+);
 
-  if (saved.mode === 'paper' || saved.mode === 'live') {
-    config.mode = saved.mode;
-  }
-  if (saved.trade) config.trade = deepMerge(config.trade, saved.trade);
-  if (saved.filters) config.filters = deepMerge(config.filters, saved.filters);
-  if (saved.strategy)
-    config.strategy = deepMerge(config.strategy, saved.strategy);
-  if (saved.risk) config.risk = deepMerge(config.risk, saved.risk);
-  if (saved.profitStrategy) {
-    config.profitStrategy = deepMerge(
-      config.profitStrategy,
-      saved.profitStrategy
-    );
-  }
-  if (saved.selective) {
-    config.selective = deepMerge(config.selective, saved.selective);
-  }
-  if (saved.paper) config.paper = deepMerge(config.paper, saved.paper);
-  if (saved.mev) config.mev = deepMerge(config.mev, saved.mev);
-  if (saved.gmgnDiscovery) {
-    config.gmgn.discovery = deepMerge(
-      config.gmgn.discovery,
-      saved.gmgnDiscovery
-    );
-  }
-  if (saved.walletDiscovery) {
-    if (saved.walletDiscovery.defaultSource) {
-      config.walletDiscovery.defaultSource = saved.walletDiscovery
-        .defaultSource as typeof config.walletDiscovery.defaultSource;
-    }
-    if (saved.walletDiscovery.cacheTtlMs != null) {
-      config.walletDiscovery.cacheTtlMs = Number(
-        saved.walletDiscovery.cacheTtlMs
-      );
-    }
-  }
-  if (saved.tokenMetrics) {
-    config.tokenMetrics = deepMerge(config.tokenMetrics, saved.tokenMetrics);
-  }
-  if (saved.bondingCurve) {
-    config.bondingCurve = deepMerge(config.bondingCurve, saved.bondingCurve);
-  }
-  if (typeof saved.convergenceWindowMs === 'number') {
-    config.convergenceWindowMs = saved.convergenceWindowMs;
-  }
-  if (typeof saved.pollIntervalMs === 'number') {
-    config.pollIntervalMs = saved.pollIntervalMs;
-  }
-
-  // Keep filter aliases in sync after merge
+function syncConfigAliases(): void {
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;
   }
-  // Keep trade size aliases in sync
   if (config.trade.baseTradeAmountSol != null) {
     config.trade.tradeAmountSol = config.trade.baseTradeAmountSol;
   } else if (config.trade.tradeAmountSol != null) {
@@ -782,11 +1053,170 @@ export function applyPersistedSettings(): boolean {
   } else if (config.risk.trailingStopPct != null) {
     config.risk.trailingStopPercent = config.risk.trailingStopPct;
   }
+}
 
+/**
+ * Apply a settings snapshot onto `config`.
+ * - merge: saved keys win; missing keys keep current (code updates survive)
+ * - replace: overwrite tunable sections from the snapshot (Reset to Defaults)
+ */
+function applySettingsSnapshot(
+  saved: PersistedBotSettings,
+  mode: 'merge' | 'replace'
+): void {
+  if (saved.mode === 'paper' || saved.mode === 'live') {
+    config.mode = saved.mode;
+  }
+  if (
+    saved.riskLevel === 'low' ||
+    saved.riskLevel === 'medium' ||
+    saved.riskLevel === 'high'
+  ) {
+    config.riskLevel = saved.riskLevel;
+  }
+
+  if (mode === 'replace') {
+    if (saved.trade)
+      config.trade = cloneJson(saved.trade) as unknown as typeof config.trade;
+    if (saved.filters)
+      config.filters = cloneJson(
+        saved.filters
+      ) as unknown as typeof config.filters;
+    if (saved.strategy)
+      config.strategy = cloneJson(
+        saved.strategy
+      ) as unknown as typeof config.strategy;
+    if (saved.risk)
+      config.risk = cloneJson(saved.risk) as unknown as typeof config.risk;
+    if (saved.profitStrategy) {
+      config.profitStrategy = cloneJson(
+        saved.profitStrategy
+      ) as unknown as typeof config.profitStrategy;
+    }
+    if (saved.selective) {
+      config.selective = cloneJson(
+        saved.selective
+      ) as unknown as typeof config.selective;
+    }
+    if (saved.paper)
+      config.paper = cloneJson(saved.paper) as unknown as typeof config.paper;
+    if (saved.mev)
+      config.mev = cloneJson(saved.mev) as unknown as typeof config.mev;
+    if (saved.gmgnDiscovery) {
+      config.gmgn.discovery = cloneJson(
+        saved.gmgnDiscovery
+      ) as unknown as typeof config.gmgn.discovery;
+    }
+    if (saved.tokenMetrics) {
+      config.tokenMetrics = cloneJson(
+        saved.tokenMetrics
+      ) as unknown as typeof config.tokenMetrics;
+    }
+    if (saved.bondingCurve) {
+      config.bondingCurve = cloneJson(
+        saved.bondingCurve
+      ) as unknown as typeof config.bondingCurve;
+    }
+  } else {
+    if (saved.trade) config.trade = deepMerge(config.trade, saved.trade);
+    if (saved.filters) config.filters = deepMerge(config.filters, saved.filters);
+    if (saved.strategy)
+      config.strategy = deepMerge(config.strategy, saved.strategy);
+    if (saved.risk) config.risk = deepMerge(config.risk, saved.risk);
+    if (saved.profitStrategy) {
+      config.profitStrategy = deepMerge(
+        config.profitStrategy,
+        saved.profitStrategy
+      );
+    }
+    if (saved.selective) {
+      config.selective = deepMerge(config.selective, saved.selective);
+    }
+    if (saved.paper) config.paper = deepMerge(config.paper, saved.paper);
+    if (saved.mev) config.mev = deepMerge(config.mev, saved.mev);
+    if (saved.gmgnDiscovery) {
+      config.gmgn.discovery = deepMerge(
+        config.gmgn.discovery,
+        saved.gmgnDiscovery
+      );
+    }
+    if (saved.tokenMetrics) {
+      config.tokenMetrics = deepMerge(config.tokenMetrics, saved.tokenMetrics);
+    }
+    if (saved.bondingCurve) {
+      config.bondingCurve = deepMerge(config.bondingCurve, saved.bondingCurve);
+    }
+  }
+
+  if (saved.walletDiscovery) {
+    if (saved.walletDiscovery.defaultSource) {
+      config.walletDiscovery.defaultSource = saved.walletDiscovery
+        .defaultSource as typeof config.walletDiscovery.defaultSource;
+    }
+    if (saved.walletDiscovery.cacheTtlMs != null) {
+      config.walletDiscovery.cacheTtlMs = Number(
+        saved.walletDiscovery.cacheTtlMs
+      );
+    }
+  }
+  if (typeof saved.convergenceWindowMs === 'number') {
+    config.convergenceWindowMs = saved.convergenceWindowMs;
+  }
+  if (typeof saved.pollIntervalMs === 'number') {
+    config.pollIntervalMs = saved.pollIntervalMs;
+  }
+
+  syncConfigAliases();
+}
+
+/**
+ * Apply data/config.json on top of code/env defaults.
+ * Saved keys win; new keys from code updates keep their defaults.
+ */
+export function applyPersistedSettings(): boolean {
+  const saved = loadPersistedSettings();
+  if (!saved) {
+    console.log('[settings] No config.json — using code/env defaults');
+    return false;
+  }
+
+  applySettingsSnapshot(saved, 'merge');
   console.log(
-    `[settings] Loaded bot-settings.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
+    `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
   return true;
+}
+
+/**
+ * Wipe persisted JSON files and restore code/env defaults in memory.
+ * Recreates default wallets.json / trading-wallets.json / paperBalance.json.
+ * Caller should also reset paper trader + backtest history + refresh monitor.
+ */
+export function resetToDefaults(): {
+  deleted: string[];
+  dataDir: string;
+} {
+  const result = resetAllPersistedData();
+  applySettingsSnapshot(CODE_DEFAULT_SETTINGS, 'replace');
+  // Recreate default wallet files and load into config (no saved settings file)
+  const loaded = loadWalletsFromDisk();
+  config.smartWallets = loaded.map((w) => ({
+    name: w.name,
+    address: w.address,
+    enabled: w.enabled,
+    lastTradedAt: w.lastTradedAt ?? w.lastActive,
+    lastActive: w.lastActive ?? w.lastTradedAt,
+    winRate: w.winRate,
+    notes: w.notes,
+    tradesLast30d: w.tradesLast30d,
+    tradesLast7d: w.tradesLast7d,
+    pumpFunTradeCount: w.pumpFunTradeCount,
+    tags: w.tags,
+    lastCheckedAt: w.lastCheckedAt,
+  }));
+  initTradingWallets();
+  console.log('[settings] Reset to code/env defaults');
+  return result;
 }
 
 /** Load persisted wallets into config on startup */
@@ -1118,6 +1548,118 @@ export function setMode(
   }
 }
 
+/**
+ * Apply a Low / Medium / High risk preset — overwrites recommended knobs
+ * across trade, filters, risk, selective, and profit strategy.
+ */
+export function applyRiskLevel(
+  level: RiskLevel,
+  options: { persist?: boolean } = {}
+): {
+  riskLevel: RiskLevel;
+  warning: string | null;
+  summary: ReturnType<typeof getRiskLevelSummary>;
+} {
+  if (level !== 'low' && level !== 'medium' && level !== 'high') {
+    throw new Error(`Invalid riskLevel: ${level}`);
+  }
+  const preset = RISK_LEVEL_PRESETS[level];
+  config.riskLevel = level;
+
+  Object.assign(config.trade, preset.trade);
+  if (preset.trade.baseTradeAmountSol != null) {
+    config.trade.tradeAmountSol = preset.trade.baseTradeAmountSol;
+    config.trade.baseTradeAmountSol = preset.trade.baseTradeAmountSol;
+  } else if (preset.trade.tradeAmountSol != null) {
+    config.trade.baseTradeAmountSol = preset.trade.tradeAmountSol;
+    config.trade.tradeAmountSol = preset.trade.tradeAmountSol;
+  }
+
+  Object.assign(config.filters, preset.filters);
+  if (preset.filters.maxDevPercent != null) {
+    config.filters.maxDevHoldPct = preset.filters.maxDevPercent;
+  } else if (preset.filters.maxDevHoldPct != null) {
+    config.filters.maxDevPercent = preset.filters.maxDevHoldPct;
+  }
+
+  const { normal, migration, ...riskRest } = preset.risk;
+  Object.assign(config.risk, riskRest);
+  if (normal) {
+    config.risk.normal = {
+      ...config.risk.normal,
+      ...normal,
+      tiers: normal.tiers
+        ? normal.tiers.map((t) => ({ ...t }))
+        : config.risk.normal.tiers,
+    };
+  }
+  if (migration) {
+    config.risk.migration = {
+      ...config.risk.migration,
+      ...migration,
+      tiers: migration.tiers
+        ? migration.tiers.map((t) => ({ ...t }))
+        : config.risk.migration.tiers,
+    };
+  }
+  if (config.risk.trailingStopPercent != null) {
+    config.risk.trailingStopPct = config.risk.trailingStopPercent;
+  }
+
+  Object.assign(config.selective, preset.selective);
+  Object.assign(config.profitStrategy, preset.profitStrategy);
+  Object.assign(config.strategy, preset.strategy);
+
+  if (options.persist !== false) {
+    persistUserSettings();
+  }
+
+  console.log(
+    `[config] Risk level → ${level.toUpperCase()}` +
+      (preset.warning ? ` · ${preset.warning}` : '')
+  );
+
+  return {
+    riskLevel: level,
+    warning: preset.warning ?? null,
+    summary: getRiskLevelSummary(),
+  };
+}
+
+/** Compact active settings for dashboard summary */
+export function getRiskLevelSummary() {
+  const level = config.riskLevel ?? 'medium';
+  const preset = RISK_LEVEL_PRESETS[level];
+  return {
+    riskLevel: level,
+    label: preset.label,
+    description: preset.description,
+    warning: level === 'high' ? HIGH_RISK_WARNING : null,
+    active: {
+      baseTradeAmountSol:
+        config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
+      riskMultiplier: config.trade.riskMultiplier,
+      convictionMultiplier: config.trade.convictionMultiplier,
+      stopLossPercent: config.trade.stopLossPercent,
+      maxRiskScore: config.filters.maxRiskScore,
+      minLiquidity: config.filters.minLiquidity,
+      convergenceRequired: config.filters.convergenceRequired,
+      maxConcurrentPositions: config.filters.maxConcurrentPositions,
+      dailyLossLimitSol: config.filters.dailyLossLimitSol,
+      minVolume24hUsd: config.filters.minVolume24hUsd,
+      minHolderCount: config.filters.minHolderCount,
+      riskPercentPerTrade: config.risk.riskPercentPerTrade,
+      maxDrawdownPct: config.risk.maxDrawdownPct,
+      maxTradeSol: config.risk.maxTradeSol,
+      weeklyLossLimitSol: config.risk.weeklyLossLimitSol,
+      minConvictionScore: config.selective.minConvictionScore,
+      maxTradesPerHour: config.selective.maxTradesPerHour,
+      hardStopNormal: config.risk.normal.hardStopLossPct,
+      hardStopMigration: config.risk.migration.hardStopLossPct,
+    },
+  };
+}
+
 export function randomTakeProfitPct(): number {
   const { minProfitPercent, maxProfitPercent } = config.trade;
   return minProfitPercent + Math.random() * (maxProfitPercent - minProfitPercent);
@@ -1127,6 +1669,8 @@ export function randomTakeProfitPct(): number {
 export function getConfigSnapshot() {
   return {
     mode: config.mode,
+    riskLevel: config.riskLevel,
+    riskLevelSummary: getRiskLevelSummary(),
     trade: { ...config.trade },
     filters: { ...config.filters },
     strategy: { ...config.strategy },

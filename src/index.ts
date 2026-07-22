@@ -22,12 +22,14 @@ async function main(): Promise<void> {
   logPersistenceStatus();
 
   initWallets();
+  paperTrader.loadPersistedState();
 
   console.log('═══════════════════════════════════════════════════');
   console.log('  Solana Smart Money Copy Trading Bot');
   console.log('  Pump.fun launches & migrations');
   console.log('═══════════════════════════════════════════════════');
   console.log(`  Mode: ${config.mode.toUpperCase()}`);
+  console.log(`  Risk level: ${(config.riskLevel || 'medium').toUpperCase()}`);
   console.log(
     `  Buy size: base ${config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol} SOL` +
       ` (risk×${config.trade.riskMultiplier ?? 0.4}, conviction×${config.trade.convictionMultiplier ?? 1.45})`

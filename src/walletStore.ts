@@ -5,10 +5,15 @@
  * is mounted (Starter+). See dataDir.ts / README.
  */
 
-import fs from 'fs';
-import { dataFile, ensureDataDir } from './dataDir';
+import {
+  atomicWriteJson,
+  dataFile,
+  ensureDataDir,
+  PERSIST_FILES,
+  readJsonFile,
+} from './dataDir';
 
-const WALLETS_FILE = dataFile('wallets.json');
+const WALLETS_FILE = dataFile(PERSIST_FILES.wallets);
 
 export type WalletCategory = 'smart' | 'scalper' | 'sniper' | 'kol';
 
@@ -97,7 +102,8 @@ export function normalizeWalletRecord(w: WalletRecord): WalletRecord {
 export function loadWalletsFromDisk(): WalletRecord[] {
   ensureDataDir();
 
-  if (!fs.existsSync(WALLETS_FILE)) {
+  const parsed = readJsonFile<WalletRecord[]>(WALLETS_FILE);
+  if (!parsed || !Array.isArray(parsed) || parsed.length === 0) {
     const initial = defaultSmartWallets.map((w) =>
       normalizeWalletRecord({ ...w, addedAt: Date.now() })
     );
@@ -106,27 +112,15 @@ export function loadWalletsFromDisk(): WalletRecord[] {
     return initial;
   }
 
-  try {
-    const raw = fs.readFileSync(WALLETS_FILE, 'utf-8');
-    const parsed = JSON.parse(raw) as WalletRecord[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      throw new Error('Invalid wallets file');
-    }
-    console.log(`[wallets] Loaded ${parsed.length} wallet(s) from disk`);
-    return parsed.map(normalizeWalletRecord);
-  } catch (err) {
-    console.error('[wallets] Failed to load wallets.json, using defaults:', err);
-    return defaultSmartWallets.map((w) =>
-      normalizeWalletRecord({ ...w, addedAt: Date.now() })
-    );
-  }
+  console.log(`[wallets] Loaded ${parsed.length} wallet(s) from disk`);
+  return parsed.map(normalizeWalletRecord);
 }
 
-/** Persist wallets to disk */
+/** Persist wallets to disk (atomic) */
 export function saveWalletsToDisk(wallets: WalletRecord[]): void {
   ensureDataDir();
   const normalized = wallets.map(normalizeWalletRecord);
-  fs.writeFileSync(WALLETS_FILE, JSON.stringify(normalized, null, 2), 'utf-8');
+  atomicWriteJson(WALLETS_FILE, normalized);
 }
 
 /** Validate a Solana address string */

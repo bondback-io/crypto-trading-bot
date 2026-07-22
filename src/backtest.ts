@@ -4,8 +4,7 @@
  * with realistic candle-driven price paths.
  */
 
-import fs from 'fs';
-import { config, randomTakeProfitPct } from './config';
+import { config, applyRiskLevel, getRiskLevelSummary, type RiskLevel } from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
   fetchRecentLaunches,
@@ -19,12 +18,15 @@ import {
 } from './marketData';
 import { cacheTokenMeta } from './tokenMeta';
 import { logger } from './logger';
-import {
-  evaluateProfitAction,
-  type ProfitPositionView,
-} from './profitStrategy';
 import { calculateDynamicPositionSize } from './risk';
-import { dataFile, ensureDataDir } from './dataDir';
+import {
+  atomicWriteJson,
+  dataFile,
+  ensureDataDir,
+  migrateLegacyFile,
+  PERSIST_FILES,
+  readJsonFile,
+} from './dataDir';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -65,6 +67,21 @@ export interface BacktestOptions {
   useLiveData?: boolean;
   /** Allow synthetic fallback when live data empty */
   allowSynthetic?: boolean;
+  /**
+   * Temporarily apply this risk-level preset for the run (not persisted).
+   * Omit / 'current' = use whatever config is already loaded (saved settings).
+   */
+  riskLevel?: RiskLevel | 'current';
+  /**
+   * When true, run Low / Medium / High on the same events and attach comparison.
+   * Primary result uses the selected riskLevel (or current).
+   */
+  compareRiskLevels?: boolean;
+  /**
+   * When filter overrides are 0/undefined, pull mins from saved config filters.
+   * Default true.
+   */
+  useSavedConfigFilters?: boolean;
 }
 
 export type BacktestExitTakeStage =
@@ -151,6 +168,8 @@ export interface BacktestTradeResult {
   strategyKind: 'migration' | 'normal';
   /** Effective fee+slippage bps modeled on this trade (round-trip estimate) */
   roundTripCostBps?: number;
+  /** Step-by-step exit debug lines for this trade */
+  debugLog?: string[];
 }
 
 export interface BacktestProgress {
@@ -209,6 +228,8 @@ export interface BacktestSummary {
   totalTrades: number;
   wins: number;
   losses: number;
+  /** Wins ÷ losses (∞ → 999 when no losses) */
+  winLossRatio: number;
   reBuyTrades: number;
   strategyBreakdown: StrategyBreakdownMetrics[];
 }
@@ -232,7 +253,42 @@ export interface BacktestResult {
     useLiveData: boolean;
     allowSynthetic: boolean;
     startingBalanceSol: number;
+    riskLevel: RiskLevel | 'current';
+    compareRiskLevels: boolean;
+    useSavedConfigFilters: boolean;
   };
+  /** Snapshot of trading knobs used for this run */
+  configUsed: {
+    riskLevel: RiskLevel;
+    baseTradeAmountSol: number;
+    stopLossPercent: number;
+    maxProfitPercent: number;
+    maxRiskScore: number;
+    minLiquidity: number;
+    convergenceRequired: number;
+    maxConcurrentPositions: number;
+    riskPercentPerTrade: number;
+    maxDrawdownPct: number;
+    minConvictionScore: number;
+    profitStrategyEnabled: boolean;
+    partialSellAt: number;
+    trailingStopAfter: number;
+    feeBps: number;
+    slippageBps: number;
+    label?: string;
+  };
+  /** Present when compareRiskLevels was requested */
+  riskComparison?: Array<{
+    riskLevel: RiskLevel;
+    tradesExecuted: number;
+    winRatePct: number;
+    totalPnlSol: number;
+    profitFactor: number;
+    maxDrawdownPct: number;
+    sharpeRatio: number;
+    avgHoldMs: number;
+    message: string;
+  }>;
   period: { fromMs: number; toMs: number; hours: number };
   dataSource: string;
   eventsConsidered: number;
@@ -247,6 +303,19 @@ export interface BacktestResult {
     runs: number;
   };
   charts: ReturnType<PaperTrader['getChartData']> & {
+    /** Bankroll equity (starting balance + cumulative PnL) */
+    equityCurve?: {
+      labels: string[];
+      values: number[];
+      startingBalanceSol: number;
+      points?: Array<{
+        time: number;
+        label: string;
+        pnlSol: number;
+        equity: number;
+        symbol: string;
+      }>;
+    };
     pnlDistribution?: {
       labels: string[];
       counts: number[];
@@ -255,6 +324,15 @@ export interface BacktestResult {
       labels: string[];
       pnlSol: number[];
       winRatePct: number[];
+      trades: number[];
+    };
+    /** Present when compareRiskLevels was run */
+    riskComparison?: {
+      labels: string[];
+      pnlSol: number[];
+      winRatePct: number[];
+      profitFactor: number[];
+      maxDrawdownPct: number[];
       trades: number[];
     };
   };
@@ -297,8 +375,61 @@ function sleep(ms: number): Promise<void> {
 }
 
 function historyFilePath(): string {
-  return dataFile('backtest-history.json');
+  migrateLegacyFile(
+    dataFile(PERSIST_FILES.legacyBacktest),
+    dataFile(PERSIST_FILES.backtestHistory)
+  );
+  return dataFile(PERSIST_FILES.backtestHistory);
 }
+
+type SlimBacktest = {
+  id: string;
+  ranAt: number;
+  message: string;
+  summary: BacktestSummary;
+  period: BacktestResult['period'];
+  dataSource: string;
+  options?: BacktestResult['options'];
+  tradesExecuted?: number;
+};
+
+function loadHistoryFromDisk(): void {
+  try {
+    const path = historyFilePath();
+    const parsed = readJsonFile<SlimBacktest[]>(path);
+    if (!parsed || !Array.isArray(parsed) || parsed.length === 0) return;
+    history.length = 0;
+    for (const row of parsed.slice(0, HISTORY_CAP)) {
+      history.push(row as unknown as BacktestResult);
+    }
+    if (history.length > 0) {
+      lastResult = history[0];
+      console.log(
+        `[backtest] Loaded ${history.length} run(s) from ${PERSIST_FILES.backtestHistory}`
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      'Backtest',
+      'failed to load history',
+      err instanceof Error ? { error: err.message } : {}
+    );
+  }
+}
+
+/** Clear in-memory + on-disk backtest history (used by Reset to Defaults). */
+export function clearBacktestHistory(): void {
+  history.length = 0;
+  lastResult = null;
+  try {
+    atomicWriteJson(historyFilePath(), []);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Load persisted history once at module init
+loadHistoryFromDisk();
 
 export function getLastBacktest(): BacktestResult | null {
   return lastResult;
@@ -335,7 +466,7 @@ function persistHistory(): void {
       options: r.options,
       tradesExecuted: r.tradesExecuted,
     }));
-    fs.writeFileSync(historyFilePath(), JSON.stringify(slim, null, 2), 'utf8');
+    atomicWriteJson(historyFilePath(), slim);
   } catch (err) {
     logger.warn(
       'Backtest',
@@ -514,9 +645,81 @@ function buildSummary(
     totalTrades: trades.length,
     wins: wins.length,
     losses: losses.length,
+    winLossRatio: Number(
+      (losses.length > 0
+        ? wins.length / losses.length
+        : wins.length > 0
+          ? 999
+          : 0
+      ).toFixed(2)
+    ),
     reBuyTrades: trades.filter((t) => t.isReBuy).length,
     strategyBreakdown: [migration, normal],
   };
+}
+
+/** Equity curve from starting bankroll through closed trades (chronological). */
+function buildEquityCurve(
+  trades: BacktestTradeResult[],
+  startingBalanceSol: number
+): NonNullable<BacktestResult['charts']['equityCurve']> {
+  const startLabel = 'Start';
+  if (trades.length === 0) {
+    return {
+      labels: [startLabel],
+      values: [Number(startingBalanceSol.toFixed(6))],
+      startingBalanceSol,
+      points: [
+        {
+          time: Date.now(),
+          label: startLabel,
+          pnlSol: 0,
+          equity: startingBalanceSol,
+          symbol: 'start',
+        },
+      ],
+    };
+  }
+
+  const sorted = [...trades].sort(
+    (a, b) => (a.closedAt ?? a.openedAt) - (b.closedAt ?? b.openedAt)
+  );
+  let equity = startingBalanceSol;
+  const labels: string[] = [startLabel];
+  const values: number[] = [Number(startingBalanceSol.toFixed(6))];
+  const points: NonNullable<
+    BacktestResult['charts']['equityCurve']
+  >['points'] = [
+    {
+      time: sorted[0]?.openedAt ?? Date.now(),
+      label: startLabel,
+      pnlSol: 0,
+      equity: startingBalanceSol,
+      symbol: 'start',
+    },
+  ];
+
+  for (const t of sorted) {
+    equity += t.pnlSol;
+    const time = t.closedAt ?? t.openedAt;
+    const label = new Date(time).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    labels.push(label);
+    values.push(Number(equity.toFixed(6)));
+    points!.push({
+      time,
+      label,
+      pnlSol: t.pnlSol,
+      equity: Number(equity.toFixed(6)),
+      symbol: t.symbol,
+    });
+  }
+
+  return { labels, values, startingBalanceSol, points };
 }
 
 function buildPnlDistribution(trades: BacktestTradeResult[]): {
@@ -645,7 +848,7 @@ export function describeExitReason(
       detail: 'Price fell to the stop-loss threshold.' + hold,
     };
   }
-  if (/Trailing stop/i.test(text)) {
+  if (/trailing stop/i.test(text)) {
     return {
       reason: text,
       detail:
@@ -793,6 +996,35 @@ function resolveSourceNames(
   return [names[index % names.length]];
 }
 
+function formatBacktestExitLog(
+  symbol: string,
+  markPnlPct: number,
+  reason: string,
+  kind: string
+): string {
+  const sign = markPnlPct >= 0 ? '+' : '';
+  const pct = `${sign}${markPnlPct.toFixed(1)}%`;
+  if (kind === 'arm_trail') {
+    return `Armed trail on ${symbol} at ${pct}: ${reason}`;
+  }
+  if (kind === 'partial' || kind === 'tier') {
+    return `Partial sell ${symbol} at ${pct}: ${reason}`;
+  }
+  if (kind === 'trail_exit') {
+    return `Sold ${symbol} at ${pct} due to trailing stop — ${reason}`;
+  }
+  if (kind === 'hard_sl') {
+    return `Sold ${symbol} at ${pct} due to stop-loss — ${reason}`;
+  }
+  if (kind === 'take_profit' || kind === 'full') {
+    return `Sold ${symbol} at ${pct} due to take-profit — ${reason}`;
+  }
+  if (/end-of-window/i.test(reason)) {
+    return `Forced exit ${symbol} at ${pct} (lookback ended)`;
+  }
+  return `Sold ${symbol} at ${pct}: ${reason}`;
+}
+
 function replayLaunch(
   trader: PaperTrader,
   event: LaunchEvent,
@@ -809,17 +1041,6 @@ function replayLaunch(
   const strategyKind: 'migration' | 'normal' = event.migrated
     ? 'migration'
     : 'normal';
-
-  /** Extra adverse slippage when path is volatile (bps) */
-  function impactSlippageBps(): number {
-    const first = event.candles[0]?.priceSol ?? event.entryPriceSol;
-    const last =
-      event.candles[event.candles.length - 1]?.priceSol ?? event.lastPriceSol;
-    const move =
-      first > 0 ? Math.abs(last - first) / first : 0;
-    // 0–120 bps extra impact for big path moves
-    return Math.min(120, Math.round(move * 80));
-  }
 
   const runOne = (
     fromIdx: number,
@@ -843,11 +1064,11 @@ function replayLaunch(
         ? 70
         : Math.min(80, 40 + (sourceNames.length - 1) * 12),
     });
-    const impactBps = impactSlippageBps();
-    const effectiveSlipBps =
-      (config.paper.slippageBps ?? 150) + impactBps;
-    const roundTripCostBps =
-      (config.paper.feeBps ?? 30) * 2 + effectiveSlipBps + (config.paper.slippageBps ?? 150);
+
+    // Match paper/live costs exactly — no extra impact slippage
+    const slipBps = config.paper.slippageBps ?? 150;
+    const feeBps = config.paper.feeBps ?? 30;
+    const roundTripCostBps = feeBps * 2 + slipBps * 2;
 
     const position = trader.simulateBuy(
       event.mint,
@@ -861,25 +1082,38 @@ function replayLaunch(
         sourceNames,
         name: event.name || event.symbol,
         strategyKind,
-        slippageBps: effectiveSlipBps,
+        // Same slippage as paper — omit override so config.paper.slippageBps applies
+        antiRug:
+          event.riskScoreHint != null
+            ? {
+                riskScore: event.riskScoreHint,
+                riskLevel:
+                  event.riskScoreHint >= 70
+                    ? 'high'
+                    : event.riskScoreHint >= 40
+                      ? 'medium'
+                      : 'low',
+                flags: [],
+                ok: event.riskScoreHint < 80,
+              }
+            : undefined,
       }
     );
     if (!position) return { trade: null, exitIdx: fromIdx };
 
-    // Cap take-profit at configured max; profit strategy uses this as hard ceiling
-    position.takeProfitPct = config.profitStrategy?.enabled
-      ? config.trade.maxProfitPercent
-      : randomTakeProfitPct();
-    // Never exceed maxProfitPercent
-    position.takeProfitPct = Math.min(
-      position.takeProfitPct,
-      config.trade.maxProfitPercent
-    );
-    position.stopLossPct = config.trade.stopLossPercent;
-    if (config.profitStrategy?.enabled) {
-      position.trailingStopPct = config.profitStrategy.trailingStopPct;
-    }
+    // Keep SL/TP/trail exactly as simulateBuy seeded them (matches paper/live)
     position.openedAt = openedAt;
+
+    const debugLog: string[] = [];
+    const entryMarkNote =
+      `Opened ${event.symbol} @ ${position.entryPriceSol.toExponential(4)} SOL` +
+      ` (mark ${botEntryPriceSol.toExponential(4)}, slip ${slipBps}bps, fee ${feeBps}bps)` +
+      ` · size ${sizing.sizeSol.toFixed(4)} SOL` +
+      ` · TP ${position.takeProfitPct.toFixed(0)}% / SL ${position.stopLossPct}%` +
+      ` · trail ${position.trailingStopPct}%` +
+      (config.profitStrategy?.enabled ? ' · profit strategy ON' : ' · legacy TP/SL/trail');
+    debugLog.push(entryMarkNote);
+    logger.info('Backtest', entryMarkNote, { mint: event.mint, simulation });
 
     let closed: Position | null = null;
     let exitIdx = event.candles.length - 1;
@@ -889,7 +1123,10 @@ function replayLaunch(
     const sellReasons: string[] = [];
     const exitTakes: BacktestExitTake[] = [];
     let lastExitPrice = position.entryPriceSol;
-    let takeCursor = { sol: position.solReturned ?? 0, pnl: position.realizedPnlSol ?? 0 };
+    let takeCursor = {
+      sol: position.solReturned ?? 0,
+      pnl: position.realizedPnlSol ?? 0,
+    };
 
     const pushTake = (
       stage: string | undefined,
@@ -919,19 +1156,27 @@ function replayLaunch(
         (candleTime != null && candleTime >= openedAt ? candleTime : openedAt);
     };
 
+    const stageFromReason = (reason: string): string | undefined => {
+      if (/partial sell|Partial/i.test(reason) && !/recover/i.test(reason))
+        return 'partial';
+      if (/recover|initial investment/i.test(reason)) return 'recover_initial';
+      if (/bag/i.test(reason)) return 'bag_trim';
+      if (/tier/i.test(reason)) return 'partial';
+      return undefined;
+    };
+
+    // Candle loop — exits via same sync rules as paperTrader.checkPositions
     for (let i = fromIdx + 1; i < event.candles.length; i++) {
       const c = event.candles[i];
+      // Skip candles before our fill time (copy delay)
+      if (c.time != null && c.time < openedAt) continue;
+
       trader.setTokenPrice(event.mint, c.priceSol);
 
       const open = trader.getOpenPositions().find((p) => p.id === position.id);
       if (!open) {
-        // Closed on a prior candle/sell — don't attribute hold to this candle
         markExit(Math.max(fromIdx, i - 1));
         break;
-      }
-
-      if (c.priceSol > open.highWaterMarkSol) {
-        open.highWaterMarkSol = c.priceSol;
       }
 
       const pnlPct =
@@ -939,144 +1184,61 @@ function replayLaunch(
       if (pnlPct < maxDrawdownPct) maxDrawdownPct = pnlPct;
       if (pnlPct > maxRunupPct) maxRunupPct = pnlPct;
 
-      if (config.profitStrategy?.enabled) {
-        // Apply up to a few staged actions per candle (partial → recover → arm)
-        for (let step = 0; step < 4; step++) {
-          const still = trader.getOpenPositions().find((p) => p.id === position.id);
-          if (!still) break;
+      const events = trader.runPositionTicksUntilIdle(position.id, c.priceSol, 4);
+      for (const ev of events) {
+        const line = formatBacktestExitLog(
+          event.symbol,
+          ev.markPnlPct,
+          ev.reason,
+          ev.kind
+        );
+        debugLog.push(line);
+        logger.info('Backtest', line, {
+          mint: event.mint,
+          kind: ev.kind,
+          markPnlPct: ev.markPnlPct,
+        });
+        sellReasons.push(ev.reason);
 
-          const view: ProfitPositionView = {
-            entryPriceSol: still.entryPriceSol,
-            currentPriceSol: c.priceSol,
-            highWaterMarkSol: still.highWaterMarkSol,
-            amountTokens: still.amountTokens,
-            initialAmountTokens: still.initialAmountTokens,
-            initialCostSol: still.initialCostSol,
-            solReturned: still.solReturned ?? 0,
-            trailingActive: still.trailingActive,
-            trailingStopPct: still.trailingStopPct,
-            stopLossPct: still.stopLossPct,
-            maxProfitPct: Math.min(
-              still.takeProfitPct,
-              config.trade.maxProfitPercent
-            ),
-            initialRecovered: still.initialRecovered ?? false,
-            partialSellDone: still.partialSellDone ?? false,
-            bagTrimDone: still.bagTrimDone ?? false,
-            riskScore: event.riskScoreHint,
-          };
-
-          const action = evaluateProfitAction(view);
-          if (action.type === 'none') break;
-
-          if (action.type === 'arm_trail') {
-            still.trailingActive = true;
-            still.trailingActivatedAt = Date.now();
-            still.trailingStopPct = action.trailPct;
-            still.trailingStopPriceSol =
-              still.highWaterMarkSol * (1 - action.trailPct / 100);
-            sellReasons.push(action.reason);
-            continue;
-          }
-
-          if (
-            action.type === 'hard_sl' ||
-            action.type === 'trail_exit' ||
-            action.type === 'full'
-          ) {
-            closed = trader.simulateSell(still.id, c.priceSol, action.reason);
-            if (closed) closed.closedAt = c.time;
-            pushTake(undefined, action.reason, closed);
-            lastExitPrice = closed?.exitPriceSol ?? c.priceSol;
-            sellReasons.push(action.reason);
-            markExit(i, c.time);
-            break;
-          }
-
-          if (action.type === 'partial') {
-            if (
-              (action.tokensToSell != null && action.tokensToSell <= 0) ||
-              (action.sellPctOfInitial <= 0 && action.tokensToSell == null)
-            ) {
-              if (action.stage === 'recover_initial')
-                still.initialRecovered = true;
-              if (action.stage === 'partial') still.partialSellDone = true;
-              if (action.stage === 'bag_trim') still.bagTrimDone = true;
-              sellReasons.push(action.reason);
-              continue;
-            }
-
-            const slice = trader.simulateSell(still.id, c.priceSol, action.reason, {
-              tokensToSell: action.tokensToSell,
-              sellPctOfInitial:
-                action.tokensToSell == null
-                  ? action.sellPctOfInitial
-                  : undefined,
-            });
-            if (slice) slice.closedAt = c.time;
-            // Prefer open position for cumulative solReturned after partial
-            const after =
-              trader.getOpenPositions().find((p) => p.id === position.id) ??
-              slice;
-            pushTake(action.stage, action.reason, after);
-            lastExitPrice = slice?.exitPriceSol ?? c.priceSol;
-            sellReasons.push(action.reason);
-            if (action.stage === 'partial') still.partialSellDone = true;
-            if (action.stage === 'recover_initial') still.initialRecovered = true;
-            if (action.stage === 'bag_trim') still.bagTrimDone = true;
-            if (
-              !still.initialRecovered &&
-              (still.solReturned ?? 0) >= still.initialCostSol * 0.98
-            ) {
-              still.initialRecovered = true;
-            }
-            // If fully closed by partial (sold everything)
-            if (!trader.getOpenPositions().find((p) => p.id === position.id)) {
-              closed = slice;
-              markExit(i, c.time);
-              break;
-            }
-          }
-        }
-        if (closed || !trader.getOpenPositions().find((p) => p.id === position.id)) {
-          if (!closed) {
-            // Fully closed via last partial — use last closed slice from trader
-            const hist = trader
+        if (
+          ev.kind === 'partial' ||
+          ev.kind === 'tier' ||
+          ev.kind === 'full' ||
+          ev.kind === 'hard_sl' ||
+          ev.kind === 'trail_exit' ||
+          ev.kind === 'take_profit'
+        ) {
+          const after =
+            trader.getOpenPositions().find((p) => p.id === position.id) ??
+            trader
               .getClosedPositions()
               .filter((p) => p.mint === event.mint)
-              .slice(-1)[0];
-            closed = hist ?? null;
-          }
+              .slice(-1)[0] ??
+            null;
+          pushTake(stageFromReason(ev.reason), ev.reason, after);
+          lastExitPrice = after?.exitPriceSol ?? c.priceSol;
+        }
+
+        if (!ev.stillOpen) {
+          closed =
+            trader
+              .getClosedPositions()
+              .filter((p) => p.id === position.id || p.mint === event.mint)
+              .slice(-1)[0] ?? null;
+          if (closed) closed.closedAt = c.time;
           markExit(i, c.time);
           break;
         }
-        continue;
       }
 
-      // Legacy TP / SL path
-      if (pnlPct >= position.takeProfitPct) {
-        closed = trader.simulateSell(
-          position.id,
-          c.priceSol,
-          `${isReBuy ? 'rebuy ' : ''}backtest take-profit ${position.takeProfitPct.toFixed(0)}% (cap ${config.trade.maxProfitPercent}%)`
-        );
-        if (closed) closed.closedAt = c.time;
-        pushTake(undefined, closed?.reason ?? 'take-profit', closed);
-        lastExitPrice = closed?.exitPriceSol ?? c.priceSol;
-        sellReasons.push(closed?.reason ?? 'take-profit');
-        markExit(i, c.time);
-        break;
-      }
-      if (pnlPct <= position.stopLossPct) {
-        closed = trader.simulateSell(
-          position.id,
-          c.priceSol,
-          `${isReBuy ? 'rebuy ' : ''}backtest stop-loss ${position.stopLossPct}%`
-        );
-        if (closed) closed.closedAt = c.time;
-        pushTake(undefined, closed?.reason ?? 'stop-loss', closed);
-        lastExitPrice = closed?.exitPriceSol ?? c.priceSol;
-        sellReasons.push(closed?.reason ?? 'stop-loss');
+      if (closed || !trader.getOpenPositions().find((p) => p.id === position.id)) {
+        if (!closed) {
+          closed =
+            trader
+              .getClosedPositions()
+              .filter((p) => p.mint === event.mint)
+              .slice(-1)[0] ?? null;
+        }
         markExit(i, c.time);
         break;
       }
@@ -1085,20 +1247,26 @@ function replayLaunch(
     // Still open when lookback candles run out — forced mark-to-market exit
     if (!closed && trader.getOpenPositions().find((p) => p.id === position.id)) {
       const last = event.candles[event.candles.length - 1];
-      closed = trader.simulateSell(
-        position.id,
-        last.priceSol,
-        `${isReBuy ? 'rebuy ' : ''}backtest end-of-window`
-      );
+      const markPnl =
+        ((last.priceSol - position.entryPriceSol) / position.entryPriceSol) * 100;
+      const forceReason = `${isReBuy ? 'rebuy ' : ''}backtest end-of-window`;
+      closed = trader.simulateSell(position.id, last.priceSol, forceReason);
       if (closed) closed.closedAt = last.time;
       pushTake(undefined, closed?.reason ?? 'end-of-window', closed);
       lastExitPrice = closed?.exitPriceSol ?? last.priceSol;
       sellReasons.push(closed?.reason ?? 'end-of-window');
+      const forceLine = formatBacktestExitLog(
+        event.symbol,
+        markPnl,
+        forceReason,
+        'full'
+      );
+      debugLog.push(forceLine);
+      logger.info('Backtest', forceLine, { mint: event.mint });
       markExit(event.candles.length - 1, last.time);
     }
 
     if (!closed) {
-      // Aggregate from closed slices for this mint in this run
       const slices = trader
         .getClosedPositions()
         .filter(
@@ -1108,8 +1276,12 @@ function replayLaunch(
               p.reason?.includes('partial') ||
               p.reason?.includes('recovered') ||
               p.reason?.includes('Trailing') ||
+              p.reason?.includes('trailing') ||
               p.reason?.includes('Max profit') ||
               p.reason?.includes('Hard stop') ||
+              p.reason?.includes('hard stop') ||
+              p.reason?.includes('take-profit') ||
+              p.reason?.includes('tier') ||
               p.reason?.includes('backtest') ||
               p.reason?.includes('bag'))
         );
@@ -1120,7 +1292,7 @@ function replayLaunch(
     const openGone = !trader.getOpenPositions().find((p) => p.id === position.id);
     if (!openGone && !closed) return { trade: null, exitIdx };
 
-    // Accurate aggregate PnL vs initial cost
+    // Accurate aggregate PnL vs initial cost (fee-aware SOL accounting)
     const entryPriceSol = position.entryPriceSol;
     const exitPriceSol =
       closed.exitPriceSol ?? lastExitPrice ?? entryPriceSol;
@@ -1128,21 +1300,30 @@ function replayLaunch(
       closed.realizedPnlSol != null && closed.status === 'closed'
         ? closed.realizedPnlSol
         : closed.pnlSol ?? 0;
-    // Prefer position-level realized if we still have the original id closed
     const pnlSol =
       typeof closed.pnlSol === 'number' && closed.id === position.id
         ? closed.pnlSol
         : totalPnlSol;
-    // Always report realized PnL% vs cost — never cap or invent from price alone
     const pnlPct =
       position.initialCostSol > 0
         ? (pnlSol / position.initialCostSol) * 100
         : 0;
 
-    // Prefer explicit exit timestamp from the candle where we sold
+    // Mark-to-entry price move (for debug — differs from fee-aware pnlPct)
+    const markExitPct =
+      entryPriceSol > 0
+        ? ((exitPriceSol - entryPriceSol) / entryPriceSol) * 100
+        : 0;
+    debugLog.push(
+      `PnL debug ${event.symbol}: realized ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL` +
+        ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% vs cost)` +
+        ` · mark exit ${markExitPct >= 0 ? '+' : ''}${markExitPct.toFixed(1)}%` +
+        ` · RT cost ~${roundTripCostBps}bps` +
+        ` · hold ${(Math.max(0, Math.max(openedAt, exitAtMs) - openedAt) / 60000).toFixed(1)}m`
+    );
+
     const closedAt = Math.max(openedAt, exitAtMs);
     if (closed) closed.closedAt = closedAt;
-    // event.marketCapUsd / liquidityUsd are DexScreener snapshots at lastPriceSol
     const refMc = event.marketCapUsd;
     const refLiq = event.liquidityUsd;
     const refPrice = event.lastPriceSol > 0 ? event.lastPriceSol : exitPriceSol;
@@ -1191,6 +1372,13 @@ function replayLaunch(
           : 150;
     const costSol = position.initialCostSol || config.trade.tradeAmountSol;
     const pnlUsd = Number((pnlSol * solUsd).toFixed(2));
+
+    logger.info(
+      'Backtest',
+      `Closed ${event.symbol}: ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL` +
+        ` (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%) · ${described.reason}`,
+      { mint: event.mint, reason: rawReason, steps: debugLog.length }
+    );
 
     const trade: BacktestTradeResult = {
       mint: event.mint,
@@ -1246,6 +1434,7 @@ function replayLaunch(
       simulation,
       strategyKind,
       roundTripCostBps,
+      debugLog,
     };
     return { trade, exitIdx };
   };
@@ -1367,49 +1556,159 @@ function runSinglePass(
   return { trader, trades, skipped, considered };
 }
 
+function captureTradingConfigSnapshot() {
+  return {
+    riskLevel: config.riskLevel,
+    trade: { ...config.trade },
+    filters: { ...config.filters },
+    risk: {
+      ...config.risk,
+      normal: {
+        ...config.risk.normal,
+        tiers: config.risk.normal.tiers.map((t) => ({ ...t })),
+      },
+      migration: {
+        ...config.risk.migration,
+        tiers: config.risk.migration.tiers.map((t) => ({ ...t })),
+      },
+    },
+    selective: { ...config.selective },
+    profitStrategy: { ...config.profitStrategy },
+    strategy: {
+      migrationSizeMultiplier: config.strategy.migrationSizeMultiplier,
+      confirmationThreshold: config.strategy.confirmationThreshold,
+      reBuyMinProfitPct: config.strategy.reBuyMinProfitPct,
+      reBuyEnabled: config.strategy.reBuyEnabled,
+      enableMigrationOnly: config.strategy.enableMigrationOnly,
+    },
+  };
+}
+
+function restoreTradingConfigSnapshot(
+  snap: ReturnType<typeof captureTradingConfigSnapshot>
+): void {
+  config.riskLevel = snap.riskLevel;
+  Object.assign(config.trade, snap.trade);
+  Object.assign(config.filters, snap.filters);
+  config.risk = {
+    ...snap.risk,
+    normal: {
+      ...snap.risk.normal,
+      tiers: snap.risk.normal.tiers.map((t) => ({ ...t })),
+    },
+    migration: {
+      ...snap.risk.migration,
+      tiers: snap.risk.migration.tiers.map((t) => ({ ...t })),
+    },
+  };
+  Object.assign(config.selective, snap.selective);
+  Object.assign(config.profitStrategy, snap.profitStrategy);
+  Object.assign(config.strategy, snap.strategy);
+}
+
+function buildConfigUsedSnapshot() {
+  const sum = getRiskLevelSummary();
+  return {
+    riskLevel: (config.riskLevel || 'medium') as RiskLevel,
+    baseTradeAmountSol:
+      config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
+    stopLossPercent: config.trade.stopLossPercent,
+    maxProfitPercent: config.trade.maxProfitPercent,
+    maxRiskScore: config.filters.maxRiskScore,
+    minLiquidity: config.filters.minLiquidity,
+    convergenceRequired: config.filters.convergenceRequired,
+    maxConcurrentPositions: config.filters.maxConcurrentPositions,
+    riskPercentPerTrade: config.risk.riskPercentPerTrade,
+    maxDrawdownPct: config.risk.maxDrawdownPct,
+    minConvictionScore: config.selective.minConvictionScore,
+    profitStrategyEnabled: config.profitStrategy?.enabled !== false,
+    partialSellAt: config.profitStrategy?.partialSellAt ?? 0,
+    trailingStopAfter: config.profitStrategy?.trailingStopAfter ?? 0,
+    feeBps: config.paper.feeBps,
+    slippageBps: config.paper.slippageBps,
+    label: sum.label,
+  };
+}
+
 /** Run a full backtest over a time window */
 export async function runBacktest(
   options: BacktestOptions = {}
 ): Promise<BacktestResult> {
-  const toMs = options.toMs ?? Date.now();
-  const hours = options.hours ?? 24;
-  const fromMs = options.fromMs ?? toMs - hours * 60 * 60 * 1000;
-  const useLiveData = options.useLiveData ?? config.paper.useLiveData;
-  const allowSynthetic = options.allowSynthetic !== false;
-  const maxTrades = options.maxTrades ?? 20;
-  const simulations = Math.min(Math.max(options.simulations ?? 1, 1), 20);
-  const migrationsOnly =
-    options.migrationsOnly ?? config.strategy.enableMigrationOnly;
-  const pumpFunOnly = Boolean(options.pumpFunOnly);
-  const reBuyEnabled =
-    options.reBuyEnabled ?? config.strategy.reBuyEnabled ?? false;
-  const minVolumeUsd = options.minVolumeUsd ?? 0;
-  const strategyType: BacktestStrategyType =
-    options.strategyType ?? (migrationsOnly ? 'migration' : 'auto');
-  const startingBalance =
-    options.startingBalanceSol ?? config.paper.startingBalanceSol;
-  const minLiquidityUsd = options.minLiquidityUsd ?? 0;
-  const minMarketCapUsd = options.minMarketCapUsd ?? 0;
-  const maxRiskScore = options.maxRiskScore ?? 0;
-
-  const solUsd = await fetchSolUsdPrice();
-
-  setProgress({
-    running: true,
-    phase: 'loading',
-    current: 0,
-    total: simulations,
-    pct: 0,
-    message: `Fetching market data… (SOL ≈ $${solUsd.toFixed(0)})`,
-    startedAt: Date.now(),
-    finishedAt: null,
-  });
-  await sleep(10);
-
-  let events: LaunchEvent[] = [];
-  let dataSource = 'synthetic';
+  const savedSnap = captureTradingConfigSnapshot();
+  const requestedLevel = options.riskLevel ?? 'current';
+  const compareRiskLevels = Boolean(options.compareRiskLevels);
+  const useSavedConfigFilters = options.useSavedConfigFilters !== false;
 
   try {
+    // Optionally apply a risk-level preset for this run only (not persisted)
+    if (
+      requestedLevel === 'low' ||
+      requestedLevel === 'medium' ||
+      requestedLevel === 'high'
+    ) {
+      applyRiskLevel(requestedLevel, { persist: false });
+    }
+
+    const toMs = options.toMs ?? Date.now();
+    const hours = options.hours ?? 24;
+    const fromMs = options.fromMs ?? toMs - hours * 60 * 60 * 1000;
+    const useLiveData = options.useLiveData ?? config.paper.useLiveData;
+    const allowSynthetic = options.allowSynthetic !== false;
+    const maxTrades = options.maxTrades ?? 20;
+    const simulations = Math.min(Math.max(options.simulations ?? 1, 1), 20);
+    const migrationsOnly =
+      options.migrationsOnly ?? config.strategy.enableMigrationOnly;
+    const pumpFunOnly = Boolean(options.pumpFunOnly);
+    const reBuyEnabled =
+      options.reBuyEnabled ?? config.strategy.reBuyEnabled ?? false;
+    const strategyType: BacktestStrategyType =
+      options.strategyType ?? (migrationsOnly ? 'migration' : 'auto');
+    const startingBalance =
+      options.startingBalanceSol ?? config.paper.startingBalanceSol;
+
+    // Prefer explicit overrides; otherwise inherit saved filter config
+    const minVolumeUsd =
+      options.minVolumeUsd != null && options.minVolumeUsd > 0
+        ? options.minVolumeUsd
+        : useSavedConfigFilters
+          ? config.filters.minVolume24hUsd || 0
+          : 0;
+    const minLiquidityUsd =
+      options.minLiquidityUsd != null && options.minLiquidityUsd > 0
+        ? options.minLiquidityUsd
+        : useSavedConfigFilters
+          ? config.filters.minLiquidity || 0
+          : 0;
+    const minMarketCapUsd = options.minMarketCapUsd ?? 0;
+    const maxRiskScore =
+      options.maxRiskScore != null && options.maxRiskScore > 0
+        ? options.maxRiskScore
+        : useSavedConfigFilters
+          ? config.filters.maxRiskScore || 0
+          : 0;
+
+    const solUsd = await fetchSolUsdPrice();
+    const configUsed = buildConfigUsedSnapshot();
+
+    setProgress({
+      running: true,
+      phase: 'loading',
+      current: 0,
+      total: simulations,
+      pct: 0,
+      message:
+        `Using ${configUsed.riskLevel.toUpperCase()} risk config` +
+        ` · base ${configUsed.baseTradeAmountSol} SOL` +
+        ` · SL ${configUsed.stopLossPercent}%` +
+        ` · fetching (SOL ≈ $${solUsd.toFixed(0)})`,
+      startedAt: Date.now(),
+      finishedAt: null,
+    });
+    await sleep(10);
+
+    let events: LaunchEvent[] = [];
+    let dataSource = 'synthetic';
+
     if (useLiveData) {
       const fetched = await fetchRecentLaunches({
         fromMs,
@@ -1435,128 +1734,198 @@ export async function runBacktest(
       events = events.filter((e) => e.isPumpFun ?? !e.migrated);
     }
 
-    setProgress({
-      phase: 'simulating',
-      message: `Simulating ${events.length} events × ${simulations} run(s)…`,
-      total: simulations * Math.max(events.length, 1),
-      current: 0,
-    });
+    const runOptsBase = {
+      maxTrades,
+      startingBalance,
+      strategyType,
+      minLiquidityUsd,
+      minMarketCapUsd,
+      maxRiskScore,
+      minVolumeUsd,
+      pumpFunOnly,
+      reBuyEnabled,
+      solUsd,
+    };
 
-    const allSkipped: { mint: string; reason: string }[] = [];
-    const runStats: Array<ReturnType<PaperTrader['getStats']>> = [];
-    let lastTrades: BacktestTradeResult[] = [];
-    let lastTrader: PaperTrader | null = null;
-    let considered = 0;
-    let progressCursor = 0;
+    const executeSims = async (
+      passEvents: LaunchEvent[],
+      labelPrefix: string
+    ) => {
+      const allSkipped: { mint: string; reason: string }[] = [];
+      const runStats: Array<ReturnType<PaperTrader['getStats']>> = [];
+      let lastTrades: BacktestTradeResult[] = [];
+      let lastTrader: PaperTrader | null = null;
+      let considered = 0;
+      let progressCursor = 0;
 
-    for (let sim = 1; sim <= simulations; sim++) {
-      let passEvents = events;
-      if (sim > 1 && dataSource === 'synthetic') {
-        passEvents = generateSyntheticLaunches(
-          fromMs,
-          toMs,
-          Math.min(maxTrades * 2, 30)
-        );
-        if (migrationsOnly || strategyType === 'migration') {
-          passEvents = passEvents.filter((e) => e.migrated);
-        }
-        if (pumpFunOnly) {
-          passEvents = passEvents.filter((e) => e.isPumpFun ?? !e.migrated);
-        }
-      } else if (sim > 1) {
-        passEvents = [...events].sort(() => Math.random() - 0.5);
-      }
-
-      const pass = runSinglePass(passEvents, {
-        maxTrades,
-        startingBalance,
-        strategyType,
-        simulation: sim,
-        minLiquidityUsd,
-        minMarketCapUsd,
-        maxRiskScore,
-        minVolumeUsd,
-        pumpFunOnly,
-        reBuyEnabled,
-        solUsd,
-        onProgress: (_cur, _tot, label) => {
-          progressCursor += 1;
-          setProgress({
-            current: progressCursor,
-            total: Math.max(
-              simulations * Math.max(events.length, 1),
-              progressCursor
-            ),
-            message: `Sim ${sim}/${simulations} · ${label}`,
-            phase: 'simulating',
-          });
-        },
+      setProgress({
+        phase: 'simulating',
+        message: `${labelPrefix} · ${passEvents.length} events × ${simulations} run(s)`,
+        total: simulations * Math.max(passEvents.length, 1),
+        current: 0,
       });
 
-      considered = Math.max(considered, pass.considered);
-      allSkipped.push(...pass.skipped);
-      runStats.push(pass.trader.getStats());
-      lastTrades = pass.trades;
-      lastTrader = pass.trader;
-      await sleep(5);
+      for (let sim = 1; sim <= simulations; sim++) {
+        let simEvents = passEvents;
+        if (sim > 1 && dataSource === 'synthetic') {
+          simEvents = generateSyntheticLaunches(
+            fromMs,
+            toMs,
+            Math.min(maxTrades * 2, 30)
+          );
+          if (migrationsOnly || strategyType === 'migration') {
+            simEvents = simEvents.filter((e) => e.migrated);
+          }
+          if (pumpFunOnly) {
+            simEvents = simEvents.filter((e) => e.isPumpFun ?? !e.migrated);
+          }
+        } else if (sim > 1) {
+          simEvents = [...passEvents].sort(() => Math.random() - 0.5);
+        }
+
+        const pass = runSinglePass(simEvents, {
+          ...runOptsBase,
+          simulation: sim,
+          onProgress: (_cur, _tot, label) => {
+            progressCursor += 1;
+            setProgress({
+              current: progressCursor,
+              total: Math.max(
+                simulations * Math.max(passEvents.length, 1),
+                progressCursor
+              ),
+              message: `${labelPrefix} · Sim ${sim}/${simulations} · ${label}`,
+              phase: 'simulating',
+            });
+          },
+        });
+
+        considered = Math.max(considered, pass.considered);
+        allSkipped.push(...pass.skipped);
+        runStats.push(pass.trader.getStats());
+        lastTrades = pass.trades;
+        lastTrader = pass.trader;
+        await sleep(5);
+      }
+
+      return { allSkipped, runStats, lastTrades, lastTrader, considered };
+    };
+
+    // Optional Low/Medium/High comparison on the same events
+    let riskComparison: BacktestResult['riskComparison'];
+    if (compareRiskLevels) {
+      riskComparison = [];
+      const compareSnap = captureTradingConfigSnapshot();
+      for (const level of ['low', 'medium', 'high'] as RiskLevel[]) {
+        applyRiskLevel(level, { persist: false });
+        const cmp = await executeSims(events, `Compare ${level}`);
+        const sum = buildSummary(
+          cmp.lastTrades,
+          solUsd,
+          startingBalance
+        );
+        riskComparison.push({
+          riskLevel: level,
+          tradesExecuted: cmp.lastTrades.length,
+          winRatePct: Number(sum.winRatePct.toFixed(1)),
+          totalPnlSol: Number(sum.totalPnlSol.toFixed(4)),
+          profitFactor: sum.profitFactor,
+          maxDrawdownPct: sum.maxDrawdownPct,
+          sharpeRatio: sum.sharpeRatio,
+          avgHoldMs: sum.avgHoldingMs,
+          message: `${level}: ${cmp.lastTrades.length} trades · WR ${sum.winRatePct.toFixed(0)}% · PnL ${sum.totalPnlSol.toFixed(3)} SOL · PF ${sum.profitFactor}`,
+        });
+      }
+      restoreTradingConfigSnapshot(compareSnap);
+      // Re-apply primary level for the main run
+      if (
+        requestedLevel === 'low' ||
+        requestedLevel === 'medium' ||
+        requestedLevel === 'high'
+      ) {
+        applyRiskLevel(requestedLevel, { persist: false });
+      } else {
+        restoreTradingConfigSnapshot(savedSnap);
+      }
     }
 
+    const primary = await executeSims(
+      events,
+      `Risk ${(config.riskLevel || 'medium').toUpperCase()}`
+    );
     const trader =
-      lastTrader ?? new PaperTrader(startingBalance, { mode: 'backtest' });
+      primary.lastTrader ??
+      new PaperTrader(startingBalance, { mode: 'backtest' });
     const stats = trader.getStats();
     const baseCharts = trader.getChartData();
-    const summary = buildSummary(lastTrades, solUsd, startingBalance);
-    // Prefer summary return (trade-based); fall back to paper equity return
+    const summary = buildSummary(primary.lastTrades, solUsd, startingBalance);
     if (!Number.isFinite(summary.returnPct) || summary.totalTrades === 0) {
       summary.returnPct = stats.returnPct;
     }
 
     const charts = {
       ...baseCharts,
-      pnlDistribution: buildPnlDistribution(lastTrades),
+      equityCurve: buildEquityCurve(primary.lastTrades, startingBalance),
+      pnlDistribution: buildPnlDistribution(primary.lastTrades),
       strategyBreakdown: {
         labels: summary.strategyBreakdown.map((s) => s.strategyKind),
         pnlSol: summary.strategyBreakdown.map((s) => s.totalPnlSol),
         winRatePct: summary.strategyBreakdown.map((s) => s.winRatePct),
         trades: summary.strategyBreakdown.map((s) => s.trades),
       },
+      riskComparison: riskComparison?.length
+        ? {
+            labels: riskComparison.map((r) => r.riskLevel),
+            pnlSol: riskComparison.map((r) => r.totalPnlSol),
+            winRatePct: riskComparison.map((r) => r.winRatePct),
+            profitFactor: riskComparison.map((r) => r.profitFactor),
+            maxDrawdownPct: riskComparison.map((r) => r.maxDrawdownPct),
+            trades: riskComparison.map((r) => r.tradesExecuted),
+          }
+        : undefined,
     };
 
     const aggregate =
       simulations > 1
         ? {
             avgWinRatePct:
-              runStats.reduce((s, r) => s + r.winRatePct, 0) / runStats.length,
+              primary.runStats.reduce((s, r) => s + r.winRatePct, 0) /
+              primary.runStats.length,
             avgNetPnlSol:
-              runStats.reduce((s, r) => s + r.netPnlSol, 0) / runStats.length,
+              primary.runStats.reduce((s, r) => s + r.netPnlSol, 0) /
+              primary.runStats.length,
             avgReturnPct:
-              runStats.reduce((s, r) => s + r.returnPct, 0) / runStats.length,
+              primary.runStats.reduce((s, r) => s + r.returnPct, 0) /
+              primary.runStats.length,
             runs: simulations,
           }
         : undefined;
 
+    const configUsedFinal = buildConfigUsedSnapshot();
     const message =
-      lastTrades.length === 0
-        ? `No trades simulated (source=${dataSource}, events=${events.length}, sims=${simulations}). Widen window or loosen filters.`
-        : `Backtest complete: ${lastTrades.length} trades` +
+      primary.lastTrades.length === 0
+        ? `No trades simulated (source=${dataSource}, events=${events.length}, risk=${configUsedFinal.riskLevel}). Widen window or loosen filters.`
+        : `Backtest (${configUsedFinal.riskLevel} risk): ${primary.lastTrades.length} trades` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
-          `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)} @ $${solUsd.toFixed(0)}/SOL), win rate ${stats.winRatePct.toFixed(0)}%` +
+          `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${stats.winRatePct.toFixed(0)}%` +
           ` · PF ${summary.profitFactor}` +
           ` · Sharpe ${summary.sharpeRatio}` +
           ` · maxDD ${summary.maxDrawdownPct}%` +
+          ` · base ${configUsedFinal.baseTradeAmountSol} SOL / SL ${configUsedFinal.stopLossPercent}%` +
           (summary.reBuyTrades ? ` · ${summary.reBuyTrades} rebuys` : '') +
           (aggregate
             ? ` · avg WR ${aggregate.avgWinRatePct.toFixed(0)}%`
             : '');
 
     logger.info('Backtest', message, {
-      trades: lastTrades.length,
+      trades: primary.lastTrades.length,
       simulations,
       dataSource,
+      riskLevel: configUsedFinal.riskLevel,
     });
 
     const result: BacktestResult = {
-      ok: lastTrades.length > 0,
+      ok: primary.lastTrades.length > 0,
       id: `bt-${Date.now()}`,
       ranAt: Date.now(),
       options: {
@@ -1574,22 +1943,27 @@ export async function runBacktest(
         useLiveData: Boolean(useLiveData),
         allowSynthetic,
         startingBalanceSol: startingBalance,
+        riskLevel: requestedLevel,
+        compareRiskLevels,
+        useSavedConfigFilters,
       },
+      configUsed: configUsedFinal,
+      riskComparison,
       period: {
         fromMs,
         toMs,
         hours: (toMs - fromMs) / (60 * 60 * 1000),
       },
       dataSource,
-      eventsConsidered: considered,
-      tradesExecuted: lastTrades.length,
+      eventsConsidered: primary.considered,
+      tradesExecuted: primary.lastTrades.length,
       simulationsRun: simulations,
       stats,
       summary,
       aggregate,
       charts,
-      trades: lastTrades,
-      skipped: allSkipped.slice(0, 40),
+      trades: primary.lastTrades,
+      skipped: primary.allSkipped.slice(0, 40),
       message,
     };
 
@@ -1599,7 +1973,7 @@ export async function runBacktest(
       phase: 'done',
       pct: 100,
       current: progress.total || 1,
-      message: message.slice(0, 120),
+      message: message.slice(0, 140),
       finishedAt: Date.now(),
     });
     return result;
@@ -1611,6 +1985,9 @@ export async function runBacktest(
       finishedAt: Date.now(),
     });
     throw err;
+  } finally {
+    // Always restore the user's live saved config after a backtest override
+    restoreTradingConfigSnapshot(savedSnap);
   }
 }
 
@@ -1729,6 +2106,8 @@ export function exportLastBacktestJson(): string | null {
     eventsConsidered: lastResult.eventsConsidered,
     tradesExecuted: lastResult.tradesExecuted,
     simulationsRun: lastResult.simulationsRun,
+    configUsed: lastResult.configUsed,
+    riskComparison: lastResult.riskComparison,
     metrics: {
       winRatePct: lastResult.summary.winRatePct,
       profitFactor: lastResult.summary.profitFactor,
@@ -1748,6 +2127,7 @@ export function exportLastBacktestJson(): string | null {
       totalTrades: lastResult.summary.totalTrades,
       wins: lastResult.summary.wins,
       losses: lastResult.summary.losses,
+      winLossRatio: lastResult.summary.winLossRatio,
       reBuyTrades: lastResult.summary.reBuyTrades,
       strategyBreakdown: lastResult.summary.strategyBreakdown,
       bestTrade: lastResult.summary.bestTrade
@@ -1769,6 +2149,12 @@ export function exportLastBacktestJson(): string | null {
     aggregate: lastResult.aggregate,
     trades: lastResult.trades,
     skipped: lastResult.skipped,
+    /** Flattened exit debug lines across trades */
+    debugLog: lastResult.trades.flatMap((t) => [
+      `── ${t.symbol} (${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct}%) ──`,
+      ...(t.debugLog || []),
+      '',
+    ]),
   };
   return JSON.stringify(report, null, 2);
 }

@@ -4,9 +4,14 @@
  */
 
 import fs from 'fs';
-import { dataFile, ensureDataDir } from './dataDir';
+import {
+  atomicWriteJson,
+  dataFile,
+  ensureDataDir,
+  PERSIST_FILES,
+} from './dataDir';
 
-const FILE = dataFile('trading-wallets.json');
+const FILE = dataFile(PERSIST_FILES.tradingWallets);
 
 /** Only these env name patterns may be used as key sources */
 export const ALLOWED_KEY_ENV =
@@ -127,7 +132,7 @@ export function saveTradingWalletsFile(data: TradingWalletsFile): void {
       createdAt: w.createdAt ?? Date.now(),
     })),
   };
-  fs.writeFileSync(FILE, JSON.stringify(safe, null, 2), 'utf-8');
+  atomicWriteJson(FILE, safe);
 }
 
 export function makeTradingWalletId(name: string): string {

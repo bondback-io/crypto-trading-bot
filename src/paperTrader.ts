@@ -17,6 +17,7 @@ import {
   type ProfitPositionView,
 } from './profitStrategy';
 import { marketCapAtPrice } from './marketData';
+import { loadPaperBalance, savePaperBalance } from './paperStateStore';
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
 
@@ -144,6 +145,46 @@ export class PaperTrader {
 
   getMode(): 'paper' | 'backtest' {
     return this.mode;
+  }
+
+  /** Persist paper balance + positions (no-op for backtest mode). */
+  private persistState(): void {
+    if (this.mode !== 'paper') return;
+    savePaperBalance({
+      balanceSol: this.balanceSol,
+      startingBalanceSol: this.startingBalanceSol,
+      positions: Array.from(this.positions.values()),
+      closedPositions: this.closedPositions,
+    });
+  }
+
+  /**
+   * Load paperBalance.json after boot (call once from index after settings load).
+   */
+  loadPersistedState(): boolean {
+    if (this.mode !== 'paper') return false;
+    const saved = loadPaperBalance();
+    if (!saved) {
+      console.log('[paper] No paperBalance.json — using starting balance');
+      this.persistState();
+      return false;
+    }
+    this.balanceSol = saved.balanceSol;
+    this.startingBalanceSol =
+      saved.startingBalanceSol || config.paper.startingBalanceSol;
+    this.positions.clear();
+    for (const p of saved.positions) {
+      if (p?.id && p.status !== 'closed') {
+        this.positions.set(p.id, { ...p });
+      }
+    }
+    this.closedPositions = (saved.closedPositions || []).map((p) => ({ ...p }));
+    resetPeakEquity(this.getEquitySol());
+    console.log(
+      `[paper] Loaded paperBalance.json — balance ${this.balanceSol.toFixed(4)} SOL, ` +
+        `${this.positions.size} open, ${this.closedPositions.length} closed`
+    );
+    return true;
   }
 
   getStartingBalance(): number {
@@ -436,6 +477,7 @@ export class PaperTrader {
         `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit})`,
       { mint, symbol: tokenSymbol, name: tokenName, solAmount: spendSol }
     );
+    this.persistState();
 
     return position;
   }
@@ -556,6 +598,7 @@ export class PaperTrader {
       if (this.closedPositions.length > 200) {
         this.closedPositions = this.closedPositions.slice(-200);
       }
+      this.persistState();
       return slice;
     }
 
@@ -612,6 +655,7 @@ export class PaperTrader {
       });
     }
 
+    this.persistState();
     return position;
   }
 
@@ -669,6 +713,7 @@ export class PaperTrader {
       `Topped up +${amountSol.toFixed(4)} SOL → balance ${this.balanceSol.toFixed(4)} SOL`,
       { solAmount: amountSol }
     );
+    this.persistState();
     return this.balanceSol;
   }
 
@@ -701,11 +746,317 @@ export class PaperTrader {
         (clearHistory ? ' · history cleared' : ' · closed history kept')
     );
 
+    this.persistState();
+
     return {
       balanceSol: this.balanceSol,
       clearedOpen,
       clearedHistory: clearHistory,
     };
+  }
+
+  /**
+   * Synchronous exit evaluation for paper/backtest — same rules as checkPositions
+   * (profit strategy OR legacy tiers/TP/trail). Skips live Jupiter path.
+   * Returns one action's event, or null if nothing to do.
+   */
+  evaluatePositionTickSync(
+    positionId: string,
+    currentPrice: number
+  ): {
+    kind:
+      | 'none'
+      | 'arm_trail'
+      | 'partial'
+      | 'full'
+      | 'hard_sl'
+      | 'trail_exit'
+      | 'take_profit'
+      | 'tier'
+      | 'info';
+    reason: string;
+    markPnlPct: number;
+    stillOpen: boolean;
+  } | null {
+    if (!config.strategy.enableAutoSell && this.mode !== 'backtest') return null;
+
+    const position = this.positions.get(positionId);
+    if (!position || position.status === 'closed') return null;
+    if (position.tradeMode === 'live') return null;
+
+    this.priceCache.set(position.mint, currentPrice);
+
+    if (position.initialAmountTokens == null) {
+      position.initialAmountTokens = position.amountTokens;
+      position.initialCostSol = position.costSol;
+      position.highWaterMarkSol = position.entryPriceSol;
+      position.trailingStopPct =
+        getStrategyRiskRules(position.strategyKind ?? 'normal').trailingStopPct ??
+        config.risk.trailingStopPercent;
+      position.trailingActive = position.trailingActive ?? false;
+      position.tiersHit = position.tiersHit ?? [];
+      position.strategyKind = position.strategyKind ?? 'normal';
+      position.realizedPnlSol = position.realizedPnlSol ?? 0;
+    }
+    position.initialRecovered = position.initialRecovered ?? false;
+    position.partialSellDone = position.partialSellDone ?? false;
+    position.bagTrimDone = position.bagTrimDone ?? false;
+    position.solReturned = position.solReturned ?? 0;
+
+    if (currentPrice > position.highWaterMarkSol) {
+      position.highWaterMarkSol = currentPrice;
+    }
+
+    const markPnlPct =
+      ((currentPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+    const label = formatTokenLabel(position.symbol, position.name, position.mint);
+
+    // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
+    if (config.profitStrategy?.enabled) {
+      const view: ProfitPositionView = {
+        entryPriceSol: position.entryPriceSol,
+        currentPriceSol: currentPrice,
+        highWaterMarkSol: position.highWaterMarkSol,
+        amountTokens: position.amountTokens,
+        initialAmountTokens: position.initialAmountTokens,
+        initialCostSol: position.initialCostSol,
+        solReturned: position.solReturned ?? 0,
+        trailingActive: position.trailingActive,
+        trailingStopPct: position.trailingStopPct,
+        stopLossPct: position.stopLossPct,
+        maxProfitPct: Math.max(
+          position.takeProfitPct,
+          config.trade.maxProfitPercent
+        ),
+        initialRecovered: position.initialRecovered,
+        partialSellDone: position.partialSellDone,
+        bagTrimDone: position.bagTrimDone,
+        riskScore: position.antiRug?.riskScore,
+      };
+
+      const action = evaluateProfitAction(view);
+      if (action.type === 'none') {
+        return {
+          kind: 'none',
+          reason: '',
+          markPnlPct,
+          stillOpen: true,
+        };
+      }
+
+      if (action.type === 'arm_trail') {
+        position.trailingActive = true;
+        position.trailingActivatedAt = Date.now();
+        position.trailingStopPct = action.trailPct;
+        position.trailingStopPriceSol =
+          position.highWaterMarkSol * (1 - action.trailPct / 100);
+        this.log('info', `${label}: ${action.reason}`);
+        return {
+          kind: 'arm_trail',
+          reason: action.reason,
+          markPnlPct,
+          stillOpen: true,
+        };
+      }
+
+      if (
+        action.type === 'hard_sl' ||
+        action.type === 'trail_exit' ||
+        action.type === 'full'
+      ) {
+        this.simulateSell(position.id, currentPrice, action.reason);
+        const kind =
+          action.type === 'hard_sl'
+            ? 'hard_sl'
+            : action.type === 'trail_exit'
+              ? 'trail_exit'
+              : 'full';
+        return {
+          kind,
+          reason: action.reason,
+          markPnlPct,
+          stillOpen: this.positions.has(positionId),
+        };
+      }
+
+      if (action.type === 'partial') {
+        if (
+          (action.tokensToSell != null && action.tokensToSell <= 0) ||
+          (action.sellPctOfInitial <= 0 && action.tokensToSell == null)
+        ) {
+          if (action.stage === 'recover_initial') position.initialRecovered = true;
+          if (action.stage === 'partial') position.partialSellDone = true;
+          if (action.stage === 'bag_trim') position.bagTrimDone = true;
+          this.log('info', `${label}: ${action.reason}`);
+          return {
+            kind: 'info',
+            reason: action.reason,
+            markPnlPct,
+            stillOpen: true,
+          };
+        }
+
+        this.simulateSell(position.id, currentPrice, action.reason, {
+          tokensToSell: action.tokensToSell,
+          sellPctOfInitial:
+            action.tokensToSell == null ? action.sellPctOfInitial : undefined,
+        });
+        if (action.stage === 'partial') position.partialSellDone = true;
+        if (action.stage === 'recover_initial') position.initialRecovered = true;
+        if (action.stage === 'bag_trim') position.bagTrimDone = true;
+        if (
+          !position.initialRecovered &&
+          (position.solReturned ?? 0) >= position.initialCostSol * 0.98
+        ) {
+          position.initialRecovered = true;
+        }
+        return {
+          kind: 'partial',
+          reason: action.reason,
+          markPnlPct,
+          stillOpen: this.positions.has(positionId),
+        };
+      }
+
+      return null;
+    }
+
+    // —— Legacy path (profit strategy off) — same as checkPositions ——
+    const rules = getStrategyRiskRules(position.strategyKind);
+    const risk = config.risk;
+    const hardSl = rules.hardStopLossPct ?? position.stopLossPct;
+
+    if (markPnlPct <= hardSl) {
+      const reason = `hard stop-loss ${hardSl}%`;
+      this.simulateSell(position.id, currentPrice, reason);
+      return {
+        kind: 'hard_sl',
+        reason,
+        markPnlPct,
+        stillOpen: this.positions.has(positionId),
+      };
+    }
+
+    if (risk.tieredSellEnabled && rules.tiers?.length) {
+      for (let i = 0; i < rules.tiers.length; i++) {
+        if (position.tiersHit.includes(i)) continue;
+        const tier = rules.tiers[i];
+        if (markPnlPct >= tier.profitPct) {
+          position.tiersHit.push(i);
+          const reason = `tier ${i + 1}: +${tier.profitPct}% → sell ${tier.sellPct}%`;
+          this.simulateSell(position.id, currentPrice, reason, {
+            sellPctOfInitial: tier.sellPct,
+          });
+          return {
+            kind: 'tier',
+            reason,
+            markPnlPct,
+            stillOpen: this.positions.has(positionId),
+          };
+        }
+      }
+    } else if (markPnlPct >= position.takeProfitPct) {
+      const reason = `take-profit ${position.takeProfitPct.toFixed(0)}%`;
+      this.simulateSell(position.id, currentPrice, reason);
+      return {
+        kind: 'take_profit',
+        reason,
+        markPnlPct,
+        stillOpen: this.positions.has(positionId),
+      };
+    }
+
+    const stillOpen = this.positions.get(positionId);
+    if (!stillOpen) {
+      return {
+        kind: 'full',
+        reason: 'closed',
+        markPnlPct,
+        stillOpen: false,
+      };
+    }
+
+    const trailPct =
+      stillOpen.trailingStopPct ||
+      risk.trailingStopPercent ||
+      risk.trailingStopPct ||
+      20;
+    const activation = risk.trailingActivationProfit ?? 30;
+
+    if (!stillOpen.trailingActive && markPnlPct >= activation) {
+      stillOpen.trailingActive = true;
+      stillOpen.trailingActivatedAt = Date.now();
+      stillOpen.trailingStopPct = trailPct;
+      stillOpen.trailingStopPriceSol =
+        stillOpen.highWaterMarkSol * (1 - trailPct / 100);
+      const reason =
+        `Trailing stop ACTIVATED at +${markPnlPct.toFixed(1)}% — ` +
+        `${trailPct}% trail from peak`;
+      this.log('info', `${label}: ${reason}`);
+      return {
+        kind: 'arm_trail',
+        reason,
+        markPnlPct,
+        stillOpen: true,
+      };
+    }
+
+    if (!stillOpen.trailingActive) {
+      return {
+        kind: 'none',
+        reason: '',
+        markPnlPct,
+        stillOpen: true,
+      };
+    }
+
+    stillOpen.trailingStopPriceSol =
+      stillOpen.highWaterMarkSol * (1 - trailPct / 100);
+    const trailTrigger = stillOpen.trailingStopPriceSol;
+
+    if (currentPrice <= trailTrigger) {
+      const dropFromPeak =
+        ((currentPrice - stillOpen.highWaterMarkSol) /
+          stillOpen.highWaterMarkSol) *
+        100;
+      const reason = `trailing stop ${trailPct}% (peak drop ${dropFromPeak.toFixed(1)}%)`;
+      this.simulateSell(stillOpen.id, currentPrice, reason);
+      return {
+        kind: 'trail_exit',
+        reason,
+        markPnlPct,
+        stillOpen: this.positions.has(positionId),
+      };
+    }
+
+    return {
+      kind: 'none',
+      reason: '',
+      markPnlPct,
+      stillOpen: true,
+    };
+  }
+
+  /**
+   * Run sync exit ticks at a fixed price until idle or closed
+   * (staged partials that would fire on consecutive paper checks).
+   */
+  runPositionTicksUntilIdle(
+    positionId: string,
+    currentPrice: number,
+    maxSteps = 4
+  ): Array<NonNullable<ReturnType<PaperTrader['evaluatePositionTickSync']>>> {
+    const events: Array<
+      NonNullable<ReturnType<PaperTrader['evaluatePositionTickSync']>>
+    > = [];
+    for (let step = 0; step < maxSteps; step++) {
+      const ev = this.evaluatePositionTickSync(positionId, currentPrice);
+      if (!ev) break;
+      if (ev.kind === 'none') break;
+      events.push(ev);
+      if (!ev.stillOpen) break;
+    }
+    return events;
   }
 
   /** Check all open positions — tiered sells, trailing stop, hard SL */

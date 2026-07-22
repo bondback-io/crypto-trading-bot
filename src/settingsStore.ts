@@ -1,17 +1,24 @@
 /**
- * Persist dashboard / runtime bot settings to data/bot-settings.json.
+ * Persist dashboard / runtime bot settings to data/config.json.
  *
  * Load order: code defaults + env → deep-merge saved file (saved wins).
  * New keys added in code updates keep their defaults; existing saved values
  * are never wiped by a redeploy or code change.
  *
- * On Render: attach a persistent disk (Starter+) or files are wiped each deploy.
+ * Migrates legacy data/bot-settings.json → data/config.json once.
  */
 
-import fs from 'fs';
-import { dataFile, ensureDataDir } from './dataDir';
+import {
+  atomicWriteJson,
+  dataFile,
+  ensureDataDir,
+  migrateLegacyFile,
+  PERSIST_FILES,
+  readJsonFile,
+} from './dataDir';
 
-const SETTINGS_FILE = dataFile('bot-settings.json');
+const SETTINGS_FILE = dataFile(PERSIST_FILES.config);
+const LEGACY_SETTINGS_FILE = dataFile(PERSIST_FILES.legacyConfig);
 
 export const SETTINGS_VERSION = 1 as const;
 
@@ -20,6 +27,7 @@ export interface PersistedBotSettings {
   version: typeof SETTINGS_VERSION;
   updatedAt: number;
   mode?: 'paper' | 'live';
+  riskLevel?: 'low' | 'medium' | 'high';
   trade?: Record<string, unknown>;
   filters?: Record<string, unknown>;
   strategy?: Record<string, unknown>;
@@ -65,20 +73,25 @@ export function deepMerge<T>(base: T, overlay: unknown): T {
   return out as T;
 }
 
+function ensureMigrated(): void {
+  migrateLegacyFile(LEGACY_SETTINGS_FILE, SETTINGS_FILE);
+}
+
 export function settingsFilePath(): string {
+  ensureMigrated();
   return SETTINGS_FILE;
 }
 
 export function loadPersistedSettings(): PersistedBotSettings | null {
   try {
-    if (!fs.existsSync(SETTINGS_FILE)) return null;
-    const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-    const parsed = JSON.parse(raw) as PersistedBotSettings;
+    ensureDataDir();
+    ensureMigrated();
+    const parsed = readJsonFile<PersistedBotSettings>(SETTINGS_FILE);
     if (!parsed || typeof parsed !== 'object') return null;
     return parsed;
   } catch (err) {
     console.error(
-      '[settings] Failed to load bot-settings.json — using code defaults:',
+      '[settings] Failed to load config.json — using code defaults:',
       err instanceof Error ? err.message : err
     );
     return null;
@@ -88,22 +101,25 @@ export function loadPersistedSettings(): PersistedBotSettings | null {
 export function savePersistedSettings(settings: PersistedBotSettings): void {
   try {
     ensureDataDir();
+    ensureMigrated();
     const payload: PersistedBotSettings = {
       ...settings,
       version: SETTINGS_VERSION,
       updatedAt: Date.now(),
     };
-    const tmp = `${SETTINGS_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf-8');
-    fs.renameSync(tmp, SETTINGS_FILE);
+    atomicWriteJson(SETTINGS_FILE, payload);
   } catch (err) {
     console.error(
-      '[settings] Failed to save bot-settings.json:',
+      '[settings] Failed to save config.json:',
       err instanceof Error ? err.message : err
     );
   }
 }
 
 export function hasPersistedSettings(): boolean {
-  return fs.existsSync(SETTINGS_FILE);
+  ensureMigrated();
+  return (
+    require('fs').existsSync(SETTINGS_FILE) ||
+    require('fs').existsSync(LEGACY_SETTINGS_FILE)
+  );
 }

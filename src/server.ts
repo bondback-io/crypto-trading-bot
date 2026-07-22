@@ -16,12 +16,19 @@ import {
   updateSelectiveConfig,
   updatePaperConfig,
   persistUserSettings,
+  persistWallets,
   getConfigSnapshot,
+  applyRiskLevel,
+  getRiskLevelSummary,
+  RISK_LEVEL_PRESETS,
+  HIGH_RISK_WARNING,
   setActiveTradingWallet,
   addTradingWallet,
   removeTradingWallet,
   getActiveTradingWallet,
+  resetToDefaults,
   TradingMode,
+  RiskLevel,
 } from './config';
 import { isValidSolanaAddress, inferWalletCategory } from './walletStore';
 import {
@@ -50,6 +57,10 @@ import {
   clearMonitorRiskHalt,
   clearTradedMints,
   recoverDisabledWallets,
+  syncWalletsToMonitoring,
+  forceRefreshMonitoring,
+  pruneInactiveWallets,
+  refreshWalletActivity,
 } from './monitor';
 import {
   updateRiskConfig,
@@ -347,6 +358,9 @@ export function createServer(): express.Application {
         useLiveData?: boolean;
         allowSynthetic?: boolean;
         startingBalanceSol?: number;
+        riskLevel?: 'low' | 'medium' | 'high' | 'current';
+        compareRiskLevels?: boolean;
+        useSavedConfigFilters?: boolean;
       };
 
       const { runBacktest } = await import('./backtest');
@@ -382,6 +396,9 @@ export function createServer(): express.Application {
           body.startingBalanceSol != null
             ? Number(body.startingBalanceSol)
             : undefined,
+        riskLevel: body.riskLevel ?? 'current',
+        compareRiskLevels: Boolean(body.compareRiskLevels),
+        useSavedConfigFilters: body.useSavedConfigFilters !== false,
       });
 
       res.json(result);
@@ -405,6 +422,7 @@ export function createServer(): express.Application {
         req.query.migrationsOnly === '1' || req.query.migrationsOnly === 'true';
 
       const { runBacktest } = await import('./backtest');
+      const riskQ = String(req.query.riskLevel || 'current').toLowerCase();
       const result = await runBacktest({
         hours,
         useLiveData,
@@ -425,6 +443,13 @@ export function createServer(): express.Application {
         minMarketCapUsd: Number(req.query.minMc) || 0,
         maxRiskScore: Number(req.query.maxRisk) || 0,
         allowSynthetic: req.query.synthetic !== '0',
+        riskLevel:
+          riskQ === 'low' || riskQ === 'medium' || riskQ === 'high'
+            ? riskQ
+            : 'current',
+        compareRiskLevels:
+          req.query.compareRisk === '1' || req.query.compareRisk === 'true',
+        useSavedConfigFilters: req.query.useSaved !== '0',
       });
       res.json(result);
     } catch (err) {
@@ -564,6 +589,29 @@ export function createServer(): express.Application {
     res.json(getMonitorStatus());
   });
 
+  /** Re-subscribe all tracked wallets to the poll loop */
+  app.post('/api/monitor/force-refresh', (_req: Request, res: Response) => {
+    const result = forceRefreshMonitoring();
+    res.json({
+      ...result,
+      monitor: getMonitorStatus(),
+      wallets: getWalletsWithActivity(),
+    });
+  });
+
+  app.get('/api/monitor/watching', (_req: Request, res: Response) => {
+    const status = getMonitorStatus();
+    res.json({
+      watching: status.watchedWallets,
+      tracked: status.trackedWallets,
+      enabled: status.enabledWallets,
+      label: status.watchingLabel,
+      wallets: status.watchingList,
+      running: status.running,
+      paused: status.paused,
+    });
+  });
+
   app.get('/api/risk', (_req: Request, res: Response) => {
     res.json({
       config: config.risk,
@@ -572,7 +620,48 @@ export function createServer(): express.Application {
         dailyPnlSol: paperTrader.getDailyPnlSol(),
         weeklyPnlSol: paperTrader.getWeeklyPnlSol(),
       }),
+      riskLevel: config.riskLevel,
+      riskLevelSummary: getRiskLevelSummary(),
+      presets: {
+        low: {
+          label: RISK_LEVEL_PRESETS.low.label,
+          description: RISK_LEVEL_PRESETS.low.description,
+        },
+        medium: {
+          label: RISK_LEVEL_PRESETS.medium.label,
+          description: RISK_LEVEL_PRESETS.medium.description,
+        },
+        high: {
+          label: RISK_LEVEL_PRESETS.high.label,
+          description: RISK_LEVEL_PRESETS.high.description,
+          warning: HIGH_RISK_WARNING,
+        },
+      },
     });
+  });
+
+  app.post('/api/config/risk-level', (req: Request, res: Response) => {
+    const level = String((req.body as { riskLevel?: string }).riskLevel || '')
+      .toLowerCase()
+      .trim() as RiskLevel;
+    if (level !== 'low' && level !== 'medium' && level !== 'high') {
+      res.status(400).json({
+        error: "riskLevel must be 'low' | 'medium' | 'high'",
+      });
+      return;
+    }
+    try {
+      const result = applyRiskLevel(level);
+      res.json({
+        ok: true,
+        ...result,
+        config: getConfigSnapshot(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.post('/api/risk', (req: Request, res: Response) => {
@@ -822,6 +911,38 @@ export function createServer(): express.Application {
 
   app.get('/api/config', (_req: Request, res: Response) => {
     res.json(getConfigSnapshot());
+  });
+
+  /**
+   * Wipe data/*.json persistence files and reload code defaults.
+   * Also resets paper balance/history and clears backtest history.
+   */
+  app.post('/api/config/reset-defaults', async (_req: Request, res: Response) => {
+    try {
+      const result = resetToDefaults();
+      paperTrader.reset({ clearHistory: true });
+      const { clearBacktestHistory } = await import('./backtest');
+      clearBacktestHistory();
+      const monitoring = forceRefreshMonitoring();
+      res.json({
+        ok: true,
+        deleted: result.deleted,
+        dataDir: result.dataDir,
+        config: getConfigSnapshot(),
+        persistence: getPersistenceStatus(),
+        paper: {
+          balanceSol: paperTrader.getBalance(),
+          stats: paperTrader.getStats(),
+        },
+        wallets: getWalletsWithActivity(),
+        monitoring,
+        message:
+          'All saved settings cleared. Defaults restored (wallets, paper, backtest history).',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
   });
 
   app.post('/api/config/mode', (req: Request, res: Response) => {
@@ -1469,10 +1590,21 @@ export function createServer(): express.Application {
       const limit = Number(req.body?.limit) || 20;
       const { wallets, source } = await getTopSmartWallets(limit, period, minWinRate);
       const result = importSuggestedWallets(wallets, { minWinRate, onlyNew: true });
-      console.log(
-        `[gmgn] Imported ${result.added.length} wallet(s) from ${source} (${period})`
+      const monitoring = syncWalletsToMonitoring(
+        [...result.added, ...result.updated],
+        `gmgn-import:${source}`
       );
-      res.json({ ...result, source, period, wallets: getWalletsWithActivity() });
+      console.log(
+        `[gmgn] Imported ${result.added.length} wallet(s) from ${source} (${period})` +
+          ` · now watching ${monitoring.watching}/${monitoring.tracked}`
+      );
+      res.json({
+        ...result,
+        source,
+        period,
+        monitoring,
+        wallets: getWalletsWithActivity(),
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: message });
@@ -1549,10 +1681,15 @@ export function createServer(): express.Application {
       source: 'gmgn',
       discoveredAt: Date.now(),
     });
+    const monitoring = syncWalletsToMonitoring(
+      [body.address.trim()],
+      'gmgn-top-add'
+    );
     res.json({
       ok: true,
       added: result.added,
       updated: result.updated,
+      monitoring,
       wallets: getWalletsWithActivity(),
     });
   });
@@ -1655,12 +1792,15 @@ export function createServer(): express.Application {
       name: name.trim(),
       address: address.trim(),
       enabled: true,
+      source: 'manual',
+      discoveredAt: Date.now(),
     });
     if (!added) {
       res.status(409).json({ error: 'Wallet already tracked' });
       return;
     }
-    res.json({ ok: true, wallets: getWalletsWithActivity() });
+    const monitoring = syncWalletsToMonitoring([address.trim()], 'top-wallets-add');
+    res.json({ ok: true, monitoring, wallets: getWalletsWithActivity() });
   });
 
   app.post('/api/wallets/refresh-activity', async (_req: Request, res: Response) => {
@@ -1668,10 +1808,13 @@ export function createServer(): express.Application {
       const reports = await refreshAllWalletActivity();
       const filter = filterActiveWallets({ persistActiveOnly: false });
       const recovered = recoverDisabledWallets();
+      // Kick poll so any recovered/enabled wallets are picked up
+      const monitoring = syncWalletsToMonitoring([], 'refresh-activity');
       res.json({
         reports,
         filter,
         recovered,
+        monitoring,
         wallets: getWalletsWithActivity(),
         watchedWallets: getMonitorStatus().watchedWallets,
       });
@@ -1691,12 +1834,23 @@ export function createServer(): express.Application {
     });
   });
 
-  app.post('/api/wallets/prune-inactive', (_req: Request, res: Response) => {
-    const filter = filterActiveWallets({
-      persistActiveOnly: true,
-      pruneInactive: true,
+  app.post('/api/wallets/prune-inactive', (req: Request, res: Response) => {
+    const maxDays =
+      req.body?.maxDays != null
+        ? Number(req.body.maxDays)
+        : req.query.maxDays != null
+          ? Number(req.query.maxDays)
+          : 14;
+    const days = Number.isFinite(maxDays) && maxDays > 0 ? maxDays : 14;
+    const result = pruneInactiveWallets(days);
+    const monitoring = syncWalletsToMonitoring([], 'after-prune');
+    res.json({
+      ...result,
+      maxDaysInactive: days,
+      monitoring,
+      watchedWallets: getMonitorStatus().watchedWallets,
+      wallets: getWalletsWithActivity(),
     });
-    res.json({ ...filter, wallets: getWalletsWithActivity() });
   });
 
   app.get('/api/migrations', (_req: Request, res: Response) => {
@@ -1764,16 +1918,22 @@ export function createServer(): express.Application {
       discoveredAt: Date.now(),
     });
 
+    const monitoring = syncWalletsToMonitoring(
+      [body.address.trim()],
+      `wallets-add:${body.source ?? 'manual'}`
+    );
+
     res.json({
       ok: true,
       added: result.added,
       updated: result.updated,
+      monitoring,
       wallets: getWalletsWithActivity(),
     });
   });
 
   /** Bulk import addresses (one per line / comma-separated; optional Name:Address) */
-  app.post('/wallets/bulk-import', (req: Request, res: Response) => {
+  app.post('/wallets/bulk-import', async (req: Request, res: Response) => {
     const raw = String(req.body?.text ?? req.body?.addresses ?? '');
     const categoryHint = req.body?.category as
       | 'smart'
@@ -1823,16 +1983,59 @@ export function createServer(): express.Application {
         source: 'bulk',
         discoveredAt: Date.now(),
       });
+      // Always force-enable on bulk import (even updates of previously disabled)
+      const wallet = config.smartWallets.find((w) => w.address === address);
+      if (wallet) {
+        wallet.enabled = true;
+        if (!wallet.discoveredAt) wallet.discoveredAt = Date.now();
+      }
       if (result.added) added.push(address);
       else if (result.updated) updated.push(address);
       else skipped.push(address);
     }
+
+    if (added.length + updated.length > 0) {
+      persistWallets();
+    }
+
+    const toActivate = [...added, ...updated];
+    const monitoring = syncWalletsToMonitoring(toActivate, 'bulk-import');
+
+    // Background activity refresh so Last Active fills in soon
+    if (toActivate.length > 0) {
+      void (async () => {
+        for (const addr of toActivate) {
+          const w = config.smartWallets.find((x) => x.address === addr);
+          if (w) {
+            try {
+              await refreshWalletActivity(w);
+            } catch {
+              /* ignore per-wallet failures */
+            }
+          }
+        }
+        console.log(
+          `[monitor] Bulk-import activity refresh done for ${toActivate.length} wallet(s)`
+        );
+      })();
+    }
+
+    console.log(
+      `[wallets] Bulk import: +${added.length} updated ${updated.length} skipped ${skipped.length} · ` +
+        `activated for monitoring ${monitoring.watching}/${monitoring.tracked}`
+    );
 
     res.json({
       ok: true,
       added,
       updated,
       skipped,
+      activated: toActivate.length,
+      monitoring,
+      message:
+        `Imported ${added.length} new, updated ${updated.length}. ` +
+        `Activated ${toActivate.length} for monitoring ` +
+        `(watching ${monitoring.watching}/${monitoring.tracked}).`,
       wallets: getWalletsWithActivity(),
     });
   });
@@ -1862,8 +2065,15 @@ export function createServer(): express.Application {
       res.status(400).json({ error: 'name and address required' });
       return;
     }
-    addSmartWallet({ name, address, enabled: true });
-    res.json({ wallets: config.smartWallets });
+    addSmartWallet({
+      name,
+      address,
+      enabled: true,
+      source: 'manual',
+      discoveredAt: Date.now(),
+    });
+    const monitoring = syncWalletsToMonitoring([address], 'api-wallets-add');
+    res.json({ wallets: config.smartWallets, monitoring });
   });
 
   app.delete('/api/wallets/:address', (req: Request, res: Response) => {
@@ -1875,7 +2085,10 @@ export function createServer(): express.Application {
     const address = String(req.params.address);
     const { enabled } = req.body as { enabled: boolean };
     toggleSmartWallet(address, enabled);
-    res.json({ wallets: config.smartWallets });
+    const monitoring = enabled
+      ? syncWalletsToMonitoring([address], 'toggle-enable')
+      : syncWalletsToMonitoring([], 'toggle-disable');
+    res.json({ wallets: config.smartWallets, monitoring });
   });
 
   // --- Dashboard (tabbed Tailwind UI) ---
