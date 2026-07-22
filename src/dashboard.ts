@@ -3520,12 +3520,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         : 30;
       const ptbody = document.querySelector('#positions-table tbody');
       const posBadge = document.getElementById('open-positions-badge');
-      const openN = positions.open.length;
+      const posOpenN = positions.open.length;
       if (posBadge) {
-        posBadge.textContent = openN + (openN === 1 ? ' open' : ' open');
-        posBadge.setAttribute('data-empty', openN === 0 ? '1' : '0');
+        posBadge.textContent = posOpenN + ' open';
+        posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
       }
-      ptbody.innerHTML = openN === 0
+      ptbody.innerHTML = posOpenN === 0
         ? '<tr><td colspan="11"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
