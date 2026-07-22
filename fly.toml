@@ -1,34 +1,28 @@
-# =============================================================================
-# Fly.io — Solana smart-money copy bot (24/7, no idle)
-# https://fly.io/docs/reference/configuration/
+# fly.toml app configuration file generated for crypto-trading-bot on 2026-07-22T14:19:59Z
 #
-# Goals:
-#   • Never auto-stop (monitor + outbound Solana migration WebSockets stay up)
-#   • Persist wallets/settings on a volume at /data
-#   • Single machine only (in-memory positions must not be duplicated)
-#   • HTTP health check at GET /health
-# =============================================================================
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = 'solana-copy-bot'
-primary_region = 'sjc'
+app = 'crypto-trading-bot'
+primary_region = 'arn'
 
 [build]
   dockerfile = 'Dockerfile'
 
-# Non-secret defaults (secrets go via `fly secrets set`)
 [env]
-  NODE_ENV = 'production'
-  HOST = '0.0.0.0'
-  PORT = '8080'
   DATA_DIR = '/data'
+  HOST = '0.0.0.0'
+  NODE_ENV = 'production'
+  PORT = '8080'
   TRADING_MODE = 'paper'
 
+[[mounts]]
+  source = 'bot_data'
+  destination = '/data'
+
 [http_service]
-  internal_port = 8080
+  internal_port = 3000
   force_https = true
-  # Fly Proxy supports WebSocket upgrades by default on http_service.
-  # Outbound Solana RPC WebSockets are client connections from this process —
-  # they only stay alive if the machine never sleeps:
   auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
@@ -45,17 +39,8 @@ primary_region = 'sjc'
     method = 'GET'
     path = '/health'
 
-# One small VM — scale count must stay at 1
 [[vm]]
   memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
-
-# Persistent disk for bot-settings.json + wallets.json
-[mounts]
-  source = 'bot_data'
-  destination = '/data'
-
-# Graceful SIGTERM so monitor / WS can shut down cleanly on deploy
-kill_signal = 'SIGTERM'
-kill_timeout = '30s'
+  memory_mb = 256
