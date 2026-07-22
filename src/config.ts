@@ -1010,6 +1010,10 @@ export const config: BotConfig = {
  * Snapshot of user-tunable settings (no API keys / wallets).
  * Written whenever dashboard/API saves config so restarts keep values.
  */
+/** One-shot: older defaults hard-blocked almost all pre-migration Pump copies. */
+const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
+let settingsMigrations: Record<string, boolean> = {};
+
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
   return {
     version: SETTINGS_VERSION,
@@ -1227,10 +1231,6 @@ export function applyPersistedSettings(): boolean {
   );
   return true;
 }
-
-/** One-shot: older defaults hard-blocked almost all pre-migration Pump copies. */
-const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
-let settingsMigrations: Record<string, boolean> = {};
 
 function applyPaperSignalRelaxMigration(): boolean {
   if (settingsMigrations[PAPER_SIGNAL_RELAX_MIGRATION]) return false;
