@@ -634,7 +634,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- Header -->
     <div class="header-bar">
       <div class="min-w-0">
-        <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
+        <div class="flex items-baseline gap-2 flex-wrap">
+          <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
+          <span id="app-version" class="text-[10px] sm:text-xs text-slate-500 font-mono whitespace-nowrap has-tip" title="App version and last update">v—</span>
+        </div>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
       <div class="header-actions card !py-2 !px-3">
@@ -2993,6 +2996,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const badge = document.getElementById('mode-badge');
       badge.textContent = status.mode.toUpperCase();
       badge.className = 'badge ' + (status.mode === 'live' ? 'badge-live' : 'badge-paper');
+
+      const verEl = document.getElementById('app-version');
+      if (verEl && status.app) {
+        verEl.textContent = status.app.label || ('v' + status.app.version);
+        const when = status.app.updatedAt
+          ? new Date(status.app.updatedAt).toLocaleString()
+          : '';
+        verEl.title = 'Version ' + status.app.version +
+          (when ? ' · updated ' + when : '') +
+          (status.app.gitSha ? ' · ' + status.app.gitSha : '');
+      }
+
       const tw = status.tradingWallet;
       const liveStatus = document.getElementById('live-wallet-status');
       if (liveStatus && tw) {

@@ -135,6 +135,7 @@ import {
 import { DASHBOARD_HTML } from './dashboard';
 import { logger } from './logger';
 import { env } from './env';
+import { getAppVersion } from './version';
 
 /** Optional CORS for API access from external dashboards / tools */
 function corsMiddleware(
@@ -185,9 +186,12 @@ export function createServer(): express.Application {
    * Used by Fly.io, Render, etc. Response: { status: "ok", uptime }
    */
   app.get('/health', (_req: Request, res: Response) => {
+    const app = getAppVersion();
     res.status(200).json({
       status: 'ok',
       uptime: Math.floor(process.uptime()),
+      version: app.version,
+      updatedAt: app.updatedAt,
     });
   });
 
@@ -229,6 +233,7 @@ export function createServer(): express.Application {
     res.json({
       mode: config.mode,
       monitor,
+      app: getAppVersion(),
       balance:
         config.mode === 'paper' ? paperTrader.getBalance() : liveBalance,
       winRate: paperTrader.getWinRatePct(),
