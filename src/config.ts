@@ -40,7 +40,7 @@ export type TradingMode = 'paper' | 'live';
 export type RiskLevel = 'low' | 'medium' | 'high';
 
 export const HIGH_RISK_WARNING =
-  '⚠️ High risk mode increases position size and reduces filters — use with caution';
+  '⚠️ High risk mode increases position size and reduces optional filters — absolute volume/liquidity/holder/curve floors still apply';
 
 /** Human labels for dashboard */
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
@@ -110,7 +110,7 @@ export const DEFAULT_RISK: RiskConfig = {
   trailingStopPercent: 18,
   trailingActivationProfit: 25,
   enableDeadVolumeExit: true,
-  deadVolumeUsdPerHour: 50,
+  deadVolumeUsdPerHour: 80,
   deadVolumeConsecutiveHours: 3,
   deadVolumeMinHoldMinutes: 30,
   normal: {
@@ -227,8 +227,8 @@ export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
   minWalletsForTrade: 1,
-  minVolume24hUsd: 1_000,
-  minHolderCount: 10,
+  minVolume24hUsd: 10_000,
+  minHolderCount: 30,
   maxTradesPerHour: 12,
   minMsBetweenTrades: 45_000,
   riskScoreSizeCutoff: 40,
@@ -284,7 +284,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxConcurrentPositions: 6,
       dailyLossLimitSol: 1.0,
       minVolume24hUsd: 12_000,
+      minRecentVolumeUsd: 2_000,
+      minRecentBuyVolumeUsd: 1_000,
       minHolderCount: 65,
+      minHolders: 65,
+      minRecentActivity: 8,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -364,7 +368,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -30,
     },
     filters: {
-      minLiquidity: 1_500,
+      minLiquidity: 5_000,
       maxDevHoldPct: 14,
       maxDevPercent: 14,
       maxTopHolderPct: 65,
@@ -376,8 +380,12 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 2,
       maxConcurrentPositions: 12,
       dailyLossLimitSol: 2.5,
-      minVolume24hUsd: 800,
-      minHolderCount: 8,
+      minVolume24hUsd: 10_000,
+      minRecentVolumeUsd: 800,
+      minRecentBuyVolumeUsd: 500,
+      minHolderCount: 30,
+      minHolders: 30,
+      minRecentActivity: 3,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -419,8 +427,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
-      minVolume24hUsd: 800,
-      minHolderCount: 8,
+      minVolume24hUsd: 10_000,
+      minHolderCount: 30,
       maxTradesPerHour: 14,
       minMsBetweenTrades: 35_000,
       riskScoreSizeCutoff: 45,
@@ -459,7 +467,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -42,
     },
     filters: {
-      minLiquidity: 3_500,
+      minLiquidity: 5_000,
       maxDevHoldPct: 22,
       maxDevPercent: 22,
       maxTopHolderPct: 85,
@@ -471,8 +479,12 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 1,
       maxConcurrentPositions: 20,
       dailyLossLimitSol: 4,
-      minVolume24hUsd: 2_000,
-      minHolderCount: 15,
+      minVolume24hUsd: 10_000,
+      minRecentVolumeUsd: 800,
+      minRecentBuyVolumeUsd: 500,
+      minHolderCount: 30,
+      minHolders: 30,
+      minRecentActivity: 3,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -514,8 +526,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
-      minVolume24hUsd: 800,
-      minHolderCount: 8,
+      minVolume24hUsd: 10_000,
+      minHolderCount: 30,
       maxTradesPerHour: 18,
       minMsBetweenTrades: 20_000,
       riskScoreSizeCutoff: 55,
@@ -541,10 +553,44 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
   },
 };
 
+/**
+ * Absolute non-bypassable floors for volume / liquidity / holders / activity.
+ * Risk presets may be stricter; High cannot go below these.
+ *
+ * Liquidity: floor $5,000 (recommended quality band $5k–$8k; Low stays higher).
+ * 24h volume: floor $10,000.
+ * Recent (DexScreener ~1h) volume / buys: reject near-zero activity.
+ */
+export const HARD_FILTER_FLOORS = {
+  /** Absolute min pool liquidity USD — High cannot go below */
+  minLiquidityUsd: 5_000,
+  /** Absolute min 24h USD volume */
+  minVolume24hUsd: 10_000,
+  /** Absolute min DexScreener h1 total volume USD (15–60m proxy) */
+  minRecentVolumeUsd: 800,
+  /** Absolute min estimated recent buy-side volume USD */
+  minRecentBuyVolumeUsd: 500,
+  /** Absolute min holder count */
+  minHolders: 30,
+  /** Absolute min buys+sells in DexScreener h1 window */
+  minRecentActivityTxns: 3,
+  /** Holders at/below this + dead activity → hard reject */
+  extremeLowHolders: 12,
+  /** Curve progress at/below this counts as "very low" when volume is dead */
+  deadBondingCurveMaxPct: 12,
+  /** Buy/sell volume ratio below this = heavily negative net flow */
+  maxNegativeBuySellRatio: 0.5,
+  /** 1h or 24h price change at/below this + negative net volume → reject */
+  priceCrashPct: -35,
+} as const;
+
 export interface FilterConfig {
   /** Minimum wallet win-rate % to include in signals (0 = disabled) */
   minWinRate: number;
-  /** Minimum pool liquidity USD (0 = disabled) */
+  /**
+   * Minimum pool liquidity USD.
+   * Clamped to HARD_FILTER_FLOORS.minLiquidityUsd ($5k). Recommended band $5k–$8k.
+   */
   minLiquidity: number;
   /** Skip if estimated dev/authority hold % exceeds this (0 = disabled) */
   maxDevHoldPct: number;
@@ -592,10 +638,32 @@ export interface FilterConfig {
   minTradesLast30d: number;
   /** Auto-disable / prune wallets that fail activity checks */
   enableActivityFilter: boolean;
-  /** Min 24h volume USD — skip in anti-rug when data available (0 = off) */
+  /**
+   * Min 24h volume USD — clamped to HARD_FILTER_FLOORS ($10k+).
+   */
   minVolume24hUsd: number;
-  /** Min holder count — skip in anti-rug when data available (0 = off) */
+  /**
+   * Min DexScreener ~1h volume USD (recent activity proxy).
+   * Clamped to HARD_FILTER_FLOORS.minRecentVolumeUsd.
+   */
+  minRecentVolumeUsd: number;
+  /**
+   * Min estimated recent buy-side volume USD (h1 buy share × volume).
+   * Clamped to HARD_FILTER_FLOORS.minRecentBuyVolumeUsd.
+   */
+  minRecentBuyVolumeUsd: number;
+  /** Min holder count — alias of minHolders (kept for older clients) */
   minHolderCount: number;
+  /**
+   * Preferred min holders (30–50+ recommended).
+   * Clamped to HARD_FILTER_FLOORS.minHolders.
+   */
+  minHolders: number;
+  /**
+   * Min recent trades (DexScreener h1 buys+sells).
+   * Clamped to HARD_FILTER_FLOORS.minRecentActivityTxns.
+   */
+  minRecentActivity: number;
 }
 
 export interface StrategyConfig {
@@ -745,13 +813,34 @@ export interface BotConfig {
     devActivityLookbackMs: number;
   };
 
-  /** Pump.fun bonding curve analysis */
+  /** Pump.fun bonding curve analysis + health gates */
   bondingCurve: {
     cacheTtlMs: number;
     /** Approx SOL raised when curve completes */
     migrationThresholdSol: number;
     /** Initial real token reserves (raw) for progress % */
     initialRealTokenReserves: number;
+    /**
+     * When true (default), reject dead/stalled curves — non-bypassable
+     * across all risk levels.
+     */
+    requireHealthyCurve: boolean;
+    /**
+     * Optional min curve progress % to enter (0 = off beyond dead-curve floor).
+     * Dead curves still rejected via requireHealthyCurve.
+     */
+    minCurveProgress: number;
+    /**
+     * Skip entries above this progress % (e.g. 98 = avoid completed curves).
+     * 0 = disabled.
+     */
+    maxCurveProgressForEntry: number;
+    /** Prefer near-migration band for soft score boost (lower bound) */
+    preferNearMigrationMinPct: number;
+    /** Prefer near-migration band for soft score boost (upper bound) */
+    preferNearMigrationMaxPct: number;
+    /** Require recent Dex volume/txns when evaluating curve health */
+    requireRecentCurveActivity: boolean;
   };
 
   /** Time window (ms) for convergence detection */
@@ -793,7 +882,7 @@ export const config: BotConfig = {
 
   filters: {
     minWinRate: 0,
-    minLiquidity: 2_000,
+    minLiquidity: 5_000,
     maxDevHoldPct: 12,
     maxDevPercent: 12,
     maxTopHolderPct: 35,
@@ -819,8 +908,12 @@ export const config: BotConfig = {
     minActivityDays: 14,
     minTradesLast30d: 3,
     enableActivityFilter: true,
-    minVolume24hUsd: 1_000,
-    minHolderCount: 10,
+    minVolume24hUsd: 10_000,
+    minRecentVolumeUsd: 800,
+    minRecentBuyVolumeUsd: 500,
+    minHolderCount: 30,
+    minHolders: 30,
+    minRecentActivity: 3,
   },
 
   strategy: {
@@ -987,6 +1080,12 @@ export const config: BotConfig = {
     cacheTtlMs: 12_000,
     migrationThresholdSol: 85,
     initialRealTokenReserves: 793_100_000_000_000,
+    requireHealthyCurve: true,
+    minCurveProgress: 0,
+    maxCurveProgressForEntry: 98,
+    preferNearMigrationMinPct: 70,
+    preferNearMigrationMaxPct: 95,
+    requireRecentCurveActivity: true,
   },
 
   convergenceWindowMs: 5 * 60 * 1000,
@@ -1014,6 +1113,8 @@ export const config: BotConfig = {
 const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
 /** One-shot: undo migrationFocus_v1 — keep Migration Only OFF by default. */
 const MIGRATION_FOCUS_OFF_V1 = 'migrationFocus_off_v1';
+/** One-shot: raise volume/liquidity/holder floors after paper-relax loosened them. */
+const HARD_VOLUME_LIQ_FLOORS_V113 = 'hardVolumeLiquidityFloors_v113';
 let settingsMigrations: Record<string, boolean> = {};
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
@@ -1073,6 +1174,43 @@ const CODE_DEFAULT_SETTINGS: PersistedBotSettings = cloneJson(
 function syncConfigAliases(): void {
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;
+  }
+  // Keep minHolders ↔ minHolderCount in sync (prefer whichever was set higher)
+  const holders = Math.max(
+    config.filters.minHolders ?? 0,
+    config.filters.minHolderCount ?? 0
+  );
+  if (holders > 0) {
+    config.filters.minHolders = holders;
+    config.filters.minHolderCount = holders;
+  }
+  if (config.filters.minRecentVolumeUsd == null) {
+    config.filters.minRecentVolumeUsd = HARD_FILTER_FLOORS.minRecentVolumeUsd;
+  }
+  if (config.filters.minRecentBuyVolumeUsd == null) {
+    config.filters.minRecentBuyVolumeUsd =
+      HARD_FILTER_FLOORS.minRecentBuyVolumeUsd;
+  }
+  if (config.filters.minRecentActivity == null) {
+    config.filters.minRecentActivity = HARD_FILTER_FLOORS.minRecentActivityTxns;
+  }
+  if (config.bondingCurve.requireHealthyCurve == null) {
+    config.bondingCurve.requireHealthyCurve = true;
+  }
+  if (config.bondingCurve.minCurveProgress == null) {
+    config.bondingCurve.minCurveProgress = 0;
+  }
+  if (config.bondingCurve.maxCurveProgressForEntry == null) {
+    config.bondingCurve.maxCurveProgressForEntry = 98;
+  }
+  if (config.bondingCurve.preferNearMigrationMinPct == null) {
+    config.bondingCurve.preferNearMigrationMinPct = 70;
+  }
+  if (config.bondingCurve.preferNearMigrationMaxPct == null) {
+    config.bondingCurve.preferNearMigrationMaxPct = 95;
+  }
+  if (config.bondingCurve.requireRecentCurveActivity == null) {
+    config.bondingCurve.requireRecentCurveActivity = true;
   }
   if (config.trade.baseTradeAmountSol != null) {
     config.trade.tradeAmountSol = config.trade.baseTradeAmountSol;
@@ -1251,6 +1389,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyHardVolumeLiquidityFloorsMigration()) {
+    settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V113] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied hardVolumeLiquidityFloors_v113 — absolute liq/vol/holder floors (non-bypassable)'
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1325,6 +1471,104 @@ function applyMigrationFocusOffMigration(): boolean {
   if (!config.strategy.enableMigrationOnly) return true;
   config.strategy.enableMigrationOnly = false;
   return true;
+}
+
+/**
+ * Raise persisted filters to absolute hard floors after paperSignalRelax lowered them.
+ * Always marks the migration done so it runs once.
+ */
+function applyHardVolumeLiquidityFloorsMigration(): boolean {
+  if (settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V113]) return false;
+
+  config.filters.minLiquidity = Math.max(
+    config.filters.minLiquidity ?? 0,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minVolume24hUsd = Math.max(
+    config.filters.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.filters.minRecentVolumeUsd = Math.max(
+    config.filters.minRecentVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+  config.filters.minRecentBuyVolumeUsd = Math.max(
+    config.filters.minRecentBuyVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentBuyVolumeUsd
+  );
+  const holders = Math.max(
+    config.filters.minHolders ?? 0,
+    config.filters.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  config.filters.minHolders = holders;
+  config.filters.minHolderCount = holders;
+  config.filters.minRecentActivity = Math.max(
+    config.filters.minRecentActivity ?? 0,
+    HARD_FILTER_FLOORS.minRecentActivityTxns
+  );
+  config.selective.minVolume24hUsd = Math.max(
+    config.selective.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.selective.minHolderCount = Math.max(
+    config.selective.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  if (config.bondingCurve.requireHealthyCurve == null) {
+    config.bondingCurve.requireHealthyCurve = true;
+  }
+  if (config.bondingCurve.requireRecentCurveActivity == null) {
+    config.bondingCurve.requireRecentCurveActivity = true;
+  }
+  syncConfigAliases();
+  return true;
+}
+
+/** Effective floors — risk presets may be stricter, never below HARD_FILTER_FLOORS. */
+export function effectiveMinLiquidityUsd(): number {
+  return Math.max(
+    config.filters.minLiquidity ?? 0,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+}
+
+export function effectiveMinVolume24hUsd(): number {
+  return Math.max(
+    config.filters.minVolume24hUsd ?? 0,
+    config.selective?.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+}
+
+export function effectiveMinRecentVolumeUsd(): number {
+  return Math.max(
+    config.filters.minRecentVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+}
+
+export function effectiveMinRecentBuyVolumeUsd(): number {
+  return Math.max(
+    config.filters.minRecentBuyVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentBuyVolumeUsd
+  );
+}
+
+export function effectiveMinHolders(): number {
+  return Math.max(
+    config.filters.minHolders ?? 0,
+    config.filters.minHolderCount ?? 0,
+    config.selective?.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
+}
+
+export function effectiveMinRecentActivity(): number {
+  return Math.max(
+    config.filters.minRecentActivity ?? 0,
+    HARD_FILTER_FLOORS.minRecentActivityTxns
+  );
 }
 
 /**
@@ -1565,6 +1809,36 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
     config.filters.maxDevPercent = partial.maxDevHoldPct;
     config.filters.maxDevHoldPct = partial.maxDevHoldPct;
   }
+  if (partial.minHolders != null || partial.minHolderCount != null) {
+    const holders = Math.max(
+      partial.minHolders ?? 0,
+      partial.minHolderCount ?? 0,
+      HARD_FILTER_FLOORS.minHolders
+    );
+    config.filters.minHolders = holders;
+    config.filters.minHolderCount = holders;
+  }
+  // Never allow dashboard to undercut absolute floors
+  config.filters.minLiquidity = Math.max(
+    config.filters.minLiquidity ?? 0,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minVolume24hUsd = Math.max(
+    config.filters.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.filters.minRecentVolumeUsd = Math.max(
+    config.filters.minRecentVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+  config.filters.minRecentBuyVolumeUsd = Math.max(
+    config.filters.minRecentBuyVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentBuyVolumeUsd
+  );
+  config.filters.minRecentActivity = Math.max(
+    config.filters.minRecentActivity ?? 0,
+    HARD_FILTER_FLOORS.minRecentActivityTxns
+  );
   persistUserSettings();
 }
 
@@ -1708,6 +1982,22 @@ export function applyRiskLevel(
   } else if (preset.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = preset.filters.maxDevHoldPct;
   }
+  // Keep holder aliases + selective floors aligned with preset (never below hard floors)
+  const holders = Math.max(
+    config.filters.minHolders ?? 0,
+    config.filters.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  config.filters.minHolders = holders;
+  config.filters.minHolderCount = holders;
+  config.filters.minLiquidity = Math.max(
+    config.filters.minLiquidity ?? 0,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minVolume24hUsd = Math.max(
+    config.filters.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
 
   const { normal, migration, ...riskRest } = preset.risk;
   Object.assign(config.risk, riskRest);
@@ -1734,8 +2024,18 @@ export function applyRiskLevel(
   }
 
   Object.assign(config.selective, preset.selective);
+  config.selective.minVolume24hUsd = Math.max(
+    config.selective.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.selective.minHolderCount = Math.max(
+    config.selective.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
   Object.assign(config.profitStrategy, preset.profitStrategy);
   Object.assign(config.strategy, preset.strategy);
+
+  syncConfigAliases();
 
   if (options.persist !== false) {
     persistUserSettings();
@@ -1769,12 +2069,17 @@ export function getRiskLevelSummary() {
       convictionMultiplier: config.trade.convictionMultiplier,
       stopLossPercent: config.trade.stopLossPercent,
       maxRiskScore: config.filters.maxRiskScore,
-      minLiquidity: config.filters.minLiquidity,
+      minLiquidity: effectiveMinLiquidityUsd(),
       convergenceRequired: config.filters.convergenceRequired,
       maxConcurrentPositions: config.filters.maxConcurrentPositions,
       dailyLossLimitSol: config.filters.dailyLossLimitSol,
-      minVolume24hUsd: config.filters.minVolume24hUsd,
-      minHolderCount: config.filters.minHolderCount,
+      minVolume24hUsd: effectiveMinVolume24hUsd(),
+      minHolderCount: effectiveMinHolders(),
+      minHolders: effectiveMinHolders(),
+      minRecentVolumeUsd: effectiveMinRecentVolumeUsd(),
+      minRecentBuyVolumeUsd: effectiveMinRecentBuyVolumeUsd(),
+      minRecentActivity: effectiveMinRecentActivity(),
+      requireHealthyCurve: config.bondingCurve.requireHealthyCurve !== false,
       riskPercentPerTrade: config.risk.riskPercentPerTrade,
       maxDrawdownPct: config.risk.maxDrawdownPct,
       maxTradeSol: config.risk.maxTradeSol,
@@ -1783,6 +2088,7 @@ export function getRiskLevelSummary() {
       maxTradesPerHour: config.selective.maxTradesPerHour,
       hardStopNormal: config.risk.normal.hardStopLossPct,
       hardStopMigration: config.risk.migration.hardStopLossPct,
+      hardFloors: { ...HARD_FILTER_FLOORS },
     },
   };
 }

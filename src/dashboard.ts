@@ -1579,7 +1579,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">5</span></label><input type="range" id="maxConcurrentPositions" min="1" max="20" step="1" value="5" /></div>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
-            <div class="field"><label title="Minimum pool liquidity in USD">Min Liquidity USD — <span class="val" id="v-minLiquidity">2000</span></label><input type="range" id="minLiquidity" min="0" max="100000" step="500" value="2000" /></div>
+            <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $5,000 (recommended $5k–$8k). High cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="5000" max="100000" step="500" value="5000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">40</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="40" /></div>
             <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">40</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="40" /></div>
@@ -1587,11 +1587,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
             <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
-            <div class="field"><label title="Minimum 24h volume USD (anti-rug)">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">1000</span></label><input type="range" id="minVolume24hUsd" min="0" max="100000" step="500" value="1000" /></div>
-            <div class="field"><label title="Minimum holder count (anti-rug)">Min Holders — <span class="val" id="v-minHolderCount">10</span></label><input type="range" id="minHolderCount" min="0" max="500" step="5" value="10" /></div>
+            <div class="field"><label title="Minimum 24h volume USD. Absolute floor $10,000 — non-bypassable.">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">10000</span></label><input type="range" id="minVolume24hUsd" min="10000" max="200000" step="500" value="10000" /></div>
+            <div class="field"><label title="Min DexScreener ~1h volume USD (recent activity). Floor $800.">Min Recent Vol USD — <span class="val" id="v-minRecentVolumeUsd">800</span></label><input type="range" id="minRecentVolumeUsd" min="800" max="50000" step="100" value="800" /></div>
+            <div class="field"><label title="Min estimated recent buy-side volume USD. Floor $500.">Min Recent Buy Vol — <span class="val" id="v-minRecentBuyVolumeUsd">500</span></label><input type="range" id="minRecentBuyVolumeUsd" min="500" max="25000" step="100" value="500" /></div>
+            <div class="field"><label title="Minimum holder count. Floor 30 — non-bypassable.">Min Holders — <span class="val" id="v-minHolders">30</span></label><input type="range" id="minHolders" min="30" max="500" step="5" value="30" /></div>
+            <div class="field"><label title="Min DexScreener h1 buys+sells. Floor 3.">Min Recent Activity — <span class="val" id="v-minRecentActivity">3</span></label><input type="range" id="minRecentActivity" min="3" max="100" step="1" value="3" /></div>
           </div>
           <div class="mt-2 space-y-0">
-            <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks (volume/liq/curve hard floors always apply)">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Reject dead/stalled Pump bonding curves — non-bypassable when on">Require healthy bonding curve</span><label class="switch"><input type="checkbox" id="requireHealthyCurve" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
@@ -1881,7 +1885,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
       'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
-      'minActivityDays','minTradesLast30d','minVolume24hUsd','minHolderCount'
+      'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
+      'minHolders','minRecentActivity'
     ];
     rangeFields.forEach(id => {
       const el = document.getElementById(id);
@@ -3740,6 +3745,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             if (el) { el.value = v; const lab = document.getElementById('v-'+k); if (lab) lab.textContent = v; }
           }
         });
+        // Alias: minHolders preferred over minHolderCount in UI
+        const holdersVal = cfg.filters.minHolders ?? cfg.filters.minHolderCount;
+        const holdersEl = document.getElementById('minHolders');
+        if (holdersEl && holdersVal != null) {
+          holdersEl.value = holdersVal;
+          const lab = document.getElementById('v-minHolders');
+          if (lab) lab.textContent = holdersVal;
+        }
+        const healthyCurve = document.getElementById('requireHealthyCurve');
+        if (healthyCurve && cfg.bondingCurve) {
+          healthyCurve.checked = cfg.bondingCurve.requireHealthyCurve !== false;
+        }
         document.getElementById('enableConvergence').checked = cfg.strategy.enableConvergence;
         document.getElementById('enableMigrationOnly').checked = cfg.strategy.enableMigrationOnly;
         document.getElementById('enableMigrationPriority').checked = !!cfg.strategy.enableMigrationPriority;
@@ -3981,6 +3998,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   (be.volume24hUsd != null ? ' · vol $' + Number(be.volume24hUsd).toFixed(0) : '') +
                   (be.smartMoneyScore != null ? ' · SM ' + be.smartMoneyScore : '') +
                   '</div>'
+                : '') +
+              (ar.liquidityUsd != null || ar.volume24hUsd != null || ar.holderCount != null || ar.bondingCurveProgressPct != null
+                ? '<div class="mint">liq $' +
+                  (ar.liquidityUsd != null ? Number(ar.liquidityUsd).toFixed(0) : '?') +
+                  (ar.volume24hUsd != null ? ' · vol24h $' + Number(ar.volume24hUsd).toFixed(0) : '') +
+                  (ar.holderCount != null ? ' · holders ' + ar.holderCount : '') +
+                  (ar.bondingCurveProgressPct != null
+                    ? ' · curve ' + Number(ar.bondingCurveProgressPct).toFixed(0) + '%' +
+                      (ar.curveHealth ? ' (' + ar.curveHealth + ')' : '')
+                    : '') +
+                  '</div>'
                 : '')
             : '';
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
@@ -4065,22 +4093,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const flagBits = (ar.flags || []).slice(0, 3).join(' · ');
             const bc = a.bondingCurve || {};
             const sn = a.sniper || a.antiRug || {};
+            const be = a.birdeye || ar.birdeye || {};
+            const beLiq = be.liquidityUsd != null ? Number(be.liquidityUsd) : (m.liquidityUsd != null ? Number(m.liquidityUsd) : (ar.liquidityUsd != null ? Number(ar.liquidityUsd) : null));
+            const beVol = be.volume24hUsd != null ? Number(be.volume24hUsd) : (m.volume24hUsd != null ? Number(m.volume24hUsd) : (ar.volume24hUsd != null ? Number(ar.volume24hUsd) : null));
+            const volH1 = m.volumeH1Usd != null ? Number(m.volumeH1Usd) : (ar.volumeH1Usd != null ? Number(ar.volumeH1Usd) : null);
+            const beHold = be.holder != null ? Number(be.holder) : (m.holderCountEstimate != null ? Number(m.holderCountEstimate) : (ar.holderCount != null ? Number(ar.holderCount) : null));
+            const beSm = be.smartMoneyScore != null ? Number(be.smartMoneyScore) : null;
+            const curveHealth = bc.health || ar.curveHealth || null;
+            const birdeyeBadge = (beLiq != null || beVol != null || beSm != null || volH1 != null || beHold != null)
+              ? \` <span style="color:var(--muted)">liq $\${beLiq != null ? beLiq.toFixed(0) : '?'}\${beVol != null ? ' · vol24h $' + beVol.toFixed(0) : ''}\${volH1 != null ? ' · vol1h $' + volH1.toFixed(0) : ''}\${beHold != null ? ' · holders ' + beHold : ''}\${m.txnsH1 != null ? ' · txns1h ' + m.txnsH1 : ''}\${beSm != null ? ' · SM ' + beSm : ''}</span>\`
+              : '';
             const curveBadge = bc.progressPct != null
-              ? \` <span style="color:\${bc.nearMigration ? 'var(--green)' : 'var(--muted)'};font-weight:600">curve \${Number(bc.progressPct).toFixed(0)}%\${bc.nearMigration ? ' · near-mig' : ''}\${bc.solRaised != null ? ' · ' + Number(bc.solRaised).toFixed(1) + ' SOL' : ''}</span>\`
+              ? \` <span style="color:\${bc.nearMigration || curveHealth === 'preferred' ? 'var(--green)' : (curveHealth === 'dead' || curveHealth === 'stalled' ? 'var(--red)' : 'var(--muted)')};font-weight:600">curve \${Number(bc.progressPct).toFixed(0)}%\${curveHealth ? ' · ' + curveHealth : ''}\${bc.nearMigration ? ' · near-mig' : ''}\${bc.solRaised != null ? ' · ' + Number(bc.solRaised).toFixed(1) + ' SOL' : ''}</span>\`
               : '';
             const sniperBadge = (sn.sniperScore != null || sn.sniperCount != null)
               ? \` <span style="color:\${sn.highRisk || sn.sniperHighRisk ? 'var(--red)' : 'var(--muted)'}">sniper \${sn.sniperScore != null ? sn.sniperScore : '?'}\${sn.sniperCount != null ? ' · n=' + sn.sniperCount : ''}\${sn.bundlerPct != null ? ' · bundler ' + Number(sn.bundlerPct).toFixed(0) + '%' : ''}\${sn.insiderPct != null ? ' · insider ' + Number(sn.insiderPct).toFixed(0) + '%' : ''}</span>\`
               : '';
-            const be = a.birdeye || ar.birdeye || {};
-            const beLiq = be.liquidityUsd != null ? Number(be.liquidityUsd) : (m.liquidityUsd != null ? Number(m.liquidityUsd) : null);
-            const beVol = be.volume24hUsd != null ? Number(be.volume24hUsd) : null;
-            const beHold = be.holder != null ? Number(be.holder) : null;
-            const beSm = be.smartMoneyScore != null ? Number(be.smartMoneyScore) : null;
-            const birdeyeBadge = (beLiq != null || beVol != null || beSm != null)
-              ? \` <span style="color:var(--muted)">BE liq $\${beLiq != null ? beLiq.toFixed(0) : '?'}\${beVol != null ? ' · vol24h $' + beVol.toFixed(0) : ''}\${beHold != null ? ' · holders ' + beHold : ''}\${beSm != null ? ' · SM ' + beSm : ''}\${be.source && be.source !== 'none' ? ' · ' + be.source : ''}</span>\`
-              : '';
-            const metricsLine = (m.liquidityUsd != null || m.devHoldPct != null || ar.riskScore != null || bc.progressPct != null || sn.sniperScore != null || beLiq != null || beVol != null)
-              ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : (m.topHolderPct != null ? Number(m.topHolderPct).toFixed(1) + '%' : '?')}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
+            const metricsLine = (m.liquidityUsd != null || m.devHoldPct != null || ar.riskScore != null || bc.progressPct != null || sn.sniperScore != null || beLiq != null || beVol != null || beHold != null)
+              ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · vol24h $\${beVol != null ? beVol.toFixed(0) : '?'} · holders \${beHold != null ? beHold : '?'} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : (m.topHolderPct != null ? Number(m.topHolderPct).toFixed(1) + '%' : '?')}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
               : '';
             return \`
           <div class="log-entry">
@@ -4276,14 +4306,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         requireLiquidityLocked: document.getElementById('requireLiquidityLocked').checked,
         enableSniperFilter: document.getElementById('enableSniperFilter').checked,
         sniperSensitivity: document.getElementById('sniperSensitivity').value,
+        requireHealthyCurve: document.getElementById('requireHealthyCurve')
+          ? document.getElementById('requireHealthyCurve').checked
+          : true,
       };
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
        'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
-       'minActivityDays','minTradesLast30d','minVolume24hUsd','minHolderCount'].forEach(k => {
+       'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
+       'minHolders','minRecentActivity'].forEach(k => {
         const el = document.getElementById(k);
         if (el) body[k] = Number(el.value);
       });
       body.maxDevPercent = body.maxDevHoldPct;
+      body.minHolderCount = body.minHolders;
       await fetchJSON('/api/config/filters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       alert('Filters saved');
     }

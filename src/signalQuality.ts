@@ -2,7 +2,12 @@
  * High-conviction signal scoring — gates entries to reduce low-quality trades.
  */
 
-import { config, type SelectiveTradingConfig } from './config';
+import {
+  config,
+  effectiveMinHolders,
+  effectiveMinVolume24hUsd,
+  type SelectiveTradingConfig,
+} from './config';
 import type { TradeSignal } from './monitor';
 
 export interface ConvictionVerdict {
@@ -33,14 +38,22 @@ export function riskScoreSizeMultiplier(riskScore?: number): number {
 
 function volumeUsd(signal: TradeSignal): number | null {
   return (
+    signal.metrics?.volume24hUsd ??
     signal.birdeye?.volume24hUsd ??
     signal.antiRug?.birdeye?.volume24hUsd ??
+    signal.antiRug?.volume24hUsd ??
     null
   );
 }
 
 function holderCount(signal: TradeSignal): number | null {
-  return signal.birdeye?.holder ?? signal.antiRug?.birdeye?.holder ?? null;
+  return (
+    signal.metrics?.holderCountEstimate ??
+    signal.birdeye?.holder ??
+    signal.antiRug?.birdeye?.holder ??
+    signal.antiRug?.holderCount ??
+    null
+  );
 }
 
 function isPrioritySignal(signal: TradeSignal): boolean {
@@ -122,12 +135,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     score += 8;
   }
 
-  // --- Volume / liquidity (0–10) ---
+  // --- Volume / liquidity (0–10) — use effective hard floors ---
   const vol = volumeUsd(signal);
-  const minVol = Math.max(
-    sel.minVolume24hUsd ?? 0,
-    config.filters.minVolume24hUsd ?? 0
-  );
+  const minVol = effectiveMinVolume24hUsd();
   if (minVol > 0) {
     if (vol != null && vol >= minVol) {
       score += clamp(5 + (vol / minVol) * 2, 5, 10);
@@ -135,11 +145,21 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
       score += clamp((vol / minVol) * 4, 0, 4);
       reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
     } else {
-      // Unknown volume (Birdeye/Dex miss) — don't hard-fail early pumps
-      score += priority ? 5 : 3;
+      // Unknown volume — small credit only for priority; hard floors run in antiRug
+      score += priority ? 4 : 2;
     }
   } else if (vol != null && vol > 0) {
     score += vol >= 10_000 ? 8 : 4;
+  }
+
+  // Near-migration healthy curve soft boost
+  const curvePct = signal.bondingCurve?.progressPct;
+  const curveHealth = signal.bondingCurve?.health;
+  if (curveHealth === 'preferred' || (curvePct != null && curvePct >= 70 && curvePct <= 95)) {
+    score += 6;
+    reasons.push('near-migration curve preference');
+  } else if (curveHealth === 'dead' || curveHealth === 'stalled') {
+    reasons.push(`unhealthy curve (${curveHealth})`);
   }
 
   // --- Birdeye smart money / holders (0–10) ---
@@ -148,17 +168,13 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   else if (sm != null && sm >= 30) score += 3;
 
   const holders = holderCount(signal);
-  const minHolders = Math.max(
-    sel.minHolderCount ?? 0,
-    config.filters.minHolderCount ?? 0
-  );
+  const minHolders = effectiveMinHolders();
   if (minHolders > 0) {
     if (holders != null && holders >= minHolders) score += 5;
     else if (holders != null) {
       reasons.push(`holders ${holders} < ${minHolders}`);
     } else {
-      // Unknown holders — don't hard-fail
-      score += priority ? 3 : 2;
+      score += priority ? 2 : 1;
     }
   }
 
@@ -193,10 +209,13 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     reasons.push(`conviction ${score} < min ${minRequired}`);
   }
 
+  // Hard floors: volume/holders fail even on priority (antiRug also blocks)
   const hardFail =
     !walletOk ||
-    (!priority && minVol > 0 && vol != null && vol < minVol) ||
-    (!priority && minHolders > 0 && holders != null && holders < minHolders);
+    (minVol > 0 && vol != null && vol < minVol) ||
+    (minHolders > 0 && holders != null && holders < minHolders) ||
+    curveHealth === 'dead' ||
+    curveHealth === 'stalled';
 
   return {
     pass: !hardFail && score >= minRequired,

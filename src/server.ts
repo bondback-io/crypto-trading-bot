@@ -1129,7 +1129,11 @@ export function createServer(): express.Application {
       'minActivityDays',
       'minTradesLast30d',
       'minVolume24hUsd',
+      'minRecentVolumeUsd',
+      'minRecentBuyVolumeUsd',
       'minHolderCount',
+      'minHolders',
+      'minRecentActivity',
     ] as const;
 
     const partial: Partial<Record<(typeof keys)[number], number>> = {};
@@ -1178,7 +1182,30 @@ export function createServer(): express.Application {
       }
     }
     updateFilterConfig(partial);
-    res.json(config.filters);
+    if (req.body.requireHealthyCurve !== undefined) {
+      config.bondingCurve.requireHealthyCurve = Boolean(
+        req.body.requireHealthyCurve
+      );
+    }
+    if (req.body.requireRecentCurveActivity !== undefined) {
+      config.bondingCurve.requireRecentCurveActivity = Boolean(
+        req.body.requireRecentCurveActivity
+      );
+    }
+    if (req.body.minCurveProgress !== undefined) {
+      config.bondingCurve.minCurveProgress = Number(req.body.minCurveProgress);
+    }
+    if (req.body.maxCurveProgressForEntry !== undefined) {
+      config.bondingCurve.maxCurveProgressForEntry = Number(
+        req.body.maxCurveProgressForEntry
+      );
+    }
+    persistUserSettings();
+    res.json({
+      ...config.filters,
+      requireHealthyCurve: config.bondingCurve.requireHealthyCurve,
+      bondingCurve: { ...config.bondingCurve },
+    });
   });
 
   app.get('/api/token-metrics/:mint', async (req: Request, res: Response) => {

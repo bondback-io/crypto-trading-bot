@@ -27,7 +27,18 @@ import {
   type BirdeyeTokenOverview,
   type BirdeyeSmartMoneySignal,
 } from './birdeye';
+import {
+  fetchBondingCurve,
+  assessBondingCurveHealth,
+  type BondingCurveHealth,
+} from './bondingCurve';
+import {
+  evaluateDeadTokenHardFloors,
+  isNonBypassableSkipReason,
+} from './deadTokenFilters';
 import { logger, errorToMeta, loggedFetch } from './logger';
+
+export { isNonBypassableSkipReason };
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 export type FlagSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
@@ -41,6 +52,13 @@ export interface AntiRugFlag {
 
 export interface AntiRugChecks {
   liquidityUsd: number | null;
+  volume24hUsd: number | null;
+  volumeH1Usd: number | null;
+  recentBuyVolumeUsd: number | null;
+  txnsH1: number | null;
+  holderCount: number | null;
+  bondingCurveProgressPct: number | null;
+  curveHealth: BondingCurveHealthStatus | null;
   devHoldPct: number | null;
   top10HoldPct: number | null;
   topHolderPct: number | null;
@@ -69,6 +87,8 @@ export interface AntiRugChecks {
   birdeyeSmartMoneyScore: number | null;
   birdeyeBuySellRatio: number | null;
 }
+
+type BondingCurveHealthStatus = BondingCurveHealth['status'];
 
 export interface AntiRugReport {
   mint: string;
@@ -122,6 +142,13 @@ function riskLevelFromScore(score: number): RiskLevel {
 function emptyChecks(): AntiRugChecks {
   return {
     liquidityUsd: null,
+    volume24hUsd: null,
+    volumeH1Usd: null,
+    recentBuyVolumeUsd: null,
+    txnsH1: null,
+    holderCount: null,
+    bondingCurveProgressPct: null,
+    curveHealth: null,
     devHoldPct: null,
     top10HoldPct: null,
     topHolderPct: null,
@@ -176,6 +203,13 @@ export function summarizeAntiRug(report: AntiRugReport): {
   ok: boolean;
   flags: string[];
   skipReasons: string[];
+  liquidityUsd: number | null;
+  volume24hUsd: number | null;
+  volumeH1Usd: number | null;
+  recentBuyVolumeUsd: number | null;
+  holderCount: number | null;
+  bondingCurveProgressPct: number | null;
+  curveHealth: BondingCurveHealthStatus | null;
   liquidityLockedOrBurned: boolean | null;
   honeypot: boolean | null;
   recentDevSells: boolean | null;
@@ -194,6 +228,14 @@ export function summarizeAntiRug(report: AntiRugReport): {
     ok: report.ok,
     flags: report.flags.map((f) => f.label),
     skipReasons: report.skipReasons,
+    liquidityUsd: report.checks.liquidityUsd,
+    volume24hUsd:
+      report.checks.volume24hUsd ?? report.checks.birdeyeVolume24hUsd,
+    volumeH1Usd: report.checks.volumeH1Usd,
+    recentBuyVolumeUsd: report.checks.recentBuyVolumeUsd,
+    holderCount: report.checks.holderCount ?? report.checks.birdeyeHolder,
+    bondingCurveProgressPct: report.checks.bondingCurveProgressPct,
+    curveHealth: report.checks.curveHealth,
     liquidityLockedOrBurned: report.checks.liquidityLockedOrBurned,
     honeypot: report.checks.honeypot,
     recentDevSells: report.checks.recentDevSells,
@@ -294,6 +336,7 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
   const enabled = filters.enableAntiRug !== false;
   const flags: AntiRugFlag[] = [];
   const skipReasons: string[] = [];
+  const hardSkipReasons: string[] = [];
   const sources: string[] = [];
   const checks = emptyChecks();
   let score = 0;
@@ -304,9 +347,6 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
     filters.maxHolderConcentration ??
     filters.maxTopHolderPct ??
     40;
-  const minLiq = filters.minLiquidity ?? 0;
-  const minVol = filters.minVolume24hUsd ?? 0;
-  const minHolders = filters.minHolderCount ?? 0;
   const maxTax = filters.maxEstimatedTaxPct ?? 25;
   const maxScore = filters.maxRiskScore ?? 70;
   const requireLock = filters.requireLiquidityLocked === true;
@@ -319,31 +359,68 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
   sources.push(metrics.source || 'tokenMetrics');
 
   checks.liquidityUsd = metrics.liquidityUsd;
+  checks.volume24hUsd = metrics.volume24hUsd;
+  checks.volumeH1Usd = metrics.volumeH1Usd;
+  checks.recentBuyVolumeUsd = metrics.recentBuyVolumeUsd;
+  checks.txnsH1 = metrics.txnsH1;
+  checks.holderCount = metrics.holderCountEstimate;
   checks.devHoldPct = metrics.devHoldPct;
   checks.top10HoldPct = metrics.top10HoldPct;
   checks.topHolderPct = metrics.topHolderPct;
   checks.mintAuthorityRenounced = metrics.mintAuthority == null;
   checks.freezeAuthorityRenounced = metrics.freezeAuthority == null;
-  // Basic "verification": mint+freeze renounced is the strongest on-chain signal we have
   checks.contractVerifiedHint =
     metrics.mintAuthority == null && metrics.freezeAuthority == null;
 
-  // Liquidity
-  if (minLiq > 0) {
-    const liq = metrics.liquidityUsd ?? 0;
-    if (liq < minLiq) {
-      score += 25;
-      flags.push({
-        id: 'low_liquidity',
-        severity: 'high',
-        label: 'Low liquidity',
-        detail: `$${liq.toFixed(0)} < $${minLiq}`,
+  // --- Bonding curve health (cached) ---
+  let curveHealth: BondingCurveHealth | null = null;
+  try {
+    const curve = await fetchBondingCurve(mint);
+    if (curve.source !== 'none') {
+      sources.push('bonding-curve');
+      checks.bondingCurveProgressPct = curve.progressPct;
+      curveHealth = assessBondingCurveHealth(curve, {
+        volumeH1Usd: metrics.volumeH1Usd,
+        txnsH1: metrics.txnsH1,
+        recentBuyVolumeUsd: metrics.recentBuyVolumeUsd,
       });
-      skipReasons.push(
-        `Skipped - low liquidity ($${liq.toFixed(0)} < min $${minLiq})`
-      );
+      checks.curveHealth = curveHealth.status;
     }
+  } catch (err) {
+    logger.warn('anti-rug', 'bonding curve fetch failed', {
+      mint: mint.slice(0, 12),
+      ...errorToMeta(err),
+    });
   }
+
+  // --- Non-bypassable dead-token floors (volume / liq / holders / curve) ---
+  const hard = evaluateDeadTokenHardFloors({
+    liquidityUsd: checks.liquidityUsd,
+    volume24hUsd: checks.volume24hUsd,
+    volumeH1Usd: checks.volumeH1Usd,
+    volumeM5Usd: metrics.volumeM5Usd,
+    recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
+    buysH1: metrics.buysH1,
+    sellsH1: metrics.sellsH1,
+    txnsH1: checks.txnsH1,
+    holderCount: checks.holderCount,
+    buySellRatio: null,
+    priceChangeH1Pct: metrics.priceChangeH1Pct,
+    priceChange24hPct: metrics.priceChange24hPct,
+    bondingCurveProgressPct: checks.bondingCurveProgressPct,
+    curveHealth,
+  });
+  score += hard.scorePenalty;
+  for (const f of hard.flags) {
+    flags.push({
+      id: f.id,
+      severity: f.severity,
+      label: f.label,
+      detail: f.detail,
+    });
+  }
+  hardSkipReasons.push(...hard.skipReasons);
+  skipReasons.push(...hard.skipReasons);
 
   // Dev holdings
   if (maxDev > 0 && metrics.devHoldPct != null) {
@@ -697,66 +774,59 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
       checks.birdeyeSmartMoneyScore = signal.smartMoneyScore;
       checks.birdeyeBuySellRatio = overview.buySellRatio ?? signal.buySellRatio;
 
-      // Re-check min liquidity with Birdeye-backed value if we hadn't skipped yet
       if (
-        minLiq > 0 &&
-        checks.liquidityUsd != null &&
-        checks.liquidityUsd < minLiq &&
-        !skipReasons.some((r) => r.includes('low liquidity'))
+        overview.volume24hUsd != null &&
+        (checks.volume24hUsd == null || overview.volume24hUsd > checks.volume24hUsd)
       ) {
-        score += 20;
-        flags.push({
-          id: 'birdeye_low_liquidity',
-          severity: 'high',
-          label: 'Low liquidity (Birdeye)',
-          detail: `$${checks.liquidityUsd.toFixed(0)} < $${minLiq}`,
-        });
-        skipReasons.push(
-          `Skipped - low liquidity ($${checks.liquidityUsd.toFixed(0)} < min $${minLiq})`
-        );
+        checks.volume24hUsd = overview.volume24hUsd;
+      }
+      if (overview.holder != null) {
+        checks.holderCount = overview.holder;
       }
 
-      if (
-        minVol > 0 &&
-        checks.birdeyeVolume24hUsd != null &&
-        checks.birdeyeVolume24hUsd < minVol
-      ) {
-        score += 18;
-        flags.push({
-          id: 'birdeye_low_volume',
-          severity: 'high',
-          label: 'Low 24h volume',
-          detail: `$${checks.birdeyeVolume24hUsd.toFixed(0)} < $${minVol}`,
-        });
-        skipReasons.push(
-          `Skipped - low 24h volume ($${checks.birdeyeVolume24hUsd.toFixed(0)} < min $${minVol})`
-        );
+      // Re-evaluate hard floors with Birdeye-enriched liquidity / volume / holders
+      const hard2 = evaluateDeadTokenHardFloors({
+        liquidityUsd: checks.liquidityUsd,
+        volume24hUsd: checks.volume24hUsd,
+        volumeH1Usd: checks.volumeH1Usd,
+        volumeM5Usd: metrics.volumeM5Usd,
+        recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
+        buysH1: metrics.buysH1,
+        sellsH1: metrics.sellsH1,
+        txnsH1: checks.txnsH1,
+        holderCount: checks.holderCount,
+        buySellRatio: checks.birdeyeBuySellRatio,
+        priceChangeH1Pct: metrics.priceChangeH1Pct,
+        priceChange24hPct:
+          overview.priceChange24hPct ?? metrics.priceChange24hPct,
+        bondingCurveProgressPct: checks.bondingCurveProgressPct,
+        curveHealth,
+      });
+      for (const reason of hard2.skipReasons) {
+        if (!skipReasons.includes(reason)) {
+          skipReasons.push(reason);
+          hardSkipReasons.push(reason);
+        }
+      }
+      for (const f of hard2.flags) {
+        if (!flags.some((x) => x.id === f.id)) {
+          flags.push({
+            id: f.id,
+            severity: f.severity,
+            label: f.label,
+            detail: f.detail,
+          });
+          score += Math.min(12, Math.round(hard2.scorePenalty / 4));
+        }
       }
 
-      if (
-        minHolders > 0 &&
-        checks.birdeyeHolder != null &&
-        checks.birdeyeHolder < minHolders
-      ) {
-        score += 15;
-        flags.push({
-          id: 'birdeye_low_holders',
-          severity: 'high',
-          label: 'Low holder count',
-          detail: `${checks.birdeyeHolder} < ${minHolders}`,
-        });
-        skipReasons.push(
-          `Skipped - low holders (${checks.birdeyeHolder} < min ${minHolders})`
-        );
-      }
-
-      // Thin liquidity / sell pressure soft risk
+      // Soft sell-pressure / thin-liq signals (score only — floors already hard-gated)
       if (
         overview.liquidityUsd != null &&
         overview.liquidityUsd > 0 &&
-        overview.liquidityUsd < 5_000
+        overview.liquidityUsd < 8_000
       ) {
-        score += 12;
+        score += 8;
         flags.push({
           id: 'birdeye_thin_liq',
           severity: 'medium',
@@ -855,7 +925,7 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
 
   score = Math.min(100, Math.max(0, Math.round(score)));
 
-  // Aggregate risk-score gate
+  // Aggregate risk-score gate (optional filters only — hard floors already applied)
   if (enabled && score >= maxScore) {
     const already = skipReasons.some((r) => r.includes('risk score'));
     if (!already) {
@@ -873,7 +943,12 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
     }
   }
 
-  const ok = !enabled || skipReasons.length === 0;
+  // Hard floors are never bypassable — even when enableAntiRug is off
+  const hasHardSkip =
+    hardSkipReasons.length > 0 ||
+    skipReasons.some((r) => isNonBypassableSkipReason(r));
+  const softSkips = skipReasons.filter((r) => !isNonBypassableSkipReason(r));
+  const ok = !hasHardSkip && (!enabled || softSkips.length === 0);
 
   return {
     mint,

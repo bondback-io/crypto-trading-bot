@@ -76,6 +76,7 @@ import {
   evaluateAntiRug,
   summarizeAntiRug,
   formatAntiRugSkipLog,
+  isNonBypassableSkipReason,
   type AntiRugReport,
 } from './antiRug';
 import {
@@ -2087,12 +2088,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             Boolean(signal.earlyBuy || signal.nearMigration) ||
             Boolean(signal.bondingCurve && !signal.isMigration);
           const hardReasons = report.skipReasons.filter((reason) => {
+            // Non-bypassable dead-token floors always block (all risk levels).
+            if (isNonBypassableSkipReason(reason)) return true;
             if (!softEarly) return true;
-            // Pre-migration Pump tokens normally keep mint authority and thin metrics.
+            // Pre-migration Pump tokens normally keep mint authority.
             if (/mint authority/i.test(reason)) return false;
-            if (/low 24h volume/i.test(reason)) return false;
-            if (/low holders/i.test(reason)) return false;
-            if (/low liquidity/i.test(reason)) return false;
             // Jupiter often has no route until graduation — not a real honeypot.
             if (/honeypot.*no (buy|sell) quote/i.test(reason)) return false;
             if (/no jupiter route/i.test(reason)) return false;

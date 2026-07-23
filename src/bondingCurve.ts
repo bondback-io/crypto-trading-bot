@@ -4,7 +4,7 @@
  */
 
 import { PublicKey } from '@solana/web3.js';
-import { config } from './config';
+import { config, HARD_FILTER_FLOORS } from './config';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
@@ -122,7 +122,10 @@ export function summarizeBondingCurve(s: BondingCurveState): {
   nearMigration: boolean;
   proximity: BondingCurveState['proximity'];
   complete: boolean;
+  health?: BondingCurveHealthStatus;
+  healthDetail?: string;
 } {
+  const health = assessBondingCurveHealth(s);
   return {
     progressPct: s.progressPct,
     solRaised: s.solRaised,
@@ -131,6 +134,142 @@ export function summarizeBondingCurve(s: BondingCurveState): {
     nearMigration: s.nearMigration,
     proximity: s.proximity,
     complete: s.complete,
+    health: health.status,
+    healthDetail: health.detail,
+  };
+}
+
+export type BondingCurveHealthStatus =
+  | 'healthy'
+  | 'preferred'
+  | 'stalled'
+  | 'dead'
+  | 'unknown';
+
+export interface BondingCurveHealth {
+  status: BondingCurveHealthStatus;
+  dead: boolean;
+  stalled: boolean;
+  preferBoost: boolean;
+  detail?: string;
+  progressPct: number;
+  solRaised: number;
+  solToMigration: number;
+}
+
+export interface CurveActivityHints {
+  volumeH1Usd?: number | null;
+  txnsH1?: number | null;
+  recentBuyVolumeUsd?: number | null;
+}
+
+/**
+ * Detect dead / stalled curves and preferred near-migration band.
+ * Fast — uses cached curve state + optional Dex activity hints.
+ */
+export function assessBondingCurveHealth(
+  state: BondingCurveState | null | undefined,
+  activity?: CurveActivityHints | null
+): BondingCurveHealth {
+  if (!state || state.source === 'none') {
+    return {
+      status: 'unknown',
+      dead: false,
+      stalled: false,
+      preferBoost: false,
+      detail: 'no curve data',
+      progressPct: 0,
+      solRaised: 0,
+      solToMigration: migrationThresholdSol(),
+    };
+  }
+
+  const bc = config.bondingCurve;
+  const deadMax = HARD_FILTER_FLOORS.deadBondingCurveMaxPct;
+  const progress = state.progressPct;
+  const vol = activity?.volumeH1Usd;
+  const txns = activity?.txnsH1;
+  const buyVol = activity?.recentBuyVolumeUsd;
+  const requireActivity = bc.requireRecentCurveActivity !== false;
+  const activityDead =
+    requireActivity &&
+    ((vol != null && vol < (config.filters.minRecentVolumeUsd ?? 800)) ||
+      (txns != null && txns < (config.filters.minRecentActivity ?? 3)) ||
+      (buyVol != null && buyVol < (config.filters.minRecentBuyVolumeUsd ?? 500)) ||
+      (vol == null && txns == null && buyVol == null && progress <= deadMax && state.solRaised < 2));
+
+  const preferMin = bc.preferNearMigrationMinPct ?? 70;
+  const preferMax = bc.preferNearMigrationMaxPct ?? 95;
+
+  if (state.complete) {
+    return {
+      status: 'healthy',
+      dead: false,
+      stalled: false,
+      preferBoost: false,
+      detail: 'curve complete / migrated',
+      progressPct: progress,
+      solRaised: state.solRaised,
+      solToMigration: state.solToMigration,
+    };
+  }
+
+  if (progress <= deadMax && activityDead) {
+    return {
+      status: 'dead',
+      dead: true,
+      stalled: false,
+      preferBoost: false,
+      detail: `${progress.toFixed(0)}% progress + no recent volume/activity`,
+      progressPct: progress,
+      solRaised: state.solRaised,
+      solToMigration: state.solToMigration,
+    };
+  }
+
+  // Stalled: mid-curve but activity gone (post-pump death)
+  if (
+    progress > deadMax &&
+    progress < preferMin &&
+    requireActivity &&
+    ((vol != null && vol < 200) || (txns != null && txns === 0))
+  ) {
+    return {
+      status: 'stalled',
+      dead: false,
+      stalled: true,
+      preferBoost: false,
+      detail: `${progress.toFixed(0)}% stalled — abrupt volume drop`,
+      progressPct: progress,
+      solRaised: state.solRaised,
+      solToMigration: state.solToMigration,
+    };
+  }
+
+  if (progress >= preferMin && progress <= preferMax) {
+    return {
+      status: activityDead ? 'stalled' : 'preferred',
+      dead: false,
+      stalled: Boolean(activityDead),
+      preferBoost: !activityDead,
+      detail: activityDead
+        ? `${progress.toFixed(0)}% near-mig but dead activity`
+        : `${progress.toFixed(0)}% near migration with activity`,
+      progressPct: progress,
+      solRaised: state.solRaised,
+      solToMigration: state.solToMigration,
+    };
+  }
+
+  return {
+    status: 'healthy',
+    dead: false,
+    stalled: false,
+    preferBoost: false,
+    detail: `${progress.toFixed(0)}% · ${state.solRaised.toFixed(1)} SOL raised · ${state.solToMigration.toFixed(1)} to mig`,
+    progressPct: progress,
+    solRaised: state.solRaised,
+    solToMigration: state.solToMigration,
   };
 }
 

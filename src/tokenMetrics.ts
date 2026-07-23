@@ -4,7 +4,12 @@
  */
 
 import { PublicKey } from '@solana/web3.js';
-import { config } from './config';
+import {
+  config,
+  effectiveMinHolders,
+  effectiveMinLiquidityUsd,
+  effectiveMinVolume24hUsd,
+} from './config';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
@@ -22,6 +27,17 @@ export interface TokenMetrics {
   /** USD liquidity from DexScreener (best pool) */
   liquidityUsd: number | null;
   volume24hUsd: number | null;
+  /** DexScreener rolling 1h volume (15–60m activity proxy) */
+  volumeH1Usd: number | null;
+  /** DexScreener rolling 5m volume */
+  volumeM5Usd: number | null;
+  /** Estimated buy-side volume over h1 (share of volume × buys) */
+  recentBuyVolumeUsd: number | null;
+  buysH1: number | null;
+  sellsH1: number | null;
+  txnsH1: number | null;
+  priceChangeH1Pct: number | null;
+  priceChange24hPct: number | null;
   priceUsd: number | null;
   /** Circulating / total supply (UI amount) */
   supplyUi: number | null;
@@ -78,6 +94,14 @@ function emptyMetrics(mint: string, error?: string): TokenMetrics {
     mint,
     liquidityUsd: null,
     volume24hUsd: null,
+    volumeH1Usd: null,
+    volumeM5Usd: null,
+    recentBuyVolumeUsd: null,
+    buysH1: null,
+    sellsH1: null,
+    txnsH1: null,
+    priceChangeH1Pct: null,
+    priceChange24hPct: null,
     priceUsd: null,
     supplyUi: null,
     holderCountEstimate: null,
@@ -147,6 +171,14 @@ export async function fetchTokenMetrics(
         name: dex.name ?? onchain.name,
         liquidityUsd: dex.liquidityUsd ?? onchain.liquidityUsd ?? null,
         volume24hUsd: dex.volume24hUsd ?? null,
+        volumeH1Usd: dex.volumeH1Usd ?? null,
+        volumeM5Usd: dex.volumeM5Usd ?? null,
+        recentBuyVolumeUsd: dex.recentBuyVolumeUsd ?? null,
+        buysH1: dex.buysH1 ?? null,
+        sellsH1: dex.sellsH1 ?? null,
+        txnsH1: dex.txnsH1 ?? null,
+        priceChangeH1Pct: dex.priceChangeH1Pct ?? null,
+        priceChange24hPct: dex.priceChange24hPct ?? null,
         priceUsd: dex.priceUsd ?? null,
         source: 'dexscreener+rpc',
         fetchedAt: Date.now(),
@@ -217,7 +249,12 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
       pairs?: Array<{
         chainId?: string;
         liquidity?: { usd?: number };
-        volume?: { h24?: number };
+        volume?: { m5?: number; h1?: number; h24?: number };
+        txns?: {
+          m5?: { buys?: number; sells?: number };
+          h1?: { buys?: number; sells?: number };
+        };
+        priceChange?: { m5?: number; h1?: number; h24?: number };
         priceUsd?: string;
         baseToken?: { symbol?: string; name?: string };
       }>;
@@ -235,11 +272,38 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
       }
     }
 
+    const volumeH1Usd = Number(best.volume?.h1 ?? NaN);
+    const volumeM5Usd = Number(best.volume?.m5 ?? NaN);
+    const volume24hUsd = Number(best.volume?.h24 ?? NaN);
+    const buysH1 = Number(best.txns?.h1?.buys ?? NaN);
+    const sellsH1 = Number(best.txns?.h1?.sells ?? NaN);
+    const buys = Number.isFinite(buysH1) ? buysH1 : 0;
+    const sells = Number.isFinite(sellsH1) ? sellsH1 : 0;
+    const txnsH1 = buys + sells;
+    const h1Vol = Number.isFinite(volumeH1Usd) ? volumeH1Usd : null;
+    let recentBuyVolumeUsd: number | null = null;
+    if (h1Vol != null) {
+      recentBuyVolumeUsd =
+        txnsH1 > 0 ? h1Vol * (buys / txnsH1) : h1Vol > 0 ? h1Vol * 0.5 : 0;
+    }
+
     return {
       symbol: best.baseToken?.symbol,
       name: best.baseToken?.name,
       liquidityUsd: bestLiq > 0 ? bestLiq : null,
-      volume24hUsd: Number(best.volume?.h24 ?? 0) || null,
+      volume24hUsd: Number.isFinite(volume24hUsd) && volume24hUsd > 0 ? volume24hUsd : null,
+      volumeH1Usd: h1Vol,
+      volumeM5Usd: Number.isFinite(volumeM5Usd) ? volumeM5Usd : null,
+      recentBuyVolumeUsd,
+      buysH1: Number.isFinite(buysH1) ? buysH1 : null,
+      sellsH1: Number.isFinite(sellsH1) ? sellsH1 : null,
+      txnsH1: txnsH1 > 0 || Number.isFinite(buysH1) ? txnsH1 : null,
+      priceChangeH1Pct: Number.isFinite(Number(best.priceChange?.h1))
+        ? Number(best.priceChange?.h1)
+        : null,
+      priceChange24hPct: Number.isFinite(Number(best.priceChange?.h24))
+        ? Number(best.priceChange?.h24)
+        : null,
       priceUsd: Number(best.priceUsd ?? 0) || null,
     };
   } catch (err) {
@@ -431,7 +495,8 @@ async function fetchGmgnTokenHints(
 }
 
 /**
- * Apply configured filters to metrics (liquidity, dev concentration).
+ * Apply configured filters to metrics (liquidity, volume, holders, concentration).
+ * Uses effective hard floors so High risk cannot undercut absolute mins.
  */
 export function evaluateTokenMetricsFilters(
   metrics: TokenMetrics
@@ -439,14 +504,26 @@ export function evaluateTokenMetricsFilters(
   const filters = config.filters;
   const reasons: string[] = [];
 
-  const minLiq = filters.minLiquidity ?? 0;
-  if (minLiq > 0) {
-    const liq = metrics.liquidityUsd ?? 0;
-    if (liq < minLiq) {
-      reasons.push(
-        `liquidity $${liq.toFixed(0)} < min $${minLiq}`
-      );
-    }
+  const minLiq = effectiveMinLiquidityUsd();
+  const liq = metrics.liquidityUsd ?? 0;
+  if (liq < minLiq) {
+    reasons.push(`liquidity $${liq.toFixed(0)} < min $${minLiq}`);
+  }
+
+  const minVol = effectiveMinVolume24hUsd();
+  const vol = metrics.volume24hUsd ?? 0;
+  if (metrics.volume24hUsd != null && vol < minVol) {
+    reasons.push(`volume24h $${vol.toFixed(0)} < min $${minVol}`);
+  }
+
+  const minHolders = effectiveMinHolders();
+  if (
+    metrics.holderCountEstimate != null &&
+    metrics.holderCountEstimate < minHolders
+  ) {
+    reasons.push(
+      `holders ${metrics.holderCountEstimate} < min ${minHolders}`
+    );
   }
 
   const maxDev = filters.maxDevHoldPct ?? 0;
@@ -471,16 +548,12 @@ export function evaluateTokenMetricsFilters(
   if (maxConc > 0 && metrics.top10HoldPct != null) {
     if (metrics.top10HoldPct > maxConc) {
       reasons.push(
-        `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% > max ${maxConc}%`
+        `top10 concentration ${metrics.top10HoldPct.toFixed(0)}% > max ${maxConc}%`
       );
     }
   }
 
-  // Optional: skip if mint authority still active and filter enabled
-  if (
-    filters.skipIfMintAuthority &&
-    metrics.mintAuthority
-  ) {
+  if (filters.skipIfMintAuthority && metrics.mintAuthority) {
     reasons.push(`mint authority still set (${metrics.mintAuthority.slice(0, 8)}…)`);
   }
 
@@ -491,9 +564,14 @@ export function evaluateTokenMetricsFilters(
   };
 }
 
-/** Compact summary for signals / dashboard */
+/** Compact summary for dashboard / signals */
 export function summarizeTokenMetrics(m: TokenMetrics): {
   liquidityUsd: number | null;
+  volume24hUsd: number | null;
+  volumeH1Usd: number | null;
+  recentBuyVolumeUsd: number | null;
+  txnsH1: number | null;
+  holderCountEstimate: number | null;
   topHolderPct: number | null;
   top10HoldPct: number | null;
   devHoldPct: number | null;
@@ -503,6 +581,11 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
 } {
   return {
     liquidityUsd: m.liquidityUsd,
+    volume24hUsd: m.volume24hUsd,
+    volumeH1Usd: m.volumeH1Usd,
+    recentBuyVolumeUsd: m.recentBuyVolumeUsd,
+    txnsH1: m.txnsH1,
+    holderCountEstimate: m.holderCountEstimate,
     topHolderPct: m.topHolderPct,
     top10HoldPct: m.top10HoldPct,
     devHoldPct: m.devHoldPct,
