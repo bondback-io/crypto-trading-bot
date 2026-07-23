@@ -1121,6 +1121,7 @@ export function createServer(): express.Application {
     const keys = [
       'minWinRate',
       'minLiquidity',
+      'minMarketCapUsd',
       'maxDevHoldPct',
       'maxDevPercent',
       'maxTopHolderPct',

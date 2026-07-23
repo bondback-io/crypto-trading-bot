@@ -53,6 +53,7 @@ export interface AntiRugFlag {
 
 export interface AntiRugChecks {
   liquidityUsd: number | null;
+  marketCapUsd: number | null;
   volume24hUsd: number | null;
   volumeH1Usd: number | null;
   recentBuyVolumeUsd: number | null;
@@ -143,6 +144,7 @@ function riskLevelFromScore(score: number): RiskLevel {
 function emptyChecks(): AntiRugChecks {
   return {
     liquidityUsd: null,
+    marketCapUsd: null,
     volume24hUsd: null,
     volumeH1Usd: null,
     recentBuyVolumeUsd: null,
@@ -215,6 +217,7 @@ export function summarizeAntiRug(report: AntiRugReport): {
   flags: string[];
   skipReasons: string[];
   liquidityUsd: number | null;
+  marketCapUsd: number | null;
   volume24hUsd: number | null;
   volumeH1Usd: number | null;
   recentBuyVolumeUsd: number | null;
@@ -240,6 +243,7 @@ export function summarizeAntiRug(report: AntiRugReport): {
     flags: report.flags.map((f) => f.label),
     skipReasons: report.skipReasons,
     liquidityUsd: report.checks.liquidityUsd,
+    marketCapUsd: report.checks.marketCapUsd,
     volume24hUsd:
       report.checks.volume24hUsd ?? report.checks.birdeyeVolume24hUsd,
     volumeH1Usd: report.checks.volumeH1Usd,
@@ -393,6 +397,7 @@ async function runAntiRugChecks(
   sources.push(metrics.source || 'tokenMetrics');
 
   checks.liquidityUsd = metrics.liquidityUsd;
+  checks.marketCapUsd = metrics.marketCapUsd;
   checks.volume24hUsd = metrics.volume24hUsd;
   checks.volumeH1Usd = metrics.volumeH1Usd;
   checks.recentBuyVolumeUsd = metrics.recentBuyVolumeUsd;
@@ -820,6 +825,15 @@ async function runAntiRugChecks(
       if (overview.holder != null) {
         checks.holderCount = overview.holder;
       }
+      if (
+        overview.marketCap != null &&
+        overview.marketCap > 0 &&
+        (checks.marketCapUsd == null ||
+          checks.marketCapUsd <= 0 ||
+          overview.marketCap > (checks.marketCapUsd ?? 0) * 0.5)
+      ) {
+        checks.marketCapUsd = overview.marketCap;
+      }
 
       // Soft sell-pressure / thin-liq signals (score only — floors applied after enrichment)
       if (
@@ -940,6 +954,7 @@ async function runAntiRugChecks(
       priceChangeH1Pct: metrics.priceChangeH1Pct,
       priceChange24hPct: metrics.priceChange24hPct,
       bondingCurveProgressPct: checks.bondingCurveProgressPct,
+      marketCapUsd: checks.marketCapUsd,
       isMigrated,
       curveHealth,
     },

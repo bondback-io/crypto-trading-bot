@@ -8,6 +8,7 @@ import {
   config,
   effectiveMinHolders,
   effectiveMinLiquidityUsd,
+  effectiveMinMarketCapUsd,
   effectiveMinTop10HolderPct,
   effectiveMinVolume24hUsd,
 } from './config';
@@ -27,6 +28,8 @@ export interface TokenMetrics {
   name?: string;
   /** USD liquidity from DexScreener (best pool) */
   liquidityUsd: number | null;
+  /** Circulating / FDV market cap USD from DexScreener */
+  marketCapUsd: number | null;
   volume24hUsd: number | null;
   /** DexScreener rolling 1h volume (15–60m activity proxy) */
   volumeH1Usd: number | null;
@@ -94,6 +97,7 @@ function emptyMetrics(mint: string, error?: string): TokenMetrics {
   return {
     mint,
     liquidityUsd: null,
+    marketCapUsd: null,
     volume24hUsd: null,
     volumeH1Usd: null,
     volumeM5Usd: null,
@@ -171,6 +175,7 @@ export async function fetchTokenMetrics(
         symbol: dex.symbol ?? onchain.symbol,
         name: dex.name ?? onchain.name,
         liquidityUsd: dex.liquidityUsd ?? onchain.liquidityUsd ?? null,
+        marketCapUsd: dex.marketCapUsd ?? null,
         volume24hUsd: dex.volume24hUsd ?? null,
         volumeH1Usd: dex.volumeH1Usd ?? null,
         volumeM5Usd: dex.volumeM5Usd ?? null,
@@ -250,6 +255,8 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
       pairs?: Array<{
         chainId?: string;
         liquidity?: { usd?: number };
+        marketCap?: number;
+        fdv?: number;
         volume?: { m5?: number; h1?: number; h24?: number };
         txns?: {
           m5?: { buys?: number; sells?: number };
@@ -287,11 +294,20 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
       recentBuyVolumeUsd =
         txnsH1 > 0 ? h1Vol * (buys / txnsH1) : h1Vol > 0 ? h1Vol * 0.5 : 0;
     }
+    const mcRaw = Number(best.marketCap ?? NaN);
+    const fdvRaw = Number(best.fdv ?? NaN);
+    const marketCapUsd =
+      Number.isFinite(mcRaw) && mcRaw > 0
+        ? mcRaw
+        : Number.isFinite(fdvRaw) && fdvRaw > 0
+          ? fdvRaw
+          : null;
 
     return {
       symbol: best.baseToken?.symbol,
       name: best.baseToken?.name,
       liquidityUsd: bestLiq > 0 ? bestLiq : null,
+      marketCapUsd,
       volume24hUsd: Number.isFinite(volume24hUsd) && volume24hUsd > 0 ? volume24hUsd : null,
       volumeH1Usd: h1Vol,
       volumeM5Usd: Number.isFinite(volumeM5Usd) ? volumeM5Usd : null,
@@ -517,6 +533,12 @@ export function evaluateTokenMetricsFilters(
     reasons.push(`liquidity $${liq.toFixed(0)} < min $${minLiq}`);
   }
 
+  const minMc = effectiveMinMarketCapUsd();
+  const mc = metrics.marketCapUsd;
+  if (mc != null && mc > 0 && mc < minMc) {
+    reasons.push(`market cap $${mc.toFixed(0)} < min $${minMc}`);
+  }
+
   const minVol = effectiveMinVolume24hUsd();
   const vol = metrics.volume24hUsd;
   if (vol != null && vol < minVol) {
@@ -581,6 +603,7 @@ export function evaluateTokenMetricsFilters(
 /** Compact summary for dashboard / signals */
 export function summarizeTokenMetrics(m: TokenMetrics): {
   liquidityUsd: number | null;
+  marketCapUsd: number | null;
   volume24hUsd: number | null;
   volumeH1Usd: number | null;
   recentBuyVolumeUsd: number | null;
@@ -595,6 +618,7 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
 } {
   return {
     liquidityUsd: m.liquidityUsd,
+    marketCapUsd: m.marketCapUsd,
     volume24hUsd: m.volume24hUsd,
     volumeH1Usd: m.volumeH1Usd,
     recentBuyVolumeUsd: m.recentBuyVolumeUsd,

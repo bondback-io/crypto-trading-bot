@@ -295,6 +295,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     filters: {
       minLiquidity: 12_000,
+      minMarketCapUsd: 8_000,
       maxDevHoldPct: 12,
       maxDevPercent: 12,
       maxTopHolderPct: 35,
@@ -393,6 +394,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     filters: {
       minLiquidity: 5_000,
+      minMarketCapUsd: 5_000,
       maxDevHoldPct: 14,
       maxDevPercent: 14,
       maxTopHolderPct: 70,
@@ -494,6 +496,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     filters: {
       minLiquidity: 5_000,
+      minMarketCapUsd: 5_000,
       maxDevHoldPct: 22,
       maxDevPercent: 22,
       maxTopHolderPct: 85,
@@ -594,6 +597,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     filters: {
       minLiquidity: 5_000,
+      minMarketCapUsd: 5_000,
       maxDevHoldPct: 40,
       maxDevPercent: 40,
       maxTopHolderPct: 95,
@@ -695,6 +699,18 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
 export const HARD_FILTER_FLOORS = {
   /** Absolute min pool liquidity USD — High cannot go below */
   minLiquidityUsd: 5_000,
+  /**
+   * Absolute min entry / buy market-cap USD — non-bypassable across all
+   * risk levels (including Degen). Rejects post-dump ghosts at ~$2–3k MC.
+   */
+  minMarketCapUsd: 5_000,
+  /**
+   * MC below this + near-zero recent (h1) volume → hard reject combo
+   * (catches thin post-selloff tokens that clear the $5k floor alone).
+   */
+  lowMcNearZeroVolumeComboUsd: 10_000,
+  /** Dex h1 / m5 volume at/below this counts as near-zero for MC combo */
+  nearZeroRecentVolumeUsd: 25,
   /** Absolute min 24h USD volume (mature / non-early entries) */
   minVolume24hUsd: 10_000,
   /** Absolute min DexScreener h1 total volume USD (15–60m proxy) */
@@ -750,6 +766,11 @@ export interface FilterConfig {
    * Clamped to HARD_FILTER_FLOORS.minLiquidityUsd ($5k). Recommended band $5k–$8k.
    */
   minLiquidity: number;
+  /**
+   * Minimum entry / buy market-cap USD.
+   * Clamped to HARD_FILTER_FLOORS.minMarketCapUsd ($5k). Non-bypassable.
+   */
+  minMarketCapUsd: number;
   /** Skip if estimated dev/authority hold % exceeds this (0 = disabled) */
   maxDevHoldPct: number;
   /** Preferred alias for maxDevHoldPct (anti-rug) */
@@ -1050,6 +1071,7 @@ export const config: BotConfig = {
   filters: {
     minWinRate: 0,
     minLiquidity: 5_000,
+    minMarketCapUsd: 5_000,
     maxDevHoldPct: 14,
     maxDevPercent: 14,
     maxTopHolderPct: 70,
@@ -1299,6 +1321,8 @@ const HOLDER_CONCENTRATION_FLOORS_V1124 = 'holderConcentrationFloors_v1124';
  * maxTopHolderPct / conviction / maxRiskScore blocked migrations + copies.
  */
 const MEDIUM_ENTRY_RESTORE_V1125 = 'mediumEntryRestore_v1125';
+/** One-shot: seed min entry market-cap floor ($5k, non-bypassable). */
+const MIN_MARKET_CAP_FLOOR_V1129 = 'minMarketCapFloor_v1129';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -1386,6 +1410,18 @@ function syncConfigAliases(): void {
   }
   if (config.filters.minRecentActivity == null) {
     config.filters.minRecentActivity = HARD_FILTER_FLOORS.minRecentActivityTxns;
+  }
+  if (
+    config.filters.minMarketCapUsd == null ||
+    !Number.isFinite(Number(config.filters.minMarketCapUsd)) ||
+    Number(config.filters.minMarketCapUsd) <= 0
+  ) {
+    config.filters.minMarketCapUsd = HARD_FILTER_FLOORS.minMarketCapUsd;
+  } else {
+    config.filters.minMarketCapUsd = Math.max(
+      Number(config.filters.minMarketCapUsd),
+      HARD_FILTER_FLOORS.minMarketCapUsd
+    );
   }
   if (
     config.filters.minTop10HolderPct == null ||
@@ -1651,6 +1687,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyMinMarketCapFloorMigration()) {
+    settingsMigrations[MIN_MARKET_CAP_FLOOR_V1129] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied minMarketCapFloor_v1129 — minMarketCapUsd=${config.filters.minMarketCapUsd} (hard floor $${HARD_FILTER_FLOORS.minMarketCapUsd})`
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1904,11 +1948,37 @@ function applyMediumEntryRestoreMigration(): boolean {
   return true;
 }
 
+/**
+ * One-shot: ensure min entry market-cap floor (default $5k, hard ≥$5k).
+ * Always marks done so it runs once after upgrade to 1.1.29.
+ */
+function applyMinMarketCapFloorMigration(): boolean {
+  if (settingsMigrations[MIN_MARKET_CAP_FLOOR_V1129]) return false;
+  const cur = Number(config.filters.minMarketCapUsd);
+  if (!Number.isFinite(cur) || cur <= 0) {
+    config.filters.minMarketCapUsd = HARD_FILTER_FLOORS.minMarketCapUsd;
+  } else {
+    config.filters.minMarketCapUsd = Math.max(
+      cur,
+      HARD_FILTER_FLOORS.minMarketCapUsd
+    );
+  }
+  syncConfigAliases();
+  return true;
+}
+
 /** Effective floors — risk presets may be stricter, never below HARD_FILTER_FLOORS. */
 export function effectiveMinLiquidityUsd(): number {
   return Math.max(
     config.filters.minLiquidity ?? 0,
     HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+}
+
+export function effectiveMinMarketCapUsd(): number {
+  return Math.max(
+    config.filters.minMarketCapUsd ?? 0,
+    HARD_FILTER_FLOORS.minMarketCapUsd
   );
 }
 
@@ -2226,6 +2296,10 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
     config.filters.minLiquidity ?? 0,
     HARD_FILTER_FLOORS.minLiquidityUsd
   );
+  config.filters.minMarketCapUsd = Math.max(
+    config.filters.minMarketCapUsd ?? 0,
+    HARD_FILTER_FLOORS.minMarketCapUsd
+  );
   config.filters.minVolume24hUsd = Math.max(
     config.filters.minVolume24hUsd ?? 0,
     HARD_FILTER_FLOORS.minVolume24hUsd
@@ -2410,6 +2484,10 @@ export function applyRiskLevel(
     config.filters.minLiquidity ?? 0,
     HARD_FILTER_FLOORS.minLiquidityUsd
   );
+  config.filters.minMarketCapUsd = Math.max(
+    config.filters.minMarketCapUsd ?? 0,
+    HARD_FILTER_FLOORS.minMarketCapUsd
+  );
   config.filters.minVolume24hUsd = Math.max(
     config.filters.minVolume24hUsd ?? 0,
     HARD_FILTER_FLOORS.minVolume24hUsd
@@ -2501,6 +2579,7 @@ export function getRiskLevelSummary() {
       stopLossPercent: config.trade.stopLossPercent,
       maxRiskScore: config.filters.maxRiskScore,
       minLiquidity: effectiveMinLiquidityUsd(),
+      minMarketCapUsd: effectiveMinMarketCapUsd(),
       convergenceRequired: config.filters.convergenceRequired,
       maxConcurrentPositions: config.filters.maxConcurrentPositions,
       dailyLossLimitSol: config.filters.dailyLossLimitSol,

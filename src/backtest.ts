@@ -1102,6 +1102,7 @@ function buildBacktestSignal(
             ok: event.riskScoreHint < (config.filters.maxRiskScore || 70),
             skipReasons: [],
             liquidityUsd: event.liquidityUsd ?? null,
+            marketCapUsd: event.marketCapUsd ?? null,
             volume24hUsd: event.volumeUsd ?? null,
             volumeH1Usd: null,
             recentBuyVolumeUsd: null,

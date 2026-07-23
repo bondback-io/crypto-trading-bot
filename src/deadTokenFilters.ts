@@ -13,6 +13,7 @@ import {
   config,
   effectiveMinHolders,
   effectiveMinLiquidityUsd,
+  effectiveMinMarketCapUsd,
   effectiveMinRecentActivity,
   effectiveMinRecentBuyVolumeUsd,
   effectiveMinRecentVolumeUsd,
@@ -36,6 +37,8 @@ export interface DeadTokenMarketSnapshot {
   priceChangeH1Pct: number | null;
   priceChange24hPct: number | null;
   bondingCurveProgressPct: number | null;
+  /** Circulating / FDV market cap USD when known */
+  marketCapUsd?: number | null;
   isMigrated?: boolean;
   curveHealth?: BondingCurveHealth | null;
 }
@@ -74,8 +77,22 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('low bonding curve + dead') ||
     r.includes('top 10 holders too low') ||
     r.includes('top10 holders too low') ||
-    r.includes('insider % too high')
+    r.includes('insider % too high') ||
+    r.includes('market cap too low') ||
+    r.includes('low mc with near-zero volume')
   );
+}
+
+function formatMcShort(usd: number): string {
+  if (usd >= 1_000_000) {
+    const m = usd / 1_000_000;
+    return `$${m >= 10 ? m.toFixed(0) : m.toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (usd >= 1_000) {
+    const k = usd / 1_000;
+    return `$${k >= 10 ? k.toFixed(0) : k.toFixed(1).replace(/\.0$/, '')}K`;
+  }
+  return `$${Math.round(usd)}`;
 }
 
 function estimatedBuyVolume(snap: DeadTokenMarketSnapshot): number | null {
@@ -138,11 +155,55 @@ export function evaluateDeadTokenHardFloors(
   const buys = snap.buysH1;
   const sells = snap.sellsH1;
   const txns = snap.txnsH1 ?? (buys != null && sells != null ? buys + sells : null);
+  const nearZeroVolThreshold = HARD_FILTER_FLOORS.nearZeroRecentVolumeUsd;
+  const recentNearZero =
+    recentVol != null && Number.isFinite(recentVol) && recentVol < nearZeroVolThreshold;
+
+  // --- Non-bypassable entry market-cap floors (all risk levels, no early soft-pass) ---
+  const minMc = effectiveMinMarketCapUsd();
+  const mc = snap.marketCapUsd;
+  if (mc != null && Number.isFinite(mc) && mc > 0) {
+    if (mc < minMc) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_low_market_cap',
+        severity: 'critical',
+        label: 'Market cap too low',
+        detail: `${formatMcShort(mc)} < ${formatMcShort(minMc)}`,
+      });
+      skipReasons.push(
+        `Skipped — market cap too low (${formatMcShort(mc)} < ${formatMcShort(minMc)})`
+      );
+    } else if (
+      mc < HARD_FILTER_FLOORS.lowMcNearZeroVolumeComboUsd &&
+      recentNearZero
+    ) {
+      scorePenalty += 32;
+      flags.push({
+        id: 'hard_low_mc_near_zero_vol',
+        severity: 'critical',
+        label: 'Low MC with near-zero volume',
+        detail: `MC ${formatMcShort(mc)} · h1/m5 $${(recentVol ?? 0).toFixed(0)}`,
+      });
+      skipReasons.push(
+        `Skipped — low MC with near-zero volume (MC ${formatMcShort(mc)}, vol $${(recentVol ?? 0).toFixed(0)})`
+      );
+    }
+  }
+
+  // Post-dump / low-MC tokens never get early soft-pass on thin recent volume.
+  const blockEarlySoftVol =
+    mc != null &&
+    Number.isFinite(mc) &&
+    mc > 0 &&
+    mc < HARD_FILTER_FLOORS.lowMcNearZeroVolumeComboUsd;
 
   const recentHealthy =
     (recentVol != null && recentVol >= minRecentVol) ||
     (buyVol != null && buyVol >= minRecentBuy && (txns == null || txns >= minActivity)) ||
     (earlyPath &&
+      !blockEarlySoftVol &&
+      !recentNearZero &&
       txns != null &&
       txns >= minActivity &&
       (recentVol == null || recentVol > 0));
@@ -254,10 +315,10 @@ export function evaluateDeadTokenHardFloors(
   }
 
   if (recentVol != null && recentVol < minRecentVol) {
-    const nearZeroRecent = recentVol < 25;
+    const nearZeroRecent = recentVol < nearZeroVolThreshold;
     // Early/migration: soft-penalty thin but non-zero recent vol (Dex lag).
-    // Mature entries and true near-zero still hard-fail.
-    if (earlyPath && !nearZeroRecent) {
+    // Mature entries, true near-zero, and low-MC post-dump ghosts hard-fail.
+    if (earlyPath && !nearZeroRecent && !blockEarlySoftVol) {
       scorePenalty += 10;
       flags.push({
         id: 'early_thin_recent_volume',
@@ -289,7 +350,12 @@ export function evaluateDeadTokenHardFloors(
   if (buyVol != null && buyVol < minRecentBuy) {
     const nearZeroBuy = buyVol < 15;
     // Early path with any recent flow / non-zero buy: soft-penalty only
-    if (earlyPath && (!nearZeroBuy || (recentVol != null && recentVol >= minRecentVol))) {
+    // (blocked for known low-MC post-dump tokens)
+    if (
+      earlyPath &&
+      !blockEarlySoftVol &&
+      (!nearZeroBuy || (recentVol != null && recentVol >= minRecentVol))
+    ) {
       scorePenalty += 6;
       flags.push({
         id: 'early_weak_buy_volume',

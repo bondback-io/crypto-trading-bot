@@ -294,6 +294,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-color: rgba(100, 116, 139, 0.45);
       color: #94a3b8;
     }
+    .card-open-positions .title-right {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .card-open-positions .sell-all-btn[hidden] {
+      display: none !important;
+    }
     .card-open-positions .positions-scroll {
       overflow-x: auto;
       max-height: 22rem;
@@ -1117,7 +1126,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span class="title-text">Open Positions</span>
             <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
           </div>
-          <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
+          <div class="title-right">
+            <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
+            <button type="button" class="danger sell-all-btn" id="sell-all-open" hidden disabled onclick="forceSellAllPositions()" title="Force sell all open positions">Sell All</button>
+          </div>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
@@ -1194,7 +1206,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span class="title-text">Open Trades</span>
             <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
           </div>
-          <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
+          <div class="title-right">
+            <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
+            <button type="button" class="danger sell-all-btn" id="trades-sell-all-open" hidden disabled onclick="forceSellAllPositions()" title="Force sell all open positions">Sell All</button>
+          </div>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
@@ -1832,6 +1847,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $5,000 (recommended $5k–$8k). High cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="5000" max="100000" step="500" value="5000" /></div>
+            <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $5,000 — non-bypassable across all risk levels (including Degen). Rejects post-dump ghosts under ~$5k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">5000</span></label><input type="range" id="minMarketCapUsd" min="5000" max="100000" step="500" value="5000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">35</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="35" /></div>
             <div class="field"><label title="Min % held by top 10 wallets. Floor 5% (default 8%) — rejects suspiciously dispersed / honeypot holder distributions. Non-bypassable.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="40" step="1" value="8" /></div>
@@ -2172,7 +2188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     const rangeFields = [
       'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
-      'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
+      'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
       'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
       'minHolders','minRecentActivity'
@@ -3650,6 +3666,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    async function forceSellAllPositions() {
+      try {
+        const data = await fetchJSON('/api/positions');
+        const open = data.open || [];
+        if (open.length === 0) {
+          alert('No open positions to sell');
+          return;
+        }
+        if (!confirm('Sell all ' + open.length + ' open positions?')) return;
+        const errors = [];
+        for (let i = 0; i < open.length; i++) {
+          const p = open[i];
+          const label = p.symbol || (p.mint ? String(p.mint).slice(0, 6) : p.id);
+          try {
+            await fetchJSON('/api/positions/' + encodeURIComponent(p.id) + '/sell', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: '{}',
+            });
+          } catch (err) {
+            errors.push(label + ': ' + (err.message || err));
+          }
+        }
+        if (errors.length) {
+          alert('Some sells failed (' + errors.length + '/' + open.length + '):\\n' + errors.slice(0, 8).join('\\n'));
+        }
+        refresh();
+      } catch (err) {
+        alert('Sell all failed: ' + (err.message || err));
+      }
+    }
+
     async function refreshPumpActivity() {
       const filter = (document.getElementById('pump-act-filter') || {}).value || 'all';
       const minSm = Number((document.getElementById('pump-act-min-sm') || {}).value) || 0;
@@ -4319,6 +4367,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
         }
       });
+      ['sell-all-open', 'trades-sell-all-open'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (posOpenN === 0) {
+          btn.hidden = true;
+          btn.disabled = true;
+        } else {
+          btn.hidden = false;
+          btn.disabled = false;
+        }
+      });
       const positionsHtml = posOpenN === 0
         ? '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
@@ -4691,7 +4750,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? document.getElementById('requireHealthyCurve').checked
           : true,
       };
-      ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
+      ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
        'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
        'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
        'minHolders','minRecentActivity'].forEach(k => {
