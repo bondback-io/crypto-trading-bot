@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Wallets / Signals / Backtester / Config / Logs)
+ * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Backtester / Config / Logs)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -857,8 +857,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Dashboard home: balance, positions, PnL charts, paper funding">Overview</button>
+      <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
-      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, migrations, and re-buy watches"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals &amp; Trades</span></button>
+      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
       <button data-tab="config" onclick="showTab('config', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
       <button data-tab="logs" onclick="showTab('logs', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade events and system/API error logs for debugging">Logs</button>
@@ -973,6 +974,47 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="migrations" class="max-h-28 overflow-y-auto text-sm mb-2"></div>
           <div class="mint" id="rebuy-status">—</div>
         </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Trades (open / closed / signals / migrations) ========== -->
+    <section data-tab-panel="trades" class="hidden space-y-4">
+      <div class="card card-open-positions" id="trades-open-positions-panel">
+        <div class="section-title-open">
+          <div class="title-left">
+            <span class="title-text">Open Trades</span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
+          </div>
+          <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
+        </div>
+        <div class="positions-scroll">
+          <table id="trades-positions-table">
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="trades-closed-table">
+            <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Recent Signals <span class="tip" tabindex="0" data-tip="Latest wallet buys and bot reactions (copy, skip, anti-rug block)."></span></div>
+        <div id="trades-activity" class="max-h-72 overflow-y-auto text-sm"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Migrations / Re-Buy <span class="tip" tabindex="0" data-tip="Pump.fun graduations to Raydium/PumpSwap and dip re-entry watches after take-profit."></span></div>
+        <div class="mint mb-2" id="trades-mig-live-status">WS: —</div>
+        <div id="trades-migrations" class="max-h-40 overflow-y-auto text-sm mb-2"></div>
+        <div class="mint" id="trades-rebuy-status">—</div>
       </div>
     </section>
 
@@ -1306,8 +1348,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
       <div class="card">
         <div class="section-title">Recent Migrations <span class="tip" tabindex="0" data-tip="Tokens graduating off Pump.fun bonding curve onto Raydium/PumpSwap — often high-priority entries."></span></div>
-        <div class="mint mb-1" id="mig-live-status-signals">Live feed is on Overview · open that tab for WS status</div>
-        <p class="text-sm text-slate-400">Migration events, re-buy watches, and open positions update live from the same APIs.</p>
+        <div class="mint mb-1" id="mig-live-status-signals">Live feed is on Overview / Trades · open those tabs for WS status</div>
+        <p class="text-sm text-slate-400">Migration events, re-buy watches, and open positions update live from the same APIs. Prefer the <button type="button" class="text-emerald-400 underline" onclick="showTab('trades', document.querySelector('[data-tab=trades]'))">Trades</button> tab on mobile.</p>
       </div>
       <div class="card">
         <div class="section-title">Trade Log Preview <span class="tip" tabindex="0" data-tip="Short feed of recent buys/sells. Full history is on the Logs tab."></span></div>
@@ -1809,7 +1851,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }, 80);
       }
       if (name === 'logs') loadSystemLogs();
-      if (name === 'overview' || name === 'signals') {
+      if (name === 'overview' || name === 'signals' || name === 'trades') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
       }
@@ -2179,11 +2221,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function tickOpenPositionHolds() {
       const overview = document.querySelector('[data-tab-panel="overview"]');
       const signals = document.querySelector('[data-tab-panel="signals"]');
+      const trades = document.querySelector('[data-tab-panel="trades"]');
       const overviewVisible = overview && !overview.classList.contains('hidden');
       const signalsVisible = signals && !signals.classList.contains('hidden');
-      if (!overviewVisible && !signalsVisible) return;
+      const tradesVisible = trades && !trades.classList.contains('hidden');
+      if (!overviewVisible && !signalsVisible && !tradesVisible) return;
       const now = Date.now();
-      if (overviewVisible) {
+      if (overviewVisible || tradesVisible) {
         document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
           if (el.classList.contains('show-entry')) return;
           const opened = Number(el.getAttribute('data-opened-at'));
@@ -3690,7 +3734,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const retEl = document.getElementById('stat-return');
       retEl.textContent = (s.returnPct ?? 0).toFixed(1) + '%';
       retEl.style.color = (s.returnPct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
-      document.getElementById('migrations').innerHTML =
+      const migrationsHtml =
         (migrations.recent || []).length === 0
           ? '<div style="color:var(--muted)">No recent migrations detected — listening for Pump.fun graduation…</div>'
           : migrations.recent.map(m => \`
@@ -3705,16 +3749,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <span class="mint">\${m.source || ''} · \${fmtTimeAgoCell(m.timestamp || m.detectedAt)}</span>
             </div>
           \`).join('');
+      ['migrations', 'trades-migrations'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = migrationsHtml;
+      });
 
       const migStatus = migrations.status || {};
-      const migLive = document.getElementById('mig-live-status');
-      if (migLive) {
-        migLive.textContent =
-          (migStatus.wsMode ? 'WS live' : 'poll fallback') +
-          ' · ' + (migStatus.recentCount ?? 0) + ' tracked' +
-          (migStatus.reconnectAttempts ? ' · reconnects:' + migStatus.reconnectAttempts : '') +
-          (migStatus.priorityEnabled ? ' · priority ON' : ' · priority OFF');
-      }
+      const migLiveText =
+        (migStatus.wsMode ? 'WS live' : 'poll fallback') +
+        ' · ' + (migStatus.recentCount ?? 0) + ' tracked' +
+        (migStatus.reconnectAttempts ? ' · reconnects:' + migStatus.reconnectAttempts : '') +
+        (migStatus.priorityEnabled ? ' · priority ON' : ' · priority OFF');
+      ['mig-live-status', 'trades-mig-live-status'].forEach((id) => {
+        const migLive = document.getElementById(id);
+        if (migLive) migLive.textContent = migLiveText;
+      });
       document.getElementById('stat-detail').textContent =
         'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
         ' · maxDD ' + maxDd.toFixed(1) + '%' +
@@ -3954,14 +4003,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const trailArmAt = (cfg && cfg.risk && cfg.risk.trailingActivationProfit != null)
         ? cfg.risk.trailingActivationProfit
         : 30;
-      const ptbody = document.querySelector('#positions-table tbody');
-      const posBadge = document.getElementById('open-positions-badge');
       const posOpenN = positions.open.length;
-      if (posBadge) {
-        posBadge.textContent = posOpenN + ' open';
-        posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
-      }
-      ptbody.innerHTML = posOpenN === 0
+      ['open-positions-badge', 'trades-open-positions-badge'].forEach((id) => {
+        const posBadge = document.getElementById(id);
+        if (posBadge) {
+          posBadge.textContent = posOpenN + ' open';
+          posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
+        }
+      });
+      const positionsHtml = posOpenN === 0
         ? '<tr><td colspan="12"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
@@ -4032,12 +4082,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td><button class="danger" onclick="forceSellPosition('\${p.id}', '\${sellLabel}')" title="Force sell entire position">Sell</button></td>
           </tr>\`;
         }).join('');
+      document.querySelectorAll('#positions-table tbody, #trades-positions-table tbody').forEach((ptbody) => {
+        ptbody.innerHTML = positionsHtml;
+      });
       ensurePosHoldTicker();
       tickOpenPositionHolds();
 
-      const ctbody = document.querySelector('#closed-table tbody');
       const closed = (positions.closed || []).slice().reverse().slice(0, 25);
-      ctbody.innerHTML = closed.length === 0
+      const closedHtml = closed.length === 0
         ? '<tr><td colspan="7" style="color:var(--muted)">No closed trades yet</td></tr>'
         : closed.map(p => \`
           <tr>
@@ -4052,17 +4104,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td class="mint">\${p.reason || '—'}</td>
             <td>\${p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—'}</td>
           </tr>\`).join('');
+      document.querySelectorAll('#closed-table tbody, #trades-closed-table tbody').forEach((ctbody) => {
+        ctbody.innerHTML = closedHtml;
+      });
 
       const rb = positions.rebuy || {};
       const rbStatus = rb.status || status.monitor?.rebuy || {};
-      const rbEl = document.getElementById('rebuy-status');
-      if (rbEl) {
-        rbEl.textContent =
-          (rbStatus.enabled ? 'ON' : 'OFF') +
-          ' · watching ' + (rbStatus.watching ?? 0) +
-          ' · dip-armed ' + (rbStatus.dipArmed ?? 0) +
-          ' · sells tracked ' + (rbStatus.sellHistoryCount ?? (positions.sellHistory || []).length);
-      }
+      const rbText =
+        (rbStatus.enabled ? 'ON' : 'OFF') +
+        ' · watching ' + (rbStatus.watching ?? 0) +
+        ' · dip-armed ' + (rbStatus.dipArmed ?? 0) +
+        ' · sells tracked ' + (rbStatus.sellHistoryCount ?? (positions.sellHistory || []).length);
+      ['rebuy-status', 'trades-rebuy-status'].forEach((id) => {
+        const rbEl = document.getElementById(id);
+        if (rbEl) rbEl.textContent = rbText;
+      });
       const rtbody = document.querySelector('#rebuy-table tbody');
       const candidates = rb.candidates || [];
       if (rtbody) {
@@ -4128,6 +4184,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (actEl) actEl.innerHTML = activityHtml;
       const actSig = document.getElementById('activity-signals');
       if (actSig) actSig.innerHTML = activityHtml;
+      const actTrades = document.getElementById('trades-activity');
+      if (actTrades) actTrades.innerHTML = activityHtml;
 
       const sizingTbody = document.querySelector('#sizing-signals-table tbody');
       const sizingStatus = document.getElementById('sizing-status');
@@ -5290,7 +5348,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    showTab(savedTab || 'overview');
+    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'backtester', 'config', 'logs'];
+    const startTab = tabNames.includes(savedTab) ? savedTab : 'overview';
+    showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
   </script>
 
 </body>
