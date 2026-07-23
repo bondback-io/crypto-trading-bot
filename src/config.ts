@@ -810,7 +810,7 @@ export const config: BotConfig = {
 
   strategy: {
     enableConvergence: true,
-    enableMigrationOnly: false,
+    enableMigrationOnly: true,
     enableMigrationPriority: true,
     enableBondingCurvePriority: true,
     nearMigrationCurvePct: 80,
@@ -997,6 +997,8 @@ export const config: BotConfig = {
  */
 /** One-shot: older defaults hard-blocked almost all pre-migration Pump copies. */
 const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
+/** One-shot: focus copy-trading on Pump.fun migrations (skip random non-mig swaps). */
+const MIGRATION_FOCUS_V1 = 'migrationFocus_v1';
 let settingsMigrations: Record<string, boolean> = {};
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
@@ -1211,6 +1213,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyMigrationFocusMigration()) {
+    settingsMigrations[MIGRATION_FOCUS_V1] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied migrationFocus_v1 — enableMigrationOnly ON (Pump.fun migration focus)'
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1277,6 +1287,13 @@ function applyPaperSignalRelaxMigration(): boolean {
     changed = true;
   }
   return changed;
+}
+
+/** Prefer Pump.fun migrations; users can still turn Migration Only off in the UI. */
+function applyMigrationFocusMigration(): boolean {
+  if (settingsMigrations[MIGRATION_FOCUS_V1]) return false;
+  config.strategy.enableMigrationOnly = true;
+  return true;
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { config, getActiveTradingWallet } from './config';
+import { isDeniedCopyMint } from './deniedMints';
 import {
   getKeypair,
   estimatePriorityFeeMicroLamports,
@@ -183,6 +184,14 @@ export async function executeBuy(
   symbol: string,
   meta?: BuyOptions
 ): Promise<SwapResult> {
+  if (isDeniedCopyMint(mint, config.solMint)) {
+    return {
+      success: false,
+      mode: config.mode,
+      error: `Denied mint (stable/quote) — not a copy target`,
+    };
+  }
+
   const solAmount =
     meta?.solAmount ??
     config.trade.baseTradeAmountSol ??

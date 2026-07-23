@@ -10,6 +10,7 @@ import {
   PublicKey,
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets } from './config';
+import { isDeniedCopyMint } from './deniedMints';
 import { getConnection } from './connection';
 import { executeBuy, refreshPositionPrices } from './trade';
 import { paperTrader } from './paperTrader';
@@ -1086,7 +1087,8 @@ function parseBuysFromTransaction(
     if (post.owner !== wallet.address) continue;
 
     const mint = post.mint;
-    if (mint === config.solMint) continue;
+    // Skip SOL + known stables/quotes (USDC balance bumps look like meme buys)
+    if (isDeniedCopyMint(mint, config.solMint)) continue;
 
     const pre = preBalances.find(
       (p) => p.mint === mint && p.owner === wallet.address
@@ -1132,6 +1134,12 @@ function getProgramId(
  */
 async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void> {
   if (paused) return;
+  if (isDeniedCopyMint(event.mint, config.solMint)) {
+    console.log(
+      `[monitor] Migration priority skipped — denied mint (stable/quote) ${event.mint.slice(0, 8)}…`
+    );
+    return;
+  }
   if (!config.strategy.enableMigrationPriority) {
     console.log(
       `[monitor] Migration priority signal ignored (toggle OFF) for ${event.mint.slice(0, 8)}…`
@@ -1269,6 +1277,12 @@ async function enrichBuyEvent(buy: WalletBuyEvent): Promise<WalletBuyEvent> {
 }
 
 async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
+  if (isDeniedCopyMint(buy.mint, config.solMint)) {
+    console.log(
+      `[monitor] Ignoring denied mint (stable/quote) ${buy.mint.slice(0, 8)}…`
+    );
+    return;
+  }
   await enrichBuyEvent(buy);
   const label = formatTokenLabel(buy.symbol, buy.name, buy.mint);
 
@@ -1987,6 +2001,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   if (isRiskHalted() || paused) {
     console.log(`[monitor] Signal rejected — risk/paused`);
     recordRejectedSignal(signal, paused ? 'monitor paused' : 'risk halt');
+    return false;
+  }
+
+  if (isDeniedCopyMint(signal.mint, config.solMint)) {
+    console.log(
+      `[monitor] Signal rejected — denied mint (stable/quote) ${signal.symbol}`
+    );
+    recordRejectedSignal(signal, 'denied stable/quote mint');
     return false;
   }
 

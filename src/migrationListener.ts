@@ -16,6 +16,7 @@ import {
   Connection,
 } from '@solana/web3.js';
 import { config } from './config';
+import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 
@@ -517,6 +518,7 @@ function extractPoolAddress(
     if (key === config.pumpSwapProgramId) continue;
     if (key === RAYDIUM_AMM_V4) continue;
     if (key === config.solMint) continue;
+    if (isDeniedCopyMint(key, config.solMint)) continue;
     if (tracked.has(key)) continue;
     // Likely pool/state account (base58 length typical of pubkeys)
     if (key.length >= 32 && key.length <= 44) {
@@ -546,7 +548,7 @@ function parseMigrationTransaction(
     ...new Set(
       postBalances
         .map((b) => b.mint)
-        .filter((m) => m && m !== config.solMint)
+        .filter((m) => m && !isDeniedCopyMint(m, config.solMint))
     ),
   ];
 

@@ -6,6 +6,7 @@
 
 import { gmgnRequest } from './gmgn';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import { isDeniedCopyMint } from './deniedMints';
 
 export interface MarketCandle {
   /** Unix ms */
@@ -49,6 +50,11 @@ export interface LaunchEvent {
 
 function isValidMint(m: string): boolean {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m);
+}
+
+/** Valid mint that is not SOL / known stable / quote — safe as a copy target. */
+function isCopyTargetMint(m: string): boolean {
+  return isValidMint(m) && !isDeniedCopyMint(m);
 }
 
 /** Infer SOL/USD from a DexScreener pair (priceUsd / priceNative) */
@@ -481,7 +487,7 @@ async function fetchFromDexScreener(
       if (chain && chain !== 'solana') continue;
 
       const tokenAddress = String(row.tokenAddress ?? row.address ?? '');
-      if (!isValidMint(tokenAddress) || seen.has(tokenAddress)) continue;
+      if (!isCopyTargetMint(tokenAddress) || seen.has(tokenAddress)) continue;
 
       // Fetch pair details
       const pairData = await fetchJson(
@@ -603,7 +609,7 @@ async function fetchFromDexScreener(
         const mint = String(
           (pair.baseToken as { address?: string } | undefined)?.address ?? ''
         );
-        if (!isValidMint(mint) || seen.has(mint)) continue;
+        if (!isCopyTargetMint(mint) || seen.has(mint)) continue;
 
         const createdAt = Number(pair.pairCreatedAt ?? 0);
         if (!createdAt || createdAt < fromMs || createdAt > toMs) continue;
@@ -712,7 +718,7 @@ async function fetchFromGmgn(
       const mint = String(
         row.address ?? row.base_address ?? row.token_address ?? ''
       );
-      if (!isValidMint(mint)) continue;
+      if (!isCopyTargetMint(mint)) continue;
 
       const openTs = Number(row.open_timestamp ?? row.created_timestamp ?? 0);
       const launchedAt = openTs < 1e12 ? openTs * 1000 : openTs;
@@ -914,7 +920,7 @@ export async function fetchRecentLaunches(
         let added = 0;
         for (const t of trend.tokens) {
           const mint = String(t.mint || '');
-          if (!isValidMint(mint) || seen.has(mint)) continue;
+          if (!isCopyTargetMint(mint) || seen.has(mint)) continue;
           const launchedAt =
             Number(t.liquidityUsd || 0) > 0 ? toMs - 60 * 60_000 : 0;
           // Only keep if we can get a Dex pair in window
@@ -1021,7 +1027,7 @@ export async function fetchLivePriceSol(mint: string): Promise<number | null> {
 export async function fetchLiveTokenSnapshot(
   mint: string
 ): Promise<{ priceSol: number | null; marketCapUsd: number | null } | null> {
-  if (!isValidMint(mint)) return null;
+  if (!isCopyTargetMint(mint)) return null;
   const data = await fetchJson(
     `https://api.dexscreener.com/latest/dex/tokens/${mint}`
   );
