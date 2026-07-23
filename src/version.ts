@@ -1,6 +1,8 @@
 /**
  * App version + last-updated stamp for the dashboard header.
- * Prefer package.json fields; fall back to git commit date when available.
+ * Semver always comes from package.json (single source of truth).
+ * Timestamp prefers build/env or latest git commit so the header
+ * stays fresh on deploy even if package.json updatedAt was not bumped.
  */
 
 import { execSync } from 'node:child_process';
@@ -76,9 +78,10 @@ export function getAppVersion(): AppVersionInfo {
   const version = String(pkg.version || '0.0.0');
   const updatedAt =
     process.env.BUILD_UPDATED_AT?.trim() ||
+    process.env.RENDER_GIT_COMMIT_TIMESTAMP?.trim() ||
+    gitValue('log -1 --format=%cI') ||
     pkg.updatedAt ||
     pkg.buildUpdatedAt ||
-    gitValue('log -1 --format=%cI') ||
     new Date().toISOString();
   const gitSha =
     process.env.RENDER_GIT_COMMIT?.slice(0, 7) ||
