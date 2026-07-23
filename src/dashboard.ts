@@ -510,7 +510,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .persist-banner {
       display: none;
-      margin-bottom: 0.85rem;
+      margin-top: 1.25rem;
+      margin-bottom: 0;
       padding: 0.75rem 1rem;
       border-radius: 0.65rem;
       border: 1px solid #b45309;
@@ -518,6 +519,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #fbbf24;
       font-size: 13px;
       line-height: 1.45;
+    }
+    .persist-banner + .persist-banner {
+      margin-top: 0.65rem;
+    }
+    .page-alerts {
+      margin-top: 1.5rem;
+      padding-top: 0.25rem;
     }
     .persist-banner strong { color: #fde68a; }
 
@@ -797,9 +805,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
       </div>
     </div>
-
-    <div id="persist-banner" class="persist-banner" role="alert"></div>
-    <div id="rpc-banner" class="persist-banner" role="alert" style="display:none"></div>
 
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
