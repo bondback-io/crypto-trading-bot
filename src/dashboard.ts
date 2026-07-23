@@ -1037,7 +1037,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3">
           <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div>
           <div class="text-lg font-semibold" id="signals">—</div>
-          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy activity in the last 15 minutes while monitor is running with wallets watched. Amber = running but quiet, or paused. Red = monitor stopped, no wallets watched, or RPC unhealthy.">
+          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy seen in the last 15 minutes while monitor is running with wallets watched. Amber = running but quiet (shows age of last signal), or paused. Red = monitor stopped, no wallets watched, or RPC unhealthy.">
             <span class="dot dot-quiet" id="signal-light-dot"></span>
             <span id="signal-light-label">Signals: —</span>
           </div>
@@ -3909,8 +3909,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (wrap) {
           const age = light.ageMs != null ? Math.round(light.ageMs / 60000) + 'm ago' : 'none yet';
           wrap.title =
-            'Green = wallet-buy activity in last 15m (monitor running + wallets watched). ' +
-            'Amber = running but quiet, or intentionally paused. ' +
+            'Green = wallet-buy seen in last 15m (monitor running + wallets watched). ' +
+            'Amber = running but quiet (or paused). ' +
             'Red = stopped, no wallets, or RPC unhealthy. ' +
             'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
         }
@@ -4411,15 +4411,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const metricsLine = (m.liquidityUsd != null || m.devHoldPct != null || ar.riskScore != null || bc.progressPct != null || sn.sniperScore != null || beLiq != null || beVol != null || beHold != null)
               ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · vol24h $\${beVol != null ? beVol.toFixed(0) : '?'} · holders \${beHold != null ? beHold : '?'} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : (m.topHolderPct != null ? Number(m.topHolderPct).toFixed(1) + '%' : '?')}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
               : '';
+            const skipBadge = a.skipReason
+              ? \` <span style="color:var(--muted)">· \${a.tradeStatus === 'waiting' ? 'waiting' : 'skip'}: \${escHtml(String(a.skipReason).slice(0, 80))}</span>\`
+              : (a.tradeStatus === 'taken' ? ' <span style="color:var(--green);font-weight:600">· taken</span>' : '');
+            const seenAt = a.detectedAt || a.timestamp;
+            const blockAge = a.timestamp ? (Date.now() - Number(a.timestamp)) : 0;
+            const staleStyle = blockAge > 60 * 60 * 1000 ? 'opacity:0.72' : '';
+            const ageNote = blockAge > 60 * 60 * 1000
+              ? ' <span class="mint" title="On-chain buy time is older than 1h — shown for context">· on-chain \${fmtTimeAgoCell(a.timestamp)}</span>'
+              : '';
             return \`
-          <div class="log-entry">
+          <div class="log-entry" style="\${staleStyle}">
             <strong>\${a.walletName}</strong> bought
             \${fmtToken(a.symbol, a.name, a.mint)}
             \${a.name && a.name !== a.symbol ? '<span class="mint">(' + escHtml(a.name) + ')</span>' : ''}
             \${a.isMigration ? '🚀' : a.earlyBuy ? '🌱' : a.isPumpFun ? '🎯' : ''}
             \${a.earlyBuy && a.earlyBuyerCount ? '<span class="mint">early×' + a.earlyBuyerCount + '</span>' : ''}
-            \${metricsLine}
-            <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · \${fmtTimeAgoCell(a.timestamp)}</span>
+            \${metricsLine}\${skipBadge}
+            <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · seen \${fmtTimeAgoCell(seenAt)}</span>\${ageNote}
           </div>\`;
           }).join('');
 

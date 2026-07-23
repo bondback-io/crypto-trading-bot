@@ -11,7 +11,8 @@ import {
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets } from './config';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats } from './connection';
+import { getConnection, getRpcStats, getRpcUrl } from './connection';
+import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices } from './trade';
 import { paperTrader } from './paperTrader';
 import { refreshOpenMarketActivity } from './marketData';
@@ -100,10 +101,16 @@ export interface WalletBuyEvent {
   /** Full token name */
   name: string;
   signature: string;
+  /** On-chain block time (ms) */
   timestamp: number;
+  /** Wall-clock when the monitor first recorded this buy */
+  detectedAt?: number;
   isPumpFun: boolean;
   isMigration: boolean;
   solSpent?: number;
+  /** Copy-trade outcome for Recent Signals */
+  tradeStatus?: 'seen' | 'taken' | 'skipped' | 'waiting';
+  skipReason?: string;
   /** Cached on-chain / Dex metrics when available */
   metrics?: ReturnType<typeof summarizeTokenMetrics>;
   /** Anti-rug risk summary for dashboard */
@@ -199,14 +206,21 @@ const MAX_RECENT_SIGNALS = 40;
 /** Longer-lived feed for dashboard (separate from convergence window prune). */
 const activityFeed: WalletBuyEvent[] = [];
 const MAX_ACTIVITY_FEED = 200;
-const ACTIVITY_FEED_TTL_MS = 6 * 60 * 60 * 1000;
+/** Keep Recent Signals for a full day; UI de-emphasizes stale rows. */
+const ACTIVITY_FEED_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Rolling 24h signal timestamps for Overview count.
  * Separate from activityFeed (capped at 200) so the displayed total is not truncated.
+ * Values are wall-clock detectedAt (not block time) so the signal light stays honest.
  */
 const SIGNAL_COUNT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const signals24hTimestamps: number[] = [];
+
+/** Parsed buys waiting for filter/trade handling — keeps pollWallet fast. */
+const pendingBuyEvents: WalletBuyEvent[] = [];
+let buyDrainInFlight = false;
+const MAX_PENDING_BUY_EVENTS = 80;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
@@ -382,17 +396,23 @@ async function pollAllWallets(): Promise<void> {
     return;
   }
   pollInFlight = true;
+  const cycleStarted = Date.now();
   try {
     const wallets = getWalletsForPolling();
-    // Keep concurrent RPC polls low — public RPCs + large wallet lists OOM Render
-    const batchSize = 4;
+    const publicRpc = isPublicRpcUrl(getRpcUrl());
+    // Keep concurrent RPC polls low on public RPCs; paid endpoints can go faster
+    const batchSize = publicRpc ? 4 : 8;
+    const batchGapMs = publicRpc ? 200 : 80;
     for (let i = 0; i < wallets.length; i += batchSize) {
       const batch = wallets.slice(i, i + batchSize);
       await Promise.allSettled(batch.map((wallet) => pollWallet(wallet)));
       if (i + batchSize < wallets.length) {
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, batchGapMs));
       }
     }
+
+    // Drain buy handlers after signature scan so detection isn't blocked by anti-rug
+    await drainBuyEventQueue();
 
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
     if (openMints.length > 0) {
@@ -405,6 +425,14 @@ async function pollAllWallets(): Promise<void> {
     await evaluateReBuyOpportunities();
 
     pruneOldBuys();
+
+    const elapsed = Date.now() - cycleStarted;
+    if (elapsed > config.pollIntervalMs * 1.5) {
+      console.warn(
+        `[monitor] Poll cycle slow: ${elapsed}ms for ${wallets.length} wallet(s) ` +
+          `(interval ${config.pollIntervalMs}ms) — consider a paid RPC_URL`
+      );
+    }
   } finally {
     pollInFlight = false;
   }
@@ -1010,6 +1038,67 @@ export function isWalletActive(wallet: SmartWallet): boolean {
   return passesActivityRules(wallet);
 }
 
+/**
+ * Queue a detected buy for async filter/trade handling so the wallet poll
+ * loop can keep scanning signatures without waiting on GMGN/Dex/Jupiter.
+ */
+function enqueueBuyEvent(buy: WalletBuyEvent): void {
+  if (pendingBuyEvents.length >= MAX_PENDING_BUY_EVENTS) {
+    console.warn(
+      `[monitor] Buy queue full (${MAX_PENDING_BUY_EVENTS}) — dropping oldest`
+    );
+    pendingBuyEvents.shift();
+  }
+  pendingBuyEvents.push(buy);
+}
+
+async function drainBuyEventQueue(): Promise<void> {
+  if (buyDrainInFlight) return;
+  buyDrainInFlight = true;
+  try {
+    while (pendingBuyEvents.length > 0 && !paused) {
+      const buy = pendingBuyEvents.shift();
+      if (!buy) break;
+      try {
+        await handleBuyEvent(buy);
+      } catch (err) {
+        console.error(
+          `[monitor] Buy handler error for ${buy.walletName}/${buy.mint.slice(0, 8)}…:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  } finally {
+    buyDrainInFlight = false;
+  }
+}
+
+async function fetchParsedTx(
+  signature: string
+): Promise<ParsedTransactionWithMeta | null> {
+  const conn = getConnection();
+  try {
+    const tx = await conn.getParsedTransaction(signature, {
+      maxSupportedTransactionVersion: 0,
+    });
+    if (tx) return tx;
+  } catch (err) {
+    console.warn(
+      `[monitor] getParsedTransaction failed ${signature.slice(0, 8)}…:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+  // Brief retry — public RPCs often return null under load
+  await new Promise((r) => setTimeout(r, 250));
+  try {
+    return await getConnection().getParsedTransaction(signature, {
+      maxSupportedTransactionVersion: 0,
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function pollWallet(wallet: SmartWallet): Promise<void> {
   try {
     let pubkey: PublicKey;
@@ -1021,7 +1110,11 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
     }
 
     const conn = getConnection();
-    const signatures = await conn.getSignaturesForAddress(pubkey, { limit: 10 });
+    const publicRpc = isPublicRpcUrl(getRpcUrl());
+    const sigLimit = publicRpc ? 12 : 20;
+    const signatures = await conn.getSignaturesForAddress(pubkey, {
+      limit: sigLimit,
+    });
 
     if (signatures.length === 0) {
       walletLastActivity.set(wallet.address, {
@@ -1032,8 +1125,25 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
     }
 
     const lastSeen = lastSignature.get(wallet.address);
-    const newSigs: string[] = [];
 
+    // First sight: seed cursor ONLY — never replay historical txs into the feed.
+    // Replaying on restart was flooding Recent Signals with 9–14h-old buys and
+    // advancing the cursor past live activity when parses failed.
+    if (lastSeen == null) {
+      lastSignature.set(wallet.address, signatures[0].signature);
+      walletLastActivity.set(wallet.address, {
+        timestamp: Date.now(),
+        signature: signatures[0].signature,
+        type: 'poll',
+      });
+      console.log(
+        `[monitor] Seeded sig cursor for ${wallet.name} ` +
+          `(${wallet.address.slice(0, 8)}…) — watching for new buys only`
+      );
+      return;
+    }
+
+    const newSigs: string[] = [];
     for (const sig of signatures) {
       if (sig.signature === lastSeen) break;
       newSigs.push(sig.signature);
@@ -1041,18 +1151,29 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
 
     if (newSigs.length === 0) return;
 
-    lastSignature.set(wallet.address, signatures[0].signature);
+    // Oldest → newest so we can advance the cursor safely through successes
+    const chronological = newSigs.reverse();
+    const maxParse = publicRpc ? 4 : 10;
+    const toParse = chronological.slice(0, maxParse);
 
-    // Cap tx parses per wallet per cycle (public RPC + many wallets → OOM)
-    const toParse = newSigs.reverse().slice(0, 3);
+    let lastFullyProcessed: string | null = null;
+    let stoppedEarly = false;
+
     for (const sig of toParse) {
-      const tx = await conn.getParsedTransaction(sig, {
-        maxSupportedTransactionVersion: 0,
-      });
-      if (!tx) continue;
+      const tx = await fetchParsedTx(sig);
+      if (!tx) {
+        // Do NOT advance past a failed parse — retry next cycle
+        stoppedEarly = true;
+        console.warn(
+          `[monitor] Parse miss for ${wallet.name} sig ${sig.slice(0, 8)}… — ` +
+            `holding cursor (will retry)`
+        );
+        break;
+      }
 
       const buys = parseBuysFromTransaction(tx, wallet, sig);
       for (const buy of buys) {
+        buy.detectedAt = Date.now();
         walletLastActivity.set(wallet.address, {
           timestamp: buy.timestamp,
           signature: buy.signature,
@@ -1060,9 +1181,21 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
           name: buy.name,
           type: 'buy',
         });
-        await handleBuyEvent(buy);
+        enqueueBuyEvent(buy);
+      }
+      lastFullyProcessed = sig;
+    }
+
+    if (lastFullyProcessed) {
+      if (!stoppedEarly && toParse.length >= chronological.length) {
+        // Caught up with this fetch's tip
+        lastSignature.set(wallet.address, signatures[0].signature);
+      } else {
+        // Partial progress (cap or parse miss) — resume from last success
+        lastSignature.set(wallet.address, lastFullyProcessed);
       }
     }
+    // If every parse failed, leave lastSeen unchanged so we retry the same tip
   } catch (err) {
     console.error(`[monitor] Error polling ${wallet.name}:`, err);
   }
@@ -1262,11 +1395,19 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
   finishBuy(event.mint, result.success);
   if (result.success) {
     recordTradeExecuted();
+    annotateActivityFeedByMint(event.mint, {
+      tradeStatus: 'taken',
+      skipReason: undefined,
+    });
     console.log(
       `[monitor] Migration priority trade executed (${result.mode}): ${label} ` +
         `@ ${sizing.sizeSol.toFixed(3)} SOL`
     );
   } else {
+    annotateActivityFeedByMint(event.mint, {
+      tradeStatus: 'skipped',
+      skipReason: result.error || 'migration executeBuy failed',
+    });
     console.error(`[monitor] Migration priority trade failed: ${result.error}`);
   }
   } catch (err) {
@@ -1293,6 +1434,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     );
     return;
   }
+  buy.detectedAt = buy.detectedAt ?? Date.now();
   await enrichBuyEvent(buy);
   const label = formatTokenLabel(buy.symbol, buy.name, buy.mint);
 
@@ -1309,6 +1451,30 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     `[monitor] 🔔 ${buy.walletName} bought ${label} (${buy.mint.slice(0, 8)}…) ` +
       `[pump: ${buy.isPumpFun}, migration: ${isMigration}]`
   );
+
+  // Push to Recent Signals IMMEDIATELY so the feed stays live even when
+  // anti-rug / Dex / Birdeye calls are slow or the trade is later skipped.
+  if (!recentBuys.has(buy.mint)) {
+    recentBuys.set(buy.mint, []);
+  }
+  const buys = recentBuys.get(buy.mint)!;
+  let feedEvent: WalletBuyEvent | null = null;
+
+  if (!buys.some((b) => b.wallet === buy.wallet && b.signature === buy.signature)) {
+    feedEvent = {
+      ...buy,
+      isMigration,
+      tradeStatus: 'seen',
+      detectedAt: buy.detectedAt,
+    };
+    buys.push(feedEvent);
+    pushActivityFeed(feedEvent);
+  } else {
+    feedEvent =
+      buys.find(
+        (b) => b.wallet === buy.wallet && b.signature === buy.signature
+      ) ?? null;
+  }
 
   // Attach token metrics + anti-rug + bonding curve for dashboard (cached)
   try {
@@ -1378,25 +1544,18 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
 
   if (isMigration) markLaunchMigrated(buy.mint);
 
-  if (!recentBuys.has(buy.mint)) {
-    recentBuys.set(buy.mint, []);
-  }
-  const buys = recentBuys.get(buy.mint)!;
-
-  if (!buys.some((b) => b.wallet === buy.wallet && b.signature === buy.signature)) {
-    const event: WalletBuyEvent = {
-      ...buy,
-      isMigration,
-      metrics: buy.metrics,
-      antiRug: buy.antiRug,
-      bondingCurve: buy.bondingCurve,
-      sniper: buy.sniper,
-      birdeye: buy.birdeye,
-      earlyBuy: buy.earlyBuy,
-      earlyBuyerCount: buy.earlyBuyerCount,
-    };
-    buys.push(event);
-    pushActivityFeed(event);
+  // Sync heavy enrichment onto the live feed row
+  if (feedEvent) {
+    feedEvent.metrics = buy.metrics;
+    feedEvent.antiRug = buy.antiRug;
+    feedEvent.bondingCurve = buy.bondingCurve;
+    feedEvent.sniper = buy.sniper;
+    feedEvent.birdeye = buy.birdeye;
+    feedEvent.earlyBuy = buy.earlyBuy;
+    feedEvent.earlyBuyerCount = buy.earlyBuyerCount;
+    feedEvent.isMigration = isMigration;
+    feedEvent.symbol = buy.symbol;
+    feedEvent.name = buy.name;
   }
 
   // Feed re-buy confirmation if we're watching this mint after a profit sell
@@ -1405,7 +1564,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     const price = paperTrader.getTokenPrice(buy.mint);
     if (price != null) updateCandidatePrice(buy.mint, price);
     const triggered = await tryExecuteReBuy(buy.mint);
-    if (triggered) return; // re-buy path handled entry
+    if (triggered) {
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'taken',
+        skipReason: undefined,
+      });
+      return; // re-buy path handled entry
+    }
   }
 
   let signal: TradeSignal | null = null;
@@ -1667,10 +1832,15 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       const needed = config.filters.convergenceRequired ?? 2;
       const seen = recentBuys.get(buy.mint)?.length ?? 1;
       if (seen < needed) {
+        const waitReason = `waiting convergence ${seen}/${needed}`;
         console.log(
           `[monitor] Waiting for convergence on ${label}: ${seen}/${needed} wallets` +
             ` (non-Pump buy from ${buy.walletName})`
         );
+        annotateActivityFeed(buy.mint, buy.signature, {
+          tradeStatus: 'waiting',
+          skipReason: waitReason,
+        });
       }
     }
     return;
@@ -1687,8 +1857,16 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       console.log(
         `[monitor] ${label} already traded — waiting for re-buy confirmation (dip + wallets/volume)`
       );
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'waiting',
+        skipReason: 'already traded — re-buy watch',
+      });
     } else {
       console.log(`[monitor] Signal skipped — already traded ${label}`);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: 'already traded',
+      });
     }
     return;
   }
@@ -1696,6 +1874,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   try {
   if (!(await passesFilters(signal))) {
     finishBuy(buy.mint, false);
+    // recordRejectedSignal already annotated the feed with skipReason
     return;
   }
 
@@ -1777,16 +1956,28 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
 
   if (result.success) {
     recordTradeExecuted();
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'taken',
+      skipReason: undefined,
+    });
     console.log(
       `[monitor] Copy trade executed (${result.mode}): ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}` +
         (signal.convictionScore != null ? ` · conviction ${signal.convictionScore}` : '') +
         ` · ${sizing.sizeSol.toFixed(4)} SOL`
     );
   } else {
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason: result.error || 'executeBuy failed',
+    });
     console.error(`[monitor] Copy trade failed: ${result.error}`);
   }
   } catch (err) {
     finishBuy(buy.mint, false);
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason: err instanceof Error ? err.message : 'handler error',
+    });
     throw err;
   }
 }
@@ -1991,6 +2182,47 @@ function recordRejectedSignal(signal: TradeSignal, reason: string): void {
   });
   preview.reason = reason;
   recordSignalSizing(signal, preview, false);
+  // Annotate matching Recent Signals rows so skips are visible even when no open
+  annotateActivityFeedByMint(signal.mint, {
+    tradeStatus: 'skipped',
+    skipReason: reason,
+  });
+}
+
+function annotateActivityFeed(
+  mint: string,
+  signature: string,
+  patch: Partial<WalletBuyEvent>
+): void {
+  for (const ev of activityFeed) {
+    if (ev.mint === mint && ev.signature === signature) {
+      Object.assign(ev, patch);
+      return;
+    }
+  }
+  for (const buys of recentBuys.values()) {
+    for (const ev of buys) {
+      if (ev.mint === mint && ev.signature === signature) {
+        Object.assign(ev, patch);
+        return;
+      }
+    }
+  }
+}
+
+/** Annotate newest feed rows for a mint (filter rejects may not have this buy's sig). */
+function annotateActivityFeedByMint(
+  mint: string,
+  patch: Partial<WalletBuyEvent>
+): void {
+  let patched = 0;
+  for (const ev of activityFeed) {
+    if (ev.mint !== mint) continue;
+    if (ev.tradeStatus === 'taken') continue;
+    Object.assign(ev, patch);
+    patched += 1;
+    if (patched >= 3) break;
+  }
 }
 
 export function getRecentSignals() {
@@ -2243,25 +2475,18 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   signal.sizeMultiplier = conviction.sizeMultiplier;
   if (!conviction.pass) {
     const detail = conviction.reasons.join('; ') || 'below threshold';
-    const preview = resolveTradeSize(
-      signal.isMigration || signal.nearMigration || signal.earlyBuy
-        ? 'migration'
-        : 'normal',
-      {
-        riskScore: signal.antiRug?.riskScore,
-        convictionScore: conviction.score,
-        sizeMultiplier: conviction.sizeMultiplier,
-      }
-    );
-    recordSignalSizing(signal, preview, false);
     console.log(
       `[monitor] FILTER_SKIP kind=${signalKind} reason=conviction ` +
         `${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     paperTrader.addLog(
       'info',
-      `Low conviction ${signal.symbol}: ${detail} (score ${conviction.score}) · would size ${preview.sizeSol.toFixed(4)} SOL`,
+      `Low conviction ${signal.symbol}: ${detail} (score ${conviction.score})`,
       { mint: signal.mint, symbol: signal.symbol }
+    );
+    recordRejectedSignal(
+      signal,
+      `conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     return false;
   }
@@ -2331,17 +2556,22 @@ function pushActivityFeed(event: WalletBuyEvent): void {
   if (activityFeed.length > MAX_ACTIVITY_FEED) {
     activityFeed.length = MAX_ACTIVITY_FEED;
   }
-  signals24hTimestamps.push(event.timestamp);
+  // Wall-clock detection time — not blockTime — so LIVE/quiet reflects real monitor health
+  const detected = event.detectedAt ?? Date.now();
+  event.detectedAt = detected;
+  signals24hTimestamps.push(detected);
   pruneSignals24hCount();
 }
 
 function pruneSignals24hCount(now = Date.now()): void {
   const cutoff = now - SIGNAL_COUNT_WINDOW_MS;
-  let i = 0;
-  while (i < signals24hTimestamps.length && signals24hTimestamps[i] < cutoff) {
-    i += 1;
+  let write = 0;
+  for (let i = 0; i < signals24hTimestamps.length; i++) {
+    if (signals24hTimestamps[i] >= cutoff) {
+      signals24hTimestamps[write++] = signals24hTimestamps[i];
+    }
   }
-  if (i > 0) signals24hTimestamps.splice(0, i);
+  signals24hTimestamps.length = write;
 }
 
 function getSignals24hCount(): number {
@@ -2352,7 +2582,11 @@ function getSignals24hCount(): number {
 function getLastSignalAt(): number | null {
   pruneSignals24hCount();
   if (signals24hTimestamps.length === 0) return null;
-  return signals24hTimestamps[signals24hTimestamps.length - 1] ?? null;
+  let max = signals24hTimestamps[0];
+  for (let i = 1; i < signals24hTimestamps.length; i++) {
+    if (signals24hTimestamps[i] > max) max = signals24hTimestamps[i];
+  }
+  return max;
 }
 
 /** Recent wallet-buy signal activity window for Overview signal light (15m). */
@@ -2418,9 +2652,17 @@ export function getSignalLightStatus(now = Date.now()): {
       ageMs,
     };
   }
+  const quietAge =
+    ageMs == null
+      ? 'none yet'
+      : ageMs < 60_000
+        ? `${Math.round(ageMs / 1000)}s ago`
+        : ageMs < 3_600_000
+          ? `${Math.round(ageMs / 60_000)}m ago`
+          : `${Math.round(ageMs / 3_600_000)}h ago`;
   return {
     state: 'quiet',
-    label: 'Signals: quiet',
+    label: `Signals: quiet (${quietAge})`,
     lastSignalAt,
     signals24h,
     ageMs,
@@ -2429,10 +2671,10 @@ export function getSignalLightStatus(now = Date.now()): {
 
 function pruneActivityFeed(): void {
   const cutoff = Date.now() - ACTIVITY_FEED_TTL_MS;
-  while (
-    activityFeed.length > 0 &&
-    activityFeed[activityFeed.length - 1].timestamp < cutoff
-  ) {
+  while (activityFeed.length > 0) {
+    const oldest = activityFeed[activityFeed.length - 1];
+    const ageBasis = oldest.detectedAt ?? oldest.timestamp;
+    if (ageBasis >= cutoff) break;
     activityFeed.pop();
   }
 }
