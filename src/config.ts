@@ -367,7 +367,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       riskMultiplier: 0.45,
       convictionMultiplier: 1.5,
       minProfitPercent: 42,
-      maxProfitPercent: 100,
+      maxProfitPercent: 1000,
       stopLossPercent: -30,
     },
     filters: {
@@ -889,7 +889,7 @@ export const config: BotConfig = {
     riskMultiplier: 0.45,
     convictionMultiplier: 1.5,
     minProfitPercent: 42,
-    maxProfitPercent: 100,
+    maxProfitPercent: 1000,
     stopLossPercent: -30,
   },
 
@@ -1132,6 +1132,14 @@ const REQUIRE_HEALTHY_CURVE_OFF_V1 = 'requireHealthyCurve_off_v1';
 const HARD_VOLUME_LIQ_FLOORS_V113 = 'hardVolumeLiquidityFloors_v113';
 /** One-shot: re-apply selected riskLevel presets onto persisted knobs (Medium sync). */
 const RISK_LEVEL_SYNC_V1 = 'riskLevelSync_v1';
+/**
+ * One-shot: bump maxProfitPercent to 1000 when still on an old default (100/500),
+ * and clamp any value above the new 5000% ceiling.
+ */
+const MAX_PROFIT_DEFAULT_V1123 = 'maxProfitDefault_v1123';
+const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
+const NEW_MAX_PROFIT_DEFAULT = 1000;
+const MAX_PROFIT_PERCENT_CEILING = 5000;
 let settingsMigrations: Record<string, boolean> = {};
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
@@ -1245,6 +1253,12 @@ function syncConfigAliases(): void {
   }
   if (config.trade.convictionMultiplier == null) {
     config.trade.convictionMultiplier = 1.5;
+  }
+  if (
+    Number.isFinite(config.trade.maxProfitPercent) &&
+    config.trade.maxProfitPercent > MAX_PROFIT_PERCENT_CEILING
+  ) {
+    config.trade.maxProfitPercent = MAX_PROFIT_PERCENT_CEILING;
   }
   if (config.risk.trailingStopPercent != null) {
     config.risk.trailingStopPct = config.risk.trailingStopPercent;
@@ -1436,6 +1450,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyMaxProfitDefaultMigration()) {
+    settingsMigrations[MAX_PROFIT_DEFAULT_V1123] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied maxProfitDefault_v1123 — maxProfitPercent now ${config.trade.maxProfitPercent}% (default ${NEW_MAX_PROFIT_DEFAULT}, ceiling ${MAX_PROFIT_PERCENT_CEILING})`
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1585,6 +1607,22 @@ function applyRiskLevelSyncMigration(): boolean {
       ? config.riskLevel
       : 'medium';
   applyRiskLevel(level, { persist: false });
+  return true;
+}
+
+/**
+ * One-shot: raise maxProfitPercent to the new 1000% default when still on an old
+ * shipped default (100 or 500). Custom values are left alone unless above the
+ * new 5000% ceiling (then clamped). Always marks done so it runs once.
+ */
+function applyMaxProfitDefaultMigration(): boolean {
+  if (settingsMigrations[MAX_PROFIT_DEFAULT_V1123]) return false;
+  const cur = Number(config.trade.maxProfitPercent);
+  if (!Number.isFinite(cur) || OLD_MAX_PROFIT_DEFAULTS.has(cur)) {
+    config.trade.maxProfitPercent = NEW_MAX_PROFIT_DEFAULT;
+  } else if (cur > MAX_PROFIT_PERCENT_CEILING) {
+    config.trade.maxProfitPercent = MAX_PROFIT_PERCENT_CEILING;
+  }
   return true;
 }
 
@@ -1857,6 +1895,18 @@ export function updateTradeConfig(partial: Partial<TradeConfig>): void {
     config.trade.convictionMultiplier = Math.min(
       3,
       Math.max(1, Number(partial.convictionMultiplier))
+    );
+  }
+  if (partial.maxProfitPercent != null) {
+    config.trade.maxProfitPercent = Math.min(
+      MAX_PROFIT_PERCENT_CEILING,
+      Math.max(20, Number(partial.maxProfitPercent))
+    );
+  }
+  if (partial.minProfitPercent != null) {
+    config.trade.minProfitPercent = Math.min(
+      MAX_PROFIT_PERCENT_CEILING,
+      Math.max(10, Number(partial.minProfitPercent))
     );
   }
   persistUserSettings();

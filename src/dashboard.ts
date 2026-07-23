@@ -1729,8 +1729,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="range" id="minProfitPercent" min="10" max="200" step="5" value="50" />
             </div>
             <div class="field">
-              <label title="Hard ceiling — with profit strategy ON this caps full exit before trail; trail can still run the bag past this until stop hits">Max Profit % — <span class="val" id="v-maxProfitPercent">500</span></label>
-              <input type="range" id="maxProfitPercent" min="20" max="500" step="5" value="500" />
+              <label title="Hard ceiling — with profit strategy ON this caps full exit before trail; trail can still run the bag past this until stop hits">Max Profit % — <span class="val" id="v-maxProfitPercent">1000</span></label>
+              <input type="range" id="maxProfitPercent" min="20" max="5000" step="5" value="1000" />
             </div>
             <div class="field">
               <label title="Hard stop-loss % from entry (negative)">Stop Loss % — <span class="val" id="v-stopLossPercent">-30</span></label>
