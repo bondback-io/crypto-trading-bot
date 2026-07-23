@@ -30,6 +30,8 @@ export interface PersistedBotSettings {
   riskLevel?: 'low' | 'medium' | 'high' | 'degen';
   /** Opt-in Strict Mode overlay (default false) */
   strictMode?: boolean;
+  /** Strict intensity when ON: low (most selective) | medium (default) | high (more active) */
+  strictModeIntensity?: 'low' | 'medium' | 'high';
   trade?: Record<string, unknown>;
   filters?: Record<string, unknown>;
   strategy?: Record<string, unknown>;

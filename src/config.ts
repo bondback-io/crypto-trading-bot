@@ -997,6 +997,11 @@ export interface BotConfig {
    * timing / exits on top of the active risk level. Default OFF.
    */
   strictMode: boolean;
+  /**
+   * Strict Mode intensity when ON: low (most selective) | medium (default) |
+   * high (still strict, more active). Ignored when strictMode is OFF.
+   */
+  strictModeIntensity: 'low' | 'medium' | 'high';
   smartWallets: SmartWallet[];
   /** Live execution wallets (keys via env only) */
   tradingWallets: TradingWalletSlot[];
@@ -1153,6 +1158,7 @@ export const config: BotConfig = {
   mode: 'paper',
   riskLevel: 'medium',
   strictMode: false,
+  strictModeIntensity: 'medium',
   smartWallets: [],
   tradingWallets: [],
   activeTradingWalletId: null,
@@ -1456,6 +1462,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     mode: config.mode,
     riskLevel: config.riskLevel,
     strictMode: config.strictMode === true,
+    strictModeIntensity:
+      config.strictModeIntensity === 'low' ||
+      config.strictModeIntensity === 'high'
+        ? config.strictModeIntensity
+        : 'medium',
     trade: { ...config.trade },
     filters: { ...config.filters },
     strategy: { ...config.strategy },
@@ -1562,6 +1573,13 @@ function syncConfigAliases(): void {
   }
   if (config.strictMode == null) {
     config.strictMode = false;
+  }
+  if (
+    config.strictModeIntensity !== 'low' &&
+    config.strictModeIntensity !== 'medium' &&
+    config.strictModeIntensity !== 'high'
+  ) {
+    config.strictModeIntensity = 'medium';
   }
   if (config.filters.enableWalletQualityGate == null) {
     config.filters.enableWalletQualityGate = true;
@@ -1728,6 +1746,13 @@ function applySettingsSnapshot(
   }
   if (typeof saved.strictMode === 'boolean') {
     config.strictMode = saved.strictMode;
+  }
+  if (
+    saved.strictModeIntensity === 'low' ||
+    saved.strictModeIntensity === 'medium' ||
+    saved.strictModeIntensity === 'high'
+  ) {
+    config.strictModeIntensity = saved.strictModeIntensity;
   }
 
   if (mode === 'replace') {
@@ -2293,6 +2318,13 @@ function applyWalletQualityEntryMigration(): boolean {
   if (config.strictMode == null) {
     config.strictMode = false;
   }
+  if (
+    config.strictModeIntensity !== 'low' &&
+    config.strictModeIntensity !== 'medium' &&
+    config.strictModeIntensity !== 'high'
+  ) {
+    config.strictModeIntensity = 'medium';
+  }
 
   syncConfigAliases();
   return true;
@@ -2782,23 +2814,82 @@ export function setMode(
 /** Toggle Strict Mode overlay (persisted). Does not change riskLevel presets. */
 export function setStrictMode(
   enabled: boolean,
-  options: { persist?: boolean } = {}
+  options: {
+    persist?: boolean;
+    intensity?: 'low' | 'medium' | 'high';
+  } = {}
 ): {
   strictMode: boolean;
+  strictModeIntensity: 'low' | 'medium' | 'high';
   warning: string | null;
 } {
   config.strictMode = Boolean(enabled);
+  if (
+    options.intensity === 'low' ||
+    options.intensity === 'medium' ||
+    options.intensity === 'high'
+  ) {
+    config.strictModeIntensity = options.intensity;
+  } else if (
+    config.strictMode &&
+    config.strictModeIntensity !== 'low' &&
+    config.strictModeIntensity !== 'medium' &&
+    config.strictModeIntensity !== 'high'
+  ) {
+    config.strictModeIntensity = 'medium';
+  }
+  const intensity =
+    config.strictModeIntensity === 'low' ||
+    config.strictModeIntensity === 'high'
+      ? config.strictModeIntensity
+      : 'medium';
+  config.strictModeIntensity = intensity;
   const warning = config.strictMode
     ? 'Higher quality trades only – fewer but better setups'
     : null;
   console.log(
     `[config] Strict Mode → ${config.strictMode ? 'ON' : 'OFF'}` +
+      (config.strictMode ? ` · intensity=${intensity}` : '') +
       (warning ? ` · ${warning}` : '')
   );
   if (options.persist !== false) {
     persistUserSettings();
   }
-  return { strictMode: config.strictMode, warning };
+  return {
+    strictMode: config.strictMode,
+    strictModeIntensity: intensity,
+    warning,
+  };
+}
+
+/** Set Strict Mode intensity (persisted). Active only when strictMode is ON. */
+export function setStrictModeIntensity(
+  intensity: 'low' | 'medium' | 'high',
+  options: { persist?: boolean } = {}
+): {
+  strictMode: boolean;
+  strictModeIntensity: 'low' | 'medium' | 'high';
+  warning: string | null;
+} {
+  if (intensity !== 'low' && intensity !== 'medium' && intensity !== 'high') {
+    throw new Error(`Invalid strictModeIntensity: ${intensity}`);
+  }
+  config.strictModeIntensity = intensity;
+  const warning = config.strictMode
+    ? 'Higher quality trades only – fewer but better setups'
+    : null;
+  console.log(
+    `[config] Strict Mode intensity → ${intensity}` +
+      (config.strictMode ? ' (active)' : ' (saved; Strict Mode OFF)')
+  );
+  if (options.persist !== false) {
+    persistUserSettings();
+  }
+  return {
+    strictMode: config.strictMode === true,
+    strictModeIntensity: intensity,
+    warning,
+  };
 }
 
 /**
@@ -2987,6 +3078,11 @@ export function getConfigSnapshot() {
     mode: config.mode,
     riskLevel: config.riskLevel,
     strictMode: config.strictMode === true,
+    strictModeIntensity:
+      config.strictModeIntensity === 'low' ||
+      config.strictModeIntensity === 'high'
+        ? config.strictModeIntensity
+        : 'medium',
     strictModeWarning:
       config.strictMode === true
         ? 'Higher quality trades only – fewer but better setups'

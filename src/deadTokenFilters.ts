@@ -15,17 +15,17 @@ import {
   effectiveMinLiquidityUsd,
   effectiveMinMarketCapUsd,
   effectiveMinRecentActivity,
-  effectiveMinRecentBuyVolumeUsd,
-  effectiveMinRecentVolumeUsd,
   effectiveMinTop10HolderPct,
   effectiveMaxInsiderPct,
-  effectiveMinVolume24hUsd,
 } from './config';
 import type { BondingCurveHealth } from './bondingCurve';
 import {
   effectiveMaxDrawdownFromRecentHighPct,
   effectiveMaxEntryAgeMinutes,
   effectiveRejectDumpingToken,
+  effectiveStrictMinRecentBuyVolumeUsd,
+  effectiveStrictMinRecentVolumeUsd,
+  effectiveStrictMinVolume24hUsd,
 } from './strictMode';
 
 export interface DeadTokenMarketSnapshot {
@@ -162,9 +162,9 @@ export function evaluateDeadTokenHardFloors(
   const earlyPath = Boolean(ctx.earlyEntry || isMigrated);
 
   const minLiqFull = effectiveMinLiquidityUsd();
-  const minVol24 = effectiveMinVolume24hUsd();
-  const minRecentVolFull = effectiveMinRecentVolumeUsd();
-  const minRecentBuyFull = effectiveMinRecentBuyVolumeUsd();
+  const minVol24 = effectiveStrictMinVolume24hUsd();
+  const minRecentVolFull = effectiveStrictMinRecentVolumeUsd();
+  const minRecentBuyFull = effectiveStrictMinRecentBuyVolumeUsd();
   const minHoldersFull = effectiveMinHolders();
   const minActivity = effectiveMinRecentActivity();
 

@@ -1149,10 +1149,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mt-3 pt-3 border-t border-slate-700/80">
           <div class="toggle-row">
-            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, and tighter exits on top of the risk level">Strict Mode</span>
+            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
             <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
           </div>
           <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups</div>
+          <div id="strict-intensity-row" class="mt-2">
+            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Medium matches the original Strict defaults. You can pre-select intensity while Strict is OFF."></span></div>
+            <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective — highest quality bars, fewest trades">Strict-Low</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="Still strict but more active — lower bars than Low">Strict-High</button>
+            </div>
+            <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
+          </div>
           <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
         </div>
         <div class="mint mt-2" id="risk-status">—</div>
@@ -1978,6 +1987,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </div>
             <div id="cfg-risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
             <div class="mint text-xs" id="cfg-risk-level-summary">Selecting a level applies recommended trade size, filters, stops, and selective gates.</div>
+            <div class="mt-3 pt-3 border-t border-slate-700/80">
+              <div class="toggle-row">
+                <span title="Opt-in overlay on top of the risk level">Strict Mode</span>
+                <label class="switch"><input type="checkbox" id="cfg-strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
+              </div>
+              <div id="cfg-strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups</div>
+              <div id="cfg-strict-intensity-row" class="mt-2">
+                <div class="text-xs text-slate-400 mb-1">Intensity</div>
+                <div class="flex flex-wrap gap-2 items-center">
+                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective — highest quality bars, fewest trades">Strict-Low</button>
+                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced (default)">Strict-Medium</button>
+                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-high" onclick="setStrictModeIntensity('high')" title="Still strict, more active">Strict-High</button>
+                </div>
+                <div class="mint text-xs mt-1" id="cfg-strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
+              </div>
+              <div class="mint text-xs mt-1" id="cfg-strict-mode-status">Strict Mode OFF — using risk-level presets</div>
+            </div>
           </div>
           <div class="toggle-row"><span title="Enable the risk engine (limits, sizing, trails)">Risk engine</span><label class="switch"><input type="checkbox" id="riskEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Size buys from risk % of bankroll instead of fixed SOL">Risk-% sizing</span><label class="switch"><input type="checkbox" id="useRiskSizing" checked /><span class="slider"></span></label></div>
@@ -4271,16 +4297,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             '% · filters inherited when fields are 0. Overrides below are optional.';
         }
         // Strict Mode status
-        const strictTog = document.getElementById('strict-mode-toggle');
-        const strictWarn = document.getElementById('strict-mode-warning');
-        const strictSt = document.getElementById('strict-mode-status');
-        if (strictTog) strictTog.checked = !!cfg.strictMode;
-        if (strictWarn) strictWarn.classList.toggle('hidden', !cfg.strictMode);
-        if (strictSt) {
-          strictSt.textContent = cfg.strictMode
-            ? 'Strict Mode ON — higher quality / conviction / cluster / tighter exits'
-            : 'Strict Mode OFF — using risk-level presets';
-        }
+        updateStrictModeUI(cfg);
         if (cfg.strategy.reBuyMinProfitPct != null) {
           document.getElementById('reBuyMinProfitPct').value = cfg.strategy.reBuyMinProfitPct;
         }
@@ -5500,6 +5517,60 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    const STRICT_INTENSITY_META = {
+      low: { label: 'Strict-Low', description: 'Most selective — highest quality bars, fewest trades' },
+      medium: { label: 'Strict-Medium', description: 'Balanced strict overlay (default intensity)' },
+      high: { label: 'Strict-High', description: 'Still strict but more active — lower bars than Low' },
+    };
+
+    function updateStrictModeUI(cfg, status) {
+      const on = !!(cfg && cfg.strictMode);
+      const intensity =
+        (status && status.intensity) ||
+        (cfg && cfg.strictModeIntensity) ||
+        'medium';
+      const meta = STRICT_INTENSITY_META[intensity] || STRICT_INTENSITY_META.medium;
+      const ef = (status && status.effective) || {};
+
+      ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
+        const tog = document.getElementById(id);
+        if (tog) tog.checked = on;
+      });
+      ['strict-mode-warning', 'cfg-strict-mode-warning'].forEach((id) => {
+        const warn = document.getElementById(id);
+        if (warn) warn.classList.toggle('hidden', !on);
+      });
+      ['strict-intensity-row', 'cfg-strict-intensity-row'].forEach((id) => {
+        const row = document.getElementById(id);
+        if (!row) return;
+        row.classList.toggle('opacity-60', !on);
+      });
+      ['low', 'medium', 'high'].forEach((id) => {
+        ['strict-int-', 'cfg-strict-int-'].forEach((prefix) => {
+          const btn = document.getElementById(prefix + id);
+          if (!btn) return;
+          const active = id === intensity;
+          btn.className = active
+            ? 'btn btn-primary text-xs'
+            : 'btn bg-slate-800 text-slate-300 text-xs';
+        });
+      });
+      ['strict-intensity-desc', 'cfg-strict-intensity-desc'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = meta.label + ' — ' + meta.description;
+      });
+      const statusText = on
+        ? (meta.label + ' ON · Q≥' + (ef.minWalletQualityScore ?? '?') +
+           ' · conviction≥' + (ef.minConvictionScore ?? '?') +
+           ' · cluster≥' + (ef.clusterMinWallets ?? '?') +
+           (ef.maxEntryAgeMinutes != null ? ' · entry≤' + ef.maxEntryAgeMinutes + 'm' : ''))
+        : 'Strict Mode OFF — using risk-level presets';
+      ['strict-mode-status', 'cfg-strict-mode-status'].forEach((id) => {
+        const st = document.getElementById(id);
+        if (st) st.textContent = statusText;
+      });
+    }
+
     async function toggleStrictMode(enabled) {
       try {
         const data = await fetchJSON('/api/config/strict-mode', {
@@ -5507,25 +5578,35 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ strictMode: !!enabled }),
         });
-        const warn = document.getElementById('strict-mode-warning');
-        const st = document.getElementById('strict-mode-status');
-        const tog = document.getElementById('strict-mode-toggle');
-        if (tog) tog.checked = !!(data.strictMode);
-        if (warn) warn.classList.toggle('hidden', !data.strictMode);
-        if (st) {
-          const ef = (data.status && data.status.effective) || {};
-          st.textContent = data.strictMode
-            ? ('Strict ON · Q≥' + (ef.minWalletQualityScore ?? '?') +
-               ' · conviction≥' + (ef.minConvictionScore ?? '?') +
-               ' · cluster≥' + (ef.clusterMinWallets ?? '?'))
-            : 'Strict Mode OFF — using risk-level presets';
-        }
-        if (data.warning) alert(data.warning);
+        updateStrictModeUI(
+          data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
+          data.status
+        );
+        if (data.warning && enabled) alert(data.warning);
         refresh();
       } catch (err) {
         alert(err.message || String(err));
-        const tog = document.getElementById('strict-mode-toggle');
-        if (tog) tog.checked = !enabled;
+        ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
+          const tog = document.getElementById(id);
+          if (tog) tog.checked = !enabled;
+        });
+      }
+    }
+
+    async function setStrictModeIntensity(intensity) {
+      try {
+        const data = await fetchJSON('/api/config/strict-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ intensity: intensity }),
+        });
+        updateStrictModeUI(
+          data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
+          data.status
+        );
+        refresh();
+      } catch (err) {
+        alert(err.message || String(err));
       }
     }
 

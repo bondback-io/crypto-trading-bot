@@ -1904,6 +1904,7 @@ function captureTradingConfigSnapshot() {
   return {
     riskLevel: config.riskLevel,
     strictMode: config.strictMode,
+    strictModeIntensity: config.strictModeIntensity,
     trade: { ...config.trade },
     filters: { ...config.filters },
     risk: {
@@ -1934,6 +1935,10 @@ function restoreTradingConfigSnapshot(
 ): void {
   config.riskLevel = snap.riskLevel;
   config.strictMode = snap.strictMode === true;
+  config.strictModeIntensity =
+    snap.strictModeIntensity === 'low' || snap.strictModeIntensity === 'high'
+      ? snap.strictModeIntensity
+      : 'medium';
   Object.assign(config.trade, snap.trade);
   Object.assign(config.filters, snap.filters);
   config.risk = {
@@ -1957,6 +1962,11 @@ function buildConfigUsedSnapshot() {
   return {
     riskLevel: (config.riskLevel || 'medium') as RiskLevel,
     strictMode: config.strictMode === true,
+    strictModeIntensity:
+      config.strictModeIntensity === 'low' ||
+      config.strictModeIntensity === 'high'
+        ? config.strictModeIntensity
+        : 'medium',
     baseTradeAmountSol:
       config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
     stopLossPercent: config.trade.stopLossPercent,

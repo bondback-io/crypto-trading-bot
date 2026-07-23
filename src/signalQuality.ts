@@ -16,7 +16,6 @@
 import {
   config,
   effectiveMinHolders,
-  effectiveMinVolume24hUsd,
   type SelectiveTradingConfig,
 } from './config';
 import type { TradeSignal } from './monitor';
@@ -26,6 +25,7 @@ import {
   effectiveMinConvictionScore,
   effectivePreferEntryWithinMinutes,
   effectiveRequireMomentumConfirmation,
+  effectiveStrictMinVolume24hUsd,
 } from './strictMode';
 
 export interface ConvictionBreakdown {
@@ -222,7 +222,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   // --- Recent volume / buy pressure (0–12) ---
   const vol = volumeUsd(signal);
   const recentVol = recentVolumeUsd(signal);
-  const minVol = effectiveMinVolume24hUsd();
+  const minVol = effectiveStrictMinVolume24hUsd();
   const ratio = buySellRatio(signal);
   if (recentVol != null && recentVol >= (config.filters.minRecentVolumeUsd || 800)) {
     breakdown.volume += 6;

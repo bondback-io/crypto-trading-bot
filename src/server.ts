@@ -11,6 +11,7 @@ import {
   toggleSmartWallet,
   setMode,
   setStrictMode,
+  setStrictModeIntensity,
   updateTradeConfig,
   updateFilterConfig,
   updateStrategyConfig,
@@ -1012,15 +1013,45 @@ export function createServer(): express.Application {
   });
 
   app.post('/api/config/strict-mode', (req: Request, res: Response) => {
-    const enabled = Boolean(
-      (req.body as { strictMode?: boolean; enabled?: boolean }).strictMode ??
-        (req.body as { enabled?: boolean }).enabled
-    );
-    const result = setStrictMode(enabled);
-    res.json({
-      ...result,
-      status: getStrictModeStatus(),
-      config: getConfigSnapshot(),
+    const body = req.body as {
+      strictMode?: boolean;
+      enabled?: boolean;
+      intensity?: 'low' | 'medium' | 'high';
+      strictModeIntensity?: 'low' | 'medium' | 'high';
+    };
+    const intensity = body.intensity ?? body.strictModeIntensity;
+    const hasToggle =
+      body.strictMode !== undefined || body.enabled !== undefined;
+    if (hasToggle) {
+      const enabled = Boolean(body.strictMode ?? body.enabled);
+      const result = setStrictMode(enabled, {
+        intensity:
+          intensity === 'low' || intensity === 'medium' || intensity === 'high'
+            ? intensity
+            : undefined,
+      });
+      res.json({
+        ...result,
+        status: getStrictModeStatus(),
+        config: getConfigSnapshot(),
+      });
+      return;
+    }
+    if (
+      intensity === 'low' ||
+      intensity === 'medium' ||
+      intensity === 'high'
+    ) {
+      const result = setStrictModeIntensity(intensity);
+      res.json({
+        ...result,
+        status: getStrictModeStatus(),
+        config: getConfigSnapshot(),
+      });
+      return;
+    }
+    res.status(400).json({
+      error: 'Provide strictMode (boolean) and/or intensity (low|medium|high)',
     });
   });
 

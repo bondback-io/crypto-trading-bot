@@ -10,11 +10,11 @@ import {
   effectiveMinLiquidityUsd,
   effectiveMinMarketCapUsd,
   effectiveMinTop10HolderPct,
-  effectiveMinVolume24hUsd,
 } from './config';
 import { getBondingCurvePda } from './bondingCurve';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import { effectiveStrictMinVolume24hUsd } from './strictMode';
 
 export interface HolderBucket {
   address: string;
@@ -587,7 +587,7 @@ export function evaluateTokenMetricsFilters(
     reasons.push(`market cap unknown (min $${minMc})`);
   }
 
-  const minVol = effectiveMinVolume24hUsd();
+  const minVol = effectiveStrictMinVolume24hUsd();
   const vol = metrics.volume24hUsd;
   if (vol != null && vol < minVol) {
     reasons.push(`volume24h $${vol.toFixed(0)} < min $${minVol}`);
