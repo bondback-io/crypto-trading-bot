@@ -1805,7 +1805,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }, 80);
       }
       if (name === 'logs') loadSystemLogs();
-      if (name === 'overview') {
+      if (name === 'overview' || name === 'signals') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
       }
@@ -2107,6 +2107,31 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '</div>';
     }
 
+    /** Relative "Xs/Xm/Xh/Xd ago" for event timestamps (migrations, signals, trades). */
+    function fmtTimeAgo(ts) {
+      const t = Number(ts);
+      if (!t || !Number.isFinite(t)) return '—';
+      const ms = Math.max(0, Date.now() - t);
+      if (ms < 1000) return '0s ago';
+      if (ms < 60_000) return Math.floor(ms / 1000) + 's ago';
+      if (ms < 3_600_000) return Math.floor(ms / 60_000) + 'm ago';
+      if (ms < 86_400_000) return Math.floor(ms / 3_600_000) + 'h ago';
+      return Math.floor(ms / 86_400_000) + 'd ago';
+    }
+
+    /** Compact relative time with hover title (desktop) + tap-to-toggle absolute (mobile). */
+    function fmtTimeAgoCell(ts) {
+      const t = Number(ts);
+      if (!t || !Number.isFinite(t)) return '—';
+      const abs = new Date(t).toLocaleString();
+      const tip = abs.replace(/"/g, '&quot;');
+      return '<span class="pos-hold rel-time" data-event-at="' + t + '" title="' + tip +
+        '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
+        '<span class="pos-hold-dur">' + fmtTimeAgo(t) + '</span>' +
+        '<span class="pos-hold-entry">' + abs.replace(/</g, '&lt;') + '</span>' +
+        '</span>';
+    }
+
     function togglePosHoldEntry(el) {
       if (!el) return;
       // Desktop: native title tooltip; skip toggle on fine pointers
@@ -2118,15 +2143,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     let _posHoldTimer = null;
     function tickOpenPositionHolds() {
-      const panel = document.querySelector('[data-tab-panel="overview"]');
-      if (!panel || panel.classList.contains('hidden')) return;
+      const overview = document.querySelector('[data-tab-panel="overview"]');
+      const signals = document.querySelector('[data-tab-panel="signals"]');
+      const overviewVisible = overview && !overview.classList.contains('hidden');
+      const signalsVisible = signals && !signals.classList.contains('hidden');
+      if (!overviewVisible && !signalsVisible) return;
       const now = Date.now();
-      document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
+      if (overviewVisible) {
+        document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
+          if (el.classList.contains('show-entry')) return;
+          const opened = Number(el.getAttribute('data-opened-at'));
+          if (!opened) return;
+          const durEl = el.querySelector('.pos-hold-dur');
+          if (durEl) durEl.textContent = fmtHold(now - opened);
+        });
+      }
+      document.querySelectorAll('.pos-hold[data-event-at]').forEach((el) => {
         if (el.classList.contains('show-entry')) return;
-        const opened = Number(el.getAttribute('data-opened-at'));
-        if (!opened) return;
+        const at = Number(el.getAttribute('data-event-at'));
+        if (!at) return;
         const durEl = el.querySelector('.pos-hold-dur');
-        if (durEl) durEl.textContent = fmtHold(now - opened);
+        if (durEl) durEl.textContent = fmtTimeAgo(at);
       });
     }
     function ensurePosHoldTicker() {
@@ -3293,10 +3330,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   '<td>' + (e.smartMoneyScore != null ? e.smartMoneyScore : '—') +
                   (e.birdeye && e.birdeye.volume24hUsd != null ? ' · $' + Number(e.birdeye.volume24hUsd).toFixed(0) : '') + '</td>' +
                   '<td class="mint">' + (e.notes || (e.birdeye && e.birdeye.flags ? e.birdeye.flags.slice(0, 2).join(' · ') : '—')) + '</td>' +
-                  '<td class="mint">' + new Date(e.timestamp).toLocaleTimeString() + '</td>' +
+                  '<td class="mint">' + fmtTimeAgoCell(e.timestamp) + '</td>' +
                   '</tr>';
               }).join('');
         }
+        ensurePosHoldTicker();
+        tickOpenPositionHolds();
         const hot = document.getElementById('pump-hot-launches');
         if (hot && data.launches) {
           const launches = data.launches.filter(l => (l.earlyBuyers || []).length > 0 || l.migrated).slice(0, 6);
@@ -3617,7 +3656,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               \${m.volumeSpike ? '· <strong>vol spike ' + (m.volumeSol ?? 0).toFixed(1) + ' SOL</strong>' : (m.volumeSol ? '· ' + m.volumeSol.toFixed(1) + ' SOL' : '')}
               \${m.smartWalletNames?.length ? '· ' + m.smartWalletNames.join(', ') : ''}
               \${m.priorityReason ? '<span class="mint">(' + escHtml(m.priorityReason) + ')</span>' : ''}
-              <span class="mint">\${m.source || ''} · \${new Date(m.timestamp || m.detectedAt).toLocaleString()}</span>
+              <span class="mint">\${m.source || ''} · \${fmtTimeAgoCell(m.timestamp || m.detectedAt)}</span>
             </div>
           \`).join('');
 
@@ -3942,7 +3981,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>
             </td>
             <td class="mint">\${p.reason || '—'}</td>
-            <td>\${p.closedAt ? new Date(p.closedAt).toLocaleString() : '—'}</td>
+            <td>\${p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—'}</td>
           </tr>\`).join('');
 
       const rb = positions.rebuy || {};
@@ -4010,7 +4049,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             \${a.isMigration ? '🚀' : a.earlyBuy ? '🌱' : a.isPumpFun ? '🎯' : ''}
             \${a.earlyBuy && a.earlyBuyerCount ? '<span class="mint">early×' + a.earlyBuyerCount + '</span>' : ''}
             \${metricsLine}
-            <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · \${new Date(a.timestamp).toLocaleTimeString()}</span>
+            <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · \${fmtTimeAgoCell(a.timestamp)}</span>
           </div>\`;
           }).join('');
 
@@ -4041,9 +4080,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <td>\${s.riskScore != null ? s.riskScore : '—'}</td>
               <td style="color:\${s.accepted ? 'var(--green)' : 'var(--muted)'}">\${s.accepted ? 'taken' : 'skipped'}</td>
               <td class="mint" title="\${s.dynamicSizeReason || ''}">\${s.dynamicSizeReason || '—'}</td>
-              <td class="mint">\${new Date(s.timestamp).toLocaleTimeString()}</td>
+              <td class="mint">\${fmtTimeAgoCell(s.timestamp)}</td>
             </tr>\`).join('');
       }
+      ensurePosHoldTicker();
+      tickOpenPositionHolds();
 
       const ps = status.monitor?.pumpSmart;
       const pumpStat = document.getElementById('pump-act-status');
@@ -4058,12 +4099,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       refreshPumpActivity().catch(() => {});
 
       const logHtml = (Array.isArray(logs) ? logs : []).map(l => \`
-        <div class="log-entry log-\${l.type}" data-type="\${l.type}">\${new Date(l.timestamp).toLocaleTimeString()} — \${l.message}</div>\`).join('');
+        <div class="log-entry log-\${l.type}" data-type="\${l.type}">\${fmtTimeAgoCell(l.timestamp)} — \${l.message}</div>\`).join('');
       const logsEl = document.getElementById('logs');
       if (logsEl) logsEl.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
       const logsFull = document.getElementById('logs-full');
       if (logsFull) logsFull.innerHTML = logHtml || '<div class="text-slate-500 text-sm">No logs</div>';
       if (typeof applyLogFilter === 'function') applyLogFilter();
+      ensurePosHoldTicker();
+      tickOpenPositionHolds();
       } catch (err) {
         console.error('[dashboard] refresh failed:', err);
         const detail = document.getElementById('stat-detail');
