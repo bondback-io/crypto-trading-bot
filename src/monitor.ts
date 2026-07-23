@@ -2319,7 +2319,7 @@ function getLastSignalAt(): number | null {
 const SIGNAL_LIVE_WINDOW_MS = 15 * 60 * 1000;
 
 export function getSignalLightStatus(now = Date.now()): {
-  state: 'live' | 'quiet' | 'off';
+  state: 'live' | 'quiet' | 'paused' | 'off';
   label: string;
   lastSignalAt: number | null;
   signals24h: number;
@@ -2330,11 +2330,40 @@ export function getSignalLightStatus(now = Date.now()): {
   const ageMs = lastSignalAt != null ? now - lastSignalAt : null;
   const rpc = getRpcStats();
   const rpcHealthy = Boolean(rpc.ok);
+  const watching = getWalletsForPolling().length;
 
-  if (!running || paused || !rpcHealthy || getWalletsForPolling().length === 0) {
+  // Paused is distinct from broken/off so Overview doesn't look "dead"
+  if (running && paused) {
+    return {
+      state: 'paused',
+      label: 'Signals: paused',
+      lastSignalAt,
+      signals24h,
+      ageMs,
+    };
+  }
+  if (!running) {
     return {
       state: 'off',
       label: 'Signals: off',
+      lastSignalAt,
+      signals24h,
+      ageMs,
+    };
+  }
+  if (!rpcHealthy) {
+    return {
+      state: 'off',
+      label: 'Signals: RPC down',
+      lastSignalAt,
+      signals24h,
+      ageMs,
+    };
+  }
+  if (watching === 0) {
+    return {
+      state: 'off',
+      label: 'Signals: no wallets',
       lastSignalAt,
       signals24h,
       ageMs,

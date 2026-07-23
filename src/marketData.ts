@@ -144,6 +144,97 @@ export const MAX_PATH_PRICE_MULTIPLE = 8;
 /** Soft cap when scaling a Dex MC snapshot across prices (guards unit bugs). */
 export const MAX_MC_PRICE_RATIO = 20;
 
+/**
+ * Max allowed mark/entry price multiple for paper MTM / exits.
+ * Beyond this, prefer MC-scaled marks or reject the feed (unit bugs → absurd PnL).
+ */
+export const MAX_SANE_MARK_PRICE_RATIO = 50;
+
+export interface ReconcileMarkPriceInput {
+  entryPriceSol: number;
+  markPriceSol: number;
+  entryMarketCapUsd?: number;
+  markMarketCapUsd?: number | null;
+}
+
+export interface ReconcileMarkPriceResult {
+  priceSol: number;
+  /** True when the raw mark was adjusted or rejected */
+  adjusted: boolean;
+  rejected: boolean;
+  reason?: string;
+}
+
+/**
+ * Reconcile a live mark vs entry so paper PnL cannot explode from unit mismatches
+ * (bonding-curve SOL/lamports, Dex native vs USD, decimal scale errors).
+ *
+ * Prefer MC-implied scale when price ratio disagrees with MC ratio by >10×.
+ */
+export function reconcileMarkPriceSol(
+  input: ReconcileMarkPriceInput
+): ReconcileMarkPriceResult {
+  const entry = input.entryPriceSol;
+  const mark = input.markPriceSol;
+  if (!(entry > 0) || !Number.isFinite(entry)) {
+    return {
+      priceSol: mark,
+      adjusted: false,
+      rejected: !(mark > 0) || !Number.isFinite(mark),
+      reason: 'bad-entry',
+    };
+  }
+  if (!(mark > 0) || !Number.isFinite(mark)) {
+    return { priceSol: entry, adjusted: true, rejected: true, reason: 'bad-mark' };
+  }
+
+  const pxRatio = mark / entry;
+  const entryMc = input.entryMarketCapUsd;
+  const markMc = input.markMarketCapUsd ?? undefined;
+
+  if (
+    entryMc != null &&
+    markMc != null &&
+    Number.isFinite(entryMc) &&
+    Number.isFinite(markMc) &&
+    entryMc > 0 &&
+    markMc > 0
+  ) {
+    const mcRatio = markMc / entryMc;
+    if (Number.isFinite(mcRatio) && mcRatio > 0) {
+      const disagree =
+        pxRatio / mcRatio > 10 || mcRatio / pxRatio > 10;
+      if (disagree) {
+        const clampedMc = Math.min(
+          MAX_SANE_MARK_PRICE_RATIO,
+          Math.max(1 / MAX_SANE_MARK_PRICE_RATIO, mcRatio)
+        );
+        return {
+          priceSol: entry * clampedMc,
+          adjusted: true,
+          rejected: false,
+          reason: `mc-scaled (px ${pxRatio.toExponential(2)} vs mc ${mcRatio.toExponential(2)})`,
+        };
+      }
+    }
+  }
+
+  if (
+    pxRatio > MAX_SANE_MARK_PRICE_RATIO ||
+    pxRatio < 1 / MAX_SANE_MARK_PRICE_RATIO
+  ) {
+    // No trustworthy MC — refuse to poison the book with a pathological mark
+    return {
+      priceSol: entry,
+      adjusted: true,
+      rejected: true,
+      reason: `absurd ratio ${pxRatio.toExponential(2)}`,
+    };
+  }
+
+  return { priceSol: mark, adjusted: false, rejected: false };
+}
+
 export type PriceChangePick = {
   pct: number;
   windowMs: number;
@@ -1071,6 +1162,27 @@ export async function fetchLiveTokenSnapshot(
   const priceNative = Number(
     (best as { priceNative?: string }).priceNative ?? 0
   );
+  const priceUsd = Number((best as { priceUsd?: string }).priceUsd ?? 0);
+  const solFromPair = solUsdFromPair(best as Record<string, unknown>);
+  if (solFromPair != null) {
+    cachedSolUsd = { value: solFromPair, at: Date.now() };
+  }
+  const solUsd = getCachedSolUsdPrice();
+  const priceFromUsd =
+    priceUsd > 0 && solUsd > 0 ? priceUsd / solUsd : null;
+
+  // Prefer SOL-native; if native vs USD-implied disagree by >10×, USD path is safer
+  // (avoids inverted/odd pairs poisoning paper marks).
+  let priceSol: number | null = null;
+  if (priceNative > 0 && priceFromUsd != null && priceFromUsd > 0) {
+    const r = priceNative / priceFromUsd;
+    priceSol = r > 10 || r < 0.1 ? priceFromUsd : priceNative;
+  } else if (priceNative > 0) {
+    priceSol = priceNative;
+  } else if (priceFromUsd != null && priceFromUsd > 0) {
+    priceSol = priceFromUsd;
+  }
+
   const marketCapUsd = readMarketCapUsd(best) ?? null;
   const volume = best.volume as
     | { h1?: number; h24?: number }
@@ -1085,7 +1197,7 @@ export async function fetchLiveTokenSnapshot(
   const txnsTotal = buys + sells;
 
   return {
-    priceSol: priceNative > 0 ? priceNative : null,
+    priceSol,
     marketCapUsd: marketCapUsd != null && marketCapUsd > 0 ? marketCapUsd : null,
     volumeH1Usd: Number.isFinite(volumeH1Usd) ? volumeH1Usd : null,
     volumeH24Usd: Number.isFinite(volumeH24Usd) ? volumeH24Usd : null,

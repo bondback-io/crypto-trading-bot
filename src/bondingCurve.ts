@@ -549,6 +549,10 @@ export function isNearMigrationPriority(
 /**
  * Spot price in SOL per whole token from virtual reserves (6dp tokens).
  * Used for paper simulation when Jupiter has no route yet.
+ *
+ * Reserves may arrive as on-chain raw (lamports / 1e6 base units) or already
+ * in UI units from some APIs — detect and avoid double-scaling (which underprices
+ * by ~1e9 and blows up paper token amounts / exit PnL).
  */
 export function estimateBondingCurvePriceSol(
   state: BondingCurveState | null | undefined
@@ -557,9 +561,11 @@ export function estimateBondingCurvePriceSol(
   const vSol = state.virtualSolReserves;
   const vTok = state.virtualTokenReserves;
   if (!(vSol > 0) || !(vTok > 0)) return null;
-  const sol = vSol / 1e9;
-  const tokens = vTok / 1e6;
-  if (!(tokens > 0)) return null;
+  // Lamports are typically >= 1e7 (~0.01 SOL); UI SOL on the curve is ~1–120.
+  const sol = vSol > 1e6 ? vSol / 1e9 : vSol;
+  // Raw token reserves ~1e15; UI tokens ~1e9. Threshold separates the two.
+  const tokens = vTok > 1e12 ? vTok / 1e6 : vTok;
+  if (!(sol > 0) || !(tokens > 0)) return null;
   const price = sol / tokens;
   return Number.isFinite(price) && price > 0 ? price : null;
 }

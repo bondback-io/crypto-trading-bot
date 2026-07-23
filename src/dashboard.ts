@@ -77,6 +77,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .signal-light .dot-live { background: #34d399; box-shadow: 0 0 8px #34d399; }
     .signal-light .dot-quiet { background: #fbbf24; box-shadow: 0 0 6px #fbbf2488; }
+    .signal-light .dot-paused { background: #fbbf24; box-shadow: 0 0 6px #fbbf2488; }
     .signal-light .dot-off { background: #f87171; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
     .badge-paper { background: #1d4ed833; color: #93c5fd; }
@@ -733,9 +734,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     #bt-results-table { min-width: 64rem; }
     #positions-table,
-    #trades-positions-table { min-width: 54rem; }
+    #trades-positions-table { min-width: 62rem; }
     #closed-table,
-    #trades-closed-table { min-width: 36rem; }
+    #trades-closed-table { min-width: 52rem; }
     #pump-activity-table,
     #sizing-signals-table,
     #rebuy-table { min-width: 32rem; }
@@ -1036,7 +1037,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3">
           <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div>
           <div class="text-lg font-semibold" id="signals">—</div>
-          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy activity in the last 15 minutes while monitor is running with wallets watched. Amber = monitor running but no recent signals. Red = monitor stopped/paused, no wallets watched, or RPC unhealthy.">
+          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy activity in the last 15 minutes while monitor is running with wallets watched. Amber = running but quiet, or paused. Red = monitor stopped, no wallets watched, or RPC unhealthy.">
             <span class="dot dot-quiet" id="signal-light-dot"></span>
             <span id="signal-light-label">Signals: —</span>
           </div>
@@ -1065,13 +1066,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), converging wallets, 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
           </div>
           <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1083,10 +1084,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
             <table id="closed-table">
-              <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+              <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -1142,23 +1143,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Trades</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), converging wallets, 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
           </div>
           <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </div>
 
       <div class="card">
-        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -2318,6 +2319,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const solBit = sol.toFixed(4) + ' SOL';
       if (usd == null || !Number.isFinite(usd)) return solBit;
       return solBit + ' · $' + usd.toFixed(2);
+    }
+
+    /** Copied wallet + other converging wallets from sourceNames / sourceWallets. */
+    function fmtWalletConvergence(p) {
+      const names = (p && p.sourceNames && p.sourceNames.length)
+        ? p.sourceNames
+        : null;
+      const addrs = (p && p.sourceWallets && p.sourceWallets.length)
+        ? p.sourceWallets
+        : null;
+      const total = names ? names.length : (addrs ? addrs.length : 0);
+      if (total <= 0) return '<span class="mint">—</span>';
+      const primary = names
+        ? String(names[0])
+        : (addrs[0].slice(0, 4) + '…' + addrs[0].slice(-4));
+      const others = total - 1;
+      if (others <= 0) {
+        return '<span title="Copied wallet">' + primary.replace(/</g, '&lt;') + '</span>';
+      }
+      return '<span title="' + total + ' wallets converged">' +
+        primary.replace(/</g, '&lt;') +
+        ' <span class="mint">+' + others + '</span></span>';
     }
 
     /** Compact signed unrealized P&L: +0.12 SOL · $18.40 */
@@ -3859,20 +3882,31 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById('signals').textContent = status.monitor.recentSignals;
       (function updateSignalLight() {
         const light = status.monitor.signalLight || {};
-        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? 'off' : 'quiet');
-        const label = light.label || (state === 'live' ? 'Signals: LIVE' : state === 'off' ? 'Signals: off' : 'Signals: quiet');
+        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? (status.monitor.paused ? 'paused' : 'off') : 'quiet');
+        const label = light.label || (
+          state === 'live' ? 'Signals: LIVE' :
+          state === 'paused' ? 'Signals: paused' :
+          state === 'off' ? 'Signals: off' :
+          'Signals: quiet'
+        );
         const dot = document.getElementById('signal-light-dot');
         const lab = document.getElementById('signal-light-label');
         const wrap = document.getElementById('signal-light');
         if (dot) {
-          dot.className = 'dot ' + (state === 'live' ? 'dot-live' : state === 'off' ? 'dot-off' : 'dot-quiet');
+          const cls =
+            state === 'live' ? 'dot-live' :
+            state === 'paused' ? 'dot-paused' :
+            state === 'off' ? 'dot-off' :
+            'dot-quiet';
+          dot.className = 'dot ' + cls;
         }
         if (lab) lab.textContent = label;
         if (wrap) {
           const age = light.ageMs != null ? Math.round(light.ageMs / 60000) + 'm ago' : 'none yet';
           wrap.title =
             'Green = wallet-buy activity in last 15m (monitor running + wallets watched). ' +
-            'Amber = running but quiet. Red = stopped/paused, no wallets, or RPC unhealthy. ' +
+            'Amber = running but quiet, or intentionally paused. ' +
+            'Red = stopped, no wallets, or RPC unhealthy. ' +
             'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
         }
       })();
@@ -4212,7 +4246,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       });
       const positionsHtml = posOpenN === 0
-        ? '<tr><td colspan="12"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
+        ? '<tr><td colspan="13"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
           const pnlCell = pnl == null
@@ -4264,6 +4298,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
           const costCell = fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd);
+          const walletsCell = fmtWalletConvergence(p);
           const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
           return \`
@@ -4273,6 +4308,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at buy">\${buyMc}</td>
             <td class="pos-cost-cell" title="Position cost">\${costCell}</td>
+            <td class="mint" title="Copied wallet + other converging wallets">\${walletsCell}</td>
             <td>\${volCell}</td>
             <td>\${pnlCell}</td>
             <td>\${trailCell}</td>
@@ -4290,13 +4326,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       const closed = (positions.closed || []).slice().reverse().slice(0, 25);
       const closedHtml = closed.length === 0
-        ? '<tr><td colspan="7" style="color:var(--muted)">No closed trades yet</td></tr>'
+        ? '<tr><td colspan="9" style="color:var(--muted)">No closed trades yet</td></tr>'
         : closed.map(p => \`
           <tr>
             <td>\${fmtToken(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td class="mint" title="Market cap at buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
             <td class="mint" title="Market cap at exit">\${fmtUsdShort(p.exitMarketCapUsd)}</td>
+            <td class="pos-cost-cell" title="Buy-in / cost basis of sold portion">\${fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd)}</td>
+            <td class="mint" title="Copied wallet + other converging wallets">\${fmtWalletConvergence(p)}</td>
             <td style="color:\${(p.pnlSol||0)>=0?'var(--green)':'var(--red)'}">
               \${(p.pnlSol||0)>=0?'+':''}\${(p.pnlSol||0).toFixed(4)} SOL
               <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>

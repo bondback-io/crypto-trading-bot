@@ -9,6 +9,7 @@ import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
   fetchRecentLaunches,
   fetchLivePriceSol,
+  fetchLiveTokenSnapshot,
   fetchSolUsdPrice,
   generateSyntheticLaunches,
   estimateRiskScoreHint,
@@ -2512,9 +2513,12 @@ export async function refreshPaperPricesFromLive(
   let updated = 0;
 
   for (const pos of open) {
-    const price = await fetchLivePriceSol(pos.mint);
-    if (price != null) {
-      trader.setTokenPrice(pos.mint, price);
+    const snap = await fetchLiveTokenSnapshot(pos.mint);
+    const price = snap?.priceSol ?? null;
+    if (price != null && price > 0) {
+      trader.setTokenPrice(pos.mint, price, {
+        marketCapUsd: snap?.marketCapUsd,
+      });
       updated += 1;
     }
   }

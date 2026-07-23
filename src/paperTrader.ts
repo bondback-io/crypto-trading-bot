@@ -16,8 +16,11 @@ import {
   evaluateProfitAction,
   type ProfitPositionView,
 } from './profitStrategy';
-import { marketCapAtPrice, getCachedSolUsdPrice } from './marketData';
+import { marketCapAtPrice, getCachedSolUsdPrice, reconcileMarkPriceSol } from './marketData';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
+
+/** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
+const MAX_EXIT_PRICE_MULTIPLE = 50;
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
 
@@ -206,8 +209,41 @@ export class PaperTrader {
   }
 
   /** Register or update a token price (SOL per token) for simulation */
-  setTokenPrice(mint: string, priceSol: number): void {
-    this.priceCache.set(mint, priceSol);
+  setTokenPrice(
+    mint: string,
+    priceSol: number,
+    meta?: { marketCapUsd?: number | null }
+  ): void {
+    if (!(priceSol > 0) || !Number.isFinite(priceSol)) return;
+
+    let mark = priceSol;
+    for (const pos of this.positions.values()) {
+      if (pos.mint !== mint || pos.status === 'closed') continue;
+      if (!(pos.entryPriceSol > 0)) break;
+      const reconciled = reconcileMarkPriceSol({
+        entryPriceSol: pos.entryPriceSol,
+        markPriceSol: priceSol,
+        entryMarketCapUsd: pos.entryMarketCapUsd,
+        markMarketCapUsd: meta?.marketCapUsd,
+      });
+      if (reconciled.rejected) {
+        console.warn(
+          `[paper] Rejected absurd mark for ${mint.slice(0, 8)}… ` +
+            `(${reconciled.reason}) — keeping prior price`
+        );
+        return;
+      }
+      if (reconciled.adjusted) {
+        console.warn(
+          `[paper] Adjusted mark for ${mint.slice(0, 8)}… ` +
+            `${priceSol.toExponential(3)} → ${reconciled.priceSol.toExponential(3)} ` +
+            `(${reconciled.reason})`
+        );
+      }
+      mark = reconciled.priceSol;
+      break;
+    }
+    this.priceCache.set(mint, mark);
   }
 
   getTokenPrice(mint: string): number | undefined {
@@ -370,7 +406,25 @@ export class PaperTrader {
   }
 
   getClosedPositions(): Position[] {
-    return [...this.closedPositions];
+    const solUsd = getCachedSolUsdPrice();
+    return this.closedPositions.map((p) => {
+      const costBasis =
+        p.costSol > 0
+          ? p.costSol
+          : p.initialCostSol > 0
+            ? p.initialCostSol
+            : 0;
+      const costUsd =
+        costBasis > 0 && solUsd > 0
+          ? Number((costBasis * solUsd).toFixed(2))
+          : undefined;
+      return {
+        ...p,
+        costSol: costBasis,
+        costUsd,
+        solUsd,
+      } as Position & { costUsd?: number; solUsd?: number };
+    });
   }
 
   getLogs(limit = 100): TradeLog[] {
@@ -564,13 +618,40 @@ export class PaperTrader {
     const isPartial = tokensToSell < position.amountTokens * 0.999;
 
     const { feeBps, slippageBps } = config.paper;
-    const exitPrice = applySlippage(currentPriceSol, slippageBps, 'sell');
+    // Guard against unit-mismatch marks that would credit absurd SOL to paper balance
+    let safeMark = currentPriceSol;
+    if (position.entryPriceSol > 0 && currentPriceSol > 0) {
+      const ratio = currentPriceSol / position.entryPriceSol;
+      if (
+        ratio > MAX_EXIT_PRICE_MULTIPLE ||
+        ratio < 1 / MAX_EXIT_PRICE_MULTIPLE
+      ) {
+        const clamped = Math.min(
+          MAX_EXIT_PRICE_MULTIPLE,
+          Math.max(1 / MAX_EXIT_PRICE_MULTIPLE, ratio)
+        );
+        safeMark = position.entryPriceSol * clamped;
+        console.warn(
+          `[paper] Clamped exit mark ratio ${ratio.toExponential(2)} → ${clamped.toFixed(2)}x ` +
+            `for ${position.symbol || position.mint.slice(0, 8)}`
+        );
+      }
+    }
+    const exitPrice = applySlippage(safeMark, slippageBps, 'sell');
     const grossSol = tokensToSell * exitPrice;
     const fee = applyFee(grossSol, feeBps);
-    const netSol = grossSol - fee;
+    let netSol = grossSol - fee;
 
     const costBasisSold =
       position.costSol * (tokensToSell / position.amountTokens);
+    // Second-line guard: proceeds cannot exceed cost × max multiple
+    if (costBasisSold > 0 && netSol > costBasisSold * MAX_EXIT_PRICE_MULTIPLE) {
+      netSol = costBasisSold * MAX_EXIT_PRICE_MULTIPLE;
+      console.warn(
+        `[paper] Clamped exit proceeds to ${MAX_EXIT_PRICE_MULTIPLE}× cost ` +
+          `(${netSol.toFixed(4)} SOL) for ${position.symbol || position.mint.slice(0, 8)}`
+      );
+    }
     const pnlSol = netSol - costBasisSold;
     const pnlPct = costBasisSold > 0 ? (pnlSol / costBasisSold) * 100 : 0;
 
@@ -653,6 +734,12 @@ export class PaperTrader {
       position.initialCostSol > 0
         ? (totalPnl / position.initialCostSol) * 100
         : pnlPct;
+    const closedCostSol =
+      position.initialCostSol > 0 ? position.initialCostSol : costBasisSold;
+    const closedTokens =
+      position.initialAmountTokens > 0
+        ? position.initialAmountTokens
+        : tokensToSell;
 
     position.status = 'closed';
     position.closedAt = Date.now();
@@ -665,7 +752,12 @@ export class PaperTrader {
     position.costSol = 0;
 
     this.positions.delete(positionId);
-    this.closedPositions.push({ ...position });
+    this.closedPositions.push({
+      ...position,
+      // Preserve buy-in for Closed Trades UI (open book zeros costSol)
+      costSol: closedCostSol,
+      amountTokens: closedTokens,
+    });
     if (this.closedPositions.length > 200) {
       this.closedPositions = this.closedPositions.slice(-200);
     }
@@ -829,7 +921,10 @@ export class PaperTrader {
     if (!position || position.status === 'closed') return null;
     if (position.tradeMode === 'live') return null;
 
-    this.priceCache.set(position.mint, currentPrice);
+    this.setTokenPrice(position.mint, currentPrice);
+    // Use reconciled cache mark (may reject/adjust absurd feeds)
+    const markPrice = this.priceCache.get(position.mint) ?? currentPrice;
+    if (!(markPrice > 0)) return null;
 
     if (position.initialAmountTokens == null) {
       position.initialAmountTokens = position.amountTokens;
@@ -848,19 +943,19 @@ export class PaperTrader {
     position.bagTrimDone = position.bagTrimDone ?? false;
     position.solReturned = position.solReturned ?? 0;
 
-    if (currentPrice > position.highWaterMarkSol) {
-      position.highWaterMarkSol = currentPrice;
+    if (markPrice > position.highWaterMarkSol) {
+      position.highWaterMarkSol = markPrice;
     }
 
     const markPnlPct =
-      ((currentPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+      ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
     if (config.profitStrategy?.enabled) {
       const view: ProfitPositionView = {
         entryPriceSol: position.entryPriceSol,
-        currentPriceSol: currentPrice,
+        currentPriceSol: markPrice,
         highWaterMarkSol: position.highWaterMarkSol,
         amountTokens: position.amountTokens,
         initialAmountTokens: position.initialAmountTokens,
@@ -909,7 +1004,7 @@ export class PaperTrader {
         action.type === 'trail_exit' ||
         action.type === 'full'
       ) {
-        this.simulateSell(position.id, currentPrice, action.reason);
+        this.simulateSell(position.id, markPrice, action.reason);
         const kind =
           action.type === 'hard_sl'
             ? 'hard_sl'
@@ -941,7 +1036,7 @@ export class PaperTrader {
           };
         }
 
-        this.simulateSell(position.id, currentPrice, action.reason, {
+        this.simulateSell(position.id, markPrice, action.reason, {
           tokensToSell: action.tokensToSell,
           sellPctOfInitial:
             action.tokensToSell == null ? action.sellPctOfInitial : undefined,
@@ -973,7 +1068,7 @@ export class PaperTrader {
 
     if (markPnlPct <= hardSl) {
       const reason = `hard stop-loss ${hardSl}%`;
-      this.simulateSell(position.id, currentPrice, reason);
+      this.simulateSell(position.id, markPrice, reason);
       return {
         kind: 'hard_sl',
         reason,
@@ -989,7 +1084,7 @@ export class PaperTrader {
         if (markPnlPct >= tier.profitPct) {
           position.tiersHit.push(i);
           const reason = `tier ${i + 1}: +${tier.profitPct}% → sell ${tier.sellPct}%`;
-          this.simulateSell(position.id, currentPrice, reason, {
+          this.simulateSell(position.id, markPrice, reason, {
             sellPctOfInitial: tier.sellPct,
           });
           return {
@@ -1002,7 +1097,7 @@ export class PaperTrader {
       }
     } else if (markPnlPct >= position.takeProfitPct) {
       const reason = `take-profit ${position.takeProfitPct.toFixed(0)}%`;
-      this.simulateSell(position.id, currentPrice, reason);
+      this.simulateSell(position.id, markPrice, reason);
       return {
         kind: 'take_profit',
         reason,
@@ -1059,13 +1154,13 @@ export class PaperTrader {
       stillOpen.highWaterMarkSol * (1 - trailPct / 100);
     const trailTrigger = stillOpen.trailingStopPriceSol;
 
-    if (currentPrice <= trailTrigger) {
+    if (markPrice <= trailTrigger) {
       const dropFromPeak =
-        ((currentPrice - stillOpen.highWaterMarkSol) /
+        ((markPrice - stillOpen.highWaterMarkSol) /
           stillOpen.highWaterMarkSol) *
         100;
       const reason = `trailing stop ${trailPct}% (peak drop ${dropFromPeak.toFixed(1)}%)`;
-      this.simulateSell(stillOpen.id, currentPrice, reason);
+      this.simulateSell(stillOpen.id, markPrice, reason);
       return {
         kind: 'trail_exit',
         reason,
