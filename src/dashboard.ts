@@ -3992,6 +3992,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const migLive = document.getElementById(id);
         if (migLive) migLive.textContent = migLiveText;
       });
+      const pf = Number(s.profitFactor ?? 0);
       document.getElementById('stat-detail').textContent =
         'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
         ' · maxDD ' + maxDd.toFixed(1) + '%' +
