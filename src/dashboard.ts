@@ -1714,6 +1714,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="system-logs" class="max-h-[50vh] overflow-y-auto text-sm font-mono"></div>
       </div>
     </section>
+
+    <div class="page-alerts" aria-live="polite">
+      <div id="persist-banner" class="persist-banner" role="alert"></div>
+      <div id="rpc-banner" class="persist-banner" role="alert" style="display:none"></div>
+    </div>
   </div>
 
   <script>
