@@ -761,6 +761,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     </div>
 
     <div id="persist-banner" class="persist-banner" role="alert"></div>
+    <div id="rpc-banner" class="persist-banner" role="alert" style="display:none"></div>
 
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
@@ -3158,13 +3159,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       // RPC status
       const rpc = status.rpc || {};
       const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
-      document.getElementById('rpc-active').textContent = rpc.active || '—';
+      const rpcActiveEl = document.getElementById('rpc-active');
+      if (rpcActiveEl) {
+        rpcActiveEl.textContent = rpc.active || '—';
+        rpcActiveEl.style.color = rpc.ok === false ? 'var(--red)' : '';
+      }
       document.getElementById('rpc-latency').textContent =
         activeEp.latencyMs != null ? activeEp.latencyMs + 'ms' : '—';
       document.getElementById('rpc-summary').textContent =
         'Active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
+      const rpcBanner = document.getElementById('rpc-banner');
+      if (rpcBanner) {
+        if (rpc.ok === false) {
+          rpcBanner.style.display = 'block';
+          rpcBanner.style.background = 'rgba(248,81,73,0.15)';
+          rpcBanner.style.borderColor = 'rgba(248,81,73,0.45)';
+          rpcBanner.textContent =
+            rpc.warning ||
+            'RPC unhealthy — no wallet buys can be detected. Fix RPC_URL on Render (replace any placeholder with a real Helius/QuickNode URL).';
+        } else if (rpc.warning) {
+          rpcBanner.style.display = 'block';
+          rpcBanner.style.background = 'rgba(210,153,34,0.12)';
+          rpcBanner.style.borderColor = 'rgba(210,153,34,0.4)';
+          rpcBanner.textContent = rpc.warning;
+        } else {
+          rpcBanner.style.display = 'none';
+          rpcBanner.textContent = '';
+        }
+      }
       const rpcBody = document.querySelector('#rpc-table tbody');
       if (rpcBody) {
         rpcBody.innerHTML = (rpc.endpoints || []).length === 0

@@ -1627,7 +1627,20 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     };
   }
 
-  if (!signal) return;
+  if (!signal) {
+    // Non-Pump buys wait for N-wallet convergence — surface why Signals stay empty.
+    if (config.strategy.enableConvergence && !buy.isPumpFun) {
+      const needed = config.filters.convergenceRequired ?? 2;
+      const seen = recentBuys.get(buy.mint)?.length ?? 1;
+      if (seen < needed) {
+        console.log(
+          `[monitor] Waiting for convergence on ${label}: ${seen}/${needed} wallets` +
+            ` (non-Pump buy from ${buy.walletName})`
+        );
+      }
+    }
+    return;
+  }
 
   // Prefer enriched name/symbol from this buy if signal still has placeholders
   signal.symbol = buy.symbol || signal.symbol;
@@ -2039,6 +2052,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             if (/low 24h volume/i.test(reason)) return false;
             if (/low holders/i.test(reason)) return false;
             if (/low liquidity/i.test(reason)) return false;
+            // Jupiter often has no route until graduation — not a real honeypot.
+            if (/honeypot.*no (buy|sell) quote/i.test(reason)) return false;
+            if (/no jupiter route/i.test(reason)) return false;
             return true;
           });
           if (hardReasons.length === 0) {
@@ -2099,7 +2115,22 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         `[monitor] Anti-rug / metrics fetch failed for ${signal.mint.slice(0, 8)}…:`,
         err instanceof Error ? err.message : err
       );
+      const softEarly =
+        Boolean(signal.earlyBuy || signal.nearMigration) ||
+        Boolean(signal.bondingCurve && !signal.isMigration);
       if (
+        softEarly &&
+        config.mode === 'paper'
+      ) {
+        console.log(
+          `[monitor] Anti-rug soft-pass ${signal.symbol}: metrics unavailable on early/curve paper signal`
+        );
+        paperTrader.addLog(
+          'info',
+          `Anti-rug soft-pass ${signal.symbol}: metrics unavailable (early paper)`,
+          { mint: signal.mint, symbol: signal.symbol }
+        );
+      } else if (
         config.filters.enableAntiRug !== false ||
         (filters.minLiquidity ?? 0) > 0 ||
         (filters.maxDevPercent ?? filters.maxDevHoldPct ?? 0) > 0

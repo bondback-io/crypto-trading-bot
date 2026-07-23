@@ -58,8 +58,17 @@ export const env: EnvConfig = {
       : process.env.TRADING_MODE?.toLowerCase() === 'paper'
         ? 'paper'
         : undefined,
-  rpcUrl:
-    process.env.RPC_URL?.trim() || 'https://api.mainnet-beta.solana.com',
+  rpcUrl: (() => {
+    const raw = process.env.RPC_URL?.trim() || '';
+    // Defer to rpcUrl helper without circular import weight — inline check
+    if (
+      !raw ||
+      /your-helius|your-quicknode|example\.com|changeme/i.test(raw)
+    ) {
+      return 'https://api.mainnet-beta.solana.com';
+    }
+    return raw;
+  })(),
 };
 
 /** Log non-secret deployment context at boot */
@@ -88,9 +97,17 @@ export function validateDeploymentEnv(): string[] {
       );
     }
   }
-  if (env.isProduction && env.rpcUrl.includes('mainnet-beta.solana.com')) {
+  const rawRpc = process.env.RPC_URL?.trim() || '';
+  if (
+    rawRpc &&
+    /your-helius|your-quicknode|example\.com|changeme/i.test(rawRpc)
+  ) {
     warnings.push(
-      'Using public Solana RPC in production — set RPC_URL to a paid endpoint'
+      `RPC_URL looks like a placeholder (${rawRpc.slice(0, 48)}) — using public Solana RPC until you set a real Helius/QuickNode URL`
+    );
+  } else if (env.isProduction && env.rpcUrl.includes('mainnet-beta.solana.com')) {
+    warnings.push(
+      'Using public Solana RPC in production — set RPC_URL to a paid endpoint (Helius/QuickNode) for reliable wallet polling'
     );
   }
   return warnings;

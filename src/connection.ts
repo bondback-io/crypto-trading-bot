@@ -16,10 +16,15 @@ import bs58 from 'bs58';
 import dotenv from 'dotenv';
 import { config, getActiveTradingWallet, listTradingWalletSlots, resolveTradingWalletSecret } from './config';
 import { logger, errorToMeta } from './logger';
+import {
+  PUBLIC_SOLANA_RPC,
+  normalizeRpcEndpoints,
+  rpcEndpointsFromEnv,
+} from './rpcUrl';
 
 dotenv.config();
 
-const DEFAULT_RPC = 'https://api.mainnet-beta.solana.com';
+const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
 export interface RpcEndpoint {
   url: string;
@@ -63,31 +68,15 @@ let started = false;
 function parseRpcList(): RpcEndpoint[] {
   const fromConfig = config.rpc?.endpoints ?? [];
   if (fromConfig.length > 0) {
-    return fromConfig.map((e, i) => ({
-      url: e.url,
-      label: e.label || `rpc-${i + 1}`,
-      wsUrl: e.wsUrl,
-    }));
+    return normalizeRpcEndpoints(
+      fromConfig.map((e, i) => ({
+        url: e.url,
+        label: e.label || `rpc-${i + 1}`,
+        wsUrl: e.wsUrl,
+      }))
+    );
   }
-
-  const primary = process.env.RPC_URL?.trim() || DEFAULT_RPC;
-  const fallbacks = (process.env.RPC_FALLBACKS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const list: RpcEndpoint[] = [
-    { url: primary, label: 'primary' },
-    ...fallbacks.map((url, i) => ({ url, label: `fallback-${i + 1}` })),
-  ];
-
-  // Dedupe by URL
-  const seen = new Set<string>();
-  return list.filter((e) => {
-    if (seen.has(e.url)) return false;
-    seen.add(e.url);
-    return true;
-  });
+  return rpcEndpointsFromEnv();
 }
 
 function toWsUrl(httpUrl: string): string {
@@ -267,8 +256,25 @@ export function getRpcStats(): {
   endpoints: RpcEndpointStats[];
   jitoEnabled: boolean;
   priorityFeeLamports: number | null;
+  /** True when at least one endpoint is currently healthy */
+  ok: boolean;
+  /** Human-readable warning when polling is likely broken */
+  warning: string | null;
 } {
   ensureEndpoints();
+  const active = endpoints[activeIndex];
+  const anyHealthy = endpoints.some((e) => e.healthy);
+  let warning: string | null = null;
+  if (!anyHealthy) {
+    warning =
+      'All RPC endpoints unhealthy — wallet buy detection is paused until RPC recovers. ' +
+      'Set a real Helius/QuickNode RPC_URL on Render (not a placeholder).';
+  } else if (
+    /mainnet-beta\.solana\.com|publicnode\.com/i.test(active?.endpoint.url || '')
+  ) {
+    warning =
+      'Using a public Solana RPC — fine for paper, but rate limits can miss buys. Prefer a paid Helius/QuickNode RPC_URL.';
+  }
   return {
     active: getActiveEndpointLabel(),
     activeUrl: getRpcUrl(),
@@ -289,6 +295,8 @@ export function getRpcStats(): {
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
     priorityFeeLamports: lastPriorityFeeLamports,
+    ok: anyHealthy,
+    warning,
   };
 }
 

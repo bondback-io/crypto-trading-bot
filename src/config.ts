@@ -32,6 +32,7 @@ import {
   type PersistedBotSettings,
 } from './settingsStore';
 import { resetAllPersistedData } from './dataDir';
+import { rpcEndpointsFromEnv } from './rpcUrl';
 
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
 export { hasPersistedSettings };
@@ -928,23 +929,7 @@ export const config: BotConfig = {
   },
 
   rpc: {
-    endpoints: (() => {
-      const primary = process.env.RPC_URL?.trim() || 'https://api.mainnet-beta.solana.com';
-      const fallbacks = (process.env.RPC_FALLBACKS || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const list = [
-        { url: primary, label: 'primary' },
-        ...fallbacks.map((url, i) => ({ url, label: `fallback-${i + 1}` })),
-      ];
-      const seen = new Set<string>();
-      return list.filter((e) => {
-        if (seen.has(e.url)) return false;
-        seen.add(e.url);
-        return true;
-      });
-    })(),
+    endpoints: rpcEndpointsFromEnv(),
     healthIntervalMs: 30_000,
     failureThreshold: 3,
     priorityFee: {

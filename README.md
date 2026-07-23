@@ -227,7 +227,7 @@ Non-secret defaults are already in `fly.toml` (`NODE_ENV`, `HOST`, `PORT`, `DATA
 
 ```bash
 # Required — use a paid RPC (public mainnet-beta will 429 and break trading)
-fly secrets set RPC_URL="https://your-helius-or-quicknode-url"
+fly secrets set RPC_URL="https://mainnet.helius-rpc.com/?api-key=YOUR_KEY"
 
 # Strongly recommended
 fly secrets set RPC_FALLBACKS="https://backup-rpc-1,https://backup-rpc-2"

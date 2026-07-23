@@ -557,7 +557,16 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
       checks.estimatedSellTaxPct = tax.sellTaxPct;
       checks.roundTripLossPct = tax.roundTripLossPct;
 
-      if (tax.honeypot) {
+      if (tax.noRoute) {
+        // Soft signal only — do not hard-skip (bonding-curve / brand-new mints)
+        score += 4;
+        flags.push({
+          id: 'no_jupiter_route',
+          severity: 'low',
+          label: 'No Jupiter route yet',
+          detail: tax.reason,
+        });
+      } else if (tax.honeypot) {
         score += 40;
         flags.push({
           id: 'honeypot',
@@ -1092,16 +1101,21 @@ function sumOwnerMint(
 async function probeBuySellTax(mint: string): Promise<{
   honeypot: boolean;
   reason?: string;
+  /** Jupiter has no route yet (common on early Pump bonding-curve tokens) */
+  noRoute?: boolean;
   buyTaxPct: number | null;
   sellTaxPct: number | null;
   roundTripLossPct: number | null;
 }> {
-  // Small probe; high slippage tolerance so quote failures mean real issues
+  // Small probe; high slippage tolerance so quote failures mean real issues.
+  // Missing quotes are NOT treated as honeypots — early Pump.fun tokens often
+  // have no Jupiter route until migration.
   const buy = await getQuote(mint, 0.05, 800);
   if (!buy?.outAmount || !buy?.inAmount) {
     return {
-      honeypot: true,
-      reason: 'no buy quote',
+      honeypot: false,
+      noRoute: true,
+      reason: 'no buy quote (no Jupiter route yet)',
       buyTaxPct: null,
       sellTaxPct: null,
       roundTripLossPct: null,
