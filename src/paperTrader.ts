@@ -80,9 +80,11 @@ export interface Position {
     flags: string[];
     ok: boolean;
   };
-  /** Market cap USD at entry fill (DexScreener, scaled to fill price when possible) */
+  /** Market cap USD at entry fill (curve/Dex, scaled to fill price when possible) */
   entryMarketCapUsd?: number;
-  /** Market cap USD at exit (scaled from entry MC by exit/entry price) */
+  /** Market cap USD when the copied smart wallet bought (signal-time) */
+  sourceEntryMcUsd?: number;
+  /** Market cap USD at exit (live mark MC preferred; else scaled from entry) */
   exitMarketCapUsd?: number;
   /**
    * Wall-clock ms when rolling 1h volume / tx activity first went "dead".
@@ -141,6 +143,8 @@ export class PaperTrader {
   private closedPositions: Position[] = [];
   private logs: TradeLog[] = [];
   private priceCache: Map<string, number> = new Map();
+  /** Latest observed market-cap USD per mint (from Dex/curve refresh) */
+  private marketCapCache: Map<string, number> = new Map();
   /** Latest DexScreener activity per mint (for dead-volume exits) */
   private marketActivityCache: Map<string, MarketActivitySample> = new Map();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
@@ -193,6 +197,16 @@ export class PaperTrader {
     for (const p of saved.positions) {
       if (p?.id && p.status !== 'closed') {
         this.positions.set(p.id, { ...p });
+        if (p.entryPriceSol > 0) {
+          this.priceCache.set(p.mint, p.entryPriceSol);
+        }
+        if (
+          p.entryMarketCapUsd != null &&
+          Number.isFinite(p.entryMarketCapUsd) &&
+          p.entryMarketCapUsd > 0
+        ) {
+          this.marketCapCache.set(p.mint, p.entryMarketCapUsd);
+        }
       }
     }
     this.closedPositions = (saved.closedPositions || []).map((p) => ({ ...p }));
@@ -216,6 +230,14 @@ export class PaperTrader {
   ): void {
     if (!(priceSol > 0) || !Number.isFinite(priceSol)) return;
 
+    if (
+      meta?.marketCapUsd != null &&
+      Number.isFinite(meta.marketCapUsd) &&
+      meta.marketCapUsd > 0
+    ) {
+      this.marketCapCache.set(mint, meta.marketCapUsd);
+    }
+
     let mark = priceSol;
     for (const pos of this.positions.values()) {
       if (pos.mint !== mint || pos.status === 'closed') continue;
@@ -224,7 +246,8 @@ export class PaperTrader {
         entryPriceSol: pos.entryPriceSol,
         markPriceSol: priceSol,
         entryMarketCapUsd: pos.entryMarketCapUsd,
-        markMarketCapUsd: meta?.marketCapUsd,
+        markMarketCapUsd:
+          meta?.marketCapUsd ?? this.marketCapCache.get(mint) ?? null,
       });
       if (reconciled.rejected) {
         console.warn(
@@ -244,6 +267,21 @@ export class PaperTrader {
       break;
     }
     this.priceCache.set(mint, mark);
+  }
+
+  /** Cache latest live market-cap USD for a mint (Live MC column / exit MC). */
+  setMarkMarketCapUsd(mint: string, marketCapUsd: number | null | undefined): void {
+    if (
+      marketCapUsd != null &&
+      Number.isFinite(marketCapUsd) &&
+      marketCapUsd > 0
+    ) {
+      this.marketCapCache.set(mint, marketCapUsd);
+    }
+  }
+
+  getMarkMarketCapUsd(mint: string): number | undefined {
+    return this.marketCapCache.get(mint);
   }
 
   getTokenPrice(mint: string): number | undefined {
@@ -290,6 +328,8 @@ export class PaperTrader {
     txnsH1?: number | null;
     costUsd?: number;
     solUsd?: number;
+    /** Current market cap (mark); falls back to entry MC scaled by mark/entry price */
+    liveMarketCapUsd?: number | null;
   } {
     const trailPct =
       position.trailingStopPct ||
@@ -310,6 +350,24 @@ export class PaperTrader {
       position.costSol > 0 && solUsd > 0
         ? Number((position.costSol * solUsd).toFixed(2))
         : undefined;
+
+    let liveMarketCapUsd: number | null =
+      this.marketCapCache.get(position.mint) ?? null;
+    if (
+      (liveMarketCapUsd == null || !(liveMarketCapUsd > 0)) &&
+      position.entryMarketCapUsd != null &&
+      position.entryPriceSol > 0 &&
+      current != null &&
+      current > 0
+    ) {
+      liveMarketCapUsd =
+        marketCapAtPrice(
+          position.entryMarketCapUsd,
+          position.entryPriceSol,
+          current
+        ) ?? null;
+    }
+
     return {
       ...position,
       trailingStopPct: trailPct,
@@ -319,6 +377,10 @@ export class PaperTrader {
       txnsH1: activity ? activity.txnsH1 : null,
       costUsd,
       solUsd,
+      liveMarketCapUsd:
+        liveMarketCapUsd != null && liveMarketCapUsd > 0
+          ? liveMarketCapUsd
+          : null,
     };
   }
 
@@ -338,6 +400,7 @@ export class PaperTrader {
     sourceNames?: string[];
     antiRug?: Position['antiRug'];
     entryMarketCapUsd?: number;
+    sourceEntryMcUsd?: number;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -390,10 +453,19 @@ export class PaperTrader {
         input.entryMarketCapUsd > 0
           ? input.entryMarketCapUsd
           : undefined,
+      sourceEntryMcUsd:
+        input.sourceEntryMcUsd != null &&
+        Number.isFinite(input.sourceEntryMcUsd) &&
+        input.sourceEntryMcUsd > 0
+          ? input.sourceEntryMcUsd
+          : undefined,
     };
 
     this.positions.set(position.id, position);
     this.priceCache.set(input.mint, input.entryPriceSol);
+    if (position.entryMarketCapUsd != null) {
+      this.marketCapCache.set(input.mint, position.entryMarketCapUsd);
+    }
     const trailArm = config.profitStrategy?.enabled
       ? config.profitStrategy.trailingStopAfter
       : config.risk.trailingActivationProfit;
@@ -487,6 +559,7 @@ export class PaperTrader {
       strategyKind?: 'migration' | 'normal';
       antiRug?: Position['antiRug'];
       entryMarketCapUsd?: number;
+      sourceEntryMcUsd?: number;
     }
   ): Position | null {
     const spendSol =
@@ -563,9 +636,18 @@ export class PaperTrader {
         meta.entryMarketCapUsd > 0
           ? meta.entryMarketCapUsd
           : undefined,
+      sourceEntryMcUsd:
+        meta?.sourceEntryMcUsd != null &&
+        Number.isFinite(meta.sourceEntryMcUsd) &&
+        meta.sourceEntryMcUsd > 0
+          ? meta.sourceEntryMcUsd
+          : undefined,
     };
 
     this.positions.set(position.id, position);
+    if (position.entryMarketCapUsd != null) {
+      this.marketCapCache.set(mint, position.entryMarketCapUsd);
+    }
     const mcBit =
       position.entryMarketCapUsd != null
         ? ` MC~$${Math.round(position.entryMarketCapUsd).toLocaleString()}`
@@ -677,14 +759,17 @@ export class PaperTrader {
     }
 
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
+    const liveMc = this.marketCapCache.get(position.mint);
     const exitMc =
-      position.entryMarketCapUsd != null && position.entryPriceSol > 0
-        ? marketCapAtPrice(
-            position.entryMarketCapUsd,
-            position.entryPriceSol,
-            exitPrice
-          )
-        : undefined;
+      liveMc != null && liveMc > 0
+        ? liveMc
+        : position.entryMarketCapUsd != null && position.entryPriceSol > 0
+          ? marketCapAtPrice(
+              position.entryMarketCapUsd,
+              position.entryPriceSol,
+              exitPrice
+            )
+          : undefined;
 
     if (isPartial && position.amountTokens > 1e-12) {
       position.status = 'partial';
@@ -1594,14 +1679,17 @@ export class PaperTrader {
           position.status = 'closed';
           position.closedAt = Date.now();
           position.exitPriceSol = currentPriceSol;
+          const liveMc = this.marketCapCache.get(position.mint);
           position.exitMarketCapUsd =
-            position.entryMarketCapUsd != null && position.entryPriceSol > 0
-              ? marketCapAtPrice(
-                  position.entryMarketCapUsd,
-                  position.entryPriceSol,
-                  currentPriceSol
-                )
-              : undefined;
+            liveMc != null && liveMc > 0
+              ? liveMc
+              : position.entryMarketCapUsd != null && position.entryPriceSol > 0
+                ? marketCapAtPrice(
+                    position.entryMarketCapUsd,
+                    position.entryPriceSol,
+                    currentPriceSol
+                  )
+                : undefined;
           position.reason = reason;
           const pnlPct =
             ((currentPriceSol - position.entryPriceSol) /

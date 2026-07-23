@@ -1242,6 +1242,15 @@ export async function refreshOpenMarketActivity(
       mint: string,
       sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
     ) => void;
+    setTokenPrice?: (
+      mint: string,
+      priceSol: number,
+      meta?: { marketCapUsd?: number | null }
+    ) => void;
+    setMarkMarketCapUsd?: (
+      mint: string,
+      marketCapUsd: number | null | undefined
+    ) => void;
   },
   options: { force?: boolean } = {}
 ): Promise<number> {
@@ -1271,6 +1280,18 @@ export async function refreshOpenMarketActivity(
         txnsH1: snap.txnsH1 ?? 0,
         updatedAt: now,
       });
+      if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+        trader.setMarkMarketCapUsd?.(mint, snap.marketCapUsd);
+      }
+      if (
+        snap.priceSol != null &&
+        snap.priceSol > 0 &&
+        typeof trader.setTokenPrice === 'function'
+      ) {
+        trader.setTokenPrice(mint, snap.priceSol, {
+          marketCapUsd: snap.marketCapUsd,
+        });
+      }
       updated += 1;
     } catch {
       // best-effort — keep prior cache

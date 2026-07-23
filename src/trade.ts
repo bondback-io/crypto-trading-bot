@@ -28,11 +28,13 @@ import { paperTrader } from './paperTrader';
 import { logger, errorToMeta } from './logger';
 import {
   fetchLiveTokenSnapshot,
+  getCachedSolUsdPrice,
   marketCapAtPrice,
 } from './marketData';
 import {
   fetchBondingCurve,
   estimateBondingCurvePriceSol,
+  estimateBondingCurveMarketCapUsd,
 } from './bondingCurve';
 
 const jupiter = createJupiterApiClient();
@@ -153,30 +155,128 @@ export interface BuyOptions {
     flags: string[];
     ok: boolean;
   };
+  /** Bot fill-time market cap USD (preferred when already resolved) */
   entryMarketCapUsd?: number;
+  /**
+   * Market cap when the copied smart wallet bought (signal-time snapshot).
+   * Stored separately from our fill MC for wallet hover / analytics.
+   */
+  sourceEntryMcUsd?: number;
 }
 
+/**
+ * Resolve Buy MC at our fill.
+ * Prefer active bonding-curve MC (pump truth) over Dex FDV/MC, which often
+ * reports absurd tens-of-millions figures for early curve tokens when price
+ * units disagree with Jupiter/curve fills.
+ */
 async function resolveEntryMarketCapUsd(
   mint: string,
   fillPriceSol: number,
   provided?: number
 ): Promise<number | undefined> {
+  let curveMc: number | undefined;
+  try {
+    const curve = await fetchBondingCurve(mint);
+    if (curve.source !== 'none' && !curve.complete) {
+      const solUsd = getCachedSolUsdPrice();
+      let mc = estimateBondingCurveMarketCapUsd(curve, solUsd) ?? undefined;
+      const curvePx = estimateBondingCurvePriceSol(curve);
+      if (
+        mc != null &&
+        curvePx != null &&
+        curvePx > 0 &&
+        fillPriceSol > 0
+      ) {
+        mc =
+          marketCapAtPrice(mc, curvePx, fillPriceSol) ?? mc;
+      }
+      if (mc != null && Number.isFinite(mc) && mc > 0) curveMc = mc;
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  let dexMc: number | undefined;
+  try {
+    const snap = await fetchLiveTokenSnapshot(mint);
+    if (snap?.marketCapUsd && snap.marketCapUsd > 0) {
+      if (snap.priceSol != null && snap.priceSol > 0 && fillPriceSol > 0) {
+        const ratio = fillPriceSol / snap.priceSol;
+        // Price-unit mismatch vs Dex → distrust Dex MC when we have curve.
+        if (
+          Number.isFinite(ratio) &&
+          ratio >= 0.1 &&
+          ratio <= 10
+        ) {
+          dexMc =
+            marketCapAtPrice(
+              snap.marketCapUsd,
+              snap.priceSol,
+              fillPriceSol
+            ) ?? snap.marketCapUsd;
+        } else if (curveMc == null) {
+          dexMc =
+            marketCapAtPrice(
+              snap.marketCapUsd,
+              snap.priceSol,
+              fillPriceSol
+            ) ?? undefined;
+        }
+      } else if (curveMc == null) {
+        dexMc = snap.marketCapUsd;
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  const pickSane = (
+    a: number | undefined,
+    b: number | undefined
+  ): number | undefined => {
+    if (a != null && b != null && a > 0 && b > 0) {
+      // Curve vs Dex disagree wildly → trust curve for pumps
+      if (a / b > 10 || b / a > 10) return a;
+      return b;
+    }
+    return a ?? b;
+  };
+
   if (provided != null && Number.isFinite(provided) && provided > 0) {
+    // Reject provided values that look like Dex FDV blow-ups vs curve
+    if (curveMc != null && provided / curveMc > 10) return curveMc;
     return provided;
+  }
+
+  return pickSane(curveMc, dexMc);
+}
+
+/** Snapshot MC at signal / smart-wallet buy time (curve first, else Dex). */
+export async function resolveSourceEntryMcUsd(
+  mint: string
+): Promise<number | undefined> {
+  try {
+    const curve = await fetchBondingCurve(mint);
+    if (curve.source !== 'none' && !curve.complete) {
+      const mc = estimateBondingCurveMarketCapUsd(
+        curve,
+        getCachedSolUsdPrice()
+      );
+      if (mc != null && mc > 0) return mc;
+    }
+  } catch {
+    /* non-fatal */
   }
   try {
     const snap = await fetchLiveTokenSnapshot(mint);
-    if (!snap?.marketCapUsd) return undefined;
-    if (snap.priceSol != null && snap.priceSol > 0 && fillPriceSol > 0) {
-      return (
-        marketCapAtPrice(snap.marketCapUsd, snap.priceSol, fillPriceSol) ??
-        snap.marketCapUsd
-      );
+    if (snap?.marketCapUsd != null && snap.marketCapUsd > 0) {
+      return snap.marketCapUsd;
     }
-    return snap.marketCapUsd;
   } catch {
-    return undefined;
+    /* non-fatal */
   }
+  return undefined;
 }
 
 export async function executeBuy(
@@ -266,6 +366,12 @@ export async function executeBuy(
     priceSol,
     meta?.entryMarketCapUsd
   );
+  const sourceEntryMcUsd =
+    meta?.sourceEntryMcUsd != null &&
+    Number.isFinite(meta.sourceEntryMcUsd) &&
+    meta.sourceEntryMcUsd > 0
+      ? meta.sourceEntryMcUsd
+      : undefined;
 
   if (config.mode === 'paper') {
     const position = paperTrader.simulateBuy(
@@ -281,6 +387,7 @@ export async function executeBuy(
         strategyKind,
         antiRug: meta?.antiRug,
         entryMarketCapUsd,
+        sourceEntryMcUsd,
       }
     );
     if (!position) {
@@ -360,6 +467,7 @@ export async function executeBuy(
         sourceNames: meta?.sourceNames,
         antiRug: meta?.antiRug,
         entryMarketCapUsd,
+        sourceEntryMcUsd,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

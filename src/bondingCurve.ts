@@ -570,6 +570,37 @@ export function estimateBondingCurvePriceSol(
   return Number.isFinite(price) && price > 0 ? price : null;
 }
 
+/**
+ * Pump.fun-style market cap: spot price × total supply × SOL/USD.
+ * Prefers on-curve reserves over Dex FDV (which often misreports early pumps
+ * as tens/hundreds of millions).
+ */
+export function estimateBondingCurveMarketCapUsd(
+  state: BondingCurveState | null | undefined,
+  solUsd: number
+): number | null {
+  if (!state || state.source === 'none') return null;
+  if (!(solUsd > 0) || !Number.isFinite(solUsd)) return null;
+  const priceSol = estimateBondingCurvePriceSol(state);
+  if (priceSol == null || !(priceSol > 0)) return null;
+
+  // Pump default supply is 1e9 whole tokens (raw 1e15 at 6dp).
+  const raw = state.tokenTotalSupply;
+  let supply =
+    raw > 0
+      ? raw > 1e12
+        ? raw / 1e6
+        : raw
+      : 1_000_000_000;
+  if (!(supply > 0) || !Number.isFinite(supply)) supply = 1_000_000_000;
+
+  const mc = priceSol * supply * solUsd;
+  // Pre-migration curve MC is almost never above ~$2M; reject unit explosions.
+  if (!Number.isFinite(mc) || mc <= 0) return null;
+  if (!state.complete && mc > 2_000_000) return null;
+  return mc;
+}
+
 /** Human log line */
 export function formatBondingCurveLog(
   symbol: string,

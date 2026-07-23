@@ -1067,13 +1067,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), converging wallets, 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
           </div>
           <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1085,7 +1085,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others — hover/tap username for their entry MC), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
             <table id="closed-table">
               <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -1144,20 +1144,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Trades</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), converging wallets, 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
           </div>
           <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </div>
 
       <div class="card">
-        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others — hover/tap username for their entry MC), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
             <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -2290,8 +2290,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function fmtUsdShort(n) {
       if (n == null || !Number.isFinite(Number(n))) return '—';
       const v = Number(n);
+      if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
       if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
-      if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+      if (v >= 1e3) {
+        const k = v / 1e3;
+        return '$' + (k >= 100 ? k.toFixed(0) : k.toFixed(k >= 10 ? 0 : 1)) + 'K';
+      }
       return '$' + v.toFixed(0);
     }
 
@@ -2326,7 +2330,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return solBit + ' · $' + usd.toFixed(2);
     }
 
-    /** Copied wallet + other converging wallets from sourceNames / sourceWallets. */
+    /**
+     * Copied wallet + converging wallets.
+     * Hover (desktop) / tap (mobile) shows smart-wallet entry MC when known.
+     */
     function fmtWalletConvergence(p) {
       const names = (p && p.sourceNames && p.sourceNames.length)
         ? p.sourceNames
@@ -2340,12 +2347,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? String(names[0])
         : (addrs[0].slice(0, 4) + '…' + addrs[0].slice(-4));
       const others = total - 1;
-      if (others <= 0) {
-        return '<span title="Copied wallet">' + primary.replace(/</g, '&lt;') + '</span>';
-      }
-      return '<span title="' + total + ' wallets converged">' +
-        primary.replace(/</g, '&lt;') +
-        ' <span class="mint">+' + others + '</span></span>';
+      const srcMc = p.sourceEntryMcUsd != null
+        ? Number(p.sourceEntryMcUsd)
+        : (p.smartWalletEntryMarketCapUsd != null
+          ? Number(p.smartWalletEntryMarketCapUsd)
+          : null);
+      const mcLabel = srcMc != null && Number.isFinite(srcMc) && srcMc > 0
+        ? fmtUsdShort(srcMc)
+        : null;
+      const tipText = mcLabel
+        ? 'Smart wallet bought at MC ' + mcLabel
+        : 'Copied wallet' + (others > 0 ? ' (+' + others + ' converged)' : '') +
+          ' · entry MC not stored';
+      const tipEsc = tipText.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const label = primary.replace(/</g, '&lt;') +
+        (others > 0 ? ' <span class="mint">+' + others + '</span>' : '');
+      return '<span class="pos-hold wallet-mc-tip" title="' + tipEsc +
+        '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
+        '<span class="pos-hold-dur">' + label + '</span>' +
+        '<span class="pos-hold-entry">' + tipEsc + '</span>' +
+        '</span>';
     }
 
     /** Compact signed unrealized P&L: +0.12 SOL · $18.40 */
@@ -4251,7 +4272,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       });
       const positionsHtml = posOpenN === 0
-        ? '<tr><td colspan="13"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
+        ? '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
           const pnlCell = pnl == null
@@ -4301,6 +4322,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 : '')
             : '';
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
+          const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
           const costCell = fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd);
           const walletsCell = fmtWalletConvergence(p);
@@ -4311,9 +4333,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td>\${fmtToken(p.symbol, p.name, p.mint)}\${mode}\${riskBit}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtMintCa(p.mint)}</td>
-            <td class="mint" title="Market cap at buy">\${buyMc}</td>
+            <td class="mint" title="Market cap at your buy">\${buyMc}</td>
+            <td class="mint" title="Current market cap (live mark)">\${liveMc}</td>
             <td class="pos-cost-cell" title="Position cost">\${costCell}</td>
-            <td class="mint" title="Copied wallet + other converging wallets">\${walletsCell}</td>
+            <td class="mint" title="Copied wallet — hover/tap for their entry MC">\${walletsCell}</td>
             <td>\${volCell}</td>
             <td>\${pnlCell}</td>
             <td>\${trailCell}</td>
@@ -4336,10 +4359,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <tr>
             <td>\${fmtToken(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
-            <td class="mint" title="Market cap at buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
+            <td class="mint" title="Market cap at your buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
             <td class="mint" title="Market cap at exit">\${fmtUsdShort(p.exitMarketCapUsd)}</td>
             <td class="pos-cost-cell" title="Buy-in / cost basis of sold portion">\${fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd)}</td>
-            <td class="mint" title="Copied wallet + other converging wallets">\${fmtWalletConvergence(p)}</td>
+            <td class="mint" title="Copied wallet — hover/tap for their entry MC">\${fmtWalletConvergence(p)}</td>
             <td style="color:\${(p.pnlSol||0)>=0?'var(--green)':'var(--red)'}">
               \${(p.pnlSol||0)>=0?'+':''}\${(p.pnlSol||0).toFixed(4)} SOL
               <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>

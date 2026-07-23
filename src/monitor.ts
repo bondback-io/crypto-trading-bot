@@ -13,7 +13,7 @@ import { config, SmartWallet, persistWallets } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
-import { executeBuy, refreshPositionPrices } from './trade';
+import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
 import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
@@ -173,6 +173,8 @@ export interface TradeSignal {
   dynamicSizeSol?: number;
   /** Human-readable sizing reason for logs / dashboard */
   dynamicSizeReason?: string;
+  /** Market cap when the smart wallet bought (signal-time) */
+  sourceEntryMcUsd?: number;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -1361,6 +1363,12 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     return;
   }
 
+  try {
+    signal.sourceEntryMcUsd = await resolveSourceEntryMcUsd(event.mint);
+  } catch {
+    /* non-fatal */
+  }
+
   onSignalHandler?.(signal);
 
   const sizing = resolveTradeSize('migration', {
@@ -1383,6 +1391,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     priority: true,
     strategyKind: 'migration',
     sizeReason: sizing.reason,
+    sourceEntryMcUsd: signal.sourceEntryMcUsd,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -1882,6 +1891,15 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     `[monitor] ✅ SIGNAL${priority ? ' (priority)' : ''}: ${signal.walletNames.join(' + ')} → ${formatTokenLabel(signal.symbol, signal.name, signal.mint)}`
   );
 
+  // Snapshot MC at signal time (smart-wallet entry) before our fill
+  if (signal.sourceEntryMcUsd == null) {
+    try {
+      signal.sourceEntryMcUsd = await resolveSourceEntryMcUsd(signal.mint);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   onSignalHandler?.(signal);
 
   const kind: 'migration' | 'normal' =
@@ -1904,6 +1922,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     priority?: boolean;
     strategyKind?: 'migration' | 'normal';
     sizeReason?: string;
+    sourceEntryMcUsd?: number;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -1917,6 +1936,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     strategyKind: kind,
     solAmount: sizing.sizeSol,
     sizeReason: sizing.reason,
+    sourceEntryMcUsd: signal.sourceEntryMcUsd,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2079,6 +2099,12 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
     return false;
   }
 
+  try {
+    signal.sourceEntryMcUsd = await resolveSourceEntryMcUsd(mint);
+  } catch {
+    /* non-fatal */
+  }
+
   onSignalHandler?.(signal);
 
   const sizing = resolveTradeSize(signal.isMigration ? 'migration' : 'normal', {
@@ -2096,6 +2122,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
     solAmount: sizing.sizeSol,
     sizeReason: sizing.reason,
     strategyKind: signal.isMigration ? 'migration' : 'normal',
+    sourceEntryMcUsd: signal.sourceEntryMcUsd,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
