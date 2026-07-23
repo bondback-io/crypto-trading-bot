@@ -810,7 +810,7 @@ export const config: BotConfig = {
 
   strategy: {
     enableConvergence: true,
-    enableMigrationOnly: true,
+    enableMigrationOnly: false,
     enableMigrationPriority: true,
     enableBondingCurvePriority: true,
     nearMigrationCurvePct: 80,
@@ -997,8 +997,8 @@ export const config: BotConfig = {
  */
 /** One-shot: older defaults hard-blocked almost all pre-migration Pump copies. */
 const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
-/** One-shot: focus copy-trading on Pump.fun migrations (skip random non-mig swaps). */
-const MIGRATION_FOCUS_V1 = 'migrationFocus_v1';
+/** One-shot: undo migrationFocus_v1 — keep Migration Only OFF by default. */
+const MIGRATION_FOCUS_OFF_V1 = 'migrationFocus_off_v1';
 let settingsMigrations: Record<string, boolean> = {};
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
@@ -1213,11 +1213,11 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
-  if (applyMigrationFocusMigration()) {
-    settingsMigrations[MIGRATION_FOCUS_V1] = true;
+  if (applyMigrationFocusOffMigration()) {
+    settingsMigrations[MIGRATION_FOCUS_OFF_V1] = true;
     persistUserSettings();
     console.log(
-      '[settings] Applied migrationFocus_v1 — enableMigrationOnly ON (Pump.fun migration focus)'
+      '[settings] Applied migrationFocus_off_v1 — enableMigrationOnly OFF (default)'
     );
   }
 
@@ -1289,10 +1289,11 @@ function applyPaperSignalRelaxMigration(): boolean {
   return changed;
 }
 
-/** Prefer Pump.fun migrations; users can still turn Migration Only off in the UI. */
-function applyMigrationFocusMigration(): boolean {
-  if (settingsMigrations[MIGRATION_FOCUS_V1]) return false;
-  config.strategy.enableMigrationOnly = true;
+/** Undo migrationFocus_v1 force-on so redeploys keep Migration Only OFF by default. */
+function applyMigrationFocusOffMigration(): boolean {
+  if (settingsMigrations[MIGRATION_FOCUS_OFF_V1]) return false;
+  if (!config.strategy.enableMigrationOnly) return true;
+  config.strategy.enableMigrationOnly = false;
   return true;
 }
 
