@@ -158,7 +158,7 @@ export async function fetchPlatformLeaderboard(
     const res = await loggedFetch(url, {
       context: 'SolanaTracker',
       label: `leaderboard:${platform}`,
-      timeoutMs: 20_000,
+      timeoutMs: 8_000,
       headers: {
         Accept: 'application/json',
         'x-api-key': apiKey,

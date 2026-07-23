@@ -3957,7 +3957,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
-            timeoutMs: 60000,
+            timeoutMs: 25000,
           });
         }
         let rows = data.wallets || [];
@@ -4044,6 +4044,57 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           }).join('');
         }
       } catch (err) {
+        // Render 502 / proxy kill while GMGN hangs — still populate Discover.
+        try {
+          const fallback = await fetchJSON('/api/discover-wallets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: 'manual', limit, force: true }),
+            timeoutMs: 15000,
+          });
+          const rows = fallback.wallets || [];
+          window._discoveredWallets = rows;
+          window._topWallets = rows.map(w => ({
+            name: w.name,
+            address: w.address,
+            winRate: w.winRate,
+            lastActiveAt: w.lastActiveAt,
+            tradesLast7d: w.tradesLast7d,
+            pumpFunTradeCount: w.pumpFunTradeCount || (w.metrics && w.metrics.pumpFunTrades),
+            tags: w.tags,
+            notes: w.notes,
+            alreadyTracked: w.alreadyTracked,
+            realizedPnlUsd: w.realizedPnlUsd,
+            source: w.source,
+          }));
+          status.textContent =
+            'Live sources failed (' + (err.message || err) + ') — curated · ' + rows.length + ' wallets';
+          if (empty) empty.classList.add('hidden');
+          const tbody = document.querySelector('#discover-wallets-table tbody');
+          if (tbody && rows.length) {
+            tbody.innerHTML = rows.map(w => {
+              const flow = w.smartFlowScore != null ? w.smartFlowScore : (w.metrics && w.metrics.smartFlowScore);
+              const pump = w.pumpFunTradeCount != null ? w.pumpFunTradeCount : (w.metrics && w.metrics.pumpFunTrades);
+              const trades = w.tradesLast7d ?? w.tradeCount ?? '—';
+              return \`
+              <tr>
+                <td>\${w.name}</td>
+                <td class="mint">\${w.source}</td>
+                <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+                <td>\${fmtLastTrade(w.lastActiveAt)}</td>
+                <td>\${w.winRate != null ? w.winRate + '%' : '—'}</td>
+                <td>\${trades}</td>
+                <td>\${pump != null && pump !== '' ? pump : '—'}</td>
+                <td>\${flow != null ? flow : '—'}</td>
+                <td>\${w.alreadyTracked
+                  ? '<span class="mint">Tracked</span>'
+                  : \`<button onclick="addDiscoveredWallet('\${w.address}')">Add</button>\`
+                }</td>
+              </tr>\`;
+            }).join('');
+            return;
+          }
+        } catch (_) {}
         status.textContent = err.message;
         if (empty) {
           empty.classList.remove('hidden');

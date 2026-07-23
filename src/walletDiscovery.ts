@@ -96,8 +96,49 @@ export interface DiscoveryResult {
 
 const cache = new Map<string, { expiresAt: number; data: DiscoveryResult }>();
 
+/** Keep Discover under Render's proxy budget (~30s) and avoid GMGN hangs. */
+const DISCOVERY_OVERALL_MS = 10_000;
+const DISCOVERY_SOURCE_MS = 6_000;
+
 function cacheTtlMs(): number {
   return config.walletDiscovery?.cacheTtlMs ?? 5 * 60 * 1000;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function raceTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: () => T
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback()), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function emptyDiscovery(
+  source: DiscoverySource,
+  message: string,
+  error?: string
+): DiscoveryResult {
+  return {
+    source,
+    wallets: [],
+    fetchedAt: Date.now(),
+    cached: false,
+    message,
+    error,
+  };
 }
 
 function trackedSet(): Set<string> {
@@ -582,7 +623,7 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
     const res = await loggedFetch(url, {
       context: 'Kolscan',
       label: 'leaderboard',
-      timeoutMs: 18_000,
+      timeoutMs: 8_000,
       headers: {
         Accept: 'text/html,application/xhtml+xml',
         'User-Agent':
@@ -920,31 +961,38 @@ async function discoverAll(
     `[discovery] multi-source all limit=${limit} period=${period} minWin=${minWinRate} pump=${pumpFunFocus}`
   );
   const errors: string[] = [];
-  const parts: DiscoveredWallet[][] = [];
+  // Curated first so Discover always has rows even if every live API dies.
+  const parts: DiscoveredWallet[][] = [manualCurated(limit, 'manual')];
 
-  // Run independent sources in parallel so one slow/dead API (GMGN 404) can't
-  // empty the Discover UI via client timeout.
+  // Per-source budget: one hung GMGN/Kolscan call must not block the response.
   const tasks: Array<Promise<{ label: string; result: DiscoveryResult }>> = [
-    discoverGmgn(limit, period, minWinRate, pumpFunFocus).then((result) => ({
-      label: 'gmgn',
-      result,
-    })),
-    discoverFromKolscan(limit).then((result) => ({
-      label: 'kolscan',
-      result,
-    })),
-    discoverDexScreener(Math.min(limit, 25)).then((result) => ({
-      label: 'dex',
-      result,
-    })),
+    raceTimeout(
+      discoverGmgn(limit, period, minWinRate, pumpFunFocus, {
+        skipKolscan: true,
+      }),
+      DISCOVERY_SOURCE_MS,
+      () =>
+        emptyDiscovery('gmgn', 'GMGN timed out', 'timeout')
+    ).then((result) => ({ label: 'gmgn', result })),
+    raceTimeout(
+      discoverFromKolscan(limit),
+      DISCOVERY_SOURCE_MS,
+      () => emptyDiscovery('kolscan', 'Kolscan timed out', 'timeout')
+    ).then((result) => ({ label: 'kolscan', result })),
+    raceTimeout(
+      discoverDexScreener(Math.min(limit, 25)),
+      DISCOVERY_SOURCE_MS,
+      () => emptyDiscovery('dexscreener', 'DexScreener timed out', 'timeout')
+    ).then((result) => ({ label: 'dex', result })),
   ];
 
   if (hasBirdeyeKey()) {
     tasks.push(
-      discoverBirdeye(limit).then((result) => ({
-        label: 'birdeye',
-        result,
-      }))
+      raceTimeout(
+        discoverBirdeye(limit),
+        DISCOVERY_SOURCE_MS,
+        () => emptyDiscovery('birdeye', 'Birdeye timed out', 'timeout')
+      ).then((result) => ({ label: 'birdeye', result }))
     );
   } else {
     console.log('[discovery] all←birdeye skipped (no key)');
@@ -953,14 +1001,16 @@ async function discoverAll(
   if (hasSolanaTrackerKey()) {
     const per = Math.max(8, Math.ceil(limit / 3));
     tasks.push(
-      discoverFromPlatformLeaderboard('axiom', per, period).then((result) => ({
-        label: 'axiom',
-        result,
-      })),
-      discoverFromPlatformLeaderboard('photon', per, period).then((result) => ({
-        label: 'photon',
-        result,
-      }))
+      raceTimeout(
+        discoverFromPlatformLeaderboard('axiom', per, period),
+        DISCOVERY_SOURCE_MS,
+        () => emptyDiscovery('axiom', 'Axiom timed out', 'timeout')
+      ).then((result) => ({ label: 'axiom', result })),
+      raceTimeout(
+        discoverFromPlatformLeaderboard('photon', per, period),
+        DISCOVERY_SOURCE_MS,
+        () => emptyDiscovery('photon', 'Photon timed out', 'timeout')
+      ).then((result) => ({ label: 'photon', result }))
     );
   } else {
     console.log(
@@ -987,8 +1037,6 @@ async function discoverAll(
       relatedTokens = result.relatedTokens;
     }
   }
-
-  parts.push(manualCurated(limit, 'manual'));
 
   let wallets = mergeDiscovered(parts, limit);
 
@@ -1035,92 +1083,27 @@ async function discoverGmgn(
   limit: number,
   period: GmgnPeriod,
   minWinRate: number,
-  pumpFunFocus = false
+  pumpFunFocus = false,
+  opts: { skipKolscan?: boolean } = {}
 ): Promise<DiscoveryResult> {
-  try {
-    console.log(
-      `[discovery] GMGN start limit=${limit} period=${period} minWin=${minWinRate} pump=${pumpFunFocus}`
-    );
-    if (pumpFunFocus) {
-      const search = await searchWallets({
-        limit,
-        period,
-        minWinRate,
-        pumpFunFocus: true,
-        minTrades7d: config.gmgn?.discovery?.minTrades7d,
-        maxDaysInactive: config.gmgn?.discovery?.activityDays,
-      });
-      const wallets: DiscoveredWallet[] = search.candidates.map((w) => ({
-        name: w.name,
-        address: w.address,
-        source: 'gmgn' as const,
-        winRate: w.winRate,
-        tradesLast7d: w.tradesLast7d,
-        tradeCount: w.tradeCount,
-        pumpFunTradeCount: w.pumpFunTradeCount,
-        realizedPnlUsd: w.realizedPnlUsd ?? w.realizedPnl7d,
-        smartFlowScore: Math.min(
-          100,
-          Math.round(
-            (w.winRate ?? 0) * 0.6 + Math.min(40, (w.tradesLast7d ?? 0) / 2)
-          )
-        ),
-        tags: Array.from(
-          new Set([...(w.tags ?? []), 'pump.fun', 'pump-smart'])
-        ),
-        alreadyTracked: w.alreadyTracked,
-        notes: w.notes,
-        lastActiveAt: w.lastActiveAt,
-        metrics: {
-          winRate: w.winRate,
-          pnlUsd: Math.round(w.realizedPnlUsd ?? w.realizedPnl7d ?? 0),
-          trades7d: w.tradesLast7d ?? w.tradeCount ?? 0,
-          pumpFunTrades: w.pumpFunTradeCount ?? 0,
-          smartFlowScore: Math.min(
-            100,
-            Math.round(
-              (w.winRate ?? 0) * 0.6 + Math.min(40, (w.tradesLast7d ?? 0) / 2)
-            )
-          ),
-        },
-      }));
-      console.log(`[discovery] GMGN pump focus → ${wallets.length}`);
-      // If still sparse, top up from Kolscan + curated
-      if (wallets.length < Math.min(12, limit)) {
-        console.warn(
-          `[discovery] GMGN pump sparse (${wallets.length}) — merging Kolscan/curated`
-        );
-        const kol = await discoverFromKolscan(limit);
-        const merged = mergeDiscovered(
-          [wallets, kol.wallets, manualCurated(limit, 'gmgn')],
-          limit
-        );
-        return {
-          source: 'gmgn',
-          wallets: merged,
-          fetchedAt: Date.now(),
-          cached: false,
-          message:
-            `GMGN Pump.fun + fallbacks · ${merged.length} wallet(s)` +
-            (search.message ? ` · ${search.message}` : ''),
-          error: search.message?.includes('warning')
-            ? search.message
-            : kol.error,
-        };
-      }
-      return {
-        source: 'gmgn',
-        wallets,
-        fetchedAt: search.fetchedAt,
-        cached: false,
-        message:
-          `GMGN Pump.fun focus · ${search.source} · ${wallets.length} wallet(s)` +
-          (search.message ? ` · ${search.message}` : ''),
-      };
-    }
-
-    const top = await getTopSmartWallets(limit, period, minWinRate);
-    let wallets: DiscoveredWallet[] = top.wallets.map((w) => ({
+  const mapGmgn = (
+    list: Array<{
+      name: string;
+      address: string;
+      winRate?: number;
+      tradesLast7d?: number;
+      tradeCount?: number;
+      pumpFunTradeCount?: number;
+      realizedPnlUsd?: number;
+      realizedPnl7d?: number;
+      tags?: string[];
+      alreadyTracked: boolean;
+      notes?: string;
+      lastActiveAt?: number;
+    }>,
+    extraTags: string[] = []
+  ): DiscoveredWallet[] =>
+    list.map((w) => ({
       name: w.name,
       address: w.address,
       source: 'gmgn' as const,
@@ -1135,12 +1118,12 @@ async function discoverGmgn(
           (w.winRate ?? 0) * 0.6 + Math.min(40, (w.tradesLast7d ?? 0) / 2)
         )
       ),
-      tags: w.tags ?? [],
+      tags: Array.from(new Set([...(w.tags ?? []), ...extraTags])),
       alreadyTracked: w.alreadyTracked,
       notes: w.notes,
       lastActiveAt: w.lastActiveAt,
       metrics: {
-        winRate: w.winRate,
+        winRate: w.winRate ?? 0,
         pnlUsd: Math.round(w.realizedPnlUsd ?? w.realizedPnl7d ?? 0),
         trades7d: w.tradesLast7d ?? w.tradeCount ?? 0,
         pumpFunTrades: w.pumpFunTradeCount ?? 0,
@@ -1153,15 +1136,87 @@ async function discoverGmgn(
       },
     }));
 
+  try {
+    console.log(
+      `[discovery] GMGN start limit=${limit} period=${period} minWin=${minWinRate} pump=${pumpFunFocus}`
+    );
+    if (pumpFunFocus) {
+      let wallets: DiscoveredWallet[] = [];
+      let searchMsg = '';
+      let searchSource: string = 'curated';
+      try {
+        const search = await raceTimeout(
+          searchWallets({
+            limit,
+            period,
+            minWinRate,
+            pumpFunFocus: true,
+            minTrades7d: config.gmgn?.discovery?.minTrades7d,
+            maxDaysInactive: config.gmgn?.discovery?.activityDays,
+          }),
+          DISCOVERY_SOURCE_MS,
+          () => null as null
+        );
+        if (search) {
+          wallets = mapGmgn(search.candidates, ['pump.fun', 'pump-smart']);
+          searchMsg = search.message ?? '';
+          searchSource = search.source;
+        }
+      } catch (err) {
+        searchMsg = err instanceof Error ? err.message : String(err);
+      }
+      console.log(`[discovery] GMGN pump focus → ${wallets.length}`);
+      if (
+        !opts.skipKolscan &&
+        wallets.length < Math.min(12, limit)
+      ) {
+        const kol = await raceTimeout(
+          discoverFromKolscan(limit),
+          2_500,
+          () => emptyDiscovery('kolscan', 'Kolscan skip', 'timeout')
+        );
+        wallets = mergeDiscovered(
+          [wallets, kol.wallets, manualCurated(limit, 'gmgn')],
+          limit
+        );
+      } else if (wallets.length === 0) {
+        wallets = manualCurated(limit, 'gmgn');
+      }
+      return {
+        source: 'gmgn',
+        wallets,
+        fetchedAt: Date.now(),
+        cached: false,
+        message: `GMGN Pump.fun · ${searchSource} · ${wallets.length} wallet(s)`,
+        error: searchMsg.includes('warning') ? searchMsg : undefined,
+      };
+    }
+
+    const top = await raceTimeout(
+      getTopSmartWallets(limit, period, minWinRate),
+      DISCOVERY_SOURCE_MS,
+      () => {
+        const curated = getCuratedSmartWallets(limit, period, 0);
+        curated.error = 'GMGN timed out — curated fallback';
+        return curated;
+      }
+    );
+    let wallets = mapGmgn(top.wallets);
+
     console.log(
       `[discovery] GMGN top source=${top.source} count=${wallets.length} err=${top.error ?? 'none'}`
     );
 
-    if (wallets.length < Math.min(15, limit) || top.source === 'curated') {
-      console.warn(
-        `[discovery] GMGN weak (${wallets.length}, ${top.source}) — merging Kolscan`
+    // Short optional Kolscan top-up only for standalone GMGN (not multi-source).
+    if (
+      !opts.skipKolscan &&
+      (wallets.length < Math.min(15, limit) || top.source === 'curated')
+    ) {
+      const kol = await raceTimeout(
+        discoverFromKolscan(limit),
+        2_500,
+        () => emptyDiscovery('kolscan', 'Kolscan skip', 'timeout')
       );
-      const kol = await discoverFromKolscan(limit);
       wallets = mergeDiscovered(
         [wallets, kol.wallets, manualCurated(limit, 'gmgn')],
         limit
@@ -1171,9 +1226,13 @@ async function discoverGmgn(
         wallets,
         fetchedAt: Date.now(),
         cached: false,
-        message: `GMGN ${top.source} + Kolscan · ${wallets.length} wallet(s)`,
+        message: `GMGN ${top.source} + fallbacks · ${wallets.length} wallet(s)`,
         error: top.error ?? kol.error,
       };
+    }
+
+    if (wallets.length === 0) {
+      wallets = manualCurated(limit, 'gmgn');
     }
 
     return {
@@ -1186,19 +1245,12 @@ async function discoverGmgn(
     };
   } catch (err) {
     console.error('[discovery] GMGN failed:', err);
-    const kol = await discoverFromKolscan(limit).catch(() => null);
     return {
       source: 'gmgn',
-      wallets: mergeDiscovered(
-        [
-          kol?.wallets ?? [],
-          manualCurated(limit, 'gmgn'),
-        ],
-        limit
-      ),
+      wallets: manualCurated(limit, 'gmgn'),
       fetchedAt: Date.now(),
       cached: false,
-      message: 'GMGN failed — Kolscan/curated fallback',
+      message: 'GMGN failed — curated fallback',
       error: err instanceof Error ? err.message : String(err),
     };
   }
@@ -1242,92 +1294,133 @@ export async function findSmartWallets(
     pumpFunFocus,
   });
 
-  let result: DiscoveryResult;
-  switch (source) {
-    case 'birdeye':
-      result = await discoverBirdeye(limit);
-      if (result.wallets.length < Math.min(10, limit)) {
-        const kol = await discoverFromKolscan(limit);
+  const curatedNow = (): DiscoveryResult => ({
+    source,
+    wallets: manualCurated(limit, source === 'manual' ? 'manual' : source),
+    fetchedAt: Date.now(),
+    cached: false,
+    message: `Discovery budget ${DISCOVERY_OVERALL_MS}ms exceeded — curated fallback`,
+    error: 'timeout',
+  });
+
+  const work = (async (): Promise<DiscoveryResult> => {
+    let result: DiscoveryResult;
+    switch (source) {
+      case 'birdeye':
+        result = await discoverBirdeye(limit);
+        if (result.wallets.length < Math.min(10, limit)) {
+          const kol = await raceTimeout(
+            discoverFromKolscan(limit),
+            2_500,
+            () => emptyDiscovery('kolscan', 'Kolscan skip', 'timeout')
+          );
+          result = {
+            ...result,
+            wallets: mergeDiscovered(
+              [result.wallets, kol.wallets, manualCurated(limit, 'birdeye')],
+              limit
+            ),
+            message: `${result.message} · topped up via Kolscan/curated`,
+          };
+        }
+        break;
+      case 'dexscreener':
+        result = await discoverDexScreener(limit);
+        if (result.wallets.length < Math.min(10, limit)) {
+          const kol = await raceTimeout(
+            discoverFromKolscan(limit),
+            2_500,
+            () => emptyDiscovery('kolscan', 'Kolscan skip', 'timeout')
+          );
+          result = {
+            ...result,
+            wallets: mergeDiscovered(
+              [
+                result.wallets,
+                kol.wallets,
+                manualCurated(limit, 'dexscreener'),
+              ],
+              limit
+            ),
+            message: `${result.message} · topped up via Kolscan/curated`,
+          };
+        }
+        break;
+      case 'kolscan':
+        result = await discoverFromKolscan(limit);
+        break;
+      case 'axiom':
+        result = await discoverFromPlatformLeaderboard('axiom', limit, period);
+        break;
+      case 'photon':
+        result = await discoverFromPlatformLeaderboard('photon', limit, period);
+        break;
+      case 'bullx':
+        result = await discoverFromPlatformLeaderboard('bullx', limit, period);
+        break;
+      case 'all':
+        result = await discoverAll(limit, period, minWinRate, pumpFunFocus);
+        break;
+      case 'manual': {
+        const fromText = options.manualText
+          ? parseManualText(options.manualText, limit)
+          : [];
+        const wallets =
+          fromText.length > 0 ? fromText : manualCurated(limit, 'manual');
         result = {
-          ...result,
-          wallets: mergeDiscovered(
-            [result.wallets, kol.wallets, manualCurated(limit, 'birdeye')],
-            limit
-          ),
-          message: `${result.message} · topped up via Kolscan`,
+          source: 'manual',
+          wallets,
+          fetchedAt: Date.now(),
+          cached: false,
+          message:
+            fromText.length > 0
+              ? `Manual import · ${fromText.length} address(es)`
+              : `Manual curated · ${wallets.length} wallet(s)`,
         };
+        break;
       }
-      break;
-    case 'dexscreener':
-      result = await discoverDexScreener(limit);
-      if (result.wallets.length < Math.min(10, limit)) {
-        const kol = await discoverFromKolscan(limit);
-        result = {
-          ...result,
-          wallets: mergeDiscovered(
-            [result.wallets, kol.wallets, manualCurated(limit, 'dexscreener')],
-            limit
-          ),
-          message: `${result.message} · topped up via Kolscan`,
-        };
-      }
-      break;
-    case 'kolscan':
-      result = await discoverFromKolscan(limit);
-      break;
-    case 'axiom':
-      result = await discoverFromPlatformLeaderboard('axiom', limit, period);
-      break;
-    case 'photon':
-      result = await discoverFromPlatformLeaderboard('photon', limit, period);
-      break;
-    case 'bullx':
-      result = await discoverFromPlatformLeaderboard('bullx', limit, period);
-      break;
-    case 'all':
-      result = await discoverAll(limit, period, minWinRate, pumpFunFocus);
-      break;
-    case 'manual': {
-      const fromText = options.manualText
-        ? parseManualText(options.manualText, limit)
-        : [];
-      const wallets =
-        fromText.length > 0 ? fromText : manualCurated(limit, 'manual');
-      result = {
-        source: 'manual',
-        wallets,
-        fetchedAt: Date.now(),
-        cached: false,
-        message:
-          fromText.length > 0
-            ? `Manual import · ${fromText.length} address(es)`
-            : `Manual curated · ${wallets.length} wallet(s)`,
-      };
-      break;
+      case 'gmgn':
+      default:
+        result = await discoverGmgn(limit, period, minWinRate, pumpFunFocus);
+        break;
     }
-    case 'gmgn':
-    default:
-      result = await discoverGmgn(limit, period, minWinRate, pumpFunFocus);
-      break;
-  }
 
-  console.log(
-    `[discovery] done source=${result.source} count=${result.wallets.length} msg=${result.message}`
-  );
-
-  // Last-resort guarantee: never hand the dashboard an empty Discover table.
-  if (!result.wallets.length && source !== 'bullx') {
-    const curated = manualCurated(limit, source === 'manual' ? 'manual' : source);
-    result = {
-      ...result,
-      wallets: curated,
-      message: `${result.message || result.source} · curated fallback (${curated.length})`,
-      error: result.error || 'No live wallets — curated fallback',
-    };
-    console.warn(
-      `[discovery] empty result for ${source} — injected ${curated.length} curated wallet(s)`
+    console.log(
+      `[discovery] done source=${result.source} count=${result.wallets.length} msg=${result.message}`
     );
-  }
+
+    // Last-resort guarantee: never hand the dashboard an empty Discover table.
+    if (!result.wallets.length && source !== 'bullx') {
+      const curated = manualCurated(
+        limit,
+        source === 'manual' ? 'manual' : source
+      );
+      result = {
+        ...result,
+        wallets: curated,
+        message: `${result.message || result.source} · curated fallback (${curated.length})`,
+        error: result.error || 'No live wallets — curated fallback',
+      };
+      console.warn(
+        `[discovery] empty result for ${source} — injected ${curated.length} curated wallet(s)`
+      );
+    }
+
+    return result;
+  })();
+
+  work.catch((err) => {
+    console.warn(
+      '[discovery] background work error after budget:',
+      err instanceof Error ? err.message : err
+    );
+  });
+
+  // Manual is sync/curated — no need to race.
+  const result =
+    source === 'manual'
+      ? await work
+      : await raceTimeout(work, DISCOVERY_OVERALL_MS, curatedNow);
 
   cache.set(cacheKey, {
     data: result,

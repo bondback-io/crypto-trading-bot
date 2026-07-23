@@ -1478,12 +1478,15 @@ export function createServer(): express.Application {
         'manual',
         'all',
       ];
-      const result = await findSmartWallets({
+      const limit = req.query.limit != null ? Number(req.query.limit) : 100;
+      const period = (req.query.period === '30d' ? '30d' : '7d') as '7d' | '30d';
+      const minWinRate =
+        req.query.minWinRate != null ? Number(req.query.minWinRate) : undefined;
+      const work = findSmartWallets({
         source: allowed.includes(source) ? source : 'gmgn',
-        limit: req.query.limit != null ? Number(req.query.limit) : 100,
-        period: req.query.period === '30d' ? '30d' : '7d',
-        minWinRate:
-          req.query.minWinRate != null ? Number(req.query.minWinRate) : undefined,
+        limit,
+        period,
+        minWinRate,
         manualText:
           req.query.manualText != null ? String(req.query.manualText) : undefined,
         force: req.query.force === '1' || req.query.force === 'true',
@@ -1491,6 +1494,34 @@ export function createServer(): express.Application {
           req.query.pumpFunFocus === '1' ||
           req.query.pumpFunFocus === 'true',
       });
+      const result = await Promise.race([
+        work,
+        new Promise<Awaited<ReturnType<typeof findSmartWallets>>>((resolve) => {
+          setTimeout(() => {
+            const curated = getCuratedSmartWallets(limit, period, minWinRate ?? 0);
+            resolve({
+              source: allowed.includes(source) ? source : 'gmgn',
+              wallets: curated.wallets.map((w) => ({
+                name: w.name,
+                address: w.address,
+                source: 'manual' as const,
+                winRate: w.winRate,
+                tradesLast7d: w.tradesLast7d,
+                tradeCount: w.tradeCount,
+                tags: [...(w.tags ?? []), 'curated'],
+                alreadyTracked: w.alreadyTracked,
+                notes: w.notes ?? 'Curated / timeout fallback',
+                lastActiveAt: w.lastActiveAt,
+                metrics: { winRate: w.winRate, trades7d: w.tradesLast7d ?? 0 },
+              })),
+              fetchedAt: Date.now(),
+              cached: false,
+              message: 'Discover timed out — curated fallback',
+              error: 'timeout',
+            });
+          }, 12_000);
+        }),
+      ]);
       res.json({
         ...result,
         discovery: getDiscoveryStatus(),
@@ -1530,16 +1561,57 @@ export function createServer(): express.Application {
         config.walletDiscovery.defaultSource = body.defaultSource;
         persistUserSettings();
       }
-      const result = await findSmartWallets({
-        source:
-          body.source && allowed.includes(body.source) ? body.source : undefined,
-        limit: body.limit ?? 100,
-        period: body.period,
+      const limit = body.limit ?? 100;
+      const period = body.period ?? '7d';
+      const source =
+        body.source && allowed.includes(body.source) ? body.source : undefined;
+      const work = findSmartWallets({
+        source,
+        limit,
+        period,
         minWinRate: body.minWinRate,
         manualText: body.manualText,
         force: body.force,
         pumpFunFocus: body.pumpFunFocus,
       });
+      work.catch((err) => {
+        console.warn(
+          '[discover] late error after race:',
+          err instanceof Error ? err.message : err
+        );
+      });
+      const result = await Promise.race([
+        work,
+        new Promise<Awaited<ReturnType<typeof findSmartWallets>>>((resolve) => {
+          setTimeout(() => {
+            const curated = getCuratedSmartWallets(
+              limit,
+              period,
+              body.minWinRate ?? 0
+            );
+            resolve({
+              source: source ?? 'all',
+              wallets: curated.wallets.map((w) => ({
+                name: w.name,
+                address: w.address,
+                source: 'manual' as const,
+                winRate: w.winRate,
+                tradesLast7d: w.tradesLast7d,
+                tradeCount: w.tradeCount,
+                tags: [...(w.tags ?? []), 'curated'],
+                alreadyTracked: w.alreadyTracked,
+                notes: w.notes ?? 'Curated / timeout fallback',
+                lastActiveAt: w.lastActiveAt,
+                metrics: { winRate: w.winRate, trades7d: w.tradesLast7d ?? 0 },
+              })),
+              fetchedAt: Date.now(),
+              cached: false,
+              message: 'Discover timed out — curated fallback',
+              error: 'timeout',
+            });
+          }, 12_000);
+        }),
+      ]);
       res.json({
         ...result,
         discovery: getDiscoveryStatus(),
@@ -1547,7 +1619,21 @@ export function createServer(): express.Application {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message, wallets: [], source: 'error' });
+      const curated = getCuratedSmartWallets(
+        Number((req.body as { limit?: number })?.limit) || 20,
+        '7d',
+        0
+      );
+      res.status(200).json({
+        source: 'manual',
+        wallets: curated.wallets,
+        fetchedAt: Date.now(),
+        cached: false,
+        message: 'Discover error — curated fallback',
+        error: message,
+        discovery: getDiscoveryStatus(),
+        gmgn: getGmgnStatus(),
+      });
     }
   });
 
@@ -1603,11 +1689,28 @@ export function createServer(): express.Application {
       const minWinRate = Number(req.query.minWinRate) || 45;
       const period = (req.query.period === '30d' ? '30d' : '7d') as GmgnPeriod;
       const limit = Number(req.query.limit) || 20;
-      const result = await getTopSmartWallets(limit, period, minWinRate);
+      const work = getTopSmartWallets(limit, period, minWinRate);
+      work.catch(() => undefined);
+      const result = await Promise.race([
+        work,
+        new Promise<Awaited<ReturnType<typeof getTopSmartWallets>>>((resolve) => {
+          setTimeout(() => {
+            const curated = getCuratedSmartWallets(limit, period, minWinRate);
+            curated.error = 'GMGN timed out — curated fallback';
+            resolve(curated);
+          }, 8_000);
+        }),
+      ]);
       res.json(result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      const curated = getCuratedSmartWallets(
+        Number(req.query.limit) || 20,
+        req.query.period === '30d' ? '30d' : '7d',
+        Number(req.query.minWinRate) || 45
+      );
+      curated.error = message;
+      res.json(curated);
     }
   });
 

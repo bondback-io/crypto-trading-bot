@@ -842,7 +842,19 @@ async function gmgnFetch(
 
         let data: unknown;
         try {
-          data = await res.json();
+          // Cap body size — huge GMGN payloads have OOM'd the Render free tier.
+          const text = await res.text();
+          if (text.length > 1_500_000) {
+            lastError = `Response too large (${Math.round(text.length / 1024)}KB)`;
+            lastStatus = res.status;
+            consecutiveErrors += 1;
+            logger.warn('GMGN', 'response too large', {
+              url: url.slice(0, 160),
+              bytes: text.length,
+            });
+            continue;
+          }
+          data = text ? JSON.parse(text) : null;
         } catch (err) {
           lastError = 'Invalid JSON response';
           lastStatus = res.status;
@@ -1283,15 +1295,21 @@ export async function getTopSmartWallets(
   }
 
   // Circuit breaker — stop hammering GMGN for a bit after repeated failures
+  // OR after "successful" empty OpenAPI payloads (common when key/plan returns {}).
   if (
-    consecutiveErrors >= 6 &&
+    (consecutiveErrors >= 4 ||
+      (discoveryStatus.lastSource === 'openapi' &&
+        discoveryStatus.lastWalletCount === 0 &&
+        discoveryStatus.lastSuccessAt != null &&
+        Date.now() - discoveryStatus.lastSuccessAt < 10 * 60_000)) &&
     (discoveryStatus.lastSuccessAt == null ||
-      Date.now() - (discoveryStatus.lastSuccessAt ?? 0) > 5 * 60_000)
+      discoveryStatus.lastWalletCount === 0 ||
+      Date.now() - (discoveryStatus.lastSuccessAt ?? 0) > 3 * 60_000)
   ) {
     const curated = curatedTop(limit, period, minWinRate);
     curated.error =
       discoveryStatus.lastError ??
-      'GMGN unreachable — showing curated wallets';
+      'GMGN unreachable/empty — showing curated wallets';
     touchDiscovery({
       lastWalletCount: curated.wallets.length,
       lastSource: 'curated',
@@ -1304,7 +1322,7 @@ export async function getTopSmartWallets(
     return curated;
   }
 
-  const deadlineAt = Date.now() + 14_000;
+  const deadlineAt = Date.now() + 7_000;
   const fetchLimit = Math.min(Math.max(limit, 50), 100);
   const paths = getGmgnApiKey()
     ? [
@@ -1346,7 +1364,17 @@ export async function getTopSmartWallets(
 
     const rows = extractWalletRows(res.data, period);
     console.log(`[gmgn] extracted ${rows.length} row(s) from ${path.slice(0, 72)}`);
-    if (rows.length === 0) continue;
+    if (rows.length === 0) {
+      lastError = `Empty wallet list from ${path.slice(0, 60)}`;
+      // Don't treat empty OpenAPI success as healthy forever — count toward breaker.
+      consecutiveErrors += 1;
+      touchDiscovery({
+        lastWalletCount: 0,
+        lastError,
+        consecutiveFailures: consecutiveErrors,
+      });
+      continue;
+    }
 
     // OpenAPI smartmoney/kol feeds often lack winrate — enrich top makers via wallet_stats
     const needsStats = rows
