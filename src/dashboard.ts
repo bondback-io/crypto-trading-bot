@@ -245,7 +245,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         0 10px 28px rgba(2, 6, 23, 0.45),
         inset 0 1px 0 rgba(148, 163, 184, 0.08);
       padding: 1.1rem 1.15rem 1.15rem;
-      overflow: hidden;
+      /* visible so help tips are not clipped */
+      overflow: visible;
     }
     .card-open-positions::before {
       content: '';
@@ -254,6 +255,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       top: 0;
       bottom: 0;
       width: 4px;
+      border-radius: 0.75rem 0 0 0.75rem;
       background: linear-gradient(180deg, #34d399, #38bdf8);
     }
     .card-open-positions .section-title-open {
@@ -376,7 +378,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       gap: 0.2rem;
     }
 
-    /* Help tooltips — hover/focus the ? icon */
+    /* Help tooltips — hover/focus/tap the ? icon (tabindex=0) */
     .tip {
       display: inline-flex;
       align-items: center;
@@ -392,20 +394,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       cursor: help;
       flex-shrink: 0;
       position: relative;
+      overflow: visible;
       border: 1px solid #475569;
       text-transform: none;
       letter-spacing: 0;
       vertical-align: middle;
+      -webkit-tap-highlight-color: transparent;
     }
     .tip::before { content: '?'; }
+    /*
+      Tip bubble width must NOT use % of .tip (15px host) — that collapses
+      max-width to ~10px and wraps one word per line. Use vw / px instead.
+    */
     .tip::after {
       content: attr(data-tip);
       position: absolute;
       left: 50%;
       bottom: calc(100% + 8px);
       transform: translateX(-50%);
+      box-sizing: border-box;
       width: max-content;
-      max-width: min(280px, 70%);
+      min-width: 12.5rem; /* 200px */
+      max-width: min(17.5rem, calc(100vw - 1.5rem)); /* 280px */
       padding: 8px 10px;
       border-radius: 8px;
       background: #0f172a;
@@ -417,13 +427,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       text-transform: none;
       letter-spacing: 0;
       white-space: normal;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
       text-align: left;
       box-shadow: 0 8px 24px rgba(0,0,0,.45);
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
       transition: opacity .12s ease;
-      z-index: 80;
+      z-index: 200;
+    }
+    .tip:hover,
+    .tip:focus,
+    .tip:focus-visible {
+      z-index: 210;
+      outline: none;
     }
     .tip:hover::after,
     .tip:focus::after,
@@ -435,6 +453,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .tip.tip-below::after {
       bottom: auto;
       top: calc(100% + 8px);
+    }
+    /* Tip hosts: do not clip absolute ::after bubbles */
+    .card,
+    .stat-label,
+    .section-title,
+    .section-title-open,
+    .title-left,
+    .ctl > span {
+      overflow: visible;
     }
     .has-tip { cursor: help; }
 
@@ -893,10 +920,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         font-size: 13px;
       }
       .chart-wrap { height: 180px; }
+      /* Keep tip readable on narrow screens; % here was relative to 15px .tip */
       .tip::after {
-        left: 0;
-        transform: none;
-        max-width: min(260px, calc(100% - 2rem));
+        left: 50%;
+        transform: translateX(-50%);
+        width: min(15rem, calc(100vw - 1.5rem)); /* 240px */
+        min-width: min(11.25rem, calc(100vw - 1.5rem)); /* 180px */
+        max-width: min(17.5rem, calc(100vw - 1.5rem));
       }
       th, td { padding: 7px 5px; font-size: 12px; }
       .persist-banner { font-size: 12px; padding: 0.65rem 0.75rem; }
