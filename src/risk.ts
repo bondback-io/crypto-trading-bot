@@ -136,7 +136,7 @@ export function calculateDynamicPositionSize(options: {
 
   const baseSol =
     options.flatFallbackSol ??
-    (trade.baseTradeAmountSol ?? trade.tradeAmountSol ?? 0.12);
+    (trade.baseTradeAmountSol ?? trade.tradeAmountSol ?? 0.14);
 
   const riskFloor = trade.riskMultiplier ?? 0.4;
   const convCeil = trade.convictionMultiplier ?? 1.45;

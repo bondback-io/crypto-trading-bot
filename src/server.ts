@@ -1514,7 +1514,7 @@ export function createServer(): express.Application {
         'all',
       ];
       const limit = req.query.limit != null ? Number(req.query.limit) : 100;
-      const period = (req.query.period === '30d' ? '30d' : '7d') as '7d' | '30d';
+      const period = (req.query.period === '7d' ? '7d' : '30d') as '7d' | '30d';
       const minWinRate =
         req.query.minWinRate != null ? Number(req.query.minWinRate) : undefined;
       const work = findSmartWallets({
@@ -1603,7 +1603,7 @@ export function createServer(): express.Application {
         persistUserSettings();
       }
       const limit = body.limit ?? 100;
-      const period = body.period ?? '7d';
+      const period = body.period === '7d' ? '7d' : '30d';
       const source =
         body.source && allowed.includes(body.source) ? body.source : undefined;
       const work = findSmartWallets({

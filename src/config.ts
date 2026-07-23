@@ -96,37 +96,38 @@ export interface RiskConfig {
   migration: StrategyRiskRules;
 }
 
+/** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_RISK: RiskConfig = {
   enabled: true,
   useRiskSizing: true,
-  riskPercentPerTrade: 1.2,
-  maxTradeSol: 0.8,
+  riskPercentPerTrade: 1.35,
+  maxTradeSol: 0.9,
   minTradeSol: 0.02,
-  weeklyLossLimitSol: 4,
-  maxDrawdownPct: 20,
+  weeklyLossLimitSol: 5,
+  maxDrawdownPct: 22,
   autoPauseOnLimit: true,
   tieredSellEnabled: true,
-  trailingStopPct: 18,
-  trailingStopPercent: 18,
-  trailingActivationProfit: 25,
+  trailingStopPct: 19,
+  trailingStopPercent: 19,
+  trailingActivationProfit: 22,
   enableDeadVolumeExit: true,
   deadVolumeUsdPerHour: 80,
   deadVolumeConsecutiveHours: 3,
   deadVolumeMinHoldMinutes: 30,
   normal: {
-    riskPercentPerTrade: 1.2,
-    trailingStopPct: 18,
-    hardStopLossPct: -28,
+    riskPercentPerTrade: 1.35,
+    trailingStopPct: 19,
+    hardStopLossPct: -30,
     tiers: [
       { profitPct: 40, sellPct: 35 },
       { profitPct: 80, sellPct: 30 },
     ],
   },
   migration: {
-    riskPercentPerTrade: 1.8,
-    trailingStopPct: 22,
-    hardStopLossPct: -32,
-    sizeMultiplier: 1.15,
+    riskPercentPerTrade: 2.0,
+    trailingStopPct: 23,
+    hardStopLossPct: -34,
+    sizeMultiplier: 1.2,
     tiers: [
       { profitPct: 40, sellPct: 35 },
       { profitPct: 80, sellPct: 30 },
@@ -180,16 +181,17 @@ export interface ProfitStrategyConfig {
   highRiskScoreThreshold: number;
 }
 
+/** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_PROFIT_STRATEGY: ProfitStrategyConfig = {
   enabled: true,
-  takeInitialPercent: 90,
-  partialSellAt: 60,
-  partialSellPercent: 45,
-  trailingStopAfter: 120,
-  trailingStopPct: 20,
-  bagPercent: 25,
+  takeInitialPercent: 95,
+  partialSellAt: 55,
+  partialSellPercent: 42,
+  trailingStopAfter: 110,
+  trailingStopPct: 21,
+  bagPercent: 28,
   riskBasedAdjustment: true,
-  highRiskScoreThreshold: 50,
+  highRiskScoreThreshold: 55,
 };
 
 /** Selective entry gating — high-conviction setups only */
@@ -221,20 +223,21 @@ export interface SelectiveTradingConfig {
   highRiskConvergenceThreshold: number;
 }
 
+/** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   enabled: true,
-  minConvictionScore: 45,
+  minConvictionScore: 40,
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
   minWalletsForTrade: 1,
   minVolume24hUsd: 10_000,
   minHolderCount: 30,
-  maxTradesPerHour: 12,
-  minMsBetweenTrades: 45_000,
-  riskScoreSizeCutoff: 40,
-  minRiskSizeMultiplier: 0.35,
+  maxTradesPerHour: 14,
+  minMsBetweenTrades: 35_000,
+  riskScoreSizeCutoff: 45,
+  minRiskSizeMultiplier: 0.38,
   extraConvergenceAboveRisk: 1,
-  highRiskConvergenceThreshold: 50,
+  highRiskConvergenceThreshold: 55,
 };
 
 /**
@@ -880,28 +883,29 @@ export const config: BotConfig = {
   activeTradingWalletId: null,
 
   trade: {
-    baseTradeAmountSol: 0.12,
-    tradeAmountSol: 0.12,
-    riskMultiplier: 0.4,
-    convictionMultiplier: 1.45,
-    minProfitPercent: 45,
-    maxProfitPercent: 500,
-    stopLossPercent: -28,
+    // Match Medium RISK_LEVEL_PRESETS (recommended default)
+    baseTradeAmountSol: 0.14,
+    tradeAmountSol: 0.14,
+    riskMultiplier: 0.45,
+    convictionMultiplier: 1.5,
+    minProfitPercent: 42,
+    maxProfitPercent: 100,
+    stopLossPercent: -30,
   },
 
   filters: {
     minWinRate: 0,
     minLiquidity: 5_000,
-    maxDevHoldPct: 12,
-    maxDevPercent: 12,
-    maxTopHolderPct: 35,
-    maxHolderConcentration: 35,
+    maxDevHoldPct: 14,
+    maxDevPercent: 14,
+    maxTopHolderPct: 70,
+    maxHolderConcentration: 70,
     enableAntiRug: true,
     requireLiquidityLocked: false,
     skipIfDevRecentSells: true,
     checkHoneypot: true,
-    maxEstimatedTaxPct: 20,
-    maxRiskScore: 65,
+    maxEstimatedTaxPct: 24,
+    maxRiskScore: 70,
     // Pump.fun bonding-curve tokens keep mint authority until migration —
     // hard-skipping them blocks almost all early copy signals.
     skipIfMintAuthority: false,
@@ -912,8 +916,8 @@ export const config: BotConfig = {
     maxInsiderPct: 0,
     maxSniperScore: 0,
     convergenceRequired: 2,
-    maxConcurrentPositions: 5,
-    dailyLossLimitSol: 2,
+    maxConcurrentPositions: 12,
+    dailyLossLimitSol: 2.5,
     minActivityDays: 14,
     minTradesLast30d: 3,
     enableActivityFilter: true,
@@ -938,13 +942,13 @@ export const config: BotConfig = {
     earlyCurveMinSmartWallets:
       Number(process.env.EARLY_CURVE_MIN_WALLETS) || 1,
     enableAutoSell: true,
-    migrationSizeMultiplier: 1.5,
+    migrationSizeMultiplier: 1.55,
     migrationSlippageBps: 100,
     migrationVolumeSpikeSol: 40,
     reBuyEnabled: true,
-    reBuyMinProfitPct: 100,
+    reBuyMinProfitPct: 90,
     reBuyDipPercent: -30,
-    confirmationThreshold: 4,
+    confirmationThreshold: 3,
     reBuyVolumeIncreasePct: 50,
     reBuyMaxPerMint: 2,
   },
@@ -1126,6 +1130,8 @@ const MIGRATION_FOCUS_OFF_V1 = 'migrationFocus_off_v1';
 const REQUIRE_HEALTHY_CURVE_OFF_V1 = 'requireHealthyCurve_off_v1';
 /** One-shot: raise volume/liquidity/holder floors after paper-relax loosened them. */
 const HARD_VOLUME_LIQ_FLOORS_V113 = 'hardVolumeLiquidityFloors_v113';
+/** One-shot: re-apply selected riskLevel presets onto persisted knobs (Medium sync). */
+const RISK_LEVEL_SYNC_V1 = 'riskLevelSync_v1';
 let settingsMigrations: Record<string, boolean> = {};
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
@@ -1235,10 +1241,10 @@ function syncConfigAliases(): void {
     config.trade.baseTradeAmountSol = config.trade.tradeAmountSol;
   }
   if (config.trade.riskMultiplier == null) {
-    config.trade.riskMultiplier = 0.4;
+    config.trade.riskMultiplier = 0.45;
   }
   if (config.trade.convictionMultiplier == null) {
-    config.trade.convictionMultiplier = 1.45;
+    config.trade.convictionMultiplier = 1.5;
   }
   if (config.risk.trailingStopPercent != null) {
     config.risk.trailingStopPct = config.risk.trailingStopPercent;
@@ -1422,6 +1428,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyRiskLevelSyncMigration()) {
+    settingsMigrations[RISK_LEVEL_SYNC_V1] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied riskLevelSync_v1 — re-applied ${(config.riskLevel || 'medium').toUpperCase()} risk presets onto live knobs`
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1555,6 +1569,22 @@ function applyHardVolumeLiquidityFloorsMigration(): boolean {
     config.bondingCurve.requireRecentCurveActivity = true;
   }
   syncConfigAliases();
+  return true;
+}
+
+/**
+ * One-shot: persisted configs often kept riskLevel=medium while knobs stayed on
+ * older defaults (max pos 5, base 0.12, etc.). Re-apply the selected preset once.
+ */
+function applyRiskLevelSyncMigration(): boolean {
+  if (settingsMigrations[RISK_LEVEL_SYNC_V1]) return false;
+  const level =
+    config.riskLevel === 'low' ||
+    config.riskLevel === 'medium' ||
+    config.riskLevel === 'high'
+      ? config.riskLevel
+      : 'medium';
+  applyRiskLevel(level, { persist: false });
   return true;
 }
 

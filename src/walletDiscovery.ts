@@ -1277,7 +1277,7 @@ export async function findSmartWallets(
     config.walletDiscovery?.defaultSource ??
     'gmgn';
   const limit = Math.min(Math.max(options.limit ?? 40, 1), 100);
-  const period: GmgnPeriod = options.period ?? '7d';
+  const period: GmgnPeriod = options.period ?? '30d';
   const minWinRate =
     options.minWinRate ?? config.gmgn?.discovery?.minWinRate ?? 40;
   const pumpFunFocus = Boolean(
