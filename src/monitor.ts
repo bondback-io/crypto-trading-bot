@@ -200,6 +200,13 @@ const activityFeed: WalletBuyEvent[] = [];
 const MAX_ACTIVITY_FEED = 200;
 const ACTIVITY_FEED_TTL_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Rolling 24h signal timestamps for Overview count.
+ * Separate from activityFeed (capped at 200) so the displayed total is not truncated.
+ */
+const SIGNAL_COUNT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const signals24hTimestamps: number[] = [];
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activityTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
@@ -2280,6 +2287,22 @@ function pushActivityFeed(event: WalletBuyEvent): void {
   if (activityFeed.length > MAX_ACTIVITY_FEED) {
     activityFeed.length = MAX_ACTIVITY_FEED;
   }
+  signals24hTimestamps.push(event.timestamp);
+  pruneSignals24hCount();
+}
+
+function pruneSignals24hCount(now = Date.now()): void {
+  const cutoff = now - SIGNAL_COUNT_WINDOW_MS;
+  let i = 0;
+  while (i < signals24hTimestamps.length && signals24hTimestamps[i] < cutoff) {
+    i += 1;
+  }
+  if (i > 0) signals24hTimestamps.splice(0, i);
+}
+
+function getSignals24hCount(): number {
+  pruneSignals24hCount();
+  return signals24hTimestamps.length;
 }
 
 function pruneActivityFeed(): void {
@@ -2304,6 +2327,7 @@ function pruneOldBuys(): void {
     }
   }
   pruneActivityFeed();
+  pruneSignals24hCount();
 }
 
 export function getRecentActivity(): WalletBuyEvent[] {
@@ -2408,7 +2432,7 @@ export function getMonitorStatus(): {
       enabled: w.enabled,
       isActive: isWalletActive(w),
     })),
-    recentSignals: Math.max(recentBuys.size, activityFeed.length),
+    recentSignals: getSignals24hCount(),
     dailyPnlSol: paperTrader.getDailyPnlSol(),
     openPositions: paperTrader.getOpenPositions().length,
     migration: getMigrationStatus(),

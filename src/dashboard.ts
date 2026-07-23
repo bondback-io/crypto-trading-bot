@@ -880,7 +880,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="text-lg font-semibold" id="watched">—</div>
           <div class="mint mt-1 text-xs" id="watched-sub">—</div>
         </div>
-        <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Recent buy/sell signals generated from wallet activity."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades. Closed count is shown in Closed Trades below."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
