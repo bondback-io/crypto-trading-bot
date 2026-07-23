@@ -1187,6 +1187,9 @@ export function createServer(): express.Application {
       }
     }
     updateFilterConfig(partial);
+    if (req.body.buyPumpFunOnly !== undefined) {
+      config.filters.buyPumpFunOnly = Boolean(req.body.buyPumpFunOnly);
+    }
     if (req.body.requireHealthyCurve !== undefined) {
       config.bondingCurve.requireHealthyCurve = Boolean(
         req.body.requireHealthyCurve
@@ -1209,6 +1212,7 @@ export function createServer(): express.Application {
     res.json({
       ...config.filters,
       requireHealthyCurve: config.bondingCurve.requireHealthyCurve,
+      buyPumpFunOnly: config.filters.buyPumpFunOnly === true,
       bondingCurve: { ...config.bondingCurve },
     });
   });

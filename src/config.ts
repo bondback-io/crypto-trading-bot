@@ -851,6 +851,11 @@ export interface FilterConfig {
    * Clamped to HARD_FILTER_FLOORS.minRecentActivityTxns.
    */
   minRecentActivity: number;
+  /**
+   * When true, only open buys on Pump.fun mints whose address ends with `pump`
+   * (case-sensitive). Hard floor — non-bypassable by soft-pass / early / Degen.
+   */
+  buyPumpFunOnly: boolean;
 }
 
 export interface StrategyConfig {
@@ -1104,6 +1109,7 @@ export const config: BotConfig = {
     minHolderCount: 30,
     minHolders: 30,
     minRecentActivity: 3,
+    buyPumpFunOnly: true,
   },
 
   strategy: {
@@ -1323,6 +1329,8 @@ const HOLDER_CONCENTRATION_FLOORS_V1124 = 'holderConcentrationFloors_v1124';
 const MEDIUM_ENTRY_RESTORE_V1125 = 'mediumEntryRestore_v1125';
 /** One-shot: seed min entry market-cap floor ($5k, non-bypassable). */
 const MIN_MARKET_CAP_FLOOR_V1129 = 'minMarketCapFloor_v1129';
+/** One-shot: turn buyPumpFunOnly ON (Pump.fun mint suffix hard floor). */
+const BUY_PUMP_FUN_ONLY_ON_V1131 = 'buyPumpFunOnly_on_v1131';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -1434,6 +1442,9 @@ function syncConfigAliases(): void {
       Number(config.filters.minTop10HolderPct),
       HARD_FILTER_FLOORS.minTop10HolderPct
     );
+  }
+  if (config.filters.buyPumpFunOnly == null) {
+    config.filters.buyPumpFunOnly = true;
   }
   if (config.bondingCurve.requireHealthyCurve == null) {
     config.bondingCurve.requireHealthyCurve = false;
@@ -1692,6 +1703,14 @@ export function applyPersistedSettings(): boolean {
     persistUserSettings();
     console.log(
       `[settings] Applied minMarketCapFloor_v1129 — minMarketCapUsd=${config.filters.minMarketCapUsd} (hard floor $${HARD_FILTER_FLOORS.minMarketCapUsd})`
+    );
+  }
+
+  if (applyBuyPumpFunOnlyOnMigration()) {
+    settingsMigrations[BUY_PUMP_FUN_ONLY_ON_V1131] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied buyPumpFunOnly_on_v1131 — buyPumpFunOnly ON (only mints ending in pump)'
     );
   }
 
@@ -1965,6 +1984,16 @@ function applyMinMarketCapFloorMigration(): boolean {
     );
   }
   syncConfigAliases();
+  return true;
+}
+
+/**
+ * One-shot: enable buyPumpFunOnly on upgrade to 1.1.31+.
+ * Always marks done so it runs once; user can turn OFF afterward.
+ */
+function applyBuyPumpFunOnlyOnMigration(): boolean {
+  if (settingsMigrations[BUY_PUMP_FUN_ONLY_ON_V1131]) return false;
+  config.filters.buyPumpFunOnly = true;
   return true;
 }
 
@@ -2593,6 +2622,7 @@ export function getRiskLevelSummary() {
       minTop10HolderPct: effectiveMinTop10HolderPct(),
       maxInsiderPctHard: effectiveMaxInsiderPct(),
       requireHealthyCurve: config.bondingCurve.requireHealthyCurve === true,
+      buyPumpFunOnly: config.filters.buyPumpFunOnly === true,
       riskPercentPerTrade: config.risk.riskPercentPerTrade,
       maxDrawdownPct: config.risk.maxDrawdownPct,
       maxTradeSol: config.risk.maxTradeSol,

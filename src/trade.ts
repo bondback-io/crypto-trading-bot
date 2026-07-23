@@ -11,6 +11,7 @@ import {
 } from '@solana/web3.js';
 import { config, getActiveTradingWallet, effectiveMinMarketCapUsd } from './config';
 import { isDeniedCopyMint } from './deniedMints';
+import { evaluateBuyPumpFunOnlyGate } from './deadTokenFilters';
 import {
   getKeypair,
   estimatePriorityFeeMicroLamports,
@@ -285,6 +286,16 @@ export async function executeBuy(
       mode: config.mode,
       error: `Denied mint (stable/quote) — not a copy target`,
     };
+  }
+
+  // Hard floor: only Pump.fun mints ending in `pump` when toggle is ON.
+  // Covers paper + live + migration + re-buy (all executeBuy callers).
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint);
+  if (pumpFunGate) {
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${pumpFunGate}`
+    );
+    return { success: false, mode: config.mode, error: pumpFunGate };
   }
 
   const solAmount =

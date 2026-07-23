@@ -1866,6 +1866,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="mt-2 space-y-0">
             <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks (volume/liq/curve hard floors always apply)">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Reject dead/stalled Pump bonding curves — non-bypassable when on">Require healthy bonding curve</span><label class="switch"><input type="checkbox" id="requireHealthyCurve" /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path / Degen.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
@@ -4748,6 +4749,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         sniperSensitivity: document.getElementById('sniperSensitivity').value,
         requireHealthyCurve: document.getElementById('requireHealthyCurve')
           ? document.getElementById('requireHealthyCurve').checked
+          : true,
+        buyPumpFunOnly: document.getElementById('buyPumpFunOnly')
+          ? document.getElementById('buyPumpFunOnly').checked
           : true,
       };
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',

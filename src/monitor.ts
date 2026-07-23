@@ -81,6 +81,7 @@ import {
   isNonBypassableSkipReason,
   type AntiRugReport,
 } from './antiRug';
+import { evaluateBuyPumpFunOnlyGate } from './deadTokenFilters';
 import {
   fetchBondingCurve,
   summarizeBondingCurve,
@@ -1286,6 +1287,13 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     );
     return;
   }
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(event.mint);
+  if (pumpFunGate) {
+    console.log(
+      `[monitor] Migration priority skipped — ${pumpFunGate}`
+    );
+    return;
+  }
   if (!config.strategy.enableMigrationPriority) {
     console.log(
       `[monitor] Migration priority signal ignored (toggle OFF) for ${event.mint.slice(0, 8)}…`
@@ -2427,6 +2435,15 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `[monitor] Signal rejected (${signalKind}) — denied mint (stable/quote) ${signal.symbol}`
     );
     recordRejectedSignal(signal, 'denied stable/quote mint');
+    return false;
+  }
+
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(signal.mint);
+  if (pumpFunGate) {
+    console.log(
+      `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${pumpFunGate}`
+    );
+    recordRejectedSignal(signal, pumpFunGate);
     return false;
   }
 

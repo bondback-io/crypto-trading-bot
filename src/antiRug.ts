@@ -37,6 +37,7 @@ import {
 import {
   evaluateDeadTokenHardFloors,
   evaluateHolderConcentrationHardFloors,
+  evaluateBuyPumpFunOnlyGate,
   isNonBypassableSkipReason,
 } from './deadTokenFilters';
 import { getCachedSolUsdPrice } from './marketData';
@@ -393,6 +394,19 @@ async function runAntiRugChecks(
   const requireLock = filters.requireLiquidityLocked === true;
   const skipDevSells = filters.skipIfDevRecentSells !== false;
   const checkHoneypot = filters.checkHoneypot !== false;
+
+  // Hard floor: Pump.fun mint suffix only (non-bypassable when enabled)
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint);
+  if (pumpFunGate) {
+    hardSkipReasons.push(pumpFunGate);
+    skipReasons.push(pumpFunGate);
+    flags.push({
+      id: 'buy_pump_fun_only',
+      severity: 'critical',
+      label: 'Not a pump.fun mint',
+      detail: 'Mint must end with pump',
+    });
+  }
 
   // --- Base metrics (shared cache with tokenMetrics) ---
   const metrics =

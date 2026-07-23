@@ -80,8 +80,29 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('insider % too high') ||
     r.includes('market cap too low') ||
     r.includes('market cap unknown') ||
-    r.includes('low mc with near-zero volume')
+    r.includes('low mc with near-zero volume') ||
+    r.includes('not a pump.fun mint')
   );
+}
+
+/** Pump.fun convention: mint address ends with case-sensitive `pump`. */
+export function isPumpFunMintSuffix(mint: string): boolean {
+  return typeof mint === 'string' && mint.endsWith('pump');
+}
+
+export function pumpFunMintSkipReason(mint: string): string {
+  const short = mint && mint.length > 8 ? `${mint.slice(0, 8)}…` : mint || '?';
+  return `Skipped — not a pump.fun mint (${short})`;
+}
+
+/**
+ * Hard floor when filters.buyPumpFunOnly is ON — rejects non-`pump` suffix mints.
+ * Non-bypassable by soft-pass / early path / Degen. Returns skip reason or null.
+ */
+export function evaluateBuyPumpFunOnlyGate(mint: string): string | null {
+  if (config.filters.buyPumpFunOnly !== true) return null;
+  if (isPumpFunMintSuffix(mint)) return null;
+  return pumpFunMintSkipReason(mint);
 }
 
 function formatMcShort(usd: number): string {
