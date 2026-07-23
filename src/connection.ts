@@ -92,6 +92,8 @@ function ensureEndpoints(): void {
     connection: new Connection(endpoint.url, {
       commitment: 'confirmed',
       wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
+      // Public RPCs 429 heavily; default web3 retries can hang boot/health for minutes.
+      disableRetryOnRateLimit: true,
     }),
     healthy: true,
     latencyMs: null,
@@ -175,13 +177,21 @@ async function maybeSwitchEndpoint(): Promise<void> {
   console.error('[rpc] All endpoints unhealthy — staying on current');
 }
 
-async function probeEndpoint(index: number): Promise<boolean> {
+async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
   const state = endpoints[index];
   if (!state) return false;
 
   const start = Date.now();
   try {
-    await state.connection.getSlot('confirmed');
+    await Promise.race([
+      state.connection.getSlot('confirmed'),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`RPC probe timeout after ${timeoutMs}ms`)),
+          timeoutMs
+        )
+      ),
+    ]);
     recordSuccess(index, Date.now() - start);
     return true;
   } catch (err) {
@@ -539,21 +549,24 @@ export async function getTradingWalletsStatus(): Promise<{
 export async function testConnection(): Promise<boolean> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  const ok = await probeEndpoint(activeIndex);
+  const ok = await probeEndpoint(activeIndex, 6_000);
   if (ok) {
     console.log(
       `[connection] RPC OK — ${getActiveEndpointLabel()} latency ${endpoints[activeIndex].latencyMs}ms`
     );
-  } else {
-    await maybeSwitchEndpoint();
-    const retry = await probeEndpoint(activeIndex);
-    if (retry) {
-      console.log(`[connection] RPC OK after failover → ${getActiveEndpointLabel()}`);
-      return true;
-    }
-    console.error('[connection] RPC health check failed on all endpoints');
+    return true;
   }
-  return ok;
+
+  await maybeSwitchEndpoint();
+  const retry = await probeEndpoint(activeIndex, 6_000);
+  if (retry) {
+    console.log(
+      `[connection] RPC OK after failover → ${getActiveEndpointLabel()}`
+    );
+    return true;
+  }
+  console.error('[connection] RPC health check failed on all endpoints');
+  return false;
 }
 
 /** Periodic health probes + auto-switch */

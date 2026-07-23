@@ -1221,7 +1221,7 @@ function curatedTop(
   minWinRate: number
 ): TopWalletsResult {
   const tracked = new Set(config.smartWallets.map((w) => w.address));
-  const wallets = CURATED_SMART_WALLETS.filter(
+  let wallets = CURATED_SMART_WALLETS.filter(
     (w) => w.winRate >= minWinRate && isValidAddress(w.address)
   )
     .sort((a, b) => {
@@ -1237,6 +1237,17 @@ function curatedTop(
       alreadyTracked: tracked.has(w.address),
       period,
     }));
+
+  // Never return an empty curated list — discovery UI depends on this fallback.
+  if (wallets.length === 0) {
+    wallets = CURATED_SMART_WALLETS.filter((w) => isValidAddress(w.address))
+      .slice(0, limit)
+      .map((w) => ({
+        ...w,
+        alreadyTracked: tracked.has(w.address),
+        period,
+      }));
+  }
 
   return {
     wallets,

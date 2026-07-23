@@ -2140,8 +2140,22 @@ export function createServer(): express.Application {
 }
 
 export function startServer(port?: number, host?: string): void {
-  startRpcHealthMonitor();
-  startDiscoveryAutoRefresh();
+  try {
+    startRpcHealthMonitor();
+  } catch (err) {
+    console.warn(
+      '[server] RPC health monitor failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    startDiscoveryAutoRefresh();
+  } catch (err) {
+    console.warn(
+      '[server] Discovery auto-refresh failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
   const listenPort = port ?? env.port ?? config.port;
   const listenHost = host ?? env.host;
   logger.info('Server', 'starting dashboard', {

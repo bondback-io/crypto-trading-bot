@@ -922,44 +922,70 @@ async function discoverAll(
   const errors: string[] = [];
   const parts: DiscoveredWallet[][] = [];
 
-  const gmgn = await discoverGmgn(limit, period, minWinRate, pumpFunFocus);
-  parts.push(gmgn.wallets);
-  if (gmgn.error) errors.push(`gmgn: ${gmgn.error}`);
-  console.log(`[discovery] all←gmgn ${gmgn.wallets.length}`);
-
-  const kol = await discoverFromKolscan(limit);
-  parts.push(kol.wallets);
-  if (kol.error) errors.push(`kolscan: ${kol.error}`);
-  console.log(`[discovery] all←kolscan ${kol.wallets.length}`);
+  // Run independent sources in parallel so one slow/dead API (GMGN 404) can't
+  // empty the Discover UI via client timeout.
+  const tasks: Array<Promise<{ label: string; result: DiscoveryResult }>> = [
+    discoverGmgn(limit, period, minWinRate, pumpFunFocus).then((result) => ({
+      label: 'gmgn',
+      result,
+    })),
+    discoverFromKolscan(limit).then((result) => ({
+      label: 'kolscan',
+      result,
+    })),
+    discoverDexScreener(Math.min(limit, 25)).then((result) => ({
+      label: 'dex',
+      result,
+    })),
+  ];
 
   if (hasBirdeyeKey()) {
-    const bird = await discoverBirdeye(limit);
-    parts.push(bird.wallets);
-    if (bird.error) errors.push(`birdeye: ${bird.error}`);
-    console.log(`[discovery] all←birdeye ${bird.wallets.length}`);
+    tasks.push(
+      discoverBirdeye(limit).then((result) => ({
+        label: 'birdeye',
+        result,
+      }))
+    );
   } else {
     console.log('[discovery] all←birdeye skipped (no key)');
   }
 
-  const dex = await discoverDexScreener(Math.min(limit, 25));
-  parts.push(dex.wallets);
-  if (dex.error) errors.push(`dex: ${dex.error}`);
-  console.log(`[discovery] all←dex ${dex.wallets.length}`);
-
   if (hasSolanaTrackerKey()) {
     const per = Math.max(8, Math.ceil(limit / 3));
-    const [ax, ph] = await Promise.all([
-      discoverFromPlatformLeaderboard('axiom', per, period),
-      discoverFromPlatformLeaderboard('photon', per, period),
-    ]);
-    parts.push(ax.wallets, ph.wallets);
-    if (ax.error) errors.push(`axiom: ${ax.error}`);
-    if (ph.error) errors.push(`photon: ${ph.error}`);
-    console.log(
-      `[discovery] all←axiom ${ax.wallets.length} photon ${ph.wallets.length}`
+    tasks.push(
+      discoverFromPlatformLeaderboard('axiom', per, period).then((result) => ({
+        label: 'axiom',
+        result,
+      })),
+      discoverFromPlatformLeaderboard('photon', per, period).then((result) => ({
+        label: 'photon',
+        result,
+      }))
     );
   } else {
-    console.log('[discovery] all←axiom/photon skipped (no SOLANA_TRACKER_API_KEY)');
+    console.log(
+      '[discovery] all←axiom/photon skipped (no SOLANA_TRACKER_API_KEY)'
+    );
+  }
+
+  const settled = await Promise.allSettled(tasks);
+  let relatedTokens: DiscoveryResult['relatedTokens'];
+
+  for (const item of settled) {
+    if (item.status === 'rejected') {
+      const msg =
+        item.reason instanceof Error ? item.reason.message : String(item.reason);
+      errors.push(msg);
+      console.warn(`[discovery] all source rejected: ${msg}`);
+      continue;
+    }
+    const { label, result } = item.value;
+    parts.push(result.wallets);
+    if (result.error) errors.push(`${label}: ${result.error}`);
+    console.log(`[discovery] all←${label} ${result.wallets.length}`);
+    if (!relatedTokens && result.relatedTokens?.length) {
+      relatedTokens = result.relatedTokens;
+    }
   }
 
   parts.push(manualCurated(limit, 'manual'));
@@ -987,6 +1013,11 @@ async function discoverAll(
     wallets = mergeDiscovered([scalpers, wallets], limit);
   }
 
+  if (wallets.length === 0) {
+    wallets = manualCurated(limit, 'manual');
+    errors.push('all sources empty — curated fallback');
+  }
+
   return {
     source: 'all',
     wallets,
@@ -996,7 +1027,7 @@ async function discoverAll(
       `Multi-source · ${wallets.length} wallet(s)` +
       (errors.length ? ` · warnings: ${errors.slice(0, 2).join('; ')}` : ''),
     error: errors.length ? errors.join(' | ') : undefined,
-    relatedTokens: dex.relatedTokens ?? kol.relatedTokens,
+    relatedTokens,
   };
 }
 
@@ -1283,6 +1314,20 @@ export async function findSmartWallets(
   console.log(
     `[discovery] done source=${result.source} count=${result.wallets.length} msg=${result.message}`
   );
+
+  // Last-resort guarantee: never hand the dashboard an empty Discover table.
+  if (!result.wallets.length && source !== 'bullx') {
+    const curated = manualCurated(limit, source === 'manual' ? 'manual' : source);
+    result = {
+      ...result,
+      wallets: curated,
+      message: `${result.message || result.source} · curated fallback (${curated.length})`,
+      error: result.error || 'No live wallets — curated fallback',
+    };
+    console.warn(
+      `[discovery] empty result for ${source} — injected ${curated.length} curated wallet(s)`
+    );
+  }
 
   cache.set(cacheKey, {
     data: result,

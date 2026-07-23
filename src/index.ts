@@ -54,29 +54,41 @@ async function main(): Promise<void> {
     }
   }
 
-  const rpcOk = await testConnection();
-  if (!rpcOk) {
-    console.warn('[boot] RPC connection failed — monitor may not work until RPC is fixed');
-  }
-
-  // Paper trading auto-check for TP/SL
-  if (config.mode === 'paper' && config.strategy.enableAutoSell) {
-    paperTrader.startAutoCheck();
-  }
-
-  // Log signals (monitor also auto-executes)
-  onSignal((signal: TradeSignal) => {
-    console.log(
-      `[signal] 🎯 ${signal.walletNames.join(' + ')} → ${signal.symbol}` +
-        (signal.name && signal.name !== signal.symbol ? ` (${signal.name})` : '') +
-        (signal.isMigration ? ' (post-migration)' : '')
-    );
-  });
-
-  startMonitor();
-  // Start migration listener after monitor so priority handler is registered
-  startMigrationListener();
+  // Bind /health FIRST so Render/Fly health checks never see 502 while RPC/GMGN boot.
+  // Public Solana RPC 429 retries can hang getSlot for minutes otherwise.
   startServer();
+
+  // Heavy I/O after listen — failures here must not take the process down.
+  void (async () => {
+    try {
+      const rpcOk = await testConnection();
+      if (!rpcOk) {
+        console.warn(
+          '[boot] RPC connection failed — monitor may not work until RPC is fixed'
+        );
+      }
+
+      if (config.mode === 'paper' && config.strategy.enableAutoSell) {
+        paperTrader.startAutoCheck();
+      }
+
+      onSignal((signal: TradeSignal) => {
+        console.log(
+          `[signal] 🎯 ${signal.walletNames.join(' + ')} → ${signal.symbol}` +
+            (signal.name && signal.name !== signal.symbol
+              ? ` (${signal.name})`
+              : '') +
+            (signal.isMigration ? ' (post-migration)' : '')
+        );
+      });
+
+      startMonitor();
+      startMigrationListener();
+      console.log('[boot] Monitor + migration listener started');
+    } catch (err) {
+      console.error('[boot] Post-listen startup error (server still up):', err);
+    }
+  })();
 
   // Graceful shutdown
   const shutdown = (): void => {
