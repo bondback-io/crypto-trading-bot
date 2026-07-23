@@ -8,6 +8,7 @@ import {
   config,
   effectiveMinHolders,
   effectiveMinLiquidityUsd,
+  effectiveMinTop10HolderPct,
   effectiveMinVolume24hUsd,
 } from './config';
 import { getConnection } from './connection';
@@ -551,6 +552,13 @@ export function evaluateTokenMetricsFilters(
         `top10 concentration ${metrics.top10HoldPct.toFixed(0)}% > max ${maxConc}%`
       );
     }
+  }
+
+  const minTop10 = effectiveMinTop10HolderPct();
+  if (metrics.top10HoldPct != null && metrics.top10HoldPct < minTop10) {
+    reasons.push(
+      `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
+    );
   }
 
   if (filters.skipIfMintAuthority && metrics.mintAuthority) {

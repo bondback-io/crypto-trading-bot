@@ -34,6 +34,7 @@ import {
 } from './bondingCurve';
 import {
   evaluateDeadTokenHardFloors,
+  evaluateHolderConcentrationHardFloors,
   isNonBypassableSkipReason,
 } from './deadTokenFilters';
 import { logger, errorToMeta, loggedFetch } from './logger';
@@ -494,7 +495,7 @@ async function runAntiRugChecks(
     }
   }
 
-  // Top-10 concentration
+  // Top-10 concentration (max — min floor is a non-bypassable hard gate)
   if (maxConc > 0 && metrics.top10HoldPct != null) {
     if (metrics.top10HoldPct > maxConc) {
       score += 25;
@@ -792,6 +793,24 @@ async function runAntiRugChecks(
       );
     }
   }
+
+  // --- Non-bypassable holder dispersion / insider ceilings (all risk levels) ---
+  const holderHard = evaluateHolderConcentrationHardFloors({
+    top10HoldPct: checks.top10HoldPct,
+    insiderPct: checks.insiderPct,
+    devHoldPct: checks.devHoldPct,
+  });
+  score += holderHard.scorePenalty;
+  for (const f of holderHard.flags) {
+    flags.push({
+      id: f.id,
+      severity: f.severity,
+      label: f.label,
+      detail: f.detail,
+    });
+  }
+  hardSkipReasons.push(...holderHard.skipReasons);
+  skipReasons.push(...holderHard.skipReasons);
 
   // --- Birdeye token overview + smart-money signal (soft enrichment) ---
   let birdeyeSummary: ReturnType<typeof summarizeBirdeye> | undefined;

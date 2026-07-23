@@ -16,6 +16,8 @@ import {
   effectiveMinRecentActivity,
   effectiveMinRecentBuyVolumeUsd,
   effectiveMinRecentVolumeUsd,
+  effectiveMinTop10HolderPct,
+  effectiveMaxInsiderPct,
   effectiveMinVolume24hUsd,
 } from './config';
 import type { BondingCurveHealth } from './bondingCurve';
@@ -69,7 +71,10 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('no recent activity') ||
     r.includes('net volume heavily negative') ||
     r.includes('price crash') ||
-    r.includes('low bonding curve + dead')
+    r.includes('low bonding curve + dead') ||
+    r.includes('top 10 holders too low') ||
+    r.includes('top10 holders too low') ||
+    r.includes('insider % too high')
   );
 }
 
@@ -407,6 +412,83 @@ export function evaluateDeadTokenHardFloors(
 
   if (curveHealth?.preferBoost) {
     scorePenalty = Math.max(0, scorePenalty - 8);
+  }
+
+  return { skipReasons, scorePenalty, flags };
+}
+
+export interface HolderConcentrationSnapshot {
+  top10HoldPct: number | null;
+  insiderPct: number | null;
+  /** Extreme dev hold treated as insider-cluster when ≥ hard max */
+  devHoldPct?: number | null;
+}
+
+/**
+ * Non-bypassable holder-dispersion / insider ceilings.
+ * - Reject when top10 is present and below min (default 8%, hard ≥5%).
+ * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
+ * Missing top10 on fresh pumps does not fail-open into a hard reject.
+ */
+export function evaluateHolderConcentrationHardFloors(
+  snap: HolderConcentrationSnapshot
+): DeadTokenFilterResult {
+  const skipReasons: string[] = [];
+  const flags: DeadTokenFilterResult['flags'] = [];
+  let scorePenalty = 0;
+
+  const minTop10 = effectiveMinTop10HolderPct();
+  const maxInsider = effectiveMaxInsiderPct();
+
+  if (snap.top10HoldPct != null && Number.isFinite(snap.top10HoldPct)) {
+    if (snap.top10HoldPct < minTop10) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_top10_too_low',
+        severity: 'critical',
+        label: 'Top-10 holders too low',
+        detail: `${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%`,
+      });
+      skipReasons.push(
+        `Skipped — top 10 holders too low (${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%)`
+      );
+    }
+  }
+
+  if (snap.insiderPct != null && Number.isFinite(snap.insiderPct)) {
+    if (snap.insiderPct >= maxInsider) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_insider_too_high',
+        severity: 'critical',
+        label: 'Insider % too high',
+        detail: `${snap.insiderPct.toFixed(0)}% ≥ ${maxInsider}%`,
+      });
+      skipReasons.push(
+        `Skipped — insider % too high (${snap.insiderPct.toFixed(0)}% ≥ ${maxInsider}%)`
+      );
+    }
+  }
+
+  // Extreme deployer hold (≥ hard insider cap) — same non-bypassable class
+  if (
+    snap.devHoldPct != null &&
+    Number.isFinite(snap.devHoldPct) &&
+    snap.devHoldPct >= maxInsider
+  ) {
+    const already = skipReasons.some((r) => r.toLowerCase().includes('insider % too high'));
+    if (!already) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_dev_insider_cluster',
+        severity: 'critical',
+        label: 'Dev/insider cluster too high',
+        detail: `dev ${snap.devHoldPct.toFixed(0)}% ≥ ${maxInsider}%`,
+      });
+      skipReasons.push(
+        `Skipped — insider % too high (dev ${snap.devHoldPct.toFixed(0)}% ≥ ${maxInsider}%)`
+      );
+    }
   }
 
   return { skipReasons, scorePenalty, flags };

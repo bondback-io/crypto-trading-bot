@@ -279,6 +279,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxDevPercent: 12,
       maxTopHolderPct: 35,
       maxHolderConcentration: 35,
+      minTop10HolderPct: 8,
       maxEstimatedTaxPct: 18,
       maxRiskScore: 45,
       skipIfMintAuthority: true,
@@ -376,6 +377,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxDevPercent: 14,
       maxTopHolderPct: 70,
       maxHolderConcentration: 70,
+      minTop10HolderPct: 8,
       maxEstimatedTaxPct: 24,
       maxRiskScore: 70,
       skipIfMintAuthority: false,
@@ -475,6 +477,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxDevPercent: 22,
       maxTopHolderPct: 85,
       maxHolderConcentration: 85,
+      minTop10HolderPct: 8,
       maxEstimatedTaxPct: 35,
       maxRiskScore: 78,
       skipIfMintAuthority: false,
@@ -594,6 +597,17 @@ export const HARD_FILTER_FLOORS = {
   maxNegativeBuySellRatio: 0.5,
   /** 1h or 24h price change at/below this + negative net volume → reject */
   priceCrashPct: -35,
+  /**
+   * Absolute min top-10 holder concentration %.
+   * Suspiciously dispersed holdings (<5%) are a common honeypot pattern.
+   * Config default is stricter (8%); High cannot go below this floor.
+   */
+  minTop10HolderPct: 5,
+  /**
+   * Absolute max insider / rat / extreme-dev hold %.
+   * Reject when insiderPct (or extreme dev hold) ≥ this — non-bypassable.
+   */
+  maxInsiderPct: 50,
 } as const;
 
 export interface FilterConfig {
@@ -612,6 +626,11 @@ export interface FilterConfig {
   maxTopHolderPct: number;
   /** Skip if top-10 holders concentration % exceeds this (0 = disabled) */
   maxHolderConcentration: number;
+  /**
+   * Skip if top-10 holders concentration % is below this (honeypot dispersion).
+   * Clamped to HARD_FILTER_FLOORS.minTop10HolderPct (5). Default 8.
+   */
+  minTop10HolderPct: number;
   /** Master switch for comprehensive anti-rug checks */
   enableAntiRug: boolean;
   /** Require LP locked/burned (RugCheck / heuristics) */
@@ -634,7 +653,10 @@ export interface FilterConfig {
   maxSniperCount: number;
   /** Override max bundler volume % (0 = use sensitivity default) */
   maxBundlerPct: number;
-  /** Override max insider/rat volume % (0 = use sensitivity default) */
+  /**
+   * Override max insider/rat volume % for sniper sensitivity (0 = use sensitivity default).
+   * Independent hard ceiling HARD_FILTER_FLOORS.maxInsiderPct (50) always applies.
+   */
   maxInsiderPct: number;
   /** Override max sniper score 0–100 (0 = use sensitivity default) */
   maxSniperScore: number;
@@ -900,6 +922,7 @@ export const config: BotConfig = {
     maxDevPercent: 14,
     maxTopHolderPct: 70,
     maxHolderConcentration: 70,
+    minTop10HolderPct: 8,
     enableAntiRug: true,
     requireLiquidityLocked: false,
     skipIfDevRecentSells: true,
@@ -1137,6 +1160,8 @@ const RISK_LEVEL_SYNC_V1 = 'riskLevelSync_v1';
  * and clamp any value above the new 5000% ceiling.
  */
 const MAX_PROFIT_DEFAULT_V1123 = 'maxProfitDefault_v1123';
+/** One-shot: seed min top-10 concentration floor (honeypot dispersion gate). */
+const HOLDER_CONCENTRATION_FLOORS_V1124 = 'holderConcentrationFloors_v1124';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -1224,6 +1249,18 @@ function syncConfigAliases(): void {
   }
   if (config.filters.minRecentActivity == null) {
     config.filters.minRecentActivity = HARD_FILTER_FLOORS.minRecentActivityTxns;
+  }
+  if (
+    config.filters.minTop10HolderPct == null ||
+    !Number.isFinite(Number(config.filters.minTop10HolderPct)) ||
+    Number(config.filters.minTop10HolderPct) <= 0
+  ) {
+    config.filters.minTop10HolderPct = 8;
+  } else {
+    config.filters.minTop10HolderPct = Math.max(
+      Number(config.filters.minTop10HolderPct),
+      HARD_FILTER_FLOORS.minTop10HolderPct
+    );
   }
   if (config.bondingCurve.requireHealthyCurve == null) {
     config.bondingCurve.requireHealthyCurve = false;
@@ -1458,6 +1495,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyHolderConcentrationFloorsMigration()) {
+    settingsMigrations[HOLDER_CONCENTRATION_FLOORS_V1124] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied holderConcentrationFloors_v1124 — minTop10HolderPct=${config.filters.minTop10HolderPct}% (hard floor ${HARD_FILTER_FLOORS.minTop10HolderPct}%), maxInsider hard cap ${HARD_FILTER_FLOORS.maxInsiderPct}%`
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1626,6 +1671,25 @@ function applyMaxProfitDefaultMigration(): boolean {
   return true;
 }
 
+/**
+ * One-shot: ensure min top-10 holder concentration floor (default 8%, hard ≥5%).
+ * Always marks done so it runs once after upgrade to 1.1.24.
+ */
+function applyHolderConcentrationFloorsMigration(): boolean {
+  if (settingsMigrations[HOLDER_CONCENTRATION_FLOORS_V1124]) return false;
+  const cur = Number(config.filters.minTop10HolderPct);
+  if (!Number.isFinite(cur) || cur <= 0) {
+    config.filters.minTop10HolderPct = 8;
+  } else {
+    config.filters.minTop10HolderPct = Math.max(
+      cur,
+      HARD_FILTER_FLOORS.minTop10HolderPct
+    );
+  }
+  syncConfigAliases();
+  return true;
+}
+
 /** Effective floors — risk presets may be stricter, never below HARD_FILTER_FLOORS. */
 export function effectiveMinLiquidityUsd(): number {
   return Math.max(
@@ -1670,6 +1734,18 @@ export function effectiveMinRecentActivity(): number {
     config.filters.minRecentActivity ?? 0,
     HARD_FILTER_FLOORS.minRecentActivityTxns
   );
+}
+
+/** Min top-10 concentration — never below HARD_FILTER_FLOORS (5%), default 8%. */
+export function effectiveMinTop10HolderPct(): number {
+  const configured = Number(config.filters.minTop10HolderPct);
+  const preferred = Number.isFinite(configured) && configured > 0 ? configured : 8;
+  return Math.max(preferred, HARD_FILTER_FLOORS.minTop10HolderPct);
+}
+
+/** Hard max insider / extreme-dev hold % — non-bypassable across risk levels. */
+export function effectiveMaxInsiderPct(): number {
+  return HARD_FILTER_FLOORS.maxInsiderPct;
 }
 
 /**
@@ -1952,6 +2028,11 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
     config.filters.minRecentActivity ?? 0,
     HARD_FILTER_FLOORS.minRecentActivityTxns
   );
+  const minTop10 = Number(config.filters.minTop10HolderPct);
+  config.filters.minTop10HolderPct = Math.max(
+    Number.isFinite(minTop10) && minTop10 > 0 ? minTop10 : 8,
+    HARD_FILTER_FLOORS.minTop10HolderPct
+  );
   persistUserSettings();
 }
 
@@ -2119,6 +2200,12 @@ export function applyRiskLevel(
     config.filters.minVolume24hUsd ?? 0,
     HARD_FILTER_FLOORS.minVolume24hUsd
   );
+  config.filters.minTop10HolderPct = Math.max(
+    Number(config.filters.minTop10HolderPct) > 0
+      ? Number(config.filters.minTop10HolderPct)
+      : 8,
+    HARD_FILTER_FLOORS.minTop10HolderPct
+  );
 
   const { normal, migration, ...riskRest } = preset.risk;
   Object.assign(config.risk, riskRest);
@@ -2200,6 +2287,8 @@ export function getRiskLevelSummary() {
       minRecentVolumeUsd: effectiveMinRecentVolumeUsd(),
       minRecentBuyVolumeUsd: effectiveMinRecentBuyVolumeUsd(),
       minRecentActivity: effectiveMinRecentActivity(),
+      minTop10HolderPct: effectiveMinTop10HolderPct(),
+      maxInsiderPctHard: effectiveMaxInsiderPct(),
       requireHealthyCurve: config.bondingCurve.requireHealthyCurve === true,
       riskPercentPerTrade: config.risk.riskPercentPerTrade,
       maxDrawdownPct: config.risk.maxDrawdownPct,

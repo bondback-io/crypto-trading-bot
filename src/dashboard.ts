@@ -1784,7 +1784,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $5,000 (recommended $5k–$8k). High cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="5000" max="100000" step="500" value="5000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">35</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="35" /></div>
+            <div class="field"><label title="Min % held by top 10 wallets. Floor 5% (default 8%) — rejects suspiciously dispersed / honeypot holder distributions. Non-bypassable.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="40" step="1" value="8" /></div>
             <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
+            <div class="field"><label title="Hard max insider/rat (or extreme dev) hold %. Floor cap 50% — non-bypassable across risk levels. Sniper sensitivity may be stricter.">Max Insider % — <span class="val" id="v-maxInsiderPctDisplay">50</span></label><input type="range" id="maxInsiderPctDisplay" min="50" max="50" step="1" value="50" disabled title="Hard floor 50% — not adjustable below (non-bypassable)" /></div>
             <div class="field"><label title="Composite rug/risk score ceiling (0-100)">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="20" max="100" step="5" value="70" /></div>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
@@ -2120,7 +2122,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     const rangeFields = [
       'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
       'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
-      'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
+      'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
       'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
       'minHolders','minRecentActivity'
     ];
@@ -4607,7 +4609,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : true,
       };
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity',
-       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','maxRiskScore','maxEstimatedTaxPct',
+       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
        'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
        'minHolders','minRecentActivity'].forEach(k => {
         const el = document.getElementById(k);
