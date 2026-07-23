@@ -9,7 +9,7 @@ import {
   Transaction,
   VersionedTransaction,
 } from '@solana/web3.js';
-import { config, getActiveTradingWallet, effectiveMinMarketCapUsd } from './config';
+import { config, getActiveTradingWallet, effectiveMinMarketCapUsd, usesPaperAccounting } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   evaluateBuyPumpFunOnlyGate,
@@ -55,7 +55,7 @@ export interface SwapQuote {
 
 export interface SwapResult {
   success: boolean;
-  mode: 'paper' | 'live';
+  mode: 'paper' | 'liveSimulation' | 'live';
   txId?: string;
   quote?: SwapQuote;
   error?: string;
@@ -338,10 +338,10 @@ export async function executeBuy(
   const quote = await getQuote(mint, solAmount, slippageBps);
   let priceSol = quote ? quoteToPriceSol(quote) : null;
 
-  // Paper: brand-new Pump.fun mints often have no Jupiter route yet —
-  // fall back to bonding-curve / Dex price so signals still open positions.
+  // Paper / Live Simulation: brand-new Pump.fun mints often have no Jupiter route yet —
+  // fall back to bonding-curve / Dex price so signals still open virtual positions.
   if (priceSol == null || !(priceSol > 0)) {
-    if (config.mode === 'paper') {
+    if (usesPaperAccounting()) {
       try {
         const curve = await fetchBondingCurve(mint);
         const curvePx = estimateBondingCurvePriceSol(curve);
@@ -434,7 +434,7 @@ export async function executeBuy(
     `[trade] Entry top10 OK ${symbol}: ${top10HoldPct!.toFixed(1)}%`
   );
 
-  if (config.mode === 'paper') {
+  if (usesPaperAccounting()) {
     const position = paperTrader.simulateBuy(
       mint,
       symbol,
@@ -453,11 +453,15 @@ export async function executeBuy(
       }
     );
     if (!position) {
-      return { success: false, mode: 'paper', error: 'Paper buy failed' };
+      return {
+        success: false,
+        mode: config.mode,
+        error: 'Simulated buy failed',
+      };
     }
     return {
       success: true,
-      mode: 'paper',
+      mode: config.mode,
       quote: quote ?? undefined,
       positionId: position.id,
       mevProtected: false,
@@ -560,16 +564,24 @@ export async function executeSell(
   mint: string,
   tokenAmount?: number | string
 ): Promise<SwapResult> {
-  if (config.mode === 'paper') {
+  if (usesPaperAccounting()) {
     const price = paperTrader.getTokenPrice(mint);
     if (price === undefined) {
-      return { success: false, mode: 'paper', error: 'No price for token' };
+      return {
+        success: false,
+        mode: config.mode,
+        error: 'No price for token',
+      };
     }
     const closed = paperTrader.simulateSell(positionId, price, 'manual');
     if (!closed) {
-      return { success: false, mode: 'paper', error: 'Paper sell failed' };
+      return {
+        success: false,
+        mode: config.mode,
+        error: 'Simulated sell failed',
+      };
     }
-    return { success: true, mode: 'paper', positionId };
+    return { success: true, mode: config.mode, positionId };
   }
 
   const keypair = getKeypair();

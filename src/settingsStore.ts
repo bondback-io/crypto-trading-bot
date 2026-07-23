@@ -26,7 +26,7 @@ export const SETTINGS_VERSION = 2 as const;
 export interface PersistedBotSettings {
   version: number;
   updatedAt: number;
-  mode?: 'paper' | 'live';
+  mode?: 'paper' | 'liveSimulation' | 'live';
   riskLevel?: 'low' | 'medium' | 'high' | 'degen';
   /** Opt-in Strict Mode overlay (default false) */
   strictMode?: boolean;

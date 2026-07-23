@@ -81,7 +81,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .signal-light .dot-off { background: #f87171; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
     .badge-paper { background: #1d4ed833; color: #93c5fd; }
+    .badge-livesim { background: #0f766e55; color: #5eead4; }
     .badge-live { background: #7f1d1d55; color: #fca5a5; }
+    .score-card { text-align: center; }
+    .score-grade { font-size: 2.25rem; font-weight: 800; line-height: 1; }
+    .score-num { font-size: 1.1rem; font-weight: 600; margin-top: 4px; }
+    .score-tone-good { color: #34d399; }
+    .score-tone-average { color: #fbbf24; }
+    .score-tone-poor { color: #f87171; }
+    .score-tone-neutral { color: #94a3b8; }
+    .cmp-win { color: #34d399; font-weight: 600; }
+    .cmp-lose { color: #f87171; }
+    .cmp-tie { color: #94a3b8; }
     .bt-pnl-cell { line-height: 1.35; white-space: nowrap; }
     .bt-pnl-cell .bt-pnl-sol { font-weight: 700; font-size: 13px; }
     .bt-pnl-cell .bt-pnl-usd { font-size: 11px; opacity: 0.85; }
@@ -1083,7 +1094,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="header-actions card !py-2 !px-3">
         <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
         <strong id="status-text" class="text-sm has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
-        <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = simulated fills. LIVE = real swaps with trading wallet keys">PAPER</span>
+        <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">PAPER</span>
         <span class="text-slate-500 text-xs hidden sm:inline">·</span>
         <span class="text-xs text-slate-400 has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance" class="text-slate-100">—</strong></span>
         <span class="text-xs text-slate-400 has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl" class="text-slate-100">—</strong></span>
@@ -1091,7 +1102,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
         <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
         <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
-        <button onclick="setMode('paper')" class="btn btn-secondary" title="Switch to paper trading — no real funds risked">Paper</button>
+        <button onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
+        <button onclick="setMode('liveSimulation')" class="btn btn-secondary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
         <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
       </div>
     </div>
@@ -1112,6 +1124,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card"><div class="stat-label">Open Positions <span class="tip tip-below" tabindex="0" data-tip="How many tokens you currently hold waiting for TP, SL, or trailing exit."></span></div><div class="stat" id="open-count">—</div></div>
         <div class="card"><div class="stat-label">Net PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of realized profit/loss from closed trades this session/day."></span></div><div class="stat" id="stat-pnl">—</div><div class="mint mt-1" id="stat-return">—</div></div>
         <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
+        <div class="card score-card">
+          <div class="stat-label">Performance Score <span class="tip tip-below" tabindex="0" data-tip="Score 0–100 from weighted Win Rate (30%), Profit Factor (25%), Max Drawdown inverted (20%), Avg Win/Loss (15%), sample-size confidence (10%). Tiny samples are penalized. A≥80, B≥65, C≥50, D≥35, else F."></span></div>
+          <div class="score-grade score-tone-neutral" id="ov-score-grade">—</div>
+          <div class="score-num score-tone-neutral" id="ov-score-num">—</div>
+          <div class="mint mt-1 text-xs" id="ov-score-sub">Live Simulation / Paper ledger</div>
+        </div>
+        <div class="card sm:col-span-2">
+          <div class="section-title !text-sm !mb-2">Live Sim vs Backtest <span class="tip" tabindex="0" data-tip="Side-by-side KPIs. Run a backtest matching live Strict/risk to compare apples-to-apples."></span></div>
+          <div class="overflow-x-auto">
+            <table id="ov-perf-compare-table" class="text-xs">
+              <thead><tr><th>Metric</th><th>Live Sim</th><th>Backtest</th><th>Edge</th></tr></thead>
+              <tbody><tr><td colspan="4" class="text-slate-500">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="mint text-xs mt-2" id="ov-perf-compare-winner">—</div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button class="btn btn-secondary text-xs" onclick="runBacktestMatchingLive()" title="Run backtest with current risk + Strict Mode settings">Backtest matching live</button>
+            <button class="btn btn-secondary text-xs" onclick="showTab('backtester', document.querySelector('[data-tab=backtester]'))">Open Backtester</button>
+          </div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
+        <div class="card">
+          <div class="section-title !text-sm">Equity (Live Sim) <span class="tip" tabindex="0" data-tip="Cumulative realized PnL from the paper / Live Simulation ledger."></span></div>
+          <div class="chart-wrap" style="height:200px"><canvas id="ov-chart-livesim-equity"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title !text-sm">Compare bars <span class="tip" tabindex="0" data-tip="Win Rate, Profit Factor, Max DD, Score — Live Sim vs last Backtest."></span></div>
+          <div class="chart-wrap" style="height:200px"><canvas id="ov-chart-compare-bars"></canvas></div>
+        </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card"><div class="stat-label">Unrealized gains/loss <span class="tip tip-below" tabindex="0" data-tip="Sum of unrealized P&amp;L on open trades that haven’t closed yet, using the same live mark prices as the Open Positions table. Positive = unrealized profit; negative = unrealized loss."></span></div><div class="stat" id="stat-unrealized">—</div><div class="mint mt-1" id="stat-unrealized-hint">—</div></div>
@@ -1634,8 +1678,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
         <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #334155;color:#94a3b8">
-          <strong style="color:#e2e8f0">Backtest uses your risk presets + selective entry gates</strong>
-          <span class="mint block mt-1" id="bt-config-banner">Applies conviction score, wallet convergence, rate limits, max concurrent, and filter floors from the selected risk level. Compare Low/Med/High/Degen to see differentiated trade counts and WR.</span>
+          <strong style="color:#e2e8f0">Backtest uses your risk presets + Strict Mode + selective entry gates</strong>
+          <span class="mint block mt-1" id="bt-config-banner">Applies conviction, wallet quality, cluster, volume, dead-market exits, and Strict intensity from the selected risk level (or live match). Overrides below are run-only.</span>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
@@ -1659,6 +1703,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="degen">Override → Degen</option>
             </select>
           </label>
+          <label class="ctl ctl-lg"><span>Strict Mode for this run <span class="tip" tabindex="0" data-tip="Match live = use current Strict ON/OFF + intensity. Force Off/On overrides for this run only (not saved)."></span></span>
+            <select id="bt-strict-mode" onchange="onBtStrictModeChange()">
+              <option value="match" selected>Match live</option>
+              <option value="off">Force OFF</option>
+              <option value="on">Force ON</option>
+            </select>
+          </label>
+          <label class="ctl ctl-md" id="bt-strict-intensity-wrap"><span>Strict intensity <span class="tip" tabindex="0" data-tip="Used when Match live (if Strict ON) or Force ON. Low = most selective."></span></span>
+            <select id="bt-strict-intensity">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Min liquidity $ <span class="tip" tabindex="0" data-tip="Skip tokens below this liquidity."></span></span><input type="number" id="bt-min-liq" value="0" min="0" step="1000" /></label>
@@ -1679,6 +1737,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="bt-config-used" class="mint text-sm mb-2 hidden"></div>
         <div class="flex flex-wrap gap-2 items-center mb-2">
           <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Start the simulation with current filters">Run Backtest</button>
+          <button class="btn btn-secondary" onclick="runBacktestMatchingLive()" title="Run with current live risk + Strict Mode settings">Match live Strict</button>
           <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
           <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV"><span class="btn-label-short">CSV</span><span class="btn-label-full">Export CSV</span></button>
           <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON"><span class="btn-label-short">JSON</span><span class="btn-label-full">Export JSON</span></button>
@@ -1698,6 +1757,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough. Check Compare Low/Med/High to add a risk-level breakdown."></span></div>
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
+          <div class="card !py-3 !bg-slate-900/50 score-card">
+            <div class="stat-label">Performance Score <span class="tip" tabindex="0" data-tip="Score 0–100 from weighted Win Rate (30%), Profit Factor (25%), Max Drawdown inverted (20%), Avg Win/Loss (15%), sample-size confidence (10%). Tiny samples are penalized. A≥80, B≥65, C≥50, D≥35, else F."></span></div>
+            <div class="score-grade score-tone-neutral" id="bt-score-grade">—</div>
+            <div class="score-num score-tone-neutral" id="bt-score-num">—</div>
+            <div class="mint mt-1 text-xs" id="bt-score-sub">After each run</div>
+          </div>
+          <div class="card !py-3 !bg-slate-900/50 sm:col-span-3">
+            <div class="section-title !text-sm !mb-2">Live Sim vs This Backtest</div>
+            <div class="overflow-x-auto">
+              <table id="bt-perf-compare-table" class="text-xs">
+                <thead><tr><th>Metric</th><th>Live Sim</th><th>Backtest</th><th>Edge</th></tr></thead>
+                <tbody><tr><td colspan="4" class="text-slate-500">Run a backtest to compare</td></tr></tbody>
+              </table>
+            </div>
+            <div class="mint text-xs mt-2" id="bt-perf-compare-winner">—</div>
+          </div>
+        </div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win Rate</div><div class="stat" id="bt-stat-wr">—</div><div class="mint mt-1" id="bt-stat-wr-sub">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Profit Factor</div><div class="stat" id="bt-stat-pf">—</div><div class="mint mt-1" id="bt-stat-expect">—</div></div>
@@ -1770,6 +1847,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title">Win / Loss Distribution <span class="tip" tabindex="0" data-tip="Trade counts and net SOL for wins vs losses."></span></div>
           <div class="chart-wrap" style="height:280px"><canvas id="bt-chart-wl"></canvas></div>
           <div class="chart-empty mint" id="bt-chart-wl-empty">No distribution yet</div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
+        <div class="card">
+          <div class="section-title">Live Sim + Backtest Equity <span class="tip" tabindex="0" data-tip="Overlay cumulative PnL from Live Simulation ledger and last backtest (normalized to start at 0)."></span></div>
+          <div class="chart-wrap" style="height:240px"><canvas id="bt-chart-overlay-equity"></canvas></div>
+          <div class="chart-empty mint" id="bt-chart-overlay-empty">Need Live Sim trades and a backtest run</div>
+        </div>
+        <div class="card">
+          <div class="section-title">Performance Comparison Bars <span class="tip" tabindex="0" data-tip="Side-by-side Win Rate, Profit Factor, Max DD, Score."></span></div>
+          <div class="chart-wrap" style="height:240px"><canvas id="bt-chart-compare-bars"></canvas></div>
+          <div class="chart-empty mint" id="bt-chart-compare-empty">Run a backtest to compare</div>
         </div>
       </div>
 
@@ -1877,9 +1967,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="card">
-          <div class="section-title">Paper Prices <span class="tip" tabindex="0" data-tip="When on, paper positions mark-to-market with live prices. Full sims are in Backtester."></span></div>
-          <p class="text-sm text-slate-400 mb-2">Advanced simulation lives in the <strong>Backtester</strong> tab.</p>
-          <div class="toggle-row"><span title="Update open paper positions using live price feeds">Paper live prices</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
+          <div class="section-title">Paper / Live Simulation Prices <span class="tip" tabindex="0" data-tip="When on (or in Live Simulation mode), positions mark-to-market with live Dex/GMGN prices. Live Simulation forces this ON."></span></div>
+          <p class="text-sm text-slate-400 mb-2">Use <strong>Live Sim</strong> in the header for full live-parity filters with virtual fills. Advanced historical sims are in the <strong>Backtester</strong> tab.</p>
+          <div class="toggle-row"><span title="Update open paper / Live Sim positions using live price feeds">Live market marks</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
           <div class="flex flex-wrap gap-2 mt-2">
             <button class="btn btn-secondary" onclick="togglePaperLiveData()" title="Save the paper live-prices toggle">Save Live Price</button>
             <button class="btn btn-primary" onclick="showTab('backtester', document.querySelector('[data-tab=backtester]'))">Open Backtester</button>
@@ -3003,7 +3093,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (data.dataSource || '—') + ' · ' + (data.tradesExecuted || 0) + ' trades' +
           (data.simulationsRun > 1 ? ' · ' + data.simulationsRun + ' sims' : '') +
           (sum.reBuyTrades ? ' · ' + sum.reBuyTrades + ' rebuys' : '') +
-          (cu.riskLevel ? ' · risk ' + String(cu.riskLevel).toUpperCase() : '');
+          (cu.riskLevel ? ' · risk ' + String(cu.riskLevel).toUpperCase() : '') +
+          (cu.strictLabel ? ' · ' + cu.strictLabel : '');
       }
       if (out) {
         out.innerHTML =
@@ -3021,9 +3112,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (cfgUsedEl) {
         if (cu.riskLevel) {
           cfgUsedEl.classList.remove('hidden');
+          const strictTxt = cu.strictLabel
+            ? String(cu.strictLabel)
+            : (cu.strictMode
+              ? ('Strict: ON · ' + String(cu.strictModeIntensity || 'medium'))
+              : 'Strict: OFF');
           cfgUsedEl.innerHTML =
             'Config used: <strong style="color:#e2e8f0">' + String(cu.riskLevel).toUpperCase() +
             (cu.label ? ' (' + cu.label + ')' : '') + '</strong>' +
+            ' · <strong style="color:#e2e8f0">' + strictTxt + '</strong>' +
+            (cu.effectiveMinConvictionScore != null
+              ? ' · conviction≥' + cu.effectiveMinConvictionScore
+              : '') +
+            (cu.effectiveMinWalletQualityScore != null
+              ? ' · Q≥' + cu.effectiveMinWalletQualityScore
+              : '') +
+            (cu.effectiveClusterMinWallets != null
+              ? ' · cluster≥' + cu.effectiveClusterMinWallets
+              : '') +
             ' · base ' + Number(cu.baseTradeAmountSol || 0) + ' SOL' +
             ' · SL ' + Number(cu.stopLossPercent || 0) + '%' +
             ' · max profit ' + Number(cu.maxProfitPercent || 0) + '%' +
@@ -3038,6 +3144,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           cfgUsedEl.textContent = '';
         }
       }
+      renderScoreCard('bt', data.performanceScore);
+      refreshPerformanceCompare();
       const cmpWrap = document.getElementById('bt-risk-compare');
       const cmpBody = document.querySelector('#bt-risk-compare-table tbody');
       if (cmpWrap && cmpBody) {
@@ -3433,7 +3541,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!ok) alert('Could not copy: ' + ca);
     }
 
-    async function runBacktest() {
+    async function runBacktest(extraOpts) {
       const status = document.getElementById('bt-status');
       const out = document.getElementById('bt-result');
       const btn = document.getElementById('bt-run-btn');
@@ -3444,10 +3552,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       clearInterval(_btProgressTimer);
       _btProgressTimer = setInterval(pollBacktestProgress, 400);
       try {
+        const strict = typeof btStrictPayload === 'function' ? btStrictPayload() : {};
         const data = await fetchJSON('/backtest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify(Object.assign({
             hours: Number(document.getElementById('bt-hours').value),
             maxTrades: Number(document.getElementById('bt-max').value),
             simulations: Number((document.getElementById('bt-sims') || {}).value) || 1,
@@ -3467,7 +3576,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             pumpFunOnly: (document.getElementById('bt-pump-only') || {}).checked,
             reBuyEnabled: (document.getElementById('bt-rebuy') || {}).checked,
             allowSynthetic: (document.getElementById('bt-synthetic') || { checked: true }).checked,
-          }),
+          }, strict, extraOpts || {})),
           timeoutMs: 180000,
         });
         setBtProgress(100, 'Complete');
@@ -3920,8 +4029,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById('btn-pause').textContent = status.monitor.paused ? 'Resume' : 'Pause';
 
       const badge = document.getElementById('mode-badge');
-      badge.textContent = status.mode.toUpperCase();
-      badge.className = 'badge ' + (status.mode === 'live' ? 'badge-live' : 'badge-paper');
+      const modeLabel = status.modeLabel || (status.mode === 'liveSimulation' ? 'LIVE SIM' : String(status.mode || 'paper').toUpperCase());
+      badge.textContent = modeLabel;
+      badge.className = 'badge ' + (
+        status.mode === 'live' ? 'badge-live' :
+        status.mode === 'liveSimulation' ? 'badge-livesim' :
+        'badge-paper'
+      );
+      badge.title = status.mode === 'live'
+        ? 'LIVE = real swaps with trading wallet keys'
+        : status.mode === 'liveSimulation'
+          ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
+          : 'PAPER = simulated fills';
+
+      renderScoreCard('ov', status.performanceScore);
+      refreshPerformanceCompare();
 
       const verEl = document.getElementById('app-version');
       if (verEl && status.app) {
@@ -4709,13 +4831,248 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function setMode(mode) {
       if (mode === 'live' && !confirm('Switch to LIVE trading? Real funds will be used with the selected trading wallet.')) return;
+      if (mode === 'liveSimulation' && !confirm('Switch to LIVE SIMULATION? Uses live market data and the same filters as live, but fills stay virtual — no real funds.')) return;
       try {
         await fetchJSON('/api/config/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
         refresh();
         loadTradingWallets();
+        refreshPerformanceCompare();
       } catch (err) {
         alert(err.message);
       }
+    }
+
+    function renderScoreCard(prefix, score) {
+      const gradeEl = document.getElementById(prefix + '-score-grade');
+      const numEl = document.getElementById(prefix + '-score-num');
+      const subEl = document.getElementById(prefix + '-score-sub');
+      if (!gradeEl || !numEl) return;
+      if (!score || score.score == null) {
+        gradeEl.textContent = '—';
+        numEl.textContent = '—';
+        gradeEl.className = 'score-grade score-tone-neutral';
+        numEl.className = 'score-num score-tone-neutral';
+        if (subEl) subEl.textContent = 'No closed trades yet';
+        return;
+      }
+      const tone = score.tone || 'neutral';
+      gradeEl.textContent = score.grade || '—';
+      numEl.textContent = (score.score != null ? score.score : '—') + '/100';
+      gradeEl.className = 'score-grade score-tone-' + tone;
+      numEl.className = 'score-num score-tone-' + tone;
+      if (subEl) subEl.textContent = score.label || '';
+    }
+
+    function fmtCmpVal(key, v) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      const n = Number(v);
+      if (key === 'winRatePct' || key === 'maxDrawdownPct') return n.toFixed(1) + '%';
+      if (key === 'netPnlSol') return (n >= 0 ? '+' : '') + n.toFixed(4);
+      if (key === 'avgHoldSec') {
+        if (n < 60) return Math.round(n) + 's';
+        if (n < 3600) return (n / 60).toFixed(1) + 'm';
+        return (n / 3600).toFixed(1) + 'h';
+      }
+      if (key === 'profitFactor') return n >= 999 ? '∞' : n.toFixed(2);
+      if (key === 'closedTrades' || key === 'score') return String(Math.round(n));
+      return n.toFixed(2);
+    }
+
+    function metricLabel(key) {
+      return ({
+        winRatePct: 'Win Rate',
+        profitFactor: 'Profit Factor',
+        netPnlSol: 'Total PnL (SOL)',
+        maxDrawdownPct: 'Max Drawdown',
+        closedTrades: 'Closed Trades',
+        avgHoldSec: 'Avg Hold',
+        score: 'Perf Score',
+      })[key] || key;
+    }
+
+    function fillCompareTable(tbodyId, winnerId, data) {
+      const table = document.getElementById(tbodyId);
+      const tbody = table ? (table.querySelector('tbody') || table) : null;
+      const winnerEl = document.getElementById(winnerId);
+      if (!tbody) return;
+      const metrics = (data && data.metrics) || [];
+      if (!metrics.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-slate-500">No comparison data</td></tr>';
+        if (winnerEl) winnerEl.textContent = '—';
+        return;
+      }
+      tbody.innerHTML = metrics.map(m => {
+        const edge =
+          m.winner === 'liveSim' ? '<span class="cmp-win">Live Sim</span>' :
+          m.winner === 'backtest' ? '<span class="cmp-win">Backtest</span>' :
+          m.winner === 'tie' ? '<span class="cmp-tie">Tie</span>' : '—';
+        return '<tr><td>' + metricLabel(m.key) + '</td><td>' + fmtCmpVal(m.key, m.liveSim) +
+          '</td><td>' + fmtCmpVal(m.key, m.backtest) + '</td><td>' + edge + '</td></tr>';
+      }).join('');
+      if (winnerEl) {
+        const w = data.overallWinner;
+        winnerEl.textContent =
+          w === 'liveSim' ? 'Overall edge: Live Simulation' :
+          w === 'backtest' ? 'Overall edge: Backtest' :
+          w === 'tie' ? 'Overall: roughly tied' : '—';
+      }
+    }
+
+    let chartOvLiveEquity = null;
+    let chartOvCompareBars = null;
+    let chartBtOverlayEquity = null;
+    let chartBtCompareBars = null;
+
+    function upsertLineChart(existing, canvasId, labels, datasets) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || typeof Chart === 'undefined') return existing;
+      if (!existing) {
+        return new Chart(canvas, {
+          type: 'line',
+          data: { labels: labels || [], datasets: datasets || [] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#94a3b8', boxWidth: 12 } },
+              tooltip: { callbacks: { label: (c) => (c.dataset.label || '') + ': ' + Number(c.raw).toFixed(4) } },
+            },
+            scales: {
+              x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
+              y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+            },
+          },
+        });
+      }
+      existing.data.labels = labels || [];
+      existing.data.datasets = datasets || [];
+      existing.update('none');
+      return existing;
+    }
+
+    function upsertBarChart(existing, canvasId, labels, datasets) {
+      const canvas = document.getElementById(canvasId);
+      if (!canvas || typeof Chart === 'undefined') return existing;
+      if (!existing) {
+        return new Chart(canvas, {
+          type: 'bar',
+          data: { labels: labels || [], datasets: datasets || [] },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#94a3b8', boxWidth: 12 } },
+              tooltip: { callbacks: { label: (c) => (c.dataset.label || '') + ': ' + Number(c.raw).toFixed(2) } },
+            },
+            scales: {
+              x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+              y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' }, beginAtZero: true },
+            },
+          },
+        });
+      }
+      existing.data.labels = labels || [];
+      existing.data.datasets = datasets || [];
+      existing.update('none');
+      return existing;
+    }
+
+    async function refreshPerformanceCompare() {
+      try {
+        const data = await fetchJSON('/api/performance/compare');
+        fillCompareTable('ov-perf-compare-table', 'ov-perf-compare-winner', data);
+        fillCompareTable('bt-perf-compare-table', 'bt-perf-compare-winner', data);
+
+        const liveEq = (data.liveSim && data.liveSim.charts && data.liveSim.charts.cumulativePnl) || {};
+        const btEq = (data.backtest && data.backtest.charts && (data.backtest.charts.equityCurve || data.backtest.charts.cumulativePnl)) || {};
+        const liveVals = liveEq.values || [];
+        const btVals = (btEq.values || []).map((v, i, arr) => {
+          const start = arr[0] != null ? arr[0] : 0;
+          return Number(v) - Number(start);
+        });
+        const liveNorm = liveVals.map((v, i, arr) => Number(v) - Number(arr[0] || 0));
+        const n = Math.max(liveNorm.length, btVals.length, 1);
+        const labels = Array.from({ length: n }, (_, i) => String(i + 1));
+        const pad = (arr) => {
+          const out = arr.slice();
+          while (out.length < n) out.push(null);
+          return out;
+        };
+        const overlayDatasets = [
+          {
+            label: 'Live Sim',
+            data: pad(liveNorm),
+            borderColor: '#5eead4',
+            backgroundColor: '#5eead433',
+            tension: 0.25,
+            fill: false,
+            pointRadius: 0,
+            spanGaps: true,
+          },
+          {
+            label: 'Backtest',
+            data: pad(btVals),
+            borderColor: '#93c5fd',
+            backgroundColor: '#93c5fd33',
+            tension: 0.25,
+            fill: false,
+            pointRadius: 0,
+            spanGaps: true,
+          },
+        ];
+        chartOvLiveEquity = upsertLineChart(chartOvLiveEquity, 'ov-chart-livesim-equity', labels, [overlayDatasets[0]]);
+        chartBtOverlayEquity = upsertLineChart(chartBtOverlayEquity, 'bt-chart-overlay-equity', labels, overlayDatasets);
+        const ovEmpty = document.getElementById('bt-chart-overlay-empty');
+        if (ovEmpty) ovEmpty.style.display = (liveNorm.length || btVals.length) ? 'none' : '';
+
+        const metrics = data.metrics || [];
+        const barKeys = ['winRatePct', 'profitFactor', 'maxDrawdownPct', 'score'];
+        const barLabels = barKeys.map(metricLabel);
+        const liveBars = barKeys.map(k => {
+          const m = metrics.find(x => x.key === k);
+          return m && m.liveSim != null ? Number(m.liveSim) : 0;
+        });
+        const btBars = barKeys.map(k => {
+          const m = metrics.find(x => x.key === k);
+          return m && m.backtest != null ? Number(m.backtest) : 0;
+        });
+        const barDatasets = [
+          { label: 'Live Sim', data: liveBars, backgroundColor: '#2dd4bf88', borderColor: '#5eead4', borderWidth: 1 },
+          { label: 'Backtest', data: btBars, backgroundColor: '#60a5fa88', borderColor: '#93c5fd', borderWidth: 1 },
+        ];
+        chartOvCompareBars = upsertBarChart(chartOvCompareBars, 'ov-chart-compare-bars', barLabels, barDatasets);
+        chartBtCompareBars = upsertBarChart(chartBtCompareBars, 'bt-chart-compare-bars', barLabels, barDatasets);
+        const cmpEmpty = document.getElementById('bt-chart-compare-empty');
+        if (cmpEmpty) cmpEmpty.style.display = data.backtest ? 'none' : '';
+      } catch (err) {
+        console.warn('[dashboard] performance compare failed', err);
+      }
+    }
+
+    function onBtStrictModeChange() {
+      const sel = document.getElementById('bt-strict-mode');
+      const wrap = document.getElementById('bt-strict-intensity-wrap');
+      if (!sel || !wrap) return;
+      wrap.style.opacity = sel.value === 'off' ? '0.5' : '1';
+    }
+
+    function btStrictPayload() {
+      const mode = (document.getElementById('bt-strict-mode') || {}).value || 'match';
+      const intensity = (document.getElementById('bt-strict-intensity') || {}).value || 'medium';
+      if (mode === 'match') return { matchLiveStrict: true };
+      if (mode === 'off') return { strictMode: false };
+      return { strictMode: true, strictModeIntensity: intensity };
+    }
+
+    async function runBacktestMatchingLive() {
+      const strictSel = document.getElementById('bt-strict-mode');
+      if (strictSel) strictSel.value = 'match';
+      const riskSel = document.getElementById('bt-risk-level');
+      if (riskSel) riskSel.value = 'current';
+      onBtStrictModeChange();
+      showTab('backtester', document.querySelector('[data-tab=backtester]'));
+      await runBacktest({ matchLiveStrict: true });
     }
 
     async function loadTradingWallets() {

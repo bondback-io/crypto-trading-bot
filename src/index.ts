@@ -28,7 +28,13 @@ async function main(): Promise<void> {
   console.log('  Solana Smart Money Copy Trading Bot');
   console.log('  Pump.fun launches & migrations');
   console.log('═══════════════════════════════════════════════════');
-  console.log(`  Mode: ${config.mode.toUpperCase()}`);
+  console.log(
+    `  Mode: ${
+      config.mode === 'liveSimulation'
+        ? 'LIVE SIMULATION (no real funds)'
+        : config.mode.toUpperCase()
+    }`
+  );
   console.log(`  Risk level: ${(config.riskLevel || 'medium').toUpperCase()}`);
   console.log(
     `  Buy size: base ${config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol} SOL` +
@@ -79,7 +85,10 @@ async function main(): Promise<void> {
         );
       }
 
-      if (config.mode === 'paper' && config.strategy.enableAutoSell) {
+      if (
+        (config.mode === 'paper' || config.mode === 'liveSimulation') &&
+        config.strategy.enableAutoSell
+      ) {
         paperTrader.startAutoCheck();
       }
 

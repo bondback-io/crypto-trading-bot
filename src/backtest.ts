@@ -33,6 +33,21 @@ import {
   PERSIST_FILES,
   readJsonFile,
 } from './dataDir';
+import {
+  effectiveClusterMinWallets,
+  effectiveDeadVolumeConsecutiveHours,
+  effectiveDeadVolumeMinHoldMinutes,
+  effectiveDeadVolumeUsdPerHour,
+  effectiveMaxEntryAgeMinutes,
+  effectiveMinConvictionScore,
+  effectiveMinWalletQualityScore,
+  effectiveStrictMinVolume24hUsd,
+  getStrictModeIntensity,
+  isStrictMode,
+  isStrictModeIntensity,
+  type StrictModeIntensity,
+} from './strictMode';
+import { passesWalletQualityGate } from './walletQuality';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -92,8 +107,16 @@ export interface BacktestOptions {
   minConvictionScore?: number;
   /** Override wallet quality cutoff for this run only (0 = use live) */
   minWalletQualityScore?: number;
-  /** Temporarily enable Strict Mode overlay for this run only */
+  /**
+   * Strict Mode for this run only (not persisted).
+   * `undefined` = match live saved settings; `true`/`false` = force on/off.
+   */
   strictMode?: boolean;
+  /**
+   * Intensity when Strict is forced ON for this run (or when matching live ON).
+   * Ignored when Strict is OFF. Default: live intensity / medium.
+   */
+  strictModeIntensity?: StrictModeIntensity;
 }
 
 export type BacktestExitTakeStage =
@@ -272,10 +295,17 @@ export interface BacktestResult {
     riskLevel: RiskLevel | 'current';
     compareRiskLevels: boolean;
     useSavedConfigFilters: boolean;
+    /** Effective Strict Mode for this run (after override / match-live) */
+    strictMode: boolean;
+    strictModeIntensity: StrictModeIntensity;
   };
   /** Snapshot of trading knobs used for this run */
   configUsed: {
     riskLevel: RiskLevel;
+    strictMode: boolean;
+    strictModeIntensity: StrictModeIntensity;
+    /** Display e.g. "Strict: OFF" or "Strict: ON · Medium" */
+    strictLabel: string;
     baseTradeAmountSol: number;
     stopLossPercent: number;
     maxProfitPercent: number;
@@ -286,6 +316,16 @@ export interface BacktestResult {
     riskPercentPerTrade: number;
     maxDrawdownPct: number;
     minConvictionScore: number;
+    minWalletQualityScore: number;
+    /** Effective (Strict-adjusted) thresholds actually applied */
+    effectiveMinConvictionScore: number;
+    effectiveMinWalletQualityScore: number;
+    effectiveClusterMinWallets: number;
+    effectiveMaxEntryAgeMinutes: number;
+    effectiveMinVolume24hUsd: number;
+    effectiveDeadVolumeUsdPerHour: number;
+    effectiveDeadVolumeConsecutiveHours: number;
+    effectiveDeadVolumeMinHoldMinutes: number;
     profitStrategyEnabled: boolean;
     partialSellAt: number;
     trailingStopAfter: number;
@@ -355,6 +395,8 @@ export interface BacktestResult {
   trades: BacktestTradeResult[];
   skipped: { mint: string; reason: string }[];
   message: string;
+  /** 0–100 performance score card for this run */
+  performanceScore?: import('./performanceScore').PerformanceScoreCard;
 }
 
 const HISTORY_CAP = 20;
@@ -796,11 +838,10 @@ function passesFilters(
     if (!isPump) return 'not Pump.fun';
   }
 
-  // Prefer the stricter of UI override vs selective/live filter floors
+  // Prefer the stricter of UI override vs selective/live Strict-aware floors
   const minVol = Math.max(
     options.minVolumeUsd || 0,
-    config.selective?.enabled ? config.selective.minVolume24hUsd || 0 : 0,
-    config.filters.minVolume24hUsd || 0
+    effectiveStrictMinVolume24hUsd()
   );
   const vol = event.volumeUsd;
   if (minVol > 0) {
@@ -879,6 +920,38 @@ function simulateCopyDelayMs(): number {
   const base = Math.max(2_000, Math.min(config.pollIntervalMs || 8_000, 20_000));
   const jitter = Math.floor(Math.random() * 5_000); // 0–5s
   return Math.round(base * 0.6 + jitter);
+}
+
+/**
+ * Estimate 1h volume/txns from the price path for dead-market exits in backtests.
+ * Flat / quiet paths → low volume (Strict thresholds trip sooner).
+ */
+function estimateBacktestH1Activity(
+  event: LaunchEvent,
+  nowMs: number
+): { volumeH1Usd: number; txnsH1: number } {
+  const windowStart = nowMs - 3_600_000;
+  const recent = event.candles.filter(
+    (c) => c.time >= windowStart && c.time <= nowMs
+  );
+  const baseH1 = Math.max(0, (event.volumeUsd ?? 0) / 24);
+  if (recent.length < 2) {
+    return {
+      volumeH1Usd: baseH1,
+      txnsH1: baseH1 > 50 ? 5 : 0,
+    };
+  }
+  let pathLen = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const a = recent[i - 1]!.priceSol;
+    const b = recent[i]!.priceSol;
+    if (a > 0) pathLen += Math.abs(b - a) / a;
+  }
+  const activityFactor = Math.min(3, pathLen / 0.05);
+  const volumeH1Usd = baseH1 * activityFactor;
+  const txnsH1 =
+    pathLen < 0.01 ? 0 : Math.max(1, Math.round(pathLen * 40));
+  return { volumeH1Usd, txnsH1 };
 }
 
 function priceAtTime(
@@ -1079,12 +1152,8 @@ function resolveSourceNames(
     return { names: [unique[index % unique.length]] };
   }
 
-  // Convergence: require distinct wallets matching live filters/selective
-  const needed = Math.max(
-    config.filters.convergenceRequired ?? 2,
-    config.selective?.minWalletsForTrade ?? 2,
-    2
-  );
+  // Convergence: require distinct wallets matching live Strict-aware cluster floor
+  const needed = Math.max(effectiveClusterMinWallets(), 2);
   if (unique.length < needed) {
     return {
       names: [],
@@ -1358,6 +1427,7 @@ function replayLaunch(
         sourceNames,
         name: event.name || event.symbol,
         strategyKind,
+        convictionScore,
         // Same slippage as paper — omit override so config.paper.slippageBps applies
         antiRug:
           event.riskScoreHint != null
@@ -1460,6 +1530,32 @@ function replayLaunch(
         ((c.priceSol - open.entryPriceSol) / open.entryPriceSol) * 100;
       if (pnlPct < maxDrawdownPct) maxDrawdownPct = pnlPct;
       if (pnlPct > maxRunupPct) maxRunupPct = pnlPct;
+
+      // Dead-market exit (Strict-aware thresholds) using path activity proxy
+      const activity = estimateBacktestH1Activity(event, c.time);
+      trader.setMarketActivity(event.mint, {
+        volumeH1Usd: activity.volumeH1Usd,
+        txnsH1: activity.txnsH1,
+        updatedAt: c.time,
+      });
+      const deadReason = trader.tryDeadMarketExit(position.id, c.time);
+      if (deadReason) {
+        closed = trader.simulateSell(position.id, c.priceSol, deadReason);
+        if (closed) closed.closedAt = c.time;
+        pushTake(undefined, deadReason, closed);
+        lastExitPrice = closed?.exitPriceSol ?? c.priceSol;
+        sellReasons.push(deadReason);
+        const deadLine = formatBacktestExitLog(
+          event.symbol,
+          pnlPct,
+          deadReason,
+          'full'
+        );
+        debugLog.push(deadLine);
+        logger.info('Backtest', deadLine, { mint: event.mint });
+        markExit(i, c.time);
+        break;
+      }
 
       const events = trader.runPositionTicksUntilIdle(position.id, c.priceSol, 12);
       for (const ev of events) {
@@ -1777,7 +1873,11 @@ function runSinglePass(
   const tradeWindows: SimTradeWindow[] = [];
   const tradeOpenTimes: number[] = [];
   const walletPool = config.smartWallets
-    .filter((w) => w.enabled)
+    .filter((w) => {
+      if (!w.enabled) return false;
+      if (config.filters.enableWalletQualityGate === false) return true;
+      return passesWalletQualityGate(w).ok;
+    })
     .map((w) => w.name);
   const names =
     walletPool.length >= 1 ? walletPool : ['Cented', 'Theo', 'Decu', 'Megga'];
@@ -1959,14 +2059,17 @@ function restoreTradingConfigSnapshot(
 
 function buildConfigUsedSnapshot() {
   const sum = getRiskLevelSummary();
+  const intensity = getStrictModeIntensity();
+  const strictOn = isStrictMode();
+  const intensityLabel =
+    intensity === 'low' ? 'Low' : intensity === 'high' ? 'High' : 'Medium';
   return {
     riskLevel: (config.riskLevel || 'medium') as RiskLevel,
-    strictMode: config.strictMode === true,
-    strictModeIntensity:
-      config.strictModeIntensity === 'low' ||
-      config.strictModeIntensity === 'high'
-        ? config.strictModeIntensity
-        : 'medium',
+    strictMode: strictOn,
+    strictModeIntensity: intensity,
+    strictLabel: strictOn
+      ? `Strict: ON · ${intensityLabel}`
+      : 'Strict: OFF',
     baseTradeAmountSol:
       config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
     stopLossPercent: config.trade.stopLossPercent,
@@ -1979,6 +2082,14 @@ function buildConfigUsedSnapshot() {
     maxDrawdownPct: config.risk.maxDrawdownPct,
     minConvictionScore: config.selective.minConvictionScore,
     minWalletQualityScore: config.filters.minWalletQualityScore,
+    effectiveMinConvictionScore: effectiveMinConvictionScore(),
+    effectiveMinWalletQualityScore: effectiveMinWalletQualityScore(),
+    effectiveClusterMinWallets: effectiveClusterMinWallets(),
+    effectiveMaxEntryAgeMinutes: effectiveMaxEntryAgeMinutes(),
+    effectiveMinVolume24hUsd: effectiveStrictMinVolume24hUsd(),
+    effectiveDeadVolumeUsdPerHour: effectiveDeadVolumeUsdPerHour(),
+    effectiveDeadVolumeConsecutiveHours: effectiveDeadVolumeConsecutiveHours(),
+    effectiveDeadVolumeMinHoldMinutes: effectiveDeadVolumeMinHoldMinutes(),
     profitStrategyEnabled: config.profitStrategy?.enabled !== false,
     partialSellAt: config.profitStrategy?.partialSellAt ?? 0,
     trailingStopAfter: config.profitStrategy?.trailingStopAfter ?? 0,
@@ -2008,6 +2119,9 @@ export async function runBacktest(
       config.strictMode = true;
     } else if (options.strictMode === false) {
       config.strictMode = false;
+    }
+    if (isStrictModeIntensity(options.strictModeIntensity)) {
+      config.strictModeIntensity = options.strictModeIntensity;
     }
     if (
       options.minConvictionScore != null &&
@@ -2304,14 +2418,15 @@ export async function runBacktest(
           `, skipped ${primary.allSkipped.length}` +
           (skipSummary ? `: ${skipSummary}` : '') +
           `). Widen window or loosen risk/filters.`
-        : `Backtest (${configUsedFinal.riskLevel} risk): ${primary.lastTrades.length}/${effectiveCap} trades` +
+        : `Backtest (${configUsedFinal.riskLevel} risk · ${configUsedFinal.strictLabel}): ${primary.lastTrades.length}/${effectiveCap} trades` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
           `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${stats.winRatePct.toFixed(0)}%` +
           ` · PF ${summary.profitFactor}` +
           ` · Sharpe ${summary.sharpeRatio}` +
           ` · maxDD ${summary.maxDrawdownPct}%` +
           ` · base ${configUsedFinal.baseTradeAmountSol} SOL / SL ${configUsedFinal.stopLossPercent}%` +
-          ` · conviction≥${configUsedFinal.minConvictionScore}` +
+          ` · conviction≥${configUsedFinal.effectiveMinConvictionScore}` +
+          ` · Q≥${configUsedFinal.effectiveMinWalletQualityScore}` +
           (summary.reBuyTrades ? ` · ${summary.reBuyTrades} rebuys` : '') +
           (aggregate
             ? ` · avg WR ${aggregate.avgWinRatePct.toFixed(0)}%`
@@ -2323,7 +2438,12 @@ export async function runBacktest(
       simulations,
       dataSource,
       riskLevel: configUsedFinal.riskLevel,
+      strictMode: configUsedFinal.strictMode,
+      strictModeIntensity: configUsedFinal.strictModeIntensity,
     });
+
+    const { performanceScoreFromStats } = await import('./performanceScore');
+    const performanceScore = performanceScoreFromStats(stats);
 
     const result: BacktestResult = {
       ok: primary.lastTrades.length > 0,
@@ -2347,6 +2467,8 @@ export async function runBacktest(
         riskLevel: requestedLevel,
         compareRiskLevels,
         useSavedConfigFilters,
+        strictMode: configUsedFinal.strictMode,
+        strictModeIntensity: configUsedFinal.strictModeIntensity,
       },
       configUsed: configUsedFinal,
       riskComparison,
@@ -2366,6 +2488,7 @@ export async function runBacktest(
       trades: primary.lastTrades,
       skipped: primary.allSkipped.slice(0, 40),
       message,
+      performanceScore,
     };
 
     storeResult(result);

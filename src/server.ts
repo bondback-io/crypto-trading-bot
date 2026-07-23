@@ -26,6 +26,9 @@ import {
   HIGH_RISK_WARNING,
   DEGEN_RISK_WARNING,
   isRiskLevel,
+  isTradingMode,
+  usesPaperAccounting,
+  forcesLiveMarketData,
   setActiveTradingWallet,
   addTradingWallet,
   removeTradingWallet,
@@ -34,6 +37,8 @@ import {
   TradingMode,
   RiskLevel,
 } from './config';
+import { performanceScoreFromStats } from './performanceScore';
+import { isStrictModeIntensity } from './strictMode';
 import { isValidSolanaAddress, inferWalletCategory } from './walletStore';
 import {
   getLiveBalanceSol,
@@ -236,15 +241,31 @@ export function createServer(): express.Application {
       config.mode === 'live' ? await getLiveBalanceSol() : null;
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
+    const paperStats = paperTrader.getStats();
+    const liveSimScore = usesPaperAccounting()
+      ? performanceScoreFromStats(paperStats)
+      : null;
 
     res.json({
       mode: config.mode,
+      modeLabel:
+        config.mode === 'liveSimulation'
+          ? 'LIVE SIM'
+          : config.mode === 'live'
+            ? 'LIVE'
+            : 'PAPER',
+      usesRealFunds: config.mode === 'live',
+      usesPaperAccounting: usesPaperAccounting(),
+      forcesLiveMarketData: forcesLiveMarketData(),
       monitor,
       app: getAppVersion(),
-      balance:
-        config.mode === 'paper' ? paperTrader.getBalance() : liveBalance,
+      balance: usesPaperAccounting()
+        ? paperTrader.getBalance()
+        : liveBalance,
       winRate: paperTrader.getWinRatePct(),
-      stats: paperTrader.getStats(),
+      stats: paperStats,
+      performanceScore: liveSimScore,
+      charts: usesPaperAccounting() ? paperTrader.getChartData() : null,
       rpc: getRpcStats(),
       jito: getJitoStatus(),
       mev: getMevStatus(),
@@ -377,9 +398,28 @@ export function createServer(): express.Application {
         minConvictionScore?: number;
         minWalletQualityScore?: number;
         strictMode?: boolean;
+        strictModeIntensity?: 'low' | 'medium' | 'high';
+        /** When true, force Strict + intensity to match current live config */
+        matchLiveStrict?: boolean;
       };
 
       const { runBacktest } = await import('./backtest');
+      let strictMode =
+        body.strictMode !== undefined ? Boolean(body.strictMode) : undefined;
+      let strictModeIntensity =
+        body.strictModeIntensity != null &&
+        isStrictModeIntensity(body.strictModeIntensity)
+          ? body.strictModeIntensity
+          : undefined;
+      if (body.matchLiveStrict) {
+        strictMode = config.strictMode === true;
+        strictModeIntensity =
+          config.strictModeIntensity === 'low' ||
+          config.strictModeIntensity === 'high'
+            ? config.strictModeIntensity
+            : 'medium';
+      }
+
       const result = await runBacktest({
         hours: body.hours != null ? Number(body.hours) : undefined,
         fromMs: body.fromMs != null ? Number(body.fromMs) : undefined,
@@ -411,12 +451,12 @@ export function createServer(): express.Application {
           body.minWalletQualityScore != null
             ? Number(body.minWalletQualityScore)
             : undefined,
-        strictMode:
-          body.strictMode !== undefined ? Boolean(body.strictMode) : undefined,
+        strictMode,
+        strictModeIntensity,
         useLiveData:
           body.useLiveData !== undefined
             ? Boolean(body.useLiveData)
-            : config.paper.useLiveData,
+            : config.paper.useLiveData || config.mode === 'liveSimulation',
         allowSynthetic: body.allowSynthetic !== false,
         startingBalanceSol:
           body.startingBalanceSol != null
@@ -983,8 +1023,10 @@ export function createServer(): express.Application {
 
   app.post('/api/config/mode', (req: Request, res: Response) => {
     const { mode } = req.body as { mode: TradingMode };
-    if (mode !== 'paper' && mode !== 'live') {
-      res.status(400).json({ error: 'mode must be paper or live' });
+    if (!isTradingMode(mode)) {
+      res.status(400).json({
+        error: 'mode must be paper, liveSimulation, or live',
+      });
       return;
     }
     if (mode === 'live') {
@@ -1000,8 +1042,19 @@ export function createServer(): express.Application {
       }
     }
     setMode(mode);
+    if (usesPaperAccounting() && config.strategy.enableAutoSell) {
+      paperTrader.startAutoCheck();
+    }
     res.json({
       mode: config.mode,
+      modeLabel:
+        config.mode === 'liveSimulation'
+          ? 'LIVE SIM'
+          : config.mode === 'live'
+            ? 'LIVE'
+            : 'PAPER',
+      usesRealFunds: config.mode === 'live',
+      useLiveData: config.paper.useLiveData,
       tradingWallet: getActiveTradingWallet()
         ? {
             id: getActiveTradingWallet()!.id,
@@ -1010,6 +1063,97 @@ export function createServer(): express.Application {
           }
         : null,
     });
+  });
+
+  /** Live Simulation (paper ledger) vs last Backtest — side-by-side metrics + charts */
+  app.get('/api/performance/compare', async (_req: Request, res: Response) => {
+    try {
+      const { getLastBacktest } = await import('./backtest');
+      const liveStats = paperTrader.getStats();
+      const liveCharts = paperTrader.getChartData();
+      const liveScore = performanceScoreFromStats(liveStats);
+      const bt = getLastBacktest();
+      const btStats = bt?.stats ?? null;
+      const btScore = btStats ? performanceScoreFromStats(btStats) : null;
+
+      const metric = (
+        key: string,
+        liveVal: number | null | undefined,
+        btVal: number | null | undefined,
+        higherIsBetter: boolean
+      ) => {
+        const l = liveVal != null && Number.isFinite(liveVal) ? Number(liveVal) : null;
+        const b = btVal != null && Number.isFinite(btVal) ? Number(btVal) : null;
+        let winner: 'liveSim' | 'backtest' | 'tie' | null = null;
+        if (l != null && b != null) {
+          if (Math.abs(l - b) < 1e-9) winner = 'tie';
+          else if (higherIsBetter) winner = l > b ? 'liveSim' : 'backtest';
+          else winner = l < b ? 'liveSim' : 'backtest';
+        }
+        return { key, liveSim: l, backtest: b, delta: l != null && b != null ? l - b : null, winner, higherIsBetter };
+      };
+
+      const metrics = [
+        metric('winRatePct', liveStats.winRatePct, btStats?.winRatePct, true),
+        metric('profitFactor', liveStats.profitFactor, btStats?.profitFactor, true),
+        metric('netPnlSol', liveStats.netPnlSol, btStats?.netPnlSol, true),
+        metric('maxDrawdownPct', liveStats.maxDrawdownPct, btStats?.maxDrawdownPct, false),
+        metric('closedTrades', liveStats.closedTrades, btStats?.closedTrades, true),
+        metric('avgHoldSec', liveStats.avgHoldSec, btStats?.avgHoldSec, false),
+        metric('score', liveScore.score, btScore?.score ?? null, true),
+      ];
+
+      const wins = { liveSim: 0, backtest: 0, tie: 0 };
+      for (const m of metrics) {
+        if (m.winner === 'liveSim') wins.liveSim += 1;
+        else if (m.winner === 'backtest') wins.backtest += 1;
+        else if (m.winner === 'tie') wins.tie += 1;
+      }
+      const overallWinner =
+        wins.liveSim === wins.backtest
+          ? 'tie'
+          : wins.liveSim > wins.backtest
+            ? 'liveSim'
+            : 'backtest';
+
+      res.json({
+        ok: true,
+        mode: config.mode,
+        liveSim: {
+          label:
+            config.mode === 'liveSimulation'
+              ? 'Live Simulation'
+              : config.mode === 'paper'
+                ? 'Paper (live marks)'
+                : 'Paper ledger',
+          stats: liveStats,
+          score: liveScore,
+          charts: liveCharts,
+          strictMode: config.strictMode === true,
+          strictModeIntensity: config.strictModeIntensity,
+          riskLevel: config.riskLevel,
+        },
+        backtest: bt
+          ? {
+              id: bt.id,
+              ranAt: bt.ranAt,
+              message: bt.message,
+              stats: bt.stats,
+              summary: bt.summary,
+              score: btScore,
+              charts: bt.charts,
+              configUsed: bt.configUsed,
+              period: bt.period,
+            }
+          : null,
+        metrics,
+        overallWinner,
+        wins,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
   });
 
   app.post('/api/config/strict-mode', (req: Request, res: Response) => {

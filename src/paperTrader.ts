@@ -1325,23 +1325,25 @@ export class PaperTrader {
   }
 
   /**
-   * Update dead-market streak from DexScreener activity.
-   * Returns a force-sell reason when consecutive dead hours + min hold are met.
+   * Update dead-market streak from DexScreener (live) or path-proxy (backtest) activity.
+   * Uses Strict Mode effective thresholds. `nowMs` lets backtests use the candle clock.
    */
-  private evaluateDeadMarketExit(position: Position): string | null {
+  private evaluateDeadMarketExit(
+    position: Position,
+    nowMs: number = Date.now()
+  ): string | null {
     const risk = config.risk;
     if (!risk.enableDeadVolumeExit) return null;
-    if (this.mode === 'backtest') return null;
 
     const minHoldMs =
       Math.max(0, effectiveDeadVolumeMinHoldMinutes()) * 60_000;
-    const holdMs = Date.now() - position.openedAt;
+    const holdMs = nowMs - position.openedAt;
     if (holdMs < minHoldMs) return null;
 
     const activity = this.marketActivityCache.get(position.mint);
     if (!activity) return null;
     // Ignore stale samples (e.g. failed refresh) — don't reset or trip the streak
-    if (Date.now() - activity.updatedAt > 15 * 60_000) return null;
+    if (nowMs - activity.updatedAt > 15 * 60_000) return null;
 
     const volThreshold = Math.max(0, effectiveDeadVolumeUsdPerHour());
     const needHours = Math.max(1, effectiveDeadVolumeConsecutiveHours());
@@ -1357,11 +1359,11 @@ export class PaperTrader {
     }
 
     if (position.deadMarketBelowSince == null) {
-      position.deadMarketBelowSince = Date.now();
+      position.deadMarketBelowSince = nowMs;
       return null;
     }
 
-    const deadForMs = Date.now() - position.deadMarketBelowSince;
+    const deadForMs = nowMs - position.deadMarketBelowSince;
     const needMs = needHours * 60 * 60_000;
     if (deadForMs < needMs) return null;
 
@@ -1376,6 +1378,16 @@ export class PaperTrader {
       return `Dead volume: <$${volThreshold}/hr for ${needHours}h (${hoursHeld}h)`;
     }
     return `Dead market: no trades for ${needHours}h (${hoursHeld}h)`;
+  }
+
+  /**
+   * Backtest/sim helper — same dead-market gates as live paper, with candle clock.
+   * Caller must setMarketActivity first. Returns sell reason or null.
+   */
+  tryDeadMarketExit(positionId: string, nowMs: number): string | null {
+    const position = this.positions.get(positionId);
+    if (!position || position.status === 'closed') return null;
+    return this.evaluateDeadMarketExit(position, nowMs);
   }
 
   async checkPositionsAsync(): Promise<void> {
@@ -1813,7 +1825,7 @@ export class PaperTrader {
     const interval = config.paper.positionCheckIntervalMs;
     this.checkTimer = setInterval(() => {
       void (async () => {
-        if (config.paper.useLiveData) {
+        if (config.paper.useLiveData || config.mode === 'liveSimulation') {
           try {
             const { refreshPaperPricesFromLive } = await import('./backtest');
             await refreshPaperPricesFromLive(this);

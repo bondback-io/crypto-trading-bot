@@ -36,8 +36,17 @@ import { rpcEndpointsFromEnv } from './rpcUrl';
 
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
 export { hasPersistedSettings };
-export type TradingMode = 'paper' | 'live';
+/**
+ * paper — virtual fills, optional live marks
+ * liveSimulation — virtual fills + forced live market data / live filter path (no real funds)
+ * live — real swaps with trading wallet keys
+ */
+export type TradingMode = 'paper' | 'liveSimulation' | 'live';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'degen';
+
+export function isTradingMode(v: unknown): v is TradingMode {
+  return v === 'paper' || v === 'liveSimulation' || v === 'live';
+}
 
 export const RISK_LEVELS: readonly RiskLevel[] = [
   'low',
@@ -1733,7 +1742,11 @@ function applySettingsSnapshot(
   saved: PersistedBotSettings,
   mode: 'merge' | 'replace'
 ): void {
-  if (saved.mode === 'paper' || saved.mode === 'live') {
+  if (
+    saved.mode === 'paper' ||
+    saved.mode === 'liveSimulation' ||
+    saved.mode === 'live'
+  ) {
     config.mode = saved.mode;
   }
   if (
@@ -2804,11 +2817,43 @@ export function setMode(
   mode: TradingMode,
   options: { persist?: boolean } = {}
 ): void {
+  if (!isTradingMode(mode)) {
+    throw new Error(`Invalid trading mode: ${String(mode)}`);
+  }
+  // Safety: never silently land on live from a bad cast
+  if (mode === 'liveSimulation') {
+    config.paper.useLiveData = true;
+  }
   config.mode = mode;
-  console.log(`[config] Trading mode set to: ${mode.toUpperCase()}`);
+  const label =
+    mode === 'liveSimulation'
+      ? 'LIVE SIMULATION (no real funds)'
+      : mode.toUpperCase();
+  console.log(`[config] Trading mode set to: ${label}`);
   if (options.persist !== false) {
     persistUserSettings();
   }
+}
+
+/** Real on-chain swaps — the only mode that spends funds. */
+export function usesRealFunds(mode?: TradingMode): boolean {
+  return (mode ?? config.mode) === 'live';
+}
+
+/** Paper ledger (balance/positions/PnL) — paper and liveSimulation. */
+export function usesPaperAccounting(mode?: TradingMode): boolean {
+  const m = mode ?? config.mode;
+  return m === 'paper' || m === 'liveSimulation';
+}
+
+export function isLiveSimulationMode(mode?: TradingMode): boolean {
+  return (mode ?? config.mode) === 'liveSimulation';
+}
+
+/** Force Dex/GMGN marks + live-parity filter path. */
+export function forcesLiveMarketData(mode?: TradingMode): boolean {
+  const m = mode ?? config.mode;
+  return m === 'live' || m === 'liveSimulation';
 }
 
 /** Toggle Strict Mode overlay (persisted). Does not change riskLevel presets. */

@@ -17,7 +17,7 @@ export interface EnvConfig {
   host: string;
   /** Comma-separated allowed origins; empty = same-origin only (no CORS headers) */
   corsOrigins: string[];
-  tradingMode?: 'paper' | 'live';
+  tradingMode?: 'paper' | 'liveSimulation' | 'live';
   rpcUrl: string;
 }
 
@@ -55,9 +55,13 @@ export const env: EnvConfig = {
   tradingMode:
     process.env.TRADING_MODE?.toLowerCase() === 'live'
       ? 'live'
-      : process.env.TRADING_MODE?.toLowerCase() === 'paper'
-        ? 'paper'
-        : undefined,
+      : process.env.TRADING_MODE?.toLowerCase() === 'livesimulation' ||
+          process.env.TRADING_MODE?.toLowerCase() === 'live_simulation' ||
+          process.env.TRADING_MODE?.toLowerCase() === 'live-sim'
+        ? 'liveSimulation'
+        : process.env.TRADING_MODE?.toLowerCase() === 'paper'
+          ? 'paper'
+          : undefined,
   rpcUrl: (() => {
     const raw = process.env.RPC_URL?.trim() || '';
     // Defer to rpcUrl helper without circular import weight — inline check
