@@ -873,7 +873,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-        <div class="card"><div class="stat-label">Profit Factor <span class="tip tip-below" tabindex="0" data-tip="Gross wins ÷ gross losses. Above 1.0 means net profitable; 2.0+ is strong."></span></div><div class="stat" id="stat-pf">—</div><div class="mint mt-1" id="stat-pf-hint">—</div></div>
+        <div class="card"><div class="stat-label">Unrealized gains/loss <span class="tip tip-below" tabindex="0" data-tip="Sum of unrealized P&amp;L on open trades that haven’t closed yet, using the same live mark prices as the Open Positions table. Positive = unrealized profit; negative = unrealized loss."></span></div><div class="stat" id="stat-unrealized">—</div><div class="mint mt-1" id="stat-unrealized-hint">—</div></div>
         <div class="card"><div class="stat-label">Max Drawdown <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div><div class="stat" id="stat-maxdd">—</div><div class="mint mt-1" id="stat-avg-hold">—</div></div>
         <div class="card !py-3">
           <div class="stat-label">Wallets <span class="tip tip-below" tabindex="0" data-tip="Watching = polled for copy signals. Tracked = total imported smart wallets."></span></div>
@@ -2078,6 +2078,35 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const solBit = sol.toFixed(4) + ' SOL';
       if (usd == null || !Number.isFinite(usd)) return solBit;
       return solBit + ' · $' + usd.toFixed(2);
+    }
+
+    /** Compact signed unrealized P&L: +0.12 SOL · $18.40 */
+    function fmtUnrealizedSolUsd(sol, usd) {
+      const n = Number(sol || 0);
+      const sign = n > 0 ? '+' : '';
+      const solBit = sign + n.toFixed(4) + ' SOL';
+      if (usd == null || !Number.isFinite(Number(usd))) return solBit;
+      const u = Number(usd);
+      const usdBit = (u < 0 ? '-$' : '$') + Math.abs(u).toFixed(2);
+      return solBit + ' · ' + usdBit;
+    }
+
+    /** Unrealized SOL from open positions — same mark basis as Open Positions pnlPct. */
+    function sumOpenUnrealized(open) {
+      let sol = 0;
+      let marked = 0;
+      let solUsd = null;
+      for (const p of open || []) {
+        const pct = p.pnlPct != null ? Number(p.pnlPct) : NaN;
+        if (!Number.isFinite(pct)) continue;
+        const cost = Number(p.costSol || 0);
+        if (!Number.isFinite(cost) || cost <= 0) continue;
+        sol += cost * (pct / 100);
+        marked += 1;
+        if (p.solUsd != null && Number(p.solUsd) > 0) solUsd = Number(p.solUsd);
+      }
+      const usd = solUsd != null && Number.isFinite(solUsd) ? sol * solUsd : null;
+      return { sol, usd, marked, openN: (open || []).length };
     }
 
     function fmtVolH1(vol, txns) {
@@ -3612,14 +3641,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (openN || 0) + ' open · ' + (closedN ?? Math.max(0, (s.totalTrades || 0) - (openN || 0))) + ' closed');
       }
       document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
-      const pfEl = document.getElementById('stat-pf');
-      const pf = s.profitFactor ?? 0;
-      if (pfEl) {
-        pfEl.textContent = pf >= 999 ? '∞' : pf.toFixed(2);
-        pfEl.style.color = pf >= 1.5 ? 'var(--green)' : pf >= 1 ? 'var(--muted)' : 'var(--red)';
+      const ur = sumOpenUnrealized(positions.open);
+      const urEl = document.getElementById('stat-unrealized');
+      if (urEl) {
+        if (ur.openN === 0) {
+          urEl.textContent = fmtUnrealizedSolUsd(0, 0);
+          urEl.style.color = 'var(--muted)';
+        } else if (ur.marked === 0) {
+          urEl.textContent = '—';
+          urEl.style.color = 'var(--muted)';
+        } else {
+          urEl.textContent = fmtUnrealizedSolUsd(ur.sol, ur.usd);
+          urEl.style.color = ur.sol > 0 ? 'var(--green)' : ur.sol < 0 ? 'var(--red)' : 'var(--muted)';
+        }
       }
-      const pfHint = document.getElementById('stat-pf-hint');
-      if (pfHint) pfHint.textContent = pf >= 1.5 ? 'Strong' : pf >= 1 ? 'Profitable' : pf > 0 ? 'Weak' : '—';
+      const urHint = document.getElementById('stat-unrealized-hint');
+      if (urHint) {
+        urHint.textContent = ur.openN === 0
+          ? 'No open trades'
+          : ur.marked + '/' + ur.openN + ' marked';
+      }
       const ddEl = document.getElementById('stat-maxdd');
       const maxDd = s.maxDrawdownPct ?? 0;
       if (ddEl) {
