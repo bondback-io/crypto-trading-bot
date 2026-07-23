@@ -691,9 +691,17 @@ export function createServer(): express.Application {
       'trailingStopPct',
       'trailingStopPercent',
       'trailingActivationProfit',
+      'deadVolumeUsdPerHour',
+      'deadVolumeConsecutiveHours',
+      'deadVolumeMinHoldMinutes',
     ] as const) {
       if (body[key] !== undefined) {
         (partial as Record<string, number>)[key] = Number(body[key]);
+      }
+    }
+    for (const key of ['enableDeadVolumeExit'] as const) {
+      if (body[key] !== undefined) {
+        (partial as Record<string, unknown>)[key] = Boolean(body[key]);
       }
     }
     if (body.normal && typeof body.normal === 'object') {

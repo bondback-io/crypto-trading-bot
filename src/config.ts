@@ -81,6 +81,17 @@ export interface RiskConfig {
   trailingStopPercent: number;
   /** Unrealized profit % required before trailing arms (e.g. 30) */
   trailingActivationProfit: number;
+  /**
+   * Force-sell when DexScreener rolling 1h volume stays below threshold
+   * (and/or no trades) for deadVolumeConsecutiveHours.
+   */
+  enableDeadVolumeExit: boolean;
+  /** USD volume over the last hour below which the market is "dead" */
+  deadVolumeUsdPerHour: number;
+  /** Consecutive hours of dead samples before force-selling */
+  deadVolumeConsecutiveHours: number;
+  /** Do not apply dead-volume exit until position has been open this long */
+  deadVolumeMinHoldMinutes: number;
   normal: StrategyRiskRules;
   migration: StrategyRiskRules;
 }
@@ -98,6 +109,10 @@ export const DEFAULT_RISK: RiskConfig = {
   trailingStopPct: 18,
   trailingStopPercent: 18,
   trailingActivationProfit: 25,
+  enableDeadVolumeExit: true,
+  deadVolumeUsdPerHour: 50,
+  deadVolumeConsecutiveHours: 3,
+  deadVolumeMinHoldMinutes: 30,
   normal: {
     riskPercentPerTrade: 1.2,
     trailingStopPct: 18,
@@ -1074,6 +1089,21 @@ function syncConfigAliases(): void {
     config.risk.trailingStopPct = config.risk.trailingStopPercent;
   } else if (config.risk.trailingStopPct != null) {
     config.risk.trailingStopPercent = config.risk.trailingStopPct;
+  }
+  // Fill dead-volume defaults for older persisted risk blobs
+  if (config.risk.enableDeadVolumeExit == null) {
+    config.risk.enableDeadVolumeExit = DEFAULT_RISK.enableDeadVolumeExit;
+  }
+  if (config.risk.deadVolumeUsdPerHour == null) {
+    config.risk.deadVolumeUsdPerHour = DEFAULT_RISK.deadVolumeUsdPerHour;
+  }
+  if (config.risk.deadVolumeConsecutiveHours == null) {
+    config.risk.deadVolumeConsecutiveHours =
+      DEFAULT_RISK.deadVolumeConsecutiveHours;
+  }
+  if (config.risk.deadVolumeMinHoldMinutes == null) {
+    config.risk.deadVolumeMinHoldMinutes =
+      DEFAULT_RISK.deadVolumeMinHoldMinutes;
   }
 }
 

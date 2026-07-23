@@ -2512,6 +2512,13 @@ export async function refreshPaperPricesFromLive(
     }
   }
 
+  try {
+    const { refreshOpenMarketActivity } = await import('./marketData');
+    await refreshOpenMarketActivity(trader);
+  } catch {
+    // activity refresh is best-effort
+  }
+
   if (updated > 0 && config.strategy.enableAutoSell) {
     trader.checkPositions();
   }

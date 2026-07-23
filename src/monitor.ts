@@ -14,6 +14,7 @@ import { isDeniedCopyMint } from './deniedMints';
 import { getConnection } from './connection';
 import { executeBuy, refreshPositionPrices } from './trade';
 import { paperTrader } from './paperTrader';
+import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
 import {
   getTokenOverview,
@@ -388,6 +389,7 @@ async function pollAllWallets(): Promise<void> {
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
     if (openMints.length > 0) {
       await refreshPositionPrices(openMints);
+      await refreshOpenMarketActivity(paperTrader);
       paperTrader.checkPositions();
     }
 

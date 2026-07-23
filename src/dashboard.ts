@@ -608,7 +608,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       min-width: 36rem;
     }
     #bt-results-table { min-width: 64rem; }
-    #positions-table { min-width: 48rem; }
+    #positions-table { min-width: 54rem; }
+    .pos-hold {
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      line-height: 1.25;
+    }
+    .pos-hold-dur { font-variant-numeric: tabular-nums; }
+    .pos-hold-entry {
+      display: none;
+      margin-top: 0.15rem;
+      font-size: 0.68rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .pos-hold.show-entry .pos-hold-entry { display: block; }
+    @media (hover: hover) and (pointer: fine) {
+      .pos-hold { cursor: help; }
+    }
+    .pos-cost-cell { white-space: nowrap; font-size: 0.8rem; }
+    .pos-vol-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
     #wallets-table, #search-wallets-table, #discover-wallets-table { min-width: 48rem; }
     #discover-wallets-table th, #discover-wallets-table td,
     #wallets-table th, #wallets-table td,
@@ -885,13 +905,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, cost (SOL + USD), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
           </div>
           <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Cost</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1659,6 +1679,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <label class="ctl ctl-md"><span>Mig risk % <span class="tip" tabindex="0" data-tip="Risk % for migration priority entries."></span></span><input type="number" id="migRiskPct" value="2" step="0.1" /></label>
             <label class="ctl ctl-md"><span>Mig trail % <span class="tip" tabindex="0" data-tip="Trail % for migration entries."></span></span><input type="number" id="migTrailPct" value="25" /></label>
           </div>
+          <div class="mt-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155">
+            <div class="text-sm font-semibold text-slate-200 mb-2">Dead market exit <span class="tip" tabindex="0" data-tip="Force-sell when DexScreener 1h volume stays below the USD threshold and/or there are no trades for N consecutive hours. Skips brand-new positions until min hold."></span></div>
+            <div class="toggle-row"><span title="Force-sell stuck positions with dead volume / no trades">Enable dead-volume exit</span><label class="switch"><input type="checkbox" id="enableDeadVolumeExit" checked /><span class="slider"></span></label></div>
+            <div class="filters-row mt-2">
+              <label class="ctl ctl-md"><span>Vol/hr $ &lt; <span class="tip" tabindex="0" data-tip="Rolling 1h USD volume below this counts as dead."></span></span><input type="number" id="deadVolumeUsdPerHour" value="50" min="0" step="10" /></label>
+              <label class="ctl ctl-sm"><span>Hours <span class="tip" tabindex="0" data-tip="Consecutive hours of dead samples before force-sell."></span></span><input type="number" id="deadVolumeConsecutiveHours" value="3" min="1" max="48" step="1" /></label>
+              <label class="ctl ctl-md"><span>Min hold min <span class="tip" tabindex="0" data-tip="Do not apply dead-volume exit until the position has been open this many minutes."></span></span><input type="number" id="deadVolumeMinHoldMinutes" value="30" min="0" max="1440" step="5" /></label>
+            </div>
+          </div>
           <div class="flex flex-wrap gap-2 mt-3">
             <button class="btn btn-primary" onclick="saveRiskConfig()" title="Save risk management settings">Save Risk</button>
             <button class="btn btn-warning" onclick="clearRiskHalt()" title="Clear a risk halt so trading can resume">Clear halt</button>
@@ -1776,6 +1805,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }, 80);
       }
       if (name === 'logs') loadSystemLogs();
+      if (name === 'overview') {
+        ensurePosHoldTicker();
+        tickOpenPositionHolds();
+      }
     }
 
     function applyLogFilter() {
@@ -2026,9 +2059,79 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const s = Math.round((v % 60_000) / 1000);
         return s > 0 ? m + 'm ' + s + 's' : m + 'm';
       }
-      const h = Math.floor(v / 3_600_000);
-      const m = Math.round((v % 3_600_000) / 60_000);
-      return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+      if (v < 86_400_000) {
+        const h = Math.floor(v / 3_600_000);
+        const m = Math.round((v % 3_600_000) / 60_000);
+        return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+      }
+      const d = Math.floor(v / 86_400_000);
+      const h = Math.floor((v % 86_400_000) / 3_600_000);
+      return h > 0 ? d + 'd ' + h + 'h' : d + 'd';
+    }
+
+    function fmtCostSolUsd(costSol, costUsd, solUsd) {
+      const sol = Number(costSol || 0);
+      let usd = costUsd != null ? Number(costUsd) : null;
+      if ((usd == null || !Number.isFinite(usd)) && solUsd != null && Number(solUsd) > 0) {
+        usd = sol * Number(solUsd);
+      }
+      const solBit = sol.toFixed(4) + ' SOL';
+      if (usd == null || !Number.isFinite(usd)) return solBit;
+      return solBit + ' · $' + usd.toFixed(2);
+    }
+
+    function fmtVolH1(vol, txns) {
+      if (vol == null || !Number.isFinite(Number(vol))) {
+        return '<span class="mint">—</span>';
+      }
+      const v = Number(vol);
+      const color = v <= 0 ? 'var(--red)' : (v < 50 ? '#fbbf24' : 'inherit');
+      const tip = 'Rolling 1h USD volume' +
+        (txns != null ? ' · ' + Number(txns) + ' txns/hr' : '');
+      const label = v >= 1000
+        ? '$' + (v / 1000).toFixed(1) + 'K'
+        : '$' + (v < 10 ? v.toFixed(1) : v.toFixed(0));
+      return '<span class="pos-vol-cell" style="color:' + color + '" title="' + tip + '">' +
+        label + '</span>';
+    }
+
+    function fmtOpenedHoldCell(openedAt) {
+      const ts = Number(openedAt);
+      if (!ts || !Number.isFinite(ts)) return '—';
+      const entryLabel = new Date(ts).toLocaleString();
+      const dur = fmtHold(Date.now() - ts);
+      return '<div class="pos-hold" data-opened-at="' + ts + '" title="Opened ' + entryLabel +
+        '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
+        '<div class="pos-hold-dur">' + dur + '</div>' +
+        '<div class="pos-hold-entry">Opened ' + entryLabel + '</div>' +
+        '</div>';
+    }
+
+    function togglePosHoldEntry(el) {
+      if (!el) return;
+      // Desktop: native title tooltip; skip toggle on fine pointers
+      if (window.matchMedia && window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+        return;
+      }
+      el.classList.toggle('show-entry');
+    }
+
+    let _posHoldTimer = null;
+    function tickOpenPositionHolds() {
+      const panel = document.querySelector('[data-tab-panel="overview"]');
+      if (!panel || panel.classList.contains('hidden')) return;
+      const now = Date.now();
+      document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
+        if (el.classList.contains('show-entry')) return;
+        const opened = Number(el.getAttribute('data-opened-at'));
+        if (!opened) return;
+        const durEl = el.querySelector('.pos-hold-dur');
+        if (durEl) durEl.textContent = fmtHold(now - opened);
+      });
+    }
+    function ensurePosHoldTicker() {
+      if (_posHoldTimer) return;
+      _posHoldTimer = setInterval(tickOpenPositionHolds, 1000);
     }
 
     function fmtCopyDelay(ms) {
@@ -3651,6 +3754,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           document.getElementById('normalTrailPct').value = cfg.risk.normal.trailingStopPct;
           document.getElementById('migRiskPct').value = cfg.risk.migration.riskPercentPerTrade;
           document.getElementById('migTrailPct').value = cfg.risk.migration.trailingStopPct;
+          if (document.getElementById('enableDeadVolumeExit')) {
+            document.getElementById('enableDeadVolumeExit').checked = cfg.risk.enableDeadVolumeExit !== false;
+          }
+          if (document.getElementById('deadVolumeUsdPerHour')) {
+            document.getElementById('deadVolumeUsdPerHour').value = cfg.risk.deadVolumeUsdPerHour ?? 50;
+          }
+          if (document.getElementById('deadVolumeConsecutiveHours')) {
+            document.getElementById('deadVolumeConsecutiveHours').value = cfg.risk.deadVolumeConsecutiveHours ?? 3;
+          }
+          if (document.getElementById('deadVolumeMinHoldMinutes')) {
+            document.getElementById('deadVolumeMinHoldMinutes').value = cfg.risk.deadVolumeMinHoldMinutes ?? 30;
+          }
         }
         if (cfg.profitStrategy) {
           const ps = cfg.profitStrategy;
@@ -3750,7 +3865,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
       }
       ptbody.innerHTML = posOpenN === 0
-        ? '<tr><td colspan="11"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
+        ? '<tr><td colspan="12"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const pnl = p.pnlPct;
           const pnlCell = pnl == null
@@ -3790,21 +3905,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             : '';
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
+          const costCell = fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd);
+          const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
+          const openedCell = fmtOpenedHoldCell(p.openedAt);
           return \`
           <tr>
             <td>\${fmtToken(p.symbol, p.name, p.mint)}\${mode}\${riskBit}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at buy">\${buyMc}</td>
-            <td>\${p.costSol.toFixed(4)} SOL</td>
+            <td class="pos-cost-cell" title="Position cost">\${costCell}</td>
+            <td>\${volCell}</td>
             <td>\${pnlCell}</td>
             <td>\${trailCell}</td>
             <td>+\${p.takeProfitPct.toFixed(0)}%</td>
             <td>\${p.stopLossPct}%</td>
-            <td>\${new Date(p.openedAt).toLocaleTimeString()}</td>
+            <td>\${openedCell}</td>
             <td><button class="danger" onclick="forceSellPosition('\${p.id}', '\${sellLabel}')" title="Force sell entire position">Sell</button></td>
           </tr>\`;
         }).join('');
+      ensurePosHoldTicker();
+      tickOpenPositionHolds();
 
       const ctbody = document.querySelector('#closed-table tbody');
       const closed = (positions.closed || []).slice().reverse().slice(0, 25);
@@ -4792,6 +4913,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           weeklyLossLimitSol: Number(document.getElementById('weeklyLossLimitSol').value),
           minTradeSol: Number(document.getElementById('minTradeSol').value),
           maxTradeSol: Number(document.getElementById('maxTradeSol').value),
+          enableDeadVolumeExit: document.getElementById('enableDeadVolumeExit').checked,
+          deadVolumeUsdPerHour: Number(document.getElementById('deadVolumeUsdPerHour').value),
+          deadVolumeConsecutiveHours: Number(document.getElementById('deadVolumeConsecutiveHours').value),
+          deadVolumeMinHoldMinutes: Number(document.getElementById('deadVolumeMinHoldMinutes').value),
           normal: {
             riskPercentPerTrade: Number(document.getElementById('normalRiskPct').value),
             trailingStopPct: Number(document.getElementById('normalTrailPct').value),

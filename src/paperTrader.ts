@@ -16,7 +16,7 @@ import {
   evaluateProfitAction,
   type ProfitPositionView,
 } from './profitStrategy';
-import { marketCapAtPrice } from './marketData';
+import { marketCapAtPrice, getCachedSolUsdPrice } from './marketData';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
@@ -81,6 +81,18 @@ export interface Position {
   entryMarketCapUsd?: number;
   /** Market cap USD at exit (scaled from entry MC by exit/entry price) */
   exitMarketCapUsd?: number;
+  /**
+   * Wall-clock ms when rolling 1h volume / tx activity first went "dead".
+   * Cleared when activity recovers above thresholds.
+   */
+  deadMarketBelowSince?: number;
+}
+
+/** DexScreener short-window activity for dead-market exits */
+export interface MarketActivitySample {
+  volumeH1Usd: number;
+  txnsH1: number;
+  updatedAt: number;
 }
 
 export interface TradeLog {
@@ -126,6 +138,8 @@ export class PaperTrader {
   private closedPositions: Position[] = [];
   private logs: TradeLog[] = [];
   private priceCache: Map<string, number> = new Map();
+  /** Latest DexScreener activity per mint (for dead-volume exits) */
+  private marketActivityCache: Map<string, MarketActivitySample> = new Map();
   private checkTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -200,6 +214,22 @@ export class PaperTrader {
     return this.priceCache.get(mint);
   }
 
+  /** Cache DexScreener 1h volume / txn activity for dead-market exits */
+  setMarketActivity(
+    mint: string,
+    sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
+  ): void {
+    this.marketActivityCache.set(mint, {
+      volumeH1Usd: Math.max(0, sample.volumeH1Usd),
+      txnsH1: Math.max(0, Math.floor(sample.txnsH1)),
+      updatedAt: sample.updatedAt ?? Date.now(),
+    });
+  }
+
+  getMarketActivity(mint: string): MarketActivitySample | undefined {
+    return this.marketActivityCache.get(mint);
+  }
+
   getBalance(): number {
     return this.balanceSol;
   }
@@ -219,7 +249,12 @@ export class PaperTrader {
   }
 
   /** Enrich position with current trailing stop price for UI / API */
-  withTrailSnapshot(position: Position): Position {
+  withTrailSnapshot(position: Position): Position & {
+    volumeH1Usd?: number | null;
+    txnsH1?: number | null;
+    costUsd?: number;
+    solUsd?: number;
+  } {
     const trailPct =
       position.trailingStopPct ||
       config.risk.trailingStopPercent ||
@@ -233,11 +268,21 @@ export class PaperTrader {
       current != null && position.entryPriceSol > 0
         ? ((current - position.entryPriceSol) / position.entryPriceSol) * 100
         : undefined;
+    const activity = this.marketActivityCache.get(position.mint);
+    const solUsd = getCachedSolUsdPrice();
+    const costUsd =
+      position.costSol > 0 && solUsd > 0
+        ? Number((position.costSol * solUsd).toFixed(2))
+        : undefined;
     return {
       ...position,
       trailingStopPct: trailPct,
       trailingStopPriceSol: stopPrice,
       pnlPct: unrealizedPct ?? position.pnlPct,
+      volumeH1Usd: activity ? activity.volumeH1Usd : null,
+      txnsH1: activity ? activity.txnsH1 : null,
+      costUsd,
+      solUsd,
     };
   }
 
@@ -1064,6 +1109,59 @@ export class PaperTrader {
     void this.checkPositionsAsync();
   }
 
+  /**
+   * Update dead-market streak from DexScreener activity.
+   * Returns a force-sell reason when consecutive dead hours + min hold are met.
+   */
+  private evaluateDeadMarketExit(position: Position): string | null {
+    const risk = config.risk;
+    if (!risk.enableDeadVolumeExit) return null;
+    if (this.mode === 'backtest') return null;
+
+    const minHoldMs = Math.max(0, risk.deadVolumeMinHoldMinutes ?? 30) * 60_000;
+    const holdMs = Date.now() - position.openedAt;
+    if (holdMs < minHoldMs) return null;
+
+    const activity = this.marketActivityCache.get(position.mint);
+    if (!activity) return null;
+    // Ignore stale samples (e.g. failed refresh) — don't reset or trip the streak
+    if (Date.now() - activity.updatedAt > 15 * 60_000) return null;
+
+    const volThreshold = Math.max(0, risk.deadVolumeUsdPerHour ?? 50);
+    const needHours = Math.max(1, risk.deadVolumeConsecutiveHours ?? 3);
+    const lowVolume = activity.volumeH1Usd < volThreshold;
+    const noTrades = activity.txnsH1 <= 0;
+    const isDead = lowVolume || noTrades;
+
+    if (!isDead) {
+      if (position.deadMarketBelowSince != null) {
+        position.deadMarketBelowSince = undefined;
+      }
+      return null;
+    }
+
+    if (position.deadMarketBelowSince == null) {
+      position.deadMarketBelowSince = Date.now();
+      return null;
+    }
+
+    const deadForMs = Date.now() - position.deadMarketBelowSince;
+    const needMs = needHours * 60 * 60_000;
+    if (deadForMs < needMs) return null;
+
+    const hoursHeld = (deadForMs / 3_600_000).toFixed(1);
+    if (lowVolume && noTrades) {
+      return (
+        `Dead volume: <$${volThreshold}/hr & no trades for ${needHours}h` +
+        ` (${hoursHeld}h)`
+      );
+    }
+    if (lowVolume) {
+      return `Dead volume: <$${volThreshold}/hr for ${needHours}h (${hoursHeld}h)`;
+    }
+    return `Dead market: no trades for ${needHours}h (${hoursHeld}h)`;
+  }
+
   async checkPositionsAsync(): Promise<void> {
     if (!config.strategy.enableAutoSell) return;
 
@@ -1097,6 +1195,15 @@ export class PaperTrader {
       }
 
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
+
+      // Dead / inactive market force-exit (paper + live tracked)
+      const deadReason = this.evaluateDeadMarketExit(position);
+      if (deadReason) {
+        console.log(`[dead-vol] 🔴 ${label} — ${deadReason}`);
+        this.log('sell', `${label}: ${deadReason}`);
+        await this.closePositionByRules(position, currentPrice, deadReason);
+        continue;
+      }
 
       // Advanced profit strategy (paper + live)
       if (config.profitStrategy?.enabled) {
@@ -1494,6 +1601,12 @@ export class PaperTrader {
           } catch {
             // fall through to local check
           }
+        }
+        try {
+          const { refreshOpenMarketActivity } = await import('./marketData');
+          await refreshOpenMarketActivity(this);
+        } catch {
+          // best-effort
         }
         this.checkPositions();
       })();

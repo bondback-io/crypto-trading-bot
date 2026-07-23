@@ -72,6 +72,11 @@ export function solUsdFromPair(pair: Record<string, unknown>): number | undefine
 
 let cachedSolUsd: { value: number; at: number } | null = null;
 
+/** Last known SOL/USD (sync). Falls back to 150 until a live fetch succeeds. */
+export function getCachedSolUsdPrice(): number {
+  return cachedSolUsd?.value ?? 150;
+}
+
 /** Live SOL/USD (cached ~5m). Falls back to 150. */
 export async function fetchSolUsdPrice(): Promise<number> {
   if (cachedSolUsd && Date.now() - cachedSolUsd.at < 5 * 60_000) {
@@ -1020,13 +1025,24 @@ export async function fetchLivePriceSol(mint: string): Promise<number | null> {
   return snap?.priceSol ?? null;
 }
 
+export interface LiveTokenSnapshot {
+  priceSol: number | null;
+  marketCapUsd: number | null;
+  /** Rolling 1h USD volume from DexScreener best pool */
+  volumeH1Usd: number | null;
+  /** Rolling 24h USD volume */
+  volumeH24Usd: number | null;
+  /** Buys + sells in the last hour (DexScreener txns.h1) */
+  txnsH1: number | null;
+}
+
 /**
- * DexScreener snapshot: price + market cap for an open/minted token.
+ * DexScreener snapshot: price + market cap + short-window activity.
  * Picks the deepest Solana pool; MC prefers circulating over FDV.
  */
 export async function fetchLiveTokenSnapshot(
   mint: string
-): Promise<{ priceSol: number | null; marketCapUsd: number | null } | null> {
+): Promise<LiveTokenSnapshot | null> {
   if (!isCopyTargetMint(mint)) return null;
   const data = await fetchJson(
     `https://api.dexscreener.com/latest/dex/tokens/${mint}`
@@ -1056,9 +1072,24 @@ export async function fetchLiveTokenSnapshot(
     (best as { priceNative?: string }).priceNative ?? 0
   );
   const marketCapUsd = readMarketCapUsd(best) ?? null;
+  const volume = best.volume as
+    | { h1?: number; h24?: number }
+    | undefined;
+  const txnsH1 = best.txns as
+    | { h1?: { buys?: number; sells?: number } }
+    | undefined;
+  const buys = Number(txnsH1?.h1?.buys ?? 0);
+  const sells = Number(txnsH1?.h1?.sells ?? 0);
+  const volumeH1Usd = Number(volume?.h1 ?? NaN);
+  const volumeH24Usd = Number(volume?.h24 ?? NaN);
+  const txnsTotal = buys + sells;
+
   return {
     priceSol: priceNative > 0 ? priceNative : null,
     marketCapUsd: marketCapUsd != null && marketCapUsd > 0 ? marketCapUsd : null,
+    volumeH1Usd: Number.isFinite(volumeH1Usd) ? volumeH1Usd : null,
+    volumeH24Usd: Number.isFinite(volumeH24Usd) ? volumeH24Usd : null,
+    txnsH1: Number.isFinite(txnsTotal) ? txnsTotal : null,
   };
 }
 
@@ -1083,4 +1114,56 @@ export async function fetchTokenInfo(
     symbol: symbol || name,
     name: name || symbol,
   };
+}
+
+const MARKET_ACTIVITY_MIN_REFRESH_MS = 55_000;
+const lastActivityFetchAt = new Map<string, number>();
+
+/**
+ * Refresh DexScreener 1h volume / txn activity for open positions.
+ * Rate-limits per mint (~1/min) so monitor polls don't spam the API.
+ */
+export async function refreshOpenMarketActivity(
+  trader: {
+    getOpenPositions: () => Array<{ mint: string }>;
+    setMarketActivity: (
+      mint: string,
+      sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
+    ) => void;
+  },
+  options: { force?: boolean } = {}
+): Promise<number> {
+  const open = trader.getOpenPositions();
+  if (open.length === 0) return 0;
+
+  const now = Date.now();
+  const mints = [...new Set(open.map((p) => p.mint))];
+  let updated = 0;
+
+  // Keep SOL/USD fresh for cost USD display (cached ~5m inside fetch)
+  void fetchSolUsdPrice();
+
+  for (const mint of mints) {
+    const last = lastActivityFetchAt.get(mint) ?? 0;
+    if (!options.force && now - last < MARKET_ACTIVITY_MIN_REFRESH_MS) {
+      continue;
+    }
+    lastActivityFetchAt.set(mint, now);
+
+    try {
+      const snap = await fetchLiveTokenSnapshot(mint);
+      if (!snap) continue;
+
+      trader.setMarketActivity(mint, {
+        volumeH1Usd: snap.volumeH1Usd ?? 0,
+        txnsH1: snap.txnsH1 ?? 0,
+        updatedAt: now,
+      });
+      updated += 1;
+    } catch {
+      // best-effort — keep prior cache
+    }
+  }
+
+  return updated;
 }
