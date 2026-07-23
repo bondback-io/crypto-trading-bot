@@ -1507,12 +1507,18 @@ export function createServer(): express.Application {
                 source: 'manual' as const,
                 winRate: w.winRate,
                 tradesLast7d: w.tradesLast7d,
+                tradesLast30d: w.tradesLast30d,
                 tradeCount: w.tradeCount,
+                pumpFunTradeCount: w.pumpFunTradeCount,
                 tags: [...(w.tags ?? []), 'curated'],
                 alreadyTracked: w.alreadyTracked,
                 notes: w.notes ?? 'Curated / timeout fallback',
                 lastActiveAt: w.lastActiveAt,
-                metrics: { winRate: w.winRate, trades7d: w.tradesLast7d ?? 0 },
+                metrics: {
+                  winRate: w.winRate,
+                  ...(w.tradesLast7d != null ? { trades7d: w.tradesLast7d } : {}),
+                  ...(w.tradesLast30d != null ? { trades30d: w.tradesLast30d } : {}),
+                },
               })),
               fetchedAt: Date.now(),
               cached: false,
@@ -1597,12 +1603,18 @@ export function createServer(): express.Application {
                 source: 'manual' as const,
                 winRate: w.winRate,
                 tradesLast7d: w.tradesLast7d,
+                tradesLast30d: w.tradesLast30d,
                 tradeCount: w.tradeCount,
+                pumpFunTradeCount: w.pumpFunTradeCount,
                 tags: [...(w.tags ?? []), 'curated'],
                 alreadyTracked: w.alreadyTracked,
                 notes: w.notes ?? 'Curated / timeout fallback',
                 lastActiveAt: w.lastActiveAt,
-                metrics: { winRate: w.winRate, trades7d: w.tradesLast7d ?? 0 },
+                metrics: {
+                  winRate: w.winRate,
+                  ...(w.tradesLast7d != null ? { trades7d: w.tradesLast7d } : {}),
+                  ...(w.tradesLast30d != null ? { trades30d: w.tradesLast30d } : {}),
+                },
               })),
               fetchedAt: Date.now(),
               cached: false,
@@ -1783,6 +1795,7 @@ export function createServer(): express.Application {
       lastActive?: number;
       lastTradeTime?: number;
       tradesLast7d?: number;
+      tradesLast30d?: number;
       pumpFunTradeCount?: number;
       notes?: string;
       tags?: string[];
@@ -1805,6 +1818,7 @@ export function createServer(): express.Application {
       lastTradedAt: lastActive,
       winRate: body.winRate,
       tradesLast7d: body.tradesLast7d,
+      tradesLast30d: body.tradesLast30d,
       pumpFunTradeCount: body.pumpFunTradeCount,
       notes: body.notes,
       tags,
@@ -2005,6 +2019,7 @@ export function createServer(): express.Application {
       lastActive?: number;
       lastTradeTime?: number;
       tradesLast7d?: number;
+      tradesLast30d?: number;
       pumpFunTradeCount?: number;
       notes?: string;
       tags?: string[];
@@ -2035,6 +2050,7 @@ export function createServer(): express.Application {
       lastTradedAt: lastActive,
       winRate: body.winRate,
       tradesLast7d: body.tradesLast7d,
+      tradesLast30d: body.tradesLast30d,
       pumpFunTradeCount: body.pumpFunTradeCount,
       notes: body.notes,
       tags,

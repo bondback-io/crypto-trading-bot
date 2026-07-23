@@ -508,6 +508,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       padding: 0.12rem 0.4rem;
       font-size: 10px;
     }
+    .wallet-addr {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+    .wallet-addr .ca-btn {
+      padding: 0.1rem 0.35rem;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+    .wallet-addr .ca-btn.copied {
+      border-color: #34d399;
+      color: #6ee7b7;
+    }
     .persist-banner {
       display: none;
       margin-top: 1.25rem;
@@ -593,7 +609,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     #bt-results-table { min-width: 64rem; }
     #positions-table { min-width: 48rem; }
-    #wallets-table, #search-wallets-table, #discover-wallets-table { min-width: 42rem; }
+    #wallets-table, #search-wallets-table, #discover-wallets-table { min-width: 48rem; }
+    #discover-wallets-table th, #discover-wallets-table td,
+    #wallets-table th, #wallets-table td,
+    #search-wallets-table th, #search-wallets-table td {
+      padding-left: 0.4rem;
+      padding-right: 0.4rem;
+      white-space: nowrap;
+      font-size: 0.8rem;
+    }
+    #discover-wallets-table th, #wallets-table th, #search-wallets-table th {
+      font-size: 0.72rem;
+      letter-spacing: 0.01em;
+    }
     .btn-label-full { display: none; }
     .btn-label-short { display: inline; }
     .stat { font-size: clamp(1.15rem, 4vw, 1.5rem); word-break: break-word; }
@@ -977,8 +1005,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="overflow-x-auto">
           <table id="search-wallets-table">
-            <thead><tr><th>Name</th><th>Address</th><th title="Time since last known trade">Last trade</th><th title="Win rate %">Win%</th><th title="Trades in last 7 days">7d trades</th><th title="Estimated Pump.fun related trades">Pump.fun</th><th></th></tr></thead>
-            <tbody><tr><td colspan="7" class="text-slate-500">Search or suggest scalpers</td></tr></tbody>
+            <thead><tr><th>Name</th><th>Address</th><th title="Time since last known trade">Last</th><th title="Win rate %">Win%</th><th title="Trades in last 7 days">7d</th><th title="Trades in last 30 days">30d</th><th title="Pump.fun trades when reported (never estimated)">Pump</th><th></th></tr></thead>
+            <tbody><tr><td colspan="8" class="text-slate-500">Search or suggest scalpers</td></tr></tbody>
           </table>
         </div>
         <div id="scalper-suggestions" class="mt-3 hidden">
@@ -1062,17 +1090,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <thead>
               <tr>
                 <th>Name</th>
-                <th title="Which API or list provided this wallet">Source</th>
+                <th title="Which API or list provided this wallet">Src</th>
                 <th>Address</th>
-                <th title="Time since last known trade">Last trade</th>
+                <th title="Time since last known trade">Last</th>
                 <th title="Win rate %">Win%</th>
-                <th title="Trades in last 7 days">7d trades</th>
-                <th title="Pump.fun related trade count (estimated)">Pump.fun</th>
+                <th title="Trades in last 7 days">7d</th>
+                <th title="Trades in last 30 days">30d</th>
+                <th title="Pump.fun trades when reported (never estimated)">Pump</th>
                 <th title="0–100 smart-flow strength score">Flow</th>
                 <th></th>
               </tr>
             </thead>
-            <tbody><tr><td colspan="9" class="text-slate-500">Choose a source and click Discover</td></tr></tbody>
+            <tbody><tr><td colspan="10" class="text-slate-500">Choose a source and click Discover</td></tr></tbody>
           </table>
         </div>
         <div class="mt-3" id="discover-manual-box">
@@ -1099,8 +1128,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="overflow-x-auto">
           <table id="top-wallets-table">
-            <thead><tr><th>Name</th><th>Address</th><th>Win%</th><th>PnL</th><th>Trades</th><th></th></tr></thead>
-            <tbody><tr><td colspan="6" class="text-slate-500">Click Load Top Wallets</td></tr></tbody>
+            <thead><tr><th>Name</th><th>Address</th><th>Win%</th><th>PnL</th><th>7d</th><th>30d</th><th></th></tr></thead>
+            <tbody><tr><td colspan="7" class="text-slate-500">Click Load Top Wallets</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1117,7 +1146,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="watching-list" class="mint text-xs mb-3 max-h-24 overflow-y-auto" style="color:#94a3b8"></div>
         <div class="overflow-x-auto">
           <table id="wallets-table">
-            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="7d trades / Pump.fun trades">7d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="7d / 30d / Pump.fun trades">7d / 30d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1125,7 +1154,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title">Scalper Wallets <span class="tip" tabindex="0" data-tip="Tracked wallets tagged as scalpers (high trade frequency)."></span></div>
           <div class="overflow-x-auto">
             <table id="scalper-wallets-table">
-              <thead><tr><th>Name</th><th>Address</th><th>Last Active</th><th>Win%</th><th>7d trades</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Address</th><th>Last Active</th><th>Win%</th><th>7d / 30d</th><th>Status</th><th></th></tr></thead>
               <tbody><tr><td colspan="7" class="text-slate-500">No scalpers tracked yet</td></tr></tbody>
             </table>
           </div>
@@ -2668,6 +2697,52 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         .replace(/>/g, '&gt;');
     }
 
+    /** Compact smart-wallet address + Copy (same clipboard pattern as Copy CA) */
+    function fmtWalletAddr(address) {
+      const addr = String(address || '').trim();
+      if (!addr) return '<span class="mint">—</span>';
+      const attr = escAttr(addr);
+      const short = escHtml(addr.slice(0, 8) + '…' + addr.slice(-4));
+      return '<span class="wallet-addr">' +
+        '<span class="mint" title="' + attr + '">' + short + '</span>' +
+        '<button type="button" class="ca-btn" data-addr="' + attr +
+          '" onclick="copyWalletAddress(event)" title="Copy wallet address">Copy</button>' +
+        '</span>';
+    }
+
+    async function copyWalletAddress(ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      const el = ev && (ev.currentTarget || ev.target);
+      const host = el && el.closest
+        ? (el.closest('[data-addr]') || el)
+        : el;
+      const addr = host && host.getAttribute
+        ? String(host.getAttribute('data-addr') || '').trim()
+        : '';
+      if (!addr) return;
+      const ok = await copyTextToClipboard(addr);
+      const btn = el && el.closest ? el.closest('.ca-btn') : el;
+      if (ok && btn) {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = prev || 'Copy';
+          btn.classList.remove('copied');
+        }, 1400);
+      }
+      const st =
+        document.getElementById('search-status') ||
+        document.getElementById('discover-status') ||
+        document.getElementById('top-status') ||
+        document.getElementById('gmgn-status');
+      if (st) {
+        st.textContent = (ok ? 'Copied: ' : 'Copy failed: ') +
+          addr.slice(0, 8) + '…' + addr.slice(-4);
+      }
+      if (!ok) alert('Could not copy: ' + addr);
+    }
+
     /** Token ticker with CA popover: Copy CA + Open Jupiter */
     function fmtTokenCa(symbol, name, mint) {
       const tick = (symbol || (mint ? String(mint).slice(0, 6) : '?')).trim();
@@ -3637,10 +3712,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <tr>
             <td>\${w.name}\${w.notes ? '<div class="mint">' + w.notes + '</div>' : ''}</td>
             \${cols > 7 ? '<td class="mint">' + (w.category || 'smart') + '</td>' : ''}
-            <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+            <td>\${fmtWalletAddr(w.address)}</td>
             <td title="\${(w.lastActiveDisplay || '').replace(/"/g, '&quot;')}">\${fmtLastTraded(w.lastTradedAt || w.lastActive, w.daysSinceTrade, w.activityLabel)}</td>
             <td>\${w.winRate != null ? w.winRate.toFixed(0) + '%' : '—'}</td>
-            <td>\${w.tradesLast7d != null ? w.tradesLast7d : (w.tradesLast30d != null ? w.tradesLast30d + ' (30d)' : '—')}\${cols > 7 ? ' / ' + (w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—') : ''}</td>
+            <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'} / \${w.tradesLast30d != null ? w.tradesLast30d : '—'}\${cols > 7 ? ' / ' + (w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—') : ''}</td>
             <td>\${w.enabled === false ? '⏸ Disabled' : (w.isActive ? '✅ ' + (w.activityLabel || 'Active') : '⛔ ' + (w.activityLabel || 'Inactive'))}</td>
             \${cols >= 9 ? '<td class="mint">' + (w.watching ? '👁 Yes' : '—') + '</td>' : ''}
             <td>
@@ -4100,7 +4175,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           winRate: w.winRate,
           lastActiveAt: w.lastActiveAt,
           tradesLast7d: w.tradesLast7d,
-          pumpFunTradeCount: w.pumpFunTradeCount || (w.metrics && w.metrics.pumpFunTrades),
+          tradesLast30d: w.tradesLast30d,
+          pumpFunTradeCount: w.pumpFunTradeCount != null
+            ? w.pumpFunTradeCount
+            : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : undefined),
           tags: w.tags,
           notes: w.notes,
           alreadyTracked: w.alreadyTracked,
@@ -4143,22 +4221,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (rows.length === 0) {
           if (empty) empty.classList.remove('hidden');
           if (emptyMsg) emptyMsg.textContent = data.error || data.message || 'No candidates returned from this source.';
-          tbody.innerHTML = '<tr><td colspan="9" style="color:var(--muted)">No wallets found — see tips above</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="10" style="color:var(--muted)">No wallets found — see tips above</td></tr>';
         } else {
           if (empty) empty.classList.add('hidden');
           tbody.innerHTML = rows.map(w => {
             const flow = w.smartFlowScore != null ? w.smartFlowScore : (w.metrics && w.metrics.smartFlowScore);
-            const pump = w.pumpFunTradeCount != null ? w.pumpFunTradeCount : (w.metrics && w.metrics.pumpFunTrades);
-            const trades = w.tradesLast7d ?? w.tradeCount ?? '—';
+            const pump = w.pumpFunTradeCount != null
+              ? w.pumpFunTradeCount
+              : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : null);
+            const trades7d = w.tradesLast7d != null
+              ? w.tradesLast7d
+              : (w.metrics && w.metrics.trades7d != null ? w.metrics.trades7d : null);
+            const trades30d = w.tradesLast30d != null
+              ? w.tradesLast30d
+              : (w.metrics && w.metrics.trades30d != null ? w.metrics.trades30d : null);
             return \`
             <tr>
               <td>\${w.name}</td>
               <td class="mint">\${w.source}</td>
-              <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+              <td>\${fmtWalletAddr(w.address)}</td>
               <td>\${fmtLastTrade(w.lastActiveAt)}</td>
               <td>\${w.winRate != null ? w.winRate + '%' : '—'}</td>
-              <td>\${trades}</td>
-              <td>\${pump != null && pump !== '' ? pump : '—'}</td>
+              <td>\${trades7d != null ? trades7d : '—'}</td>
+              <td>\${trades30d != null ? trades30d : '—'}</td>
+              <td>\${pump != null ? pump : '—'}</td>
               <td>\${flow != null ? flow : '—'}</td>
               <td>\${w.alreadyTracked
                 ? '<span class="mint">Tracked</span>'
@@ -4184,7 +4270,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             winRate: w.winRate,
             lastActiveAt: w.lastActiveAt,
             tradesLast7d: w.tradesLast7d,
-            pumpFunTradeCount: w.pumpFunTradeCount || (w.metrics && w.metrics.pumpFunTrades),
+            tradesLast30d: w.tradesLast30d,
+            pumpFunTradeCount: w.pumpFunTradeCount != null
+              ? w.pumpFunTradeCount
+              : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : undefined),
             tags: w.tags,
             notes: w.notes,
             alreadyTracked: w.alreadyTracked,
@@ -4198,17 +4287,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           if (tbody && rows.length) {
             tbody.innerHTML = rows.map(w => {
               const flow = w.smartFlowScore != null ? w.smartFlowScore : (w.metrics && w.metrics.smartFlowScore);
-              const pump = w.pumpFunTradeCount != null ? w.pumpFunTradeCount : (w.metrics && w.metrics.pumpFunTrades);
-              const trades = w.tradesLast7d ?? w.tradeCount ?? '—';
+              const pump = w.pumpFunTradeCount != null
+                ? w.pumpFunTradeCount
+                : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : null);
+              const trades7d = w.tradesLast7d != null
+                ? w.tradesLast7d
+                : (w.metrics && w.metrics.trades7d != null ? w.metrics.trades7d : null);
+              const trades30d = w.tradesLast30d != null
+                ? w.tradesLast30d
+                : (w.metrics && w.metrics.trades30d != null ? w.metrics.trades30d : null);
               return \`
               <tr>
                 <td>\${w.name}</td>
                 <td class="mint">\${w.source}</td>
-                <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+                <td>\${fmtWalletAddr(w.address)}</td>
                 <td>\${fmtLastTrade(w.lastActiveAt)}</td>
                 <td>\${w.winRate != null ? w.winRate + '%' : '—'}</td>
-                <td>\${trades}</td>
-                <td>\${pump != null && pump !== '' ? pump : '—'}</td>
+                <td>\${trades7d != null ? trades7d : '—'}</td>
+                <td>\${trades30d != null ? trades30d : '—'}</td>
+                <td>\${pump != null ? pump : '—'}</td>
                 <td>\${flow != null ? flow : '—'}</td>
                 <td>\${w.alreadyTracked
                   ? '<span class="mint">Tracked</span>'
@@ -4256,6 +4353,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 winRate: w.winRate,
                 lastActive: w.lastActiveAt,
                 tradesLast7d: w.tradesLast7d,
+                tradesLast30d: w.tradesLast30d,
+                pumpFunTradeCount: w.pumpFunTradeCount,
                 notes: w.notes || 'Manual add',
                 tags: w.tags || ['manual'],
                 source: 'manual',
@@ -4290,6 +4389,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           winRate: w.winRate,
           lastActive: w.lastActiveAt,
           tradesLast7d: w.tradesLast7d,
+          tradesLast30d: w.tradesLast30d,
+          pumpFunTradeCount: w.pumpFunTradeCount,
           notes: w.notes,
           tags: w.tags,
           category: (w.tags || []).some(t => /scalp/i.test(t)) ? 'scalper' : 'smart',
@@ -4316,6 +4417,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               winRate: w.winRate,
               lastActive: w.lastActiveAt,
               tradesLast7d: w.tradesLast7d,
+              tradesLast30d: w.tradesLast30d,
+              pumpFunTradeCount: w.pumpFunTradeCount,
               notes: w.notes,
               tags: w.tags,
               source: w.source || 'manual',
@@ -4353,14 +4456,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         window._topWallets = data.wallets || [];
         const tbody = document.querySelector('#top-wallets-table tbody');
         tbody.innerHTML = n === 0
-          ? '<tr><td colspan="6" style="color:var(--muted)">No candidates</td></tr>'
+          ? '<tr><td colspan="7" style="color:var(--muted)">No candidates</td></tr>'
           : (data.wallets || []).map(w => \`
             <tr>
               <td>\${w.name}\${w.source === 'curated' ? ' <span class="mint">curated</span>' : ''}</td>
-              <td class="mint">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+              <td>\${fmtWalletAddr(w.address)}</td>
               <td>\${w.winRate}%</td>
               <td>\${fmtPnl(w.realizedPnlUsd ?? w.realizedPnl7d ?? w.realizedPnl30d)}</td>
-              <td>\${w.tradesLast7d ?? w.tradeCount ?? '—'}</td>
+              <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'}</td>
+              <td>\${w.tradesLast30d != null ? w.tradesLast30d : '—'}</td>
               <td>\${w.alreadyTracked
                 ? '<span class="mint">Tracked</span>'
                 : \`<button onclick="addTopWallet('\${w.name.replace(/'/g, "\\\\'")}','\${w.address}')">Add to tracked</button>\`
@@ -4380,15 +4484,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const tbody = document.querySelector('#search-wallets-table tbody');
       const rows = data.candidates || [];
       tbody.innerHTML = rows.length === 0
-        ? '<tr><td colspan="7" style="color:var(--muted)">No matches</td></tr>'
+        ? '<tr><td colspan="8" style="color:var(--muted)">No matches</td></tr>'
         : rows.map(w => \`
           <tr>
             <td>\${w.name}</td>
-            <td class="mint" title="\${w.address}">\${w.address.slice(0,8)}…\${w.address.slice(-4)}</td>
+            <td>\${fmtWalletAddr(w.address)}</td>
             <td>\${w.activityLabel || '—'}</td>
             <td>\${w.winRate}%</td>
-            <td>\${w.tradesLast7d ?? '—'}</td>
-            <td>\${w.pumpFunTradeCount ?? 0}</td>
+            <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'}</td>
+            <td>\${w.tradesLast30d != null ? w.tradesLast30d : '—'}</td>
+            <td>\${w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—'}</td>
             <td>\${w.alreadyTracked
               ? \`<button class="danger" onclick="removeSearchWallet('\${w.address}')">Remove</button>\`
               : \`<button onclick="addSearchWallet('\${w.address}')">Add</button>\`
@@ -4402,7 +4507,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         box.classList.remove('hidden');
         chips.innerHTML = sug.map(w => \`
           <button class="secondary" title="\${w.address}" onclick="addSearchWallet('\${w.address}', true)">
-            \${w.name} · \${w.winRate}% · \${w.tradesLast7d ?? '?'} tx/7d
+            \${w.name} · \${w.winRate}% · \${w.tradesLast7d != null ? w.tradesLast7d + ' tx/7d' : '—'}
             \${w.alreadyTracked ? '✓' : '+'}
           </button>\`).join('');
       } else {

@@ -46,6 +46,7 @@ export interface GmgnWalletActivity {
   winRate: number | null;
   tradeCount: number | null;
   tradeCount7d: number | null;
+  tradeCount30d: number | null;
   daysSinceTrade: number | null;
   isActive: boolean;
   source: 'gmgn' | 'cache' | 'fallback';
@@ -61,9 +62,11 @@ export interface GmgnWalletSuggestion {
   realizedPnl7d?: number;
   realizedPnl30d?: number;
   tradeCount?: number;
-  /** Trades in last 7 days */
+  /** Trades in last 7 days (period-specific; not lifetime) */
   tradesLast7d?: number;
-  /** Estimated Pump.fun / migration related trades */
+  /** Trades in last 30 days when known */
+  tradesLast30d?: number;
+  /** Pump.fun related trades when the source reports them (never invented) */
   pumpFunTradeCount?: number;
   lastActiveAt?: number;
   tags: string[];
@@ -102,14 +105,15 @@ export interface WalletSearchResult {
     GmgnWalletSuggestion & {
       lastTradeTime: number | null;
       activityLabel: string;
-      pumpFunTradeCount: number;
+      /** Present only when the source reported Pump trades (never invented as 0) */
+      pumpFunTradeCount?: number;
     }
   >;
   suggestedScalpers: Array<
     GmgnWalletSuggestion & {
       lastTradeTime: number | null;
       activityLabel: string;
-      pumpFunTradeCount: number;
+      pumpFunTradeCount?: number;
     }
   >;
   source: 'gmgn' | 'curated' | 'mixed';
@@ -133,6 +137,7 @@ const CURATED_SMART_WALLETS: Omit<
   GmgnWalletSuggestion,
   'alreadyTracked' | 'period'
 >[] = [
+  // Trade counts are illustrative offline fallbacks — not live Pump/7d API data.
   {
     name: 'Cented',
     address: 'CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o',
@@ -142,11 +147,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 420_000,
     tradeCount: 820,
     tradesLast7d: 64,
-    pumpFunTradeCount: 48,
     lastActiveAt: Date.now() - 1 * MS_PER_DAY,
     tags: ['kol', 'pump.fun', 'scalper'],
     source: 'curated',
-    notes: 'High-frequency Pump.fun scalper',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Theo',
@@ -157,11 +161,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 650_000,
     tradeCount: 3300,
     tradesLast7d: 120,
-    pumpFunTradeCount: 90,
     lastActiveAt: Date.now() - 0.5 * MS_PER_DAY,
     tags: ['kol', 'sniper', 'scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Active sniper / migration hunter',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Decu',
@@ -172,11 +175,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 180_000,
     tradeCount: 595,
     tradesLast7d: 38,
-    pumpFunTradeCount: 28,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['kol', 'scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Consistent mid-freq scalper',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Pain',
@@ -187,11 +189,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 329_000,
     tradeCount: 265,
     tradesLast7d: 85,
-    pumpFunTradeCount: 70,
     lastActiveAt: Date.now() - 0.3 * MS_PER_DAY,
     tags: ['kol', 'scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'High-frequency memecoin scalper',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Cupsey',
@@ -202,11 +203,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 280_000,
     tradeCount: 350,
     tradesLast7d: 95,
-    pumpFunTradeCount: 80,
     lastActiveAt: Date.now() - 0.4 * MS_PER_DAY,
     tags: ['kol', 'scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Nano-cap / early-curve hunter',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Doji',
@@ -217,11 +217,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 110_000,
     tradeCount: 405,
     tradesLast7d: 55,
-    pumpFunTradeCount: 40,
     lastActiveAt: Date.now() - 1 * MS_PER_DAY,
     tags: ['kol', 'scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Active 7d trader',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Nyhrox',
@@ -232,11 +231,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 36_000,
     tradeCount: 220,
     tradesLast7d: 42,
-    pumpFunTradeCount: 30,
     lastActiveAt: Date.now() - 1.5 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Active scalper',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Zoe',
@@ -247,11 +245,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 27_000,
     tradeCount: 218,
     tradesLast7d: 36,
-    pumpFunTradeCount: 25,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'High win-rate swing/scalp mix',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'LUKEY',
@@ -262,11 +259,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 28_000,
     tradeCount: 95,
     tradesLast7d: 28,
-    pumpFunTradeCount: 18,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['kol', 'pump.fun'],
     source: 'curated',
-    notes: 'Selective high-WR trader',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Johnson',
@@ -277,11 +273,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 22_000,
     tradeCount: 224,
     tradesLast7d: 34,
-    pumpFunTradeCount: 22,
     lastActiveAt: Date.now() - 3 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Volume trader',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Ansem',
@@ -292,11 +287,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 40_000,
     tradeCount: 400,
     tradesLast7d: 45,
-    pumpFunTradeCount: 20,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['kol', 'pump.fun'],
     source: 'curated',
-    notes: 'Public KOL wallet — verify before copy',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'Orangie',
@@ -307,11 +301,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 90_000,
     tradeCount: 180,
     tradesLast7d: 30,
-    pumpFunTradeCount: 22,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['kol', 'pump.fun', 'scalper'],
     source: 'curated',
-    notes: 'Memecoin KOL',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'ScalperA',
@@ -322,11 +315,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 45_000,
     tradeCount: 260,
     tradesLast7d: 52,
-    pumpFunTradeCount: 40,
     lastActiveAt: Date.now() - 1 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'High trade frequency candidate',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'ScalperB',
@@ -337,11 +329,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 38_000,
     tradeCount: 210,
     tradesLast7d: 48,
-    pumpFunTradeCount: 35,
     lastActiveAt: Date.now() - 1.2 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Active 7d scalper',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowC',
@@ -352,11 +343,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 33_000,
     tradeCount: 190,
     tradesLast7d: 40,
-    pumpFunTradeCount: 28,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Flow / volume candidate',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowD',
@@ -367,11 +357,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 31_000,
     tradeCount: 175,
     tradesLast7d: 36,
-    pumpFunTradeCount: 24,
     lastActiveAt: Date.now() - 2.5 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Active trader',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowE',
@@ -382,11 +371,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 29_000,
     tradeCount: 160,
     tradesLast7d: 33,
-    pumpFunTradeCount: 20,
     lastActiveAt: Date.now() - 3 * MS_PER_DAY,
     tags: ['scalper'],
     source: 'curated',
-    notes: 'Volume trader',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowF',
@@ -397,11 +385,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 26_000,
     tradeCount: 140,
     tradesLast7d: 29,
-    pumpFunTradeCount: 18,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowG',
@@ -412,11 +399,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 24_000,
     tradeCount: 130,
     tradesLast7d: 27,
-    pumpFunTradeCount: 16,
     lastActiveAt: Date.now() - 2 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowH',
@@ -427,11 +413,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 23_000,
     tradeCount: 120,
     tradesLast7d: 25,
-    pumpFunTradeCount: 15,
     lastActiveAt: Date.now() - 3 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowI',
@@ -442,11 +427,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 21_000,
     tradeCount: 110,
     tradesLast7d: 24,
-    pumpFunTradeCount: 14,
     lastActiveAt: Date.now() - 3 * MS_PER_DAY,
     tags: ['scalper'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowJ',
@@ -457,11 +441,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 20_000,
     tradeCount: 105,
     tradesLast7d: 22,
-    pumpFunTradeCount: 12,
     lastActiveAt: Date.now() - 4 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowK',
@@ -472,11 +455,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 19_000,
     tradeCount: 100,
     tradesLast7d: 21,
-    pumpFunTradeCount: 12,
     lastActiveAt: Date.now() - 3 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowL',
@@ -487,11 +469,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 18_000,
     tradeCount: 98,
     tradesLast7d: 20,
-    pumpFunTradeCount: 11,
     lastActiveAt: Date.now() - 4 * MS_PER_DAY,
     tags: ['scalper'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
   {
     name: 'FlowM',
@@ -502,11 +483,10 @@ const CURATED_SMART_WALLETS: Omit<
     realizedPnl30d: 17_000,
     tradeCount: 90,
     tradesLast7d: 20,
-    pumpFunTradeCount: 10,
     lastActiveAt: Date.now() - 5 * MS_PER_DAY,
     tags: ['scalper', 'pump.fun'],
     source: 'curated',
-    notes: 'Curated fallback',
+    notes: 'Illustrative curated fallback — verify before copy',
   },
 ];
 
@@ -967,6 +947,7 @@ export async function getWalletActivity(
     winRate: null,
     tradeCount: null,
     tradeCount7d: null,
+    tradeCount30d: null,
     daysSinceTrade: null,
     isActive: false,
     source: 'fallback',
@@ -1042,7 +1023,10 @@ export async function getWalletActivity(
       row.buy ?? row.txs ?? row.trade_count ?? row.total_trades ?? NaN
     );
     const tradeCount7d = Number(
-      row.buy_7d ?? row.txs_7d ?? row.trade_count_7d ?? tradeCount ?? NaN
+      row.buy_7d ?? row.txs_7d ?? row.trade_count_7d ?? NaN
+    );
+    const tradeCount30d = Number(
+      row.buy_30d ?? row.txs_30d ?? row.trade_count_30d ?? NaN
     );
 
     const daysSinceTrade = hasLast
@@ -1069,6 +1053,7 @@ export async function getWalletActivity(
       winRate: Number.isFinite(winRate) && winRate > 0 ? winRate : null,
       tradeCount: Number.isFinite(tradeCount) ? tradeCount : null,
       tradeCount7d: Number.isFinite(tradeCount7d) ? tradeCount7d : null,
+      tradeCount30d: Number.isFinite(tradeCount30d) ? tradeCount30d : null,
       daysSinceTrade,
       isActive:
         hasLast &&
@@ -1166,27 +1151,41 @@ function extractWalletRows(
     const tradeCount =
       Number(row.buy ?? row.txs ?? row.trade_count ?? row.tx_count ?? 0) ||
       undefined;
+    // Prefer explicit period fields — never treat lifetime buys as "7d" unless
+    // this leaderboard was requested for that period.
     const tradesLast7d =
       Number(
         row.buy_7d ??
           row.txs_7d ??
           row.trade_count_7d ??
           row.txs_buy_7d ??
-          (period === '7d' ? tradeCount : 0) ??
+          row.buy7d ??
           0
-      ) || undefined;
-    let pumpFunTradeCount =
+      ) ||
+      (period === '7d' ? tradeCount : undefined) ||
+      undefined;
+    const tradesLast30d =
+      Number(
+        row.buy_30d ??
+          row.txs_30d ??
+          row.trade_count_30d ??
+          row.txs_buy_30d ??
+          row.buy30d ??
+          0
+      ) ||
+      (period === '30d' ? tradeCount : undefined) ||
+      undefined;
+    // Only real Pump.fun counters — token_num is # of tokens traded, not Pump txs
+    const pumpFunTradeCount =
       Number(
         row.pump_buy ??
           row.pumpfun_txs ??
-          row.token_num ??
           row.buy_pump ??
+          row.pump_txs ??
+          row.txs_pump ??
           0
       ) || undefined;
     const tagBlob = String(row.tags ?? row.tag ?? makerInfo.tags ?? '').toLowerCase();
-    if (!pumpFunTradeCount && tagBlob.includes('pump')) {
-      pumpFunTradeCount = tradesLast7d ?? tradeCount ?? 0;
-    }
 
     const tagList: string[] = ['gmgn', period];
     const rawTags = row.tags ?? row.tag ?? makerInfo.tags;
@@ -1196,6 +1195,8 @@ function extractWalletRows(
       tagList.push(String(rawTags));
     }
     if (pumpFunTradeCount && pumpFunTradeCount > 0) {
+      tagList.push('pump.fun');
+    } else if (/pump/.test(tagBlob)) {
       tagList.push('pump.fun');
     }
     if ((tradesLast7d ?? 0) > 20) {
@@ -1218,6 +1219,7 @@ function extractWalletRows(
       realizedPnl30d: period === '30d' ? pnl : undefined,
       tradeCount,
       tradesLast7d,
+      tradesLast30d,
       pumpFunTradeCount,
       lastActiveAt: Number.isFinite(lastActiveAt) ? lastActiveAt : undefined,
       tags: [...new Set(tagList)],
@@ -1402,12 +1404,21 @@ export async function getTopSmartWallets(
             );
             const pnl = Number(row.realized_profit ?? NaN);
             const buys = Number(row.buy ?? NaN);
+            const buy7d = Number(row.buy_7d ?? row.txs_7d ?? NaN);
+            const buy30d = Number(row.buy_30d ?? row.txs_30d ?? NaN);
             const lastTs = toMs(Number(row.last_timestamp ?? 0));
             if (wr > 0) r.winRate = wr;
             if (Number.isFinite(pnl)) r.realizedPnlUsd = pnl;
-            if (Number.isFinite(buys)) {
-              r.tradeCount = buys;
+            if (Number.isFinite(buys)) r.tradeCount = buys;
+            if (Number.isFinite(buy7d)) {
+              r.tradesLast7d = buy7d;
+            } else if (period === '7d' && Number.isFinite(buys)) {
               r.tradesLast7d = buys;
+            }
+            if (Number.isFinite(buy30d)) {
+              r.tradesLast30d = buy30d;
+            } else if (period === '30d' && Number.isFinite(buys)) {
+              r.tradesLast30d = buys;
             }
             if (Number.isFinite(lastTs) && lastTs > 0) r.lastActiveAt = lastTs;
           })
@@ -1537,6 +1548,7 @@ export function importSuggestedWallets(
       winRate: s.winRate,
       notes: s.notes,
       tradesLast7d: s.tradesLast7d,
+      tradesLast30d: s.tradesLast30d,
       pumpFunTradeCount: s.pumpFunTradeCount,
       tags: s.tags,
       category,
@@ -1568,7 +1580,8 @@ function enrichCandidate(
     ...w,
     lastTradeTime,
     activityLabel: formatActivityLabel(lastTradeTime, true),
-    pumpFunTradeCount: w.pumpFunTradeCount ?? 0,
+    // Keep undefined when unknown — never invent 0 for display
+    pumpFunTradeCount: w.pumpFunTradeCount,
   };
 }
 
@@ -1642,11 +1655,14 @@ function applyWalletFilters(
   return wallets.filter((w) => {
     if (w.winRate < filters.minWinRate) return false;
 
-    const trades7d = w.tradesLast7d ?? w.tradeCount ?? 0;
+    const trades7d = w.tradesLast7d ?? 0;
     const minTrades = scalperOnly
       ? Math.max(filters.minTrades7d, 20)
       : filters.minTrades7d;
-    if (trades7d < minTrades) return false;
+    // Require real 7d counts when a min is set — do not treat lifetime tradeCount as 7d
+    if (minTrades > 0 && (w.tradesLast7d == null || trades7d < minTrades)) {
+      return false;
+    }
 
     if (w.lastActiveAt != null) {
       const days = (now - w.lastActiveAt) / MS_PER_DAY;
@@ -1659,7 +1675,7 @@ function applyWalletFilters(
     if (pumpFocus) {
       const tags = (w.tags ?? []).map((t) => t.toLowerCase());
       const hasPump =
-        (w.pumpFunTradeCount ?? 0) > 0 ||
+        (w.pumpFunTradeCount != null && w.pumpFunTradeCount > 0) ||
         tags.some((t) => t.includes('pump') || t.includes('migrat'));
       if (!hasPump) return false;
     }
@@ -1742,7 +1758,7 @@ export async function searchWallets(
     address: w.address,
     winRate: w.winRate ?? 0,
     tradesLast7d: w.tradesLast7d,
-    tradeCount: w.tradesLast30d,
+    tradesLast30d: w.tradesLast30d,
     pumpFunTradeCount: w.pumpFunTradeCount,
     lastActiveAt: w.lastTradedAt ?? w.lastActive,
     tags: w.tags ?? [],

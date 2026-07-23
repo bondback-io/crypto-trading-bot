@@ -473,12 +473,13 @@ export async function refreshWalletActivity(
         lastTradedAt = gmgn.lastTradeTime;
         source = 'gmgn';
       }
-      if (gmgn.tradeCount != null) {
-        tradesLast30d = gmgn.tradeCount ?? 0;
+      if (gmgn.tradeCount30d != null) {
+        tradesLast30d = gmgn.tradeCount30d;
+      } else if (gmgn.tradeCount != null) {
+        tradesLast30d = gmgn.tradeCount;
       }
       if (gmgn.tradeCount7d != null) {
         tradesLast7d = gmgn.tradeCount7d;
-        if (tradesLast30d === 0) tradesLast30d = gmgn.tradeCount7d;
       }
       if (gmgn.winRate != null) {
         gmgnWinRate = gmgn.winRate;

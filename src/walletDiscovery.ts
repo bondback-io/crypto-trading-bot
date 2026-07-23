@@ -51,6 +51,8 @@ export interface DiscoveredWallet {
   source: DiscoverySource | 'curated';
   winRate?: number;
   tradesLast7d?: number;
+  /** Trades in last 30 days when the source period is known */
+  tradesLast30d?: number;
   tradeCount?: number;
   pumpFunTradeCount?: number;
   realizedPnlUsd?: number;
@@ -211,7 +213,7 @@ async function discoverFromBirdeyeGainers(
         address,
         source: 'birdeye',
         winRate: wr || undefined,
-        tradesLast7d: tradeCount || undefined,
+        // Period unknown on gainers endpoint — do not label as 7d
         tradeCount: tradeCount || undefined,
         realizedPnlUsd: Number.isFinite(pnl) ? pnl : undefined,
         volumeUsd: Number.isFinite(volume) ? volume : undefined,
@@ -319,6 +321,7 @@ async function discoverFromBirdeyeTopTraders(
         name: prev?.name ?? shortName(address),
         address,
         source: 'birdeye',
+        // top_traders request uses time_frame=7d
         tradesLast7d: tradeCount || undefined,
         tradeCount: tradeCount || undefined,
         realizedPnlUsd,
@@ -331,6 +334,7 @@ async function discoverFromBirdeyeTopTraders(
           volumeUsd: Math.round(volumeUsd),
           pnlUsd: Math.round(realizedPnlUsd),
           smartFlowScore: score,
+          ...(tradeCount ? { trades7d: tradeCount } : {}),
           tokens:
             (prev?.metrics?.tokens ? String(prev.metrics.tokens) + ',' : '') +
             tok.symbol,
@@ -557,7 +561,9 @@ function manualCurated(
     source: asSource,
     winRate: w.winRate,
     tradesLast7d: w.tradesLast7d,
+    tradesLast30d: w.tradesLast30d,
     tradeCount: w.tradeCount,
+    pumpFunTradeCount: w.pumpFunTradeCount,
     realizedPnlUsd: w.realizedPnlUsd,
     smartFlowScore: Math.min(
       100,
@@ -569,7 +575,11 @@ function manualCurated(
     lastActiveAt: w.lastActiveAt,
     metrics: {
       winRate: w.winRate,
-      trades7d: w.tradesLast7d ?? 0,
+      ...(w.tradesLast7d != null ? { trades7d: w.tradesLast7d } : {}),
+      ...(w.tradesLast30d != null ? { trades30d: w.tradesLast30d } : {}),
+      ...(w.pumpFunTradeCount != null
+        ? { pumpFunTrades: w.pumpFunTradeCount }
+        : {}),
       smartFlowScore: Math.min(
         100,
         Math.round((w.winRate ?? 0) / 2 + (w.tradesLast7d ?? 0))
@@ -661,14 +671,14 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
       const closed = wins + losses;
       const winRate =
         closed > 0 ? Math.round((wins / closed) * 1000) / 10 : undefined;
-      const tradesLast7d = closed > 0 ? closed : undefined;
-      // Heuristic: high closed-trade count ⇒ active scalper
-      const isScalper = (tradesLast7d ?? 0) >= 20;
+      // Wins+losses are closed trades with unknown timeframe — not "7d"
+      const tradeCount = closed > 0 ? closed : undefined;
+      const isScalper = (tradeCount ?? 0) >= 20;
       const score = Math.min(
         100,
         Math.round(
           (winRate ?? 0) * 0.55 +
-            Math.min(40, (tradesLast7d ?? 0) / 2) +
+            Math.min(40, (tradeCount ?? 0) / 2) +
             (isScalper ? 10 : 0)
         )
       );
@@ -677,28 +687,17 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
         address,
         source: 'kolscan',
         winRate,
-        tradesLast7d,
-        tradeCount: tradesLast7d,
-        pumpFunTradeCount: isScalper
-          ? Math.round((tradesLast7d ?? 0) * 0.7)
-          : Math.round((tradesLast7d ?? 0) * 0.4),
+        tradeCount,
         smartFlowScore: score,
-        tags: [
-          'kolscan',
-          ...(isScalper ? ['scalper'] : []),
-          'pump.fun',
-        ],
+        tags: ['kolscan', ...(isScalper ? ['scalper'] : [])],
         alreadyTracked: tracked.has(address),
-        notes: 'Kolscan public leaderboard',
+        notes: 'Kolscan public leaderboard (period unknown)',
         lastActiveAt: Date.now() - 12 * 60 * 60 * 1000,
         metrics: {
           winRate: winRate ?? 0,
-          trades7d: tradesLast7d ?? 0,
+          trades: tradeCount ?? 0,
           wins,
           losses,
-          pumpFunTrades: isScalper
-            ? Math.round((tradesLast7d ?? 0) * 0.7)
-            : Math.round((tradesLast7d ?? 0) * 0.4),
           smartFlowScore: score,
         },
       });
@@ -721,19 +720,13 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
           name: shortName(address),
           address,
           source: 'kolscan',
-          tradesLast7d: 25,
-          tradeCount: 25,
-          pumpFunTradeCount: 15,
-          winRate: 40,
-          smartFlowScore: 55,
-          tags: ['kolscan', 'scalper', 'pump.fun'],
+          smartFlowScore: 40,
+          tags: ['kolscan'],
           alreadyTracked: tracked.has(address),
-          notes: 'Kolscan leaderboard (address scrape)',
+          notes: 'Kolscan leaderboard (address scrape — no trade counts)',
           lastActiveAt: Date.now() - 24 * 60 * 60 * 1000,
           metrics: {
-            trades7d: 25,
-            pumpFunTrades: 15,
-            smartFlowScore: 55,
+            smartFlowScore: 40,
           },
         });
         if (wallets.length >= limit) break;
@@ -756,7 +749,8 @@ async function discoverFromKolscan(limit: number): Promise<DiscoveryResult> {
     // Prefer high-frequency traders first
     wallets.sort(
       (a, b) =>
-        (b.tradesLast7d ?? 0) - (a.tradesLast7d ?? 0) ||
+        (b.tradeCount ?? b.tradesLast7d ?? 0) -
+          (a.tradeCount ?? a.tradesLast7d ?? 0) ||
         (b.winRate ?? 0) - (a.winRate ?? 0)
     );
 
@@ -845,31 +839,31 @@ async function discoverFromPlatformLeaderboard(
   const wallets: DiscoveredWallet[] = res.traders
     .filter((t) => isValidSolanaAddress(t.wallet))
     .map((t) => {
-      const tradesLast7d = t.trades;
+      const trades = t.trades;
       const winRate =
         t.winRate != null
           ? Math.round(t.winRate * 10) / 10
           : undefined;
-      const isScalper = (tradesLast7d ?? 0) >= 20;
+      const isScalper = (trades ?? 0) >= 20;
       const score = Math.min(
         100,
         Math.round(
           (winRate ?? 0) * 0.45 +
-            Math.min(35, (tradesLast7d ?? 0) / 3) +
+            Math.min(35, (trades ?? 0) / 3) +
             (t.realizedPnlUsd && t.realizedPnlUsd > 0 ? 15 : 0) +
             (isScalper ? 10 : 0)
         )
       );
+      const tradesLast7d = days === 7 ? trades : undefined;
+      const tradesLast30d = days === 30 ? trades : undefined;
       return {
         name: shortName(t.wallet, t.name),
         address: t.wallet,
         source,
         winRate,
         tradesLast7d,
-        tradeCount: tradesLast7d,
-        pumpFunTradeCount: isScalper
-          ? Math.round((tradesLast7d ?? 0) * 0.55)
-          : Math.round((tradesLast7d ?? 0) * 0.3),
+        tradesLast30d,
+        tradeCount: days === 7 || days === 30 ? undefined : trades,
         realizedPnlUsd: t.realizedPnlUsd,
         volumeUsd: t.volumeUsd,
         smartFlowScore: score,
@@ -877,7 +871,6 @@ async function discoverFromPlatformLeaderboard(
           source,
           'solana-tracker',
           ...(isScalper ? ['scalper'] : []),
-          'pump.fun',
           ...(t.platforms ?? []),
         ],
         alreadyTracked: tracked.has(t.wallet),
@@ -885,7 +878,11 @@ async function discoverFromPlatformLeaderboard(
         lastActiveAt: t.lastTradeAt ?? Date.now() - 12 * 60 * 60 * 1000,
         metrics: {
           winRate: winRate ?? 0,
-          trades7d: tradesLast7d ?? 0,
+          ...(tradesLast7d != null ? { trades7d: tradesLast7d } : {}),
+          ...(tradesLast30d != null ? { trades30d: tradesLast30d } : {}),
+          ...(trades != null && days !== 7 && days !== 30
+            ? { trades }
+            : {}),
           realizedPnlUsd: t.realizedPnlUsd ?? 0,
           volumeUsd: t.volumeUsd ?? 0,
           roi: t.roi ?? 0,
@@ -897,7 +894,8 @@ async function discoverFromPlatformLeaderboard(
   wallets.sort(
     (a, b) =>
       (b.realizedPnlUsd ?? 0) - (a.realizedPnlUsd ?? 0) ||
-      (b.tradesLast7d ?? 0) - (a.tradesLast7d ?? 0) ||
+      (b.tradesLast7d ?? b.tradesLast30d ?? b.tradeCount ?? 0) -
+        (a.tradesLast7d ?? a.tradesLast30d ?? a.tradeCount ?? 0) ||
       (b.winRate ?? 0) - (a.winRate ?? 0)
   );
 
@@ -1043,8 +1041,13 @@ async function discoverAll(
   if (pumpFunFocus) {
     const pump = wallets.filter((w) => {
       const tags = (w.tags ?? []).map((t) => t.toLowerCase());
+      const pumpCount =
+        w.pumpFunTradeCount ??
+        (typeof w.metrics?.pumpFunTrades === 'number'
+          ? w.metrics.pumpFunTrades
+          : undefined);
       return (
-        (w.pumpFunTradeCount ?? Number(w.metrics?.pumpFunTrades ?? 0)) > 0 ||
+        (pumpCount != null && pumpCount > 0) ||
         tags.some((t) => t.includes('pump'))
       );
     });
@@ -1092,6 +1095,7 @@ async function discoverGmgn(
       address: string;
       winRate?: number;
       tradesLast7d?: number;
+      tradesLast30d?: number;
       tradeCount?: number;
       pumpFunTradeCount?: number;
       realizedPnlUsd?: number;
@@ -1109,6 +1113,7 @@ async function discoverGmgn(
       source: 'gmgn' as const,
       winRate: w.winRate,
       tradesLast7d: w.tradesLast7d,
+      tradesLast30d: w.tradesLast30d,
       tradeCount: w.tradeCount,
       pumpFunTradeCount: w.pumpFunTradeCount,
       realizedPnlUsd: w.realizedPnlUsd ?? w.realizedPnl7d,
@@ -1125,8 +1130,11 @@ async function discoverGmgn(
       metrics: {
         winRate: w.winRate ?? 0,
         pnlUsd: Math.round(w.realizedPnlUsd ?? w.realizedPnl7d ?? 0),
-        trades7d: w.tradesLast7d ?? w.tradeCount ?? 0,
-        pumpFunTrades: w.pumpFunTradeCount ?? 0,
+        ...(w.tradesLast7d != null ? { trades7d: w.tradesLast7d } : {}),
+        ...(w.tradesLast30d != null ? { trades30d: w.tradesLast30d } : {}),
+        ...(w.pumpFunTradeCount != null
+          ? { pumpFunTrades: w.pumpFunTradeCount }
+          : {}),
         smartFlowScore: Math.min(
           100,
           Math.round(
