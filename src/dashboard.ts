@@ -416,7 +416,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .has-tip { cursor: help; }
 
-    /* Token name → hover CA + click to copy */
+    /* Token name → hover CA + copy / Jupiter */
     .token-ca {
       position: relative;
       display: inline-flex;
@@ -431,8 +431,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       left: 0;
       bottom: calc(100% + 8px);
       z-index: 90;
-      min-width: 220px;
-      max-width: min(420px, 80vw);
+      min-width: 240px;
+      max-width: min(440px, 85vw);
       padding: 8px 10px;
       border-radius: 8px;
       background: #0f172a;
@@ -470,6 +470,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #38bdf8;
     }
     .token-ca.copied .ca-pop .ca-hint { color: #34d399; }
+    .ca-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.5rem;
+    }
+    .ca-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 0.4rem;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+      text-decoration: none;
+      line-height: 1.3;
+    }
+    .ca-btn:hover { border-color: #38bdf8; color: #7dd3fc; }
+    .ca-btn.ca-jup {
+      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.12);
+      color: #6ee7b7;
+    }
+    .ca-btn.ca-jup:hover { border-color: #34d399; color: #a7f3d0; }
+    .mint-ca {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .mint-ca .ca-btn {
+      padding: 0.12rem 0.4rem;
+      font-size: 10px;
+    }
     .persist-banner {
       display: none;
       margin-bottom: 0.85rem;
@@ -2601,29 +2639,71 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       window._lastBacktest = data;
     }
 
-    function fmtBacktestToken(symbol, name, mint) {
-      const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
-      const label = tick.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    function jupiterTokenUrl(mint) {
+      return 'https://jup.ag/tokens/' + encodeURIComponent(String(mint || '').trim());
+    }
+
+    function escAttr(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function escHtml(s) {
+      return String(s || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    /** Token ticker with CA popover: Copy CA + Open Jupiter */
+    function fmtTokenCa(symbol, name, mint) {
+      const tick = (symbol || (mint ? String(mint).slice(0, 6) : '?')).trim();
+      const label = escHtml(tick);
       const ca = String(mint || '').trim();
       if (!ca) return '<strong>' + label + '</strong>';
-      const attr = ca.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-      const shown = ca.replace(/</g, '&lt;');
-      return '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr + '" title="Click to copy contract address" onclick="copyContractAddress(event)">' +
+      const attr = escAttr(ca);
+      const shown = escHtml(ca);
+      const jup = escAttr(jupiterTokenUrl(ca));
+      return '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr +
+        '" title="Click to copy CA · Open on Jupiter" onclick="copyContractAddress(event)">' +
         '<strong>' + label + '</strong>' +
-        '<span class="ca-pop">' +
+        '<span class="ca-pop" onclick="event.stopPropagation()">' +
           '<div class="ca-label">Contract address</div>' +
           '<div class="ca-addr">' + shown + '</div>' +
-          '<div class="ca-hint">Click to copy</div>' +
+          '<div class="ca-actions">' +
+            '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)">Copy CA</button>' +
+            '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Open Jupiter</a>' +
+          '</div>' +
+          '<div class="ca-hint">Copy CA or view live on Jupiter</div>' +
         '</span>' +
       '</span>';
     }
 
-    async function copyContractAddress(ev) {
-      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-      const el = ev && (ev.currentTarget || ev.target);
-      const host = el && el.closest ? el.closest('.token-ca') : el;
-      const ca = host && host.getAttribute ? String(host.getAttribute('data-mint') || '').trim() : '';
-      if (!ca) return;
+    /** Compact mint column: short CA + Copy + Jupiter */
+    function fmtMintCa(mint) {
+      const ca = String(mint || '').trim();
+      if (!ca) return '<span class="mint">—</span>';
+      const attr = escAttr(ca);
+      const short = escHtml(ca.slice(0, 8) + '…' + ca.slice(-4));
+      const jup = escAttr(jupiterTokenUrl(ca));
+      return '<span class="mint-ca">' +
+        '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr +
+          '" title="' + attr + ' — click to copy" onclick="copyContractAddress(event)">' + short + '</span>' +
+        '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy</button>' +
+        '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
+      '</span>';
+    }
+
+    function fmtBacktestToken(symbol, name, mint) {
+      return fmtTokenCa(symbol, name, mint);
+    }
+
+    async function copyTextToClipboard(text) {
+      const ca = String(text || '').trim();
+      if (!ca) return false;
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(ca);
@@ -2635,20 +2715,57 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           document.execCommand('copy');
           ta.remove();
         }
-        if (host) {
-          host.classList.add('copied');
-          const hint = host.querySelector('.ca-hint');
-          if (hint) hint.textContent = 'Copied!';
-          setTimeout(() => {
-            host.classList.remove('copied');
-            if (hint) hint.textContent = 'Click to copy';
-          }, 1400);
-        }
-        const st = document.getElementById('bt-status');
-        if (st) st.textContent = 'Copied CA: ' + ca.slice(0, 8) + '…' + ca.slice(-4);
+        return true;
       } catch (err) {
-        alert('Could not copy: ' + ca);
+        return false;
       }
+    }
+
+    async function copyMintFromEl(ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      const el = ev && (ev.currentTarget || ev.target);
+      const host = el && el.closest
+        ? (el.closest('[data-mint]') || el)
+        : el;
+      const ca = host && host.getAttribute
+        ? String(host.getAttribute('data-mint') || '').trim()
+        : '';
+      if (!ca) return;
+      const ok = await copyTextToClipboard(ca);
+      const tokenHost = el && el.closest ? el.closest('.token-ca') : null;
+      if (ok && tokenHost) {
+        tokenHost.classList.add('copied');
+        const hint = tokenHost.querySelector('.ca-hint');
+        if (hint) hint.textContent = 'Copied!';
+        setTimeout(() => {
+          tokenHost.classList.remove('copied');
+          if (hint) hint.textContent = 'Copy CA or view live on Jupiter';
+        }, 1400);
+      }
+      const st = document.getElementById('bt-status');
+      if (st) st.textContent = (ok ? 'Copied CA: ' : 'Copy failed: ') + ca.slice(0, 8) + '…' + ca.slice(-4);
+      if (!ok) alert('Could not copy: ' + ca);
+    }
+
+    async function copyContractAddress(ev) {
+      if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+      const el = ev && (ev.currentTarget || ev.target);
+      const host = el && el.closest ? el.closest('.token-ca') : el;
+      const ca = host && host.getAttribute ? String(host.getAttribute('data-mint') || '').trim() : '';
+      if (!ca) return;
+      const ok = await copyTextToClipboard(ca);
+      if (ok && host) {
+        host.classList.add('copied');
+        const hint = host.querySelector('.ca-hint');
+        if (hint) hint.textContent = 'Copied!';
+        setTimeout(() => {
+          host.classList.remove('copied');
+          if (hint) hint.textContent = 'Copy CA or view live on Jupiter';
+        }, 1400);
+      }
+      const st = document.getElementById('bt-status');
+      if (st) st.textContent = (ok ? 'Copied CA: ' : 'Copy failed: ') + ca.slice(0, 8) + '…' + ca.slice(-4);
+      if (!ok) alert('Could not copy: ' + ca);
     }
 
     async function runBacktest() {
@@ -2885,17 +3002,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function fmtToken(symbol, name, mint) {
-      const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
-      const full = (name || '').trim();
-      if (!full || full.toLowerCase() === tick.toLowerCase()) return tick;
-      return tick;
+      return fmtTokenCa(symbol, name, mint);
     }
 
     function fmtTokenName(symbol, name, mint) {
       const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
       const full = (name || '').trim();
       if (!full || full.toLowerCase() === tick.toLowerCase()) return '<span class="mint">—</span>';
-      return full;
+      return escHtml(full);
     }
 
     async function paperTopUp() {
@@ -2980,7 +3094,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       ? '#3b82f6'
                       : 'var(--muted)';
                 return '<tr>' +
-                  '<td><strong>' + fmtToken(e.symbol, e.name, e.mint) + '</strong>' +
+                  '<td>' + fmtToken(e.symbol, e.name, e.mint) +
                   (e.priority ? ' <span class="mint">prio</span>' : '') + '</td>' +
                   '<td style="color:' + kindColor + '">' + (e.kind || '—') + '</td>' +
                   '<td>' + (e.curveProgressPct != null ? Number(e.curveProgressPct).toFixed(0) + '%' : '—') +
@@ -2997,12 +3111,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const hot = document.getElementById('pump-hot-launches');
         if (hot && data.launches) {
           const launches = data.launches.filter(l => (l.earlyBuyers || []).length > 0 || l.migrated).slice(0, 6);
-          hot.textContent = launches.length
+          hot.innerHTML = launches.length
             ? 'Tracked launches: ' + launches.map(l =>
-                (l.symbol || l.mint.slice(0, 6)) +
-                ' (' + (l.earlyBuyers || []).length + ' early' +
+                fmtTokenCa(l.symbol, l.name, l.mint) +
+                ' <span class="mint">(' + (l.earlyBuyers || []).length + ' early' +
                 (l.lastProgressPct != null ? ' · ' + Number(l.lastProgressPct).toFixed(0) + '%' : '') +
-                (l.migrated ? ' · mig' : '') + ')'
+                (l.migrated ? ' · mig' : '') + ')</span>'
               ).join(' · ')
             : '';
         }
@@ -3309,11 +3423,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="log-entry">
               \${m.priority ? '⚡' : '🚀'}
               <strong>\${(m.program || 'mig').toUpperCase()}</strong>
-              mint <span class="mint" title="\${m.mint}">\${m.mint.slice(0,8)}…\${m.mint.slice(-4)}</span>
-              \${m.poolAddress ? '· pool <span class="mint" title="' + m.poolAddress + '">' + m.poolAddress.slice(0,8) + '…</span>' : ''}
+              mint \${fmtMintCa(m.mint)}
+              \${m.poolAddress ? '· pool <span class="mint" title="' + escAttr(m.poolAddress) + '">' + escHtml(m.poolAddress.slice(0,8)) + '…</span>' : ''}
               \${m.volumeSpike ? '· <strong>vol spike ' + (m.volumeSol ?? 0).toFixed(1) + ' SOL</strong>' : (m.volumeSol ? '· ' + m.volumeSol.toFixed(1) + ' SOL' : '')}
               \${m.smartWalletNames?.length ? '· ' + m.smartWalletNames.join(', ') : ''}
-              \${m.priorityReason ? '<span class="mint">(' + m.priorityReason + ')</span>' : ''}
+              \${m.priorityReason ? '<span class="mint">(' + escHtml(m.priorityReason) + ')</span>' : ''}
               <span class="mint">\${m.source || ''} · \${new Date(m.timestamp || m.detectedAt).toLocaleString()}</span>
             </div>
           \`).join('');
@@ -3592,9 +3706,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
           return \`
           <tr>
-            <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong>\${mode}\${riskBit}</td>
+            <td>\${fmtToken(p.symbol, p.name, p.mint)}\${mode}\${riskBit}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
-            <td class="mint" title="\${p.mint}">\${p.mint.slice(0,8)}…</td>
+            <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at buy">\${buyMc}</td>
             <td>\${p.costSol.toFixed(4)} SOL</td>
             <td>\${pnlCell}</td>
@@ -3612,7 +3726,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? '<tr><td colspan="7" style="color:var(--muted)">No closed trades yet</td></tr>'
         : closed.map(p => \`
           <tr>
-            <td><strong>\${fmtToken(p.symbol, p.name, p.mint)}</strong></td>
+            <td>\${fmtToken(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td class="mint" title="Market cap at buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
             <td class="mint" title="Market cap at exit">\${fmtUsdShort(p.exitMarketCapUsd)}</td>
@@ -3641,7 +3755,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? '<tr><td colspan="6" style="color:var(--muted)">No re-buy watches — profitable TP sells start monitoring</td></tr>'
           : candidates.slice(0, 15).map(c => \`
             <tr>
-              <td><strong>\${fmtToken(c.symbol, c.name, c.mint)}</strong></td>
+              <td>\${fmtToken(c.symbol, c.name, c.mint)}</td>
               <td>\${c.status}</td>
               <td>\${c.dipPctFromPeak != null ? c.dipPctFromPeak.toFixed(1) + '%' : '—'}</td>
               <td>\${(c.confirmationWallets || []).length}\${c.confirmationWalletNames?.length ? ' (' + c.confirmationWalletNames.slice(0,3).join(', ') + ')' : ''}</td>
@@ -3684,12 +3798,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             return \`
           <div class="log-entry">
             <strong>\${a.walletName}</strong> bought
-            <strong>\${fmtToken(a.symbol, a.name, a.mint)}</strong>
-            \${a.name && a.name !== a.symbol ? '<span class="mint">(' + a.name + ')</span>' : ''}
+            \${fmtToken(a.symbol, a.name, a.mint)}
+            \${a.name && a.name !== a.symbol ? '<span class="mint">(' + escHtml(a.name) + ')</span>' : ''}
             \${a.isMigration ? '🚀' : a.earlyBuy ? '🌱' : a.isPumpFun ? '🎯' : ''}
             \${a.earlyBuy && a.earlyBuyerCount ? '<span class="mint">early×' + a.earlyBuyerCount + '</span>' : ''}
             \${metricsLine}
-            <span class="mint">\${a.mint ? a.mint.slice(0,8)+'…' : ''} · \${new Date(a.timestamp).toLocaleTimeString()}</span>
+            <span class="mint">\${a.mint ? fmtMintCa(a.mint) : ''} · \${new Date(a.timestamp).toLocaleTimeString()}</span>
           </div>\`;
           }).join('');
 
@@ -3714,7 +3828,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? '<tr><td colspan="7" class="text-slate-500">No sized signals yet</td></tr>'
           : sizedSignals.map(s => \`
             <tr>
-              <td><strong>\${fmtToken(s.symbol, s.name, s.mint)}</strong></td>
+              <td>\${fmtToken(s.symbol, s.name, s.mint)}</td>
               <td style="color:var(--accent,#60a5fa);font-weight:600">\${s.dynamicSizeSol != null ? Number(s.dynamicSizeSol).toFixed(4) : '—'}</td>
               <td>\${s.convictionScore != null ? s.convictionScore : '—'}</td>
               <td>\${s.riskScore != null ? s.riskScore : '—'}</td>
