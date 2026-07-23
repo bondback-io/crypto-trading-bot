@@ -1063,6 +1063,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="filters-row mb-3">
           <label class="ctl-check" title="Bias results toward Pump.fun / early-curve traders"><input type="checkbox" id="discover-pump" /> Pump.fun focus</label>
           <label class="ctl-check" title="Sort high 7d trade-count wallets first"><input type="checkbox" id="discover-scalpers" checked /> Prefer scalpers</label>
+          <label class="ctl-check" title="Hide wallets with more than 1000 trades in 7d or 30d (noise / bots)"><input type="checkbox" id="discover-exclude-hf" checked /> Exclude high-freq (&gt;1000 trades 7d/30d)</label>
           <button class="btn btn-primary" onclick="discoverWallets(false)" title="Run discovery (may use cache)">Discover</button>
           <button class="btn btn-secondary" onclick="discoverWallets(true)" title="Bypass cache and re-fetch all sources">Force refresh</button>
           <button class="btn btn-secondary" onclick="importDiscoveredAll()" title="Add every new (untracked) candidate to Tracked Smart Wallets">Import all new</button>
@@ -4107,6 +4108,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (box) box.style.opacity = source === 'manual' ? '1' : '0.95';
     }
 
+    const HIGH_FREQ_TRADE_LIMIT = 1000;
+
+    function walletTradeCounts(w) {
+      const trades7d = w.tradesLast7d != null
+        ? w.tradesLast7d
+        : (w.metrics && w.metrics.trades7d != null ? w.metrics.trades7d : null);
+      const trades30d = w.tradesLast30d != null
+        ? w.tradesLast30d
+        : (w.metrics && w.metrics.trades30d != null ? w.metrics.trades30d : null);
+      return { trades7d, trades30d };
+    }
+
+    function isHighFrequencyWallet(w) {
+      const { trades7d, trades30d } = walletTradeCounts(w);
+      return (trades7d != null && trades7d > HIGH_FREQ_TRADE_LIMIT)
+        || (trades30d != null && trades30d > HIGH_FREQ_TRADE_LIMIT);
+    }
+
+    function excludeHighFrequencyEnabled() {
+      return !!(document.getElementById('discover-exclude-hf') || {}).checked;
+    }
+
+    function filterHighFrequencyWallets(rows) {
+      if (!excludeHighFrequencyEnabled() || !rows || !rows.length) return rows || [];
+      return rows.filter(w => !isHighFrequencyWallet(w));
+    }
+
     function fmtLastTrade(ts) {
       if (!ts) return '—';
       const s = Math.max(0, (Date.now() - Number(ts)) / 1000);
@@ -4160,6 +4188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           });
         }
         let rows = data.wallets || [];
+        rows = filterHighFrequencyWallets(rows);
         if (preferScalpers) {
           rows = rows.slice().sort((a, b) => {
             const aS = (a.tradesLast7d || a.tradeCount || 0) >= 20 ? 1 : 0;
@@ -4262,7 +4291,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             body: JSON.stringify({ source: 'manual', limit, force: true }),
             timeoutMs: 15000,
           });
-          const rows = fallback.wallets || [];
+          const rows = filterHighFrequencyWallets(fallback.wallets || []);
           window._discoveredWallets = rows;
           window._topWallets = rows.map(w => ({
             name: w.name,
@@ -4477,12 +4506,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function renderSearchResults(data) {
       const status = document.getElementById('search-status');
-      status.textContent = data.message || (data.source + ' · ' + (data.candidates || []).length);
       if (data.gmgn) updateDiscoveryUi(data.gmgn);
-      window._searchCandidates = data.candidates || [];
-      window._suggestedScalpers = data.suggestedScalpers || [];
+      const rows = filterHighFrequencyWallets(data.candidates || []);
+      const sug = filterHighFrequencyWallets(data.suggestedScalpers || []);
+      window._searchCandidates = rows;
+      window._suggestedScalpers = sug;
+      status.textContent = data.message || (data.source + ' · ' + rows.length);
       const tbody = document.querySelector('#search-wallets-table tbody');
-      const rows = data.candidates || [];
       tbody.innerHTML = rows.length === 0
         ? '<tr><td colspan="8" style="color:var(--muted)">No matches</td></tr>'
         : rows.map(w => \`
@@ -4500,7 +4530,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             }</td>
           </tr>\`).join('');
 
-      const sug = data.suggestedScalpers || [];
       const box = document.getElementById('scalper-suggestions');
       const chips = document.getElementById('scalper-chips');
       if (sug.length) {
