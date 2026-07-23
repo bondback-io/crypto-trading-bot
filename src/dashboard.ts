@@ -106,7 +106,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .field label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
     .field .val { color: #60a5fa; font-weight: 600; }
     .field input[type=range] { width: 100%; }
-    .chart-wrap { position: relative; height: 220px; width: 100%; }
+    .chart-wrap { position: relative; height: 220px; width: 100%; max-width: 100%; min-width: 0; }
+    .chart-wrap canvas { max-width: 100% !important; }
     .chart-empty { color: #64748b; font-size: 13px; padding: 32px 0; text-align: center; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #1e293b; vertical-align: middle; }
@@ -395,7 +396,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       bottom: calc(100% + 8px);
       transform: translateX(-50%);
       width: max-content;
-      max-width: min(280px, 70vw);
+      max-width: min(280px, 70%);
       padding: 8px 10px;
       border-radius: 8px;
       background: #0f172a;
@@ -517,9 +518,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     html {
       -webkit-text-size-adjust: 100%;
       height: 100%;
+      max-width: 100%;
+      overflow-x: clip;
     }
     body {
-      overflow-x: hidden;
+      overflow-x: clip;
+      max-width: 100%;
       min-height: 100%;
       min-height: 100dvh;
     }
@@ -536,15 +540,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .page-shell {
       width: 100%;
-      max-width: 80rem;
+      max-width: min(80rem, 100%);
       margin-left: auto;
       margin-right: auto;
       padding: 1rem 1rem 2.5rem;
       min-width: 0;
+      overflow-x: clip;
+      box-sizing: border-box;
     }
     [data-tab-panel] {
+      display: block;
+      width: 100%;
       min-width: 0;
       max-width: 100%;
+      overflow-x: clip;
+      box-sizing: border-box;
+    }
+    [data-tab-panel].hidden {
+      display: none !important;
     }
     .panel-scroll {
       overflow-y: auto;
@@ -552,10 +565,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       -webkit-overflow-scrolling: touch;
       overscroll-behavior: contain;
       max-width: 100%;
+      min-width: 0;
     }
     .panel-scroll.overflow-x-auto,
     .overflow-x-auto.panel-scroll {
       overflow-x: auto;
+    }
+    .log-entry {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      max-width: 100%;
+    }
+    #activity .mint,
+    #trades-activity .mint,
+    #activity-signals .mint {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .header-bar {
       display: grid;
@@ -627,7 +653,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       top: calc(100% + 0.4rem);
       min-width: 10.5rem;
       width: max-content;
-      max-width: min(16rem, calc(100vw - 1.5rem));
+      max-width: min(16rem, calc(100% - 1.5rem));
       padding: 0.3rem;
       background: #0f172a;
       border: 1px solid #334155;
@@ -728,6 +754,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-x: contain;
       max-width: 100%;
+      min-width: 0;
+      width: 100%;
     }
     .overflow-x-auto table {
       min-width: 36rem;
@@ -859,7 +887,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .tip::after {
         left: 0;
         transform: none;
-        max-width: min(260px, calc(100vw - 2rem));
+        max-width: min(260px, calc(100% - 2rem));
       }
       th, td { padding: 7px 5px; font-size: 12px; }
       .persist-banner { font-size: 12px; padding: 0.65rem 0.75rem; }
@@ -936,12 +964,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       * { transition: none !important; scroll-behavior: auto !important; }
     }
 
-    /* Safe area (notched phones) */
+    /* Safe area (notched phones) — additive, must not wipe media-query side padding */
     @supports (padding: max(0px)) {
-      .page-shell {
-        padding-left: max(0.75rem, env(safe-area-inset-left));
-        padding-right: max(0.75rem, env(safe-area-inset-right));
-        padding-bottom: max(2rem, env(safe-area-inset-bottom));
+      @media (max-width: 639px) {
+        .page-shell {
+          padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+          padding-right: max(0.65rem, env(safe-area-inset-right, 0px));
+          padding-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+        }
+      }
+      @media (min-width: 640px) and (max-width: 1023px) {
+        .page-shell {
+          padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+          padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+        }
+      }
+      @media (min-width: 1024px) {
+        .page-shell {
+          padding-left: max(2rem, env(safe-area-inset-left, 0px));
+          padding-right: max(2rem, env(safe-area-inset-right, 0px));
+        }
+      }
+      @media (min-width: 1400px) {
+        .page-shell {
+          padding-left: max(2.5rem, env(safe-area-inset-left, 0px));
+          padding-right: max(2.5rem, env(safe-area-inset-right, 0px));
+        }
       }
       .nav-tabs { top: env(safe-area-inset-top, 0px); }
     }

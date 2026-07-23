@@ -418,6 +418,11 @@ async function fetchOnChainHolderMetrics(
 
   void decimals;
 
+  // Best-effort holder estimate from largest-accounts sample size when GMGN
+  // hasn't provided a real count (null stays null — never invent a floor).
+  const holderEstimate =
+    topHolders.length >= 10 ? null : topHolders.length > 0 ? topHolders.length : null;
+
   return {
     supplyUi,
     mintAuthority,
@@ -425,7 +430,7 @@ async function fetchOnChainHolderMetrics(
     topHolders,
     topHolderPct,
     top10HoldPct,
-    holderCountEstimate: topHolders.length > 0 ? null : null,
+    holderCountEstimate: holderEstimate,
     devWallet,
     devHoldPct,
     source: 'rpc',
@@ -506,14 +511,15 @@ export function evaluateTokenMetricsFilters(
   const reasons: string[] = [];
 
   const minLiq = effectiveMinLiquidityUsd();
-  const liq = metrics.liquidityUsd ?? 0;
-  if (liq < minLiq) {
+  const liq = metrics.liquidityUsd;
+  // Unknown liquidity must not fail-closed as $0
+  if (liq != null && liq < minLiq) {
     reasons.push(`liquidity $${liq.toFixed(0)} < min $${minLiq}`);
   }
 
   const minVol = effectiveMinVolume24hUsd();
-  const vol = metrics.volume24hUsd ?? 0;
-  if (metrics.volume24hUsd != null && vol < minVol) {
+  const vol = metrics.volume24hUsd;
+  if (vol != null && vol < minVol) {
     reasons.push(`volume24h $${vol.toFixed(0)} < min $${minVol}`);
   }
 

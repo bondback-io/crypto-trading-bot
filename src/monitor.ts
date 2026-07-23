@@ -72,6 +72,7 @@ import {
 import {
   fetchTokenMetrics,
   summarizeTokenMetrics,
+  clearTokenMetricsCache,
 } from './tokenMetrics';
 import {
   evaluateAntiRug,
@@ -1489,10 +1490,43 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   try {
     const metrics = await fetchTokenMetrics(buy.mint);
     buy.metrics = summarizeTokenMetrics(metrics);
-    const report = await evaluateAntiRug(buy.mint);
+    const report = await evaluateAntiRug(buy.mint, {
+      earlyEntry: Boolean(buy.isPumpFun && !isMigration),
+      isMigrated: isMigration,
+    });
     buy.antiRug = summarizeAntiRug(report);
     if (report.sniper) buy.sniper = report.sniper;
     if (report.birdeye) buy.birdeye = report.birdeye;
+    // Prefer Birdeye holders/liq on the feed row when Dex left them null
+    if (buy.metrics && report.checks) {
+      if (
+        buy.metrics.holderCountEstimate == null &&
+        report.checks.holderCount != null
+      ) {
+        buy.metrics.holderCountEstimate = report.checks.holderCount;
+      }
+      if (
+        (buy.metrics.liquidityUsd == null || buy.metrics.liquidityUsd <= 0) &&
+        report.checks.liquidityUsd != null
+      ) {
+        buy.metrics.liquidityUsd = report.checks.liquidityUsd;
+      }
+      if (
+        buy.metrics.volume24hUsd == null &&
+        report.checks.volume24hUsd != null
+      ) {
+        buy.metrics.volume24hUsd = report.checks.volume24hUsd;
+      }
+      if (
+        buy.metrics.top10HoldPct == null &&
+        report.checks.top10HoldPct != null
+      ) {
+        buy.metrics.top10HoldPct = report.checks.top10HoldPct;
+      }
+      if (buy.metrics.devHoldPct == null && report.checks.devHoldPct != null) {
+        buy.metrics.devHoldPct = report.checks.devHoldPct;
+      }
+    }
   } catch {
     // non-fatal
   }
@@ -1566,6 +1600,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     feedEvent.symbol = buy.symbol;
     feedEvent.name = buy.name;
   }
+
+  // Dex/Birdeye often lag on brand-new mints — refresh feed metrics shortly
+  scheduleSignalMetricsRefresh(buy.mint, buy.signature);
 
   // Feed re-buy confirmation if we're watching this mint after a profit sell
   if (config.strategy.reBuyEnabled && isReBuyWatching(buy.mint)) {
@@ -1821,6 +1858,25 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           `${signal.bondingCurve?.progressPct?.toFixed(1) ?? '?'}% on ${label}`
       );
     }
+    if (!signal) {
+      // Form a single-wallet candidate (same as Pump path) so Medium can open
+      // when selective/conviction allows — never hang forever on waiting 1/N.
+      signal = {
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        wallets: [buy.wallet],
+        walletNames: [buy.walletName],
+        isMigration,
+        timestamp: Date.now(),
+        bondingCurve: buy.bondingCurve,
+        birdeye: buy.birdeye,
+      };
+      console.log(
+        `[monitor] 📡 Single-wallet candidate ${buy.walletName} on ${label}` +
+          ` (convergence ${config.filters.convergenceRequired ?? 2}+ optional)`
+      );
+    }
   } else {
     signal = {
       mint: buy.mint,
@@ -1836,22 +1892,6 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   }
 
   if (!signal) {
-    // Non-Pump buys wait for N-wallet convergence — surface why Signals stay empty.
-    if (config.strategy.enableConvergence && !buy.isPumpFun) {
-      const needed = config.filters.convergenceRequired ?? 2;
-      const seen = recentBuys.get(buy.mint)?.length ?? 1;
-      if (seen < needed) {
-        const waitReason = `waiting convergence ${seen}/${needed}`;
-        console.log(
-          `[monitor] Waiting for convergence on ${label}: ${seen}/${needed} wallets` +
-            ` (non-Pump buy from ${buy.walletName})`
-        );
-        annotateActivityFeed(buy.mint, buy.signature, {
-          tradeStatus: 'waiting',
-          skipReason: waitReason,
-        });
-      }
-    }
     return;
   }
 
@@ -2249,6 +2289,83 @@ function annotateActivityFeedByMint(
     Object.assign(ev, patch);
     patched += 1;
     if (patched >= 3) break;
+  }
+}
+
+const metricsRefreshScheduled = new Set<string>();
+
+/**
+ * Re-fetch Dex/Birdeye metrics after a short delay so Recent Signals rows
+ * painted with `?` get real liq/holders once indexers catch up.
+ */
+function scheduleSignalMetricsRefresh(mint: string, signature: string): void {
+  const key = `${mint}:${signature}`;
+  if (metricsRefreshScheduled.has(key)) return;
+  metricsRefreshScheduled.add(key);
+  const delayMs = 12_000;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        clearTokenMetricsCache(mint);
+        const metrics = await fetchTokenMetrics(mint, { force: true });
+        const summary = summarizeTokenMetrics(metrics);
+        let overviewHolders: number | null = null;
+        let overviewLiq: number | null = null;
+        let overviewVol: number | null = null;
+        try {
+          const overview = await getTokenOverview(mint);
+          overviewHolders = overview.holder;
+          overviewLiq = overview.liquidityUsd;
+          overviewVol = overview.volume24hUsd;
+        } catch {
+          /* non-fatal */
+        }
+        if (summary.holderCountEstimate == null && overviewHolders != null) {
+          summary.holderCountEstimate = overviewHolders;
+        }
+        if (
+          (summary.liquidityUsd == null || summary.liquidityUsd <= 0) &&
+          overviewLiq != null
+        ) {
+          summary.liquidityUsd = overviewLiq;
+        }
+        if (summary.volume24hUsd == null && overviewVol != null) {
+          summary.volume24hUsd = overviewVol;
+        }
+        const hasData =
+          summary.liquidityUsd != null ||
+          summary.volume24hUsd != null ||
+          summary.holderCountEstimate != null ||
+          summary.top10HoldPct != null ||
+          summary.devHoldPct != null;
+        if (!hasData) return;
+        annotateActivityFeed(mint, signature, { metrics: summary });
+        // Also patch other recent rows for this mint
+        for (const ev of activityFeed) {
+          if (ev.mint !== mint) continue;
+          if (!ev.metrics || ev.metrics.liquidityUsd == null) {
+            ev.metrics = { ...summary };
+          }
+        }
+      } catch {
+        /* non-fatal */
+      } finally {
+        metricsRefreshScheduled.delete(key);
+      }
+    })();
+  }, delayMs);
+}
+
+/** Resolve hung "waiting convergence" rows after the convergence window. */
+function expireStaleWaitingSignals(now = Date.now()): void {
+  const windowMs = config.convergenceWindowMs ?? 5 * 60 * 1000;
+  for (const ev of activityFeed) {
+    if (ev.tradeStatus !== 'waiting') continue;
+    if (!ev.skipReason || !/waiting convergence/i.test(ev.skipReason)) continue;
+    const age = now - (ev.detectedAt ?? ev.timestamp);
+    if (age < windowMs) continue;
+    ev.tradeStatus = 'skipped';
+    ev.skipReason = (ev.skipReason || 'waiting convergence') + ' — timed out';
   }
 }
 
@@ -2723,6 +2840,7 @@ function pruneOldBuys(): void {
 
 export function getRecentActivity(): WalletBuyEvent[] {
   pruneActivityFeed();
+  expireStaleWaitingSignals();
   if (activityFeed.length > 0) {
     return activityFeed.slice(0, 80);
   }

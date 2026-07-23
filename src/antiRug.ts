@@ -438,38 +438,8 @@ async function runAntiRugChecks(
   const earlyEntry = Boolean(ctx.earlyEntry || earlyFromCurve);
   const floorCtx = { earlyEntry, isMigrated };
 
-  // --- Non-bypassable dead-token floors (volume / liq / holders / curve) ---
-  const hard = evaluateDeadTokenHardFloors(
-    {
-      liquidityUsd: checks.liquidityUsd,
-      volume24hUsd: checks.volume24hUsd,
-      volumeH1Usd: checks.volumeH1Usd,
-      volumeM5Usd: metrics.volumeM5Usd,
-      recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
-      buysH1: metrics.buysH1,
-      sellsH1: metrics.sellsH1,
-      txnsH1: checks.txnsH1,
-      holderCount: checks.holderCount,
-      buySellRatio: null,
-      priceChangeH1Pct: metrics.priceChangeH1Pct,
-      priceChange24hPct: metrics.priceChange24hPct,
-      bondingCurveProgressPct: checks.bondingCurveProgressPct,
-      isMigrated,
-      curveHealth,
-    },
-    floorCtx
-  );
-  score += hard.scorePenalty;
-  for (const f of hard.flags) {
-    flags.push({
-      id: f.id,
-      severity: f.severity,
-      label: f.label,
-      detail: f.detail,
-    });
-  }
-  hardSkipReasons.push(...hard.skipReasons);
-  skipReasons.push(...hard.skipReasons);
+  // Dead-token hard floors run once AFTER Birdeye enrichment below so missing
+  // Dex metrics are not fail-closed as "Dead liquidity" / $0 volume.
 
   // Dev holdings
   if (maxDev > 0 && metrics.devHoldPct != null) {
@@ -851,47 +821,7 @@ async function runAntiRugChecks(
         checks.holderCount = overview.holder;
       }
 
-      // Re-evaluate hard floors with Birdeye-enriched liquidity / volume / holders
-      const hard2 = evaluateDeadTokenHardFloors(
-        {
-          liquidityUsd: checks.liquidityUsd,
-          volume24hUsd: checks.volume24hUsd,
-          volumeH1Usd: checks.volumeH1Usd,
-          volumeM5Usd: metrics.volumeM5Usd,
-          recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
-          buysH1: metrics.buysH1,
-          sellsH1: metrics.sellsH1,
-          txnsH1: checks.txnsH1,
-          holderCount: checks.holderCount,
-          buySellRatio: checks.birdeyeBuySellRatio,
-          priceChangeH1Pct: metrics.priceChangeH1Pct,
-          priceChange24hPct:
-            overview.priceChange24hPct ?? metrics.priceChange24hPct,
-          bondingCurveProgressPct: checks.bondingCurveProgressPct,
-          isMigrated,
-          curveHealth,
-        },
-        floorCtx
-      );
-      for (const reason of hard2.skipReasons) {
-        if (!skipReasons.includes(reason)) {
-          skipReasons.push(reason);
-          hardSkipReasons.push(reason);
-        }
-      }
-      for (const f of hard2.flags) {
-        if (!flags.some((x) => x.id === f.id)) {
-          flags.push({
-            id: f.id,
-            severity: f.severity,
-            label: f.label,
-            detail: f.detail,
-          });
-          score += Math.min(12, Math.round(hard2.scorePenalty / 4));
-        }
-      }
-
-      // Soft sell-pressure / thin-liq signals (score only — floors already hard-gated)
+      // Soft sell-pressure / thin-liq signals (score only — floors applied after enrichment)
       if (
         overview.liquidityUsd != null &&
         overview.liquidityUsd > 0 &&
@@ -993,6 +923,39 @@ async function runAntiRugChecks(
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // --- Non-bypassable dead-token floors (after Dex + Birdeye merge) ---
+  const hard = evaluateDeadTokenHardFloors(
+    {
+      liquidityUsd: checks.liquidityUsd,
+      volume24hUsd: checks.volume24hUsd,
+      volumeH1Usd: checks.volumeH1Usd,
+      volumeM5Usd: metrics.volumeM5Usd,
+      recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
+      buysH1: metrics.buysH1,
+      sellsH1: metrics.sellsH1,
+      txnsH1: checks.txnsH1,
+      holderCount: checks.holderCount,
+      buySellRatio: checks.birdeyeBuySellRatio,
+      priceChangeH1Pct: metrics.priceChangeH1Pct,
+      priceChange24hPct: metrics.priceChange24hPct,
+      bondingCurveProgressPct: checks.bondingCurveProgressPct,
+      isMigrated,
+      curveHealth,
+    },
+    floorCtx
+  );
+  score += hard.scorePenalty;
+  for (const f of hard.flags) {
+    flags.push({
+      id: f.id,
+      severity: f.severity,
+      label: f.label,
+      detail: f.detail,
+    });
+  }
+  hardSkipReasons.push(...hard.skipReasons);
+  skipReasons.push(...hard.skipReasons);
 
   score = Math.min(100, Math.max(0, Math.round(score)));
 

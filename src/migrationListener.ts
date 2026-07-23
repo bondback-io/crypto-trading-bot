@@ -85,6 +85,9 @@ const WS_STALE_MS = 4 * 60 * 1000;
 const HEALTH_CHECK_MS = 45_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 
+/** Programs whose signature cursors have been seeded (no historical replay) */
+const seededPollPrograms = new Set<string>();
+
 /** Default SOL moved in migrate tx to count as volume spike */
 const DEFAULT_VOLUME_SPIKE_SOL = 40;
 
@@ -104,6 +107,7 @@ export function startMigrationListener(): void {
   if (running) return;
   running = true;
   reconnectAttempts = 0;
+  seededPollPrograms.clear();
 
   console.log('[migration] ═══════════════════════════════════════');
   console.log('[migration] Starting real-time migration listener');
@@ -420,23 +424,35 @@ async function pollMigrations(): Promise<void> {
     for (const target of targets) {
       const signatures = await conn.getSignaturesForAddress(
         new PublicKey(target.id),
-        { limit: 10 }
+        { limit: 15 }
       );
       if (signatures.length === 0) continue;
+
+      // First sight: seed cursor only — never replay historical program txs
+      // as migrations (same pattern as wallet poll in v1.1.26).
+      if (!seededPollPrograms.has(target.id)) {
+        for (const sig of signatures) {
+          rememberSig(sig.signature);
+        }
+        seededPollPrograms.add(target.id);
+        lastMigrationSig = signatures[0].signature;
+        console.log(
+          `[migration] Seeded poll cursor for ${target.label} ` +
+            `(${signatures.length} sigs) — watching for new migrations only`
+        );
+        continue;
+      }
 
       const newSigs: string[] = [];
       for (const sig of signatures) {
         if (processedSigs.has(sig.signature)) continue;
-        // Cheap pre-filter for pump.fun poll — only recent
         newSigs.push(sig.signature);
       }
 
       if (newSigs.length === 0) continue;
-      if (!lastMigrationSig) {
-        lastMigrationSig = signatures[0].signature;
-      }
 
-      for (const sig of newSigs.slice(0, 3).reverse()) {
+      // Newest first for latency; cap so public RPCs stay healthy
+      for (const sig of newSigs.slice(0, 5)) {
         await processMigrationTx(sig, 'poll', target.label);
       }
     }
@@ -453,7 +469,6 @@ async function processMigrationTx(
   programHint: MigrationEvent['program']
 ): Promise<void> {
   if (processedSigs.has(signature)) return;
-  rememberSig(signature);
 
   try {
     const conn = getConnection();
@@ -461,17 +476,46 @@ async function processMigrationTx(
       maxSupportedTransactionVersion: 0,
     });
 
-    if (!tx?.meta || tx.meta.err) return;
+    if (!tx?.meta || tx.meta.err) {
+      // Confirmed miss / failed tx — don't retry forever
+      rememberSig(signature);
+      return;
+    }
+
+    const logText = (tx.meta.logMessages ?? []).join('\n').toLowerCase();
+    // Cheap reject before mint extraction — pump.fun program is extremely busy
+    if (
+      programHint === 'pumpfun' &&
+      !looksLikeMigrationLogs(logText, 'pumpfun') &&
+      !logText.includes('pumpswap') &&
+      !accountKeysInclude(tx, config.pumpSwapProgramId) &&
+      !accountKeysInclude(tx, RAYDIUM_AMM_V4)
+    ) {
+      rememberSig(signature);
+      return;
+    }
 
     const parsed = parseMigrationTransaction(tx, signature, source, programHint);
+    rememberSig(signature);
     for (const event of parsed) {
       await recordAndEmit(event);
     }
   } catch (err) {
+    // Leave sig unmarked so a transient RPC miss can retry next poll
     if (Math.random() < 0.08) {
       console.warn('[migration] Tx parse failed:', err);
     }
   }
+}
+
+function accountKeysInclude(
+  tx: ParsedTransactionWithMeta,
+  programId: string
+): boolean {
+  return tx.transaction.message.accountKeys.some((k) => {
+    const key = typeof k === 'string' ? k : k.pubkey.toBase58();
+    return key === programId;
+  });
 }
 
 function estimateVolumeSol(tx: ParsedTransactionWithMeta): number {
@@ -559,13 +603,23 @@ function parseMigrationTransaction(
     config.strategy.migrationVolumeSpikeSol ?? DEFAULT_VOLUME_SPIKE_SOL;
   const volumeSpike = volumeSol >= spikeThreshold;
 
-  // Migration gate: Pump.fun present, or PumpSwap+Raydium, or large PumpSwap pool create
+  const logText = (tx.meta?.logMessages ?? []).join('\n').toLowerCase();
+  const migrateLog =
+    logText.includes('migrat') ||
+    logText.includes('graduation') ||
+    logText.includes('complete') ||
+    logText.includes('withdraw') ||
+    logText.includes('create_pool') ||
+    logText.includes('initialize2');
+
+  // Migration gate: require migrate evidence — Pump.fun alone is NOT enough
+  // (program is flooded with curve buys that must not be tracked as migrations).
   const isLikelyMigrate =
-    involvesPumpFun ||
+    (involvesPumpFun && migrateLog) ||
+    (involvesPumpFun && involvesPumpSwap) ||
     (involvesPumpSwap && involvesRaydium) ||
-    (involvesPumpSwap && involvesPumpFun) ||
-    (involvesPumpSwap && volumeSpike && mints.length <= 2) ||
-    (involvesPumpFun && involvesRaydium);
+    (involvesPumpFun && involvesRaydium) ||
+    (involvesPumpSwap && volumeSpike && mints.length <= 2 && migrateLog);
 
   if (!isLikelyMigrate) {
     return [];

@@ -152,13 +152,23 @@ export function evaluateDeadTokenHardFloors(
     (buyVol != null && buyVol < minRecentBuy);
 
   const liq = snap.liquidityUsd;
-  if (liq == null || liq < minLiq) {
-    const shown = liq == null ? 0 : liq;
-    // Early path: unknown/thin liq is a soft penalty when recent flow is healthy
+  if (liq == null) {
+    // Unknown liquidity ≠ dead pool. Dex/Birdeye often lag on fresh mints.
+    // Soft penalty only — never hard-kill on missing data.
+    scorePenalty += earlyPath ? 6 : 12;
+    flags.push({
+      id: 'unknown_liquidity',
+      severity: earlyPath ? 'medium' : 'high',
+      label: 'Liquidity unknown',
+      detail: 'metrics not indexed yet',
+    });
+  } else if (liq < minLiq) {
+    const shown = liq;
+    // Early path: thin liq is a soft penalty when recent flow is healthy
     // (Dex often lags on brand-new pump mints). Still reject near-zero dead pools.
     const nearZero =
       shown <= HARD_FILTER_FLOORS.earlyMinLiquidityUsd * 0.2;
-    if (earlyPath && recentHealthy && !nearZero && shown < minLiq) {
+    if (earlyPath && recentHealthy && !nearZero) {
       scorePenalty += 10;
       flags.push({
         id: 'early_thin_liquidity',
@@ -191,8 +201,17 @@ export function evaluateDeadTokenHardFloors(
     ((vol24 != null && vol24 >= HARD_FILTER_FLOORS.earlyMinVolume24hUsd) ||
       recentHealthy);
 
-  if (!vol24Ok && !vol24EarlyOk) {
-    const shown = vol24 == null ? 0 : vol24;
+  if (vol24 == null && !vol24EarlyOk) {
+    // Unknown 24h volume — soft only (indexing lag). Do not paint as $0 dead.
+    scorePenalty += earlyPath ? 8 : 14;
+    flags.push({
+      id: 'unknown_volume_24h',
+      severity: 'medium',
+      label: '24h volume unknown',
+      detail: `need ≥ $${minVol24}`,
+    });
+  } else if (!vol24Ok && !vol24EarlyOk) {
+    const shown = vol24 as number;
     const nearZeroVol = shown < 100 && !recentHealthy;
     // Early/migration with non-dead pool: soft-penalty missing 24h (indexing lag)
     // instead of hard-blocking the buy. Near-zero + no recent flow still hard-fails.
