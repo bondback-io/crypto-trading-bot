@@ -177,6 +177,16 @@ function emptyChecks(): AntiRugChecks {
   };
 }
 
+function antiRugCacheKey(
+  mint: string,
+  opts: { earlyEntry?: boolean; isMigrated?: boolean } = {}
+): string {
+  if (opts.earlyEntry || opts.isMigrated) {
+    return `${mint}|e=${opts.earlyEntry ? 1 : 0}|m=${opts.isMigrated ? 1 : 0}`;
+  }
+  return mint;
+}
+
 export function getCachedAntiRug(mint: string): AntiRugReport | null {
   const hit = cache.get(mint);
   if (!hit) return null;
@@ -254,9 +264,18 @@ export function summarizeAntiRug(report: AntiRugReport): {
  * Full anti-rug evaluation. Cached + inflight-deduped.
  * When enableAntiRug is false, still returns a soft report (ok=true) for UI.
  */
+export interface AntiRugEvalOptions {
+  force?: boolean;
+  soft?: boolean;
+  /** Early pump / near-migration / bonding-curve smart-money entry */
+  earlyEntry?: boolean;
+  /** Migration / graduated token */
+  isMigrated?: boolean;
+}
+
 export async function evaluateAntiRug(
   mint: string,
-  options: { force?: boolean; soft?: boolean } = {}
+  options: AntiRugEvalOptions = {}
 ): Promise<AntiRugReport> {
   if (!isValidMint(mint)) {
     return {
@@ -281,16 +300,27 @@ export async function evaluateAntiRug(
   }
 
   if (!options.force) {
-    const cached = getCachedAntiRug(mint);
-    if (cached) return cached;
-    const pending = inflight.get(mint);
+    const key = antiRugCacheKey(mint, options);
+    const hit = cache.get(key);
+    if (hit) {
+      if (hit.expiresAt < Date.now()) {
+        cache.delete(key);
+      } else {
+        return { ...hit.report, fromCache: true };
+      }
+    }
+    const pending = inflight.get(key);
     if (pending) return pending;
   }
 
+  const cacheKey = antiRugCacheKey(mint, options);
   const job = (async () => {
     try {
-      const report = await runAntiRugChecks(mint);
-      cache.set(mint, {
+      const report = await runAntiRugChecks(mint, {
+        earlyEntry: options.earlyEntry,
+        isMigrated: options.isMigrated,
+      });
+      cache.set(cacheKey, {
         report: { ...report, fromCache: false },
         expiresAt: Date.now() + cacheTtlMs(),
       });
@@ -317,21 +347,24 @@ export async function evaluateAntiRug(
         sources: [],
         error: message,
       };
-      cache.set(mint, {
+      cache.set(cacheKey, {
         report: fail,
         expiresAt: Date.now() + Math.min(cacheTtlMs(), 30_000),
       });
       return fail;
     } finally {
-      inflight.delete(mint);
+      inflight.delete(cacheKey);
     }
   })();
 
-  inflight.set(mint, job);
+  inflight.set(cacheKey, job);
   return job;
 }
 
-async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
+async function runAntiRugChecks(
+  mint: string,
+  ctx: { earlyEntry?: boolean; isMigrated?: boolean } = {}
+): Promise<AntiRugReport> {
   const filters = config.filters;
   const enabled = filters.enableAntiRug !== false;
   const flags: AntiRugFlag[] = [];
@@ -374,11 +407,13 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
 
   // --- Bonding curve health (cached) ---
   let curveHealth: BondingCurveHealth | null = null;
+  let curveComplete = false;
   try {
     const curve = await fetchBondingCurve(mint);
     if (curve.source !== 'none') {
       sources.push('bonding-curve');
       checks.bondingCurveProgressPct = curve.progressPct;
+      curveComplete = Boolean(curve.complete);
       curveHealth = assessBondingCurveHealth(curve, {
         volumeH1Usd: metrics.volumeH1Usd,
         txnsH1: metrics.txnsH1,
@@ -393,23 +428,36 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
     });
   }
 
+  const isMigrated = Boolean(ctx.isMigrated || curveComplete);
+  const earlyFromCurve =
+    !isMigrated &&
+    curveHealth != null &&
+    checks.bondingCurveProgressPct != null &&
+    checks.bondingCurveProgressPct < 99;
+  const earlyEntry = Boolean(ctx.earlyEntry || earlyFromCurve);
+  const floorCtx = { earlyEntry, isMigrated };
+
   // --- Non-bypassable dead-token floors (volume / liq / holders / curve) ---
-  const hard = evaluateDeadTokenHardFloors({
-    liquidityUsd: checks.liquidityUsd,
-    volume24hUsd: checks.volume24hUsd,
-    volumeH1Usd: checks.volumeH1Usd,
-    volumeM5Usd: metrics.volumeM5Usd,
-    recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
-    buysH1: metrics.buysH1,
-    sellsH1: metrics.sellsH1,
-    txnsH1: checks.txnsH1,
-    holderCount: checks.holderCount,
-    buySellRatio: null,
-    priceChangeH1Pct: metrics.priceChangeH1Pct,
-    priceChange24hPct: metrics.priceChange24hPct,
-    bondingCurveProgressPct: checks.bondingCurveProgressPct,
-    curveHealth,
-  });
+  const hard = evaluateDeadTokenHardFloors(
+    {
+      liquidityUsd: checks.liquidityUsd,
+      volume24hUsd: checks.volume24hUsd,
+      volumeH1Usd: checks.volumeH1Usd,
+      volumeM5Usd: metrics.volumeM5Usd,
+      recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
+      buysH1: metrics.buysH1,
+      sellsH1: metrics.sellsH1,
+      txnsH1: checks.txnsH1,
+      holderCount: checks.holderCount,
+      buySellRatio: null,
+      priceChangeH1Pct: metrics.priceChangeH1Pct,
+      priceChange24hPct: metrics.priceChange24hPct,
+      bondingCurveProgressPct: checks.bondingCurveProgressPct,
+      isMigrated,
+      curveHealth,
+    },
+    floorCtx
+  );
   score += hard.scorePenalty;
   for (const f of hard.flags) {
     flags.push({
@@ -785,23 +833,27 @@ async function runAntiRugChecks(mint: string): Promise<AntiRugReport> {
       }
 
       // Re-evaluate hard floors with Birdeye-enriched liquidity / volume / holders
-      const hard2 = evaluateDeadTokenHardFloors({
-        liquidityUsd: checks.liquidityUsd,
-        volume24hUsd: checks.volume24hUsd,
-        volumeH1Usd: checks.volumeH1Usd,
-        volumeM5Usd: metrics.volumeM5Usd,
-        recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
-        buysH1: metrics.buysH1,
-        sellsH1: metrics.sellsH1,
-        txnsH1: checks.txnsH1,
-        holderCount: checks.holderCount,
-        buySellRatio: checks.birdeyeBuySellRatio,
-        priceChangeH1Pct: metrics.priceChangeH1Pct,
-        priceChange24hPct:
-          overview.priceChange24hPct ?? metrics.priceChange24hPct,
-        bondingCurveProgressPct: checks.bondingCurveProgressPct,
-        curveHealth,
-      });
+      const hard2 = evaluateDeadTokenHardFloors(
+        {
+          liquidityUsd: checks.liquidityUsd,
+          volume24hUsd: checks.volume24hUsd,
+          volumeH1Usd: checks.volumeH1Usd,
+          volumeM5Usd: metrics.volumeM5Usd,
+          recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
+          buysH1: metrics.buysH1,
+          sellsH1: metrics.sellsH1,
+          txnsH1: checks.txnsH1,
+          holderCount: checks.holderCount,
+          buySellRatio: checks.birdeyeBuySellRatio,
+          priceChangeH1Pct: metrics.priceChangeH1Pct,
+          priceChange24hPct:
+            overview.priceChange24hPct ?? metrics.priceChange24hPct,
+          bondingCurveProgressPct: checks.bondingCurveProgressPct,
+          isMigrated,
+          curveHealth,
+        },
+        floorCtx
+      );
       for (const reason of hard2.skipReasons) {
         if (!skipReasons.includes(reason)) {
           skipReasons.push(reason);

@@ -11,7 +11,7 @@ import {
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets } from './config';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection } from './connection';
+import { getConnection, getRpcStats } from './connection';
 import { executeBuy, refreshPositionPrices } from './trade';
 import { paperTrader } from './paperTrader';
 import { refreshOpenMarketActivity } from './marketData';
@@ -2078,15 +2078,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   if (needsMetrics) {
     try {
       if (config.filters.enableAntiRug !== false) {
-        const report: AntiRugReport = await evaluateAntiRug(signal.mint);
+        const earlyEntry =
+          Boolean(signal.earlyBuy || signal.nearMigration) ||
+          Boolean(signal.bondingCurve && !signal.isMigration);
+        const report: AntiRugReport = await evaluateAntiRug(signal.mint, {
+          earlyEntry,
+          isMigrated: Boolean(signal.isMigration),
+        });
         signal.antiRug = summarizeAntiRug(report);
         signal.metrics = report.metricsSummary;
         if (report.sniper) signal.sniper = report.sniper;
         if (report.birdeye) signal.birdeye = report.birdeye;
         if (!report.ok) {
-          const softEarly =
-            Boolean(signal.earlyBuy || signal.nearMigration) ||
-            Boolean(signal.bondingCurve && !signal.isMigration);
+          const softEarly = earlyEntry || Boolean(signal.isMigration);
           const hardReasons = report.skipReasons.filter((reason) => {
             // Non-bypassable dead-token floors always block (all risk levels).
             if (isNonBypassableSkipReason(reason)) return true;
@@ -2305,6 +2309,55 @@ function getSignals24hCount(): number {
   return signals24hTimestamps.length;
 }
 
+function getLastSignalAt(): number | null {
+  pruneSignals24hCount();
+  if (signals24hTimestamps.length === 0) return null;
+  return signals24hTimestamps[signals24hTimestamps.length - 1] ?? null;
+}
+
+/** Recent wallet-buy signal activity window for Overview signal light (15m). */
+const SIGNAL_LIVE_WINDOW_MS = 15 * 60 * 1000;
+
+export function getSignalLightStatus(now = Date.now()): {
+  state: 'live' | 'quiet' | 'off';
+  label: string;
+  lastSignalAt: number | null;
+  signals24h: number;
+  ageMs: number | null;
+} {
+  const lastSignalAt = getLastSignalAt();
+  const signals24h = getSignals24hCount();
+  const ageMs = lastSignalAt != null ? now - lastSignalAt : null;
+  const rpc = getRpcStats();
+  const rpcHealthy = Boolean(rpc.ok);
+
+  if (!running || paused || !rpcHealthy || getWalletsForPolling().length === 0) {
+    return {
+      state: 'off',
+      label: 'Signals: off',
+      lastSignalAt,
+      signals24h,
+      ageMs,
+    };
+  }
+  if (ageMs != null && ageMs <= SIGNAL_LIVE_WINDOW_MS) {
+    return {
+      state: 'live',
+      label: 'Signals: LIVE',
+      lastSignalAt,
+      signals24h,
+      ageMs,
+    };
+  }
+  return {
+    state: 'quiet',
+    label: 'Signals: quiet',
+    lastSignalAt,
+    signals24h,
+    ageMs,
+  };
+}
+
 function pruneActivityFeed(): void {
   const cutoff = Date.now() - ACTIVITY_FEED_TTL_MS;
   while (
@@ -2394,6 +2447,8 @@ export function getMonitorStatus(): {
     isActive: boolean;
   }>;
   recentSignals: number;
+  lastSignalAt: number | null;
+  signalLight: ReturnType<typeof getSignalLightStatus>;
   dailyPnlSol: number;
   openPositions: number;
   migration: ReturnType<typeof getMigrationStatus>;
@@ -2417,6 +2472,7 @@ export function getMonitorStatus(): {
   const watching = getWalletsForPolling();
   const tracked = config.smartWallets.length;
   const enabled = config.smartWallets.filter((w) => w.enabled).length;
+  const signalLight = getSignalLightStatus();
 
   return {
     running,
@@ -2433,6 +2489,8 @@ export function getMonitorStatus(): {
       isActive: isWalletActive(w),
     })),
     recentSignals: getSignals24hCount(),
+    lastSignalAt: signalLight.lastSignalAt,
+    signalLight,
     dailyPnlSol: paperTrader.getDailyPnlSol(),
     openPositions: paperTrader.getOpenPositions().length,
     migration: getMigrationStatus(),

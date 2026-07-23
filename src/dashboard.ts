@@ -3857,6 +3857,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       document.getElementById('open-count').textContent = status.monitor.openPositions;
       document.getElementById('signals').textContent = status.monitor.recentSignals;
+      (function updateSignalLight() {
+        const light = status.monitor.signalLight || {};
+        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? 'off' : 'quiet');
+        const label = light.label || (state === 'live' ? 'Signals: LIVE' : state === 'off' ? 'Signals: off' : 'Signals: quiet');
+        const dot = document.getElementById('signal-light-dot');
+        const lab = document.getElementById('signal-light-label');
+        const wrap = document.getElementById('signal-light');
+        if (dot) {
+          dot.className = 'dot ' + (state === 'live' ? 'dot-live' : state === 'off' ? 'dot-off' : 'dot-quiet');
+        }
+        if (lab) lab.textContent = label;
+        if (wrap) {
+          const age = light.ageMs != null ? Math.round(light.ageMs / 60000) + 'm ago' : 'none yet';
+          wrap.title =
+            'Green = wallet-buy activity in last 15m (monitor running + wallets watched). ' +
+            'Amber = running but quiet. Red = stopped/paused, no wallets, or RPC unhealthy. ' +
+            'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
+        }
+      })();
       document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';
 
       const s = status.stats || {};

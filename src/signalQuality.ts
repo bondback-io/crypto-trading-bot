@@ -209,13 +209,16 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     reasons.push(`conviction ${score} < min ${minRequired}`);
   }
 
-  // Hard floors: volume/holders fail even on priority (antiRug also blocks)
+  // Hard floors: volume/holders fail on normal entries; priority (migration /
+  // early pump) relies on antiRug early-path floors instead of full 24h vol.
+  // Dead/stalled curve only hard-fails when requireHealthyCurve is on.
+  const requireHealthyCurve = config.bondingCurve?.requireHealthyCurve === true;
   const hardFail =
     !walletOk ||
-    (minVol > 0 && vol != null && vol < minVol) ||
-    (minHolders > 0 && holders != null && holders < minHolders) ||
-    curveHealth === 'dead' ||
-    curveHealth === 'stalled';
+    (!priority && minVol > 0 && vol != null && vol < minVol) ||
+    (!priority && minHolders > 0 && holders != null && holders < minHolders) ||
+    (requireHealthyCurve &&
+      (curveHealth === 'dead' || curveHealth === 'stalled'));
 
   return {
     pass: !hardFail && score >= minRequired,

@@ -564,7 +564,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
 export const HARD_FILTER_FLOORS = {
   /** Absolute min pool liquidity USD — High cannot go below */
   minLiquidityUsd: 5_000,
-  /** Absolute min 24h USD volume */
+  /** Absolute min 24h USD volume (mature / non-early entries) */
   minVolume24hUsd: 10_000,
   /** Absolute min DexScreener h1 total volume USD (15–60m proxy) */
   minRecentVolumeUsd: 800,
@@ -576,6 +576,15 @@ export const HARD_FILTER_FLOORS = {
   minRecentActivityTxns: 3,
   /** Holders at/below this + dead activity → hard reject */
   extremeLowHolders: 12,
+  /**
+   * Early pump / migration alternate path: use recent activity + these floors
+   * instead of full 24h volume (brand-new launches often have low 24h vol).
+   */
+  earlyMinLiquidityUsd: 1_500,
+  /** Soft 24h floor for early path when recent volume is missing */
+  earlyMinVolume24hUsd: 1_000,
+  /** Holder floor for early/migration when recent activity is healthy */
+  earlyMinHolders: 12,
   /** Curve progress at/below this counts as "very low" when volume is dead */
   deadBondingCurveMaxPct: 12,
   /** Buy/sell volume ratio below this = heavily negative net flow */
