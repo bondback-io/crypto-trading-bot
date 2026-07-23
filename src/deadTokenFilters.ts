@@ -77,6 +77,8 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('low bonding curve + dead') ||
     r.includes('top 10 holders too low') ||
     r.includes('top10 holders too low') ||
+    r.includes('top 10 holders unknown') ||
+    r.includes('top10 holders unknown') ||
     r.includes('insider % too high') ||
     r.includes('market cap too low') ||
     r.includes('market cap unknown') ||
@@ -589,8 +591,8 @@ export interface HolderConcentrationSnapshot {
 /**
  * Non-bypassable holder-dispersion / insider ceilings.
  * - Reject when top10 is present and below min (default 8%, hard ≥5%).
+ * - Fail closed when top10 is unknown after metrics fetch (mirror MC unknown gate).
  * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
- * Missing top10 on fresh pumps does not fail-open into a hard reject.
  */
 export function evaluateHolderConcentrationHardFloors(
   snap: HolderConcentrationSnapshot
@@ -615,6 +617,18 @@ export function evaluateHolderConcentrationHardFloors(
         `Skipped — top 10 holders too low (${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%)`
       );
     }
+  } else {
+    // Fail closed — never allow dispersed honeypots via missing top-10 data.
+    scorePenalty += 35;
+    flags.push({
+      id: 'hard_unknown_top10',
+      severity: 'critical',
+      label: 'Top-10 holders unknown',
+      detail: `need ≥ ${minTop10}%`,
+    });
+    skipReasons.push(
+      `Skipped — top 10 holders unknown (min ${minTop10}%)`
+    );
   }
 
   if (snap.insiderPct != null && Number.isFinite(snap.insiderPct)) {

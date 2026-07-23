@@ -1,7 +1,7 @@
 {
   "name": "solana-smart-money-copy-bot",
-  "version": "1.1.31",
-  "updatedAt": "2026-07-24T06:10:00.000Z",
+  "version": "1.1.32",
+  "updatedAt": "2026-07-24T06:25:00.000Z",
   "description": "Solana smart money copy trading bot for Pump.fun launches and migrations",
   "main": "dist/index.js",
   "scripts": {

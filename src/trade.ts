@@ -11,7 +11,10 @@ import {
 } from '@solana/web3.js';
 import { config, getActiveTradingWallet, effectiveMinMarketCapUsd } from './config';
 import { isDeniedCopyMint } from './deniedMints';
-import { evaluateBuyPumpFunOnlyGate } from './deadTokenFilters';
+import {
+  evaluateBuyPumpFunOnlyGate,
+  evaluateHolderConcentrationHardFloors,
+} from './deadTokenFilters';
 import {
   getKeypair,
   estimatePriorityFeeMicroLamports,
@@ -37,6 +40,7 @@ import {
   estimateBondingCurvePriceSol,
   estimateBondingCurveMarketCapUsd,
 } from './bondingCurve';
+import { resolveTop10HoldPctForEntry } from './tokenMetrics';
 
 const jupiter = createJupiterApiClient();
 
@@ -163,6 +167,11 @@ export interface BuyOptions {
    * Stored separately from our fill MC for wallet hover / analytics.
    */
   sourceEntryMcUsd?: number;
+  /**
+   * Jupiter-style top-10 holder % (bonding curve / LP excluded) from anti-rug.
+   * Re-checked at executeBuy; unknown fails closed.
+   */
+  top10HoldPct?: number | null;
 }
 
 /**
@@ -400,6 +409,27 @@ export async function executeBuy(
   }
   console.log(
     `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}`
+  );
+
+  // Hard top-10 floor at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.
+  const top10HoldPct = await resolveTop10HoldPctForEntry(
+    mint,
+    meta?.top10HoldPct
+  );
+  const holderGate = evaluateHolderConcentrationHardFloors({
+    top10HoldPct,
+    insiderPct: null,
+  });
+  if (holderGate.skipReasons.length > 0) {
+    const reason = holderGate.skipReasons[0]!;
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
+        `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'})`
+    );
+    return { success: false, mode: config.mode, error: reason };
+  }
+  console.log(
+    `[trade] Entry top10 OK ${symbol}: ${top10HoldPct!.toFixed(1)}%`
   );
 
   if (config.mode === 'paper') {

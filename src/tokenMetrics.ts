@@ -12,6 +12,7 @@ import {
   effectiveMinTop10HolderPct,
   effectiveMinVolume24hUsd,
 } from './config';
+import { getBondingCurvePda } from './bondingCurve';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
@@ -134,6 +135,33 @@ export function getCachedTokenMetrics(mint: string): TokenMetrics | null {
     return null;
   }
   return { ...hit.data, source: 'cache' };
+}
+
+/**
+ * Resolve Jupiter-style top-10 hold % for entry gates.
+ * Prefers a caller-provided value, then cache, then a best-effort on-chain fetch.
+ */
+export async function resolveTop10HoldPctForEntry(
+  mint: string,
+  provided?: number | null
+): Promise<number | null> {
+  if (provided != null && Number.isFinite(provided)) return provided;
+  const cached = getCachedTokenMetrics(mint);
+  if (cached?.top10HoldPct != null && Number.isFinite(cached.top10HoldPct)) {
+    return cached.top10HoldPct;
+  }
+  try {
+    const onchain = await fetchOnChainHolderMetrics(mint);
+    if (
+      onchain.top10HoldPct != null &&
+      Number.isFinite(onchain.top10HoldPct)
+    ) {
+      return onchain.top10HoldPct;
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
 }
 
 export function clearTokenMetricsCache(mint?: string): void {
@@ -372,6 +400,15 @@ async function fetchOnChainHolderMetrics(
   let topHolderPct: number | null = null;
   let top10HoldPct: number | null = null;
 
+  // Jupiter-style top-10 excludes the Pump bonding-curve vault. Including it
+  // inflates concentration (~80–99%) and makes minTop10HolderPct meaningless.
+  let curveOwner: string | null = null;
+  try {
+    curveOwner = getBondingCurvePda(mint).toBase58();
+  } catch {
+    curveOwner = null;
+  }
+
   try {
     const largest = await conn.getTokenLargestAccounts(mintKey);
     const accounts = largest.value ?? [];
@@ -380,8 +417,9 @@ async function fetchOnChainHolderMetrics(
         ? supplyUi
         : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
 
-    // Resolve owners for top accounts (token account → owner)
-    for (const acc of accounts.slice(0, 10)) {
+    // Resolve owners for top accounts (token account → owner). Pull up to 20 so
+    // we still have 10 retail wallets after excluding the bonding-curve vault.
+    for (const acc of accounts.slice(0, 20)) {
       const amountUi = Number(acc.uiAmount ?? 0);
       let owner = acc.address.toBase58();
       try {
@@ -396,6 +434,9 @@ async function fetchOnChainHolderMetrics(
         // keep token account address
       }
 
+      // Skip bonding-curve vault (Jupiter Top-10 H. excludes pool/curve)
+      if (curveOwner && owner === curveOwner) continue;
+
       const pct = (amountUi / supply) * 100;
       const isAuthority =
         owner === mintAuthority || owner === freezeAuthority;
@@ -405,6 +446,7 @@ async function fetchOnChainHolderMetrics(
         pctOfSupply: Math.round(pct * 100) / 100,
         isAuthority,
       });
+      if (topHolders.length >= 10) break;
     }
 
     if (topHolders.length > 0) {
@@ -589,10 +631,14 @@ export function evaluateTokenMetricsFilters(
   }
 
   const minTop10 = effectiveMinTop10HolderPct();
-  if (metrics.top10HoldPct != null && metrics.top10HoldPct < minTop10) {
-    reasons.push(
-      `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
-    );
+  if (metrics.top10HoldPct != null && Number.isFinite(metrics.top10HoldPct)) {
+    if (metrics.top10HoldPct < minTop10) {
+      reasons.push(
+        `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
+      );
+    }
+  } else {
+    reasons.push(`top 10 holders unknown (min ${minTop10}%)`);
   }
 
   if (filters.skipIfMintAuthority && metrics.mintAuthority) {

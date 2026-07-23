@@ -1401,6 +1401,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     strategyKind: 'migration',
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
+    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -1971,6 +1972,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     strategyKind?: 'migration' | 'normal';
     sizeReason?: string;
     sourceEntryMcUsd?: number;
+    top10HoldPct?: number | null;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -1985,6 +1987,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     solAmount: sizing.sizeSol,
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
+    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2171,6 +2174,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
     sizeReason: sizing.reason,
     strategyKind: signal.isMigration ? 'migration' : 'normal',
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
+    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,

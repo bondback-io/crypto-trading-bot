@@ -799,6 +799,8 @@ async function runAntiRugChecks(
   }
 
   // --- Non-bypassable holder dispersion / insider ceilings (all risk levels) ---
+  // Fail closed when top10 unknown; known values below minTop10HolderPct hard-reject.
+  // top10HoldPct is Jupiter-style (bonding-curve vault excluded) from tokenMetrics.
   const holderHard = evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,
     insiderPct: checks.insiderPct,
