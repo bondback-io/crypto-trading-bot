@@ -1134,8 +1134,15 @@ function effectiveMaxTrades(requested: number, hours: number): number {
   if (!sel?.enabled) return requested;
   const perHour = sel.maxTradesPerHour ?? 0;
   if (perHour <= 0) return requested;
-  // Assume ~35% of theoretical hourly capacity is realistic after cooldowns/filters
-  const rateCap = Math.max(2, Math.ceil(hours * perHour * 0.35));
+  // Day-normalized selective budget — not theoretical max fills.
+  // Low (3/hr) → ~2–3/day; medium (12/hr) → ~8–9; high (14/hr) → ~10.
+  const dayBudget = Math.ceil(perHour * (hours / 24) * 0.7);
+  const gapMs = sel.minMsBetweenTrades ?? 0;
+  const gapBudget =
+    gapMs > 0
+      ? Math.ceil(((hours * 3_600_000) / gapMs) * 0.25)
+      : dayBudget;
+  const rateCap = Math.max(2, Math.min(dayBudget, gapBudget));
   return Math.min(requested, rateCap);
 }
 
