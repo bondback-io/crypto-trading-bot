@@ -79,6 +79,7 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('top10 holders too low') ||
     r.includes('insider % too high') ||
     r.includes('market cap too low') ||
+    r.includes('market cap unknown') ||
     r.includes('low mc with near-zero volume')
   );
 }
@@ -160,6 +161,7 @@ export function evaluateDeadTokenHardFloors(
     recentVol != null && Number.isFinite(recentVol) && recentVol < nearZeroVolThreshold;
 
   // --- Non-bypassable entry market-cap floors (all risk levels, no early soft-pass) ---
+  // Fail closed when MC is unknown — never allow a sub-$5k entry via missing Dex MC.
   const minMc = effectiveMinMarketCapUsd();
   const mc = snap.marketCapUsd;
   if (mc != null && Number.isFinite(mc) && mc > 0) {
@@ -169,10 +171,10 @@ export function evaluateDeadTokenHardFloors(
         id: 'hard_low_market_cap',
         severity: 'critical',
         label: 'Market cap too low',
-        detail: `${formatMcShort(mc)} < ${formatMcShort(minMc)}`,
+        detail: `MC $${Math.round(mc)} < min $${minMc}`,
       });
       skipReasons.push(
-        `Skipped — market cap too low (${formatMcShort(mc)} < ${formatMcShort(minMc)})`
+        `Skipped — market cap too low (${formatMcShort(mc)} < ${formatMcShort(minMc)}; MC $${Math.round(mc)})`
       );
     } else if (
       mc < HARD_FILTER_FLOORS.lowMcNearZeroVolumeComboUsd &&
@@ -183,12 +185,23 @@ export function evaluateDeadTokenHardFloors(
         id: 'hard_low_mc_near_zero_vol',
         severity: 'critical',
         label: 'Low MC with near-zero volume',
-        detail: `MC ${formatMcShort(mc)} · h1/m5 $${(recentVol ?? 0).toFixed(0)}`,
+        detail: `MC $${Math.round(mc)} · h1/m5 $${(recentVol ?? 0).toFixed(0)}`,
       });
       skipReasons.push(
-        `Skipped — low MC with near-zero volume (MC ${formatMcShort(mc)}, vol $${(recentVol ?? 0).toFixed(0)})`
+        `Skipped — low MC with near-zero volume (MC $${Math.round(mc)}, vol $${(recentVol ?? 0).toFixed(0)})`
       );
     }
+  } else {
+    scorePenalty += 35;
+    flags.push({
+      id: 'hard_unknown_market_cap',
+      severity: 'critical',
+      label: 'Market cap unknown',
+      detail: `need ≥ $${minMc}`,
+    });
+    skipReasons.push(
+      `Skipped — market cap unknown (min ${formatMcShort(minMc)})`
+    );
   }
 
   // Post-dump / low-MC tokens never get early soft-pass on thin recent volume.

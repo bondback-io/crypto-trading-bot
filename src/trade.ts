@@ -9,7 +9,7 @@ import {
   Transaction,
   VersionedTransaction,
 } from '@solana/web3.js';
-import { config, getActiveTradingWallet } from './config';
+import { config, getActiveTradingWallet, effectiveMinMarketCapUsd } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   getKeypair,
@@ -231,25 +231,20 @@ async function resolveEntryMarketCapUsd(
     /* non-fatal */
   }
 
-  const pickSane = (
-    a: number | undefined,
-    b: number | undefined
-  ): number | undefined => {
-    if (a != null && b != null && a > 0 && b > 0) {
-      // Curve vs Dex disagree wildly → trust curve for pumps
-      if (a / b > 10 || b / a > 10) return a;
-      return b;
-    }
-    return a ?? b;
-  };
+  // Prefer curve MC for active pumps (Dex FDV often missing/inflated).
+  // Display + gate must use the same truth so Buy MC cannot show ~$2.5k
+  // after a filter that saw a higher Dex MC.
+  const resolved = curveMc ?? dexMc;
 
   if (provided != null && Number.isFinite(provided) && provided > 0) {
     // Reject provided values that look like Dex FDV blow-ups vs curve
     if (curveMc != null && provided / curveMc > 10) return curveMc;
+    // Still prefer lower curve when provided is above curve on active pump
+    if (curveMc != null && curveMc > 0) return Math.min(provided, curveMc);
     return provided;
   }
 
-  return pickSane(curveMc, dexMc);
+  return resolved;
 }
 
 /** Snapshot MC at signal / smart-wallet buy time (curve first, else Dex). */
@@ -372,6 +367,29 @@ export async function executeBuy(
     meta.sourceEntryMcUsd > 0
       ? meta.sourceEntryMcUsd
       : undefined;
+
+  // Hard entry-MC floor after MC is resolved (all paths: paper, live, migration, re-buy).
+  // Catches soft-pass / unknown-Dex cases where Buy MC would otherwise land under $5k.
+  const minEntryMc = effectiveMinMarketCapUsd();
+  if (entryMarketCapUsd == null || !(entryMarketCapUsd > 0)) {
+    const reason = `Skipped — market cap unknown (min $${minEntryMc})`;
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} (fill MC unresolved)`
+    );
+    return { success: false, mode: config.mode, error: reason };
+  }
+  if (entryMarketCapUsd < minEntryMc) {
+    const reason =
+      `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
+        `(gate MC $${Math.round(entryMarketCapUsd)}, min $${minEntryMc})`
+    );
+    return { success: false, mode: config.mode, error: reason };
+  }
+  console.log(
+    `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}`
+  );
 
   if (config.mode === 'paper') {
     const position = paperTrader.simulateBuy(

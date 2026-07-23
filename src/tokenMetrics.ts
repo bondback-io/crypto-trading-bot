@@ -535,8 +535,14 @@ export function evaluateTokenMetricsFilters(
 
   const minMc = effectiveMinMarketCapUsd();
   const mc = metrics.marketCapUsd;
-  if (mc != null && mc > 0 && mc < minMc) {
-    reasons.push(`market cap $${mc.toFixed(0)} < min $${minMc}`);
+  if (mc != null && mc > 0) {
+    if (mc < minMc) {
+      reasons.push(
+        `market cap $${Math.round(mc)} < min $${minMc}`
+      );
+    }
+  } else {
+    reasons.push(`market cap unknown (min $${minMc})`);
   }
 
   const minVol = effectiveMinVolume24hUsd();

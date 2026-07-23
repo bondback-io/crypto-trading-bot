@@ -5,7 +5,7 @@
  */
 
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
-import { config } from './config';
+import { config, effectiveMinMarketCapUsd } from './config';
 import { getConnection } from './connection';
 import {
   fetchTokenMetrics,
@@ -30,13 +30,16 @@ import {
 import {
   fetchBondingCurve,
   assessBondingCurveHealth,
+  estimateBondingCurveMarketCapUsd,
   type BondingCurveHealth,
+  type BondingCurveState,
 } from './bondingCurve';
 import {
   evaluateDeadTokenHardFloors,
   evaluateHolderConcentrationHardFloors,
   isNonBypassableSkipReason,
 } from './deadTokenFilters';
+import { getCachedSolUsdPrice } from './marketData';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
 export { isNonBypassableSkipReason };
@@ -414,10 +417,13 @@ async function runAntiRugChecks(
   // --- Bonding curve health (cached) ---
   let curveHealth: BondingCurveHealth | null = null;
   let curveComplete = false;
+  let curveState: BondingCurveState | null = null;
+  let curveMcUsd: number | null = null;
   try {
     const curve = await fetchBondingCurve(mint);
     if (curve.source !== 'none') {
       sources.push('bonding-curve');
+      curveState = curve;
       checks.bondingCurveProgressPct = curve.progressPct;
       curveComplete = Boolean(curve.complete);
       curveHealth = assessBondingCurveHealth(curve, {
@@ -426,6 +432,15 @@ async function runAntiRugChecks(
         recentBuyVolumeUsd: metrics.recentBuyVolumeUsd,
       });
       checks.curveHealth = curveHealth.status;
+      if (!curve.complete) {
+        const est = estimateBondingCurveMarketCapUsd(
+          curve,
+          getCachedSolUsdPrice()
+        );
+        if (est != null && Number.isFinite(est) && est > 0) {
+          curveMcUsd = est;
+        }
+      }
     }
   } catch (err) {
     logger.warn('anti-rug', 'bonding curve fetch failed', {
@@ -938,7 +953,36 @@ async function runAntiRugChecks(
     });
   }
 
-  // --- Non-bypassable dead-token floors (after Dex + Birdeye merge) ---
+  // --- Resolve entry MC for hard floor (after Dex + Birdeye) ---
+  // Active pump curves: prefer curve MC (Dex/Birdeye FDV often missing or inflated).
+  // When both exist on an incomplete curve, use the LOWER so inflated Dex never
+  // bypasses a real sub-$5k curve MC. Fail-closed happens in hard floors if still null.
+  const dexOrBirdMc = checks.marketCapUsd;
+  if (curveMcUsd != null && curveMcUsd > 0 && !curveComplete) {
+    if (checks.marketCapUsd == null || checks.marketCapUsd <= 0) {
+      checks.marketCapUsd = curveMcUsd;
+    } else {
+      checks.marketCapUsd = Math.min(checks.marketCapUsd, curveMcUsd);
+    }
+  }
+  const minMcGate = effectiveMinMarketCapUsd();
+  const gateMc = checks.marketCapUsd;
+  logger.info('anti-rug', 'entry MC gate input', {
+    mint: mint.slice(0, 12),
+    gateMcUsd: gateMc != null ? Math.round(gateMc) : null,
+    curveMcUsd: curveMcUsd != null ? Math.round(curveMcUsd) : null,
+    dexOrBirdMcUsd:
+      dexOrBirdMc != null && Number.isFinite(dexOrBirdMc)
+        ? Math.round(dexOrBirdMc)
+        : null,
+    minMcUsd: minMcGate,
+    curveComplete,
+    earlyEntry,
+    isMigrated,
+    curveSource: curveState?.source ?? 'none',
+  });
+
+  // --- Non-bypassable dead-token floors (after Dex + Birdeye + curve MC merge) ---
   const hard = evaluateDeadTokenHardFloors(
     {
       liquidityUsd: checks.liquidityUsd,

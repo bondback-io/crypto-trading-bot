@@ -1950,7 +1950,8 @@ function applyMediumEntryRestoreMigration(): boolean {
 
 /**
  * One-shot: ensure min entry market-cap floor (default $5k, hard ≥$5k).
- * Always marks done so it runs once after upgrade to 1.1.29.
+ * Always marks done so it runs once after upgrade to 1.1.29+.
+ * Gate enforcement (curve MC + fail-closed unknown) ships in 1.1.30.
  */
 function applyMinMarketCapFloorMigration(): boolean {
   if (settingsMigrations[MIN_MARKET_CAP_FLOOR_V1129]) return false;

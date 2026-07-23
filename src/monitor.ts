@@ -2547,6 +2547,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         }
         console.log(
           `[anti-rug] OK ${signal.symbol}: score=${report.riskScore} (${report.riskLevel}) ` +
+            `mc=$${report.checks.marketCapUsd != null ? Math.round(report.checks.marketCapUsd) : '?'} ` +
             `liq=$${report.checks.liquidityUsd?.toFixed(0) ?? '?'} ` +
             `dev=${report.checks.devHoldPct?.toFixed(1) ?? '?'}% ` +
             `top10=${report.checks.top10HoldPct?.toFixed(1) ?? '?'}% ` +
