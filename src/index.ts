@@ -58,9 +58,20 @@ async function main(): Promise<void> {
   // Public Solana RPC 429 retries can hang getSlot for minutes otherwise.
   startServer();
 
+  // Never let async RPC/WS work take down the process (Render → 502 crash loop).
+  process.on('unhandledRejection', (reason) => {
+    console.error('[boot] Unhandled rejection (kept alive):', reason);
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('[boot] Uncaught exception (kept alive):', err);
+  });
+
   // Heavy I/O after listen — failures here must not take the process down.
+  // Defer monitor/migration briefly so /health stays hot during deploy probes.
   void (async () => {
     try {
+      await new Promise((r) => setTimeout(r, 2_500));
+
       const rpcOk = await testConnection();
       if (!rpcOk) {
         console.warn(
@@ -82,7 +93,9 @@ async function main(): Promise<void> {
         );
       });
 
+      // Stagger: wallet polling first, migration listener a few seconds later
       startMonitor();
+      await new Promise((r) => setTimeout(r, 3_000));
       startMigrationListener();
       console.log('[boot] Monitor + migration listener started');
     } catch (err) {

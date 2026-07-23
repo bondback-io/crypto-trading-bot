@@ -280,11 +280,15 @@ export function startMonitor(): void {
     );
   }
 
-  // Start polling immediately so trading isn't blocked behind slow GMGN/RPC
-  // activity scans. Refresh activity in the background, then apply filter.
-  void pollAllWallets();
+  // Start polling after a short delay so /health stays responsive on boot.
+  // Activity refresh is deferred further — scanning 80+ wallets at once OOMs free RPC hosts.
+  setTimeout(() => {
+    void pollAllWallets();
+  }, 5_000);
 
   void (async () => {
+    await new Promise((r) => setTimeout(r, 30_000));
+    if (!running || paused) return;
     if (config.filters.enableActivityFilter) {
       await refreshAllWalletActivity();
       filterActiveWallets({ persistActiveOnly: false });
@@ -370,11 +374,14 @@ async function pollAllWallets(): Promise<void> {
   pollInFlight = true;
   try {
     const wallets = getWalletsForPolling();
-    // Cap concurrent RPC polls so bulk imports don't freeze the API
-    const batchSize = 12;
+    // Keep concurrent RPC polls low — public RPCs + large wallet lists OOM Render
+    const batchSize = 4;
     for (let i = 0; i < wallets.length; i += batchSize) {
       const batch = wallets.slice(i, i + batchSize);
       await Promise.allSettled(batch.map((wallet) => pollWallet(wallet)));
+      if (i + batchSize < wallets.length) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
     }
 
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
@@ -1024,7 +1031,9 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
 
     lastSignature.set(wallet.address, signatures[0].signature);
 
-    for (const sig of newSigs.reverse()) {
+    // Cap tx parses per wallet per cycle (public RPC + many wallets → OOM)
+    const toParse = newSigs.reverse().slice(0, 3);
+    for (const sig of toParse) {
       const tx = await conn.getParsedTransaction(sig, {
         maxSupportedTransactionVersion: 0,
       });

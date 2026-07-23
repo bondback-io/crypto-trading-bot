@@ -16,7 +16,8 @@ import {
   Connection,
 } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection } from './connection';
+import { getConnection, getRpcUrl } from './connection';
+import { isPublicRpcUrl } from './rpcUrl';
 
 /** Raydium AMM v4 — common post-migration venue */
 const RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -116,12 +117,22 @@ export function startMigrationListener(): void {
   );
   console.log('[migration] ═══════════════════════════════════════');
 
-  const subscribed = subscribeWebSocket();
-  if (!subscribed) {
+  // Public RPCs cannot handle program-wide onLogs (flood → OOM / crash loop on Render).
+  const rpcUrl = getRpcUrl();
+  if (isPublicRpcUrl(rpcUrl)) {
     console.warn(
-      '[migration] WebSocket subscribe failed — poll-only until reconnect'
+      '[migration] Public RPC detected — WebSocket program logs DISABLED (poll-only). ' +
+        'Set a paid Helius/QuickNode RPC_URL for real-time migration WS.'
     );
-    scheduleReconnect('initial subscribe failed');
+    wsMode = false;
+  } else {
+    const subscribed = subscribeWebSocket();
+    if (!subscribed) {
+      console.warn(
+        '[migration] WebSocket subscribe failed — poll-only until reconnect'
+      );
+      scheduleReconnect('initial subscribe failed');
+    }
   }
 
   void pollMigrations();
@@ -260,6 +271,15 @@ function subscribeWebSocket(): boolean {
 function scheduleReconnect(reason: string): void {
   if (!running) return;
   if (reconnectTimer) return;
+  // Never reconnect WS against public RPC — it crash-loops the host.
+  try {
+    if (isPublicRpcUrl(getRpcUrl())) {
+      wsMode = false;
+      return;
+    }
+  } catch {
+    return;
+  }
 
   const delay = Math.min(
     MAX_RECONNECT_DELAY_MS,
@@ -285,6 +305,16 @@ function scheduleReconnect(reason: string): void {
 
 function checkSubscriptionHealth(): void {
   if (!running) return;
+
+  // Stay poll-only on public RPCs — never try to (re)open program log websockets.
+  try {
+    if (isPublicRpcUrl(getRpcUrl())) {
+      wsMode = false;
+      return;
+    }
+  } catch {
+    return;
+  }
 
   // Active RPC may have failed over — resubscribe on new endpoint
   try {

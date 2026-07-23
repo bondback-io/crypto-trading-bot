@@ -33,6 +33,19 @@ export function isUsableRpcUrl(url: string | null | undefined): boolean {
   return !isPlaceholderRpcUrl(url);
 }
 
+/** True for free/public endpoints that rate-limit and cannot sustain program log WS. */
+export function isPublicRpcUrl(url: string | null | undefined): boolean {
+  const u = (url || '').toLowerCase();
+  if (!u) return true;
+  return (
+    u.includes('mainnet-beta.solana.com') ||
+    u.includes('api.devnet.solana.com') ||
+    u.includes('publicnode.com') ||
+    u.includes('solana-mainnet.g.alchemy.com/v2/demo') ||
+    isPlaceholderRpcUrl(url)
+  );
+}
+
 export interface NormalizedRpcEndpoint {
   url: string;
   label: string;
