@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Backtester / Config / Logs)
+ * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Backtester; Config / Logs via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -556,22 +556,108 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       padding: 1rem 0.75rem 2.5rem;
     }
     .header-bar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 0.75rem 1rem;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-areas:
+        "brand settings"
+        "actions actions";
+      align-items: start;
+      gap: 0.75rem 0.65rem;
       margin-bottom: 1rem;
     }
+    .header-brand { grid-area: brand; min-width: 0; }
     .header-actions {
+      grid-area: actions;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 0.4rem 0.5rem;
-      flex: 1 1 16rem;
       max-width: 100%;
     }
     .header-actions .btn { flex: 0 0 auto; }
+    .settings-menu-wrap {
+      grid-area: settings;
+      position: relative;
+      flex: 0 0 auto;
+      z-index: 40;
+    }
+    .settings-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.75rem;
+      height: 2.75rem;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0;
+      border-radius: 0.55rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .settings-btn:hover {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .settings-btn:focus-visible {
+      outline: 2px solid #38bdf8;
+      outline-offset: 2px;
+    }
+    .settings-btn.settings-active,
+    .settings-btn[aria-expanded="true"] {
+      background: #059669;
+      border-color: #047857;
+      color: #fff;
+    }
+    .settings-btn svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      display: block;
+    }
+    .settings-dropdown {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 0.4rem);
+      min-width: 11rem;
+      padding: 0.35rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.55rem;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+      z-index: 50;
+    }
+    .settings-dropdown.open { display: block; }
+    .settings-dropdown button {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 44px;
+      padding: 0.55rem 0.75rem;
+      border: none;
+      border-radius: 0.4rem;
+      background: transparent;
+      color: #cbd5e1;
+      font-size: 0.875rem;
+      font-weight: 600;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .settings-dropdown button:hover {
+      background: #1e293b;
+      color: #f1f5f9;
+    }
+    .settings-dropdown button.active {
+      background: #059669;
+      color: #fff;
+    }
+    .settings-dropdown button:focus-visible {
+      outline: 2px solid #38bdf8;
+      outline-offset: -2px;
+    }
     .nav-tabs {
       display: flex;
       flex-wrap: nowrap;
@@ -667,9 +753,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     @media (max-width: 639px) {
       .page-shell { padding: 0.75rem 0.65rem 2rem; }
       .card { padding: 0.85rem; border-radius: 0.65rem; }
-      .header-bar { flex-direction: column; align-items: stretch; }
       .header-actions {
-        flex: 1 1 auto;
         padding: 0.65rem !important;
       }
       .header-actions .btn {
@@ -784,7 +868,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         padding: 0.65rem 0.15rem;
       }
       .nav-tabs .btn { min-height: 2.25rem; padding: 0.5rem 0.9rem; }
-      .header-actions { flex: 0 1 auto; max-width: none; }
+      .header-bar {
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+        grid-template-areas: "brand actions settings";
+        align-items: start;
+      }
+      .header-actions { max-width: none; justify-self: end; }
       .card { padding: 1.15rem; }
       .filters-row { gap: 0.65rem 0.75rem; }
       .chart-wrap { height: 240px; }
@@ -831,12 +920,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
   <div class="page-shell">
     <!-- Header -->
     <div class="header-bar">
-      <div class="min-w-0">
+      <div class="header-brand">
         <div class="flex items-baseline gap-2 flex-wrap">
           <h1 class="text-xl sm:text-2xl lg:text-3xl font-bold text-sky-400 tracking-tight">Smart Money Copy Bot</h1>
           <span id="app-version" class="text-[10px] sm:text-xs text-slate-500 font-mono whitespace-nowrap has-tip" title="App version and last update">v—</span>
         </div>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
+      </div>
+      <div class="settings-menu-wrap" id="settings-menu-wrap">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config and Logs" onclick="toggleSettingsMenu(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
+            <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
+          </svg>
+          <span class="sr-only">Settings</span>
+        </button>
+        <div id="settings-dropdown" class="settings-dropdown" role="menu" aria-label="Settings">
+          <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
+          <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">Logs</button>
+        </div>
       </div>
       <div class="header-actions card !py-2 !px-3">
         <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
@@ -861,8 +963,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
-      <button data-tab="config" onclick="showTab('config', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
-      <button data-tab="logs" onclick="showTab('logs', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade events and system/API error logs for debugging">Logs</button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -1828,17 +1928,51 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
   <script>
     // --- Tabs ---
+    function closeSettingsMenu() {
+      const btn = document.getElementById('settings-btn');
+      const menu = document.getElementById('settings-dropdown');
+      if (menu) menu.classList.remove('open');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleSettingsMenu(event) {
+      if (event) event.stopPropagation();
+      const btn = document.getElementById('settings-btn');
+      const menu = document.getElementById('settings-dropdown');
+      if (!btn || !menu) return;
+      const open = !menu.classList.contains('open');
+      menu.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    document.addEventListener('click', (e) => {
+      const wrap = document.getElementById('settings-menu-wrap');
+      if (!wrap || wrap.contains(e.target)) return;
+      closeSettingsMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeSettingsMenu();
+    });
+
     function showTab(name, btn) {
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
         el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
       });
-      document.querySelectorAll('[data-tab]').forEach(el => {
+      document.querySelectorAll('.nav-tabs [data-tab]').forEach(el => {
         const on = el.getAttribute('data-tab') === name;
         el.classList.toggle('bg-emerald-600', on);
         el.classList.toggle('text-white', on);
         el.classList.toggle('bg-slate-800', !on);
         el.classList.toggle('text-slate-300', !on);
       });
+      document.querySelectorAll('[data-settings-tab]').forEach(el => {
+        el.classList.toggle('active', el.getAttribute('data-settings-tab') === name);
+      });
+      const settingsBtn = document.getElementById('settings-btn');
+      if (settingsBtn) {
+        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs');
+      }
+      closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
       if ((name === 'overview' || name === 'backtester') && window._chartsNeedResize) {
         window._chartsNeedResize = false;
