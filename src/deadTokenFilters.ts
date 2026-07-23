@@ -22,6 +22,11 @@ import {
   effectiveMinVolume24hUsd,
 } from './config';
 import type { BondingCurveHealth } from './bondingCurve';
+import {
+  effectiveMaxDrawdownFromRecentHighPct,
+  effectiveMaxEntryAgeMinutes,
+  effectiveRejectDumpingToken,
+} from './strictMode';
 
 export interface DeadTokenMarketSnapshot {
   liquidityUsd: number | null;
@@ -83,7 +88,13 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('market cap too low') ||
     r.includes('market cap unknown') ||
     r.includes('low mc with near-zero volume') ||
-    r.includes('not a pump.fun mint')
+    r.includes('not a pump.fun mint') ||
+    r.includes('dumping from recent high') ||
+    r.includes('signal too old') ||
+    r.includes('entry age') ||
+    r.includes('momentum confirmation failed') ||
+    r.includes('wallet quality') ||
+    r.includes('cluster need')
   );
 }
 
@@ -574,11 +585,52 @@ export function evaluateDeadTokenHardFloors(
     });
   }
 
+  // Dumping from recent high (short-term drawdown proxy) — non-bypassable when enabled
+  if (effectiveRejectDumpingToken()) {
+    const maxDd = effectiveMaxDrawdownFromRecentHighPct();
+    const dumpMove =
+      (crashH1 != null && crashH1 <= -maxDd) ||
+      (crash24 != null &&
+        crash24 <= -maxDd &&
+        (ratio == null || ratio < 1));
+    if (dumpMove) {
+      scorePenalty += 32;
+      flags.push({
+        id: 'hard_dumping_token',
+        severity: 'critical',
+        label: 'Dumping from recent high',
+        detail: `Δ1h ${crashH1 ?? '?'}% · Δ24h ${crash24 ?? '?'}% · max ${maxDd}%`,
+      });
+      skipReasons.push(
+        `Skipped — dumping from recent high` +
+          (crashH1 != null
+            ? ` (Δ1h ${crashH1.toFixed(0)}% ≤ -${maxDd}%)`
+            : crash24 != null
+              ? ` (Δ24h ${crash24.toFixed(0)}% ≤ -${maxDd}%)`
+              : '')
+      );
+    }
+  }
+
   if (curveHealth?.preferBoost) {
     scorePenalty = Math.max(0, scorePenalty - 8);
   }
 
   return { skipReasons, scorePenalty, flags };
+}
+
+/**
+ * Entry timing gate: reject if smart-wallet signal is older than maxEntryAgeMinutes.
+ * Non-bypassable when enableEntryTimingGate is on.
+ */
+export function evaluateEntryTimingGate(signalAgeMinutes: number | null | undefined): string | null {
+  if (config.filters.enableEntryTimingGate === false) return null;
+  const maxAge = effectiveMaxEntryAgeMinutes();
+  if (signalAgeMinutes == null || !Number.isFinite(signalAgeMinutes)) return null;
+  if (signalAgeMinutes > maxAge) {
+    return `Skipped — signal too old / entry age ${signalAgeMinutes.toFixed(1)}m > max ${maxAge}m`;
+  }
+  return null;
 }
 
 export interface HolderConcentrationSnapshot {

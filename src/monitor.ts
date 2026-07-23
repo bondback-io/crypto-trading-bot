@@ -81,7 +81,10 @@ import {
   isNonBypassableSkipReason,
   type AntiRugReport,
 } from './antiRug';
-import { evaluateBuyPumpFunOnlyGate } from './deadTokenFilters';
+import {
+  evaluateBuyPumpFunOnlyGate,
+  evaluateEntryTimingGate,
+} from './deadTokenFilters';
 import {
   fetchBondingCurve,
   summarizeBondingCurve,
@@ -93,6 +96,20 @@ import {
   recordTradeExecuted,
   getTradeRateStatus,
 } from './signalQuality';
+import {
+  applyQualityToWallet,
+  passesWalletQualityGate,
+  isProvenTopPerformer,
+  refreshAllWalletQualityScores,
+  maybeAutoPruneLowQuality,
+  pruneLowQualityWallets,
+} from './walletQuality';
+import {
+  effectiveClusterMinWallets,
+  effectiveMinWalletQualityScore,
+} from './strictMode';
+
+export { pruneLowQualityWallets, refreshAllWalletQualityScores };
 
 export interface WalletBuyEvent {
   wallet: string;
@@ -169,6 +186,8 @@ export interface TradeSignal {
   earlyBuyerCount?: number;
   /** High-conviction score 0–100 from selective gating */
   convictionScore?: number;
+  /** Factor breakdown for logs / dashboard */
+  convictionBreakdown?: string;
   /** Position size multiplier from risk/conviction scoring */
   sizeMultiplier?: number;
   /** Calculated dynamic buy size in SOL */
@@ -177,6 +196,12 @@ export interface TradeSignal {
   dynamicSizeReason?: string;
   /** Market cap when the smart wallet bought (signal-time) */
   sourceEntryMcUsd?: number;
+  /** Minutes since earliest smart-wallet buy in cluster */
+  signalAgeMinutes?: number;
+  /** Momentum confirmation result */
+  momentumOk?: boolean;
+  /** Single-wallet top-performer migration exception */
+  allowSingleWalletException?: boolean;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -281,6 +306,17 @@ export function startMonitor(): void {
 
   // Restore wallets that were auto-disabled after failed RPC/GMGN scans
   recoverDisabledWallets();
+
+  // Score tracked wallets + optional auto-prune (unwatch only)
+  try {
+    refreshAllWalletQualityScores();
+    maybeAutoPruneLowQuality();
+  } catch (err) {
+    console.warn(
+      '[monitor] Wallet quality refresh failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 
   // If activity filter wiped the watch list, re-enable all tracked imports
   const enabledCount = config.smartWallets.filter((w) => w.enabled).length;
@@ -605,6 +641,7 @@ export async function refreshWalletActivity(
       if (tradesLast7d != null) target.tradesLast7d = tradesLast7d;
       if (gmgnWinRate != null) target.winRate = gmgnWinRate;
       target.lastCheckedAt = Date.now();
+      applyQualityToWallet(target);
     }
     // On failure: leave prior fields alone (do not stamp lastCheckedAt with zeros)
   }
@@ -1402,6 +1439,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    convictionScore: signal.convictionScore,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -1973,6 +2011,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sizeReason?: string;
     sourceEntryMcUsd?: number;
     top10HoldPct?: number | null;
+    convictionScore?: number;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -1988,6 +2027,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    convictionScore: signal.convictionScore,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2175,6 +2215,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
     strategyKind: signal.isMigration ? 'migration' : 'normal',
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    convictionScore: signal.convictionScore,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2451,6 +2492,64 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
+  // Wallet quality gate — every source wallet must pass (or be unknown during grace)
+  if (config.filters.enableWalletQualityGate !== false) {
+    for (const addr of signal.wallets) {
+      if (addr === 'volume-spike') continue;
+      const w = config.smartWallets.find((sw) => sw.address === addr);
+      if (!w) continue;
+      const gate = passesWalletQualityGate(w);
+      if (!gate.ok) {
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=${gate.reason} wallet=${w.name}`
+        );
+        recordRejectedSignal(signal, gate.reason || 'wallet quality');
+        return false;
+      }
+    }
+  }
+
+  // Entry timing — age since earliest smart buy
+  if (signal.signalAgeMinutes == null && signal.timestamp) {
+    // Migration feed may lack cluster age — treat as fresh
+    signal.signalAgeMinutes = 0;
+  }
+  const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
+  if (timingSkip) {
+    console.log(
+      `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${timingSkip}`
+    );
+    recordRejectedSignal(signal, timingSkip);
+    return false;
+  }
+
+  // Cluster floor (unified with selective min wallets + Strict overlay)
+  const clusterMin = effectiveClusterMinWallets();
+  const priority =
+    signal.isMigration || signal.nearMigration || signal.earlyBuy;
+  if (
+    signal.wallets.length < clusterMin &&
+    !(
+      signal.allowSingleWalletException &&
+      signal.isMigration &&
+      signal.wallets.length >= 1
+    ) &&
+    !(
+      priority &&
+      config.selective?.allowSingleWalletMigration !== false &&
+      signal.wallets.length >= 1 &&
+      clusterMin <= 2
+    )
+  ) {
+    const msg = `cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
+    console.log(
+      `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${msg}`
+    );
+    recordRejectedSignal(signal, msg);
+    return false;
+  }
+
   if (strategy.enableMigrationOnly && !signal.isMigration) {
     console.log(
       `[monitor] Signal rejected (${signalKind}) — migration-only enabled for ${signal.symbol}`
@@ -2639,15 +2738,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const conviction = evaluateSignalConviction(signal);
   signal.convictionScore = conviction.score;
   signal.sizeMultiplier = conviction.sizeMultiplier;
+  signal.convictionBreakdown = conviction.breakdownLine;
   if (!conviction.pass) {
     const detail = conviction.reasons.join('; ') || 'below threshold';
     console.log(
       `[monitor] FILTER_SKIP kind=${signalKind} reason=conviction ` +
-        `${conviction.score}/${conviction.minRequired}: ${detail}`
+        `${conviction.score}/${conviction.minRequired}: ${detail} · ${conviction.breakdownLine}`
     );
     paperTrader.addLog(
       'info',
-      `Low conviction ${signal.symbol}: ${detail} (score ${conviction.score})`,
+      `Low conviction ${signal.symbol}: ${detail} (score ${conviction.score}) [${conviction.breakdownLine}]`,
       { mint: signal.mint, symbol: signal.symbol }
     );
     recordRejectedSignal(
@@ -2658,7 +2758,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
   console.log(
     `[monitor] Conviction OK ${signal.symbol}: score=${conviction.score} ` +
-      `size×${conviction.sizeMultiplier.toFixed(2)} wallets=${signal.wallets.length}`
+      `size×${conviction.sizeMultiplier.toFixed(2)} wallets=${signal.wallets.length} ` +
+      `· ${conviction.breakdownLine}`
   );
 
   return true;
@@ -2669,16 +2770,24 @@ function checkConvergence(mint: string): TradeSignal | null {
   if (!buys || buys.length === 0) return null;
 
   const now = Date.now();
-  const windowStart = now - config.convergenceWindowMs;
+  const clusterMinMs = (config.filters.clusterWindowMinutes ?? 5) * 60_000;
+  const windowMs = Math.max(config.convergenceWindowMs, clusterMinMs);
+  const windowStart = now - windowMs;
   const recent = buys.filter((b) => b.timestamp >= windowStart);
-  const uniqueWallets = [...new Set(recent.map((b) => b.wallet))];
 
-  if (uniqueWallets.length < config.filters.convergenceRequired) return null;
-
-  const walletNames = uniqueWallets.map((addr) => {
-    const w = config.smartWallets.find((sw) => sw.address === addr);
-    return w?.name ?? addr.slice(0, 8);
+  // Prefer high-quality wallets in the cluster when gate is on
+  const qualityFiltered = recent.filter((b) => {
+    const w = config.smartWallets.find((sw) => sw.address === b.wallet);
+    if (!w) return true;
+    if (config.filters.enableWalletQualityGate === false) return true;
+    if (w.qualityScore == null) applyQualityToWallet(w);
+    return (w.qualityScore ?? 0) >= effectiveMinWalletQualityScore();
   });
+  const clusterBuys = qualityFiltered.length > 0 ? qualityFiltered : recent;
+  const uniqueWallets = [...new Set(clusterBuys.map((b) => b.wallet))];
+
+  const clusterMin = effectiveClusterMinWallets();
+  const convRequired = clusterMin;
 
   const isMigration = recent.some((b) => b.isMigration);
   const latestCurve = [...recent]
@@ -2692,11 +2801,42 @@ function checkConvergence(mint: string): TradeSignal | null {
     !isMigration &&
     !nearMigration &&
     recent.some((b) => b.earlyBuy || isEarlyCurveBuy(b.bondingCurve?.progressPct));
+
+  // Single-wallet exception: proven top performer + migration only
+  let allowSingle = false;
+  if (
+    uniqueWallets.length < convRequired &&
+    uniqueWallets.length === 1 &&
+    isMigration &&
+    config.filters.allowSingleWalletTopPerformerMigration !== false
+  ) {
+    const w = config.smartWallets.find((sw) => sw.address === uniqueWallets[0]);
+    if (w && isProvenTopPerformer(w)) {
+      allowSingle = true;
+    }
+  }
+
+  if (uniqueWallets.length < convRequired && !allowSingle) return null;
+
+  const walletNames = uniqueWallets.map((addr) => {
+    const w = config.smartWallets.find((sw) => sw.address === addr);
+    return w?.name ?? addr.slice(0, 8);
+  });
+
   const earlyBuyerCount = Math.max(
     ...recent.map((b) => b.earlyBuyerCount ?? 0),
     uniqueWallets.length
   );
   const latestBirdeye = [...recent].reverse().find((b) => b.birdeye)?.birdeye;
+  const earliestBuyTs = Math.min(...clusterBuys.map((b) => b.timestamp));
+  const signalAgeMinutes = (now - earliestBuyTs) / 60_000;
+
+  // Momentum: prefer non-negative short-term change when metrics exist
+  const latestMetrics = [...recent].reverse().find((b) => b.metrics)?.metrics;
+  const chg = latestMetrics?.priceChangeH1Pct;
+  const momMin = config.filters.momentumMinHoldPct ?? -5;
+  const momentumOk =
+    chg == null || !Number.isFinite(chg) ? undefined : chg >= momMin;
 
   return {
     mint,
@@ -2710,10 +2850,13 @@ function checkConvergence(mint: string): TradeSignal | null {
     earlyBuyerCount,
     bondingCurve: latestCurve,
     antiRug: recent[0].antiRug,
-    metrics: recent[0].metrics,
+    metrics: latestMetrics ?? recent[0].metrics,
     sniper: recent[0].sniper,
     birdeye: latestBirdeye ?? recent[0].birdeye,
     timestamp: now,
+    signalAgeMinutes,
+    momentumOk,
+    allowSingleWalletException: allowSingle,
   };
 }
 

@@ -88,6 +88,12 @@ export interface BacktestOptions {
    * Default true.
    */
   useSavedConfigFilters?: boolean;
+  /** Override selective min conviction for this run only (0 = use live) */
+  minConvictionScore?: number;
+  /** Override wallet quality cutoff for this run only (0 = use live) */
+  minWalletQualityScore?: number;
+  /** Temporarily enable Strict Mode overlay for this run only */
+  strictMode?: boolean;
 }
 
 export type BacktestExitTakeStage =
@@ -227,6 +233,10 @@ export interface BacktestSummary {
   expectancySol: number;
   /** Estimated average round-trip fee+slip cost in bps */
   avgRoundTripCostBps: number;
+  /** Trades per hour over the simulated window (frequency vs WR trade-off) */
+  tradesPerHour: number;
+  /** Win rate ÷ (tradesPerHour+ε) — higher = better quality per unit frequency */
+  winRatePerTradeFrequency: number;
   totalPnlUsd: number;
   solUsd: number;
   bestTrade: BacktestTradeResult | null;
@@ -550,7 +560,8 @@ function metricsForTrades(
 function buildSummary(
   trades: BacktestTradeResult[],
   solUsd = 150,
-  startingBalanceSol = 10
+  startingBalanceSol = 10,
+  windowHours?: number
 ): BacktestSummary {
   const wins = trades.filter((t) => t.pnlSol > 0);
   const losses = trades.filter((t) => t.pnlSol <= 0);
@@ -612,8 +623,25 @@ function buildSummary(
     'normal'
   );
 
+  const spanMs =
+    trades.length >= 2
+      ? Math.max(
+          ...trades.map((t) => t.closedAt ?? t.openedAt)
+        ) - Math.min(...trades.map((t) => t.openedAt))
+      : 0;
+  const hours =
+    windowHours != null && windowHours > 0
+      ? windowHours
+      : spanMs > 0
+        ? spanMs / 3_600_000
+        : 1;
+  const tradesPerHour = trades.length / Math.max(hours, 0.25);
+  const winRatePct = trades.length ? (wins.length / trades.length) * 100 : 0;
+  const winRatePerTradeFrequency =
+    winRatePct / Math.max(tradesPerHour, 0.05);
+
   return {
-    winRatePct: trades.length ? (wins.length / trades.length) * 100 : 0,
+    winRatePct,
     totalPnlSol,
     returnPct:
       startingBalanceSol > 0
@@ -644,6 +672,8 @@ function buildSummary(
       ? Number((totalPnlSol / trades.length).toFixed(6))
       : 0,
     avgRoundTripCostBps: Number(avgRoundTripCostBps.toFixed(1)),
+    tradesPerHour: Number(tradesPerHour.toFixed(3)),
+    winRatePerTradeFrequency: Number(winRatePerTradeFrequency.toFixed(2)),
     totalPnlUsd: Number(totalPnlUsd.toFixed(2)),
     solUsd: Number(solUsd.toFixed(2)),
     bestTrade: best,
@@ -1873,6 +1903,7 @@ function runSinglePass(
 function captureTradingConfigSnapshot() {
   return {
     riskLevel: config.riskLevel,
+    strictMode: config.strictMode,
     trade: { ...config.trade },
     filters: { ...config.filters },
     risk: {
@@ -1902,6 +1933,7 @@ function restoreTradingConfigSnapshot(
   snap: ReturnType<typeof captureTradingConfigSnapshot>
 ): void {
   config.riskLevel = snap.riskLevel;
+  config.strictMode = snap.strictMode === true;
   Object.assign(config.trade, snap.trade);
   Object.assign(config.filters, snap.filters);
   config.risk = {
@@ -1924,6 +1956,7 @@ function buildConfigUsedSnapshot() {
   const sum = getRiskLevelSummary();
   return {
     riskLevel: (config.riskLevel || 'medium') as RiskLevel,
+    strictMode: config.strictMode === true,
     baseTradeAmountSol:
       config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
     stopLossPercent: config.trade.stopLossPercent,
@@ -1935,6 +1968,7 @@ function buildConfigUsedSnapshot() {
     riskPercentPerTrade: config.risk.riskPercentPerTrade,
     maxDrawdownPct: config.risk.maxDrawdownPct,
     minConvictionScore: config.selective.minConvictionScore,
+    minWalletQualityScore: config.filters.minWalletQualityScore,
     profitStrategyEnabled: config.profitStrategy?.enabled !== false,
     partialSellAt: config.profitStrategy?.partialSellAt ?? 0,
     trailingStopAfter: config.profitStrategy?.trailingStopAfter ?? 0,
@@ -1957,6 +1991,28 @@ export async function runBacktest(
     // Optionally apply a risk-level preset for this run only (not persisted)
     if (isRiskLevel(requestedLevel)) {
       applyRiskLevel(requestedLevel, { persist: false });
+    }
+
+    // Optional run-only overrides for conviction / wallet quality / strict
+    if (options.strictMode === true) {
+      config.strictMode = true;
+    } else if (options.strictMode === false) {
+      config.strictMode = false;
+    }
+    if (
+      options.minConvictionScore != null &&
+      options.minConvictionScore > 0
+    ) {
+      config.selective.minConvictionScore = Number(options.minConvictionScore);
+    }
+    if (
+      options.minWalletQualityScore != null &&
+      options.minWalletQualityScore > 0
+    ) {
+      config.filters.minWalletQualityScore = Number(
+        options.minWalletQualityScore
+      );
+      config.filters.enableWalletQualityGate = true;
     }
 
     const toMs = options.toMs ?? Date.now();
@@ -2153,7 +2209,8 @@ export async function runBacktest(
         const sum = buildSummary(
           cmp.lastTrades,
           solUsd,
-          startingBalance
+          startingBalance,
+          hours
         );
         riskComparison.push({
           riskLevel: level,
@@ -2185,7 +2242,7 @@ export async function runBacktest(
       new PaperTrader(startingBalance, { mode: 'backtest' });
     const stats = trader.getStats();
     const baseCharts = trader.getChartData();
-    const summary = buildSummary(primary.lastTrades, solUsd, startingBalance);
+    const summary = buildSummary(primary.lastTrades, solUsd, startingBalance, hours);
     if (!Number.isFinite(summary.returnPct) || summary.totalTrades === 0) {
       summary.returnPct = stats.returnPct;
     }

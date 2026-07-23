@@ -45,6 +45,16 @@ export interface SmartWallet {
   discoveredAt?: number;
   /** When activity was last checked */
   lastCheckedAt?: number;
+  /** Composite wallet quality 0–100 */
+  qualityScore?: number;
+  /** elite | good | medium | low | inactive | unknown */
+  qualityStatus?: string;
+  /** Copy size / convergence weight (1 = normal) */
+  copyWeight?: number;
+  /** When qualityScore was last computed */
+  qualityScoredAt?: number;
+  /** Average hold time in seconds (GMGN / discovery) */
+  avgHoldTimeSec?: number;
 }
 
 /** Infer category from tags / trade frequency */

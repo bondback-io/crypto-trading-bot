@@ -1117,6 +1117,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
         <div class="mint text-sm" id="risk-level-summary">—</div>
+        <div class="mt-3 pt-3 border-t border-slate-700/80">
+          <div class="toggle-row">
+            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, and tighter exits on top of the risk level">Strict Mode</span>
+            <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
+          </div>
+          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups</div>
+          <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
+        </div>
         <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
@@ -1427,13 +1435,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
           <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
           <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
+          <button class="btn btn-warning" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
           <span class="mint" id="gmgn-status"></span>
         </div>
         <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
         <div id="watching-list" class="mint text-xs mb-3 max-h-24 overflow-y-auto" style="color:#94a3b8"></div>
         <div class="overflow-x-auto">
           <table id="wallets-table">
-            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="7d / 30d / Pump.fun trades">7d / 30d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="Quality score 0–100">Q</th><th title="7d / 30d / Pump.fun trades">7d / 30d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1617,6 +1626,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="ctl ctl-md"><span>Min MC $ <span class="tip" tabindex="0" data-tip="Skip tokens below this market cap at entry."></span></span><input type="number" id="bt-min-mc" value="0" min="0" step="1000" /></label>
           <label class="ctl ctl-md"><span>Min volume $ <span class="tip" tabindex="0" data-tip="Skip tokens below this 24h volume."></span></span><input type="number" id="bt-min-vol" value="0" min="0" step="1000" /></label>
           <label class="ctl ctl-md"><span>Max risk score <span class="tip" tabindex="0" data-tip="0 = no filter. Otherwise skip tokens with risk above this (0–100)."></span></span><input type="number" id="bt-max-risk" value="0" min="0" max="100" step="5" /></label>
+          <label class="ctl ctl-md"><span>Min conviction <span class="tip" tabindex="0" data-tip="Override selective min conviction for this run only (0 = use live config)."></span></span><input type="number" id="bt-min-conviction" value="0" min="0" max="90" step="5" /></label>
+          <label class="ctl ctl-md"><span>Min wallet Q <span class="tip" tabindex="0" data-tip="Override wallet quality cutoff for this run only (0 = use live config)."></span></span><input type="number" id="bt-min-wallet-q" value="0" min="0" max="90" step="5" /></label>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl-check" title="Use live DexScreener/GMGN market data when available"><input type="checkbox" id="bt-live" checked /> Live data</label>
@@ -3393,6 +3404,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             minMarketCapUsd: Number((document.getElementById('bt-min-mc') || {}).value) || 0,
             minVolumeUsd: Number((document.getElementById('bt-min-vol') || {}).value) || 0,
             maxRiskScore: Number((document.getElementById('bt-max-risk') || {}).value) || 0,
+            minConvictionScore: Number((document.getElementById('bt-min-conviction') || {}).value) || 0,
+            minWalletQualityScore: Number((document.getElementById('bt-min-wallet-q') || {}).value) || 0,
             useLiveData: document.getElementById('bt-live').checked,
             migrationsOnly: document.getElementById('bt-mig-only').checked,
             pumpFunOnly: (document.getElementById('bt-pump-only') || {}).checked,
@@ -4227,6 +4240,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             cfg.trade.stopLossPercent + '% · max profit ' + cfg.trade.maxProfitPercent +
             '% · filters inherited when fields are 0. Overrides below are optional.';
         }
+        // Strict Mode status
+        const strictTog = document.getElementById('strict-mode-toggle');
+        const strictWarn = document.getElementById('strict-mode-warning');
+        const strictSt = document.getElementById('strict-mode-status');
+        if (strictTog) strictTog.checked = !!cfg.strictMode;
+        if (strictWarn) strictWarn.classList.toggle('hidden', !cfg.strictMode);
+        if (strictSt) {
+          strictSt.textContent = cfg.strictMode
+            ? 'Strict Mode ON — higher quality / conviction / cluster / tighter exits'
+            : 'Strict Mode OFF — using risk-level presets';
+        }
         if (cfg.strategy.reBuyMinProfitPct != null) {
           document.getElementById('reBuyMinProfitPct').value = cfg.strategy.reBuyMinProfitPct;
         }
@@ -4334,8 +4358,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td>\${fmtWalletAddr(w.address)}</td>
             <td title="\${(w.lastActiveDisplay || '').replace(/"/g, '&quot;')}">\${fmtLastTraded(w.lastTradedAt || w.lastActive, w.daysSinceTrade, w.activityLabel)}</td>
             <td>\${w.winRate != null ? w.winRate.toFixed(0) + '%' : '—'}</td>
+            \${cols > 7 ? '<td title="' + (w.qualityStatus || '') + '">' + (w.qualityScore != null ? w.qualityScore : '—') + '</td>' : ''}
             <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'} / \${w.tradesLast30d != null ? w.tradesLast30d : '—'}\${cols > 7 ? ' / ' + (w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—') : ''}</td>
-            <td>\${w.enabled === false ? '⏸ Disabled' : (w.isActive ? '✅ ' + (w.activityLabel || 'Active') : '⛔ ' + (w.activityLabel || 'Inactive'))}</td>
+            <td>\${w.enabled === false ? '⏸ Disabled' : (w.isActive ? '✅ ' + (w.activityLabel || 'Active') : '⛔ ' + (w.activityLabel || 'Inactive'))}\${w.qualityStatus ? '<div class="mint">' + w.qualityStatus + '</div>' : ''}</td>
             \${cols >= 9 ? '<td class="mint">' + (w.watching ? '👁 Yes' : '—') + '</td>' : ''}
             <td>
               <button class="secondary" onclick="toggleWallet('\${w.address}', \${!w.enabled})">\${w.enabled ? 'Disable' : 'Enable'}</button>
@@ -4343,10 +4368,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </td>
           </tr>\`;
       wtbody.innerHTML = wallets.length === 0
-        ? '<tr><td colspan="9" style="color:var(--muted)">No wallets — search above or add one below</td></tr>'
-        : wallets.slice(0, 200).map(w => renderWalletRow(w, 9)).join('') +
+        ? '<tr><td colspan="10" style="color:var(--muted)">No wallets — search above or add one below</td></tr>'
+        : wallets.slice(0, 200).map(w => renderWalletRow(w, 10)).join('') +
           (wallets.length > 200
-            ? '<tr><td colspan="9" class="mint">Showing 200 of ' + wallets.length + ' wallets</td></tr>'
+            ? '<tr><td colspan="10" class="mint">Showing 200 of ' + wallets.length + ' wallets</td></tr>'
             : '');
       const stbody = document.querySelector('#scalper-wallets-table tbody');
       if (stbody) {
@@ -4410,6 +4435,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ? '<div class="mint" style="color:' +
               (ar.riskLevel === 'high' || ar.riskLevel === 'critical' ? 'var(--red)' : 'var(--muted)') +
               '">risk ' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + ar.flags[0] : '') + '</div>' +
+              (p.convictionScore != null
+                ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
+                : '') +
               (be && (be.liquidityUsd != null || be.volume24hUsd != null)
                 ? '<div class="mint">BE liq $' +
                   (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
@@ -4428,7 +4456,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     : '') +
                   '</div>'
                 : '')
-            : '';
+            : (p.convictionScore != null
+              ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
+              : '');
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
@@ -5404,6 +5434,68 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         refresh();
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function pruneLowQuality() {
+      const hard = confirm(
+        'Prune low-quality wallets?\\n\\nOK = hard-remove below threshold\\nCancel = unwatch/down-weight only (safer)'
+      );
+      // confirm returns false on Cancel → unwatch only; true → remove
+      // Use a second confirm for clarity when removing
+      let remove = false;
+      if (hard) {
+        remove = confirm('Hard-delete low-quality wallets? This cannot be undone.');
+        if (!remove && !confirm('Unwatch / down-weight low-quality wallets instead?')) return;
+      } else {
+        if (!confirm('Unwatch / down-weight wallets below the quality threshold?')) return;
+      }
+      const status = document.getElementById('gmgn-status');
+      if (status) status.textContent = remove ? 'Removing low quality…' : 'Unwatching low quality…';
+      try {
+        const data = await fetchJSON('/api/wallets/prune-low-quality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove }),
+        });
+        if (status) {
+          status.textContent =
+            (remove ? 'Removed ' + (data.removed ?? 0) : 'Unwatched ' + (data.unwatched ?? 0)) +
+            ' · down-weighted ' + (data.downWeighted ?? 0) +
+            (data.monitoring ? ' · watching ' + data.monitoring.watching : '');
+        }
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function toggleStrictMode(enabled) {
+      try {
+        const data = await fetchJSON('/api/config/strict-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strictMode: !!enabled }),
+        });
+        const warn = document.getElementById('strict-mode-warning');
+        const st = document.getElementById('strict-mode-status');
+        const tog = document.getElementById('strict-mode-toggle');
+        if (tog) tog.checked = !!(data.strictMode);
+        if (warn) warn.classList.toggle('hidden', !data.strictMode);
+        if (st) {
+          const ef = (data.status && data.status.effective) || {};
+          st.textContent = data.strictMode
+            ? ('Strict ON · Q≥' + (ef.minWalletQualityScore ?? '?') +
+               ' · conviction≥' + (ef.minConvictionScore ?? '?') +
+               ' · cluster≥' + (ef.clusterMinWallets ?? '?'))
+            : 'Strict Mode OFF — using risk-level presets';
+        }
+        if (data.warning) alert(data.warning);
+        refresh();
+      } catch (err) {
+        alert(err.message || String(err));
+        const tog = document.getElementById('strict-mode-toggle');
+        if (tog) tog.checked = !enabled;
       }
     }
 

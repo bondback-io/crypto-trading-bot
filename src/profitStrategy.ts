@@ -15,6 +15,10 @@ import {
   DEFAULT_PROFIT_STRATEGY,
   persistUserSettings,
 } from './config';
+import {
+  effectiveLowConvictionTrailThreshold,
+  effectiveLowConvictionTrailTightenPct,
+} from './strictMode';
 
 export type { ProfitStrategyConfig };
 export { DEFAULT_PROFIT_STRATEGY };
@@ -37,6 +41,7 @@ export interface ProfitPositionView {
   partialSellDone: boolean;
   bagTrimDone: boolean;
   riskScore?: number;
+  convictionScore?: number;
 }
 
 export type ProfitAction =
@@ -57,37 +62,57 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-/** Effective parameters after optional risk-based tightening */
+/** Effective parameters after optional risk-based + conviction tightening */
 export function effectiveProfitParams(
-  riskScore?: number
-): ProfitStrategyConfig & { stopLossTightenPct: number } {
+  riskScore?: number,
+  convictionScore?: number
+): ProfitStrategyConfig & { stopLossTightenPct: number; trailTightenPct: number } {
   const base = { ...config.profitStrategy };
   const highRisk =
     base.riskBasedAdjustment &&
     riskScore != null &&
     riskScore >= (base.highRiskScoreThreshold ?? 60);
 
-  if (!highRisk) {
-    return { ...base, stopLossTightenPct: 0 };
+  let params: ProfitStrategyConfig & {
+    stopLossTightenPct: number;
+    trailTightenPct: number;
+  } = { ...base, stopLossTightenPct: 0, trailTightenPct: 0 };
+
+  if (highRisk) {
+    // High-risk: take profits earlier, tighter trail, harsher SL
+    params = {
+      ...params,
+      takeInitialPercent: Math.max(35, base.takeInitialPercent * 0.8),
+      partialSellAt: Math.max(25, base.partialSellAt * 0.7),
+      trailingStopAfter: Math.max(50, base.trailingStopAfter * 0.75),
+      trailingStopPct: Math.max(8, base.trailingStopPct - 6),
+      bagPercent: Math.max(15, base.bagPercent - 5),
+      stopLossTightenPct: 0.25,
+    };
   }
 
-  // High-risk: take profits earlier, tighter trail, harsher SL
-  return {
-    ...base,
-    takeInitialPercent: Math.max(35, base.takeInitialPercent * 0.8),
-    partialSellAt: Math.max(25, base.partialSellAt * 0.75),
-    trailingStopAfter: Math.max(50, base.trailingStopAfter * 0.75),
-    trailingStopPct: Math.max(8, base.trailingStopPct - 6),
-    bagPercent: Math.max(15, base.bagPercent - 5),
-    stopLossTightenPct: 0.25,
-  };
+  // Low conviction → tighter trailing (Strict Mode raises threshold / tighten)
+  const lowConvThreshold = effectiveLowConvictionTrailThreshold();
+  const tighten = effectiveLowConvictionTrailTightenPct();
+  if (
+    convictionScore != null &&
+    Number.isFinite(convictionScore) &&
+    convictionScore < lowConvThreshold
+  ) {
+    params.trailingStopPct = Math.max(6, params.trailingStopPct - tighten);
+    params.trailTightenPct = tighten;
+    params.trailingStopAfter = Math.max(40, params.trailingStopAfter * 0.85);
+  }
+
+  return params;
 }
 
 export function adjustedStopLossPct(
   baseStopLossPct: number,
-  riskScore?: number
+  riskScore?: number,
+  convictionScore?: number
 ): number {
-  const params = effectiveProfitParams(riskScore);
+  const params = effectiveProfitParams(riskScore, convictionScore);
   if (!params.stopLossTightenPct) return baseStopLossPct;
   // baseStopLossPct is negative; tighten = less room (closer to 0)
   return baseStopLossPct * (1 - params.stopLossTightenPct);
@@ -101,12 +126,16 @@ export function evaluateProfitAction(pos: ProfitPositionView): ProfitAction {
   const ps = config.profitStrategy;
   if (!ps?.enabled) return { type: 'none' };
 
-  const params = effectiveProfitParams(pos.riskScore);
+  const params = effectiveProfitParams(pos.riskScore, pos.convictionScore);
   const entry = pos.entryPriceSol;
   if (!(entry > 0) || !(pos.currentPriceSol > 0)) return { type: 'none' };
 
   const pnlPct = ((pos.currentPriceSol - entry) / entry) * 100;
-  const hardSl = adjustedStopLossPct(pos.stopLossPct, pos.riskScore);
+  const hardSl = adjustedStopLossPct(
+    pos.stopLossPct,
+    pos.riskScore,
+    pos.convictionScore
+  );
 
   // 1) Hard stop-loss
   if (pnlPct <= hardSl) {

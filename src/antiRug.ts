@@ -238,6 +238,9 @@ export function summarizeAntiRug(report: AntiRugReport): {
   bundlerPct: number | null;
   insiderPct: number | null;
   sniperHighRisk: boolean;
+  priceChangeH1Pct?: number | null;
+  buySellRatio?: number | null;
+  birdeyeBuySellRatio?: number | null;
   birdeye: ReturnType<typeof summarizeBirdeye> | null;
 } {
   return {
@@ -265,6 +268,9 @@ export function summarizeAntiRug(report: AntiRugReport): {
     bundlerPct: report.checks.bundlerPct,
     insiderPct: report.checks.insiderPct,
     sniperHighRisk: report.sniper?.highRisk ?? false,
+    priceChangeH1Pct: report.metricsSummary?.priceChangeH1Pct ?? null,
+    buySellRatio: report.checks.birdeyeBuySellRatio ?? null,
+    birdeyeBuySellRatio: report.checks.birdeyeBuySellRatio ?? null,
     birdeye: report.birdeye ?? null,
   };
 }

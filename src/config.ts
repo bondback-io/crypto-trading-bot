@@ -107,6 +107,13 @@ export interface RiskConfig {
   deadVolumeConsecutiveHours: number;
   /** Do not apply dead-volume exit until position has been open this long */
   deadVolumeMinHoldMinutes: number;
+  /**
+   * Tighten trailing stop % when entry conviction is below this score.
+   * 0 = disabled.
+   */
+  lowConvictionTrailThreshold?: number;
+  /** Extra trail tightness (subtract from trail %) for low-conviction trades */
+  lowConvictionTrailTightenPct?: number;
   normal: StrategyRiskRules;
   migration: StrategyRiskRules;
 }
@@ -126,9 +133,11 @@ export const DEFAULT_RISK: RiskConfig = {
   trailingStopPercent: 19,
   trailingActivationProfit: 22,
   enableDeadVolumeExit: true,
-  deadVolumeUsdPerHour: 80,
-  deadVolumeConsecutiveHours: 3,
-  deadVolumeMinHoldMinutes: 30,
+  deadVolumeUsdPerHour: 60,
+  deadVolumeConsecutiveHours: 2,
+  deadVolumeMinHoldMinutes: 15,
+  lowConvictionTrailThreshold: 50,
+  lowConvictionTrailTightenPct: 6,
   normal: {
     riskPercentPerTrade: 1.35,
     trailingStopPct: 19,
@@ -241,10 +250,10 @@ export interface SelectiveTradingConfig {
 /** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   enabled: true,
-  minConvictionScore: 32,
+  minConvictionScore: 40,
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
-  minWalletsForTrade: 1,
+  minWalletsForTrade: 2,
   minVolume24hUsd: 10_000,
   minHolderCount: 30,
   maxTradesPerHour: 16,
@@ -319,6 +328,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       skipIfDevRecentSells: true,
       enableAntiRug: true,
       enableSniperFilter: true,
+      clusterMinWallets: 3,
+      enableWalletQualityGate: true,
+      minWalletQualityScore: 60,
+      maxEntryAgeMinutes: 12,
+      requireMomentumConfirmation: true,
     },
     risk: {
       riskPercentPerTrade: 0.9,
@@ -329,6 +343,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       trailingStopPct: 15,
       trailingStopPercent: 15,
       trailingActivationProfit: 18,
+      deadVolumeUsdPerHour: 50,
+      deadVolumeConsecutiveHours: 1,
+      deadVolumeMinHoldMinutes: 10,
+      lowConvictionTrailThreshold: 55,
+      lowConvictionTrailTightenPct: 8,
       normal: {
         riskPercentPerTrade: 0.9,
         trailingStopPct: 15,
@@ -418,6 +437,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       skipIfDevRecentSells: true,
       enableAntiRug: true,
       enableSniperFilter: true,
+      clusterMinWallets: 3,
+      enableWalletQualityGate: true,
+      minWalletQualityScore: 55,
+      maxEntryAgeMinutes: 15,
+      requireMomentumConfirmation: false,
     },
     risk: {
       riskPercentPerTrade: 1.35,
@@ -428,6 +452,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       trailingStopPct: 19,
       trailingStopPercent: 19,
       trailingActivationProfit: 22,
+      deadVolumeUsdPerHour: 60,
+      deadVolumeConsecutiveHours: 2,
+      deadVolumeMinHoldMinutes: 15,
+      lowConvictionTrailThreshold: 50,
+      lowConvictionTrailTightenPct: 6,
       normal: {
         riskPercentPerTrade: 1.35,
         trailingStopPct: 19,
@@ -450,10 +479,10 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     selective: {
       enabled: true,
-      minConvictionScore: 32,
+      minConvictionScore: 40,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
-      minWalletsForTrade: 1,
+      minWalletsForTrade: 2,
       minVolume24hUsd: 10_000,
       minHolderCount: 30,
       maxTradesPerHour: 16,
@@ -520,6 +549,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       skipIfDevRecentSells: true,
       enableAntiRug: true,
       enableSniperFilter: true,
+      clusterMinWallets: 2,
+      enableWalletQualityGate: true,
+      minWalletQualityScore: 50,
+      maxEntryAgeMinutes: 18,
+      requireMomentumConfirmation: false,
     },
     risk: {
       riskPercentPerTrade: 2.4,
@@ -530,6 +564,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       trailingStopPct: 27,
       trailingStopPercent: 27,
       trailingActivationProfit: 30,
+      deadVolumeUsdPerHour: 70,
+      deadVolumeConsecutiveHours: 2,
+      deadVolumeMinHoldMinutes: 20,
+      lowConvictionTrailThreshold: 45,
+      lowConvictionTrailTightenPct: 5,
       normal: {
         riskPercentPerTrade: 2.2,
         trailingStopPct: 27,
@@ -621,6 +660,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       skipIfDevRecentSells: false,
       enableAntiRug: true,
       enableSniperFilter: false,
+      clusterMinWallets: 1,
+      enableWalletQualityGate: false,
+      minWalletQualityScore: 40,
+      maxEntryAgeMinutes: 25,
+      requireMomentumConfirmation: false,
     },
     risk: {
       riskPercentPerTrade: 3.0,
@@ -631,6 +675,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       trailingStopPct: 35,
       trailingStopPercent: 35,
       trailingActivationProfit: 40,
+      deadVolumeUsdPerHour: 80,
+      deadVolumeConsecutiveHours: 3,
+      deadVolumeMinHoldMinutes: 25,
+      lowConvictionTrailThreshold: 35,
+      lowConvictionTrailTightenPct: 4,
       normal: {
         riskPercentPerTrade: 2.8,
         trailingStopPct: 35,
@@ -856,6 +905,46 @@ export interface FilterConfig {
    * (case-sensitive). Hard floor — non-bypassable by soft-pass / early / Degen.
    */
   buyPumpFunOnly: boolean;
+
+  // --- Wallet quality gate (Prompt 1) ---
+  /** Skip copying wallets below minWalletQualityScore */
+  enableWalletQualityGate: boolean;
+  /** Minimum quality score 0–100 to allow copy (default 55) */
+  minWalletQualityScore: number;
+  /** Penalize / prune wallets with no activity for this many days */
+  walletQualityInactiveDays: number;
+  /** Auto unwatch/down-weight low-quality wallets (no hard delete) */
+  enableWalletQualityAutoPrune: boolean;
+
+  // --- Entry timing + dump rejection (Prompt 3) ---
+  /** Reject copy if oldest smart-wallet buy in cluster is older than this */
+  maxEntryAgeMinutes: number;
+  /** Soft prefer / conviction boost when signal age ≤ this */
+  preferEntryWithinMinutes: number;
+  /** Reject tokens dumping hard from recent highs */
+  rejectDumpingToken: boolean;
+  /** Max adverse short-term % move (drawdown proxy) before reject */
+  maxDrawdownFromRecentHighPct: number;
+  /** Master switch for max-age / dump timing gates */
+  enableEntryTimingGate: boolean;
+
+  // --- Wallet clustering (Prompt 5) ---
+  /** Min distinct high-quality wallets in cluster window (unifies with convergence) */
+  clusterMinWallets: number;
+  /** Cluster time window minutes (also drives convergenceWindowMs soft sync) */
+  clusterWindowMinutes: number;
+  /** Allow 1-wallet only for proven top performers on migration */
+  allowSingleWalletTopPerformerMigration: boolean;
+
+  // --- Smart money flow + momentum (Prompt 7) ---
+  /** Multiplier on Birdeye/GMGN smart-money contribution to conviction */
+  smartMoneyFlowWeight: number;
+  /** Require momentum confirmation before entry */
+  requireMomentumConfirmation: boolean;
+  /** Minutes of price action to judge momentum hold */
+  momentumLookbackMinutes: number;
+  /** Min price change % vs lookback to pass momentum (e.g. -5 = allow mild dip) */
+  momentumMinHoldPct: number;
 }
 
 export interface StrategyConfig {
@@ -903,6 +992,11 @@ export interface BotConfig {
   mode: TradingMode;
   /** Overall aggression preset — drives recommended trade/filter/risk knobs */
   riskLevel: RiskLevel;
+  /**
+   * Strict Mode — opt-in overlay that tightens quality / conviction / cluster /
+   * timing / exits on top of the active risk level. Default OFF.
+   */
+  strictMode: boolean;
   smartWallets: SmartWallet[];
   /** Live execution wallets (keys via env only) */
   tradingWallets: TradingWalletSlot[];
@@ -1058,6 +1152,7 @@ export interface BotConfig {
 export const config: BotConfig = {
   mode: 'paper',
   riskLevel: 'medium',
+  strictMode: false,
   smartWallets: [],
   tradingWallets: [],
   activeTradingWalletId: null,
@@ -1110,6 +1205,22 @@ export const config: BotConfig = {
     minHolders: 30,
     minRecentActivity: 3,
     buyPumpFunOnly: true,
+    enableWalletQualityGate: true,
+    minWalletQualityScore: 55,
+    walletQualityInactiveDays: 5,
+    enableWalletQualityAutoPrune: false,
+    maxEntryAgeMinutes: 15,
+    preferEntryWithinMinutes: 10,
+    rejectDumpingToken: true,
+    maxDrawdownFromRecentHighPct: 35,
+    enableEntryTimingGate: true,
+    clusterMinWallets: 2,
+    clusterWindowMinutes: 5,
+    allowSingleWalletTopPerformerMigration: true,
+    smartMoneyFlowWeight: 1.35,
+    requireMomentumConfirmation: false,
+    momentumLookbackMinutes: 15,
+    momentumMinHoldPct: -5,
   },
 
   strategy: {
@@ -1331,6 +1442,8 @@ const MEDIUM_ENTRY_RESTORE_V1125 = 'mediumEntryRestore_v1125';
 const MIN_MARKET_CAP_FLOOR_V1129 = 'minMarketCapFloor_v1129';
 /** One-shot: turn buyPumpFunOnly ON (Pump.fun mint suffix hard floor). */
 const BUY_PUMP_FUN_ONLY_ON_V1131 = 'buyPumpFunOnly_on_v1131';
+/** One-shot: seed wallet quality + entry timing + cluster defaults (1.1.33). */
+const WALLET_QUALITY_ENTRY_V1133 = 'walletQualityEntry_v1133';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -1342,6 +1455,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     updatedAt: Date.now(),
     mode: config.mode,
     riskLevel: config.riskLevel,
+    strictMode: config.strictMode === true,
     trade: { ...config.trade },
     filters: { ...config.filters },
     strategy: { ...config.strategy },
@@ -1446,6 +1560,87 @@ function syncConfigAliases(): void {
   if (config.filters.buyPumpFunOnly == null) {
     config.filters.buyPumpFunOnly = true;
   }
+  if (config.strictMode == null) {
+    config.strictMode = false;
+  }
+  if (config.filters.enableWalletQualityGate == null) {
+    config.filters.enableWalletQualityGate = true;
+  }
+  if (
+    config.filters.minWalletQualityScore == null ||
+    !Number.isFinite(Number(config.filters.minWalletQualityScore))
+  ) {
+    config.filters.minWalletQualityScore = 55;
+  }
+  if (
+    config.filters.walletQualityInactiveDays == null ||
+    !Number.isFinite(Number(config.filters.walletQualityInactiveDays))
+  ) {
+    config.filters.walletQualityInactiveDays = 5;
+  }
+  if (config.filters.enableWalletQualityAutoPrune == null) {
+    config.filters.enableWalletQualityAutoPrune = false;
+  }
+  if (
+    config.filters.maxEntryAgeMinutes == null ||
+    !Number.isFinite(Number(config.filters.maxEntryAgeMinutes))
+  ) {
+    config.filters.maxEntryAgeMinutes = 15;
+  }
+  if (
+    config.filters.preferEntryWithinMinutes == null ||
+    !Number.isFinite(Number(config.filters.preferEntryWithinMinutes))
+  ) {
+    config.filters.preferEntryWithinMinutes = 10;
+  }
+  if (config.filters.rejectDumpingToken == null) {
+    config.filters.rejectDumpingToken = true;
+  }
+  if (
+    config.filters.maxDrawdownFromRecentHighPct == null ||
+    !Number.isFinite(Number(config.filters.maxDrawdownFromRecentHighPct))
+  ) {
+    config.filters.maxDrawdownFromRecentHighPct = 35;
+  }
+  if (config.filters.enableEntryTimingGate == null) {
+    config.filters.enableEntryTimingGate = true;
+  }
+  if (
+    config.filters.clusterMinWallets == null ||
+    !Number.isFinite(Number(config.filters.clusterMinWallets))
+  ) {
+    config.filters.clusterMinWallets = 2;
+  }
+  if (
+    config.filters.clusterWindowMinutes == null ||
+    !Number.isFinite(Number(config.filters.clusterWindowMinutes))
+  ) {
+    config.filters.clusterWindowMinutes = 5;
+  }
+  if (config.filters.allowSingleWalletTopPerformerMigration == null) {
+    config.filters.allowSingleWalletTopPerformerMigration = true;
+  }
+  if (
+    config.filters.smartMoneyFlowWeight == null ||
+    !Number.isFinite(Number(config.filters.smartMoneyFlowWeight))
+  ) {
+    config.filters.smartMoneyFlowWeight = 1.35;
+  }
+  if (config.filters.requireMomentumConfirmation == null) {
+    config.filters.requireMomentumConfirmation = false;
+  }
+  if (
+    config.filters.momentumLookbackMinutes == null ||
+    !Number.isFinite(Number(config.filters.momentumLookbackMinutes))
+  ) {
+    config.filters.momentumLookbackMinutes = 15;
+  }
+  if (
+    config.filters.momentumMinHoldPct == null ||
+    !Number.isFinite(Number(config.filters.momentumMinHoldPct))
+  ) {
+    config.filters.momentumMinHoldPct = -5;
+  }
   if (config.bondingCurve.requireHealthyCurve == null) {
     config.bondingCurve.requireHealthyCurve = false;
   }
@@ -1501,6 +1696,14 @@ function syncConfigAliases(): void {
     config.risk.deadVolumeMinHoldMinutes =
       DEFAULT_RISK.deadVolumeMinHoldMinutes;
   }
+  if (config.risk.lowConvictionTrailThreshold == null) {
+    config.risk.lowConvictionTrailThreshold =
+      DEFAULT_RISK.lowConvictionTrailThreshold;
+  }
+  if (config.risk.lowConvictionTrailTightenPct == null) {
+    config.risk.lowConvictionTrailTightenPct =
+      DEFAULT_RISK.lowConvictionTrailTightenPct;
+  }
 }
 
 /**
@@ -1522,6 +1725,9 @@ function applySettingsSnapshot(
     saved.riskLevel === 'degen'
   ) {
     config.riskLevel = saved.riskLevel;
+  }
+  if (typeof saved.strictMode === 'boolean') {
+    config.strictMode = saved.strictMode;
   }
 
   if (mode === 'replace') {
@@ -1711,6 +1917,16 @@ export function applyPersistedSettings(): boolean {
     persistUserSettings();
     console.log(
       '[settings] Applied buyPumpFunOnly_on_v1131 — buyPumpFunOnly ON (only mints ending in pump)'
+    );
+  }
+
+  if (applyWalletQualityEntryMigration()) {
+    settingsMigrations[WALLET_QUALITY_ENTRY_V1133] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied walletQualityEntry_v1133 — quality gate ON (min ${config.filters.minWalletQualityScore}), ` +
+        `cluster≥${config.filters.clusterMinWallets}, entry age≤${config.filters.maxEntryAgeMinutes}m, ` +
+        `conviction≥${config.selective.minConvictionScore}`
     );
   }
 
@@ -1997,6 +2213,91 @@ function applyBuyPumpFunOnlyOnMigration(): boolean {
   return true;
 }
 
+/**
+ * One-shot: seed wallet quality / clustering / entry-timing defaults for 1.1.33.
+ * Does not wipe custom High/Degen knobs beyond filling nulls + Medium conviction floor.
+ */
+function applyWalletQualityEntryMigration(): boolean {
+  if (settingsMigrations[WALLET_QUALITY_ENTRY_V1133]) return false;
+
+  if (config.filters.enableWalletQualityGate == null) {
+    config.filters.enableWalletQualityGate = true;
+  }
+  if (
+    config.filters.minWalletQualityScore == null ||
+    Number(config.filters.minWalletQualityScore) <= 0
+  ) {
+    config.filters.minWalletQualityScore = 55;
+  }
+  if (config.filters.walletQualityInactiveDays == null) {
+    config.filters.walletQualityInactiveDays = 5;
+  }
+  if (config.filters.enableWalletQualityAutoPrune == null) {
+    config.filters.enableWalletQualityAutoPrune = false;
+  }
+  if (config.filters.enableEntryTimingGate == null) {
+    config.filters.enableEntryTimingGate = true;
+  }
+  if (config.filters.maxEntryAgeMinutes == null) {
+    config.filters.maxEntryAgeMinutes = 15;
+  }
+  if (config.filters.preferEntryWithinMinutes == null) {
+    config.filters.preferEntryWithinMinutes = 10;
+  }
+  if (config.filters.rejectDumpingToken == null) {
+    config.filters.rejectDumpingToken = true;
+  }
+  if (config.filters.maxDrawdownFromRecentHighPct == null) {
+    config.filters.maxDrawdownFromRecentHighPct = 35;
+  }
+  if (config.filters.clusterMinWallets == null) {
+    config.filters.clusterMinWallets =
+      config.riskLevel === 'low' ? 3 : config.riskLevel === 'degen' ? 1 : 2;
+  }
+  if (config.filters.clusterWindowMinutes == null) {
+    config.filters.clusterWindowMinutes = 5;
+  }
+  if (config.filters.allowSingleWalletTopPerformerMigration == null) {
+    config.filters.allowSingleWalletTopPerformerMigration = true;
+  }
+  if (config.filters.smartMoneyFlowWeight == null) {
+    config.filters.smartMoneyFlowWeight = 1.35;
+  }
+  if (config.filters.requireMomentumConfirmation == null) {
+    config.filters.requireMomentumConfirmation = config.riskLevel === 'low';
+  }
+  if (config.filters.momentumLookbackMinutes == null) {
+    config.filters.momentumLookbackMinutes = 15;
+  }
+  if (config.filters.momentumMinHoldPct == null) {
+    config.filters.momentumMinHoldPct = -5;
+  }
+
+  // Medium: nudge cluster toward 2 without starving single-wallet migrations
+  if (!config.riskLevel || config.riskLevel === 'medium') {
+    if ((config.filters.clusterMinWallets ?? 0) < 2) {
+      config.filters.clusterMinWallets = 2;
+    }
+    // Milder dead-volume defaults (Strict Mode tightens further when ON)
+    if ((config.risk.deadVolumeConsecutiveHours ?? 99) > 2) {
+      config.risk.deadVolumeConsecutiveHours = 2;
+    }
+    if ((config.risk.deadVolumeMinHoldMinutes ?? 99) > 15) {
+      config.risk.deadVolumeMinHoldMinutes = 15;
+    }
+    if ((config.risk.deadVolumeUsdPerHour ?? 0) > 60) {
+      config.risk.deadVolumeUsdPerHour = 60;
+    }
+  }
+
+  if (config.strictMode == null) {
+    config.strictMode = false;
+  }
+
+  syncConfigAliases();
+  return true;
+}
+
 /** Effective floors — risk presets may be stricter, never below HARD_FILTER_FLOORS. */
 export function effectiveMinLiquidityUsd(): number {
   return Math.max(
@@ -2096,7 +2397,15 @@ export function initWallets(): void {
     tradesLast7d: w.tradesLast7d,
     pumpFunTradeCount: w.pumpFunTradeCount,
     tags: w.tags,
+    category: w.category,
+    source: w.source,
+    discoveredAt: w.discoveredAt,
     lastCheckedAt: w.lastCheckedAt,
+    qualityScore: w.qualityScore,
+    qualityStatus: w.qualityStatus,
+    copyWeight: w.copyWeight,
+    qualityScoredAt: w.qualityScoredAt,
+    avgHoldTimeSec: w.avgHoldTimeSec,
   }));
 
   initTradingWallets();
@@ -2254,6 +2563,11 @@ export function persistWallets(options: { activeOnly?: boolean } = {}): void {
       source: w.source ?? prev?.source,
       discoveredAt: w.discoveredAt ?? prev?.discoveredAt,
       lastCheckedAt: w.lastCheckedAt ?? prev?.lastCheckedAt,
+      qualityScore: w.qualityScore ?? prev?.qualityScore,
+      qualityStatus: w.qualityStatus ?? prev?.qualityStatus,
+      copyWeight: w.copyWeight ?? prev?.copyWeight,
+      qualityScoredAt: w.qualityScoredAt ?? prev?.qualityScoredAt,
+      avgHoldTimeSec: w.avgHoldTimeSec ?? prev?.avgHoldTimeSec,
       addedAt: prev?.addedAt ?? Date.now(),
     };
   });
@@ -2427,6 +2741,10 @@ export function upsertSmartWallet(wallet: SmartWallet): {
     source: existing.source ?? wallet.source ?? 'manual',
     discoveredAt: existing.discoveredAt ?? wallet.discoveredAt ?? Date.now(),
     lastCheckedAt: wallet.lastCheckedAt ?? existing.lastCheckedAt,
+    avgHoldTimeSec: wallet.avgHoldTimeSec ?? existing.avgHoldTimeSec,
+    qualityScore: wallet.qualityScore ?? existing.qualityScore,
+    qualityStatus: wallet.qualityStatus ?? existing.qualityStatus,
+    copyWeight: wallet.copyWeight ?? existing.copyWeight,
   });
   persistWallets();
   return { added: false, updated: true };
@@ -2459,6 +2777,28 @@ export function setMode(
   if (options.persist !== false) {
     persistUserSettings();
   }
+}
+
+/** Toggle Strict Mode overlay (persisted). Does not change riskLevel presets. */
+export function setStrictMode(
+  enabled: boolean,
+  options: { persist?: boolean } = {}
+): {
+  strictMode: boolean;
+  warning: string | null;
+} {
+  config.strictMode = Boolean(enabled);
+  const warning = config.strictMode
+    ? 'Higher quality trades only – fewer but better setups'
+    : null;
+  console.log(
+    `[config] Strict Mode → ${config.strictMode ? 'ON' : 'OFF'}` +
+      (warning ? ` · ${warning}` : '')
+  );
+  if (options.persist !== false) {
+    persistUserSettings();
+  }
+  return { strictMode: config.strictMode, warning };
 }
 
 /**
@@ -2646,6 +2986,11 @@ export function getConfigSnapshot() {
   return {
     mode: config.mode,
     riskLevel: config.riskLevel,
+    strictMode: config.strictMode === true,
+    strictModeWarning:
+      config.strictMode === true
+        ? 'Higher quality trades only – fewer but better setups'
+        : null,
     riskLevelSummary: getRiskLevelSummary(),
     trade: { ...config.trade },
     filters: { ...config.filters },

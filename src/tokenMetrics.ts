@@ -658,8 +658,14 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
   marketCapUsd: number | null;
   volume24hUsd: number | null;
   volumeH1Usd: number | null;
+  volumeM5Usd: number | null;
   recentBuyVolumeUsd: number | null;
   txnsH1: number | null;
+  buysH1: number | null;
+  sellsH1: number | null;
+  buySellRatio: number | null;
+  priceChangeH1Pct: number | null;
+  priceChange24hPct: number | null;
   holderCountEstimate: number | null;
   topHolderPct: number | null;
   top10HoldPct: number | null;
@@ -668,13 +674,27 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
   mintAuthority: string | null;
   source: string;
 } {
+  const buys = m.buysH1;
+  const sells = m.sellsH1;
+  const ratio =
+    buys != null && sells != null && sells > 0
+      ? buys / sells
+      : buys != null && sells === 0 && buys > 0
+        ? 99
+        : null;
   return {
     liquidityUsd: m.liquidityUsd,
     marketCapUsd: m.marketCapUsd,
     volume24hUsd: m.volume24hUsd,
     volumeH1Usd: m.volumeH1Usd,
+    volumeM5Usd: m.volumeM5Usd,
     recentBuyVolumeUsd: m.recentBuyVolumeUsd,
     txnsH1: m.txnsH1,
+    buysH1: buys ?? null,
+    sellsH1: sells ?? null,
+    buySellRatio: ratio,
+    priceChangeH1Pct: m.priceChangeH1Pct,
+    priceChange24hPct: m.priceChange24hPct,
     holderCountEstimate: m.holderCountEstimate,
     topHolderPct: m.topHolderPct,
     top10HoldPct: m.top10HoldPct,

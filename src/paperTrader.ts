@@ -18,6 +18,13 @@ import {
 } from './profitStrategy';
 import { marketCapAtPrice, getCachedSolUsdPrice, reconcileMarkPriceSol } from './marketData';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
+import {
+  effectiveDeadVolumeConsecutiveHours,
+  effectiveDeadVolumeMinHoldMinutes,
+  effectiveDeadVolumeUsdPerHour,
+  effectiveLowConvictionTrailThreshold,
+  effectiveLowConvictionTrailTightenPct,
+} from './strictMode';
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -91,6 +98,8 @@ export interface Position {
    * Cleared when activity recovers above thresholds.
    */
   deadMarketBelowSince?: number;
+  /** Conviction score at entry (for exit discipline) */
+  convictionScore?: number;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -401,6 +410,7 @@ export class PaperTrader {
     antiRug?: Position['antiRug'];
     entryMarketCapUsd?: number;
     sourceEntryMcUsd?: number;
+    convictionScore?: number;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -459,7 +469,18 @@ export class PaperTrader {
         input.sourceEntryMcUsd > 0
           ? input.sourceEntryMcUsd
           : undefined,
+      convictionScore: input.convictionScore,
     };
+
+    if (
+      position.convictionScore != null &&
+      position.convictionScore < effectiveLowConvictionTrailThreshold()
+    ) {
+      position.trailingStopPct = Math.max(
+        6,
+        position.trailingStopPct - effectiveLowConvictionTrailTightenPct()
+      );
+    }
 
     this.positions.set(position.id, position);
     this.priceCache.set(input.mint, input.entryPriceSol);
@@ -560,6 +581,7 @@ export class PaperTrader {
       antiRug?: Position['antiRug'];
       entryMarketCapUsd?: number;
       sourceEntryMcUsd?: number;
+      convictionScore?: number;
     }
   ): Position | null {
     const spendSol =
@@ -642,7 +664,19 @@ export class PaperTrader {
         meta.sourceEntryMcUsd > 0
           ? meta.sourceEntryMcUsd
           : undefined,
+      convictionScore: meta?.convictionScore,
     };
+
+    // Low-conviction: tighten trail at open
+    if (
+      position.convictionScore != null &&
+      position.convictionScore < effectiveLowConvictionTrailThreshold()
+    ) {
+      position.trailingStopPct = Math.max(
+        6,
+        position.trailingStopPct - effectiveLowConvictionTrailTightenPct()
+      );
+    }
 
     this.positions.set(position.id, position);
     if (position.entryMarketCapUsd != null) {
@@ -1057,6 +1091,7 @@ export class PaperTrader {
         partialSellDone: position.partialSellDone,
         bagTrimDone: position.bagTrimDone,
         riskScore: position.antiRug?.riskScore,
+        convictionScore: position.convictionScore,
       };
 
       const action = evaluateProfitAction(view);
@@ -1298,7 +1333,8 @@ export class PaperTrader {
     if (!risk.enableDeadVolumeExit) return null;
     if (this.mode === 'backtest') return null;
 
-    const minHoldMs = Math.max(0, risk.deadVolumeMinHoldMinutes ?? 30) * 60_000;
+    const minHoldMs =
+      Math.max(0, effectiveDeadVolumeMinHoldMinutes()) * 60_000;
     const holdMs = Date.now() - position.openedAt;
     if (holdMs < minHoldMs) return null;
 
@@ -1307,8 +1343,8 @@ export class PaperTrader {
     // Ignore stale samples (e.g. failed refresh) — don't reset or trip the streak
     if (Date.now() - activity.updatedAt > 15 * 60_000) return null;
 
-    const volThreshold = Math.max(0, risk.deadVolumeUsdPerHour ?? 50);
-    const needHours = Math.max(1, risk.deadVolumeConsecutiveHours ?? 3);
+    const volThreshold = Math.max(0, effectiveDeadVolumeUsdPerHour());
+    const needHours = Math.max(1, effectiveDeadVolumeConsecutiveHours());
     const lowVolume = activity.volumeH1Usd < volThreshold;
     const noTrades = activity.txnsH1 <= 0;
     const isDead = lowVolume || noTrades;
@@ -1528,6 +1564,7 @@ export class PaperTrader {
       partialSellDone: position.partialSellDone,
       bagTrimDone: position.bagTrimDone,
       riskScore: position.antiRug?.riskScore,
+      convictionScore: position.convictionScore,
     };
 
     const action = evaluateProfitAction(view);

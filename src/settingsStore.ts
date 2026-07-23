@@ -28,6 +28,8 @@ export interface PersistedBotSettings {
   updatedAt: number;
   mode?: 'paper' | 'live';
   riskLevel?: 'low' | 'medium' | 'high' | 'degen';
+  /** Opt-in Strict Mode overlay (default false) */
+  strictMode?: boolean;
   trade?: Record<string, unknown>;
   filters?: Record<string, unknown>;
   strategy?: Record<string, unknown>;

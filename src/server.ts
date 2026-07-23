@@ -10,6 +10,7 @@ import {
   removeSmartWallet,
   toggleSmartWallet,
   setMode,
+  setStrictMode,
   updateTradeConfig,
   updateFilterConfig,
   updateStrategyConfig,
@@ -63,7 +64,10 @@ import {
   forceRefreshMonitoring,
   pruneInactiveWallets,
   refreshWalletActivity,
+  pruneLowQualityWallets,
+  refreshAllWalletQualityScores,
 } from './monitor';
+import { getStrictModeStatus } from './strictMode';
 import {
   updateRiskConfig,
   clearRiskHalt,
@@ -369,6 +373,9 @@ export function createServer(): express.Application {
         riskLevel?: 'low' | 'medium' | 'high' | 'degen' | 'current';
         compareRiskLevels?: boolean;
         useSavedConfigFilters?: boolean;
+        minConvictionScore?: number;
+        minWalletQualityScore?: number;
+        strictMode?: boolean;
       };
 
       const { runBacktest } = await import('./backtest');
@@ -395,6 +402,16 @@ export function createServer(): express.Application {
             : undefined,
         maxRiskScore:
           body.maxRiskScore != null ? Number(body.maxRiskScore) : undefined,
+        minConvictionScore:
+          body.minConvictionScore != null
+            ? Number(body.minConvictionScore)
+            : undefined,
+        minWalletQualityScore:
+          body.minWalletQualityScore != null
+            ? Number(body.minWalletQualityScore)
+            : undefined,
+        strictMode:
+          body.strictMode !== undefined ? Boolean(body.strictMode) : undefined,
         useLiveData:
           body.useLiveData !== undefined
             ? Boolean(body.useLiveData)
@@ -994,6 +1011,23 @@ export function createServer(): express.Application {
     });
   });
 
+  app.post('/api/config/strict-mode', (req: Request, res: Response) => {
+    const enabled = Boolean(
+      (req.body as { strictMode?: boolean; enabled?: boolean }).strictMode ??
+        (req.body as { enabled?: boolean }).enabled
+    );
+    const result = setStrictMode(enabled);
+    res.json({
+      ...result,
+      status: getStrictModeStatus(),
+      config: getConfigSnapshot(),
+    });
+  });
+
+  app.get('/api/config/strict-mode', (_req: Request, res: Response) => {
+    res.json(getStrictModeStatus());
+  });
+
   // --- Live trading wallets (keys never leave the backend) ---
 
   app.get('/api/trading-wallets', async (_req: Request, res: Response) => {
@@ -1167,6 +1201,50 @@ export function createServer(): express.Application {
     }
     if (req.body.enableSniperFilter !== undefined) {
       config.filters.enableSniperFilter = Boolean(req.body.enableSniperFilter);
+    }
+    if (req.body.enableWalletQualityGate !== undefined) {
+      config.filters.enableWalletQualityGate = Boolean(
+        req.body.enableWalletQualityGate
+      );
+    }
+    if (req.body.enableWalletQualityAutoPrune !== undefined) {
+      config.filters.enableWalletQualityAutoPrune = Boolean(
+        req.body.enableWalletQualityAutoPrune
+      );
+    }
+    if (req.body.enableEntryTimingGate !== undefined) {
+      config.filters.enableEntryTimingGate = Boolean(
+        req.body.enableEntryTimingGate
+      );
+    }
+    if (req.body.rejectDumpingToken !== undefined) {
+      config.filters.rejectDumpingToken = Boolean(req.body.rejectDumpingToken);
+    }
+    if (req.body.requireMomentumConfirmation !== undefined) {
+      config.filters.requireMomentumConfirmation = Boolean(
+        req.body.requireMomentumConfirmation
+      );
+    }
+    if (req.body.allowSingleWalletTopPerformerMigration !== undefined) {
+      config.filters.allowSingleWalletTopPerformerMigration = Boolean(
+        req.body.allowSingleWalletTopPerformerMigration
+      );
+    }
+    for (const key of [
+      'minWalletQualityScore',
+      'walletQualityInactiveDays',
+      'maxEntryAgeMinutes',
+      'preferEntryWithinMinutes',
+      'maxDrawdownFromRecentHighPct',
+      'clusterMinWallets',
+      'clusterWindowMinutes',
+      'smartMoneyFlowWeight',
+      'momentumLookbackMinutes',
+      'momentumMinHoldPct',
+    ] as const) {
+      if (req.body[key] !== undefined) {
+        (partial as Record<string, number>)[key] = Number(req.body[key]);
+      }
     }
     if (
       req.body.sniperSensitivity !== undefined &&
@@ -2038,6 +2116,33 @@ export function createServer(): express.Application {
       maxDaysInactive: days,
       monitoring,
       watchedWallets: getMonitorStatus().watchedWallets,
+      wallets: getWalletsWithActivity(),
+    });
+  });
+
+  app.post('/api/wallets/prune-low-quality', (req: Request, res: Response) => {
+    const remove = req.body?.remove === true || req.body?.delete === true;
+    const minScore =
+      req.body?.minScore != null ? Number(req.body.minScore) : undefined;
+    refreshAllWalletQualityScores();
+    const result = pruneLowQualityWallets({
+      remove,
+      minScore: Number.isFinite(minScore as number) ? minScore : undefined,
+    });
+    const monitoring = syncWalletsToMonitoring([], 'after-quality-prune');
+    res.json({
+      ...result,
+      remove,
+      monitoring,
+      watchedWallets: getMonitorStatus().watchedWallets,
+      wallets: getWalletsWithActivity(),
+    });
+  });
+
+  app.post('/api/wallets/refresh-quality', (_req: Request, res: Response) => {
+    const scored = refreshAllWalletQualityScores();
+    res.json({
+      ...scored,
       wallets: getWalletsWithActivity(),
     });
   });

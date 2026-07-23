@@ -1,5 +1,16 @@
 /**
- * High-conviction signal scoring — gates entries to reduce low-quality trades.
+ * High-conviction multi-factor signal scoring — gates entries to reduce
+ * low-quality trades. Unified selective gate (do not duplicate elsewhere).
+ *
+ * Factors (0–100):
+ * - Smart wallet cluster / convergence
+ * - Bonding curve health + migration proximity
+ * - Recent volume / net buy pressure
+ * - Holder growth
+ * - Inverse risk score
+ * - Time since launch / entry freshness
+ * - Birdeye / GMGN smart-money flow (heavier weight)
+ * - Momentum confirmation (price holding after smart buy)
  */
 
 import {
@@ -9,6 +20,24 @@ import {
   type SelectiveTradingConfig,
 } from './config';
 import type { TradeSignal } from './monitor';
+import {
+  effectiveClusterMinWallets,
+  effectiveMaxEntryAgeMinutes,
+  effectiveMinConvictionScore,
+  effectivePreferEntryWithinMinutes,
+  effectiveRequireMomentumConfirmation,
+} from './strictMode';
+
+export interface ConvictionBreakdown {
+  wallets: number;
+  curve: number;
+  volume: number;
+  holders: number;
+  risk: number;
+  timing: number;
+  smartFlow: number;
+  momentum: number;
+}
 
 export interface ConvictionVerdict {
   pass: boolean;
@@ -16,6 +45,9 @@ export interface ConvictionVerdict {
   minRequired: number;
   reasons: string[];
   sizeMultiplier: number;
+  breakdown: ConvictionBreakdown;
+  /** Human-readable factor line for logs */
+  breakdownLine: string;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -46,6 +78,15 @@ function volumeUsd(signal: TradeSignal): number | null {
   );
 }
 
+function recentVolumeUsd(signal: TradeSignal): number | null {
+  return (
+    signal.metrics?.volumeH1Usd ??
+    signal.metrics?.volumeM5Usd ??
+    signal.antiRug?.volumeH1Usd ??
+    null
+  );
+}
+
 function holderCount(signal: TradeSignal): number | null {
   return (
     signal.metrics?.holderCountEstimate ??
@@ -56,30 +97,67 @@ function holderCount(signal: TradeSignal): number | null {
   );
 }
 
+function buySellRatio(signal: TradeSignal): number | null {
+  return (
+    signal.metrics?.buySellRatio ??
+    signal.birdeye?.buySellRatio ??
+    signal.antiRug?.birdeyeBuySellRatio ??
+    signal.antiRug?.buySellRatio ??
+    null
+  );
+}
+
+function priceChangeH1(signal: TradeSignal): number | null {
+  return (
+    signal.metrics?.priceChangeH1Pct ??
+    signal.birdeye?.priceChange24hPct ??
+    signal.antiRug?.priceChangeH1Pct ??
+    null
+  );
+}
+
 function isPrioritySignal(signal: TradeSignal): boolean {
   if (signal.isMigration) return true;
   if (signal.nearMigration) return true;
-  // Early-curve smart buys are priority even with a single wallet
   if (signal.earlyBuy) return true;
   return false;
 }
 
+function formatBreakdown(b: ConvictionBreakdown): string {
+  return (
+    `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
+    `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
+    `flow=${b.smartFlow} mom=${b.momentum}`
+  );
+}
+
 /**
  * Score a candidate signal 0–100 and decide if it meets selective thresholds.
+ * Per-risk-level minConvictionScore lives on config.selective (set by presets).
  */
 export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict {
   const sel: SelectiveTradingConfig = config.selective;
-  const minRequired = sel.minConvictionScore ?? 55;
+  const minRequired = effectiveMinConvictionScore();
   const reasons: string[] = [];
-  let score = 0;
+  const breakdown: ConvictionBreakdown = {
+    wallets: 0,
+    curve: 0,
+    volume: 0,
+    holders: 0,
+    risk: 0,
+    timing: 0,
+    smartFlow: 0,
+    momentum: 0,
+  };
 
   const walletCount = signal.wallets.length;
   const riskScore = signal.antiRug?.riskScore;
   const maxRisk = config.filters.maxRiskScore || 70;
+  const flowWeight = clamp(config.filters.smartMoneyFlowWeight ?? 1.35, 0.5, 2.5);
 
-  // --- Wallet convergence (0–30) ---
-  const baseRequired = config.filters.convergenceRequired ?? 2;
-  let requiredWallets = Math.max(sel.minWalletsForTrade ?? 2, baseRequired);
+  // --- Wallet convergence / cluster (0–28) ---
+  const baseRequired = effectiveClusterMinWallets();
+  let requiredWallets = baseRequired;
   if (
     sel.enabled &&
     riskScore != null &&
@@ -92,100 +170,185 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const allowSingle =
     priority &&
     sel.allowSingleWalletMigration !== false &&
-    (signal.isMigration || signal.nearMigration || signal.earlyBuy);
+    (signal.isMigration || signal.nearMigration || signal.earlyBuy) &&
+    (signal.allowSingleWalletException === true ||
+      walletCount >= 1);
 
   if (walletCount >= requiredWallets) {
-    score += clamp(15 + (walletCount - requiredWallets) * 5, 15, 30);
+    breakdown.wallets = clamp(14 + (walletCount - requiredWallets) * 5, 14, 28);
   } else if (allowSingle && walletCount >= 1) {
-    score += 12;
-    reasons.push(`single-wallet ${priority ? 'priority' : ''} migration allowed`);
+    breakdown.wallets = 11;
+    reasons.push('single-wallet priority/migration allowed');
   } else if (
     sel.requireConvergenceForNormal !== false &&
     !priority &&
     walletCount < requiredWallets
   ) {
-    reasons.push(
-      `need ${requiredWallets} wallets (have ${walletCount})`
-    );
+    reasons.push(`need ${requiredWallets} wallets (have ${walletCount})`);
+    breakdown.wallets = clamp(walletCount * 4, 0, 10);
   } else if (walletCount >= 1) {
-    score += clamp(walletCount * 8, 8, 20);
+    breakdown.wallets = clamp(walletCount * 7, 7, 18);
   }
 
-  // --- Migration / momentum (0–25) ---
+  // --- Bonding curve / migration proximity (0–18) ---
+  const curvePct = signal.bondingCurve?.progressPct;
+  const curveHealth = signal.bondingCurve?.health;
   if (signal.isMigration) {
-    score += 25;
+    breakdown.curve = 18;
     reasons.push('migration momentum');
   } else if (signal.nearMigration) {
-    score += 18;
+    breakdown.curve = 14;
     reasons.push('near-migration curve');
   } else if (signal.earlyBuy) {
-    score += 16;
-    if ((signal.earlyBuyerCount ?? 0) >= 2) score += 6;
+    breakdown.curve = 12;
+    if ((signal.earlyBuyerCount ?? 0) >= 2) breakdown.curve += 3;
     reasons.push('early-curve priority');
+  } else if (
+    curveHealth === 'preferred' ||
+    (curvePct != null && curvePct >= 70 && curvePct <= 95)
+  ) {
+    breakdown.curve = 10;
+    reasons.push('near-migration curve preference');
+  } else if (curveHealth === 'dead' || curveHealth === 'stalled') {
+    breakdown.curve = 0;
+    reasons.push(`unhealthy curve (${curveHealth})`);
+  } else if (curvePct != null) {
+    breakdown.curve = clamp(curvePct / 12, 2, 8);
+  } else {
+    breakdown.curve = priority ? 6 : 3;
+  }
+  breakdown.curve = clamp(breakdown.curve, 0, 18);
+
+  // --- Recent volume / buy pressure (0–12) ---
+  const vol = volumeUsd(signal);
+  const recentVol = recentVolumeUsd(signal);
+  const minVol = effectiveMinVolume24hUsd();
+  const ratio = buySellRatio(signal);
+  if (recentVol != null && recentVol >= (config.filters.minRecentVolumeUsd || 800)) {
+    breakdown.volume += 6;
+  } else if (recentVol != null && recentVol > 0) {
+    breakdown.volume += 3;
+  }
+  if (minVol > 0) {
+    if (vol != null && vol >= minVol) {
+      breakdown.volume += clamp(3 + (vol / minVol), 3, 5);
+    } else if (vol != null) {
+      breakdown.volume += priority ? 2 : 1;
+      if (!priority) reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
+    } else {
+      breakdown.volume += priority ? 2 : 1;
+    }
+  }
+  if (ratio != null && ratio >= 1.2) breakdown.volume += 2;
+  else if (ratio != null && ratio < 0.7) {
+    breakdown.volume = Math.max(0, breakdown.volume - 2);
+    reasons.push(`sell pressure buy/sell ${ratio.toFixed(2)}`);
+  }
+  breakdown.volume = clamp(breakdown.volume, 0, 12);
+
+  // --- Holders (0–8) ---
+  const holders = holderCount(signal);
+  const minHolders = effectiveMinHolders();
+  if (minHolders > 0) {
+    if (holders != null && holders >= minHolders) breakdown.holders = 8;
+    else if (holders != null) {
+      breakdown.holders = clamp((holders / minHolders) * 5, 1, 5);
+      reasons.push(`holders ${holders} < ${minHolders}`);
+    } else {
+      breakdown.holders = priority ? 3 : 2;
+    }
+  } else if (holders != null && holders >= 30) {
+    breakdown.holders = 6;
   }
 
-  // --- Risk quality inverse (0–25) ---
+  // --- Risk quality inverse (0–14) ---
   if (riskScore != null) {
-    const riskQuality = clamp(((maxRisk - riskScore) / maxRisk) * 25, 0, 25);
-    score += riskQuality;
+    breakdown.risk = clamp(((maxRisk - riskScore) / maxRisk) * 14, 0, 14);
     if (riskScore > maxRisk * 0.7) {
       reasons.push(`elevated risk score ${riskScore}`);
     }
   } else {
-    score += priority ? 12 : 8;
+    breakdown.risk = priority ? 8 : 5;
   }
 
-  // --- Volume / liquidity (0–10) — use effective hard floors ---
-  const vol = volumeUsd(signal);
-  const minVol = effectiveMinVolume24hUsd();
-  if (minVol > 0) {
-    if (vol != null && vol >= minVol) {
-      score += clamp(5 + (vol / minVol) * 2, 5, 10);
-    } else if (vol != null) {
-      // Priority entries: partial credit (antiRug early-path already gated floors)
-      score += priority
-        ? clamp(3 + (vol / minVol) * 3, 3, 7)
-        : clamp((vol / minVol) * 4, 0, 4);
-      if (!priority) reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
+  // --- Timing / entry freshness (0–8) ---
+  const preferMin = effectivePreferEntryWithinMinutes();
+  const maxAge = effectiveMaxEntryAgeMinutes();
+  const ageMin = signal.signalAgeMinutes;
+  if (ageMin != null && Number.isFinite(ageMin)) {
+    if (ageMin <= preferMin) {
+      breakdown.timing = 8;
+    } else if (ageMin <= maxAge) {
+      breakdown.timing = clamp(8 - ((ageMin - preferMin) / Math.max(1, maxAge - preferMin)) * 5, 3, 7);
     } else {
-      // Unknown volume — credit priority (migration feed often precedes Dex fill)
-      score += priority ? 6 : 2;
+      breakdown.timing = 0;
+      reasons.push(`signal age ${ageMin.toFixed(1)}m > max ${maxAge}m`);
     }
-  } else if (vol != null && vol > 0) {
-    score += vol >= 10_000 ? 8 : 4;
+  } else {
+    breakdown.timing = priority ? 5 : 4;
   }
 
-  // Near-migration healthy curve soft boost
-  const curvePct = signal.bondingCurve?.progressPct;
-  const curveHealth = signal.bondingCurve?.health;
-  if (curveHealth === 'preferred' || (curvePct != null && curvePct >= 70 && curvePct <= 95)) {
-    score += 6;
-    reasons.push('near-migration curve preference');
-  } else if (curveHealth === 'dead' || curveHealth === 'stalled') {
-    reasons.push(`unhealthy curve (${curveHealth})`);
+  // --- Birdeye / GMGN smart money flow (0–14 × weight, capped) ---
+  const sm =
+    signal.birdeye?.smartMoneyScore ??
+    signal.antiRug?.birdeye?.smartMoneyScore ??
+    null;
+  let flowRaw = 0;
+  if (sm != null && sm >= 70) flowRaw = 14;
+  else if (sm != null && sm >= 50) flowRaw = 10;
+  else if (sm != null && sm >= 30) flowRaw = 6;
+  else if (sm != null && sm > 0) flowRaw = 3;
+  // Wallet count as soft flow proxy when Birdeye missing
+  if (flowRaw === 0 && walletCount >= 3) flowRaw = 5;
+  breakdown.smartFlow = clamp(Math.round(flowRaw * flowWeight), 0, 18);
+
+  // --- Momentum confirmation (0–8) ---
+  const requireMom = effectiveRequireMomentumConfirmation();
+  const momLookback = config.filters.momentumLookbackMinutes ?? 15;
+  const chg = priceChangeH1(signal);
+  const momOk =
+    signal.momentumOk === true ||
+    (signal.momentumOk !== false &&
+      chg != null &&
+      chg >= (config.filters.momentumMinHoldPct ?? -5));
+  if (signal.momentumOk === true) {
+    breakdown.momentum = 8;
+  } else if (momOk && chg != null && chg >= 0) {
+    breakdown.momentum = 7;
+  } else if (momOk) {
+    breakdown.momentum = 4;
+  } else if (requireMom) {
+    breakdown.momentum = 0;
+    reasons.push(
+      `momentum failed (need hold ≥ ${config.filters.momentumMinHoldPct ?? -5}% over ~${momLookback}m)`
+    );
+  } else {
+    breakdown.momentum = 2;
   }
 
-  // --- Birdeye smart money / holders (0–10) ---
-  const sm = signal.birdeye?.smartMoneyScore;
-  if (sm != null && sm >= 50) score += clamp(sm / 10, 3, 8);
-  else if (sm != null && sm >= 30) score += 3;
-
-  const holders = holderCount(signal);
-  const minHolders = effectiveMinHolders();
-  if (minHolders > 0) {
-    if (holders != null && holders >= minHolders) score += 5;
-    else if (holders != null) {
-      reasons.push(`holders ${holders} < ${minHolders}`);
-    } else {
-      score += priority ? 2 : 1;
-    }
-  }
-
+  let score =
+    breakdown.wallets +
+    breakdown.curve +
+    breakdown.volume +
+    breakdown.holders +
+    breakdown.risk +
+    breakdown.timing +
+    breakdown.smartFlow +
+    breakdown.momentum;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
+  const breakdownLine = formatBreakdown(breakdown);
 
   if (!sel.enabled) {
-    return { pass: true, score, minRequired: 0, reasons, sizeMultiplier };
+    return {
+      pass: true,
+      score,
+      minRequired: 0,
+      reasons,
+      sizeMultiplier,
+      breakdown,
+      breakdownLine,
+    };
   }
 
   const walletOk =
@@ -198,28 +361,19 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     if (!reasons.includes(msg)) reasons.push(msg);
   }
 
-  if (minVol > 0 && vol != null && vol < minVol) {
-    const msg = `low volume $${vol.toFixed(0)} < $${minVol}`;
-    if (!reasons.some((r) => r.startsWith('low volume'))) reasons.push(msg);
-  }
-
-  if (minHolders > 0 && holders != null && holders < minHolders) {
-    const msg = `holders ${holders} < ${minHolders}`;
-    if (!reasons.some((r) => r.startsWith('holders'))) reasons.push(msg);
+  if (requireMom && !momOk) {
+    const msg = `momentum confirmation failed`;
+    if (!reasons.some((r) => r.startsWith('momentum'))) reasons.push(msg);
   }
 
   if (score < minRequired) {
     reasons.push(`conviction ${score} < min ${minRequired}`);
   }
 
-  // Hard floors: volume/holders fail on normal entries; priority (migration /
-  // early pump) relies on antiRug early-path floors instead of full 24h vol.
-  // Dead/stalled curve only hard-fails when requireHealthyCurve is on.
   const requireHealthyCurve = config.bondingCurve?.requireHealthyCurve === true;
   const hardFail =
     !walletOk ||
-    (!priority && minVol > 0 && vol != null && vol < minVol) ||
-    (!priority && minHolders > 0 && holders != null && holders < minHolders) ||
+    (requireMom && !momOk) ||
     (requireHealthyCurve &&
       (curveHealth === 'dead' || curveHealth === 'stalled'));
 
@@ -229,6 +383,8 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     minRequired,
     reasons,
     sizeMultiplier,
+    breakdown,
+    breakdownLine,
   };
 }
 
@@ -258,7 +414,6 @@ export function canExecuteTradeAt(
 ): { ok: boolean; reason?: string } {
   if (!sel?.enabled) return { ok: true };
 
-  // Only trades that already happened at/before this sim clock
   const prior = recentTimes.filter((t) => t <= nowMs);
 
   const maxPerHour = sel.maxTradesPerHour ?? 0;

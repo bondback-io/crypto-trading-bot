@@ -172,6 +172,8 @@ export interface BuyOptions {
    * Re-checked at executeBuy; unknown fails closed.
    */
   top10HoldPct?: number | null;
+  /** Entry conviction 0–100 for exit discipline */
+  convictionScore?: number;
 }
 
 /**
@@ -447,6 +449,7 @@ export async function executeBuy(
         antiRug: meta?.antiRug,
         entryMarketCapUsd,
         sourceEntryMcUsd,
+        convictionScore: meta?.convictionScore,
       }
     );
     if (!position) {
@@ -527,6 +530,7 @@ export async function executeBuy(
         antiRug: meta?.antiRug,
         entryMarketCapUsd,
         sourceEntryMcUsd,
+        convictionScore: meta?.convictionScore,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
