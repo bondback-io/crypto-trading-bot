@@ -71,6 +71,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .dot-running { background: #34d399; box-shadow: 0 0 8px #34d399; }
     .dot-paused { background: #fbbf24; }
     .dot-stopped { background: #f87171; }
+    .signal-light {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: #e2e8f0;
+    }
+    .signal-light .dot-live { background: #34d399; box-shadow: 0 0 8px #34d399; }
+    .signal-light .dot-quiet { background: #fbbf24; box-shadow: 0 0 6px #fbbf2488; }
+    .signal-light .dot-off { background: #f87171; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
     .badge-paper { background: #1d4ed833; color: #93c5fd; }
     .badge-live { background: #7f1d1d55; color: #fca5a5; }
@@ -420,9 +427,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .has-tip { cursor: help; }
 
-    /* Token name → hover CA + copy / Jupiter */
+    /* Token ticker → click to copy CA (native title tip; Mint col has Copy/Jupiter) */
     .token-ca {
-      position: relative;
       display: inline-flex;
       align-items: center;
       gap: 0.25rem;
@@ -430,50 +436,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-bottom: 1px dashed #475569;
     }
     .token-ca:hover { color: #7dd3fc; border-bottom-color: #38bdf8; }
-    .token-ca .ca-pop {
-      position: absolute;
-      left: 0;
-      bottom: calc(100% + 8px);
-      z-index: 90;
-      min-width: 240px;
-      max-width: min(440px, 85vw);
-      padding: 8px 10px;
-      border-radius: 8px;
-      background: #0f172a;
-      border: 1px solid #38bdf8;
-      box-shadow: 0 8px 24px rgba(0,0,0,.45);
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-      transition: opacity .12s ease;
-    }
-    .token-ca:hover .ca-pop,
-    .token-ca:focus .ca-pop,
-    .token-ca:focus-within .ca-pop {
-      opacity: 1;
-      visibility: visible;
-      pointer-events: auto;
-    }
-    .token-ca .ca-pop .ca-label {
-      font-size: 10px;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      margin-bottom: 4px;
-    }
-    .token-ca .ca-pop .ca-addr {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      color: #e2e8f0;
-      word-break: break-all;
-      line-height: 1.35;
-    }
-    .token-ca .ca-pop .ca-hint {
-      margin-top: 6px;
-      font-size: 10px;
-      color: #38bdf8;
-    }
-    .token-ca.copied .ca-pop .ca-hint { color: #34d399; }
+    .token-ca.copied { color: #34d399; border-bottom-color: #34d399; }
     .ca-actions {
       display: flex;
       flex-wrap: wrap;
@@ -897,11 +860,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         transform: none;
         max-width: min(260px, calc(100vw - 2rem));
       }
-      .token-ca .ca-pop {
-        left: 0;
-        right: auto;
-        max-width: min(320px, calc(100vw - 2rem));
-      }
       th, td { padding: 7px 5px; font-size: 12px; }
       .persist-banner { font-size: 12px; padding: 0.65rem 0.75rem; }
       #bt-debug-log { max-height: 12rem; }
@@ -1075,7 +1033,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="text-lg font-semibold" id="watched">—</div>
           <div class="mint mt-1 text-xs" id="watched-sub">—</div>
         </div>
-        <div class="card !py-3"><div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div><div class="text-lg font-semibold" id="signals">—</div></div>
+        <div class="card !py-3">
+          <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div>
+          <div class="text-lg font-semibold" id="signals">—</div>
+          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy activity in the last 15 minutes while monitor is running with wallets watched. Amber = monitor running but no recent signals. Red = monitor stopped/paused, no wallets watched, or RPC unhealthy.">
+            <span class="dot dot-quiet" id="signal-light-dot"></span>
+            <span id="signal-light-label">Signals: —</span>
+          </div>
+        </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades. Closed count is shown in Closed Trades below."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
@@ -1711,7 +1676,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <table id="bt-results-table">
             <thead>
               <tr>
-                <th title="Hover token to show contract address · click to copy">Token</th>
+                <th title="Hover for contract address · click ticker to copy">Token</th>
                 <th title="PnL %">PnL %</th>
                 <th title="Profit/loss in SOL and USD">PnL SOL / USD</th>
                 <th title="Staged profit takes: partial → recover initial → remainder">Takes</th>
@@ -1823,7 +1788,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
             <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
-            <div class="field"><label title="Minimum 24h volume USD. Absolute floor $10,000 — non-bypassable.">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">10000</span></label><input type="range" id="minVolume24hUsd" min="10000" max="200000" step="500" value="10000" /></div>
+            <div class="field"><label title="Minimum 24h volume USD. Floor $10,000 for mature entries; early pump/migration may pass via recent (1h) volume + liquidity instead.">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">10000</span></label><input type="range" id="minVolume24hUsd" min="10000" max="200000" step="500" value="10000" /></div>
             <div class="field"><label title="Min DexScreener ~1h volume USD (recent activity). Floor $800.">Min Recent Vol USD — <span class="val" id="v-minRecentVolumeUsd">800</span></label><input type="range" id="minRecentVolumeUsd" min="800" max="50000" step="100" value="800" /></div>
             <div class="field"><label title="Min estimated recent buy-side volume USD. Floor $500.">Min Recent Buy Vol — <span class="val" id="v-minRecentBuyVolumeUsd">500</span></label><input type="range" id="minRecentBuyVolumeUsd" min="500" max="25000" step="100" value="500" /></div>
             <div class="field"><label title="Minimum holder count. Floor 30 — non-bypassable.">Min Holders — <span class="val" id="v-minHolders">30</span></label><input type="range" id="minHolders" min="30" max="500" step="5" value="30" /></div>
@@ -3190,28 +3155,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!ok) alert('Could not copy: ' + addr);
     }
 
-    /** Token ticker with CA popover: Copy CA + Open Jupiter */
+    /** Token ticker: native title tip + click to copy CA (Copy/Jupiter live in Mint col) */
     function fmtTokenCa(symbol, name, mint) {
       const tick = (symbol || (mint ? String(mint).slice(0, 6) : '?')).trim();
       const label = escHtml(tick);
       const ca = String(mint || '').trim();
       if (!ca) return '<strong>' + label + '</strong>';
       const attr = escAttr(ca);
-      const shown = escHtml(ca);
-      const jup = escAttr(jupiterTokenUrl(ca));
       return '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr +
-        '" title="Click to copy CA · Open on Jupiter" onclick="copyContractAddress(event)">' +
-        '<strong>' + label + '</strong>' +
-        '<span class="ca-pop" onclick="event.stopPropagation()">' +
-          '<div class="ca-label">Contract address</div>' +
-          '<div class="ca-addr">' + shown + '</div>' +
-          '<div class="ca-actions">' +
-            '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)">Copy CA</button>' +
-            '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Open Jupiter</a>' +
-          '</div>' +
-          '<div class="ca-hint">Copy CA or view live on Jupiter</div>' +
-        '</span>' +
-      '</span>';
+        '" title="' + attr + ' — click to copy CA" onclick="copyContractAddress(event)">' +
+        '<strong>' + label + '</strong></span>';
     }
 
     /** Compact mint column: short CA + Copy + Jupiter */
@@ -3253,6 +3206,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    function flashCopiedCa(host) {
+      if (!host) return;
+      host.classList.add('copied');
+      const prevTitle = host.getAttribute('title');
+      host.setAttribute('title', 'Copied!');
+      setTimeout(() => {
+        host.classList.remove('copied');
+        if (prevTitle != null) host.setAttribute('title', prevTitle);
+      }, 1400);
+    }
+
     async function copyMintFromEl(ev) {
       if (ev) { ev.preventDefault(); ev.stopPropagation(); }
       const el = ev && (ev.currentTarget || ev.target);
@@ -3265,14 +3229,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!ca) return;
       const ok = await copyTextToClipboard(ca);
       const tokenHost = el && el.closest ? el.closest('.token-ca') : null;
-      if (ok && tokenHost) {
-        tokenHost.classList.add('copied');
-        const hint = tokenHost.querySelector('.ca-hint');
-        if (hint) hint.textContent = 'Copied!';
-        setTimeout(() => {
-          tokenHost.classList.remove('copied');
-          if (hint) hint.textContent = 'Copy CA or view live on Jupiter';
-        }, 1400);
+      if (ok) flashCopiedCa(tokenHost || (host && host.classList && host.classList.contains('token-ca') ? host : null));
+      if (ok && el && el.classList && el.classList.contains('ca-btn')) {
+        el.classList.add('copied');
+        setTimeout(() => el.classList.remove('copied'), 1400);
       }
       const st = document.getElementById('bt-status');
       if (st) st.textContent = (ok ? 'Copied CA: ' : 'Copy failed: ') + ca.slice(0, 8) + '…' + ca.slice(-4);
@@ -3286,15 +3246,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const ca = host && host.getAttribute ? String(host.getAttribute('data-mint') || '').trim() : '';
       if (!ca) return;
       const ok = await copyTextToClipboard(ca);
-      if (ok && host) {
-        host.classList.add('copied');
-        const hint = host.querySelector('.ca-hint');
-        if (hint) hint.textContent = 'Copied!';
-        setTimeout(() => {
-          host.classList.remove('copied');
-          if (hint) hint.textContent = 'Copy CA or view live on Jupiter';
-        }, 1400);
-      }
+      if (ok) flashCopiedCa(host);
       const st = document.getElementById('bt-status');
       if (st) st.textContent = (ok ? 'Copied CA: ' : 'Copy failed: ') + ca.slice(0, 8) + '…' + ca.slice(-4);
       if (!ok) alert('Could not copy: ' + ca);
