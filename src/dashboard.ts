@@ -223,7 +223,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
-    button:not(.btn):not(.danger):not(.secondary):not(.warning) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
     .card-open-positions {
       position: relative;
@@ -293,11 +293,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border: 1px solid rgba(51, 65, 85, 0.7);
       background: rgba(15, 23, 42, 0.55);
     }
-    .card-open-positions #positions-table {
+    .card-open-positions #positions-table,
+    .card-open-positions #trades-positions-table {
       min-width: 52rem;
       margin: 0;
     }
-    .card-open-positions #positions-table thead th {
+    .card-open-positions #positions-table thead th,
+    .card-open-positions #trades-positions-table thead th {
       position: sticky;
       top: 0;
       z-index: 1;
@@ -306,11 +308,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-bottom: 1px solid rgba(52, 211, 153, 0.25);
       padding: 0.65rem 0.55rem;
     }
-    .card-open-positions #positions-table tbody td {
+    .card-open-positions #positions-table tbody td,
+    .card-open-positions #trades-positions-table tbody td {
       padding: 0.65rem 0.55rem;
       border-bottom-color: rgba(51, 65, 85, 0.55);
     }
-    .card-open-positions #positions-table tbody tr:hover {
+    .card-open-positions #positions-table tbody tr:hover,
+    .card-open-positions #trades-positions-table tbody tr:hover {
       background: rgba(56, 189, 248, 0.06);
     }
     .positions-empty {
@@ -546,14 +550,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .persist-banner strong { color: #fde68a; }
 
     /* ========== Responsive layout (mobile / tablet / desktop) ========== */
-    html { -webkit-text-size-adjust: 100%; }
-    body { overflow-x: hidden; }
+    html {
+      -webkit-text-size-adjust: 100%;
+      height: 100%;
+    }
+    body {
+      overflow-x: hidden;
+      min-height: 100%;
+      min-height: 100dvh;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .page-shell {
       width: 100%;
       max-width: 80rem;
       margin-left: auto;
       margin-right: auto;
-      padding: 1rem 0.75rem 2.5rem;
+      padding: 1rem 1rem 2.5rem;
+      min-width: 0;
+    }
+    [data-tab-panel] {
+      min-width: 0;
+      max-width: 100%;
+    }
+    .panel-scroll {
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      max-width: 100%;
+    }
+    .panel-scroll.overflow-x-auto,
+    .overflow-x-auto.panel-scroll {
+      overflow-x: auto;
     }
     .header-bar {
       display: grid;
@@ -607,9 +645,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .settings-btn.settings-active,
     .settings-btn[aria-expanded="true"] {
-      background: #059669;
-      border-color: #047857;
-      color: #fff;
+      background: #1e293b;
+      border-color: #34d399;
+      color: #6ee7b7;
+      box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25);
     }
     .settings-btn svg {
       width: 1.25rem;
@@ -620,43 +659,79 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       display: none;
       position: absolute;
       right: 0;
+      left: auto;
       top: calc(100% + 0.4rem);
-      min-width: 11rem;
-      padding: 0.35rem;
+      min-width: 10.5rem;
+      width: max-content;
+      max-width: min(16rem, calc(100vw - 1.5rem));
+      padding: 0.3rem;
       background: #0f172a;
       border: 1px solid #334155;
-      border-radius: 0.55rem;
-      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+      border-radius: 0.5rem;
+      box-shadow: 0 10px 28px rgba(2, 6, 23, 0.55), 0 0 0 1px rgba(15, 23, 42, 0.4);
       z-index: 50;
     }
     .settings-dropdown.open { display: block; }
-    .settings-dropdown button {
+    .settings-dropdown button,
+    .settings-dropdown button[data-settings-tab] {
       display: flex;
       align-items: center;
+      gap: 0.55rem;
       width: 100%;
-      min-height: 44px;
-      padding: 0.55rem 0.75rem;
+      min-height: 2.5rem;
+      padding: 0.45rem 0.7rem;
+      margin: 0;
       border: none;
-      border-radius: 0.4rem;
-      background: transparent;
-      color: #cbd5e1;
-      font-size: 0.875rem;
-      font-weight: 600;
+      border-left: 2px solid transparent;
+      border-radius: 0.35rem;
+      background: transparent !important;
+      color: #94a3b8 !important;
+      font-size: 0.8125rem;
+      font-weight: 550;
       font-family: inherit;
       text-align: left;
       cursor: pointer;
+      box-shadow: none !important;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .settings-dropdown button .settings-item-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.1rem;
+      height: 1.1rem;
+      flex-shrink: 0;
+      color: #64748b;
+    }
+    .settings-dropdown button .settings-item-icon svg {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
     .settings-dropdown button:hover {
-      background: #1e293b;
-      color: #f1f5f9;
+      background: #1e293b !important;
+      color: #e2e8f0 !important;
+      border-left-color: #475569;
     }
+    .settings-dropdown button:hover .settings-item-icon { color: #94a3b8; }
     .settings-dropdown button.active {
-      background: #059669;
-      color: #fff;
+      background: rgba(16, 185, 129, 0.12) !important;
+      color: #a7f3d0 !important;
+      border-left-color: #34d399;
+      font-weight: 600;
     }
+    .settings-dropdown button.active .settings-item-icon { color: #34d399; }
     .settings-dropdown button:focus-visible {
       outline: 2px solid #38bdf8;
       outline-offset: -2px;
+    }
+    @media (max-width: 639px) {
+      .settings-dropdown button,
+      .settings-dropdown button[data-settings-tab] {
+        min-height: 2.75rem;
+        padding: 0.55rem 0.75rem;
+        font-size: 0.875rem;
+      }
     }
     .nav-tabs {
       display: flex;
@@ -675,15 +750,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       overflow-x: auto;
       overflow-y: hidden;
       -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
+      scrollbar-width: none;
       border-bottom: 1px solid transparent;
     }
-    .nav-tabs::-webkit-scrollbar { height: 4px; }
-    .nav-tabs::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    .nav-tabs::-webkit-scrollbar { display: none; height: 0; }
     .nav-tabs .btn {
       flex: 0 0 auto;
       white-space: nowrap;
       scroll-snap-align: start;
+      min-height: 2.5rem;
     }
     .overflow-x-auto {
       -webkit-overflow-scrolling: touch;
@@ -694,7 +769,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       min-width: 36rem;
     }
     #bt-results-table { min-width: 64rem; }
-    #positions-table { min-width: 54rem; }
+    #positions-table,
+    #trades-positions-table { min-width: 54rem; }
+    #closed-table,
+    #trades-closed-table { min-width: 36rem; }
+    #pump-activity-table,
+    #sizing-signals-table,
+    #rebuy-table { min-width: 32rem; }
     .pos-hold {
       cursor: pointer;
       user-select: none;
@@ -838,10 +919,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     /* Tablets */
     @media (min-width: 640px) and (max-width: 1023px) {
-      .page-shell { padding: 1.1rem 1rem 2.25rem; }
+      .page-shell { padding: 1.1rem 1.5rem 2.25rem; }
       .btn-label-short { display: none; }
       .btn-label-full { display: inline; }
-      .nav-tabs { flex-wrap: wrap; overflow-x: visible; }
+      .nav-tabs { flex-wrap: wrap; overflow-x: visible; scrollbar-width: thin; }
+      .nav-tabs::-webkit-scrollbar { display: block; height: 4px; }
       .filters-row > .ctl,
       .filters-row > label.ctl {
         flex: 0 1 auto;
@@ -857,7 +939,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     @media (min-width: 1024px) {
       .page-shell {
         max-width: 90rem;
-        padding: 1.5rem 1.5rem 3rem;
+        padding: 1.5rem 2rem 3rem;
       }
       .btn-label-short { display: none; }
       .btn-label-full { display: inline; }
@@ -866,7 +948,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         overflow-x: visible;
         gap: 0.5rem;
         padding: 0.65rem 0.15rem;
+        scrollbar-width: thin;
       }
+      .nav-tabs::-webkit-scrollbar { display: block; height: 4px; }
       .nav-tabs .btn { min-height: 2.25rem; padding: 0.5rem 0.9rem; }
       .header-bar {
         grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
@@ -884,8 +968,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     @media (min-width: 1400px) {
       .page-shell {
         max-width: 96rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        padding: 1.75rem 2.5rem 3rem;
       }
     }
 
@@ -907,8 +990,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     /* Override inline chart heights on small screens */
     @media (max-width: 639px) {
       .chart-wrap { height: 170px !important; }
-      #logs-full, #system-logs { max-height: 55vh !important; }
-      #activity { max-height: 14rem !important; }
+      #logs-full, #system-logs { max-height: 60vh !important; }
+      #activity, #trades-activity, #activity-signals { max-height: 16rem !important; }
+      #migrations, #trades-migrations { max-height: 10rem !important; }
+      .positions-scroll { max-height: min(22rem, 55vh); }
+      .btn { min-height: 2.5rem; }
+      .risk-level-toggle .btn,
+      #risk-level-toggle .btn { min-height: 2.5rem; flex: 1 1 auto; justify-content: center; }
     }
     @media (min-width: 1024px) {
       #logs-full, #system-logs { max-height: 55vh; }
@@ -936,8 +1024,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <span class="sr-only">Settings</span>
         </button>
         <div id="settings-dropdown" class="settings-dropdown" role="menu" aria-label="Settings">
-          <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">Config</button>
-          <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">Logs</button>
+          <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
+            Config
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
+            Logs
+          </button>
         </div>
       </div>
       <div class="header-actions card !py-2 !px-3">
