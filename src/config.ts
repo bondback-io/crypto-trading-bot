@@ -772,7 +772,7 @@ export const config: BotConfig = {
     riskMultiplier: 0.4,
     convictionMultiplier: 1.45,
     minProfitPercent: 45,
-    maxProfitPercent: 90,
+    maxProfitPercent: 500,
     stopLossPercent: -28,
   },
 
@@ -1290,24 +1290,11 @@ export function resetToDefaults(): {
 } {
   const result = resetAllPersistedData();
   applySettingsSnapshot(CODE_DEFAULT_SETTINGS, 'replace');
-  // Recreate default wallet files and load into config (no saved settings file)
-  const loaded = loadWalletsFromDisk();
-  config.smartWallets = loaded.map((w) => ({
-    name: w.name,
-    address: w.address,
-    enabled: w.enabled,
-    lastTradedAt: w.lastTradedAt ?? w.lastActive,
-    lastActive: w.lastActive ?? w.lastTradedAt,
-    winRate: w.winRate,
-    notes: w.notes,
-    tradesLast30d: w.tradesLast30d,
-    tradesLast7d: w.tradesLast7d,
-    pumpFunTradeCount: w.pumpFunTradeCount,
-    tags: w.tags,
-    lastCheckedAt: w.lastCheckedAt,
-  }));
+  // Fresh install / reset: no tracked smart wallets (discover & add as needed)
+  config.smartWallets = [];
+  saveWalletsToDisk([]);
   initTradingWallets();
-  console.log('[settings] Reset to code/env defaults');
+  console.log('[settings] Reset to code/env defaults (0 tracked wallets)');
   return result;
 }
 

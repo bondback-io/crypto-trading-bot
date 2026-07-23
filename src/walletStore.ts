@@ -65,28 +65,8 @@ export interface WalletRecord extends SmartWallet {
   addedAt?: number;
 }
 
-/** Default smart wallets — used when wallets.json is first created */
-export const defaultSmartWallets: SmartWallet[] = [
-  {
-    name: 'Cented',
-    address: 'CyaE1VxvBrahnPWkqm5VsdCvyS2QmNht2UFrKJHga54o',
-    enabled: true,
-    tags: ['kol', 'pump.fun'],
-    notes: 'Default tracked KOL',
-  },
-  {
-    name: 'Theo',
-    address: 'Bi4rd5FH5bYEN8scZ7wevxNZyNmKHdaBcvewdPFxYdLt',
-    enabled: true,
-    tags: ['kol', 'sniper'],
-  },
-  {
-    name: 'Decu',
-    address: '4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9',
-    enabled: true,
-    tags: ['kol'],
-  },
-];
+/** Default smart wallets — empty so fresh installs / reset start with none */
+export const defaultSmartWallets: SmartWallet[] = [];
 
 /** Normalize lastActive ↔ lastTradedAt for persistence */
 export function normalizeWalletRecord(w: WalletRecord): WalletRecord {
