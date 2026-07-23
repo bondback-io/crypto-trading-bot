@@ -274,8 +274,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minLiquidity: 12_000,
       maxDevHoldPct: 12,
       maxDevPercent: 12,
-      maxTopHolderPct: 45,
-      maxHolderConcentration: 45,
+      maxTopHolderPct: 35,
+      maxHolderConcentration: 35,
       maxEstimatedTaxPct: 18,
       maxRiskScore: 45,
       skipIfMintAuthority: true,
@@ -371,8 +371,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minLiquidity: 5_000,
       maxDevHoldPct: 14,
       maxDevPercent: 14,
-      maxTopHolderPct: 65,
-      maxHolderConcentration: 65,
+      maxTopHolderPct: 70,
+      maxHolderConcentration: 70,
       maxEstimatedTaxPct: 24,
       maxRiskScore: 70,
       skipIfMintAuthority: false,
@@ -821,8 +821,8 @@ export interface BotConfig {
     /** Initial real token reserves (raw) for progress % */
     initialRealTokenReserves: number;
     /**
-     * When true (default), reject dead/stalled curves — non-bypassable
-     * across all risk levels.
+     * When true, reject dead/stalled curves — non-bypassable across all
+     * risk levels. Default OFF.
      */
     requireHealthyCurve: boolean;
     /**
@@ -1080,7 +1080,7 @@ export const config: BotConfig = {
     cacheTtlMs: 12_000,
     migrationThresholdSol: 85,
     initialRealTokenReserves: 793_100_000_000_000,
-    requireHealthyCurve: true,
+    requireHealthyCurve: false,
     minCurveProgress: 0,
     maxCurveProgressForEntry: 98,
     preferNearMigrationMinPct: 70,
@@ -1113,6 +1113,8 @@ export const config: BotConfig = {
 const PAPER_SIGNAL_RELAX_MIGRATION = 'paperSignalRelax_v2';
 /** One-shot: undo migrationFocus_v1 — keep Migration Only OFF by default. */
 const MIGRATION_FOCUS_OFF_V1 = 'migrationFocus_off_v1';
+/** One-shot: turn requireHealthyCurve OFF (was default ON from dead-token work). */
+const REQUIRE_HEALTHY_CURVE_OFF_V1 = 'requireHealthyCurve_off_v1';
 /** One-shot: raise volume/liquidity/holder floors after paper-relax loosened them. */
 const HARD_VOLUME_LIQ_FLOORS_V113 = 'hardVolumeLiquidityFloors_v113';
 let settingsMigrations: Record<string, boolean> = {};
@@ -1175,6 +1177,12 @@ function syncConfigAliases(): void {
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;
   }
+  // Keep maxTopHolderPct ↔ maxHolderConcentration in sync
+  if (config.filters.maxTopHolderPct != null) {
+    config.filters.maxHolderConcentration = config.filters.maxTopHolderPct;
+  } else if (config.filters.maxHolderConcentration != null) {
+    config.filters.maxTopHolderPct = config.filters.maxHolderConcentration;
+  }
   // Keep minHolders ↔ minHolderCount in sync (prefer whichever was set higher)
   const holders = Math.max(
     config.filters.minHolders ?? 0,
@@ -1195,7 +1203,7 @@ function syncConfigAliases(): void {
     config.filters.minRecentActivity = HARD_FILTER_FLOORS.minRecentActivityTxns;
   }
   if (config.bondingCurve.requireHealthyCurve == null) {
-    config.bondingCurve.requireHealthyCurve = true;
+    config.bondingCurve.requireHealthyCurve = false;
   }
   if (config.bondingCurve.minCurveProgress == null) {
     config.bondingCurve.minCurveProgress = 0;
@@ -1389,6 +1397,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyRequireHealthyCurveOffMigration()) {
+    settingsMigrations[REQUIRE_HEALTHY_CURVE_OFF_V1] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied requireHealthyCurve_off_v1 — requireHealthyCurve OFF (default)'
+    );
+  }
+
   if (applyHardVolumeLiquidityFloorsMigration()) {
     settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V113] = true;
     persistUserSettings();
@@ -1473,6 +1489,14 @@ function applyMigrationFocusOffMigration(): boolean {
   return true;
 }
 
+/** Undo dead-token default ON so redeploys keep requireHealthyCurve OFF by default. */
+function applyRequireHealthyCurveOffMigration(): boolean {
+  if (settingsMigrations[REQUIRE_HEALTHY_CURVE_OFF_V1]) return false;
+  if (!config.bondingCurve.requireHealthyCurve) return true;
+  config.bondingCurve.requireHealthyCurve = false;
+  return true;
+}
+
 /**
  * Raise persisted filters to absolute hard floors after paperSignalRelax lowered them.
  * Always marks the migration done so it runs once.
@@ -1516,7 +1540,7 @@ function applyHardVolumeLiquidityFloorsMigration(): boolean {
     HARD_FILTER_FLOORS.minHolders
   );
   if (config.bondingCurve.requireHealthyCurve == null) {
-    config.bondingCurve.requireHealthyCurve = true;
+    config.bondingCurve.requireHealthyCurve = false;
   }
   if (config.bondingCurve.requireRecentCurveActivity == null) {
     config.bondingCurve.requireRecentCurveActivity = true;
@@ -1982,6 +2006,14 @@ export function applyRiskLevel(
   } else if (preset.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = preset.filters.maxDevHoldPct;
   }
+  // Keep top-holder aliases aligned with preset
+  if (preset.filters.maxTopHolderPct != null) {
+    config.filters.maxHolderConcentration = preset.filters.maxTopHolderPct;
+    config.filters.maxTopHolderPct = preset.filters.maxTopHolderPct;
+  } else if (preset.filters.maxHolderConcentration != null) {
+    config.filters.maxTopHolderPct = preset.filters.maxHolderConcentration;
+    config.filters.maxHolderConcentration = preset.filters.maxHolderConcentration;
+  }
   // Keep holder aliases + selective floors aligned with preset (never below hard floors)
   const holders = Math.max(
     config.filters.minHolders ?? 0,
@@ -2079,7 +2111,7 @@ export function getRiskLevelSummary() {
       minRecentVolumeUsd: effectiveMinRecentVolumeUsd(),
       minRecentBuyVolumeUsd: effectiveMinRecentBuyVolumeUsd(),
       minRecentActivity: effectiveMinRecentActivity(),
-      requireHealthyCurve: config.bondingCurve.requireHealthyCurve !== false,
+      requireHealthyCurve: config.bondingCurve.requireHealthyCurve === true,
       riskPercentPerTrade: config.risk.riskPercentPerTrade,
       maxDrawdownPct: config.risk.maxDrawdownPct,
       maxTradeSol: config.risk.maxTradeSol,

@@ -1817,8 +1817,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $5,000 (recommended $5k–$8k). High cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="5000" max="100000" step="500" value="5000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
-            <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">40</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="40" /></div>
-            <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">40</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="40" /></div>
+            <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">35</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="35" /></div>
+            <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">35</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="35" /></div>
             <div class="field"><label title="Composite rug/risk score ceiling (0-100)">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="20" max="100" step="5" value="70" /></div>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
@@ -1831,7 +1831,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="mt-2 space-y-0">
             <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks (volume/liq/curve hard floors always apply)">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
-            <div class="toggle-row"><span title="Reject dead/stalled Pump bonding curves — non-bypassable when on">Require healthy bonding curve</span><label class="switch"><input type="checkbox" id="requireHealthyCurve" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Reject dead/stalled Pump bonding curves — non-bypassable when on">Require healthy bonding curve</span><label class="switch"><input type="checkbox" id="requireHealthyCurve" /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
@@ -4032,7 +4032,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         const healthyCurve = document.getElementById('requireHealthyCurve');
         if (healthyCurve && cfg.bondingCurve) {
-          healthyCurve.checked = cfg.bondingCurve.requireHealthyCurve !== false;
+          healthyCurve.checked = cfg.bondingCurve.requireHealthyCurve === true;
         }
         document.getElementById('enableConvergence').checked = cfg.strategy.enableConvergence;
         document.getElementById('enableMigrationOnly').checked = cfg.strategy.enableMigrationOnly;

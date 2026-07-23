@@ -236,7 +236,7 @@ export function evaluateDeadTokenHardFloors(
 
   // Bonding curve dead / stalled
   const bc = config.bondingCurve;
-  const requireHealthy = bc.requireHealthyCurve !== false;
+  const requireHealthy = bc.requireHealthyCurve === true;
   const progress = snap.bondingCurveProgressPct;
   const curveHealth = snap.curveHealth;
 
