@@ -637,19 +637,53 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         "brand settings"
         "actions actions";
       align-items: start;
-      gap: 0.75rem 0.65rem;
-      margin-bottom: 1rem;
+      gap: 0.45rem 0.5rem;
+      margin-bottom: 0.65rem;
     }
     .header-brand { grid-area: brand; min-width: 0; }
+    .header-brand h1 { font-size: clamp(1.05rem, 2.8vw, 1.65rem); line-height: 1.15; }
+    .header-brand p { margin-top: 0.1rem !important; font-size: 0.7rem; line-height: 1.2; }
     .header-actions {
       grid-area: actions;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 0.4rem 0.5rem;
+      gap: 0.3rem 0.4rem;
       max-width: 100%;
+      padding: 0.35rem 0.5rem !important;
     }
-    .header-actions .btn { flex: 0 0 auto; }
+    .header-actions .status-meta {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem 0.45rem;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .header-actions .status-controls {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem;
+      margin-left: auto;
+    }
+    .header-actions .status-stat {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+    .header-actions .status-stat strong { color: #e2e8f0; font-weight: 650; }
+    .header-actions #status-text { font-size: 0.75rem; line-height: 1.2; }
+    .header-actions .badge { padding: 1px 7px; font-size: 10px; letter-spacing: 0.02em; }
+    .header-actions .dot { width: 8px; height: 8px; flex: 0 0 auto; }
+    .header-actions .btn {
+      flex: 0 0 auto;
+      min-height: 1.85rem;
+      padding: 0.2rem 0.5rem;
+      font-size: 11px;
+      border-radius: 0.4rem;
+    }
     .settings-menu-wrap {
       grid-area: settings;
       position: relative;
@@ -660,12 +694,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 2.75rem;
-      height: 2.75rem;
-      min-width: 44px;
-      min-height: 44px;
+      width: 2.35rem;
+      height: 2.35rem;
+      min-width: 40px;
+      min-height: 40px;
       padding: 0;
-      border-radius: 0.55rem;
+      border-radius: 0.45rem;
       background: #1e293b;
       border: 1px solid #334155;
       color: #94a3b8;
@@ -873,14 +907,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     @media (max-width: 639px) {
       .page-shell { padding: 0.75rem 0.65rem 2rem; }
       .card { padding: 0.85rem; border-radius: 0.65rem; }
+      .header-bar { margin-bottom: 0.5rem; gap: 0.35rem 0.4rem; }
       .header-actions {
-        padding: 0.65rem !important;
+        padding: 0.4rem 0.45rem !important;
+        gap: 0.35rem;
+      }
+      .header-actions .status-meta {
+        flex: 1 1 100%;
+        gap: 0.2rem 0.4rem;
+      }
+      .header-actions .status-controls {
+        flex: 1 1 100%;
+        margin-left: 0;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.3rem;
       }
       .header-actions .btn {
-        flex: 1 1 calc(50% - 0.35rem);
+        flex: unset;
+        width: 100%;
         justify-content: center;
-        min-height: 2.5rem;
-        padding: 0.5rem 0.55rem;
+        min-height: 2.15rem;
+        padding: 0.35rem 0.4rem;
+        font-size: 11px;
+      }
+      .header-actions .status-controls .btn:nth-child(2) {
+        grid-column: span 2;
       }
       .nav-tabs {
         scroll-snap-type: x proximity;
@@ -992,9 +1044,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .header-bar {
         grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
         grid-template-areas: "brand actions settings";
-        align-items: start;
+        align-items: center;
+        gap: 0.5rem 0.75rem;
+        margin-bottom: 0.75rem;
       }
-      .header-actions { max-width: none; justify-self: end; }
+      .header-actions {
+        max-width: none;
+        justify-self: end;
+        flex-wrap: nowrap;
+        gap: 0.35rem 0.5rem;
+      }
+      .header-actions .status-controls { flex-wrap: nowrap; }
       .card { padding: 1.15rem; }
       .filters-row { gap: 0.65rem 0.75rem; }
       .chart-wrap { height: 240px; }
@@ -1091,26 +1151,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </button>
         </div>
       </div>
-      <div class="header-actions card !py-2 !px-3">
-        <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
-        <strong id="status-text" class="text-sm has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
-        <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">PAPER</span>
-        <span class="text-slate-500 text-xs hidden sm:inline">·</span>
-        <span class="text-xs text-slate-400 has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance" class="text-slate-100">—</strong></span>
-        <span class="text-xs text-slate-400 has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl" class="text-slate-100">—</strong></span>
-        <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active" class="text-slate-100">—</strong></span>
-        <span class="text-xs text-slate-400 hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
-        <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
-        <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
-        <button onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
-        <button onclick="setMode('liveSimulation')" class="btn btn-secondary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
-        <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
+      <div class="header-actions card status-bar">
+        <div class="status-meta">
+          <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
+          <strong id="status-text" class="has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
+          <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">PAPER</span>
+          <span class="status-stat has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance">—</strong></span>
+          <span class="status-stat has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl">—</strong></span>
+          <span class="status-stat hidden sm:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active">—</strong></span>
+          <span class="status-stat hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
+        </div>
+        <div class="status-controls">
+          <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
+          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh</span></button>
+          <button onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
+          <button onclick="setMode('liveSimulation')" class="btn btn-secondary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
+          <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
+        </div>
       </div>
     </div>
 
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
-      <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Dashboard home: balance, positions, PnL charts, paper funding">Overview</button>
+      <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
@@ -1125,39 +1188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card"><div class="stat-label">Net PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of realized profit/loss from closed trades this session/day."></span></div><div class="stat" id="stat-pnl">—</div><div class="mint mt-1" id="stat-return">—</div></div>
         <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
       </div>
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card score-card">
-          <div class="stat-label">Performance Score <span class="tip tip-below" tabindex="0" data-tip="Score 0–100 from weighted Win Rate (30%), Profit Factor (25%), Max Drawdown inverted (20%), Avg Win/Loss (15%), sample-size confidence (10%). Tiny samples are penalized. A≥80, B≥65, C≥50, D≥35, else F."></span></div>
-          <div class="score-grade score-tone-neutral" id="ov-score-grade">—</div>
-          <div class="score-num score-tone-neutral" id="ov-score-num">—</div>
-          <div class="mint mt-1 text-xs" id="ov-score-sub">Live Simulation / Paper ledger</div>
-        </div>
-        <div class="card sm:col-span-2">
-          <div class="section-title !text-sm !mb-2">Live Sim vs Backtest <span class="tip" tabindex="0" data-tip="Side-by-side KPIs. Run a backtest matching live Strict/risk to compare apples-to-apples."></span></div>
-          <div class="overflow-x-auto">
-            <table id="ov-perf-compare-table" class="text-xs">
-              <thead><tr><th>Metric</th><th>Live Sim</th><th>Backtest</th><th>Edge</th></tr></thead>
-              <tbody><tr><td colspan="4" class="text-slate-500">Loading…</td></tr></tbody>
-            </table>
-          </div>
-          <div class="mint text-xs mt-2" id="ov-perf-compare-winner">—</div>
-          <div class="flex flex-wrap gap-2 mt-2">
-            <button class="btn btn-secondary text-xs" onclick="runBacktestMatchingLive()" title="Run backtest with current risk + Strict Mode settings">Backtest matching live</button>
-            <button class="btn btn-secondary text-xs" onclick="showTab('backtester', document.querySelector('[data-tab=backtester]'))">Open Backtester</button>
-          </div>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card">
-          <div class="section-title !text-sm">Equity (Live Sim) <span class="tip" tabindex="0" data-tip="Cumulative realized PnL from the paper / Live Simulation ledger."></span></div>
-          <div class="chart-wrap" style="height:200px"><canvas id="ov-chart-livesim-equity"></canvas></div>
-        </div>
-        <div class="card">
-          <div class="section-title !text-sm">Compare bars <span class="tip" tabindex="0" data-tip="Win Rate, Profit Factor, Max DD, Score — Live Sim vs last Backtest."></span></div>
-          <div class="chart-wrap" style="height:200px"><canvas id="ov-chart-compare-bars"></canvas></div>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
         <div class="card"><div class="stat-label">Unrealized gains/loss <span class="tip tip-below" tabindex="0" data-tip="Sum of unrealized P&amp;L on open trades that haven’t closed yet, using the same live mark prices as the Open Positions table. Positive = unrealized profit; negative = unrealized loss."></span></div><div class="stat" id="stat-unrealized">—</div><div class="mint mt-1" id="stat-unrealized-hint">—</div></div>
         <div class="card"><div class="stat-label">Max Drawdown <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div><div class="stat" id="stat-maxdd">—</div><div class="mint mt-1" id="stat-avg-hold">—</div></div>
         <div class="card !py-3">
@@ -1757,15 +1788,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough. Check Compare Low/Med/High to add a risk-level breakdown."></span></div>
-        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-2.5 sm:gap-3 mb-3">
           <div class="card !py-3 !bg-slate-900/50 score-card">
             <div class="stat-label">Performance Score <span class="tip" tabindex="0" data-tip="Score 0–100 from weighted Win Rate (30%), Profit Factor (25%), Max Drawdown inverted (20%), Avg Win/Loss (15%), sample-size confidence (10%). Tiny samples are penalized. A≥80, B≥65, C≥50, D≥35, else F."></span></div>
             <div class="score-grade score-tone-neutral" id="bt-score-grade">—</div>
             <div class="score-num score-tone-neutral" id="bt-score-num">—</div>
             <div class="mint mt-1 text-xs" id="bt-score-sub">After each run</div>
           </div>
-          <div class="card !py-3 !bg-slate-900/50 sm:col-span-3">
-            <div class="section-title !text-sm !mb-2">Live Sim vs This Backtest</div>
+          <div class="card !py-3 !bg-slate-900/50 lg:col-span-2">
+            <div class="section-title !text-sm !mb-2">Live Sim vs This Backtest <span class="tip" tabindex="0" data-tip="Side-by-side KPIs vs your Live Simulation / paper ledger. Use Match live Strict for apples-to-apples."></span></div>
             <div class="overflow-x-auto">
               <table id="bt-perf-compare-table" class="text-xs">
                 <thead><tr><th>Metric</th><th>Live Sim</th><th>Backtest</th><th>Edge</th></tr></thead>
@@ -1857,7 +1888,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="chart-empty mint" id="bt-chart-overlay-empty">Need Live Sim trades and a backtest run</div>
         </div>
         <div class="card">
-          <div class="section-title">Performance Comparison Bars <span class="tip" tabindex="0" data-tip="Side-by-side Win Rate, Profit Factor, Max DD, Score."></span></div>
+          <div class="section-title">Performance Comparison Bars <span class="tip" tabindex="0" data-tip="Side-by-side Win Rate, Profit Factor, Max DD, Score — Live Sim vs last Backtest."></span></div>
           <div class="chart-wrap" style="height:240px"><canvas id="bt-chart-compare-bars"></canvas></div>
           <div class="chart-empty mint" id="bt-chart-compare-empty">Run a backtest to compare</div>
         </div>
@@ -2268,6 +2299,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'backtester') {
         setTimeout(() => {
           if (window._lastBacktestCharts) updateBacktestCharts(window._lastBacktestCharts);
+          refreshPerformanceCompare();
           window.dispatchEvent(new Event('resize'));
         }, 80);
       }
@@ -4042,7 +4074,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
           : 'PAPER = simulated fills';
 
-      renderScoreCard('ov', status.performanceScore);
+      // Live Sim vs Backtest compare UI lives on Backtester only
       refreshPerformanceCompare();
 
       const verEl = document.getElementById('app-version');
@@ -4918,8 +4950,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
-    let chartOvLiveEquity = null;
-    let chartOvCompareBars = null;
     let chartBtOverlayEquity = null;
     let chartBtCompareBars = null;
 
@@ -4981,7 +5011,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function refreshPerformanceCompare() {
       try {
         const data = await fetchJSON('/api/performance/compare');
-        fillCompareTable('ov-perf-compare-table', 'ov-perf-compare-winner', data);
         fillCompareTable('bt-perf-compare-table', 'bt-perf-compare-winner', data);
 
         const liveEq = (data.liveSim && data.liveSim.charts && data.liveSim.charts.cumulativePnl) || {};
@@ -5021,7 +5050,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             spanGaps: true,
           },
         ];
-        chartOvLiveEquity = upsertLineChart(chartOvLiveEquity, 'ov-chart-livesim-equity', labels, [overlayDatasets[0]]);
         chartBtOverlayEquity = upsertLineChart(chartBtOverlayEquity, 'bt-chart-overlay-equity', labels, overlayDatasets);
         const ovEmpty = document.getElementById('bt-chart-overlay-empty');
         if (ovEmpty) ovEmpty.style.display = (liveNorm.length || btVals.length) ? 'none' : '';
@@ -5041,10 +5069,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           { label: 'Live Sim', data: liveBars, backgroundColor: '#2dd4bf88', borderColor: '#5eead4', borderWidth: 1 },
           { label: 'Backtest', data: btBars, backgroundColor: '#60a5fa88', borderColor: '#93c5fd', borderWidth: 1 },
         ];
-        chartOvCompareBars = upsertBarChart(chartOvCompareBars, 'ov-chart-compare-bars', barLabels, barDatasets);
         chartBtCompareBars = upsertBarChart(chartBtCompareBars, 'bt-chart-compare-bars', barLabels, barDatasets);
         const cmpEmpty = document.getElementById('bt-chart-compare-empty');
         if (cmpEmpty) cmpEmpty.style.display = data.backtest ? 'none' : '';
+
+        // Live-sim ledger score for the compare card subtitle (does not overwrite backtest grade)
+        if (data.liveSim && data.liveSim.score) {
+          const sub = document.getElementById('bt-score-sub');
+          if (sub && !window._lastBacktest) {
+            sub.textContent = 'Live Sim score available — run a backtest';
+          }
+        }
       } catch (err) {
         console.warn('[dashboard] performance compare failed', err);
       }
