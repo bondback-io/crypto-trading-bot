@@ -1997,11 +1997,41 @@ export function getRecentSignals() {
   return recentSignals.slice(0, 30);
 }
 
+/** Optional anti-rug reasons that early/migration soft-pass may ignore. */
+function isSoftPassableEarlyReason(reason: string): boolean {
+  const r = reason.toLowerCase();
+  if (isNonBypassableSkipReason(reason)) return false;
+  return (
+    /mint authority/i.test(r) ||
+    /honeypot.*no (buy|sell) quote/i.test(r) ||
+    /no jupiter route/i.test(r) ||
+    /high holder concentration/i.test(r) ||
+    /dominant top holder/i.test(r) ||
+    /high risk score/i.test(r) ||
+    /high dev holdings/i.test(r) ||
+    /sniper/i.test(r) ||
+    /bundler/i.test(r) ||
+    /insider\/rat/i.test(r) || // sensitivity sniper gate — hard insider floor is separate
+    /estimated (tax|sell tax)/i.test(r) ||
+    /liquidity not locked/i.test(r) ||
+    /recent.*sell/i.test(r) ||
+    /dev.*sell/i.test(r)
+  );
+}
+
 async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const { filters, strategy } = config;
+  const signalKind =
+    signal.isMigration || signal.nearMigration || signal.earlyBuy
+      ? signal.isMigration
+        ? 'migration'
+        : signal.nearMigration
+          ? 'near-migration'
+          : 'early'
+      : 'normal';
 
   if (isRiskHalted()) {
-    console.log(`[monitor] Signal rejected — risk halt active`);
+    console.log(`[monitor] Signal rejected (${signalKind}) — risk halt active`);
     recordRejectedSignal(signal, 'risk halt');
     return false;
   }
@@ -2009,21 +2039,25 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   // Refresh risk limits (may auto-pause)
   paperTrader.evaluateAndMaybeHaltRisk();
   if (isRiskHalted() || paused) {
-    console.log(`[monitor] Signal rejected — risk/paused`);
+    console.log(
+      `[monitor] Signal rejected (${signalKind}) — ${paused ? 'monitor paused' : 'risk halt'}`
+    );
     recordRejectedSignal(signal, paused ? 'monitor paused' : 'risk halt');
     return false;
   }
 
   if (isDeniedCopyMint(signal.mint, config.solMint)) {
     console.log(
-      `[monitor] Signal rejected — denied mint (stable/quote) ${signal.symbol}`
+      `[monitor] Signal rejected (${signalKind}) — denied mint (stable/quote) ${signal.symbol}`
     );
     recordRejectedSignal(signal, 'denied stable/quote mint');
     return false;
   }
 
   if (strategy.enableMigrationOnly && !signal.isMigration) {
-    console.log(`[monitor] Signal rejected — migration-only enabled for ${signal.symbol}`);
+    console.log(
+      `[monitor] Signal rejected (${signalKind}) — migration-only enabled for ${signal.symbol}`
+    );
     recordRejectedSignal(signal, 'migration-only mode');
     return false;
   }
@@ -2031,7 +2065,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const openCount = paperTrader.getOpenPositions().length;
   if (openCount >= filters.maxConcurrentPositions) {
     console.log(
-      `[monitor] Signal rejected — max concurrent positions (${filters.maxConcurrentPositions})`
+      `[monitor] Signal rejected (${signalKind}) — max concurrent positions (${filters.maxConcurrentPositions})`
     );
     recordRejectedSignal(signal, `max positions (${filters.maxConcurrentPositions})`);
     return false;
@@ -2039,7 +2073,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   if (paperTrader.hasOpenMint(signal.mint)) {
     console.log(
-      `[monitor] Signal rejected — already holding ${signal.symbol || signal.mint.slice(0, 8)}`
+      `[monitor] Signal rejected (${signalKind}) — already holding ${signal.symbol || signal.mint.slice(0, 8)}`
     );
     recordRejectedSignal(signal, 'already holding');
     return false;
@@ -2048,7 +2082,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const dailyPnl = paperTrader.getDailyPnlSol();
   if (dailyPnl <= -filters.dailyLossLimitSol) {
     console.log(
-      `[monitor] Signal rejected — daily loss limit hit (${dailyPnl.toFixed(4)} SOL)`
+      `[monitor] Signal rejected (${signalKind}) — daily loss limit hit (${dailyPnl.toFixed(4)} SOL)`
     );
     recordRejectedSignal(signal, 'daily loss limit');
     return false;
@@ -2058,7 +2092,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     const winRate = paperTrader.getWinRatePct();
     if (winRate < filters.minWinRate) {
       console.log(
-        `[monitor] Signal rejected — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
+        `[monitor] Signal rejected (${signalKind}) — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
       );
       recordRejectedSignal(signal, `win rate ${winRate.toFixed(0)}%`);
       return false;
@@ -2080,7 +2114,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       if (config.filters.enableAntiRug !== false) {
         const earlyEntry =
           Boolean(signal.earlyBuy || signal.nearMigration) ||
-          Boolean(signal.bondingCurve && !signal.isMigration);
+          Boolean(signal.bondingCurve && !signal.isMigration) ||
+          Boolean(signal.isMigration);
         const report: AntiRugReport = await evaluateAntiRug(signal.mint, {
           earlyEntry,
           isMigrated: Boolean(signal.isMigration),
@@ -2090,36 +2125,41 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         if (report.sniper) signal.sniper = report.sniper;
         if (report.birdeye) signal.birdeye = report.birdeye;
         if (!report.ok) {
-          const softEarly = earlyEntry || Boolean(signal.isMigration);
+          const softEarly =
+            earlyEntry ||
+            Boolean(signal.isMigration) ||
+            Boolean(signal.nearMigration) ||
+            Boolean(signal.earlyBuy);
           const hardReasons = report.skipReasons.filter((reason) => {
-            // Non-bypassable dead-token floors always block (all risk levels).
             if (isNonBypassableSkipReason(reason)) return true;
             if (!softEarly) return true;
-            // Pre-migration Pump tokens normally keep mint authority.
-            if (/mint authority/i.test(reason)) return false;
-            // Jupiter often has no route until graduation — not a real honeypot.
-            if (/honeypot.*no (buy|sell) quote/i.test(reason)) return false;
-            if (/no jupiter route/i.test(reason)) return false;
-            return true;
+            // Early/migration: ignore optional gates; keep honeypot/rug floors.
+            return !isSoftPassableEarlyReason(reason);
           });
           if (hardReasons.length === 0) {
             console.log(
-              `[monitor] Anti-rug soft-pass ${signal.symbol}: early/curve signal — ` +
-                `ignored ${report.skipReasons.join('; ') || 'soft flags'} (score ${report.riskScore})`
+              `[monitor] Anti-rug soft-pass (${signalKind}) ${signal.symbol}: ` +
+                `ignored optional [${report.skipReasons.join('; ') || 'soft flags'}] ` +
+                `(score ${report.riskScore})`
             );
             paperTrader.addLog(
               'info',
-              `Anti-rug soft-pass ${signal.symbol}: early Pump curve — ${report.skipReasons.join('; ') || 'soft flags'}`,
+              `Anti-rug soft-pass ${signal.symbol} (${signalKind}): ${report.skipReasons.join('; ') || 'soft flags'}`,
               { mint: signal.mint, symbol: signal.symbol }
             );
           } else {
             console.log(formatAntiRugSkipLog(signal.symbol, report));
-            for (const reason of report.skipReasons) {
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `hard=[${hardReasons.join(' | ')}] ` +
+                `all=[${report.skipReasons.join(' | ')}] score=${report.riskScore}`
+            );
+            for (const reason of hardReasons) {
               console.log(`[monitor] ${reason}`);
             }
             paperTrader.addLog(
               'info',
-              `Anti-rug skip ${signal.symbol}: ${hardReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
+              `Anti-rug skip ${signal.symbol} (${signalKind}): ${hardReasons.join('; ') || 'high risk'} (score ${report.riskScore})`,
               { mint: signal.mint, symbol: signal.symbol }
             );
             recordRejectedSignal(
@@ -2145,7 +2185,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const verdict = evaluateTokenMetricsFilters(metrics);
         if (!verdict.ok) {
           console.log(
-            `[monitor] Signal rejected — token metrics for ${signal.symbol}: ` +
+            `[monitor] Signal rejected (${signalKind}) — token metrics for ${signal.symbol}: ` +
               verdict.reasons.join('; ')
           );
           recordRejectedSignal(
@@ -2161,14 +2201,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         err instanceof Error ? err.message : err
       );
       const softEarly =
-        Boolean(signal.earlyBuy || signal.nearMigration) ||
+        Boolean(signal.earlyBuy || signal.nearMigration || signal.isMigration) ||
         Boolean(signal.bondingCurve && !signal.isMigration);
-      if (
-        softEarly &&
-        config.mode === 'paper'
-      ) {
+      if (softEarly && config.mode === 'paper') {
         console.log(
-          `[monitor] Anti-rug soft-pass ${signal.symbol}: metrics unavailable on early/curve paper signal`
+          `[monitor] Anti-rug soft-pass (${signalKind}) ${signal.symbol}: metrics unavailable on early/curve paper signal`
         );
         paperTrader.addLog(
           'info',
@@ -2180,7 +2217,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         (filters.minLiquidity ?? 0) > 0 ||
         (filters.maxDevPercent ?? filters.maxDevHoldPct ?? 0) > 0
       ) {
-        console.log(`[monitor] Skipped - anti-rug / metrics unavailable`);
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} reason=anti-rug / metrics unavailable`
+        );
         recordRejectedSignal(signal, 'anti-rug / metrics unavailable');
         return false;
       }
@@ -2189,7 +2228,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   const rate = canExecuteTradeNow();
   if (!rate.ok) {
-    console.log(`[monitor] Signal rejected — ${rate.reason}`);
+    console.log(`[monitor] FILTER_SKIP kind=${signalKind} reason=${rate.reason}`);
     paperTrader.addLog(
       'info',
       `Trade rate limit: ${rate.reason}`,
@@ -2216,7 +2255,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     );
     recordSignalSizing(signal, preview, false);
     console.log(
-      `[monitor] Signal rejected — conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
+      `[monitor] FILTER_SKIP kind=${signalKind} reason=conviction ` +
+        `${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     paperTrader.addLog(
       'info',

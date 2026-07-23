@@ -132,7 +132,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
       reasons.push(`elevated risk score ${riskScore}`);
     }
   } else {
-    score += 8;
+    score += priority ? 12 : 8;
   }
 
   // --- Volume / liquidity (0–10) — use effective hard floors ---
@@ -142,11 +142,14 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     if (vol != null && vol >= minVol) {
       score += clamp(5 + (vol / minVol) * 2, 5, 10);
     } else if (vol != null) {
-      score += clamp((vol / minVol) * 4, 0, 4);
-      reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
+      // Priority entries: partial credit (antiRug early-path already gated floors)
+      score += priority
+        ? clamp(3 + (vol / minVol) * 3, 3, 7)
+        : clamp((vol / minVol) * 4, 0, 4);
+      if (!priority) reasons.push(`low volume $${vol.toFixed(0)} < $${minVol}`);
     } else {
-      // Unknown volume — small credit only for priority; hard floors run in antiRug
-      score += priority ? 4 : 2;
+      // Unknown volume — credit priority (migration feed often precedes Dex fill)
+      score += priority ? 6 : 2;
     }
   } else if (vol != null && vol > 0) {
     score += vol >= 10_000 ? 8 : 4;

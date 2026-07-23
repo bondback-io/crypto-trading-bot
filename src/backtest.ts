@@ -4,7 +4,7 @@
  * with realistic candle-driven price paths.
  */
 
-import { config, applyRiskLevel, getRiskLevelSummary, type RiskLevel } from './config';
+import { config, applyRiskLevel, getRiskLevelSummary, isRiskLevel, type RiskLevel } from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
   fetchRecentLaunches,
@@ -79,7 +79,7 @@ export interface BacktestOptions {
    */
   riskLevel?: RiskLevel | 'current';
   /**
-   * When true, run Low / Medium / High on the same events and attach comparison.
+   * When true, run Low / Medium / High / Degen on the same events and attach comparison.
    * Primary result uses the selected riskLevel (or current).
    */
   compareRiskLevels?: boolean;
@@ -1954,11 +1954,7 @@ export async function runBacktest(
 
   try {
     // Optionally apply a risk-level preset for this run only (not persisted)
-    if (
-      requestedLevel === 'low' ||
-      requestedLevel === 'medium' ||
-      requestedLevel === 'high'
-    ) {
+    if (isRiskLevel(requestedLevel)) {
       applyRiskLevel(requestedLevel, { persist: false });
     }
 
@@ -2145,12 +2141,12 @@ export async function runBacktest(
       return { allSkipped, runStats, lastTrades, lastTrader, considered };
     };
 
-    // Optional Low/Medium/High comparison on the same events
+    // Optional Low/Medium/High/Degen comparison on the same events
     let riskComparison: BacktestResult['riskComparison'];
     if (compareRiskLevels) {
       riskComparison = [];
       const compareSnap = captureTradingConfigSnapshot();
-      for (const level of ['low', 'medium', 'high'] as RiskLevel[]) {
+      for (const level of ['low', 'medium', 'high', 'degen'] as RiskLevel[]) {
         applyRiskLevel(level, { persist: false });
         const cmp = await executeSims(events, `Compare ${level}`);
         const sum = buildSummary(
@@ -2172,11 +2168,7 @@ export async function runBacktest(
       }
       restoreTradingConfigSnapshot(compareSnap);
       // Re-apply primary level for the main run
-      if (
-        requestedLevel === 'low' ||
-        requestedLevel === 'medium' ||
-        requestedLevel === 'high'
-      ) {
+      if (isRiskLevel(requestedLevel)) {
         applyRiskLevel(requestedLevel, { persist: false });
       } else {
         restoreTradingConfigSnapshot(savedSnap);

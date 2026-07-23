@@ -37,16 +37,31 @@ import { rpcEndpointsFromEnv } from './rpcUrl';
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
 export { hasPersistedSettings };
 export type TradingMode = 'paper' | 'live';
-export type RiskLevel = 'low' | 'medium' | 'high';
+export type RiskLevel = 'low' | 'medium' | 'high' | 'degen';
+
+export const RISK_LEVELS: readonly RiskLevel[] = [
+  'low',
+  'medium',
+  'high',
+  'degen',
+] as const;
+
+export function isRiskLevel(value: string): value is RiskLevel {
+  return (RISK_LEVELS as readonly string[]).includes(value);
+}
 
 export const HIGH_RISK_WARNING =
   '⚠️ High risk mode increases position size and reduces optional filters — absolute volume/liquidity/holder/curve floors still apply';
+
+export const DEGEN_RISK_WARNING =
+  '⚠️ DEGEN mode maximizes entries — only basic rug/honeypot safety + hard floors. Extremely high variance; expect many open positions.';
 
 /** Human labels for dashboard */
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
   low: 'Low — tight filters, smaller size, stricter stops',
   medium: 'Medium — balanced (recommended default)',
   high: 'High — aggressive entries, larger size, wider stops',
+  degen: 'Degen — max entries, basic rug/honeypot only, hard floors kept',
 };
 
 export interface SellTier {
@@ -226,18 +241,18 @@ export interface SelectiveTradingConfig {
 /** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   enabled: true,
-  minConvictionScore: 40,
+  minConvictionScore: 32,
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
   minWalletsForTrade: 1,
   minVolume24hUsd: 10_000,
   minHolderCount: 30,
-  maxTradesPerHour: 14,
-  minMsBetweenTrades: 35_000,
-  riskScoreSizeCutoff: 45,
-  minRiskSizeMultiplier: 0.38,
+  maxTradesPerHour: 16,
+  minMsBetweenTrades: 25_000,
+  riskScoreSizeCutoff: 50,
+  minRiskSizeMultiplier: 0.4,
   extraConvergenceAboveRisk: 1,
-  highRiskConvergenceThreshold: 55,
+  highRiskConvergenceThreshold: 60,
 };
 
 /**
@@ -257,6 +272,11 @@ export interface RiskLevelPreset {
   selective: Partial<SelectiveTradingConfig>;
   profitStrategy: Partial<ProfitStrategyConfig>;
   strategy: Partial<StrategyConfig>;
+  /** Optional bonding-curve gate overrides (e.g. requireHealthyCurve) */
+  bondingCurve?: Partial<{
+    requireHealthyCurve: boolean;
+    requireRecentCurveActivity: boolean;
+  }>;
 }
 
 export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
@@ -379,7 +399,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxHolderConcentration: 70,
       minTop10HolderPct: 8,
       maxEstimatedTaxPct: 24,
-      maxRiskScore: 70,
+      maxRiskScore: 78,
       skipIfMintAuthority: false,
       sniperSensitivity: 'medium',
       convergenceRequired: 2,
@@ -428,18 +448,18 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     selective: {
       enabled: true,
-      minConvictionScore: 40,
+      minConvictionScore: 32,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
       minVolume24hUsd: 10_000,
       minHolderCount: 30,
-      maxTradesPerHour: 14,
-      minMsBetweenTrades: 35_000,
-      riskScoreSizeCutoff: 45,
-      minRiskSizeMultiplier: 0.38,
+      maxTradesPerHour: 16,
+      minMsBetweenTrades: 25_000,
+      riskScoreSizeCutoff: 50,
+      minRiskSizeMultiplier: 0.4,
       extraConvergenceAboveRisk: 1,
-      highRiskConvergenceThreshold: 55,
+      highRiskConvergenceThreshold: 60,
     },
     profitStrategy: {
       takeInitialPercent: 95,
@@ -452,6 +472,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       highRiskScoreThreshold: 55,
     },
     strategy: {
+      enableMigrationOnly: false,
       migrationSizeMultiplier: 1.55,
       confirmationThreshold: 3,
       reBuyMinProfitPct: 90,
@@ -557,6 +578,110 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       reBuyMinProfitPct: 70,
     },
   },
+  degen: {
+    label: 'Degen',
+    description:
+      'Maximum entries — only basic rug/honeypot safety; hard volume/liquidity/holder floors still apply. Extremely high variance.',
+    warning: DEGEN_RISK_WARNING,
+    trade: {
+      baseTradeAmountSol: 0.25,
+      tradeAmountSol: 0.25,
+      riskMultiplier: 0.7,
+      convictionMultiplier: 1.9,
+      minProfitPercent: 30,
+      maxProfitPercent: 1000,
+      stopLossPercent: -55,
+    },
+    filters: {
+      minLiquidity: 5_000,
+      maxDevHoldPct: 40,
+      maxDevPercent: 40,
+      maxTopHolderPct: 95,
+      maxHolderConcentration: 95,
+      minTop10HolderPct: 8,
+      maxEstimatedTaxPct: 50,
+      maxRiskScore: 92,
+      skipIfMintAuthority: false,
+      sniperSensitivity: 'low',
+      convergenceRequired: 1,
+      maxConcurrentPositions: 50,
+      dailyLossLimitSol: 10,
+      minVolume24hUsd: 10_000,
+      minRecentVolumeUsd: 800,
+      minRecentBuyVolumeUsd: 500,
+      minHolderCount: 30,
+      minHolders: 30,
+      minRecentActivity: 3,
+      requireLiquidityLocked: false,
+      checkHoneypot: true,
+      skipIfDevRecentSells: false,
+      enableAntiRug: true,
+      enableSniperFilter: false,
+    },
+    risk: {
+      riskPercentPerTrade: 3.0,
+      maxTradeSol: 2.0,
+      minTradeSol: 0.03,
+      weeklyLossLimitSol: 18,
+      maxDrawdownPct: 60,
+      trailingStopPct: 35,
+      trailingStopPercent: 35,
+      trailingActivationProfit: 40,
+      normal: {
+        riskPercentPerTrade: 2.8,
+        trailingStopPct: 35,
+        hardStopLossPct: -55,
+        tiers: [
+          { profitPct: 60, sellPct: 25 },
+          { profitPct: 120, sellPct: 25 },
+        ],
+      },
+      migration: {
+        riskPercentPerTrade: 3.5,
+        trailingStopPct: 38,
+        hardStopLossPct: -60,
+        sizeMultiplier: 1.55,
+        tiers: [
+          { profitPct: 60, sellPct: 25 },
+          { profitPct: 120, sellPct: 25 },
+        ],
+      },
+    },
+    selective: {
+      enabled: true,
+      minConvictionScore: 20,
+      requireConvergenceForNormal: false,
+      allowSingleWalletMigration: true,
+      minWalletsForTrade: 1,
+      minVolume24hUsd: 10_000,
+      minHolderCount: 30,
+      maxTradesPerHour: 40,
+      minMsBetweenTrades: 8_000,
+      riskScoreSizeCutoff: 85,
+      minRiskSizeMultiplier: 0.7,
+      extraConvergenceAboveRisk: 0,
+      highRiskConvergenceThreshold: 95,
+    },
+    profitStrategy: {
+      takeInitialPercent: 160,
+      partialSellAt: 90,
+      partialSellPercent: 30,
+      trailingStopAfter: 200,
+      trailingStopPct: 35,
+      bagPercent: 45,
+      riskBasedAdjustment: true,
+      highRiskScoreThreshold: 85,
+    },
+    strategy: {
+      enableMigrationOnly: false,
+      migrationSizeMultiplier: 2.0,
+      confirmationThreshold: 1,
+      reBuyMinProfitPct: 50,
+    },
+    bondingCurve: {
+      requireHealthyCurve: false,
+    },
+  },
 };
 
 /**
@@ -589,6 +714,13 @@ export const HARD_FILTER_FLOORS = {
   earlyMinLiquidityUsd: 1_500,
   /** Soft 24h floor for early path when recent volume is missing */
   earlyMinVolume24hUsd: 1_000,
+  /**
+   * Early/migration recent (h1) volume floor — Dex often under-reports
+   * brand-new grads; only near-zero stays a hard reject.
+   */
+  earlyMinRecentVolumeUsd: 150,
+  /** Early/migration recent buy-side floor (soft unless near-zero) */
+  earlyMinRecentBuyVolumeUsd: 75,
   /** Holder floor for early/migration when recent activity is healthy */
   earlyMinHolders: 12,
   /** Curve progress at/below this counts as "very low" when volume is dead */
@@ -928,7 +1060,7 @@ export const config: BotConfig = {
     skipIfDevRecentSells: true,
     checkHoneypot: true,
     maxEstimatedTaxPct: 24,
-    maxRiskScore: 70,
+    maxRiskScore: 78,
     // Pump.fun bonding-curve tokens keep mint authority until migration —
     // hard-skipping them blocks almost all early copy signals.
     skipIfMintAuthority: false,
@@ -1162,6 +1294,11 @@ const RISK_LEVEL_SYNC_V1 = 'riskLevelSync_v1';
 const MAX_PROFIT_DEFAULT_V1123 = 'maxProfitDefault_v1123';
 /** One-shot: seed min top-10 concentration floor (honeypot dispersion gate). */
 const HOLDER_CONCENTRATION_FLOORS_V1124 = 'holderConcentrationFloors_v1124';
+/**
+ * One-shot: restore Medium-viable entry knobs after overly-tight persisted
+ * maxTopHolderPct / conviction / maxRiskScore blocked migrations + copies.
+ */
+const MEDIUM_ENTRY_RESTORE_V1125 = 'mediumEntryRestore_v1125';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -1334,7 +1471,8 @@ function applySettingsSnapshot(
   if (
     saved.riskLevel === 'low' ||
     saved.riskLevel === 'medium' ||
-    saved.riskLevel === 'high'
+    saved.riskLevel === 'high' ||
+    saved.riskLevel === 'degen'
   ) {
     config.riskLevel = saved.riskLevel;
   }
@@ -1503,6 +1641,16 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyMediumEntryRestoreMigration()) {
+    settingsMigrations[MEDIUM_ENTRY_RESTORE_V1125] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied mediumEntryRestore_v1125 — maxTopHold=${config.filters.maxTopHolderPct}% ` +
+        `maxRisk=${config.filters.maxRiskScore} conviction≥${config.selective.minConvictionScore} ` +
+        `maxPos=${config.filters.maxConcurrentPositions} riskLevel=${config.riskLevel}`
+    );
+  }
+
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
@@ -1648,7 +1796,8 @@ function applyRiskLevelSyncMigration(): boolean {
   const level =
     config.riskLevel === 'low' ||
     config.riskLevel === 'medium' ||
-    config.riskLevel === 'high'
+    config.riskLevel === 'high' ||
+    config.riskLevel === 'degen'
       ? config.riskLevel
       : 'medium';
   applyRiskLevel(level, { persist: false });
@@ -1686,6 +1835,71 @@ function applyHolderConcentrationFloorsMigration(): boolean {
       HARD_FILTER_FLOORS.minTop10HolderPct
     );
   }
+  syncConfigAliases();
+  return true;
+}
+
+/**
+ * One-shot: persisted configs often kept maxTopHolderPct~40 / maxRiskScore~70 /
+ * low maxConcurrent after older defaults — blocking Medium migration + copy buys
+ * while the PF migration feed still looked "live". Restore Medium-viable knobs
+ * without wiping custom High/Degen choices.
+ */
+function applyMediumEntryRestoreMigration(): boolean {
+  if (settingsMigrations[MEDIUM_ENTRY_RESTORE_V1125]) return false;
+
+  const level = config.riskLevel;
+  // Only auto-loosen when Medium or unset (user on High/Degen/Low keeps their knobs).
+  if (level === 'low' || level === 'high' || level === 'degen') {
+    return true; // mark done, no knob changes
+  }
+
+  if (!level || level === 'medium') {
+    config.riskLevel = 'medium';
+  }
+
+  const med = RISK_LEVEL_PRESETS.medium;
+  if ((config.filters.maxTopHolderPct ?? 0) < 70) {
+    config.filters.maxTopHolderPct = med.filters.maxTopHolderPct ?? 70;
+  }
+  if ((config.filters.maxHolderConcentration ?? 0) < 70) {
+    config.filters.maxHolderConcentration =
+      med.filters.maxHolderConcentration ?? 70;
+  }
+  if ((config.filters.maxRiskScore ?? 0) < 78) {
+    config.filters.maxRiskScore = med.filters.maxRiskScore ?? 78;
+  }
+  if ((config.filters.maxConcurrentPositions ?? 0) < 8) {
+    config.filters.maxConcurrentPositions =
+      med.filters.maxConcurrentPositions ?? 12;
+  }
+  if ((config.selective.minConvictionScore ?? 100) > 32) {
+    config.selective.minConvictionScore =
+      med.selective.minConvictionScore ?? 32;
+  }
+  if ((config.selective.minMsBetweenTrades ?? 0) > 25_000) {
+    config.selective.minMsBetweenTrades =
+      med.selective.minMsBetweenTrades ?? 25_000;
+  }
+  if (
+    (config.selective.maxTradesPerHour ?? 0) > 0 &&
+    (config.selective.maxTradesPerHour ?? 0) < 14
+  ) {
+    config.selective.maxTradesPerHour = med.selective.maxTradesPerHour ?? 16;
+  }
+  config.selective.allowSingleWalletMigration = true;
+  config.strategy.enableMigrationOnly = false;
+  if (config.strategy.enableMigrationPriority == null) {
+    config.strategy.enableMigrationPriority = true;
+  }
+  if (
+    config.trade.baseTradeAmountSol == null &&
+    config.trade.tradeAmountSol == null
+  ) {
+    config.trade.baseTradeAmountSol = med.trade.baseTradeAmountSol ?? 0.14;
+    config.trade.tradeAmountSol = med.trade.tradeAmountSol ?? 0.14;
+  }
+
   syncConfigAliases();
   return true;
 }
@@ -2144,7 +2358,7 @@ export function setMode(
 }
 
 /**
- * Apply a Low / Medium / High risk preset — overwrites recommended knobs
+ * Apply a Low / Medium / High / Degen risk preset — overwrites recommended knobs
  * across trade, filters, risk, selective, and profit strategy.
  */
 export function applyRiskLevel(
@@ -2155,7 +2369,7 @@ export function applyRiskLevel(
   warning: string | null;
   summary: ReturnType<typeof getRiskLevelSummary>;
 } {
-  if (level !== 'low' && level !== 'medium' && level !== 'high') {
+  if (!isRiskLevel(level)) {
     throw new Error(`Invalid riskLevel: ${level}`);
   }
   const preset = RISK_LEVEL_PRESETS[level];
@@ -2243,6 +2457,10 @@ export function applyRiskLevel(
   Object.assign(config.profitStrategy, preset.profitStrategy);
   Object.assign(config.strategy, preset.strategy);
 
+  if (preset.bondingCurve) {
+    Object.assign(config.bondingCurve, preset.bondingCurve);
+  }
+
   syncConfigAliases();
 
   if (options.persist !== false) {
@@ -2269,7 +2487,12 @@ export function getRiskLevelSummary() {
     riskLevel: level,
     label: preset.label,
     description: preset.description,
-    warning: level === 'high' ? HIGH_RISK_WARNING : null,
+    warning:
+      level === 'high'
+        ? HIGH_RISK_WARNING
+        : level === 'degen'
+          ? DEGEN_RISK_WARNING
+          : null,
     active: {
       baseTradeAmountSol:
         config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,

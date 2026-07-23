@@ -1055,6 +1055,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced recommended default">Medium</button>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="Aggressive — larger size, looser filters">High</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — basic rug/honeypot only, hard floors kept" style="border-color:#a855f7">Degen</button>
           <span class="mint self-center" id="risk-level-label">—</span>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
@@ -1523,7 +1524,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
         <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #334155;color:#94a3b8">
           <strong style="color:#e2e8f0">Backtest uses your risk presets + selective entry gates</strong>
-          <span class="mint block mt-1" id="bt-config-banner">Applies conviction score, wallet convergence, rate limits, max concurrent, and filter floors from the selected risk level. Compare Low/Med/High to see differentiated trade counts and WR.</span>
+          <span class="mint block mt-1" id="bt-config-banner">Applies conviction score, wallet convergence, rate limits, max concurrent, and filter floors from the selected risk level. Compare Low/Med/High/Degen to see differentiated trade counts and WR.</span>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
@@ -1538,12 +1539,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="single">Single wallet</option>
             </select>
           </label>
-          <label class="ctl ctl-lg"><span>Risk level for this run only <span class="tip" tabindex="0" data-tip="Overrides riskLevel for this backtest only (not saved). Current = your live saved settings. Low/Med/High apply that preset temporarily then restore."></span></span>
+          <label class="ctl ctl-lg"><span>Risk level for this run only <span class="tip" tabindex="0" data-tip="Overrides riskLevel for this backtest only (not saved). Current = your live saved settings. Low/Med/High/Degen apply that preset temporarily then restore."></span></span>
             <select id="bt-risk-level">
               <option value="current" selected>Current saved</option>
               <option value="low">Override → Low</option>
               <option value="medium">Override → Medium</option>
               <option value="high">Override → High</option>
+              <option value="degen">Override → Degen</option>
             </select>
           </label>
         </div>
@@ -1559,7 +1561,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="ctl-check" title="Only include Pump.fun / pump-tagged launches"><input type="checkbox" id="bt-pump-only" /> Pump.fun only</label>
           <label class="ctl-check" title="Allow dip re-entry after take-profit in the sim"><input type="checkbox" id="bt-rebuy" /> Re-buy enabled</label>
           <label class="ctl-check" title="If live data is thin, generate synthetic price paths so the sim still runs"><input type="checkbox" id="bt-synthetic" checked /> Allow synthetic</label>
-          <label class="ctl-check" title="Also run Low, Medium, and High on the same events for side-by-side comparison (does not change live settings)"><input type="checkbox" id="bt-compare-risk" /> Compare Low / Med / High</label>
+          <label class="ctl-check" title="Also run Low, Medium, High, and Degen on the same events for side-by-side comparison (does not change live settings)"><input type="checkbox" id="bt-compare-risk" /> Compare Low / Med / High / Degen</label>
         </div>
         <div id="bt-config-used" class="mint text-sm mb-2 hidden"></div>
         <div class="flex flex-wrap gap-2 items-center mb-2">
@@ -1621,8 +1623,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div id="bt-risk-compare" class="hidden">
-          <div class="section-title !text-sm">Risk Level Breakdown <span class="tip" tabindex="0" data-tip="Enable Compare Low / Med / High on the run controls to populate this table and chart. Does not change live settings."></span></div>
-          <p class="mint text-xs mb-2">Enable <strong>Compare Low / Med / High</strong> above, then re-run to compare the same events across risk presets.</p>
+          <div class="section-title !text-sm">Risk Level Breakdown <span class="tip" tabindex="0" data-tip="Enable Compare Low / Med / High / Degen on the run controls to populate this table and chart. Does not change live settings."></span></div>
+          <p class="mint text-xs mb-2">Enable <strong>Compare Low / Med / High / Degen</strong> above, then re-run to compare the same events across risk presets.</p>
           <div class="overflow-x-auto mb-3">
             <table id="bt-risk-compare-table">
               <thead>
@@ -1641,7 +1643,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </table>
           </div>
           <div class="chart-wrap mb-2" style="height:240px"><canvas id="bt-chart-risk"></canvas></div>
-          <div class="chart-empty mint" id="bt-chart-risk-empty">No risk comparison yet — check Compare Low / Med / High and run</div>
+          <div class="chart-empty mint" id="bt-chart-risk-empty">No risk comparison yet — check Compare Low / Med / High / Degen and run</div>
         </div>
       </div>
 
@@ -1778,7 +1780,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title">Filters &amp; Anti-Rug <span class="tip" tabindex="0" data-tip="Gates that must pass before a buy: convergence, liquidity, holder risk, honeypot, snipers."></span></div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="field"><label title="Distinct smart wallets that must buy before you copy">Convergence — <span class="val" id="v-convergenceRequired">2</span></label><input type="range" id="convergenceRequired" min="1" max="5" step="1" value="2" /></div>
-            <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">12</span></label><input type="range" id="maxConcurrentPositions" min="1" max="20" step="1" value="12" /></div>
+            <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">12</span></label><input type="range" id="maxConcurrentPositions" min="1" max="50" step="1" value="12" /></div>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $5,000 (recommended $5k–$8k). High cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">5000</span></label><input type="range" id="minLiquidity" min="5000" max="100000" step="500" value="5000" /></div>
@@ -1866,6 +1868,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-low" onclick="setRiskLevel('low')">Low</button>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-medium" onclick="setRiskLevel('medium')">Medium</button>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-high" onclick="setRiskLevel('high')">High</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-degen" onclick="setRiskLevel('degen')" style="border-color:#a855f7">Degen</button>
             </div>
             <div id="cfg-risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
             <div class="mint text-xs" id="cfg-risk-level-summary">Selecting a level applies recommended trade size, filters, stops, and selective gates.</div>
@@ -2715,17 +2718,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           chartBacktestRisk = new Chart(canvas, {
             type: 'bar',
             data: {
-              labels: ['low', 'medium', 'high'],
+              labels: ['low', 'medium', 'high', 'degen'],
               datasets: [
                 {
                   label: 'PnL (SOL)',
-                  data: [0, 0, 0],
+                  data: [0, 0, 0, 0],
                   backgroundColor: 'rgba(52,211,153,0.7)',
                   yAxisID: 'y',
                 },
                 {
                   label: 'Win rate %',
-                  data: [0, 0, 0],
+                  data: [0, 0, 0, 0],
                   backgroundColor: 'rgba(96,165,250,0.55)',
                   yAxisID: 'y1',
                 },
@@ -5352,33 +5355,49 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const level = (cfg && cfg.riskLevel) || 'medium';
       const sum = (cfg && cfg.riskLevelSummary) || {};
       const active = sum.active || {};
-      const ids = ['low', 'medium', 'high'];
+      const ids = ['low', 'medium', 'high', 'degen'];
       ids.forEach((id) => {
         ['risk-lvl-', 'cfg-risk-lvl-'].forEach((prefix) => {
           const btn = document.getElementById(prefix + id);
           if (!btn) return;
           const on = id === level;
-          btn.className = on
-            ? 'btn btn-primary text-xs sm:text-sm'
-            : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+          if (id === 'degen') {
+            btn.className = on
+              ? 'btn text-xs sm:text-sm'
+              : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+            btn.style.background = on ? 'linear-gradient(135deg,#c2410c,#7c3aed)' : '';
+            btn.style.color = on ? '#fff' : '';
+            btn.style.borderColor = '#a855f7';
+          } else {
+            btn.className = on
+              ? 'btn btn-primary text-xs sm:text-sm'
+              : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+            btn.style.background = '';
+            btn.style.color = '';
+            btn.style.borderColor = '';
+          }
         });
       });
       const label = document.getElementById('risk-level-label');
       if (label) label.textContent = (sum.label || level).toUpperCase() + (sum.description ? ' — ' + sum.description : '');
 
       const warnText =
-        level === 'high'
-          ? (sum.warning || '⚠️ High risk mode increases position size and reduces filters — use with caution')
-          : '';
+        level === 'degen'
+          ? (sum.warning || '⚠️ DEGEN mode maximizes entries — only basic rug/honeypot safety + hard floors. Extremely high variance.')
+          : level === 'high'
+            ? (sum.warning || '⚠️ High risk mode increases position size and reduces filters — use with caution')
+            : '';
       ['risk-level-warning', 'cfg-risk-level-warning'].forEach((wid) => {
         const w = document.getElementById(wid);
         if (!w) return;
         if (warnText) {
           w.textContent = warnText;
           w.classList.remove('hidden');
+          w.style.color = level === 'degen' ? '#c084fc' : '';
         } else {
           w.textContent = '';
           w.classList.add('hidden');
+          w.style.color = '';
         }
       });
 
@@ -5415,6 +5434,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (level === 'high') {
         const ok = confirm(
           '⚠️ High risk mode increases position size and reduces filters — use with caution.\\n\\nApply High risk recommended settings?'
+        );
+        if (!ok) return;
+      }
+      if (level === 'degen') {
+        const ok = confirm(
+          '⚠️ DEGEN mode maximizes open trades — only basic rug/honeypot filters + hard floors.\\n50 concurrent positions · 0.25 SOL base · very loose gates.\\n\\nApply Degen settings?'
         );
         if (!ok) return;
       }

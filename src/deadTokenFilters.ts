@@ -111,8 +111,8 @@ export function evaluateDeadTokenHardFloors(
 
   const minLiqFull = effectiveMinLiquidityUsd();
   const minVol24 = effectiveMinVolume24hUsd();
-  const minRecentVol = effectiveMinRecentVolumeUsd();
-  const minRecentBuy = effectiveMinRecentBuyVolumeUsd();
+  const minRecentVolFull = effectiveMinRecentVolumeUsd();
+  const minRecentBuyFull = effectiveMinRecentBuyVolumeUsd();
   const minHoldersFull = effectiveMinHolders();
   const minActivity = effectiveMinRecentActivity();
 
@@ -124,6 +124,14 @@ export function evaluateDeadTokenHardFloors(
   const minHolders = earlyPath
     ? Math.min(minHoldersFull, HARD_FILTER_FLOORS.earlyMinHolders)
     : minHoldersFull;
+  // Fresh pump/migration: Dex h1 often lags — use softer recent floors; only
+  // near-zero remains a hard reject on the early path.
+  const minRecentVol = earlyPath
+    ? Math.min(minRecentVolFull, HARD_FILTER_FLOORS.earlyMinRecentVolumeUsd)
+    : minRecentVolFull;
+  const minRecentBuy = earlyPath
+    ? Math.min(minRecentBuyFull, HARD_FILTER_FLOORS.earlyMinRecentBuyVolumeUsd)
+    : minRecentBuyFull;
 
   const recentVol = snap.volumeH1Usd ?? snap.volumeM5Usd;
   const buyVol = estimatedBuyVolume(snap);
@@ -133,7 +141,11 @@ export function evaluateDeadTokenHardFloors(
 
   const recentHealthy =
     (recentVol != null && recentVol >= minRecentVol) ||
-    (buyVol != null && buyVol >= minRecentBuy && (txns == null || txns >= minActivity));
+    (buyVol != null && buyVol >= minRecentBuy && (txns == null || txns >= minActivity)) ||
+    (earlyPath &&
+      txns != null &&
+      txns >= minActivity &&
+      (recentVol == null || recentVol > 0));
   const activityDead =
     (txns != null && txns < minActivity) ||
     (recentVol != null && recentVol < minRecentVol) ||
@@ -182,18 +194,35 @@ export function evaluateDeadTokenHardFloors(
   if (!vol24Ok && !vol24EarlyOk) {
     const shown = vol24 == null ? 0 : vol24;
     const nearZeroVol = shown < 100 && !recentHealthy;
-    scorePenalty += shown <= 0 ? 32 : 22;
-    flags.push({
-      id: 'hard_low_volume_24h',
-      severity: shown <= 0 ? 'critical' : 'high',
-      label: 'Low 24h volume',
-      detail: `$${shown.toFixed(0)} < $${minVol24}`,
-    });
-    skipReasons.push(
-      nearZeroVol
-        ? `Skipped — near-zero volume / dead liquidity (vol24h $${shown.toFixed(0)} < $${minVol24})`
-        : `Skipped - low 24h volume ($${shown.toFixed(0)} < min $${minVol24})`
-    );
+    // Early/migration with non-dead pool: soft-penalty missing 24h (indexing lag)
+    // instead of hard-blocking the buy. Near-zero + no recent flow still hard-fails.
+    if (
+      earlyPath &&
+      !nearZeroVol &&
+      liq != null &&
+      liq >= Math.min(minLiq, HARD_FILTER_FLOORS.earlyMinLiquidityUsd) * 0.5
+    ) {
+      scorePenalty += 12;
+      flags.push({
+        id: 'early_low_volume_24h',
+        severity: 'medium',
+        label: 'Low 24h volume (early)',
+        detail: `$${shown.toFixed(0)} < $${minVol24}`,
+      });
+    } else {
+      scorePenalty += shown <= 0 ? 32 : 22;
+      flags.push({
+        id: 'hard_low_volume_24h',
+        severity: shown <= 0 ? 'critical' : 'high',
+        label: 'Low 24h volume',
+        detail: `$${shown.toFixed(0)} < $${minVol24}`,
+      });
+      skipReasons.push(
+        nearZeroVol
+          ? `Skipped — near-zero volume / dead liquidity (vol24h $${shown.toFixed(0)} < $${minVol24})`
+          : `Skipped - low 24h volume ($${shown.toFixed(0)} < min $${minVol24})`
+      );
+    }
   } else if (earlyPath && !vol24Ok && recentHealthy) {
     // Alternate path used — soft penalty only
     scorePenalty += 4;
@@ -206,16 +235,29 @@ export function evaluateDeadTokenHardFloors(
   }
 
   if (recentVol != null && recentVol < minRecentVol) {
-    scorePenalty += recentVol <= 0 ? 28 : 18;
-    flags.push({
-      id: 'hard_dead_recent_volume',
-      severity: recentVol <= 0 ? 'critical' : 'high',
-      label: 'Dead recent volume',
-      detail: `h1/m5 $${recentVol.toFixed(0)} < $${minRecentVol}`,
-    });
-    skipReasons.push(
-      `Skipped — dead recent volume ($${recentVol.toFixed(0)} < min $${minRecentVol})`
-    );
+    const nearZeroRecent = recentVol < 25;
+    // Early/migration: soft-penalty thin but non-zero recent vol (Dex lag).
+    // Mature entries and true near-zero still hard-fail.
+    if (earlyPath && !nearZeroRecent) {
+      scorePenalty += 10;
+      flags.push({
+        id: 'early_thin_recent_volume',
+        severity: 'medium',
+        label: 'Thin recent volume (early)',
+        detail: `h1/m5 $${recentVol.toFixed(0)} < $${minRecentVolFull}`,
+      });
+    } else {
+      scorePenalty += recentVol <= 0 ? 28 : 18;
+      flags.push({
+        id: 'hard_dead_recent_volume',
+        severity: recentVol <= 0 ? 'critical' : 'high',
+        label: 'Dead recent volume',
+        detail: `h1/m5 $${recentVol.toFixed(0)} < $${minRecentVol}`,
+      });
+      skipReasons.push(
+        `Skipped — dead recent volume ($${recentVol.toFixed(0)} < min $${minRecentVol})`
+      );
+    }
   } else if (
     recentVol == null &&
     !vol24Ok &&
@@ -226,14 +268,15 @@ export function evaluateDeadTokenHardFloors(
   }
 
   if (buyVol != null && buyVol < minRecentBuy) {
-    // Early path with strong total recent vol: buy-side estimate soft-penalty only
-    if (earlyPath && recentVol != null && recentVol >= minRecentVol) {
+    const nearZeroBuy = buyVol < 15;
+    // Early path with any recent flow / non-zero buy: soft-penalty only
+    if (earlyPath && (!nearZeroBuy || (recentVol != null && recentVol >= minRecentVol))) {
       scorePenalty += 6;
       flags.push({
         id: 'early_weak_buy_volume',
         severity: 'medium',
         label: 'Weak recent buy volume (early)',
-        detail: `$${buyVol.toFixed(0)} < $${minRecentBuy}`,
+        detail: `$${buyVol.toFixed(0)} < $${minRecentBuyFull}`,
       });
     } else {
       scorePenalty += buyVol <= 0 ? 24 : 14;

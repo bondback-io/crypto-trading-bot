@@ -27,7 +27,7 @@ export interface PersistedBotSettings {
   version: number;
   updatedAt: number;
   mode?: 'paper' | 'live';
-  riskLevel?: 'low' | 'medium' | 'high';
+  riskLevel?: 'low' | 'medium' | 'high' | 'degen';
   trade?: Record<string, unknown>;
   filters?: Record<string, unknown>;
   strategy?: Record<string, unknown>;

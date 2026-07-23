@@ -22,6 +22,8 @@ import {
   getRiskLevelSummary,
   RISK_LEVEL_PRESETS,
   HIGH_RISK_WARNING,
+  DEGEN_RISK_WARNING,
+  isRiskLevel,
   setActiveTradingWallet,
   addTradingWallet,
   removeTradingWallet,
@@ -364,7 +366,7 @@ export function createServer(): express.Application {
         useLiveData?: boolean;
         allowSynthetic?: boolean;
         startingBalanceSol?: number;
-        riskLevel?: 'low' | 'medium' | 'high' | 'current';
+        riskLevel?: 'low' | 'medium' | 'high' | 'degen' | 'current';
         compareRiskLevels?: boolean;
         useSavedConfigFilters?: boolean;
       };
@@ -449,10 +451,7 @@ export function createServer(): express.Application {
         minMarketCapUsd: Number(req.query.minMc) || 0,
         maxRiskScore: Number(req.query.maxRisk) || 0,
         allowSynthetic: req.query.synthetic !== '0',
-        riskLevel:
-          riskQ === 'low' || riskQ === 'medium' || riskQ === 'high'
-            ? riskQ
-            : 'current',
+        riskLevel: isRiskLevel(riskQ) ? riskQ : 'current',
         compareRiskLevels:
           req.query.compareRisk === '1' || req.query.compareRisk === 'true',
         useSavedConfigFilters: req.query.useSaved !== '0',
@@ -642,6 +641,11 @@ export function createServer(): express.Application {
           description: RISK_LEVEL_PRESETS.high.description,
           warning: HIGH_RISK_WARNING,
         },
+        degen: {
+          label: RISK_LEVEL_PRESETS.degen.label,
+          description: RISK_LEVEL_PRESETS.degen.description,
+          warning: DEGEN_RISK_WARNING,
+        },
       },
     });
   });
@@ -650,9 +654,9 @@ export function createServer(): express.Application {
     const level = String((req.body as { riskLevel?: string }).riskLevel || '')
       .toLowerCase()
       .trim() as RiskLevel;
-    if (level !== 'low' && level !== 'medium' && level !== 'high') {
+    if (!isRiskLevel(level)) {
       res.status(400).json({
-        error: "riskLevel must be 'low' | 'medium' | 'high'",
+        error: "riskLevel must be 'low' | 'medium' | 'high' | 'degen'",
       });
       return;
     }
