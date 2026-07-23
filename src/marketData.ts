@@ -775,39 +775,73 @@ export function generateSyntheticLaunches(
 ): LaunchEvent[] {
   const events: LaunchEvent[] = [];
   const span = Math.max(toMs - fromMs, 60_000);
-  const wallets = ['Cented', 'Theo', 'Decu', 'Unknown'];
+  const wallets = ['Cented', 'Theo', 'Decu', 'Megga', 'Unknown'];
 
   for (let i = 0; i < count; i++) {
     const launchedAt = fromMs + Math.floor((span * (i + 1)) / (count + 1));
     const entry = 1e-8 * (1 + Math.random() * 50);
-    // Realistic outcome distribution: many dumps, some moons
-    const roll = Math.random();
+
+    // Quality tier drives BOTH outcome distribution and liq/vol/risk —
+    // so selective filters actually change which trades survive.
+    const quality = Math.random(); // 0 = junk, 1 = high quality
     let mult: number;
-    if (roll < 0.45) mult = 0.2 + Math.random() * 0.5; // rug/dump
-    else if (roll < 0.7) mult = 0.8 + Math.random() * 0.4; // flat
-    else if (roll < 0.9) mult = 1.5 + Math.random() * 2; // 50–250%
-    else mult = 3 + Math.random() * 8; // moon
+    let liquidityUsd: number;
+    let volumeUsd: number;
+    let riskScoreHint: number;
+    let migrated: boolean;
+
+    if (quality < 0.4) {
+      // Junk / dump — fails low-risk filters, often fails medium
+      mult = 0.15 + Math.random() * 0.55;
+      liquidityUsd = 800 + Math.random() * 4_000;
+      volumeUsd = 200 + Math.random() * 2_500;
+      riskScoreHint = Math.round(55 + Math.random() * 35);
+      migrated = Math.random() > 0.75;
+    } else if (quality < 0.7) {
+      // Mid quality — flat to modest moves
+      mult = 0.7 + Math.random() * 0.8;
+      liquidityUsd = 4_000 + Math.random() * 12_000;
+      volumeUsd = 3_000 + Math.random() * 15_000;
+      riskScoreHint = Math.round(35 + Math.random() * 30);
+      migrated = Math.random() > 0.45;
+    } else if (quality < 0.9) {
+      // Strong — more winners
+      mult = 1.4 + Math.random() * 2.5;
+      liquidityUsd = 12_000 + Math.random() * 40_000;
+      volumeUsd = 12_000 + Math.random() * 60_000;
+      riskScoreHint = Math.round(18 + Math.random() * 28);
+      migrated = Math.random() > 0.35;
+    } else {
+      // Moon — rare
+      mult = 3 + Math.random() * 10;
+      liquidityUsd = 20_000 + Math.random() * 80_000;
+      volumeUsd = 25_000 + Math.random() * 120_000;
+      riskScoreHint = Math.round(10 + Math.random() * 25);
+      migrated = Math.random() > 0.3;
+    }
 
     const last = entry * mult;
-    const mint = `SynthMint${String(i).padStart(2, '0')}${String(launchedAt).slice(-20)}`.slice(0, 44);
-    // Synthetic holds: 15–90 minutes typical for memecoin sims
-    const holdMs = (15 + Math.random() * 75) * 60_000;
+    const mint = `SynthMint${String(i).padStart(2, '0')}${String(launchedAt).slice(-20)}`.slice(
+      0,
+      44
+    );
+    const holdMs = (20 + Math.random() * 100) * 60_000;
 
     events.push({
       mint,
       symbol: `SYN${i}`,
       name: `Synthetic ${wallets[i % wallets.length]} #${i}`,
       launchedAt,
-      migrated: Math.random() > 0.4,
+      migrated,
       entryPriceSol: entry,
       lastPriceSol: last,
       priceChangePct: (mult - 1) * 100,
-      liquidityUsd: 5_000 + Math.random() * 40_000,
-      volumeUsd: 2_000 + Math.random() * 80_000,
+      liquidityUsd,
+      volumeUsd,
       marketCapUsd: 20_000 + Math.random() * 500_000,
-      riskScoreHint: Math.round(25 + Math.random() * 50),
-      isPumpFun: Math.random() > 0.35,
-      candles: buildPricePath(entry, last, launchedAt, launchedAt + holdMs, 24),
+      riskScoreHint,
+      isPumpFun: !migrated || Math.random() > 0.4,
+      candles: buildPricePath(entry, last, launchedAt, launchedAt + holdMs, 28),
       source: 'synthetic',
       solUsd: 150,
     });

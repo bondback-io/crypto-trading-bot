@@ -219,14 +219,27 @@ export function recordTradeExecuted(): void {
 
 /** Rate-limit gate — max trades/hour and min gap between buys. */
 export function canExecuteTradeNow(): { ok: boolean; reason?: string } {
-  const sel = config.selective;
+  return canExecuteTradeAt(Date.now(), recentTradeTimes);
+}
+
+/**
+ * Pure rate-limit check for a simulated clock (backtests).
+ * Does not mutate the live recentTradeTimes buffer.
+ */
+export function canExecuteTradeAt(
+  nowMs: number,
+  recentTimes: number[],
+  sel: SelectiveTradingConfig = config.selective
+): { ok: boolean; reason?: string } {
   if (!sel?.enabled) return { ok: true };
 
-  const now = Date.now();
+  // Only trades that already happened at/before this sim clock
+  const prior = recentTimes.filter((t) => t <= nowMs);
+
   const maxPerHour = sel.maxTradesPerHour ?? 0;
   if (maxPerHour > 0) {
-    const hourAgo = now - 3_600_000;
-    const recent = recentTradeTimes.filter((t) => t >= hourAgo);
+    const hourAgo = nowMs - 3_600_000;
+    const recent = prior.filter((t) => t >= hourAgo);
     if (recent.length >= maxPerHour) {
       return {
         ok: false,
@@ -236,12 +249,12 @@ export function canExecuteTradeNow(): { ok: boolean; reason?: string } {
   }
 
   const minGap = sel.minMsBetweenTrades ?? 0;
-  if (minGap > 0 && recentTradeTimes.length > 0) {
-    const last = recentTradeTimes[recentTradeTimes.length - 1];
-    if (now - last < minGap) {
+  if (minGap > 0 && prior.length > 0) {
+    const last = prior.reduce((m, t) => (t > m ? t : m), 0);
+    if (nowMs - last < minGap) {
       return {
         ok: false,
-        reason: `cooldown ${Math.ceil((minGap - (now - last)) / 1000)}s remaining`,
+        reason: `cooldown ${Math.ceil((minGap - (nowMs - last)) / 1000)}s remaining`,
       };
     }
   }

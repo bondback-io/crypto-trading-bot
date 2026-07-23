@@ -1227,12 +1227,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
         <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #334155;color:#94a3b8">
-          <strong style="color:#e2e8f0">Backtest is using your current saved config and risk settings</strong>
-          <span class="mint block mt-1" id="bt-config-banner">Loads riskLevel, dynamic sizing, profit tiers, fees/slippage, and filters from bot-settings. Overrides below are optional.</span>
+          <strong style="color:#e2e8f0">Backtest uses your risk presets + selective entry gates</strong>
+          <span class="mint block mt-1" id="bt-config-banner">Applies conviction score, wallet convergence, rate limits, max concurrent, and filter floors from the selected risk level. Compare Low/Med/High to see differentiated trade counts and WR.</span>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
-          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Cap how many simulated entries are opened."></span></span><input type="number" id="bt-max" value="25" min="1" max="80" /></label>
+          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Soft cap on simulated entries. Selective rate limits + risk level may take fewer."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
           <label class="ctl ctl-md"><span>Simulations <span class="tip" tabindex="0" data-tip="Repeat the run N times (useful when synthetic noise is allowed)."></span></span><input type="number" id="bt-sims" value="1" min="1" max="20" /></label>
           <label class="ctl ctl-md"><span>Start SOL <span class="tip" tabindex="0" data-tip="Starting paper bankroll for the simulation."></span></span><input type="number" id="bt-start-bal" value="10" min="0.5" max="100" step="0.5" /></label>
           <label class="ctl ctl-lg"><span>Strategy <span class="tip" tabindex="0" data-tip="Auto = bot defaults. Convergence = multi-wallet. Migration = grads only. Single = first wallet buy."></span></span>

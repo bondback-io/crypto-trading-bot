@@ -20,6 +20,11 @@ import { cacheTokenMeta } from './tokenMeta';
 import { logger } from './logger';
 import { calculateDynamicPositionSize } from './risk';
 import {
+  evaluateSignalConviction,
+  canExecuteTradeAt,
+} from './signalQuality';
+import type { TradeSignal } from './monitor';
+import {
   atomicWriteJson,
   dataFile,
   ensureDataDir,
@@ -759,30 +764,44 @@ function passesFilters(
     const isPump = event.isPumpFun ?? !event.migrated;
     if (!isPump) return 'not Pump.fun';
   }
+
+  // Prefer the stricter of UI override vs selective/live filter floors
+  const minVol = Math.max(
+    options.minVolumeUsd || 0,
+    config.selective?.enabled ? config.selective.minVolume24hUsd || 0 : 0,
+    config.filters.minVolume24hUsd || 0
+  );
   const vol = event.volumeUsd;
-  // Missing volume should not kill the candidate (Dex often omits it)
-  if (
-    options.minVolumeUsd > 0 &&
-    vol != null &&
-    vol > 0 &&
-    vol < options.minVolumeUsd
-  ) {
-    return `low volume ($${vol.toFixed(0)} < $${options.minVolumeUsd})`;
+  if (minVol > 0) {
+    if (vol == null || !(vol > 0)) {
+      // Missing volume: allow only migrated priority plays (live softens early pumps,
+      // but backtest must differentiate risk levels — unknown vol fails non-migrated).
+      if (!event.migrated) {
+        return `missing volume (need ≥ $${minVol})`;
+      }
+    } else if (vol < minVol) {
+      return `low volume ($${vol.toFixed(0)} < $${minVol})`;
+    }
   }
+
+  const minLiq = Math.max(
+    options.minLiquidityUsd || 0,
+    config.filters.minLiquidity || 0
+  );
   const liqAtEntry =
     liquidityAtPrice(
       event.liquidityUsd,
       event.lastPriceSol,
       event.entryPriceSol
     ) ?? event.liquidityUsd;
-  if (
-    options.minLiquidityUsd > 0 &&
-    liqAtEntry != null &&
-    liqAtEntry > 0 &&
-    liqAtEntry < options.minLiquidityUsd
-  ) {
-    return `low liquidity ($${liqAtEntry.toFixed(0)} < $${options.minLiquidityUsd})`;
+  if (minLiq > 0) {
+    if (liqAtEntry == null || !(liqAtEntry > 0)) {
+      if (!event.migrated) return `missing liquidity (need ≥ $${minLiq})`;
+    } else if (liqAtEntry < minLiq) {
+      return `low liquidity ($${liqAtEntry.toFixed(0)} < $${minLiq})`;
+    }
   }
+
   const mcAtEntry =
     marketCapAtPrice(
       event.marketCapUsd,
@@ -796,18 +815,31 @@ function passesFilters(
       return `low MC ($${mcAtEntry.toFixed(0)} < $${options.minMarketCapUsd})`;
     }
   }
-  // Score risk from entry-scaled liquidity (fairer than last-price snapshot)
+
   const risk =
+    event.riskScoreHint ??
     estimateRiskScoreHint(
       liqAtEntry ?? event.liquidityUsd,
       vol ?? event.volumeUsd
     );
-  // Soften inherited live maxRisk by +12 so backtests aren't starved by the heuristic
+  // Use exact maxRiskScore from the active risk preset (no softener)
   const riskCap =
-    options.maxRiskScore > 0 ? options.maxRiskScore + 12 : 0;
+    options.maxRiskScore > 0
+      ? options.maxRiskScore
+      : config.filters.maxRiskScore || 0;
   if (riskCap > 0 && risk >= riskCap) {
     return `risk score ${risk} ≥ ${riskCap}`;
   }
+
+  // Skip paths that already dumped hard before a realistic copy fill
+  if (
+    Number.isFinite(event.priceChangePct) &&
+    event.priceChangePct <= -55 &&
+    !event.migrated
+  ) {
+    return `already dumped (${event.priceChangePct.toFixed(0)}%)`;
+  }
+
   return null;
 }
 
@@ -982,36 +1014,193 @@ function buildProfitPath(takes: BacktestExitTake[]): string {
   return uniq.join(' → ');
 }
 
+function resolveStrategyKind(
+  event: LaunchEvent,
+  strategyType: BacktestStrategyType
+): 'migration' | 'convergence' | 'single' {
+  if (strategyType === 'auto') {
+    if (event.migrated) return 'migration';
+    if (config.strategy.enableConvergence) return 'convergence';
+    return 'single';
+  }
+  if (strategyType === 'migration') return 'migration';
+  if (strategyType === 'convergence') return 'convergence';
+  return 'single';
+}
+
+/**
+ * Attribute wallets for the sim — never duplicate a single name to fake
+ * convergence. If we lack enough distinct tracked wallets, return [].
+ */
 function resolveSourceNames(
   event: LaunchEvent,
   strategyType: BacktestStrategyType,
   names: string[],
   index: number
-): string[] {
-  const strategy =
-    strategyType === 'auto'
-      ? event.migrated
-        ? 'migration'
-        : config.strategy.enableConvergence
-          ? 'convergence'
-          : 'single'
-      : strategyType;
+): { names: string[]; skipReason?: string } {
+  const unique = [...new Set(names.filter(Boolean))];
+  if (unique.length === 0) {
+    return { names: [], skipReason: 'no tracked wallets' };
+  }
 
-  if (strategy === 'migration') {
-    return [names[index % names.length]];
+  const kind = resolveStrategyKind(event, strategyType);
+  if (kind === 'migration' || kind === 'single') {
+    return { names: [unique[index % unique.length]] };
   }
-  if (strategy === 'convergence') {
-    const n = Math.min(
-      Math.max(config.filters.convergenceRequired, 2),
-      names.length
-    );
-    let sourceNames = names.slice(0, n);
-    if (sourceNames.length < 2 && names.length >= 1) {
-      sourceNames = [names[0], names[0]];
-    }
-    return sourceNames;
+
+  // Convergence: require distinct wallets matching live filters/selective
+  const needed = Math.max(
+    config.filters.convergenceRequired ?? 2,
+    config.selective?.minWalletsForTrade ?? 2,
+    2
+  );
+  if (unique.length < needed) {
+    return {
+      names: [],
+      skipReason: `need ${needed} distinct wallets (have ${unique.length})`,
+    };
   }
-  return [names[index % names.length]];
+  // Rotate starting point so different events aren't always the same set
+  const start = index % unique.length;
+  const picked: string[] = [];
+  for (let i = 0; i < needed; i++) {
+    picked.push(unique[(start + i) % unique.length]);
+  }
+  return { names: picked };
+}
+
+function buildBacktestSignal(
+  event: LaunchEvent,
+  sourceNames: string[]
+): TradeSignal {
+  const earlyBuy = Boolean(
+    !event.migrated && (event.isPumpFun || event.source === 'synthetic')
+  );
+  return {
+    mint: event.mint,
+    symbol: event.symbol,
+    name: event.name,
+    wallets: sourceNames.map((_, i) => `bt-wallet-${i}`),
+    walletNames: sourceNames,
+    isMigration: Boolean(event.migrated),
+    nearMigration: false,
+    earlyBuy,
+    earlyBuyerCount: sourceNames.length,
+    timestamp: event.launchedAt,
+    antiRug:
+      event.riskScoreHint != null
+        ? ({
+            riskScore: event.riskScoreHint,
+            riskLevel:
+              event.riskScoreHint >= 70
+                ? 'high'
+                : event.riskScoreHint >= 40
+                  ? 'medium'
+                  : 'low',
+            flags: [],
+            ok: event.riskScoreHint < (config.filters.maxRiskScore || 70),
+            skipReasons: [],
+            liquidityLockedOrBurned: null,
+            honeypot: null,
+            recentDevSells: null,
+            devHoldPct: null,
+            top10HoldPct: null,
+            sniperScore: null,
+            sniperCount: null,
+            bundlerPct: null,
+            insiderPct: null,
+            sniperHighRisk: false,
+            birdeye: null,
+          } as NonNullable<TradeSignal['antiRug']>)
+        : undefined,
+    birdeye: {
+      liquidityUsd: event.liquidityUsd ?? null,
+      volume24hUsd: event.volumeUsd ?? null,
+      price: null,
+      priceChange24hPct: event.priceChangePct ?? null,
+      holder: null,
+      uniqueWallet24h: null,
+      buySellRatio: null,
+      smartMoneyScore: null,
+      flags: [],
+      source: event.source === 'birdeye' ? 'birdeye' : 'none',
+    },
+  };
+}
+
+/** Cap max fills by selective hourly rate × lookback (prevents always-filling UI max). */
+function effectiveMaxTrades(requested: number, hours: number): number {
+  const sel = config.selective;
+  if (!sel?.enabled) return requested;
+  const perHour = sel.maxTradesPerHour ?? 0;
+  if (perHour <= 0) return requested;
+  // Assume ~35% of theoretical hourly capacity is realistic after cooldowns/filters
+  const rateCap = Math.max(2, Math.ceil(hours * perHour * 0.35));
+  return Math.min(requested, rateCap);
+}
+
+interface SimTradeWindow {
+  openedAt: number;
+  closedAt: number;
+}
+
+function openCountAt(windows: SimTradeWindow[], atMs: number): number {
+  return windows.filter((w) => w.openedAt <= atMs && atMs < w.closedAt).length;
+}
+
+function summarizeSkipReasons(
+  skipped: { mint: string; reason: string }[]
+): string {
+  if (skipped.length === 0) return '';
+  const counts = new Map<string, number>();
+  for (const s of skipped) {
+    let key = s.reason;
+    if (key.startsWith('conviction')) key = 'conviction';
+    else if (key.startsWith('low volume') || key.startsWith('missing volume'))
+      key = 'volume';
+    else if (
+      key.startsWith('low liquidity') ||
+      key.startsWith('missing liquidity')
+    )
+      key = 'liquidity';
+    else if (key.startsWith('risk score')) key = 'risk';
+    else if (key.startsWith('trade cap') || key.startsWith('cooldown'))
+      key = 'rate limit';
+    else if (key.startsWith('max concurrent')) key = 'concurrent';
+    else if (key.startsWith('daily loss')) key = 'daily loss';
+    else if (key.startsWith('already dumped')) key = 'dumped';
+    else if (key.startsWith('need ')) key = 'wallets';
+    else key = key.replace(/\s*\(.*$/, '').slice(0, 28);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([k, n]) => `${k}×${n}`)
+    .join(', ');
+}
+
+/** Soft ranking so better liq/vol/migration candidates are tried first. */
+function launchQualityScore(event: LaunchEvent): number {
+  let score = 0;
+  if (event.migrated) score += 25;
+  if (event.isPumpFun) score += 5;
+  const vol = event.volumeUsd ?? 0;
+  const liq = event.liquidityUsd ?? 0;
+  if (vol >= 50_000) score += 20;
+  else if (vol >= 15_000) score += 14;
+  else if (vol >= 5_000) score += 8;
+  else if (vol >= 1_000) score += 4;
+  if (liq >= 30_000) score += 15;
+  else if (liq >= 10_000) score += 10;
+  else if (liq >= 2_000) score += 5;
+  const risk = event.riskScoreHint ?? 50;
+  score += Math.max(0, 20 - risk / 5);
+  const chg = event.priceChangePct ?? 0;
+  if (chg > 30 && chg < 400) score += 8;
+  if (chg < -40) score -= 15;
+  if (event.source === 'synthetic') score -= 5;
+  return score;
 }
 
 function formatBacktestExitLog(
@@ -1048,7 +1237,11 @@ function replayLaunch(
   event: LaunchEvent,
   sourceNames: string[],
   simulation: number,
-  options: { reBuyEnabled: boolean; solUsd: number } = {
+  options: {
+    reBuyEnabled: boolean;
+    solUsd: number;
+    convictionScore?: number;
+  } = {
     reBuyEnabled: false,
     solUsd: 150,
   }
@@ -1059,6 +1252,15 @@ function replayLaunch(
   const strategyKind: 'migration' | 'normal' = event.migrated
     ? 'migration'
     : 'normal';
+
+  /** Enter a few candles after launch to mimic poll latency (not candle 0 dump). */
+  const pickEntryIdx = (): number => {
+    const n = event.candles.length;
+    if (n <= 3) return 0;
+    // Migration / priority: earlier fill; normal: ~8–18% into path
+    const frac = event.migrated ? 0.05 : 0.12;
+    return Math.min(n - 2, Math.max(0, Math.floor(n * frac)));
+  };
 
   const runOne = (
     fromIdx: number,
@@ -1074,13 +1276,23 @@ function replayLaunch(
     const openedAt = smartWalletEnteredAt + copyDelayMs;
     const botEntryPriceSol = priceAtTime(event, fromIdx, openedAt);
 
+    // Skip if price already dumped >40% from path open by fill time
+    const pathOpen = event.candles[0]?.priceSol ?? event.entryPriceSol;
+    if (pathOpen > 0 && botEntryPriceSol / pathOpen < 0.6 && !event.migrated) {
+      return { trade: null, exitIdx: fromIdx };
+    }
+
+    const convictionScore =
+      options.convictionScore ??
+      (event.migrated
+        ? 70
+        : Math.min(80, 40 + (sourceNames.length - 1) * 12));
+
     const sizing = calculateDynamicPositionSize({
       equitySol: trader.getEquitySol(),
       kind: strategyKind,
       riskScore: event.riskScoreHint,
-      convictionScore: event.migrated
-        ? 70
-        : Math.min(80, 40 + (sourceNames.length - 1) * 12),
+      convictionScore,
     });
 
     // Match paper/live costs exactly — no extra impact slippage
@@ -1127,6 +1339,7 @@ function replayLaunch(
       `Opened ${event.symbol} @ ${position.entryPriceSol.toExponential(4)} SOL` +
       ` (mark ${botEntryPriceSol.toExponential(4)}, slip ${slipBps}bps, fee ${feeBps}bps)` +
       ` · size ${sizing.sizeSol.toFixed(4)} SOL` +
+      ` · conviction ${convictionScore}` +
       ` · TP ${position.takeProfitPct.toFixed(0)}% / SL ${position.stopLossPct}%` +
       ` · trail ${position.trailingStopPct}%` +
       (config.profitStrategy?.enabled ? ' · profit strategy ON' : ' · legacy TP/SL/trail');
@@ -1457,7 +1670,7 @@ function replayLaunch(
     return { trade, exitIdx };
   };
 
-  const first = runOne(0, false);
+  const first = runOne(pickEntryIdx(), false);
   if (first.trade) results.push(first.trade);
 
   // Optional dip re-entry after profitable TP
@@ -1503,6 +1716,7 @@ function runSinglePass(
     pumpFunOnly: boolean;
     reBuyEnabled: boolean;
     solUsd: number;
+    hours?: number;
     onProgress?: (current: number, total: number, label: string) => void;
   }
 ): {
@@ -1514,16 +1728,32 @@ function runSinglePass(
   const trader = new PaperTrader(options.startingBalance, { mode: 'backtest' });
   const skipped: { mint: string; reason: string }[] = [];
   const trades: BacktestTradeResult[] = [];
+  const tradeWindows: SimTradeWindow[] = [];
+  const tradeOpenTimes: number[] = [];
   const walletPool = config.smartWallets
     .filter((w) => w.enabled)
     .map((w) => w.name);
   const names =
-    walletPool.length >= 1 ? walletPool : ['Cented', 'Theo', 'Decu'];
+    walletPool.length >= 1 ? walletPool : ['Cented', 'Theo', 'Decu', 'Megga'];
+
+  const maxTrades = effectiveMaxTrades(
+    options.maxTrades,
+    options.hours ?? 24
+  );
+  const maxConcurrent = Math.max(1, config.filters.maxConcurrentPositions || 1);
+
+  // Chronological walk — rate limits / concurrent windows need time order.
+  // Filters + conviction cull junk; quality score is used only as a soft tie-break
+  // when two launches share the same timestamp.
+  const ordered = [...events].sort((a, b) => {
+    if (a.launchedAt !== b.launchedAt) return a.launchedAt - b.launchedAt;
+    return launchQualityScore(b) - launchQualityScore(a);
+  });
 
   let considered = 0;
-  const total = Math.min(events.length, options.maxTrades * 3);
-  for (const event of events) {
-    if (trades.length >= options.maxTrades) break;
+  const total = Math.min(ordered.length, maxTrades * 6);
+  for (const event of ordered) {
+    if (trades.length >= maxTrades) break;
     considered += 1;
     options.onProgress?.(considered, Math.max(total, 1), event.symbol);
 
@@ -1540,34 +1770,84 @@ function runSinglePass(
       continue;
     }
 
-    const sourceNames = resolveSourceNames(
+    const resolved = resolveSourceNames(
       event,
       options.strategyType,
       names,
       considered
     );
+    if (resolved.skipReason || resolved.names.length === 0) {
+      skipped.push({
+        mint: event.mint,
+        reason: resolved.skipReason || 'no wallets for strategy',
+      });
+      continue;
+    }
+    const sourceNames = resolved.names;
 
-    if (
-      trader.getOpenPositions().length >= config.filters.maxConcurrentPositions
-    ) {
+    const signal = buildBacktestSignal(event, sourceNames);
+    const conviction = evaluateSignalConviction(signal);
+    if (!conviction.pass) {
+      skipped.push({
+        mint: event.mint,
+        reason: `conviction: ${conviction.reasons[0] || `score ${conviction.score} < ${conviction.minRequired}`}`,
+      });
+      continue;
+    }
+
+    // Approximate open time for concurrency / rate checks
+    const openAt = event.launchedAt + simulateCopyDelayMs();
+
+    if (openCountAt(tradeWindows, openAt) >= maxConcurrent) {
       skipped.push({ mint: event.mint, reason: 'max concurrent positions' });
       continue;
+    }
+
+    // Only count buys that already happened at/before this sim decision time
+    // (entry candle offset can make t.openedAt later than later launches).
+    const priorOpenTimes = tradeOpenTimes.filter((t) => t <= openAt);
+    const rate = canExecuteTradeAt(openAt, priorOpenTimes);
+    if (!rate.ok) {
+      skipped.push({ mint: event.mint, reason: rate.reason || 'rate limit' });
+      continue;
+    }
+
+    // Daily loss halt (mirrors live risk pause)
+    const dailyLimit = config.filters.dailyLossLimitSol ?? 0;
+    if (dailyLimit > 0) {
+      const dayStart = openAt - (openAt % 86_400_000);
+      const dayPnl = trades
+        .filter(
+          (t) => (t.closedAt || 0) >= dayStart && (t.closedAt || 0) <= openAt
+        )
+        .reduce((s, t) => s + t.pnlSol, 0);
+      if (dayPnl <= -dailyLimit) {
+        skipped.push({ mint: event.mint, reason: 'daily loss limit' });
+        continue;
+      }
     }
 
     const batch = replayLaunch(trader, event, sourceNames, options.simulation, {
       reBuyEnabled: options.reBuyEnabled,
       solUsd: options.solUsd || event.solUsd || 150,
+      convictionScore: conviction.score,
     });
     if (batch.length === 0) {
       skipped.push({
         mint: event.mint,
-        reason: 'insufficient balance or bad path',
+        reason: 'insufficient balance, late dump, or bad path',
       });
       continue;
     }
     for (const t of batch) {
-      if (trades.length >= options.maxTrades) break;
+      if (trades.length >= maxTrades) break;
       trades.push(t);
+      const openedAt = t.openedAt || openAt;
+      const closedAt =
+        t.closedAt || openedAt + Math.max(60_000, t.holdingTimeMs || 60_000);
+      tradeWindows.push({ openedAt, closedAt });
+      // Record decision-time for rate limits (not delayed entry candle time)
+      tradeOpenTimes.push(openAt);
     }
   }
 
@@ -1685,25 +1965,28 @@ export async function runBacktest(
       options.startingBalanceSol ?? config.paper.startingBalanceSol;
 
     // Prefer explicit overrides; otherwise inherit saved filter config
-    const minVolumeUsd =
-      options.minVolumeUsd != null && options.minVolumeUsd > 0
-        ? options.minVolumeUsd
-        : useSavedConfigFilters
-          ? config.filters.minVolume24hUsd || 0
-          : 0;
-    const minLiquidityUsd =
-      options.minLiquidityUsd != null && options.minLiquidityUsd > 0
-        ? options.minLiquidityUsd
-        : useSavedConfigFilters
-          ? config.filters.minLiquidity || 0
-          : 0;
+    const explicitVol =
+      options.minVolumeUsd != null && options.minVolumeUsd > 0;
+    const explicitLiq =
+      options.minLiquidityUsd != null && options.minLiquidityUsd > 0;
+    const explicitRisk =
+      options.maxRiskScore != null && options.maxRiskScore > 0;
+    const minVolumeUsd = explicitVol
+      ? (options.minVolumeUsd as number)
+      : useSavedConfigFilters
+        ? config.filters.minVolume24hUsd || 0
+        : 0;
+    const minLiquidityUsd = explicitLiq
+      ? (options.minLiquidityUsd as number)
+      : useSavedConfigFilters
+        ? config.filters.minLiquidity || 0
+        : 0;
     const minMarketCapUsd = options.minMarketCapUsd ?? 0;
-    const maxRiskScore =
-      options.maxRiskScore != null && options.maxRiskScore > 0
-        ? options.maxRiskScore
-        : useSavedConfigFilters
-          ? config.filters.maxRiskScore || 0
-          : 0;
+    const maxRiskScore = explicitRisk
+      ? (options.maxRiskScore as number)
+      : useSavedConfigFilters
+        ? config.filters.maxRiskScore || 0
+        : 0;
 
     const solUsd = await fetchSolUsdPrice();
     const configUsed = buildConfigUsedSnapshot();
@@ -1740,7 +2023,7 @@ export async function runBacktest(
       events = generateSyntheticLaunches(
         fromMs,
         toMs,
-        Math.min(Math.max(maxTrades * 3, 24), 60)
+        Math.min(Math.max(maxTrades * 4, 36), 80)
       );
       dataSource = 'synthetic';
     }
@@ -1752,18 +2035,36 @@ export async function runBacktest(
       events = events.filter((e) => e.isPumpFun ?? !e.migrated);
     }
 
-    const runOptsBase = {
+    /** Refresh filter floors from whatever risk preset is currently applied. */
+    const liveFilterOpts = () => ({
+      minLiquidityUsd: explicitLiq
+        ? minLiquidityUsd
+        : useSavedConfigFilters
+          ? config.filters.minLiquidity || 0
+          : 0,
+      minMarketCapUsd,
+      maxRiskScore: explicitRisk
+        ? maxRiskScore
+        : useSavedConfigFilters
+          ? config.filters.maxRiskScore || 0
+          : 0,
+      minVolumeUsd: explicitVol
+        ? minVolumeUsd
+        : useSavedConfigFilters
+          ? config.filters.minVolume24hUsd || 0
+          : 0,
+    });
+
+    const runOptsBase = () => ({
       maxTrades,
       startingBalance,
       strategyType,
-      minLiquidityUsd,
-      minMarketCapUsd,
-      maxRiskScore,
-      minVolumeUsd,
+      ...liveFilterOpts(),
       pumpFunOnly,
       reBuyEnabled,
       solUsd,
-    };
+      hours,
+    });
 
     const executeSims = async (
       passEvents: LaunchEvent[],
@@ -1789,7 +2090,7 @@ export async function runBacktest(
           simEvents = generateSyntheticLaunches(
             fromMs,
             toMs,
-            Math.min(maxTrades * 2, 30)
+            Math.min(maxTrades * 4, 60)
           );
           if (migrationsOnly || strategyType === 'migration') {
             simEvents = simEvents.filter((e) => e.migrated);
@@ -1802,7 +2103,7 @@ export async function runBacktest(
         }
 
         const pass = runSinglePass(simEvents, {
-          ...runOptsBase,
+          ...runOptsBase(),
           simulation: sim,
           onProgress: (_cur, _tot, label) => {
             progressCursor += 1;
@@ -1920,20 +2221,27 @@ export async function runBacktest(
         : undefined;
 
     const configUsedFinal = buildConfigUsedSnapshot();
+    const skipSummary = summarizeSkipReasons(primary.allSkipped);
+    const effectiveCap = effectiveMaxTrades(maxTrades, hours);
     const message =
       primary.lastTrades.length === 0
-        ? `No trades simulated (source=${dataSource}, events=${events.length}, risk=${configUsedFinal.riskLevel}). Widen window or loosen filters.`
-        : `Backtest (${configUsedFinal.riskLevel} risk): ${primary.lastTrades.length} trades` +
+        ? `No trades simulated (source=${dataSource}, events=${events.length}, risk=${configUsedFinal.riskLevel}` +
+          `, skipped ${primary.allSkipped.length}` +
+          (skipSummary ? `: ${skipSummary}` : '') +
+          `). Widen window or loosen risk/filters.`
+        : `Backtest (${configUsedFinal.riskLevel} risk): ${primary.lastTrades.length}/${effectiveCap} trades` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
           `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${stats.winRatePct.toFixed(0)}%` +
           ` · PF ${summary.profitFactor}` +
           ` · Sharpe ${summary.sharpeRatio}` +
           ` · maxDD ${summary.maxDrawdownPct}%` +
           ` · base ${configUsedFinal.baseTradeAmountSol} SOL / SL ${configUsedFinal.stopLossPercent}%` +
+          ` · conviction≥${configUsedFinal.minConvictionScore}` +
           (summary.reBuyTrades ? ` · ${summary.reBuyTrades} rebuys` : '') +
           (aggregate
             ? ` · avg WR ${aggregate.avgWinRatePct.toFixed(0)}%`
-            : '');
+            : '') +
+          (skipSummary ? ` · skipped: ${skipSummary}` : '');
 
     logger.info('Backtest', message, {
       trades: primary.lastTrades.length,
