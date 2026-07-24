@@ -245,6 +245,43 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
+    .strategy-settings {
+      margin-top: .65rem;
+      border: 1px solid #334155;
+      border-radius: .65rem;
+      background: rgba(15, 23, 42, .72);
+      overflow: hidden;
+    }
+    .strategy-settings summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .75rem;
+      padding: .55rem .7rem;
+      color: #cbd5e1;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+    .strategy-settings summary::-webkit-details-marker { display: none; }
+    .strategy-settings summary::after { content: '›'; color: #64748b; font-size: 18px; transform: rotate(90deg); transition: transform .15s; }
+    .strategy-settings[open] summary::after { transform: rotate(-90deg); }
+    .strategy-settings fieldset { border: 0; margin: 0; padding: .75rem; border-top: 1px solid #334155; min-width: 0; }
+    .strategy-settings fieldset:disabled { opacity: .45; cursor: not-allowed; }
+    .strategy-settings fieldset:disabled input,
+    .strategy-settings fieldset:disabled select,
+    .strategy-settings fieldset:disabled button { cursor: not-allowed; }
+    .strategy-settings-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .65rem; }
+    .strategy-settings-controls .field { flex: 1 1 145px; min-width: 125px; }
+    .strategy-settings-controls .toggle-row { flex: 1 1 100%; }
+    [data-strategy-source-card="true"] { display: none !important; }
+    @media (max-width: 640px) {
+      .strategy-settings-controls .ctl,
+      .strategy-settings-controls .field { width: 100%; flex-basis: 100%; }
+      .strategy-settings summary { min-height: 42px; }
+    }
     .card-open-positions {
       position: relative;
       background:
@@ -1970,6 +2007,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div id="strategies-grid" class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card"><span class="mint">Loading strategies…</span></div>
       </div>
+      <div id="strategy-settings-stash" class="hidden" aria-hidden="true"></div>
     </section>
 
     <!-- ========== TAB: Config ========== -->
@@ -2007,7 +2045,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveTradeConfig()" title="Persist trade size and TP/SL settings">Save Trade</button></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-strategy-source-card="true">
           <div class="section-title">Profit Strategy <span class="tip" tabindex="0" data-tip="Tiered exits: partial at a milestone → recover initial investment → leave a bag running with a trailing stop. Max Profit % above is the hard ceiling."></span></div>
           <p class="text-sm text-slate-400 mb-2">
             Flow: <strong>partial</strong> at milestone → <strong>recover initial</strong> → keep a <strong>bag</strong> → <strong>trail</strong> after high profit. Backtester uses the same rules.
@@ -2081,7 +2119,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveFilterConfig()" title="Save filter and anti-rug settings">Save Filters</button></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-strategy-source-card="true">
           <div class="section-title">Selective Trading <span class="tip" tabindex="0" data-tip="High-conviction gating: score signals, limit trade frequency, scale size by risk."></span></div>
           <p class="mint mb-2">Master switch: Strategies → Multi-Factor Conviction Score.</p>
           <div class="toggle-row"><span title="Block single-wallet entries unless migration priority">Require convergence (normal)</span><label class="switch"><input type="checkbox" id="sel-require-convergence" checked /><span class="slider"></span></label></div>
@@ -2097,7 +2135,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveSelectiveConfig()" title="Save selective trading settings">Save Selective</button></div>
         </div>
 
-        <div class="card">
+        <div class="card" data-strategy-source-card="true">
           <div class="section-title">Strategy <span class="tip" tabindex="0" data-tip="When and how aggressively to enter: convergence, migrations, early curve, auto-sell, re-buy."></span></div>
           <p class="mint mb-2">Entry master switches moved to Strategies. Configure their detailed parameters here.</p>
           <div class="toggle-row"><span title="Only trade migration/graduation events">Migration Only</span><label class="switch"><input type="checkbox" id="enableMigrationOnly" /><span class="slider"></span></label></div>
@@ -2302,6 +2340,119 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     });
 
     let _strategiesStatus = null;
+    let _lastConfig = null;
+
+    const STRATEGY_SETTING_IDS = {
+      wallet_convergence: ['convergenceRequired', 'sel-require-convergence', 'sel-min-wallets'],
+      migration_priority: ['enableMigrationOnly', 'migrationSizeMultiplier', 'migrationSlippageBps'],
+      near_migration_curve: ['nearMigrationCurvePct'],
+      early_curve_smart_money: ['earlyCurveMaxPct', 'minEarlyBirdeyeSmartMoneyScore', 'earlyCurveMinSmartWallets'],
+      rebuy_on_dip: ['reEntryAfterMaxProfitEnabled', 'reBuyMinProfitPct', 'reBuyDipPercent', 'confirmationThreshold', 'reBuyVolumeIncreasePct', 'reEntryMaxPerMint', 'reEntryWatchMinutes', 'reEntryMinReclaimPct', 'reEntryMinVolumeIncreasePct', 'reEntrySizeMultiplier', 'reEntryCooldownMinutes'],
+      anti_rug_honeypot: ['maxDevHoldPct', 'maxHolderConcentration', 'maxTopHolderPct', 'maxRiskScore', 'maxEstimatedTaxPct', 'checkHoneypot', 'skipIfDevRecentSells', 'requireLiquidityLocked', 'skipIfMintAuthority'],
+      min_holders_activity: ['minHolders', 'minRecentActivity', 'minActivityDays', 'minTradesLast30d'],
+      volume_liquidity_filters: ['minLiquidity', 'minVolume24hUsd', 'minRecentVolumeUsd', 'minRecentBuyVolumeUsd'],
+      dead_market_exit: ['deadVolumeUsdPerHour', 'deadVolumeConsecutiveHours', 'deadVolumeMinHoldMinutes'],
+      dynamic_position_sizing: ['riskMultiplier', 'convictionMultiplier', 'riskEnabled', 'riskPercentPerTrade', 'minTradeSol', 'maxTradeSol', 'normalRiskPct', 'migRiskPct'],
+      tiered_profit_taking: ['enableAutoSell', 'tieredSellEnabled', 'minProfitPercent', 'maxProfitPercent', 'trailingActivationProfit', 'trailingStopPct', 'normalTrailPct', 'migTrailPct', 'ps-risk-adjust', 'ps-partial-at', 'ps-partial-sell', 'ps-take-initial', 'ps-bag', 'ps-trail-after', 'ps-trail-pct'],
+      multi_factor_conviction: ['sel-min-conviction', 'sel-max-per-hour', 'sel-cooldown-sec', 'sel-risk-cutoff', 'sel-min-size-mult'],
+      sniper_bundler_filters: ['sniperSensitivity'],
+      mev_protection: ['useJitoBundles', 'sandwichProtection', 'abortOnSandwichRisk', 'jitoTipLamports', 'tipMultiplier', 'priorityFeeMultiplier', 'sandwichMaxRecentBuys'],
+    };
+
+    function extraStrategySettingsHtml(key) {
+      const n = (id, label, value, min, max, step) =>
+        '<label class="ctl ctl-md"><span>' + label + '</span><input type="number" id="' + id + '" value="' + value + '"' +
+        (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') +
+        (step != null ? ' step="' + step + '"' : '') + ' /></label>';
+      const c = (id, label) =>
+        '<label class="ctl ctl-check"><input type="checkbox" id="' + id + '" /><span>' + label + '</span></label>';
+      const parts = {
+        wallet_convergence:
+          n('clusterMinWallets', 'Cluster wallets', 2, 1, 8, 1) +
+          n('clusterWindowMinutes', 'Window min', 5, 1, 60, 1) +
+          c('allowSingleWalletTopPerformerMigration', 'Single top-performer migration'),
+        bonding_curve_health:
+          c('requireHealthyCurve', 'Require healthy curve') +
+          c('requireRecentCurveActivity', 'Require recent activity') +
+          n('minCurveProgress', 'Min progress %', 0, 0, 99, 1) +
+          n('maxCurveProgressForEntry', 'Max progress %', 98, 0, 100, 1),
+        wallet_quality_scoring:
+          c('enableWalletQualityGate', 'Quality gate') +
+          c('enableWalletQualityAutoPrune', 'Auto-prune low quality') +
+          n('minWalletQualityScore', 'Min quality', 55, 0, 100, 1) +
+          n('walletQualityInactiveDays', 'Inactive days', 5, 1, 90, 1),
+        time_based_entry:
+          c('enableEntryTimingGate', 'Entry timing gate') +
+          n('maxEntryAgeMinutes', 'Max age min', 15, 1, 180, 1) +
+          n('preferEntryWithinMinutes', 'Prefer within min', 10, 1, 120, 1),
+        sniper_bundler_filters:
+          n('maxSniperCount', 'Max snipers', 8, 0, 100, 1) +
+          n('maxBundlerPct', 'Max bundler %', 30, 0, 100, 1) +
+          n('maxSniperScore', 'Max sniper score', 70, 0, 100, 1),
+        momentum_confirmation:
+          c('requireMomentumConfirmation', 'Require momentum') +
+          n('momentumLookbackMinutes', 'Lookback min', 15, 1, 120, 1) +
+          n('momentumMinHoldPct', 'Min hold %', -5, -80, 100, 1),
+        smart_money_flow_weighting:
+          n('smartMoneyFlowWeight', 'Flow weight ×', 1.35, 0, 5, .05),
+      };
+      return parts[key] || '';
+    }
+
+    function stashStrategyControls() {
+      const stash = document.getElementById('strategy-settings-stash');
+      if (!stash) return;
+      document.querySelectorAll('#strategies-grid [data-strategy-setting]').forEach(el => stash.appendChild(el));
+    }
+
+    function attachStrategyControls(registry) {
+      Object.entries(STRATEGY_SETTING_IDS).forEach(([key, ids]) => {
+        const target = document.getElementById('strategy-controls-' + key);
+        if (!target) return;
+        ids.forEach(id => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          const wrapper = el.closest('.field, .ctl, .toggle-row') || el;
+          wrapper.setAttribute('data-strategy-setting', key);
+          target.appendChild(wrapper);
+        });
+      });
+      if (_lastConfig) applyStrategyConfigValues(_lastConfig);
+    }
+
+    function applyStrategyConfigValues(cfg) {
+      if (!cfg) return;
+      const set = (id, value, checked) => {
+        const el = document.getElementById(id);
+        if (!el || value == null) return;
+        if (checked) el.checked = value !== false;
+        else {
+          el.value = value;
+          const lab = document.getElementById('v-' + id);
+          if (lab) lab.textContent = value;
+        }
+      };
+      const f = cfg.filters || {};
+      const b = cfg.bondingCurve || {};
+      [
+        ['clusterMinWallets', f.clusterMinWallets], ['clusterWindowMinutes', f.clusterWindowMinutes],
+        ['minWalletQualityScore', f.minWalletQualityScore], ['walletQualityInactiveDays', f.walletQualityInactiveDays],
+        ['maxEntryAgeMinutes', f.maxEntryAgeMinutes], ['preferEntryWithinMinutes', f.preferEntryWithinMinutes],
+        ['maxSniperCount', f.maxSniperCount], ['maxBundlerPct', f.maxBundlerPct], ['maxSniperScore', f.maxSniperScore],
+        ['momentumLookbackMinutes', f.momentumLookbackMinutes], ['momentumMinHoldPct', f.momentumMinHoldPct],
+        ['smartMoneyFlowWeight', f.smartMoneyFlowWeight], ['minCurveProgress', b.minCurveProgress],
+        ['maxCurveProgressForEntry', b.maxCurveProgressForEntry],
+      ].forEach(x => set(x[0], x[1], false));
+      [
+        ['allowSingleWalletTopPerformerMigration', f.allowSingleWalletTopPerformerMigration],
+        ['enableWalletQualityGate', f.enableWalletQualityGate],
+        ['enableWalletQualityAutoPrune', f.enableWalletQualityAutoPrune],
+        ['enableEntryTimingGate', f.enableEntryTimingGate],
+        ['requireMomentumConfirmation', f.requireMomentumConfirmation],
+        ['requireHealthyCurve', b.requireHealthyCurve],
+        ['requireRecentCurveActivity', b.requireRecentCurveActivity],
+      ].forEach(x => set(x[0], x[1], true));
+    }
 
     function strategyFrequencyClass(impact) {
       if (impact === 'much_fewer' || impact === 'fewer') return 'text-amber-300';
@@ -2331,6 +2482,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         warning.classList.toggle('hidden', !data.highWinRatePresetActive);
       }
       if (!grid) return;
+      stashStrategyControls();
       const registry = data.registry || [];
       grid.innerHTML = (data.groups || []).map(group => {
         const rows = (group.strategies || []).map(key => registry.find(s => s.key === key)).filter(Boolean);
@@ -2340,6 +2492,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const safety = s.criticalSafety
               ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
               : '';
+            const hasSettings = (STRATEGY_SETTING_IDS[s.key] || []).length > 0 || !!extraStrategySettingsHtml(s.key);
             return '<div class="py-3 border-t border-slate-700/70 first:border-t-0">' +
               '<div class="flex items-center justify-between gap-3">' +
                 '<div class="font-medium text-slate-100">' + s.name + safety + '</div>' +
@@ -2348,10 +2501,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '</div>' +
               '<div class="text-sm text-slate-400 mt-1">' + s.description + '</div>' +
               '<div class="text-xs mt-1 ' + strategyFrequencyClass(s.frequencyWhenOn) + '">' + s.frequencyLabel + '</div>' +
+              (hasSettings
+                ? '<details class="strategy-settings">' +
+                    '<summary>Settings' + (s.enabled ? '' : ' · enable strategy to edit') + '</summary>' +
+                    '<fieldset ' + (s.enabled ? '' : 'disabled') + '>' +
+                      '<div class="strategy-settings-controls" id="strategy-controls-' + s.key + '">' +
+                        extraStrategySettingsHtml(s.key) +
+                      '</div>' +
+                      '<div class="mt-3"><button type="button" class="btn btn-primary" onclick="saveStrategySettings(\\'' + s.key + '\\')">Save settings</button></div>' +
+                    '</fieldset>' +
+                  '</details>'
+                : '') +
             '</div>';
           }).join('') +
         '</div>';
       }).join('');
+      attachStrategyControls(registry);
     }
 
     async function loadStrategies() {
@@ -4165,6 +4330,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/paper-status'),
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
       ]);
+      _lastConfig = cfg;
+      applyStrategyConfigValues(cfg);
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
 
       updateCharts(paper && paper.charts);
@@ -5348,23 +5515,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
-    async function saveTradeConfig() {
+    async function saveTradeConfig(silent) {
       const body = {};
       ['tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
         body[k] = Number(document.getElementById(k).value);
       });
       body.baseTradeAmountSol = body.tradeAmountSol;
       await fetchJSON('/api/config/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      alert('Trade settings saved');
+      if (!silent) alert('Trade settings saved');
     }
 
-    async function saveFilterConfig() {
+    async function saveFilterConfig(silent) {
+      const checked = (id, fallback) => {
+        const el = document.getElementById(id);
+        return el ? el.checked : fallback;
+      };
       const body = {
-        skipIfMintAuthority: document.getElementById('skipIfMintAuthority').checked,
-        checkHoneypot: document.getElementById('checkHoneypot').checked,
-        skipIfDevRecentSells: document.getElementById('skipIfDevRecentSells').checked,
-        requireLiquidityLocked: document.getElementById('requireLiquidityLocked').checked,
-        sniperSensitivity: document.getElementById('sniperSensitivity').value,
+        skipIfMintAuthority: checked('skipIfMintAuthority', false),
+        checkHoneypot: checked('checkHoneypot', true),
+        skipIfDevRecentSells: checked('skipIfDevRecentSells', true),
+        requireLiquidityLocked: checked('requireLiquidityLocked', false),
+        enableWalletQualityGate: checked('enableWalletQualityGate', true),
+        enableWalletQualityAutoPrune: checked('enableWalletQualityAutoPrune', false),
+        enableEntryTimingGate: checked('enableEntryTimingGate', true),
+        allowSingleWalletTopPerformerMigration: checked('allowSingleWalletTopPerformerMigration', true),
+        requireMomentumConfirmation: checked('requireMomentumConfirmation', false),
+        requireHealthyCurve: checked('requireHealthyCurve', false),
+        requireRecentCurveActivity: checked('requireRecentCurveActivity', true),
+        sniperSensitivity: document.getElementById('sniperSensitivity')
+          ? document.getElementById('sniperSensitivity').value
+          : 'medium',
         buyPumpFunOnly: document.getElementById('buyPumpFunOnly')
           ? document.getElementById('buyPumpFunOnly').checked
           : true,
@@ -5372,17 +5552,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
        'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
        'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
-       'minHolders','minRecentActivity'].forEach(k => {
+       'minHolders','minRecentActivity','minWalletQualityScore','walletQualityInactiveDays','maxEntryAgeMinutes',
+       'preferEntryWithinMinutes','clusterMinWallets','clusterWindowMinutes','smartMoneyFlowWeight',
+       'momentumLookbackMinutes','momentumMinHoldPct','maxSniperCount','maxBundlerPct','maxSniperScore',
+       'minCurveProgress','maxCurveProgressForEntry'].forEach(k => {
         const el = document.getElementById(k);
         if (el) body[k] = Number(el.value);
       });
       body.maxDevPercent = body.maxDevHoldPct;
       body.minHolderCount = body.minHolders;
       await fetchJSON('/api/config/filters', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      alert('Filters saved');
+      if (!silent) alert('Filters saved');
     }
 
-    async function saveSelectiveConfig() {
+    async function saveSelectiveConfig(silent) {
       await fetchJSON('/api/config/selective', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5397,7 +5580,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           minRiskSizeMultiplier: Number(document.getElementById('sel-min-size-mult').value),
         }),
       });
-      alert('Selective trading settings saved');
+      if (!silent) alert('Selective trading settings saved');
     }
 
     function onDiscoverSourceChange() {
@@ -6177,7 +6360,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
-    async function saveStrategyConfig() {
+    async function saveStrategyConfig(silent) {
       await fetchJSON('/api/config/strategy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6204,10 +6387,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           reBuyMaxPerMint: Number(document.getElementById('reEntryMaxPerMint').value),
         }),
       });
-      alert('Strategy saved');
+      if (!silent) alert('Strategy saved');
     }
 
-    async function saveRiskConfig() {
+    async function saveRiskConfig(silent) {
       await fetchJSON('/api/risk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6236,7 +6419,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           },
         }),
       });
-      alert('Risk settings saved');
+      if (!silent) alert('Risk settings saved');
       refresh();
     }
 
@@ -6353,7 +6536,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
-    async function saveProfitStrategy() {
+    async function saveProfitStrategy(silent) {
       const status = document.getElementById('ps-status');
       try {
         const data = await fetchJSON('/api/profit-strategy', {
@@ -6374,13 +6557,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ? 'Saved · strategy ON'
             : 'Saved · strategy OFF';
         }
+        if (!silent) alert('Profit strategy settings saved');
         refresh();
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
       }
     }
 
-    async function saveMevConfig() {
+    async function saveMevConfig(silent) {
       await fetchJSON('/api/mev', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6395,8 +6579,39 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           jitoEnabled: document.getElementById('useJitoBundles').checked,
         }),
       });
-      alert('MEV settings saved');
+      if (!silent) alert('MEV settings saved');
       refresh();
+    }
+
+    async function saveStrategySettings(key) {
+      try {
+        if (key === 'wallet_convergence') {
+          await saveFilterConfig(true);
+          await saveSelectiveConfig(true);
+        } else if (['migration_priority', 'near_migration_curve', 'early_curve_smart_money', 'rebuy_on_dip'].includes(key)) {
+          await saveStrategyConfig(true);
+        } else if (key === 'multi_factor_conviction') {
+          await saveSelectiveConfig(true);
+        } else if (key === 'dead_market_exit') {
+          await saveRiskConfig(true);
+        } else if (key === 'dynamic_position_sizing') {
+          await saveTradeConfig(true);
+          await saveRiskConfig(true);
+        } else if (key === 'tiered_profit_taking') {
+          await saveTradeConfig(true);
+          await saveRiskConfig(true);
+          await saveProfitStrategy(true);
+        } else if (key === 'mev_protection') {
+          await saveMevConfig(true);
+        } else {
+          await saveFilterConfig(true);
+        }
+        window._cfgLoaded = false;
+        await refresh();
+        alert('Strategy settings saved');
+      } catch (err) {
+        alert('Save failed: ' + (err.message || String(err)));
+      }
     }
 
     async function resetToDefaults() {
@@ -6496,6 +6711,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     loadTradingWallets();
     refreshDiscoveryStatus();
+    loadStrategies();
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
