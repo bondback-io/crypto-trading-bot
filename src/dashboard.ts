@@ -289,26 +289,76 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-settings fieldset:disabled input,
     .strategy-settings fieldset:disabled select,
     .strategy-settings fieldset:disabled button { cursor: not-allowed; }
-    .strategy-settings-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .65rem; }
-    .strategy-settings-controls .field { flex: 1 1 145px; min-width: 125px; }
-    .strategy-settings-controls .toggle-row { flex: 1 1 100%; }
-    #strategy-controls-wallet_convergence {
+    /* One layout system for every strategy settings expander. */
+    .strat-fields {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      align-items: end;
+      grid-template-columns: minmax(0, 1fr);
+      gap: .75rem;
+      min-width: 0;
     }
-    #strategy-controls-wallet_convergence > .ctl { width: 100%; }
+    .strat-field {
+      width: 100%;
+      min-width: 0;
+      max-width: none;
+    }
+    .strat-field.ctl {
+      display: flex;
+      gap: .35rem;
+    }
+    .strat-field > label,
+    .strat-field > span {
+      display: block;
+      margin-bottom: .25rem;
+      min-width: 0;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.35;
+    }
+    .strat-field input:not([type="checkbox"]),
+    .strat-field select {
+      width: 100%;
+      min-width: 0;
+    }
+    .strat-check {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: flex-start;
+      width: 100%;
+      min-width: 0;
+      gap: .5rem;
+      padding-top: 0;
+      white-space: normal;
+    }
+    .strat-check.toggle-row { align-items: flex-start; }
+    .strat-check > span:first-of-type {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 0;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .strat-check > input[type="checkbox"] {
+      flex: 0 0 auto;
+      margin-top: .1rem;
+    }
+    .strat-check > .switch {
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+    .strat-slider {
+      grid-column: 1 / -1;
+    }
     #strategy-controls-wallet_convergence > [data-strategy-control="allowSingleWalletTopPerformerMigration"],
     #strategy-controls-wallet_convergence > [data-strategy-control="sel-require-convergence"],
+    #strategy-controls-wallet_convergence > [data-strategy-control="sel-min-wallets"],
     #strategy-controls-wallet_convergence > [data-strategy-control="convergenceRequired"] {
       grid-column: 1 / -1;
     }
-    #strategy-controls-wallet_convergence > .ctl-check {
-      padding-top: .35rem;
-      white-space: normal;
-    }
-    #strategy-controls-wallet_convergence > .ctl-check > span { white-space: normal; }
     [data-strategy-source-card="true"] { display: none !important; }
+    @media (min-width: 640px) {
+      .strat-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 640px) {
       .config-panel,
       .strategies-panel { gap: .75rem; }
@@ -319,9 +369,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         flex: 1 1 calc(50% - .25rem);
         justify-content: center;
       }
-      .strategy-settings-controls .ctl,
-      .strategy-settings-controls .field { width: 100%; flex-basis: 100%; }
-      #strategy-controls-wallet_convergence { grid-template-columns: minmax(0, 1fr); }
       .strategy-settings summary { min-height: 42px; }
     }
     @media (min-width: 1024px) {
@@ -2378,11 +2425,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function extraStrategySettingsHtml(key) {
       const n = (id, label, value, min, max, step) =>
-        '<label class="ctl ctl-md" data-strategy-control="' + id + '"><span>' + label + '</span><input type="number" id="' + id + '" value="' + value + '"' +
+        '<label class="ctl strat-field" data-strategy-control="' + id + '"><span>' + label + '</span><input type="number" id="' + id + '" value="' + value + '"' +
         (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') +
         (step != null ? ' step="' + step + '"' : '') + ' /></label>';
       const c = (id, label) =>
-        '<label class="ctl ctl-check" data-strategy-control="' + id + '"><input type="checkbox" id="' + id + '" /><span>' + label + '</span></label>';
+        '<label class="strat-check" data-strategy-control="' + id + '"><input type="checkbox" id="' + id + '" /><span>' + label + '</span></label>';
       const parts = {
         wallet_convergence:
           n('clusterMinWallets', 'Cluster wallets', 2, 1, 8, 1) +
@@ -2432,6 +2479,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const wrapper = el.closest('.field, .ctl, .toggle-row') || el;
           wrapper.setAttribute('data-strategy-setting', key);
           wrapper.setAttribute('data-strategy-control', id);
+          if (wrapper.classList.contains('toggle-row') || wrapper.classList.contains('ctl-check')) {
+            wrapper.classList.add('strat-check');
+          } else {
+            wrapper.classList.add('strat-field');
+            if (wrapper.classList.contains('field') || el.type === 'range') {
+              wrapper.classList.add('strat-slider');
+            }
+          }
           target.appendChild(wrapper);
         });
       });
@@ -2523,7 +2578,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 ? '<details class="strategy-settings">' +
                     '<summary>Settings' + (s.enabled ? '' : ' · enable strategy to edit') + '</summary>' +
                     '<fieldset ' + (s.enabled ? '' : 'disabled') + '>' +
-                      '<div class="strategy-settings-controls" id="strategy-controls-' + s.key + '">' +
+                      '<div class="strat-fields" id="strategy-controls-' + s.key + '">' +
                         extraStrategySettingsHtml(s.key) +
                       '</div>' +
                       '<div class="mt-3"><button type="button" class="btn btn-primary" onclick="saveStrategySettings(\\'' + s.key + '\\')">Save settings</button></div>' +
@@ -2555,6 +2610,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           return;
         }
       }
+      const controls = document.getElementById('strategy-controls-' + key);
+      const details = controls && controls.closest('.strategy-settings');
+      const fieldset = details && details.querySelector('fieldset');
+      const summary = details && details.querySelector('summary');
+      if (fieldset) fieldset.disabled = !enabled;
+      if (summary) summary.textContent = 'Settings' + (enabled ? '' : ' · enable strategy to edit');
       try {
         const data = await fetchJSON('/api/strategies', {
           method: 'POST',
