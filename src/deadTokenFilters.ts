@@ -28,6 +28,7 @@ import {
   effectiveStrictMinRecentVolumeUsd,
   effectiveStrictMinVolume24hUsd,
 } from './strictMode';
+import { isStrategyEnabled } from './strategies';
 
 export interface DeadTokenMarketSnapshot {
   liquidityUsd: number | null;
@@ -162,12 +163,26 @@ export function evaluateDeadTokenHardFloors(
   const isMigrated = Boolean(ctx.isMigrated || snap.isMigrated);
   const earlyPath = Boolean(ctx.earlyEntry || isMigrated);
 
-  const minLiqFull = effectiveMinLiquidityUsd();
-  const minVol24 = effectiveStrictMinVolume24hUsd();
-  const minRecentVolFull = effectiveStrictMinRecentVolumeUsd();
-  const minRecentBuyFull = effectiveStrictMinRecentBuyVolumeUsd();
-  const minHoldersFull = effectiveMinHolders();
-  const minActivity = effectiveMinRecentActivity();
+  const volumeFiltersOn = isStrategyEnabled('volume_liquidity_filters');
+  const holderActivityOn = isStrategyEnabled('min_holders_activity');
+  const minLiqFull = volumeFiltersOn
+    ? effectiveMinLiquidityUsd()
+    : HARD_FILTER_FLOORS.minLiquidityUsd;
+  const minVol24 = volumeFiltersOn
+    ? effectiveStrictMinVolume24hUsd()
+    : HARD_FILTER_FLOORS.minVolume24hUsd;
+  const minRecentVolFull = volumeFiltersOn
+    ? effectiveStrictMinRecentVolumeUsd()
+    : HARD_FILTER_FLOORS.minRecentVolumeUsd;
+  const minRecentBuyFull = volumeFiltersOn
+    ? effectiveStrictMinRecentBuyVolumeUsd()
+    : HARD_FILTER_FLOORS.minRecentBuyVolumeUsd;
+  const minHoldersFull = holderActivityOn
+    ? effectiveMinHolders()
+    : HARD_FILTER_FLOORS.minHolders;
+  const minActivity = holderActivityOn
+    ? effectiveMinRecentActivity()
+    : HARD_FILTER_FLOORS.minRecentActivityTxns;
 
   // Early pre-migration: lower liq floor (curve pools). Migrated keeps full $5k+.
   const minLiq =
@@ -506,7 +521,9 @@ export function evaluateDeadTokenHardFloors(
 
   // Bonding curve dead / stalled
   const bc = config.bondingCurve;
-  const requireHealthy = bc.requireHealthyCurve === true;
+  const requireHealthy =
+    isStrategyEnabled('bonding_curve_health') &&
+    bc.requireHealthyCurve === true;
   const progress = snap.bondingCurveProgressPct;
   const curveHealth = snap.curveHealth;
 
@@ -638,7 +655,9 @@ export function evaluateDeadTokenHardFloors(
  */
 export function evaluateEntryTimingGate(signalAgeMinutes: number | null | undefined): string | null {
   if (config.filters.enableEntryTimingGate === false) return null;
-  const maxAge = effectiveMaxEntryAgeMinutes();
+  const maxAge = isStrategyEnabled('time_based_entry')
+    ? effectiveMaxEntryAgeMinutes()
+    : 0;
   if (signalAgeMinutes == null || !Number.isFinite(signalAgeMinutes)) return null;
   if (signalAgeMinutes > maxAge) {
     return `Skipped — signal too old / entry age ${signalAgeMinutes.toFixed(1)}m > max ${maxAge}m`;

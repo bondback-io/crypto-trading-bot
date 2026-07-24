@@ -28,6 +28,7 @@ import {
   effectiveRequireMomentumConfirmation,
   effectiveStrictMinVolume24hUsd,
 } from './strictMode';
+import { isStrategyEnabled } from './strategies';
 
 export interface ConvictionBreakdown {
   wallets: number;
@@ -159,7 +160,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const walletCount = signal.wallets.length;
   const riskScore = signal.antiRug?.riskScore;
   const maxRisk = config.filters.maxRiskScore || 70;
-  const flowWeight = clamp(config.filters.smartMoneyFlowWeight ?? 1.35, 0.5, 2.5);
+  const flowWeight = isStrategyEnabled('smart_money_flow_weighting')
+    ? clamp(config.filters.smartMoneyFlowWeight ?? 1.35, 0.5, 2.5)
+    : 1;
 
   // --- Wallet convergence / cluster (0–28) ---
   const baseRequired = effectiveClusterMinWalletsForMc(entryMcHint);
@@ -309,7 +312,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   breakdown.smartFlow = clamp(Math.round(flowRaw * flowWeight), 0, 18);
 
   // --- Momentum confirmation (0–8) ---
-  const requireMom = effectiveRequireMomentumConfirmation();
+  const requireMom =
+    isStrategyEnabled('momentum_confirmation') &&
+    effectiveRequireMomentumConfirmation();
   const momLookback = config.filters.momentumLookbackMinutes ?? 15;
   const momMinHold = effectiveMomentumMinHoldPct();
   const chg = priceChangeH1(signal);

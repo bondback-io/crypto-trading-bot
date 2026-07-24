@@ -989,6 +989,99 @@ export function createServer(): express.Application {
     res.json(getConfigSnapshot());
   });
 
+  app.get('/api/strategies', (_req: Request, res: Response) => {
+    const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
+    ensureStrategyToggles();
+    res.json(getStrategiesStatus());
+  });
+
+  app.post('/api/strategies', (req: Request, res: Response) => {
+    const {
+      updateStrategyToggles,
+      setAllStrategyToggles,
+      applyHighWinRatePreset,
+      applyBalancedPreset,
+      restorePreviousStrategyProfile,
+      getStrategiesStatus,
+      isStrategyKey,
+      getStrategyDefinition,
+    } = require('./strategies') as typeof import('./strategies');
+
+    const body = (req.body ?? {}) as {
+      toggles?: Record<string, boolean>;
+      key?: string;
+      enabled?: boolean;
+      action?:
+        | 'set'
+        | 'enable_all'
+        | 'disable_all'
+        | 'high_win_rate'
+        | 'balanced'
+        | 'restore';
+    };
+
+    const action = body.action || 'set';
+
+    if (action === 'enable_all') {
+      setAllStrategyToggles(true);
+      res.json({ ok: true, ...getStrategiesStatus() });
+      return;
+    }
+    if (action === 'disable_all') {
+      setAllStrategyToggles(false);
+      res.json({ ok: true, ...getStrategiesStatus() });
+      return;
+    }
+    if (action === 'high_win_rate') {
+      const result = applyHighWinRatePreset();
+      res.json({
+        ok: true,
+        ...getStrategiesStatus(),
+        applied: result,
+        warning: result.warning,
+      });
+      return;
+    }
+    if (action === 'balanced') {
+      applyBalancedPreset();
+      res.json({ ok: true, ...getStrategiesStatus() });
+      return;
+    }
+    if (action === 'restore') {
+      const restored = restorePreviousStrategyProfile();
+      res.json({ ok: restored.ok, message: restored.message, ...getStrategiesStatus() });
+      return;
+    }
+
+    // Single toggle or partial map
+    const partial: Record<string, boolean> = {};
+    if (body.key && typeof body.enabled === 'boolean') {
+      if (!isStrategyKey(body.key)) {
+        res.status(400).json({ error: `Unknown strategy key: ${body.key}` });
+        return;
+      }
+      const def = getStrategyDefinition(body.key);
+      if (def?.criticalSafety && body.enabled === false) {
+        // Allow — UI already confirmed; server trusts client confirm
+      }
+      partial[body.key] = body.enabled;
+    }
+    if (body.toggles && typeof body.toggles === 'object') {
+      for (const [k, v] of Object.entries(body.toggles)) {
+        if (isStrategyKey(k) && typeof v === 'boolean') partial[k] = v;
+      }
+    }
+    if (Object.keys(partial).length === 0) {
+      res.status(400).json({
+        error:
+          'Provide action (enable_all|disable_all|high_win_rate|balanced|restore) or key/enabled or toggles',
+      });
+      return;
+    }
+    updateStrategyToggles(partial);
+    res.json({ ok: true, ...getStrategiesStatus() });
+  });
+
   /**
    * Wipe data/*.json persistence files and reload code defaults.
    * Also resets paper balance/history and clears backtest history.

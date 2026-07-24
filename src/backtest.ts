@@ -4,7 +4,14 @@
  * with realistic candle-driven price paths.
  */
 
-import { config, applyRiskLevel, getRiskLevelSummary, isRiskLevel, type RiskLevel } from './config';
+import {
+  config,
+  applyRiskLevel,
+  getRiskLevelSummary,
+  HARD_FILTER_FLOORS,
+  isRiskLevel,
+  type RiskLevel,
+} from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
   fetchRecentLaunches,
@@ -48,6 +55,7 @@ import {
   type StrictModeIntensity,
 } from './strictMode';
 import { passesWalletQualityGate } from './walletQuality';
+import { isStrategyEnabled } from './strategies';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -839,10 +847,12 @@ function passesFilters(
   }
 
   // Prefer the stricter of UI override vs selective/live Strict-aware floors
-  const minVol = Math.max(
-    options.minVolumeUsd || 0,
-    effectiveStrictMinVolume24hUsd()
-  );
+  const minVol = isStrategyEnabled('volume_liquidity_filters')
+    ? Math.max(
+        options.minVolumeUsd || 0,
+        effectiveStrictMinVolume24hUsd()
+      )
+    : HARD_FILTER_FLOORS.minVolume24hUsd;
   const vol = event.volumeUsd;
   if (minVol > 0) {
     if (vol == null || !(vol > 0)) {
@@ -856,10 +866,12 @@ function passesFilters(
     }
   }
 
-  const minLiq = Math.max(
-    options.minLiquidityUsd || 0,
-    config.filters.minLiquidity || 0
-  );
+  const minLiq = isStrategyEnabled('volume_liquidity_filters')
+    ? Math.max(
+        options.minLiquidityUsd || 0,
+        config.filters.minLiquidity || 0
+      )
+    : HARD_FILTER_FLOORS.minLiquidityUsd;
   const liqAtEntry =
     liquidityAtPrice(
       event.liquidityUsd,
@@ -899,7 +911,11 @@ function passesFilters(
     options.maxRiskScore > 0
       ? options.maxRiskScore
       : config.filters.maxRiskScore || 0;
-  if (riskCap > 0 && risk >= riskCap) {
+  if (
+    isStrategyEnabled('anti_rug_honeypot') &&
+    riskCap > 0 &&
+    risk >= riskCap
+  ) {
     return `risk score ${risk} ≥ ${riskCap}`;
   }
 
@@ -1123,12 +1139,23 @@ function resolveStrategyKind(
   strategyType: BacktestStrategyType
 ): 'migration' | 'convergence' | 'single' {
   if (strategyType === 'auto') {
-    if (event.migrated) return 'migration';
-    if (config.strategy.enableConvergence) return 'convergence';
+    if (event.migrated && isStrategyEnabled('migration_priority')) {
+      return 'migration';
+    }
+    if (
+      config.strategy.enableConvergence &&
+      isStrategyEnabled('wallet_convergence')
+    ) {
+      return 'convergence';
+    }
     return 'single';
   }
-  if (strategyType === 'migration') return 'migration';
-  if (strategyType === 'convergence') return 'convergence';
+  if (strategyType === 'migration') {
+    return isStrategyEnabled('migration_priority') ? 'migration' : 'single';
+  }
+  if (strategyType === 'convergence') {
+    return isStrategyEnabled('wallet_convergence') ? 'convergence' : 'single';
+  }
   return 'single';
 }
 
@@ -1875,7 +1902,12 @@ function runSinglePass(
   const walletPool = config.smartWallets
     .filter((w) => {
       if (!w.enabled) return false;
-      if (config.filters.enableWalletQualityGate === false) return true;
+      if (
+        !isStrategyEnabled('wallet_quality_scoring') ||
+        config.filters.enableWalletQualityGate === false
+      ) {
+        return true;
+      }
       return passesWalletQualityGate(w).ok;
     })
     .map((w) => w.name);
@@ -1902,6 +1934,11 @@ function runSinglePass(
     if (trades.length >= maxTrades) break;
     considered += 1;
     options.onProgress?.(considered, Math.max(total, 1), event.symbol);
+
+    if (!isStrategyEnabled('smart_money_copy')) {
+      skipped.push({ mint: event.mint, reason: 'strategy: smart money copy OFF' });
+      continue;
+    }
 
     const filterFail = passesFilters(event, options);
     if (filterFail) {
@@ -1933,7 +1970,10 @@ function runSinglePass(
 
     const signal = buildBacktestSignal(event, sourceNames);
     const conviction = evaluateSignalConviction(signal);
-    if (!conviction.pass) {
+    if (
+      isStrategyEnabled('multi_factor_conviction') &&
+      !conviction.pass
+    ) {
       skipped.push({
         mint: event.mint,
         reason: `conviction: ${conviction.reasons[0] || `score ${conviction.score} < ${conviction.minRequired}`}`,

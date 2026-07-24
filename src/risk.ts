@@ -9,6 +9,7 @@ import {
   RiskConfig,
   persistUserSettings,
 } from './config';
+import { isStrategyEnabled } from './strategies';
 
 export type { StrategyRiskRules, RiskConfig };
 export { DEFAULT_RISK };
@@ -171,7 +172,12 @@ export function calculateDynamicPositionSize(options: {
   let size = baseSol * riskFactor * convictionFactor * migrationFactor;
 
   // Optional portfolio %-of-equity override when risk engine sizing is on
-  if (risk.enabled && risk.useRiskSizing && options.equitySol > 0) {
+  if (
+    isStrategyEnabled('dynamic_position_sizing') &&
+    risk.enabled &&
+    risk.useRiskSizing &&
+    options.equitySol > 0
+  ) {
     const pct = rules.riskPercentPerTrade || risk.riskPercentPerTrade;
     let equitySize = options.equitySol * (pct / 100);
     if (rules.sizeMultiplier) equitySize *= rules.sizeMultiplier;

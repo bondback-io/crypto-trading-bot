@@ -1089,6 +1089,22 @@ export interface BotConfig {
   /** High-conviction entry gating and trade-rate limits */
   selective: SelectiveTradingConfig;
 
+  /**
+   * Master strategy ON/OFF map (Strategies tab). When a key is false, that
+   * logic is skipped entirely. Defaults match pre-1.1.40 always-on behaviour.
+   */
+  strategyToggles: Record<string, boolean>;
+  /** Active strategy profile: balanced | high_win_rate | custom */
+  strategyProfile: 'balanced' | 'high_win_rate' | 'custom';
+  /** True when High Win-Rate Preset thresholds + toggles are active */
+  highWinRatePresetActive: boolean;
+  /** Snapshot taken before applying High Win-Rate / leaving a profile */
+  strategyProfileSnapshot: {
+    savedAt: number;
+    fromProfile: 'balanced' | 'high_win_rate' | 'custom';
+    knobs: Record<string, unknown>;
+  } | null;
+
   /** GMGN API settings */
   gmgn: {
     apiKey: string;
@@ -1339,6 +1355,11 @@ export const config: BotConfig = {
 
   selective: { ...DEFAULT_SELECTIVE },
 
+  strategyToggles: {},
+  strategyProfile: 'custom',
+  highWinRatePresetActive: false,
+  strategyProfileSnapshot: null,
+
   profitStrategy: {
     ...DEFAULT_PROFIT_STRATEGY,
     enabled:
@@ -1565,6 +1586,16 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     },
     profitStrategy: { ...config.profitStrategy },
     selective: { ...config.selective },
+    strategyToggles: { ...(config.strategyToggles || {}) },
+    strategyProfile:
+      config.strategyProfile === 'balanced' ||
+      config.strategyProfile === 'high_win_rate'
+        ? config.strategyProfile
+        : 'custom',
+    highWinRatePresetActive: config.highWinRatePresetActive === true,
+    strategyProfileSnapshot: config.strategyProfileSnapshot
+      ? (cloneJson(config.strategyProfileSnapshot) as PersistedBotSettings['strategyProfileSnapshot'])
+      : null,
     paper: { ...config.paper },
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
@@ -1969,6 +2000,33 @@ function applySettingsSnapshot(
     config.pollIntervalMs = saved.pollIntervalMs;
   }
 
+  if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {
+    config.strategyToggles = {
+      ...(config.strategyToggles || {}),
+      ...saved.strategyToggles,
+    };
+  }
+  if (
+    saved.strategyProfile === 'balanced' ||
+    saved.strategyProfile === 'high_win_rate' ||
+    saved.strategyProfile === 'custom'
+  ) {
+    config.strategyProfile = saved.strategyProfile;
+  }
+  if (typeof saved.highWinRatePresetActive === 'boolean') {
+    config.highWinRatePresetActive = saved.highWinRatePresetActive;
+  }
+  if (saved.strategyProfileSnapshot === null) {
+    config.strategyProfileSnapshot = null;
+  } else if (
+    saved.strategyProfileSnapshot &&
+    typeof saved.strategyProfileSnapshot === 'object'
+  ) {
+    config.strategyProfileSnapshot = cloneJson(
+      saved.strategyProfileSnapshot
+    ) as typeof config.strategyProfileSnapshot;
+  }
+
   syncConfigAliases();
 }
 
@@ -2081,6 +2139,20 @@ export function applyPersistedSettings(): boolean {
   console.log(
     `[settings] Loaded config.json (updated ${new Date(saved.updatedAt || 0).toISOString()}) — saved values kept over code defaults`
   );
+
+  // Seed strategy toggles from persisted map or derive from current flags
+  try {
+    // Lazy import avoids circular init with strategies ↔ config
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
+    ensureStrategyToggles();
+  } catch (err) {
+    console.warn(
+      '[settings] strategy toggles seed skipped:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   return true;
 }
 
@@ -3264,6 +3336,9 @@ export function getConfigSnapshot() {
     },
     profitStrategy: { ...config.profitStrategy },
     selective: { ...config.selective },
+    strategyToggles: { ...(config.strategyToggles || {}) },
+    strategyProfile: config.strategyProfile || 'custom',
+    highWinRatePresetActive: config.highWinRatePresetActive === true,
     paper: { ...config.paper },
     trading: {
       activeId: config.activeTradingWalletId,

@@ -32,6 +32,7 @@ import {
   effectiveLowConvictionTrailThreshold,
   effectiveLowConvictionTrailTightenPct,
 } from './strictMode';
+import { isStrategyEnabled } from './strategies';
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -509,12 +510,16 @@ export class PaperTrader {
       costSol: input.costSol,
       initialAmountTokens: input.amountTokens,
       initialCostSol: input.costSol,
-      takeProfitPct: config.profitStrategy?.enabled
+      takeProfitPct:
+        isStrategyEnabled('tiered_profit_taking') &&
+        config.profitStrategy?.enabled
         ? config.trade.maxProfitPercent
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: input.entryPriceSol,
-      trailingStopPct: config.profitStrategy?.enabled
+      trailingStopPct:
+        isStrategyEnabled('tiered_profit_taking') &&
+        config.profitStrategy?.enabled
         ? config.profitStrategy.trailingStopPct
         : trailPct,
       trailingActive: false,
@@ -562,7 +567,9 @@ export class PaperTrader {
     if (position.entryMarketCapUsd != null) {
       this.marketCapCache.set(input.mint, position.entryMarketCapUsd);
     }
-    const trailArm = config.profitStrategy?.enabled
+    const trailArm =
+      isStrategyEnabled('tiered_profit_taking') &&
+      config.profitStrategy?.enabled
       ? config.profitStrategy.trailingStopAfter
       : config.risk.trailingActivationProfit;
     this.log(
@@ -702,12 +709,16 @@ export class PaperTrader {
       costSol: spendSol,
       initialAmountTokens: amountTokens,
       initialCostSol: spendSol,
-      takeProfitPct: config.profitStrategy?.enabled
+      takeProfitPct:
+        isStrategyEnabled('tiered_profit_taking') &&
+        config.profitStrategy?.enabled
         ? config.trade.maxProfitPercent
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: entryPrice,
-      trailingStopPct: config.profitStrategy?.enabled
+      trailingStopPct:
+        isStrategyEnabled('tiered_profit_taking') &&
+        config.profitStrategy?.enabled
         ? config.profitStrategy.trailingStopPct
         : rules.trailingStopPct ??
           config.risk.trailingStopPercent ??
@@ -1159,7 +1170,10 @@ export class PaperTrader {
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
-    if (config.profitStrategy?.enabled) {
+    if (
+      isStrategyEnabled('tiered_profit_taking') &&
+      config.profitStrategy?.enabled
+    ) {
       const view: ProfitPositionView = {
         entryPriceSol: position.entryPriceSol,
         currentPriceSol: markPrice,
@@ -1439,7 +1453,12 @@ export class PaperTrader {
     nowMs: number = Date.now()
   ): string | null {
     const risk = config.risk;
-    if (!risk.enableDeadVolumeExit) return null;
+    if (
+      !isStrategyEnabled('dead_market_exit') ||
+      !risk.enableDeadVolumeExit
+    ) {
+      return null;
+    }
 
     const minHoldMs =
       Math.max(0, effectiveDeadVolumeMinHoldMinutes()) * 60_000;
@@ -1540,7 +1559,10 @@ export class PaperTrader {
       }
 
       // Advanced profit strategy (paper + live)
-      if (config.profitStrategy?.enabled) {
+      if (
+        isStrategyEnabled('tiered_profit_taking') &&
+        config.profitStrategy?.enabled
+      ) {
         await this.applyProfitStrategyTick(position, currentPrice, label);
         continue;
       }

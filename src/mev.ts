@@ -6,6 +6,7 @@ import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { config, persistUserSettings } from './config';
 import { getConnection } from './connection';
 import { getJitoStatus, getJitoStats } from './jito';
+import { isStrategyEnabled } from './strategies';
 
 export interface SandwichCheckResult {
   safe: boolean;
@@ -31,13 +32,14 @@ export interface MevStatus {
 let lastSandwichCheck: SandwichCheckResult | null = null;
 
 export function isMevProtectionEnabled(): boolean {
-  return Boolean(config.mev?.enableMEVProtection);
+  return (
+    isStrategyEnabled('mev_protection') &&
+    Boolean(config.mev?.enableMEVProtection)
+  );
 }
 
 export function shouldUseJitoBundles(): boolean {
-  if (!isMevProtectionEnabled()) {
-    return Boolean(config.rpc?.jito?.enabled);
-  }
+  if (!isMevProtectionEnabled()) return false;
   return config.mev?.useJitoBundles !== false;
 }
 

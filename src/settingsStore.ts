@@ -38,6 +38,11 @@ export interface PersistedBotSettings {
   risk?: Record<string, unknown>;
   profitStrategy?: Record<string, unknown>;
   selective?: Record<string, unknown>;
+  /** Strategies tab master toggles */
+  strategyToggles?: Record<string, boolean>;
+  strategyProfile?: 'balanced' | 'high_win_rate' | 'custom';
+  highWinRatePresetActive?: boolean;
+  strategyProfileSnapshot?: Record<string, unknown> | null;
   paper?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;

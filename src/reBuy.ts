@@ -17,6 +17,7 @@ import {
   isStrictMode,
   type StrictModeIntensity,
 } from './strictMode';
+import { isStrategyEnabled } from './strategies';
 
 export interface SellHistoryEntry {
   mint: string;
@@ -248,9 +249,13 @@ export function getReEntryEffectiveParams(): ReEntryEffectiveParams {
   }
 
   return {
-    profitDipEnabled: s.reBuyEnabled !== false,
-    stopReentryEnabled: s.postStopReentryEnabled !== false,
-    afterMaxProfitEnabled: s.reEntryAfterMaxProfitEnabled === true,
+    profitDipEnabled:
+      isStrategyEnabled('rebuy_on_dip') && s.reBuyEnabled !== false,
+    stopReentryEnabled:
+      isStrategyEnabled('rebuy_on_dip') && s.postStopReentryEnabled !== false,
+    afterMaxProfitEnabled:
+      isStrategyEnabled('rebuy_on_dip') &&
+      s.reEntryAfterMaxProfitEnabled === true,
     maxPerMint: Math.max(1, maxPerMint),
     watchMinutes: Math.max(5, watchMinutes),
     minReclaimPct: Math.max(1, minReclaimPct),

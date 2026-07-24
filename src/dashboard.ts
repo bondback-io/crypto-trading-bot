@@ -1177,6 +1177,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
+      <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
       <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
     </nav>
 
@@ -1942,6 +1943,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- ========== TAB: Strategies ========== -->
+    <section data-tab-panel="strategies" class="hidden space-y-4">
+      <div class="card">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="section-title">Strategy Control Center <span class="tip" tabindex="0" data-tip="Master switches apply to paper, Live Simulation, backtests, and live trading. Risk Level and Strict Mode still control thresholds."></span></div>
+            <p class="text-sm text-slate-400">Choose which entry, filter, exit, risk, and advanced modules may run. Hard safety floors remain enforced.</p>
+          </div>
+          <div class="text-right">
+            <div id="strategies-count" class="text-lg font-semibold">—</div>
+            <div id="strategies-profile" class="mint">Loading…</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button class="btn btn-primary" onclick="applyStrategiesAction('enable_all')">Enable All</button>
+          <button class="btn btn-secondary" onclick="applyStrategiesAction('disable_all')">Disable All</button>
+          <button class="btn btn-warning" onclick="applyStrategiesAction('high_win_rate')">High Win-Rate Preset</button>
+          <button class="btn btn-secondary" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous</button>
+        </div>
+        <div id="strategies-warning" class="hidden mt-3 p-3 rounded-lg text-amber-200" style="background:#422006;border:1px solid #92400e"></div>
+      </div>
+      <div id="strategies-grid" class="grid md:grid-cols-2 gap-3 sm:gap-4">
+        <div class="card"><span class="mint">Loading strategies…</span></div>
+      </div>
+    </section>
+
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="hidden space-y-4">
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
@@ -1982,7 +2009,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <p class="text-sm text-slate-400 mb-2">
             Flow: <strong>partial</strong> at milestone → <strong>recover initial</strong> → keep a <strong>bag</strong> → <strong>trail</strong> after high profit. Backtester uses the same rules.
           </p>
-          <div class="toggle-row"><span title="Master switch for advanced tiered profit-taking (overrides simple TP when on)">Enable profit strategy</span><label class="switch"><input type="checkbox" id="ps-enabled" checked /><span class="slider"></span></label></div>
+          <p class="mint mb-2">Master switch: Strategies → Tiered Profit Taking.</p>
           <div class="toggle-row"><span title="On high-risk tokens: take profits earlier and use tighter stops/trails">Risk-based adjustment</span><label class="switch"><input type="checkbox" id="ps-risk-adjust" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Partial at +% <span class="tip" tabindex="0" data-tip="First milestone. Example: 80 = sell a chunk when up 80%."></span></span><input type="number" id="ps-partial-at" value="80" min="10" max="500" step="5" /></label>
@@ -2035,15 +2062,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Min DexScreener h1 buys+sells. Floor 3.">Min Recent Activity — <span class="val" id="v-minRecentActivity">3</span></label><input type="range" id="minRecentActivity" min="3" max="100" step="1" value="3" /></div>
           </div>
           <div class="mt-2 space-y-0">
-            <div class="toggle-row"><span title="Master switch for rug / holder / LP safety checks (volume/liq/curve hard floors always apply)">Anti-rug filters</span><label class="switch"><input type="checkbox" id="enableAntiRug" checked /><span class="slider"></span></label></div>
-            <div class="toggle-row"><span title="Reject dead/stalled Pump bonding curves — non-bypassable when on">Require healthy bonding curve</span><label class="switch"><input type="checkbox" id="requireHealthyCurve" /><span class="slider"></span></label></div>
+            <p class="mint mb-2">Master safety switches moved to Strategies. Configure their thresholds here.</p>
             <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path / Degen.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
-            <div class="toggle-row"><span title="Require source wallets to meet activity / trade-count filters">Activity filter</span><label class="switch"><input type="checkbox" id="enableActivityFilter" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if mint authority is still active (can mint more)">Skip if mint authority</span><label class="switch"><input type="checkbox" id="skipIfMintAuthority" /><span class="slider"></span></label></div>
-            <div class="toggle-row"><span title="Block tokens with high sniper/bundler/insider launch risk">Sniper / bundler filter</span><label class="switch"><input type="checkbox" id="enableSniperFilter" checked /><span class="slider"></span></label></div>
           </div>
           <div class="mt-2">
             <label class="ctl ctl-lg">
@@ -2056,7 +2080,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         <div class="card">
           <div class="section-title">Selective Trading <span class="tip" tabindex="0" data-tip="High-conviction gating: score signals, limit trade frequency, scale size by risk."></span></div>
-          <div class="toggle-row"><span title="Only take high-conviction setups">Selective mode</span><label class="switch"><input type="checkbox" id="sel-enabled" checked /><span class="slider"></span></label></div>
+          <p class="mint mb-2">Master switch: Strategies → Multi-Factor Conviction Score.</p>
           <div class="toggle-row"><span title="Block single-wallet entries unless migration priority">Require convergence (normal)</span><label class="switch"><input type="checkbox" id="sel-require-convergence" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Allow 1-wallet buys on migration / near-migration">Single-wallet migration OK</span><label class="switch"><input type="checkbox" id="sel-allow-single-mig" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
@@ -2072,14 +2096,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         <div class="card">
           <div class="section-title">Strategy <span class="tip" tabindex="0" data-tip="When and how aggressively to enter: convergence, migrations, early curve, auto-sell, re-buy."></span></div>
-          <div class="toggle-row"><span title="Require N wallets before buying">Convergence</span><label class="switch"><input type="checkbox" id="enableConvergence" checked /><span class="slider"></span></label></div>
+          <p class="mint mb-2">Entry master switches moved to Strategies. Configure their detailed parameters here.</p>
           <div class="toggle-row"><span title="Only trade migration/graduation events">Migration Only</span><label class="switch"><input type="checkbox" id="enableMigrationOnly" /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="Boost size / priority when a migration is detected">Migration Priority</span><label class="switch"><input type="checkbox" id="enableMigrationPriority" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="Prioritize tokens near bonding-curve completion">Near-migration curve priority</span><label class="switch"><input type="checkbox" id="enableBondingCurvePriority" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="Prioritize early-curve buys when smart wallets pile in">Early-curve smart money priority</span><label class="switch"><input type="checkbox" id="enableEarlyCurvePriority" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Automatically sell on TP / SL / trailing rules">Auto-Sell</span><label class="switch"><input type="checkbox" id="enableAutoSell" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="After TP, watch for a dip + confirmation buys to re-enter">Re-Buy on Dip</span><label class="switch"><input type="checkbox" id="reBuyEnabled" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="After hard stop-loss / early defensive exit, watch for reclaim + confirmation to re-enter">Post-Stop Re-Entry</span><label class="switch"><input type="checkbox" id="postStopReentryEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Also arm profit-dip watch after max-profit / full runner close (off by default)">Re-Entry After Max Profit</span><label class="switch"><input type="checkbox" id="reEntryAfterMaxProfitEnabled" /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Priority x <span class="tip" tabindex="0" data-tip="Size multiplier for priority migration entries."></span></span><input type="number" id="migrationSizeMultiplier" value="1.5" min="1" max="3" step="0.1" /></label>
@@ -2135,7 +2154,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </div>
           </div>
           <div class="toggle-row"><span title="Enable the risk engine (limits, sizing, trails)">Risk engine</span><label class="switch"><input type="checkbox" id="riskEnabled" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="Size buys from risk % of bankroll instead of fixed SOL">Risk-% sizing</span><label class="switch"><input type="checkbox" id="useRiskSizing" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Scale out in tiers as profit grows">Tiered selling</span><label class="switch"><input type="checkbox" id="tieredSellEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Pause the monitor when daily/weekly loss or DD limits trip">Auto-pause on limit</span><label class="switch"><input type="checkbox" id="autoPauseOnLimit" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
@@ -2153,7 +2171,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="mt-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155">
             <div class="text-sm font-semibold text-slate-200 mb-2">Dead market exit <span class="tip" tabindex="0" data-tip="Force-sell when DexScreener 1h volume stays below the USD threshold and/or there are no trades for N consecutive hours. Skips brand-new positions until min hold."></span></div>
-            <div class="toggle-row"><span title="Force-sell stuck positions with dead volume / no trades">Enable dead-volume exit</span><label class="switch"><input type="checkbox" id="enableDeadVolumeExit" checked /><span class="slider"></span></label></div>
+            <p class="mint mb-2">Master switch: Strategies → Dead Market Exit.</p>
             <div class="filters-row mt-2">
               <label class="ctl ctl-md"><span>Vol/hr $ &lt; <span class="tip" tabindex="0" data-tip="Rolling 1h USD volume below this counts as dead."></span></span><input type="number" id="deadVolumeUsdPerHour" value="50" min="0" step="10" /></label>
               <label class="ctl ctl-sm"><span>Hours <span class="tip" tabindex="0" data-tip="Consecutive hours of dead samples before force-sell."></span></span><input type="number" id="deadVolumeConsecutiveHours" value="3" min="1" max="48" step="1" /></label>
@@ -2169,7 +2187,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card">
           <div class="section-title">MEV / RPC <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and Solana RPC health for live execution."></span></div>
           <div class="mint mb-2" id="mev-status">—</div>
-          <div class="toggle-row"><span title="Enable MEV-aware send path">MEV protection</span><label class="switch"><input type="checkbox" id="enableMEVProtection" /><span class="slider"></span></label></div>
+          <p class="mint mb-2">Master switch: Strategies → MEV Protection.</p>
           <div class="toggle-row"><span title="Send swaps via Jito bundles when possible">Jito bundles</span><label class="switch"><input type="checkbox" id="useJitoBundles" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Detect recent buy clustering that looks like sandwich setup">Sandwich protection</span><label class="switch"><input type="checkbox" id="sandwichProtection" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Cancel the trade if sandwich risk is high">Abort on sandwich risk</span><label class="switch"><input type="checkbox" id="abortOnSandwichRisk" checked /><span class="slider"></span></label></div>
@@ -2280,6 +2298,114 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (e.key === 'Escape') closeSettingsMenu();
     });
 
+    let _strategiesStatus = null;
+
+    function strategyFrequencyClass(impact) {
+      if (impact === 'much_fewer' || impact === 'fewer') return 'text-amber-300';
+      if (impact === 'more' || impact === 'slightly_more') return 'text-emerald-300';
+      return 'text-slate-400';
+    }
+
+    function renderStrategies(data) {
+      _strategiesStatus = data;
+      const count = document.getElementById('strategies-count');
+      const profile = document.getElementById('strategies-profile');
+      const restore = document.getElementById('strategies-restore');
+      const warning = document.getElementById('strategies-warning');
+      const grid = document.getElementById('strategies-grid');
+      if (count) count.textContent = data.enabledCount + ' / ' + data.totalCount + ' ON';
+      if (profile) {
+        profile.textContent =
+          'Profile: ' + String(data.strategyProfile || 'custom').replace(/_/g, ' ') +
+          ' · Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
+          (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '');
+      }
+      if (restore) restore.disabled = !data.canRestorePrevious;
+      if (warning) {
+        warning.textContent = data.highWinRatePresetActive
+          ? '⚠ ' + data.highWinRateWarning
+          : '';
+        warning.classList.toggle('hidden', !data.highWinRatePresetActive);
+      }
+      if (!grid) return;
+      const registry = data.registry || [];
+      grid.innerHTML = (data.groups || []).map(group => {
+        const rows = (group.strategies || []).map(key => registry.find(s => s.key === key)).filter(Boolean);
+        return '<div class="card">' +
+          '<div class="section-title">' + group.label + '</div>' +
+          rows.map(s => {
+            const safety = s.criticalSafety
+              ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
+              : '';
+            return '<div class="py-3 border-t border-slate-700/70 first:border-t-0">' +
+              '<div class="flex items-center justify-between gap-3">' +
+                '<div class="font-medium text-slate-100">' + s.name + safety + '</div>' +
+                '<label class="switch"><input type="checkbox" ' + (s.enabled ? 'checked ' : '') +
+                  'onchange="toggleStrategy(\\'' + s.key + '\\', this.checked)" /><span class="slider"></span></label>' +
+              '</div>' +
+              '<div class="text-sm text-slate-400 mt-1">' + s.description + '</div>' +
+              '<div class="text-xs mt-1 ' + strategyFrequencyClass(s.frequencyWhenOn) + '">' + s.frequencyLabel + '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }).join('');
+    }
+
+    async function loadStrategies() {
+      const grid = document.getElementById('strategies-grid');
+      try {
+        renderStrategies(await fetchJSON('/api/strategies'));
+      } catch (err) {
+        if (grid) grid.innerHTML = '<div class="card text-red-300">Failed to load strategies: ' + (err.message || err) + '</div>';
+      }
+    }
+
+    async function toggleStrategy(key, enabled) {
+      const def = _strategiesStatus && (_strategiesStatus.registry || []).find(s => s.key === key);
+      if (!enabled && def && def.criticalSafety) {
+        const ok = confirm('⚠ Disable ' + def.name + '?\\n\\nThis removes a safety or quality gate and may increase losses.');
+        if (!ok) {
+          renderStrategies(_strategiesStatus);
+          return;
+        }
+      }
+      try {
+        const data = await fetchJSON('/api/strategies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set', key, enabled }),
+        });
+        renderStrategies(data);
+        window._cfgLoaded = false;
+        refresh();
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+
+    async function applyStrategiesAction(action) {
+      if (action === 'disable_all' && !confirm('⚠ Disable every strategy module?\\n\\nHard safety floors remain, but optional safety, quality, and exit modules will be off.')) return;
+      if (action === 'high_win_rate' && !confirm('Apply High Win-Rate Preset?\\n\\nFewer trades expected – prioritises win rate over frequency. Your current strategy settings will be saved for Restore Previous.')) return;
+      if (action === 'restore' && !confirm('Restore the strategy settings saved before the preset?')) return;
+      try {
+        const data = await fetchJSON('/api/strategies', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        });
+        if (data.ok === false) {
+          alert(data.message || 'Strategy action failed');
+          return;
+        }
+        renderStrategies(data);
+        window._cfgLoaded = false;
+        await refresh();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+
     function showTab(name, btn) {
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
         el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
@@ -2312,6 +2438,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }, 80);
       }
       if (name === 'logs') loadSystemLogs();
+      if (name === 'strategies') loadStrategies();
       if (name === 'overview' || name === 'signals' || name === 'trades') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -4392,23 +4519,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const lab = document.getElementById('v-minHolders');
           if (lab) lab.textContent = holdersVal;
         }
-        const healthyCurve = document.getElementById('requireHealthyCurve');
-        if (healthyCurve && cfg.bondingCurve) {
-          healthyCurve.checked = cfg.bondingCurve.requireHealthyCurve === true;
-        }
-        document.getElementById('enableConvergence').checked = cfg.strategy.enableConvergence;
         document.getElementById('enableMigrationOnly').checked = cfg.strategy.enableMigrationOnly;
-        document.getElementById('enableMigrationPriority').checked = !!cfg.strategy.enableMigrationPriority;
-        const curvePri = document.getElementById('enableBondingCurvePriority');
-        if (curvePri) curvePri.checked = cfg.strategy.enableBondingCurvePriority !== false;
-        const earlyPri = document.getElementById('enableEarlyCurvePriority');
-        if (earlyPri) earlyPri.checked = cfg.strategy.enableEarlyCurvePriority !== false;
         document.getElementById('enableAutoSell').checked = cfg.strategy.enableAutoSell !== false;
-        document.getElementById('enableActivityFilter').checked = cfg.filters.enableActivityFilter !== false;
         const skipAuth = document.getElementById('skipIfMintAuthority');
         if (skipAuth) skipAuth.checked = !!cfg.filters.skipIfMintAuthority;
-        const sniperEl = document.getElementById('enableSniperFilter');
-        if (sniperEl) sniperEl.checked = cfg.filters.enableSniperFilter !== false;
         const sensEl = document.getElementById('sniperSensitivity');
         if (sensEl && cfg.filters.sniperSensitivity) {
           sensEl.value = cfg.filters.sniperSensitivity;
@@ -4435,9 +4549,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (earlyW && cfg.strategy.earlyCurveMinSmartWallets != null) {
           earlyW.value = cfg.strategy.earlyCurveMinSmartWallets;
         }
-        document.getElementById('reBuyEnabled').checked = cfg.strategy.reBuyEnabled !== false;
-        const postStopEl = document.getElementById('postStopReentryEnabled');
-        if (postStopEl) postStopEl.checked = cfg.strategy.postStopReentryEnabled !== false;
         const afterMaxEl = document.getElementById('reEntryAfterMaxProfitEnabled');
         if (afterMaxEl) afterMaxEl.checked = cfg.strategy.reEntryAfterMaxProfitEnabled === true;
         // Prefill Backtester filters from saved config (0 = inherit at run time)
@@ -4490,7 +4601,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         setNum('reEntryCooldownMinutes', cfg.strategy.reEntryCooldownMinutes);
         if (cfg.risk) {
           document.getElementById('riskEnabled').checked = cfg.risk.enabled !== false;
-          document.getElementById('useRiskSizing').checked = cfg.risk.useRiskSizing !== false;
           document.getElementById('tieredSellEnabled').checked = cfg.risk.tieredSellEnabled !== false;
           document.getElementById('autoPauseOnLimit').checked = cfg.risk.autoPauseOnLimit !== false;
           document.getElementById('riskPercentPerTrade').value = cfg.risk.riskPercentPerTrade;
@@ -4506,9 +4616,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           document.getElementById('normalTrailPct').value = cfg.risk.normal.trailingStopPct;
           document.getElementById('migRiskPct').value = cfg.risk.migration.riskPercentPerTrade;
           document.getElementById('migTrailPct').value = cfg.risk.migration.trailingStopPct;
-          if (document.getElementById('enableDeadVolumeExit')) {
-            document.getElementById('enableDeadVolumeExit').checked = cfg.risk.enableDeadVolumeExit !== false;
-          }
           if (document.getElementById('deadVolumeUsdPerHour')) {
             document.getElementById('deadVolumeUsdPerHour').value = cfg.risk.deadVolumeUsdPerHour ?? 50;
           }
@@ -4521,8 +4628,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         if (cfg.profitStrategy) {
           const ps = cfg.profitStrategy;
-          const en = document.getElementById('ps-enabled');
-          if (en) en.checked = ps.enabled !== false;
           const ra = document.getElementById('ps-risk-adjust');
           if (ra) ra.checked = ps.riskBasedAdjustment !== false;
           const setN = (id, v) => {
@@ -4542,7 +4647,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const el = document.getElementById(id);
             if (el) el.checked = v !== false;
           };
-          setChk('sel-enabled', sel.enabled);
           setChk('sel-require-convergence', sel.requireConvergenceForNormal);
           setChk('sel-allow-single-mig', sel.allowSingleWalletMigration);
           const setN = (id, v) => {
@@ -4557,7 +4661,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setN('sel-min-size-mult', sel.minRiskSizeMultiplier);
         }
         if (cfg.mev) {
-          document.getElementById('enableMEVProtection').checked = !!cfg.mev.enableMEVProtection;
           document.getElementById('useJitoBundles').checked = cfg.mev.useJitoBundles !== false;
           document.getElementById('sandwichProtection').checked = cfg.mev.sandwichProtection !== false;
           document.getElementById('abortOnSandwichRisk').checked = cfg.mev.abortOnSandwichRisk !== false;
@@ -5254,17 +5357,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function saveFilterConfig() {
       const body = {
-        enableActivityFilter: document.getElementById('enableActivityFilter').checked,
         skipIfMintAuthority: document.getElementById('skipIfMintAuthority').checked,
-        enableAntiRug: document.getElementById('enableAntiRug').checked,
         checkHoneypot: document.getElementById('checkHoneypot').checked,
         skipIfDevRecentSells: document.getElementById('skipIfDevRecentSells').checked,
         requireLiquidityLocked: document.getElementById('requireLiquidityLocked').checked,
-        enableSniperFilter: document.getElementById('enableSniperFilter').checked,
         sniperSensitivity: document.getElementById('sniperSensitivity').value,
-        requireHealthyCurve: document.getElementById('requireHealthyCurve')
-          ? document.getElementById('requireHealthyCurve').checked
-          : true,
         buyPumpFunOnly: document.getElementById('buyPumpFunOnly')
           ? document.getElementById('buyPumpFunOnly').checked
           : true,
@@ -5287,7 +5384,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enabled: document.getElementById('sel-enabled').checked,
           requireConvergenceForNormal: document.getElementById('sel-require-convergence').checked,
           allowSingleWalletMigration: document.getElementById('sel-allow-single-mig').checked,
           minConvictionScore: Number(document.getElementById('sel-min-conviction').value),
@@ -6083,24 +6179,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enableConvergence: document.getElementById('enableConvergence').checked,
           enableMigrationOnly: document.getElementById('enableMigrationOnly').checked,
-          enableMigrationPriority: document.getElementById('enableMigrationPriority').checked,
-          enableBondingCurvePriority: document.getElementById('enableBondingCurvePriority').checked,
           nearMigrationCurvePct: Number(document.getElementById('nearMigrationCurvePct').value),
-          enableEarlyCurvePriority: document.getElementById('enableEarlyCurvePriority').checked,
           earlyCurveMaxPct: Number(document.getElementById('earlyCurveMaxPct').value),
           minEarlyBirdeyeSmartMoneyScore: Number(document.getElementById('minEarlyBirdeyeSmartMoneyScore').value),
           earlyCurveMinSmartWallets: Number(document.getElementById('earlyCurveMinSmartWallets').value),
           enableAutoSell: document.getElementById('enableAutoSell').checked,
           migrationSizeMultiplier: Number(document.getElementById('migrationSizeMultiplier').value),
           migrationSlippageBps: Number(document.getElementById('migrationSlippageBps').value),
-          reBuyEnabled: document.getElementById('reBuyEnabled').checked,
           reBuyMinProfitPct: Number(document.getElementById('reBuyMinProfitPct').value),
           reBuyDipPercent: Number(document.getElementById('reBuyDipPercent').value),
           confirmationThreshold: Number(document.getElementById('confirmationThreshold').value),
           reBuyVolumeIncreasePct: Number(document.getElementById('reBuyVolumeIncreasePct').value),
-          postStopReentryEnabled: document.getElementById('postStopReentryEnabled').checked,
           reEntryAfterMaxProfitEnabled: document.getElementById('reEntryAfterMaxProfitEnabled').checked,
           reEntryMaxPerMint: Number(document.getElementById('reEntryMaxPerMint').value),
           reEntryWatchMinutes: Number(document.getElementById('reEntryWatchMinutes').value),
@@ -6120,7 +6210,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           enabled: document.getElementById('riskEnabled').checked,
-          useRiskSizing: document.getElementById('useRiskSizing').checked,
           tieredSellEnabled: document.getElementById('tieredSellEnabled').checked,
           autoPauseOnLimit: document.getElementById('autoPauseOnLimit').checked,
           riskPercentPerTrade: Number(document.getElementById('riskPercentPerTrade').value),
@@ -6131,7 +6220,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           weeklyLossLimitSol: Number(document.getElementById('weeklyLossLimitSol').value),
           minTradeSol: Number(document.getElementById('minTradeSol').value),
           maxTradeSol: Number(document.getElementById('maxTradeSol').value),
-          enableDeadVolumeExit: document.getElementById('enableDeadVolumeExit').checked,
           deadVolumeUsdPerHour: Number(document.getElementById('deadVolumeUsdPerHour').value),
           deadVolumeConsecutiveHours: Number(document.getElementById('deadVolumeConsecutiveHours').value),
           deadVolumeMinHoldMinutes: Number(document.getElementById('deadVolumeMinHoldMinutes').value),
@@ -6269,7 +6357,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            enabled: document.getElementById('ps-enabled').checked,
             riskBasedAdjustment: document.getElementById('ps-risk-adjust').checked,
             partialSellAt: Number(document.getElementById('ps-partial-at').value),
             partialSellPercent: Number(document.getElementById('ps-partial-sell').value),
@@ -6295,7 +6382,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          enableMEVProtection: document.getElementById('enableMEVProtection').checked,
           useJitoBundles: document.getElementById('useJitoBundles').checked,
           sandwichProtection: document.getElementById('sandwichProtection').checked,
           abortOnSandwichRisk: document.getElementById('abortOnSandwichRisk').checked,
@@ -6303,8 +6389,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           priorityFeeMultiplier: Number(document.getElementById('priorityFeeMultiplier').value),
           sandwichMaxRecentBuys: Number(document.getElementById('sandwichMaxRecentBuys').value),
           tipLamports: Number(document.getElementById('jitoTipLamports').value),
-          jitoEnabled: document.getElementById('useJitoBundles').checked &&
-            document.getElementById('enableMEVProtection').checked,
+          jitoEnabled: document.getElementById('useJitoBundles').checked,
         }),
       });
       alert('MEV settings saved');

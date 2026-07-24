@@ -111,6 +111,11 @@ import {
   effectiveMinWalletQualityScore,
   effectiveMomentumMinHoldPct,
 } from './strictMode';
+import {
+  isStrategyEnabled,
+  logStrategyDecision,
+  ensureStrategyToggles,
+} from './strategies';
 
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
 
@@ -751,7 +756,10 @@ export function recoverDisabledWallets(): { recovered: number } {
 export function filterActiveWallets(
   options: { persistActiveOnly?: boolean; pruneInactive?: boolean } = {}
 ): { kept: number; disabled: number; removed: number } {
-  if (!config.filters.enableActivityFilter) {
+  if (
+    !isStrategyEnabled('min_holders_activity') ||
+    !config.filters.enableActivityFilter
+  ) {
     return {
       kept: config.smartWallets.filter((w) => w.enabled).length,
       disabled: 0,
@@ -815,7 +823,10 @@ export function getWalletsForPolling(): SmartWallet[] {
   const enabled = config.smartWallets.filter((w) => w.enabled);
   let list = enabled;
 
-  if (config.filters.enableActivityFilter) {
+  if (
+    isStrategyEnabled('min_holders_activity') &&
+    config.filters.enableActivityFilter
+  ) {
     const filtered = enabled.filter((w) => passesActivityRules(w));
     // Never drop to an empty poll set while enabled wallets exist —
     // fall back to all enabled (imported wallets must stay watched)
@@ -1078,7 +1089,12 @@ export function pruneInactiveWallets(
 
 export function isWalletActive(wallet: SmartWallet): boolean {
   if (!wallet.enabled) return false;
-  if (!config.filters.enableActivityFilter) return true;
+  if (
+    !isStrategyEnabled('min_holders_activity') ||
+    !config.filters.enableActivityFilter
+  ) {
+    return true;
+  }
   return passesActivityRules(wallet);
 }
 
@@ -1582,7 +1598,11 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   }
 
   // Dedicated sniper fetch if anti-rug didn't attach (filter off / fail)
-  if (!buy.sniper && config.filters.enableSniperFilter !== false) {
+  if (
+    !buy.sniper &&
+    isStrategyEnabled('sniper_bundler_filters') &&
+    config.filters.enableSniperFilter !== false
+  ) {
     try {
       const sniper = await getTokenSniperActivity(buy.mint);
       if (sniper.source !== 'none') {
@@ -1679,7 +1699,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   let priority = false;
 
   // Migration + smart wallet activity = strong buy (larger size, tighter slip)
-  if (config.strategy.enableMigrationPriority && isMigration) {
+  if (config.strategy.enableMigrationPriority && isStrategyEnabled('migration_priority') && isMigration) {
     signal = {
       mint: buy.mint,
       symbol: buy.symbol,
@@ -1712,6 +1732,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       notes: `migration + ${buy.walletName}`,
     });
   } else if (
+    isStrategyEnabled('near_migration_curve') &&
     config.strategy.enableBondingCurvePriority !== false &&
     buy.isPumpFun &&
     !isMigration &&
@@ -1752,7 +1773,11 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       birdeye: buy.birdeye,
       notes: `near-mig ${buy.bondingCurve.progressPct.toFixed(0)}%`,
     });
-  } else if (buy.isPumpFun && !isMigration) {
+  } else if (
+    isStrategyEnabled('early_curve_smart_money') &&
+    buy.isPumpFun &&
+    !isMigration
+  ) {
     // Early-curve smart money priority (pre-migration launches)
     const walletMeta = config.smartWallets.find(
       (w) => w.address === buy.wallet
@@ -2050,10 +2075,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   if (
     priority &&
     (signal.isMigration
-      ? config.strategy.enableMigrationPriority
+      ? config.strategy.enableMigrationPriority &&
+        isStrategyEnabled('migration_priority')
       : signal.earlyBuy
-        ? config.strategy.enableEarlyCurvePriority !== false
-        : config.strategy.enableBondingCurvePriority !== false)
+        ? config.strategy.enableEarlyCurvePriority !== false &&
+          isStrategyEnabled('early_curve_smart_money')
+        : config.strategy.enableBondingCurvePriority !== false &&
+          isStrategyEnabled('near_migration_curve'))
   ) {
     sizing = resolveTradeSize('migration', {
       riskScore: signal.antiRug?.riskScore,
@@ -2492,6 +2520,7 @@ function isSoftPassableEarlyReason(reason: string): boolean {
 }
 
 async function passesFilters(signal: TradeSignal): Promise<boolean> {
+  ensureStrategyToggles();
   const { filters, strategy } = config;
   const signalKind =
     signal.isMigration || signal.nearMigration || signal.earlyBuy
@@ -2501,6 +2530,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           ? 'near-migration'
           : 'early'
       : 'normal';
+
+  if (!isStrategyEnabled('smart_money_copy')) {
+    logStrategyDecision(
+      'smart_money_copy',
+      'skip',
+      `${signal.symbol} — Smart Money Copy OFF`
+    );
+    recordRejectedSignal(signal, 'strategy:smart_money_copy OFF');
+    return false;
+  }
 
   if (isRiskHalted()) {
     console.log(`[monitor] Signal rejected (${signalKind}) — risk halt active`);
@@ -2536,13 +2575,21 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
-  if (config.filters.enableWalletQualityGate !== false) {
+  if (
+    isStrategyEnabled('wallet_quality_scoring') &&
+    config.filters.enableWalletQualityGate !== false
+  ) {
     for (const addr of signal.wallets) {
       if (addr === 'volume-spike') continue;
       const w = config.smartWallets.find((sw) => sw.address === addr);
       if (!w) continue;
       const gate = passesWalletQualityGate(w);
       if (!gate.ok) {
+        logStrategyDecision(
+          'wallet_quality_scoring',
+          'skip',
+          `${signal.symbol} — ${gate.reason} wallet=${w.name}`
+        );
         console.log(
           `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
             `reason=${gate.reason} wallet=${w.name}`
@@ -2558,20 +2605,30 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     // Migration feed may lack cluster age — treat as fresh
     signal.signalAgeMinutes = 0;
   }
-  const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
-  if (timingSkip) {
-    console.log(
-      `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${timingSkip}`
-    );
-    recordRejectedSignal(signal, timingSkip);
-    return false;
+  if (isStrategyEnabled('time_based_entry')) {
+    const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
+    if (timingSkip) {
+      logStrategyDecision(
+        'time_based_entry',
+        'skip',
+        `${signal.symbol} — ${timingSkip}`
+      );
+      console.log(
+        `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${timingSkip}`
+      );
+      recordRejectedSignal(signal, timingSkip);
+      return false;
+    }
   }
 
   // Cluster floor (unified with selective min wallets + Strict overlay)
-  const clusterMin = effectiveClusterMinWallets();
+  const clusterMin = isStrategyEnabled('wallet_convergence')
+    ? effectiveClusterMinWallets()
+    : 1;
   const priority =
     signal.isMigration || signal.nearMigration || signal.earlyBuy;
   if (
+    isStrategyEnabled('wallet_convergence') &&
     signal.wallets.length < clusterMin &&
     !(
       signal.allowSingleWalletException &&
@@ -2586,6 +2643,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     )
   ) {
     const msg = `cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
+    logStrategyDecision(
+      'wallet_convergence',
+      'skip',
+      `${signal.symbol} — ${msg}`
+    );
     console.log(
       `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${msg}`
     );
@@ -2639,8 +2701,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // On-chain / Dex metrics + comprehensive anti-rug
+  const antiRugEnabled =
+    isStrategyEnabled('anti_rug_honeypot') &&
+    config.filters.enableAntiRug !== false;
   const needsMetrics =
-    config.filters.enableAntiRug !== false ||
+    antiRugEnabled ||
     (filters.minLiquidity ?? 0) > 0 ||
     (filters.maxDevHoldPct ?? 0) > 0 ||
     (filters.maxDevPercent ?? 0) > 0 ||
@@ -2650,7 +2715,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   if (needsMetrics) {
     try {
-      if (config.filters.enableAntiRug !== false) {
+      if (antiRugEnabled) {
         const earlyEntry =
           Boolean(signal.earlyBuy || signal.nearMigration) ||
           Boolean(signal.bondingCurve && !signal.isMigration) ||
@@ -2753,7 +2818,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           { mint: signal.mint, symbol: signal.symbol }
         );
       } else if (
-        config.filters.enableAntiRug !== false ||
+        antiRugEnabled ||
         (filters.minLiquidity ?? 0) > 0 ||
         (filters.maxDevPercent ?? filters.maxDevHoldPct ?? 0) > 0
       ) {
@@ -2782,8 +2847,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   signal.convictionScore = conviction.score;
   signal.sizeMultiplier = conviction.sizeMultiplier;
   signal.convictionBreakdown = conviction.breakdownLine;
-  if (!conviction.pass) {
+  if (
+    isStrategyEnabled('multi_factor_conviction') &&
+    !conviction.pass
+  ) {
     const detail = conviction.reasons.join('; ') || 'below threshold';
+    logStrategyDecision(
+      'multi_factor_conviction',
+      'skip',
+      `${signal.symbol} score=${conviction.score}/${conviction.minRequired}: ${detail}`
+    );
     console.log(
       `[monitor] FILTER_SKIP kind=${signalKind} reason=conviction ` +
         `${conviction.score}/${conviction.minRequired}: ${detail} · ${conviction.breakdownLine}`
@@ -2798,6 +2871,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     return false;
+  }
+  if (!isStrategyEnabled('multi_factor_conviction') && !conviction.pass) {
+    // Conviction strategy OFF — do not hard-block on selective score
+    console.log(
+      `[monitor] STRATEGY_SKIP multi_factor_conviction OFF — allowing ${signal.symbol} ` +
+        `(score ${conviction.score}, would need ${conviction.minRequired})`
+    );
+  } else if (conviction.pass) {
+    logStrategyDecision(
+      'multi_factor_conviction',
+      'take',
+      `${signal.symbol} score=${conviction.score} size×${conviction.sizeMultiplier.toFixed(2)}`
+    );
   }
   console.log(
     `[monitor] Conviction OK ${signal.symbol}: score=${conviction.score} ` +
@@ -2838,11 +2924,13 @@ function checkConvergence(mint: string): TradeSignal | null {
     .find((b) => b.bondingCurve)?.bondingCurve;
   const nearMigration =
     !isMigration &&
+    isStrategyEnabled('near_migration_curve') &&
     config.strategy.enableBondingCurvePriority !== false &&
     !!latestCurve?.nearMigration;
   const earlyBuy =
     !isMigration &&
     !nearMigration &&
+    isStrategyEnabled('early_curve_smart_money') &&
     recent.some((b) => b.earlyBuy || isEarlyCurveBuy(b.bondingCurve?.progressPct));
 
   // Single-wallet exception: proven top performer + migration only
