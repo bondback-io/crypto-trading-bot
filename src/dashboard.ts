@@ -739,6 +739,97 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #64748b;
     }
     .stat { font-size: 1.5rem; font-weight: 700; color: #34d399; }
+    .ov-equity-panel {
+      display: grid;
+      gap: 0.65rem 0.85rem;
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      border: 1px solid rgba(52, 211, 153, 0.28);
+      background:
+        linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(15, 23, 42, 0.92) 42%, rgba(15, 23, 42, 0.98));
+    }
+    .ov-equity-main {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.25rem 1rem;
+    }
+    .ov-equity-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6ee7b7;
+    }
+    .ov-equity-value {
+      font-size: clamp(1.55rem, 5.5vw, 2rem);
+      font-weight: 800;
+      color: #34d399;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    .ov-equity-value .ov-unit {
+      font-size: 0.55em;
+      font-weight: 650;
+      color: #94a3b8;
+      margin-left: 0.3rem;
+    }
+    .ov-equity-rows {
+      display: grid;
+      gap: 0.45rem;
+    }
+    .ov-equity-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.4rem 0.55rem;
+    }
+    .ov-equity-cell {
+      min-width: 0;
+      padding: 0.35rem 0.45rem;
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.35);
+      border: 1px solid rgba(51, 65, 85, 0.55);
+    }
+    .ov-equity-cell .lbl {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 0.12rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ov-equity-cell strong {
+      display: block;
+      font-size: clamp(0.82rem, 3.2vw, 0.98rem);
+      font-weight: 700;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ov-meta-strip {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.45rem;
+    }
+    @media (min-width: 640px) {
+      .ov-meta-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    .ov-meta-strip .card {
+      padding: 0.55rem 0.65rem;
+      margin: 0;
+    }
+    .ov-meta-strip .stat,
+    .ov-meta-strip .text-lg {
+      font-size: clamp(0.95rem, 3.4vw, 1.15rem);
+    }
     .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0; border-bottom: 1px solid #1e293b; gap: 12px; }
     .toggle-row:last-child { border-bottom: none; }
     .section-title {
@@ -1554,8 +1645,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
             <span class="strict-badge-label">Strict Off</span>
           </span>
-          <span class="status-stat has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance">—</strong></span>
-          <span class="status-stat has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl">—</strong></span>
+          <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
+          <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
+          <span class="status-stat has-tip" title="Realized PnL for the current UTC day">Day <strong id="daily-pnl">—</strong></span>
           <span class="status-stat rpc-status rpc-unknown hidden sm:inline has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint label">
             <svg id="rpc-health-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             RPC <strong id="rpc-active">—</strong>
@@ -1605,41 +1697,86 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <svg class="status-ico" data-mode-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
               <span data-mode-label>LIVE SIM</span>
             </span>
+            <span id="market-session-badge" class="badge status-badge has-tip" title="Current UTC market session" style="background:#1e293b;border:1px solid #334155;color:#94a3b8">
+              <span id="market-session-label">Session —</span>
+            </span>
           </span>
           <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top."></span>
         </div>
         <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-        <div class="card"><div class="stat-label">Balance <span class="tip tip-below" tabindex="0" data-tip="Available SOL for new buys (paper balance or live trading wallet)."></span></div><div class="stat" id="ov-balance-mirror">—</div><div class="mint mt-1">Daily <span id="ov-daily-mirror">—</span></div></div>
-        <div class="card"><div class="stat-label">Open Positions <span class="tip tip-below" tabindex="0" data-tip="How many tokens you currently hold waiting for TP, SL, or trailing exit."></span></div><div class="stat" id="open-count">—</div></div>
-        <div class="card"><div class="stat-label">Net PnL <span class="tip tip-below" tabindex="0" data-tip="Sum of realized profit/loss from closed trades this session/day."></span></div><div class="stat" id="stat-pnl">—</div><div class="mint mt-1" id="stat-return">—</div></div>
-        <div class="card"><div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div><div class="stat" id="win-rate">—</div><div class="mint mt-1" id="stat-wl">—</div></div>
+      <div class="ov-equity-panel" id="ov-equity-panel" title="Available moves into Positions when you open a trade; marks update Unrealized continuously; closes credit Available and Realized.">
+        <div class="ov-equity-main">
+          <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
+          <div class="ov-equity-value" id="ov-equity">—<span class="ov-unit">SOL</span></div>
+        </div>
+        <div class="ov-equity-rows">
+          <div class="ov-equity-row">
+            <div class="ov-equity-cell">
+              <span class="lbl">Available <span class="tip" tabindex="0" data-tip="SOL not in open trades — cash ready for new buys."></span></span>
+              <strong id="ov-available">—</strong>
+            </div>
+            <div class="ov-equity-cell">
+              <span class="lbl">Positions <span class="tip" tabindex="0" data-tip="Current market value of all open positions (updates with price)."></span></span>
+              <strong id="ov-positions-val">—</strong>
+            </div>
+            <div class="ov-equity-cell">
+              <span class="lbl">Open <span class="tip" tabindex="0" data-tip="Number of open positions."></span></span>
+              <strong id="open-count">—</strong>
+            </div>
+          </div>
+          <div class="ov-equity-row">
+            <div class="ov-equity-cell">
+              <span class="lbl">Unrealized <span class="tip" tabindex="0" data-tip="Open-position profit/loss vs cost, using live marks."></span></span>
+              <strong id="stat-unrealized">—</strong>
+            </div>
+            <div class="ov-equity-cell">
+              <span class="lbl">Realized <span class="tip" tabindex="0" data-tip="Profit/loss from closed trades (all-time in this ledger)."></span></span>
+              <strong id="stat-pnl">—</strong>
+            </div>
+            <div class="ov-equity-cell">
+              <span class="lbl">Daily <span class="tip" tabindex="0" data-tip="Realized PnL for the current UTC day."></span></span>
+              <strong id="ov-daily-mirror">—</strong>
+            </div>
+          </div>
+        </div>
+        <div class="mint text-xs" id="stat-unrealized-hint" style="display:none">—</div>
+        <div class="mint text-xs" id="stat-return" style="display:none">—</div>
+        <div class="mint text-xs" id="ov-balance-mirror" style="display:none">—</div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card"><div class="stat-label">Unrealized gains/loss <span class="tip tip-below" tabindex="0" data-tip="Sum of unrealized P&amp;L on open trades that haven’t closed yet, using the same live mark prices as the Open Positions table. Positive = unrealized profit; negative = unrealized loss."></span></div><div class="stat" id="stat-unrealized">—</div><div class="mint mt-1" id="stat-unrealized-hint">—</div></div>
-        <div class="card"><div class="stat-label">Max Drawdown <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div><div class="stat" id="stat-maxdd">—</div><div class="mint mt-1" id="stat-avg-hold">—</div></div>
-        <div class="card !py-3">
+
+      <div class="ov-meta-strip mt-2.5 sm:mt-3">
+        <div class="card">
+          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div>
+          <div class="stat" id="win-rate">—</div>
+          <div class="mint mt-1 text-xs" id="stat-wl">—</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">Max DD <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div>
+          <div class="stat" id="stat-maxdd">—</div>
+          <div class="mint mt-1 text-xs" id="stat-avg-hold">—</div>
+        </div>
+        <div class="card">
           <div class="stat-label">Wallets <span class="tip tip-below" tabindex="0" data-tip="Watching = polled for copy signals. Tracked = total imported smart wallets."></span></div>
           <div class="text-lg font-semibold" id="watched">—</div>
           <div class="mint mt-1 text-xs" id="watched-sub">—</div>
         </div>
-        <div class="card !py-3">
-          <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours (not capped by the recent activity list)."></span></div>
+        <div class="card">
+          <div class="stat-label">Signals <span class="tip tip-below" tabindex="0" data-tip="Wallet buy signals recorded in the last 24 hours."></span></div>
           <div class="text-lg font-semibold" id="signals">—</div>
-          <div class="signal-light mt-2" id="signal-light" title="Green = wallet-buy seen in the last 15 minutes while monitor is running with wallets watched. Amber = running but quiet (shows age of last signal), or paused. Red = monitor stopped, no wallets watched, or RPC unhealthy.">
+          <div class="signal-light mt-1.5" id="signal-light" title="Green = recent wallet-buy. Amber = quiet/paused. Red = stopped / no wallets / RPC down.">
             <span class="dot dot-quiet" id="signal-light-dot"></span>
-            <span id="signal-light-label">Signals: —</span>
+            <span id="signal-light-label">—</span>
           </div>
         </div>
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades. Closed count is shown in Closed Trades below."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
-      <div class="card card-open-positions" id="open-positions-panel">
+<div class="card card-open-positions" id="open-positions-panel">
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
@@ -2056,6 +2193,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </table>
         </div>
         <div class="mint mt-2" id="pump-hot-launches"></div>
+      </div>
+      <div class="card">
+        <div class="section-title">Post-Run Dip · Smart Wallet Activity <span class="tip" tabindex="0" data-tip="Dip-phase confirmation: HQ buys, buybacks, Fib/support clusters, net SM flow. Soft conviction boost; optional hard-require in Conservative."></span></div>
+        <div class="mint mb-2" id="prd-sm-status">—</div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="prd-sm-table">
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th title="boost / skip / take">Outcome</th>
+                <th title="Dip SM score 0–100">SM</th>
+                <th title="High-quality wallet buys">HQ</th>
+                <th title="Prior sellers / buyers buying back">Buyback</th>
+                <th title="Cluster near Fib/support">@Level</th>
+                <th title="Net smart-money flow">Flow</th>
+                <th>Detail</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="9" class="text-slate-500">No dip smart-wallet events yet — enable Post-Run Dip</td></tr></tbody>
+          </table>
+        </div>
       </div>
       <div class="card">
         <div class="section-title">Recent Signals (risk / curve / sniper) <span class="tip" tabindex="0" data-tip="Why buys were taken or skipped: anti-rug, sniper score, curve stage, convergence."></span></div>
@@ -2834,6 +2993,73 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         'confirmationBoostPoints',
         'confirmationHardFilter',
       ],
+      market_session_filter: [
+        'marketSessionAllowAsia',
+        'marketSessionAllowEurope',
+        'marketSessionAllowUs',
+        'marketSessionAllowOverlap',
+        'marketSessionAllowOffHours',
+        'marketSessionPreferred',
+        'marketSessionPreferBoostPoints',
+      ],
+      post_run_dip: [
+        'prd-sensitivity',
+        'prd-time-minutes',
+        'prd-setup-watch',
+        'prd-take-profit',
+        'prd-stop-loss',
+        'prd-min-run',
+        'prd-max-run',
+        'prd-min-dip',
+        'prd-max-dip',
+        'prd-min-age',
+        'prd-max-age',
+        'prd-near-pct',
+        'prd-min-liq',
+        'prd-min-holders',
+        'prd-min-vol',
+        'prd-boost',
+        'prd-min-score',
+        'prd-fibs',
+        'prd-sessions',
+        'prd-prefer-tech',
+        'prd-require-tech',
+        'prd-prefer-sm',
+        'prd-strong-sm',
+        'prd-require-sm',
+        'prd-clear-vol',
+        'prd-flex-vol',
+        'prd-req-session',
+        'prd-sm-sens',
+        'prd-sm-boost',
+        'prd-sm-hard-cons',
+        'prd-zone-break',
+        'prd-zone-vol',
+        'prd-hard-require',
+      ],
+      technical_levels: [
+        'tl-sensitivity',
+        'tl-lookback-hours',
+        'tl-lookback-min',
+        'tl-lookback-max',
+        'tl-near-pct',
+        'tl-min-impulse',
+        'tl-sr-lookback-hours',
+        'tl-sr-lookback-min',
+        'tl-sr-lookback-max',
+        'tl-swing-strength',
+        'tl-zone-width',
+        'tl-min-touches',
+        'tl-pivot',
+        'tl-prefer-recent',
+        'tl-prefer-recent-support',
+        'tl-favour-volume',
+        'tl-break-close',
+        'tl-fib-zones',
+        'tl-hard-filter',
+        'tl-priority-fibs',
+        'tl-secondary-fibs',
+      ],
       mev_protection: ['useJitoBundles', 'sandwichProtection', 'abortOnSandwichRisk', 'jitoTipLamports', 'tipMultiplier', 'priorityFeeMultiplier', 'sandwichMaxRecentBuys'],
     };
 
@@ -2911,6 +3137,107 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           n('confirmationNarrativeWeight', 'Narrative weight', 25, 0, 100, 1) +
           n('confirmationBoostPoints', 'Strong confirmation boost points', 10, 1, 22, 1) +
           c('confirmationHardFilter', 'Hard filter when confirmation is Weak'),
+        market_session_filter:
+          '<p class="mint text-xs mb-2">UTC sessions: Asia 00–08, Europe 07–16, US 13–22 (overlaps tagged). Preferred sessions get a soft conviction boost. Off-hours blocked by default. Current session shown on Overview.</p>' +
+          '<p class="text-xs mb-2" id="market-session-live" style="color:#7dd3fc">Current session: —</p>' +
+          c('marketSessionAllowAsia', 'Allow Asia') +
+          c('marketSessionAllowEurope', 'Allow Europe') +
+          c('marketSessionAllowUs', 'Allow US') +
+          c('marketSessionAllowOverlap', 'Allow overlaps') +
+          c('marketSessionAllowOffHours', 'Allow off-hours') +
+          '<label class="ctl strat-field" data-strategy-control="marketSessionPreferred"><span>Preferred (comma ids)</span>' +
+            '<input type="text" id="marketSessionPreferred" value="us,europe_us" /></label>' +
+          n('marketSessionPreferBoostPoints', 'Preferred session boost', 3, 0, 10, 1),
+        post_run_dip:
+          '<p class="mint text-xs mb-2">Profiles: <strong>Standard</strong> (balanced), <strong>Conservative Post-Run Dip</strong> (fewer, higher quality), <strong>Aggressive Post-Run Dip</strong> (more opportunities — run +60–100%, age to 36h, Fib 0.382/0.5/0.618 ±3.5%, liq ≥$6.5k, holders ≥40, flexible vol, SM optional, wider sessions). Fine-tune after apply.</p>' +
+          '<div class="flex flex-wrap gap-2 mb-3">' +
+            '<button type="button" class="btn btn-secondary text-xs" id="prd-apply-standard" onclick="applyPostRunDipProfile(\\'standard\\')">Standard (Recommended)</button>' +
+            '<button type="button" class="btn btn-secondary text-xs" id="prd-apply-conservative" onclick="applyPostRunDipProfile(\\'conservative\\')" style="border-color:#0f766e">Conservative Post-Run Dip</button>' +
+            '<button type="button" class="btn btn-secondary text-xs" id="prd-apply-aggressive" onclick="applyPostRunDipProfile(\\'aggressive\\')" style="border-color:#ea580c">Aggressive Post-Run Dip</button>' +
+          '</div>' +
+          '<p class="text-xs mb-2" id="prd-active-profile" style="color:#7dd3fc">Active profile: —</p>' +
+          '<label class="ctl strat-field" data-strategy-control="prd-sensitivity"><span>Sensitivity</span>' +
+            '<select id="prd-sensitivity">' +
+              '<option value="low">Low</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High</option>' +
+            '</select></label>' +
+          n('prd-time-minutes', 'Max hold (minutes)', 90, 30, 240, 5) +
+          n('prd-setup-watch', 'Setup watch (minutes)', 60, 15, 180, 5) +
+          n('prd-take-profit', 'Take-profit %', 35, 15, 80, 1) +
+          n('prd-stop-loss', 'Stop-loss % (invalidation)', -14, -30, -8, 1) +
+          n('prd-min-run', 'Min run %', 80, 20, 500, 5) +
+          n('prd-max-run', 'Max run % (soft)', 150, 50, 1000, 5) +
+          n('prd-min-dip', 'Min dip from peak %', 25, 5, 80, 1) +
+          n('prd-max-dip', 'Max dip from peak %', 65, 20, 90, 1) +
+          n('prd-min-age', 'Min token age (hours)', 12, 1, 72, 1) +
+          n('prd-max-age', 'Max token age (hours)', 24, 6, 120, 1) +
+          n('prd-near-pct', 'Fib/S distance ±%', 2.5, 1.5, 8, 0.05) +
+          n('prd-min-liq', 'Min liquidity USD', 10000, 0, 250000, 500) +
+          n('prd-min-holders', 'Min holders', 60, 0, 5000, 1) +
+          n('prd-min-vol', 'Min volume USD', 5000, 0, 500000, 500) +
+          n('prd-boost', 'Conviction boost (base)', 12, 1, 20, 1) +
+          n('prd-min-score', 'Min qualify score', 55, 40, 90, 1) +
+          '<label class="ctl strat-field" data-strategy-control="prd-fibs"><span>Preferred Fibs</span>' +
+            '<input type="text" id="prd-fibs" value="0.5,0.618" /></label>' +
+          '<label class="ctl strat-field" data-strategy-control="prd-sessions"><span>Preferred sessions</span>' +
+            '<input type="text" id="prd-sessions" value="us,europe_us" /></label>' +
+          c('prd-prefer-tech', 'Prefer near Fib / support') +
+          c('prd-require-tech', 'Require near Fib/support') +
+          c('prd-prefer-sm', 'Prefer smart money on dip') +
+          c('prd-strong-sm', 'Strongly prefer smart money (Conservative)') +
+          c('prd-require-sm', 'Require smart money on dip') +
+          c('prd-sm-hard-cons', 'Conservative: hard-require dip SM activity') +
+          '<label class="ctl strat-field" data-strategy-control="prd-sm-sens"><span>Dip SM sensitivity</span>' +
+            '<select id="prd-sm-sens">' +
+              '<option value="low">Low (more flexible)</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High (stricter HQ / flow)</option>' +
+            '</select></label>' +
+          n('prd-sm-boost', 'Dip SM conviction boost (max)', 8, 0, 15, 1) +
+          c('prd-clear-vol', 'Require clear volume dry-up then return') +
+          c('prd-flex-vol', 'Flexible volume confirmation (Aggressive)') +
+          c('prd-req-session', 'Require preferred session (peak US)') +
+          c('prd-zone-break', 'Invalidate on Fib/S zone break') +
+          c('prd-zone-vol', 'Require volume on zone-break exit') +
+          c('prd-hard-require', 'Hard-require setup (block non-dips)'),
+        technical_levels:
+          '<p class="mint text-xs mb-2">Pump.fun defaults — Fib: 2–6h, primary 0.5/0.618 as ±2% zones, secondary 0.382/0.786, 50% min impulse, most recent strong pump. S&amp;R: 1–4h (max 6), medium swings, ≥2 touches, zone ±2%, prefer recent strong supports, volume reaction, break+close invalidation. Used by Post-Run Dip. Paper / Live Sim / Backtester. All configurable.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="tl-sensitivity"><span>Sensitivity</span>' +
+            '<select id="tl-sensitivity">' +
+              '<option value="low">Low (wider near band)</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High (tighter near band)</option>' +
+            '</select></label>' +
+          '<p class="text-xs text-slate-400 mt-2 mb-1">Fibonacci</p>' +
+          n('tl-lookback-hours', 'Fib lookback hours', 4, 1, 24, 0.5) +
+          n('tl-lookback-min', 'Fib lookback min (h)', 2, 0.5, 24, 0.5) +
+          n('tl-lookback-max', 'Fib lookback max (h)', 6, 1, 48, 0.5) +
+          n('tl-near-pct', 'Entry tolerance ±%', 2, 0.5, 12, 0.1) +
+          n('tl-min-impulse', 'Min impulse move %', 50, 10, 500, 5) +
+          '<label class="ctl strat-field" data-strategy-control="tl-priority-fibs"><span>Primary Fibs</span>' +
+            '<input type="text" id="tl-priority-fibs" value="0.5,0.618" /></label>' +
+          '<label class="ctl strat-field" data-strategy-control="tl-secondary-fibs"><span>Secondary Fibs</span>' +
+            '<input type="text" id="tl-secondary-fibs" value="0.382,0.786" /></label>' +
+          c('tl-prefer-recent', 'Prefer most recent strong pump') +
+          c('tl-fib-zones', 'Treat Fib levels as zones (±entry tol.)') +
+          '<p class="text-xs text-slate-400 mt-2 mb-1">Support &amp; Resistance</p>' +
+          n('tl-sr-lookback-hours', 'S&amp;R lookback hours', 2, 0.5, 6, 0.5) +
+          n('tl-sr-lookback-min', 'S&amp;R lookback min (h)', 1, 0.5, 6, 0.5) +
+          n('tl-sr-lookback-max', 'S&amp;R lookback max (h)', 4, 1, 6, 0.5) +
+          '<label class="ctl strat-field" data-strategy-control="tl-swing-strength"><span>Swing strength</span>' +
+            '<select id="tl-swing-strength">' +
+              '<option value="low">Low</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High</option>' +
+            '</select></label>' +
+          n('tl-zone-width', 'Zone width ±%', 2, 0.5, 8, 0.1) +
+          n('tl-min-touches', 'Min touches (valid level)', 2, 1, 8, 1) +
+          n('tl-pivot', 'Pivot window', 2, 1, 6, 1) +
+          c('tl-prefer-recent-support', 'Prefer most recent strong supports') +
+          c('tl-favour-volume', 'Favour volume / bounce reaction') +
+          c('tl-break-close', 'Break + close invalidation') +
+          c('tl-hard-filter', 'Hard filter (block if not near Fib/S)'),
         early_entry_only:
           '<p class="mint text-xs mb-2">Tightens max entry age (≤8m) and prefer-within window. Stacks with Time-Based Entry.</p>',
         hard_quality_gate:
@@ -3214,6 +3541,149 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         'rs-min-volume': data.reversalScalp?.minVolumeUsd,
         'rs-min-buy-pressure': data.reversalScalp?.minBuyPressureUsd,
       });
+      const prdSens = document.getElementById('prd-sensitivity');
+      if (prdSens && data.postRunDip?.sensitivity) prdSens.value = data.postRunDip.sensitivity;
+      fillShort(data.postRunDip, {
+        'prd-time-minutes': data.postRunDip?.timeLimitMinutes,
+        'prd-setup-watch': data.postRunDip?.setupWatchMinutes,
+        'prd-take-profit': data.postRunDip?.takeProfitPct,
+        'prd-stop-loss': data.postRunDip?.stopLossPct,
+        'prd-min-run': data.postRunDip?.minRunPct,
+        'prd-max-run': data.postRunDip?.maxRunPct,
+        'prd-min-dip': data.postRunDip?.minDipFromPeakPct,
+        'prd-max-dip': data.postRunDip?.maxDipFromPeakPct,
+        'prd-min-age': data.postRunDip?.minTokenAgeHours,
+        'prd-max-age': data.postRunDip?.maxTokenAgeHours,
+        'prd-near-pct': data.postRunDip?.nearTechnicalPct,
+        'prd-min-liq': data.postRunDip?.minLiquidityUsd,
+        'prd-min-holders': data.postRunDip?.minHolders,
+        'prd-min-vol': data.postRunDip?.minVolumeUsd,
+        'prd-boost': data.postRunDip?.boostPoints,
+        'prd-min-score': data.postRunDip?.minQualifyScore,
+      });
+      const prdSessions = document.getElementById('prd-sessions');
+      if (prdSessions && data.postRunDip?.preferredSessions) {
+        prdSessions.value = Array.isArray(data.postRunDip.preferredSessions)
+          ? data.postRunDip.preferredSessions.join(',')
+          : String(data.postRunDip.preferredSessions);
+      }
+      const prdFibs = document.getElementById('prd-fibs');
+      if (prdFibs && data.postRunDip?.preferredFibLevels) {
+        prdFibs.value = Array.isArray(data.postRunDip.preferredFibLevels)
+          ? data.postRunDip.preferredFibLevels.join(',')
+          : String(data.postRunDip.preferredFibLevels);
+      }
+      const prdProfileLabel = document.getElementById('prd-active-profile');
+      if (prdProfileLabel) {
+        const p = data.postRunDip?.profile;
+        prdProfileLabel.textContent =
+          'Active profile: ' +
+          (p === 'conservative'
+            ? 'Conservative Post-Run Dip'
+            : p === 'aggressive'
+              ? 'Aggressive Post-Run Dip'
+              : 'Standard (Recommended)');
+      }
+      const prdStdBtn = document.getElementById('prd-apply-standard');
+      const prdConBtn = document.getElementById('prd-apply-conservative');
+      const prdAggBtn = document.getElementById('prd-apply-aggressive');
+      if (prdStdBtn) {
+        prdStdBtn.classList.toggle(
+          'active',
+          data.postRunDip?.profile !== 'conservative' &&
+            data.postRunDip?.profile !== 'aggressive'
+        );
+      }
+      if (prdConBtn) {
+        prdConBtn.classList.toggle('active', data.postRunDip?.profile === 'conservative');
+      }
+      if (prdAggBtn) {
+        prdAggBtn.classList.toggle('active', data.postRunDip?.profile === 'aggressive');
+      }
+      const prdPrefer = document.getElementById('prd-prefer-tech');
+      if (prdPrefer) prdPrefer.checked = data.postRunDip?.preferNearTechnicals !== false;
+      const prdReq = document.getElementById('prd-require-tech');
+      if (prdReq) prdReq.checked = data.postRunDip?.requireNearTechnicals === true;
+      const prdPreferSm = document.getElementById('prd-prefer-sm');
+      if (prdPreferSm) prdPreferSm.checked = data.postRunDip?.preferSmartMoney !== false;
+      const prdStrongSm = document.getElementById('prd-strong-sm');
+      if (prdStrongSm) prdStrongSm.checked = data.postRunDip?.stronglyPreferSmartMoney === true;
+      const prdSm = document.getElementById('prd-require-sm');
+      if (prdSm) prdSm.checked = data.postRunDip?.requireSmartMoney === true;
+      const prdSmHard = document.getElementById('prd-sm-hard-cons');
+      if (prdSmHard) prdSmHard.checked = data.postRunDip?.hardRequireSmartMoneyInConservative === true;
+      const prdSmSens = document.getElementById('prd-sm-sens');
+      if (prdSmSens && data.postRunDip?.smartWalletDipSensitivity) {
+        prdSmSens.value = data.postRunDip.smartWalletDipSensitivity;
+      }
+      const prdSmBoost = document.getElementById('prd-sm-boost');
+      if (prdSmBoost && data.postRunDip?.smartWalletDipBoostPoints != null) {
+        prdSmBoost.value = data.postRunDip.smartWalletDipBoostPoints;
+      }
+      const prdClearVol = document.getElementById('prd-clear-vol');
+      if (prdClearVol) prdClearVol.checked = data.postRunDip?.requireClearVolumeDryUp === true;
+      const prdFlexVol = document.getElementById('prd-flex-vol');
+      if (prdFlexVol) prdFlexVol.checked = data.postRunDip?.flexibleVolumeConfirmation === true;
+      const prdReqSession = document.getElementById('prd-req-session');
+      if (prdReqSession) prdReqSession.checked = data.postRunDip?.requirePreferredSession === true;
+      const prdZone = document.getElementById('prd-zone-break');
+      if (prdZone) prdZone.checked = data.postRunDip?.invalidateOnZoneBreak !== false;
+      const prdZoneVol = document.getElementById('prd-zone-vol');
+      if (prdZoneVol) prdZoneVol.checked = data.postRunDip?.invalidateRequireVolume !== false;
+      const prdHard = document.getElementById('prd-hard-require');
+      if (prdHard) prdHard.checked = data.postRunDip?.hardRequireSetup === true;
+      const tlSens = document.getElementById('tl-sensitivity');
+      if (tlSens && data.technicalLevels?.sensitivity) tlSens.value = data.technicalLevels.sensitivity;
+      const tlHours = document.getElementById('tl-lookback-hours');
+      if (tlHours && data.technicalLevels?.lookbackHours != null) tlHours.value = data.technicalLevels.lookbackHours;
+      const tlHMin = document.getElementById('tl-lookback-min');
+      if (tlHMin && data.technicalLevels?.lookbackHoursMin != null) tlHMin.value = data.technicalLevels.lookbackHoursMin;
+      const tlHMax = document.getElementById('tl-lookback-max');
+      if (tlHMax && data.technicalLevels?.lookbackHoursMax != null) tlHMax.value = data.technicalLevels.lookbackHoursMax;
+      const tlNear = document.getElementById('tl-near-pct');
+      if (tlNear && data.technicalLevels?.nearPct != null) tlNear.value = data.technicalLevels.nearPct;
+      const tlImpulse = document.getElementById('tl-min-impulse');
+      if (tlImpulse && data.technicalLevels?.minImpulsePct != null) tlImpulse.value = data.technicalLevels.minImpulsePct;
+      const tlSrH = document.getElementById('tl-sr-lookback-hours');
+      if (tlSrH && data.technicalLevels?.srLookbackHours != null) tlSrH.value = data.technicalLevels.srLookbackHours;
+      const tlSrMin = document.getElementById('tl-sr-lookback-min');
+      if (tlSrMin && data.technicalLevels?.srLookbackHoursMin != null) tlSrMin.value = data.technicalLevels.srLookbackHoursMin;
+      const tlSrMax = document.getElementById('tl-sr-lookback-max');
+      if (tlSrMax && data.technicalLevels?.srLookbackHoursMax != null) tlSrMax.value = data.technicalLevels.srLookbackHoursMax;
+      const tlSwing = document.getElementById('tl-swing-strength');
+      if (tlSwing && data.technicalLevels?.swingStrength) tlSwing.value = data.technicalLevels.swingStrength;
+      const tlZone = document.getElementById('tl-zone-width');
+      if (tlZone) {
+        const zw = data.technicalLevels?.zoneWidthPct ?? data.technicalLevels?.clusterPct;
+        if (zw != null) tlZone.value = zw;
+      }
+      const tlPivot = document.getElementById('tl-pivot');
+      if (tlPivot && data.technicalLevels?.pivotWindow != null) tlPivot.value = data.technicalLevels.pivotWindow;
+      const tlTouches = document.getElementById('tl-min-touches');
+      if (tlTouches) {
+        const mt = data.technicalLevels?.minTouchesForValid ?? data.technicalLevels?.minTouchesForStrong;
+        if (mt != null) tlTouches.value = mt;
+      }
+      const tlFibs = document.getElementById('tl-priority-fibs');
+      if (tlFibs && Array.isArray(data.technicalLevels?.prioritizeFibLevels)) {
+        tlFibs.value = data.technicalLevels.prioritizeFibLevels.join(',');
+      }
+      const tlSec = document.getElementById('tl-secondary-fibs');
+      if (tlSec && Array.isArray(data.technicalLevels?.secondaryFibLevels)) {
+        tlSec.value = data.technicalLevels.secondaryFibLevels.join(',');
+      }
+      const tlRecent = document.getElementById('tl-prefer-recent');
+      if (tlRecent) tlRecent.checked = data.technicalLevels?.preferRecentImpulse !== false;
+      const tlFibZones = document.getElementById('tl-fib-zones');
+      if (tlFibZones) tlFibZones.checked = data.technicalLevels?.fibTreatAsZones !== false;
+      const tlRecentSup = document.getElementById('tl-prefer-recent-support');
+      if (tlRecentSup) tlRecentSup.checked = data.technicalLevels?.preferRecentSupport !== false;
+      const tlVol = document.getElementById('tl-favour-volume');
+      if (tlVol) tlVol.checked = data.technicalLevels?.favourVolumeReaction !== false;
+      const tlBreak = document.getElementById('tl-break-close');
+      if (tlBreak) tlBreak.checked = data.technicalLevels?.requireBreakCloseInvalidation !== false;
+      const tlHard = document.getElementById('tl-hard-filter');
+      if (tlHard) tlHard.checked = data.technicalLevels?.hardFilter === true;
       const suiteProfiles = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
       const suiteMax = document.getElementById('suite-max-pos');
       if (suiteMax) {
@@ -5045,7 +5515,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (window._refreshInFlight) return;
       window._refreshInFlight = true;
       try {
-      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized] = await Promise.all([
+      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm] = await Promise.all([
         fetchJSON('/api/status'),
         fetchJSON('/api/positions'),
         fetchJSON('/api/logs?limit=50'),
@@ -5055,6 +5525,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/api/migrations'),
         fetchJSON('/paper-status'),
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
+        fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
       ]);
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
@@ -5166,6 +5637,47 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (status.app.gitSha ? ' · ' + status.app.gitSha : '');
       }
 
+      const ms = status.marketSession;
+      const msBadge = document.getElementById('market-session-badge');
+      const msLabel = document.getElementById('market-session-label');
+      const msLive = document.getElementById('market-session-live');
+      if (ms && msLabel) {
+        const pref = ms.preferred ? ' ★' : '';
+        const gate = ms.filterEnabled
+          ? (ms.allowed ? '' : ' (blocked)')
+          : ' (filter off)';
+        msLabel.textContent = 'Session: ' + ms.label + pref;
+        if (msBadge) {
+          msBadge.title =
+            'UTC ' + String(ms.utcHour).padStart(2, '0') + ':00 · ' +
+            ms.label +
+            (ms.filterEnabled
+              ? ms.allowed
+                ? ' · entries allowed'
+                : ' · entries blocked'
+              : ' · session filter OFF') +
+            (ms.preferred ? ' · preferred' : '');
+          msBadge.style.color = !ms.filterEnabled
+            ? '#94a3b8'
+            : ms.allowed
+              ? ms.preferred
+                ? '#6ee7b7'
+                : '#e2e8f0'
+              : '#fca5a5';
+          msBadge.style.borderColor = !ms.filterEnabled
+            ? '#334155'
+            : ms.allowed
+              ? '#334155'
+              : '#7f1d1d';
+        }
+        if (msLive) {
+          msLive.textContent =
+            'Current session: ' + ms.label +
+            ' (UTC ' + String(ms.utcHour).padStart(2, '0') + ':00)' +
+            pref + gate;
+        }
+      }
+
       const tw = status.tradingWallet;
       const liveStatus = document.getElementById('live-wallet-status');
       if (liveStatus && tw) {
@@ -5198,10 +5710,64 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         status.monitor && status.monitor.dailyPnlSol != null
           ? Number(status.monitor.dailyPnlSol).toFixed(4)
           : '—';
+      const pf = status.portfolio || {};
+      const availSol = pf.availableBalanceSol != null ? Number(pf.availableBalanceSol)
+        : (status.balance != null ? Number(status.balance) : null);
+      const posValSol = pf.positionsValueSol != null ? Number(pf.positionsValueSol) : null;
+      const equitySol = pf.totalEquitySol != null ? Number(pf.totalEquitySol)
+        : (status.equity != null ? Number(status.equity) : null);
+      const unrealSol = pf.unrealizedPnlSol != null ? Number(pf.unrealizedPnlSol) : null;
+      const realizedSol = pf.realizedPnlSol != null ? Number(pf.realizedPnlSol)
+        : (status.stats && status.stats.netPnlSol != null ? Number(status.stats.netPnlSol) : null);
+      const openCnt = pf.openCount != null ? pf.openCount
+        : (status.stats && status.stats.openTrades != null ? status.stats.openTrades : null);
+
+      const fmtSolCompact = (n) => {
+        if (n == null || !Number.isFinite(n)) return '—';
+        const abs = Math.abs(n);
+        const dig = abs >= 100 ? 2 : abs >= 10 ? 3 : 4;
+        return n.toFixed(dig);
+      };
+      const colorPnL = (el, n) => {
+        if (!el) return;
+        if (n == null || !Number.isFinite(n)) { el.style.color = ''; return; }
+        el.style.color = n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--muted)';
+      };
+
+      const eqEl = document.getElementById('ov-equity');
+      if (eqEl) {
+        eqEl.innerHTML = (equitySol != null ? fmtSolCompact(equitySol) : '—') +
+          '<span class="ov-unit">SOL</span>';
+        colorPnL(eqEl, equitySol != null && pf.startingBalanceSol != null
+          ? equitySol - Number(pf.startingBalanceSol)
+          : null);
+        if (equitySol != null) eqEl.style.color = '#34d399';
+      }
+      const hdrEq = document.getElementById('header-equity');
+      if (hdrEq) hdrEq.textContent = equitySol != null ? fmtSolCompact(equitySol) : '—';
+
+      const availEl = document.getElementById('ov-available');
+      if (availEl) availEl.textContent = availSol != null ? fmtSolCompact(availSol) + ' SOL' : '—';
+      const posEl = document.getElementById('ov-positions-val');
+      if (posEl) posEl.textContent = posValSol != null ? fmtSolCompact(posValSol) + ' SOL' : '—';
+      if (document.getElementById('balance') && availSol != null) {
+        document.getElementById('balance').textContent = fmtSolCompact(availSol);
+      }
       const _ob = document.getElementById('ov-balance-mirror');
-      if (_ob) _ob.textContent = document.getElementById('balance').textContent;
+      if (_ob) _ob.textContent = availSol != null ? fmtSolCompact(availSol) : '—';
       const _od = document.getElementById('ov-daily-mirror');
-      if (_od) _od.textContent = document.getElementById('daily-pnl').textContent;
+      if (_od) {
+        const day = status.monitor && status.monitor.dailyPnlSol != null
+          ? Number(status.monitor.dailyPnlSol) : null;
+        _od.textContent = day != null
+          ? ((day >= 0 ? '+' : '') + fmtSolCompact(day) + ' SOL')
+          : '—';
+        colorPnL(_od, day);
+      }
+      const openCountEl = document.getElementById('open-count');
+      if (openCountEl && openCnt != null) {
+        openCountEl.textContent = String(openCnt);
+      }
 
       // RPC status
       const rpc = status.rpc || {};
@@ -5361,24 +5927,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
       const ur = sumOpenUnrealized(positions.open);
+      const pfUr = status.portfolio && status.portfolio.unrealizedPnlSol != null
+        ? Number(status.portfolio.unrealizedPnlSol)
+        : ur.sol;
       const urEl = document.getElementById('stat-unrealized');
       if (urEl) {
-        if (ur.openN === 0) {
-          urEl.textContent = fmtUnrealizedSolUsd(0, 0);
+        const openNUr = status.portfolio?.openCount ?? ur.openN;
+        const markedUr = status.portfolio?.markedCount ?? ur.marked;
+        if (openNUr === 0) {
+          urEl.textContent = '+0 SOL';
           urEl.style.color = 'var(--muted)';
-        } else if (ur.marked === 0) {
+        } else if (markedUr === 0 && !(status.portfolio && status.portfolio.unrealizedPnlSol != null)) {
           urEl.textContent = '—';
           urEl.style.color = 'var(--muted)';
         } else {
-          urEl.textContent = fmtUnrealizedSolUsd(ur.sol, ur.usd);
-          urEl.style.color = ur.sol > 0 ? 'var(--green)' : ur.sol < 0 ? 'var(--red)' : 'var(--muted)';
+          const sign = pfUr > 0 ? '+' : '';
+          urEl.textContent = sign + Number(pfUr).toFixed(4) + ' SOL';
+          urEl.style.color = pfUr > 0 ? 'var(--green)' : pfUr < 0 ? 'var(--red)' : 'var(--muted)';
         }
       }
       const urHint = document.getElementById('stat-unrealized-hint');
       if (urHint) {
-        urHint.textContent = ur.openN === 0
+        const openNUr = status.portfolio?.openCount ?? ur.openN;
+        const markedUr = status.portfolio?.markedCount ?? ur.marked;
+        urHint.textContent = openNUr === 0
           ? 'No open trades'
-          : ur.marked + '/' + ur.openN + ' marked';
+          : markedUr + '/' + openNUr + ' marked';
       }
       const ddEl = document.getElementById('stat-maxdd');
       const maxDd = s.maxDrawdownPct ?? 0;
@@ -5399,11 +5973,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : tr.tradesLastHour + '/hr';
       }
       const pnlEl = document.getElementById('stat-pnl');
-      pnlEl.textContent = (s.netPnlSol ?? 0).toFixed(4);
-      pnlEl.style.color = (s.netPnlSol ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const realized = status.portfolio?.realizedPnlSol != null
+        ? Number(status.portfolio.realizedPnlSol)
+        : Number(s.netPnlSol ?? 0);
+      const rSign = realized > 0 ? '+' : '';
+      pnlEl.textContent = rSign + realized.toFixed(4) + ' SOL';
+      pnlEl.style.color = realized >= 0 ? 'var(--green)' : 'var(--red)';
       const retEl = document.getElementById('stat-return');
-      retEl.textContent = (s.returnPct ?? 0).toFixed(1) + '%';
-      retEl.style.color = (s.returnPct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)';
+      const retPct = status.portfolio?.returnPct != null
+        ? Number(status.portfolio.returnPct)
+        : Number(s.returnPct ?? 0);
+      if (retEl) {
+        retEl.textContent = retPct.toFixed(1) + '%';
+        retEl.style.color = retPct >= 0 ? 'var(--green)' : 'var(--red)';
+      }
       const migrationsHtml =
         (migrations.recent || []).length === 0
           ? '<div style="color:var(--muted)">No recent migrations detected — listening for Pump.fun graduation…</div>'
@@ -5544,6 +6127,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const confHard = document.getElementById('confirmationHardFilter');
         if (confHard) {
           confHard.checked = cfg.filters.confirmationHardFilter === true;
+        }
+        for (const [id, key] of [
+          ['marketSessionAllowAsia', 'marketSessionAllowAsia'],
+          ['marketSessionAllowEurope', 'marketSessionAllowEurope'],
+          ['marketSessionAllowUs', 'marketSessionAllowUs'],
+          ['marketSessionAllowOverlap', 'marketSessionAllowOverlap'],
+          ['marketSessionAllowOffHours', 'marketSessionAllowOffHours'],
+        ]) {
+          const el = document.getElementById(id);
+          if (el) el.checked = cfg.filters[key] === true || (key !== 'marketSessionAllowOffHours' && cfg.filters[key] !== false);
+        }
+        const sessPref = document.getElementById('marketSessionPreferred');
+        if (sessPref && Array.isArray(cfg.filters.marketSessionPreferred)) {
+          sessPref.value = cfg.filters.marketSessionPreferred.join(',');
+        }
+        const sessBoost = document.getElementById('marketSessionPreferBoostPoints');
+        if (sessBoost && cfg.filters.marketSessionPreferBoostPoints != null) {
+          sessBoost.value = cfg.filters.marketSessionPreferBoostPoints;
         }
         if (cfg.strategy.migrationSizeMultiplier != null) {
           document.getElementById('migrationSizeMultiplier').value = cfg.strategy.migrationSizeMultiplier;
@@ -5797,6 +6398,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               (p.convictionScore != null
                 ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
                 : '') +
+              (p.technicalLevels && p.technicalLevels.summary
+                ? '<div class="mint" title="Fib + support/resistance">' +
+                  (p.technicalLevels.nearKeyFib || p.technicalLevels.nearSupport
+                    ? '<strong style="color:var(--green)">◎ ' + p.technicalLevels.summary + '</strong>'
+                    : '◎ ' + p.technicalLevels.summary) +
+                  '</div>'
+                : '') +
               (be && (be.liquidityUsd != null || be.volume24hUsd != null)
                 ? '<div class="mint">BE liq $' +
                   (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
@@ -5817,7 +6425,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 : '')
             : (p.convictionScore != null
               ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
-              : '');
+              : '') +
+              (p.technicalLevels && p.technicalLevels.summary
+                ? '<div class="mint">◎ ' + p.technicalLevels.summary + '</div>'
+                : '');
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
@@ -6006,6 +6617,45 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <td class="mint">\${fmtTimeAgoCell(s.timestamp)}</td>
             </tr>\`).join('');
       }
+
+      const prdSmStatus = document.getElementById('prd-sm-status');
+      const prdSmTbody = document.querySelector('#prd-sm-table tbody');
+      const dipSmCfg = (dipSm && dipSm.config) || {};
+      const dipSmEvents = (dipSm && dipSm.events) || [];
+      if (prdSmStatus) {
+        prdSmStatus.textContent =
+          (dipSmCfg.enabled ? 'Post-Run Dip ON' : 'Post-Run Dip OFF') +
+          ' · SM sens ' + (dipSmCfg.sensitivity || 'medium') +
+          ' · boost ≤' + (dipSmCfg.boostPoints != null ? dipSmCfg.boostPoints : 8) +
+          (dipSmCfg.hardRequireSmartMoneyInConservative ? ' · Conservative hard-require' : '') +
+          (dipSmCfg.requireSmartMoney ? ' · require SM' : '') +
+          ' · ' + dipSmEvents.length + ' recent';
+      }
+      if (prdSmTbody) {
+        prdSmTbody.innerHTML = dipSmEvents.length === 0
+          ? '<tr><td colspan="9" class="text-slate-500">No dip smart-wallet events yet — enable Post-Run Dip</td></tr>'
+          : dipSmEvents.map(e => {
+            const outcomeColor =
+              e.outcome === 'skip' || e.outcome === 'reject'
+                ? 'var(--muted)'
+                : e.influenced
+                  ? 'var(--green)'
+                  : 'var(--accent,#60a5fa)';
+            return \`
+            <tr>
+              <td>\${escHtml(e.symbol || '—')}</td>
+              <td style="color:\${outcomeColor};font-weight:600">\${escHtml(e.outcome || '—')}\${e.influenced ? ' · SM' : ''}</td>
+              <td title="\${escHtml(e.detail || '')}">\${e.dipSmScore != null ? e.dipSmScore : '—'}\${e.dipSmStrong ? ' ★' : e.dipSmActive ? '' : ''}</td>
+              <td>\${e.hqNewBuys != null ? e.hqNewBuys : '—'}</td>
+              <td>\${e.buybacks != null ? e.buybacks : '—'}</td>
+              <td>\${e.clusterNearLevel ? 'yes' : '—'}</td>
+              <td>\${escHtml(e.netFlow || '—')}</td>
+              <td class="mint" title="\${escHtml(e.logLine || e.detail || '')}">\${escHtml((e.detail || '').slice(0, 72))}</td>
+              <td class="mint">\${fmtTimeAgoCell(e.timestamp)}</td>
+            </tr>\`;
+          }).join('');
+      }
+
       ensurePosHoldTicker();
       tickOpenPositionHolds();
 
@@ -6454,6 +7104,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         confirmationBoostPoints: document.getElementById('confirmationBoostPoints')
           ? Number(document.getElementById('confirmationBoostPoints').value)
           : 10,
+        marketSessionAllowAsia: document.getElementById('marketSessionAllowAsia')
+          ? document.getElementById('marketSessionAllowAsia').checked
+          : true,
+        marketSessionAllowEurope: document.getElementById('marketSessionAllowEurope')
+          ? document.getElementById('marketSessionAllowEurope').checked
+          : true,
+        marketSessionAllowUs: document.getElementById('marketSessionAllowUs')
+          ? document.getElementById('marketSessionAllowUs').checked
+          : true,
+        marketSessionAllowOverlap: document.getElementById('marketSessionAllowOverlap')
+          ? document.getElementById('marketSessionAllowOverlap').checked
+          : true,
+        marketSessionAllowOffHours: document.getElementById('marketSessionAllowOffHours')
+          ? document.getElementById('marketSessionAllowOffHours').checked
+          : false,
+        marketSessionPreferred: document.getElementById('marketSessionPreferred')
+          ? document.getElementById('marketSessionPreferred').value
+          : 'us,europe_us,europe',
+        marketSessionPreferBoostPoints: document.getElementById('marketSessionPreferBoostPoints')
+          ? Number(document.getElementById('marketSessionPreferBoostPoints').value)
+          : 3,
         buyPumpFunOnly: document.getElementById('buyPumpFunOnly')
           ? document.getElementById('buyPumpFunOnly').checked
           : true,
@@ -7791,6 +8462,205 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       refresh();
     }
 
+    async function applyPostRunDipProfile(profile) {
+      const p =
+        profile === 'conservative'
+          ? 'conservative'
+          : profile === 'aggressive'
+            ? 'aggressive'
+            : 'standard';
+      const label =
+        p === 'conservative'
+          ? 'Conservative Post-Run Dip'
+          : p === 'aggressive'
+            ? 'Aggressive Post-Run Dip'
+            : 'Standard (Recommended)';
+      const detail =
+        p === 'conservative'
+          ? 'Higher quality, fewer trades.\\n\\n' +
+            '· Min run ≥+120%\\n' +
+            '· Age 8–18h\\n' +
+            '· Fib only 0.5 / 0.618 (±1.5–2%)\\n' +
+            '· Liq ≥$12k · Holders ≥80\\n' +
+            '· Clear volume dry-up then return\\n' +
+            '· Smart money strongly preferred\\n' +
+            '· Peak US / Europe–US session required\\n' +
+            '· Faster zone-break invalidation\\n' +
+            '· Higher qualify score (≥72)\\n\\n' +
+            'Enables Post-Run Dip and aligns preferred sessions to US+overlaps.'
+          : p === 'aggressive'
+            ? 'More opportunities, looser thresholds.\\n\\n' +
+              '· Min run +60–100%\\n' +
+              '· Age up to 24–36h (window 6–36h)\\n' +
+              '· Fib 0.382 / 0.5 / 0.618 (±3–4%)\\n' +
+              '· Liq ≥$6.5k · Holders ≥40\\n' +
+              '· Flexible volume confirmation\\n' +
+              '· Smart money optional\\n' +
+              '· Wider sessions (Asia/Europe/US)\\n' +
+              '· More patient dip watch / hold\\n' +
+              '· Lower qualify score (≥45)\\n\\n' +
+              'Enables Post-Run Dip and widens preferred sessions.'
+            : 'Balanced Post-Run Dip defaults.\\n\\n' +
+              '· Run +80–150% · Age 12–24h\\n' +
+              '· Fib 0.5/0.618 ±2.5% · Liq ≥$10k · Holders ≥60\\n' +
+              '· Vol↓then↑ · SM preferred · Soft session prefer\\n\\n' +
+              'Enables Post-Run Dip.';
+      if (!confirm('Apply ' + label + '?\\n\\n' + detail)) return;
+      try {
+        await fetchJSON('/api/short-term/post_run_dip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile: p, enabled: true }),
+        });
+        window._cfgLoaded = false;
+        await refresh();
+        alert(label + ' applied');
+      } catch (err) {
+        alert('Apply failed: ' + (err.message || String(err)));
+      }
+    }
+
+    async function savePostRunDipConfig(silent) {
+      let sl = Number(document.getElementById('prd-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      const sessionsRaw = document.getElementById('prd-sessions')?.value || 'us,europe_us';
+      const preferredSessions = String(sessionsRaw)
+        .split(',')
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      const fibsRaw = document.getElementById('prd-fibs')?.value || '0.5,0.618';
+      const preferredFibLevels = String(fibsRaw)
+        .split(',')
+        .map((s) => Number(String(s).trim()))
+        .filter((n) => Number.isFinite(n));
+      await fetchJSON('/api/short-term/post_run_dip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sensitivity: document.getElementById('prd-sensitivity')?.value || 'medium',
+          timeLimitMinutes: Number(document.getElementById('prd-time-minutes')?.value) || 90,
+          setupWatchMinutes: Number(document.getElementById('prd-setup-watch')?.value) || 60,
+          takeProfitPct: Number(document.getElementById('prd-take-profit')?.value),
+          stopLossPct: sl,
+          minRunPct: Number(document.getElementById('prd-min-run')?.value) || 80,
+          maxRunPct: Number(document.getElementById('prd-max-run')?.value) || 150,
+          minDipFromPeakPct: Number(document.getElementById('prd-min-dip')?.value),
+          maxDipFromPeakPct: Number(document.getElementById('prd-max-dip')?.value),
+          minTokenAgeHours: Number(document.getElementById('prd-min-age')?.value) || 12,
+          maxTokenAgeHours: Number(document.getElementById('prd-max-age')?.value) || 24,
+          nearTechnicalPct: Number(document.getElementById('prd-near-pct')?.value) || 2.5,
+          minLiquidityUsd: Number(document.getElementById('prd-min-liq')?.value) || 10000,
+          minHolders: Number(document.getElementById('prd-min-holders')?.value) || 60,
+          minVolumeUsd: Number(document.getElementById('prd-min-vol')?.value) || 5000,
+          boostPoints: Number(document.getElementById('prd-boost')?.value) || 12,
+          boostPointsMax: 20,
+          minQualifyScore: Number(document.getElementById('prd-min-score')?.value) || 55,
+          preferredFibLevels: preferredFibLevels.length
+            ? preferredFibLevels
+            : [0.5, 0.618],
+          preferredSessions,
+          preferNearTechnicals: document.getElementById('prd-prefer-tech')
+            ? document.getElementById('prd-prefer-tech').checked
+            : true,
+          requireNearTechnicals: document.getElementById('prd-require-tech')
+            ? document.getElementById('prd-require-tech').checked
+            : false,
+          preferSmartMoney: document.getElementById('prd-prefer-sm')
+            ? document.getElementById('prd-prefer-sm').checked
+            : false,
+          stronglyPreferSmartMoney: document.getElementById('prd-strong-sm')
+            ? document.getElementById('prd-strong-sm').checked
+            : false,
+          requireSmartMoney: document.getElementById('prd-require-sm')
+            ? document.getElementById('prd-require-sm').checked
+            : false,
+          hardRequireSmartMoneyInConservative: document.getElementById('prd-sm-hard-cons')
+            ? document.getElementById('prd-sm-hard-cons').checked
+            : false,
+          smartWalletDipSensitivity: document.getElementById('prd-sm-sens')?.value || 'medium',
+          smartWalletDipBoostPoints: Number(document.getElementById('prd-sm-boost')?.value) || 8,
+          requireClearVolumeDryUp: document.getElementById('prd-clear-vol')
+            ? document.getElementById('prd-clear-vol').checked
+            : false,
+          flexibleVolumeConfirmation: document.getElementById('prd-flex-vol')
+            ? document.getElementById('prd-flex-vol').checked
+            : false,
+          requirePreferredSession: document.getElementById('prd-req-session')
+            ? document.getElementById('prd-req-session').checked
+            : false,
+          invalidateOnZoneBreak: document.getElementById('prd-zone-break')
+            ? document.getElementById('prd-zone-break').checked
+            : true,
+          invalidateRequireVolume: document.getElementById('prd-zone-vol')
+            ? document.getElementById('prd-zone-vol').checked
+            : true,
+          hardRequireSetup: document.getElementById('prd-hard-require')
+            ? document.getElementById('prd-hard-require').checked
+            : false,
+        }),
+      });
+      if (!silent) alert('Post-Run Dip settings saved');
+      refresh();
+    }
+
+    async function saveTechnicalLevelsConfig(silent) {
+      const fibRaw = document.getElementById('tl-priority-fibs')?.value || '0.5,0.618';
+      const secRaw = document.getElementById('tl-secondary-fibs')?.value || '0.382,0.786';
+      const prioritizeFibLevels = String(fibRaw)
+        .split(',')
+        .map((s) => Number(String(s).trim()))
+        .filter((n) => Number.isFinite(n));
+      const secondaryFibLevels = String(secRaw)
+        .split(',')
+        .map((s) => Number(String(s).trim()))
+        .filter((n) => Number.isFinite(n));
+      const zoneWidth = Number(document.getElementById('tl-zone-width')?.value) || 2;
+      const minTouches = Number(document.getElementById('tl-min-touches')?.value) || 2;
+      await fetchJSON('/api/config/technical-levels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sensitivity: document.getElementById('tl-sensitivity')?.value || 'medium',
+          lookbackHours: Number(document.getElementById('tl-lookback-hours')?.value) || 4,
+          lookbackHoursMin: Number(document.getElementById('tl-lookback-min')?.value) || 2,
+          lookbackHoursMax: Number(document.getElementById('tl-lookback-max')?.value) || 6,
+          pivotWindow: Number(document.getElementById('tl-pivot')?.value) || 2,
+          clusterPct: zoneWidth,
+          zoneWidthPct: zoneWidth,
+          nearPct: Number(document.getElementById('tl-near-pct')?.value) || 2,
+          minImpulsePct: Number(document.getElementById('tl-min-impulse')?.value) || 50,
+          minTouchesForValid: minTouches,
+          minTouchesForStrong: minTouches,
+          prioritizeFibLevels,
+          secondaryFibLevels,
+          preferRecentImpulse: document.getElementById('tl-prefer-recent')
+            ? document.getElementById('tl-prefer-recent').checked
+            : true,
+          fibTreatAsZones: document.getElementById('tl-fib-zones')
+            ? document.getElementById('tl-fib-zones').checked
+            : true,
+          srLookbackHours: Number(document.getElementById('tl-sr-lookback-hours')?.value) || 2,
+          srLookbackHoursMin: Number(document.getElementById('tl-sr-lookback-min')?.value) || 1,
+          srLookbackHoursMax: Number(document.getElementById('tl-sr-lookback-max')?.value) || 4,
+          swingStrength: document.getElementById('tl-swing-strength')?.value || 'medium',
+          preferRecentSupport: document.getElementById('tl-prefer-recent-support')
+            ? document.getElementById('tl-prefer-recent-support').checked
+            : true,
+          favourVolumeReaction: document.getElementById('tl-favour-volume')
+            ? document.getElementById('tl-favour-volume').checked
+            : true,
+          requireBreakCloseInvalidation: document.getElementById('tl-break-close')
+            ? document.getElementById('tl-break-close').checked
+            : true,
+          hardFilter: document.getElementById('tl-hard-filter')
+            ? document.getElementById('tl-hard-filter').checked
+            : false,
+        }),
+      });
+      if (!silent) alert('Technical Levels settings saved');
+      refresh();
+    }
+
     async function saveScalperSuiteSettings() {
       const status = document.getElementById('suite-settings-status');
       try {
@@ -7873,6 +8743,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           await savePostMigrationScalpConfig(true);
         } else if (key === 'reversal_scalp') {
           await saveReversalScalpConfig(true);
+        } else if (key === 'post_run_dip') {
+          await savePostRunDipConfig(true);
+        } else if (key === 'technical_levels') {
+          await saveTechnicalLevelsConfig(true);
         } else {
           await saveFilterConfig(true);
         }

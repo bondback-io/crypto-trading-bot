@@ -43,6 +43,8 @@ export interface PersistedBotSettings {
   momentumBurst?: Record<string, unknown>;
   postMigrationScalp?: Record<string, unknown>;
   reversalScalp?: Record<string, unknown>;
+  postRunDip?: Record<string, unknown>;
+  technicalLevels?: Record<string, unknown>;
   /** Strategies tab master toggles */
   strategyToggles?: Record<string, boolean>;
   strategyProfile?:

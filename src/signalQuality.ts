@@ -15,6 +15,7 @@
  * - Trending narrative soft boost (confirmation only; fail-open when unavailable)
  * - Volume spike hard filter + soft boost (fail-open when unavailable)
  * - Combined Volume+Sentiment+Narrative confirmation layer
+ * - Market session filter + Post-Run Dip / Rotation
  */
 
 import {
@@ -49,6 +50,15 @@ import {
   resolveConfirmationLayerForSignal,
   logConfirmationDecision,
 } from './confirmationLayer';
+import {
+  resolveMarketSessionForEntry,
+  logMarketSessionDecision,
+} from './marketSession';
+import {
+  resolvePostRunDipForSignal,
+  logPostRunDipDecision,
+} from './postRunDip';
+import { resolveTechnicalLevelsForSignal } from './technicalLevels';
 
 export interface ConvictionBreakdown {
   wallets: number;
@@ -67,6 +77,12 @@ export interface ConvictionBreakdown {
   volumeSpike: number;
   /** Combined Volume+Sentiment+Narrative confirmation boost (≥ 0) */
   confirmation: number;
+  /** Market session preference boost (≥ 0) */
+  session: number;
+  /** Post-run dip / rotation boost (≥ 0) */
+  postRunDip: number;
+  /** Fib / S/R technical levels boost (≥ 0) */
+  technicals: number;
 }
 
 export interface ConvictionVerdict {
@@ -164,6 +180,9 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     b.volumeSpike !== 0 ? ` volSpike=+${b.volumeSpike}` : '';
   const confirmation =
     b.confirmation !== 0 ? ` confirm=+${b.confirmation}` : '';
+  const session = b.session !== 0 ? ` session=+${b.session}` : '';
+  const postRunDip = b.postRunDip !== 0 ? ` postDip=+${b.postRunDip}` : '';
+  const technicals = b.technicals !== 0 ? ` tech=+${b.technicals}` : '';
   return (
     `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
     `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
@@ -171,7 +190,10 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     social +
     narrative +
     volumeSpike +
-    confirmation
+    confirmation +
+    session +
+    postRunDip +
+    technicals
   );
 }
 
@@ -201,6 +223,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     narrative: 0,
     volumeSpike: 0,
     confirmation: 0,
+    session: 0,
+    postRunDip: 0,
+    technicals: 0,
   };
 
   const walletCount = signal.wallets.length;
@@ -496,6 +521,120 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     }
   }
 
+  // --- Market session filter ---
+  let sessionSkip = false;
+  let sessionSkipReason: string | undefined;
+  const sessionVerdict = resolveMarketSessionForEntry(
+    signal.timestamp || Date.now()
+  );
+  if (sessionVerdict) {
+    if (sessionVerdict.convictionDelta > 0) {
+      breakdown.session = sessionVerdict.convictionDelta;
+      reasons.push(
+        `session prefer +${sessionVerdict.convictionDelta} (${sessionVerdict.snapshot.label})`
+      );
+      logMarketSessionDecision(
+        signal.symbol || 'token',
+        sessionVerdict,
+        'boost'
+      );
+    }
+    if (sessionVerdict.skip) {
+      sessionSkip = true;
+      sessionSkipReason = sessionVerdict.skipReason;
+      reasons.push(sessionVerdict.skipReason || 'market session blocked');
+      logMarketSessionDecision(
+        signal.symbol || 'token',
+        sessionVerdict,
+        'skip'
+      );
+    }
+  }
+
+  // --- Post-Run Dip / Rotation ---
+  let postRunDipSkip = false;
+  let postRunDipSkipReason: string | undefined;
+  const postRunDipVerdict = resolvePostRunDipForSignal({
+    symbol: signal.symbol,
+    mint: signal.mint,
+    isMigration: signal.isMigration,
+    nearMigration: signal.nearMigration,
+    earlyBuy: signal.earlyBuy,
+    wallets: signal.wallets,
+    walletNames: signal.walletNames,
+    dropFromPeakPct: (signal as { dropFromPeakPct?: number }).dropFromPeakPct,
+    signalAgeMinutes: signal.signalAgeMinutes,
+    tokenAgeHours: signal.tokenAgeHours,
+    metrics: signal.metrics ?? null,
+    birdeye: signal.birdeye ?? null,
+    candles: signal.candles,
+    nowMs: signal.timestamp,
+  });
+  if (postRunDipVerdict) {
+    if (postRunDipVerdict.convictionDelta > 0) {
+      breakdown.postRunDip = postRunDipVerdict.convictionDelta;
+      reasons.push(
+        `post-run dip +${postRunDipVerdict.convictionDelta} (score ${postRunDipVerdict.report.score})`
+      );
+      if (postRunDipVerdict.smartWalletInfluenced) {
+        reasons.push(
+          `dip SM confirm +${postRunDipVerdict.report.dipSmartWallet.score}` +
+            (postRunDipVerdict.report.dipSmartWallet.strong ? ' strong' : '')
+        );
+      }
+      logPostRunDipDecision(
+        signal.symbol || 'token',
+        postRunDipVerdict,
+        'boost'
+      );
+    }
+    if (postRunDipVerdict.skip) {
+      postRunDipSkip = true;
+      postRunDipSkipReason = postRunDipVerdict.skipReason;
+      reasons.push(postRunDipSkipReason || 'post-run dip skip');
+      logPostRunDipDecision(
+        signal.symbol || 'token',
+        postRunDipVerdict,
+        'skip'
+      );
+    } else if (!postRunDipVerdict.report.qualifies) {
+      logPostRunDipDecision(
+        signal.symbol || 'token',
+        postRunDipVerdict,
+        'reject'
+      );
+    }
+  }
+
+  // --- Technical Levels (Fib + S/R) ---
+  let technicalSkip = false;
+  let technicalSkipReason: string | undefined;
+  const technicalVerdict = resolveTechnicalLevelsForSignal({
+    mint: signal.mint,
+    symbol: signal.symbol,
+    priceUsd: (signal.metrics as { priceUsd?: number | null } | undefined)
+      ?.priceUsd,
+    priceSol: signal.priceSol ?? null,
+    priceChangeH1Pct: signal.metrics?.priceChangeH1Pct,
+    priceChange24hPct: signal.metrics?.priceChange24hPct,
+    dropFromPeakPct: (signal as { dropFromPeakPct?: number }).dropFromPeakPct,
+    candles: signal.candles,
+    nowMs: signal.timestamp,
+  });
+  if (technicalVerdict) {
+    if (technicalVerdict.convictionDelta > 0) {
+      breakdown.technicals = technicalVerdict.convictionDelta;
+      reasons.push(
+        `technicals +${technicalVerdict.convictionDelta} (${technicalVerdict.snapshot.summary})`
+      );
+    }
+    if (technicalVerdict.skip) {
+      technicalSkip = true;
+      technicalSkipReason = technicalVerdict.skipReason;
+      reasons.push(technicalVerdict.skipReason || 'technical levels skip');
+    }
+  }
+
   let score =
     breakdown.wallets +
     breakdown.curve +
@@ -508,14 +647,23 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.social +
     breakdown.narrative +
     breakdown.volumeSpike +
-    breakdown.confirmation;
+    breakdown.confirmation +
+    breakdown.session +
+    breakdown.postRunDip +
+    breakdown.technicals;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
   const breakdownLine = formatBreakdown(breakdown);
 
   if (!sel.enabled) {
     return {
-      pass: !socialSkip && !volumeSpikeSkip && !confirmationSkip,
+      pass:
+        !socialSkip &&
+        !volumeSpikeSkip &&
+        !confirmationSkip &&
+        !sessionSkip &&
+        !postRunDipSkip &&
+        !technicalSkip,
       score,
       minRequired: 0,
       reasons,
@@ -551,6 +699,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     socialSkip ||
     volumeSpikeSkip ||
     confirmationSkip ||
+    sessionSkip ||
+    postRunDipSkip ||
+    technicalSkip ||
     (requireHealthyCurve &&
       (curveHealth === 'dead' || curveHealth === 'stalled'));
 
@@ -561,6 +712,15 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     // already in reasons
   }
   if (confirmationSkip && confirmationSkipReason) {
+    // already in reasons
+  }
+  if (sessionSkip && sessionSkipReason) {
+    // already in reasons
+  }
+  if (postRunDipSkip && postRunDipSkipReason) {
+    // already in reasons
+  }
+  if (technicalSkip && technicalSkipReason) {
     // already in reasons
   }
 

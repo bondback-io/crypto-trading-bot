@@ -183,7 +183,8 @@ export interface BuyOptions {
     | 'micro_scalper'
     | 'momentum_burst'
     | 'post_migration_scalp'
-    | 'reversal_scalp';
+    | 'reversal_scalp'
+    | 'post_run_dip';
 }
 
 /**

@@ -12,6 +12,10 @@ import {
   DEFAULT_MOMENTUM_BURST,
   DEFAULT_POST_MIGRATION_SCALP,
   DEFAULT_REVERSAL_SCALP,
+  DEFAULT_POST_RUN_DIP,
+  CONSERVATIVE_POST_RUN_DIP,
+  AGGRESSIVE_POST_RUN_DIP,
+  POST_RUN_DIP_PROFILE_LABEL,
   getActiveScalpParamRanges,
   getScalperSuiteVariantLabel,
   isScalperSuiteProfile,
@@ -21,6 +25,8 @@ import {
   type MomentumBurstConfig,
   type PostMigrationScalpConfig,
   type ReversalScalpConfig,
+  type PostRunDipConfig,
+  type PostRunDipProfile,
 } from './config';
 
 export type ShortTermStrategyId =
@@ -28,7 +34,8 @@ export type ShortTermStrategyId =
   | 'micro_scalper'
   | 'momentum_burst'
   | 'post_migration_scalp'
-  | 'reversal_scalp';
+  | 'reversal_scalp'
+  | 'post_run_dip';
 
 export interface ShortTermStrategyDefinition {
   id: ShortTermStrategyId;
@@ -74,15 +81,34 @@ export const SHORT_TERM_STRATEGIES: readonly ShortTermStrategyDefinition[] = [
       'Optional selective wick snap-back. Timer 1–2.5 min (def 90s), TP 18–28% (def 22), SL 7–11% (def 9).',
     frequencyNote: 'Fewer trades · selective snap-back setups',
   },
+  {
+    id: 'post_run_dip',
+    label: 'Post-Run Dip / Rotation',
+    description:
+      'Higher-timeframe dip after a strong early run. Profiles: Standard, Conservative, or Aggressive Post-Run Dip. Prefers Fib levels / support. Exit: TP / SL (invalidation) / timer. Not an early sniper.',
+    frequencyNote: 'Fewer trades · multi-hour dip holds',
+  },
 ] as const;
 
-export type { QuickScalperConfig, MicroScalperConfig, MomentumBurstConfig, PostMigrationScalpConfig, ReversalScalpConfig };
+export type {
+  QuickScalperConfig,
+  MicroScalperConfig,
+  MomentumBurstConfig,
+  PostMigrationScalpConfig,
+  ReversalScalpConfig,
+  PostRunDipConfig,
+  PostRunDipProfile,
+};
 export {
   DEFAULT_QUICK_SCALPER,
   DEFAULT_MICRO_SCALPER,
   DEFAULT_MOMENTUM_BURST,
   DEFAULT_POST_MIGRATION_SCALP,
   DEFAULT_REVERSAL_SCALP,
+  DEFAULT_POST_RUN_DIP,
+  CONSERVATIVE_POST_RUN_DIP,
+  AGGRESSIVE_POST_RUN_DIP,
+  POST_RUN_DIP_PROFILE_LABEL,
 };
 
 export interface ShortTermExitView {
@@ -153,6 +179,7 @@ const LABEL: Record<ShortTermStrategyId, string> = {
   momentum_burst: 'Momentum Burst',
   post_migration_scalp: 'Post-Migration Scalp',
   reversal_scalp: 'Reversal Scalp',
+  post_run_dip: 'Post-Run Dip',
 };
 
 function clampTp(tp: number, fallback: number, range?: { min: number; max: number }): number {
@@ -286,6 +313,32 @@ export function getShortTermParams(id: ShortTermStrategyId): ShortTermParams {
             : DEFAULT_REVERSAL_SCALP.minConvictionScore,
       };
     }
+    case 'post_run_dip': {
+      const c = config.postRunDip ?? DEFAULT_POST_RUN_DIP;
+      let mins = Number(c.timeLimitMinutes);
+      if (!Number.isFinite(mins) || mins < 30) mins = DEFAULT_POST_RUN_DIP.timeLimitMinutes;
+      mins = Math.max(30, Math.min(240, Math.round(mins)));
+      const tp = Number(c.takeProfitPct);
+      const sl = Number(c.stopLossPct);
+      return {
+        id,
+        label: LABEL[id],
+        takeProfitPct: clampTp(
+          tp,
+          DEFAULT_POST_RUN_DIP.takeProfitPct,
+          { min: 15, max: 80 }
+        ),
+        stopLossPct: clampSl(
+          sl,
+          DEFAULT_POST_RUN_DIP.stopLossPct,
+          { min: 8, max: 30 }
+        ),
+        minVolumeUsd: Math.max(0, Number(c.minVolumeUsd) || DEFAULT_POST_RUN_DIP.minVolumeUsd),
+        minBuyPressureUsd: 0,
+        maxHoldMs: mins * 60_000,
+        minDropFromPeakPct: Number(c.minDipFromPeakPct) || DEFAULT_POST_RUN_DIP.minDipFromPeakPct,
+      };
+    }
     case 'quick_scalper':
     default: {
       const qs = config.quickScalper ?? DEFAULT_QUICK_SCALPER;
@@ -324,6 +377,8 @@ export function isShortTermStrategyActive(id: ShortTermStrategyId): boolean {
       return config.postMigrationScalp?.enabled === true || isToggleOn(id);
     case 'reversal_scalp':
       return config.reversalScalp?.enabled === true || isToggleOn(id);
+    case 'post_run_dip':
+      return config.postRunDip?.enabled === true || isToggleOn(id);
     default:
       return false;
   }
@@ -881,4 +936,242 @@ export function updateReversalScalpConfig(
   }
   if (options?.persist !== false) persistUserSettings();
   return { ...config.reversalScalp };
+}
+
+export function updatePostRunDipConfig(
+  partial: Partial<PostRunDipConfig>,
+  options?: { persist?: boolean }
+): PostRunDipConfig {
+  if (!config.postRunDip) {
+    config.postRunDip = { ...DEFAULT_POST_RUN_DIP };
+  }
+  // Applying a named profile replaces thresholds (keeps enabled state)
+  if (
+    partial.profile === 'standard' ||
+    partial.profile === 'conservative' ||
+    partial.profile === 'aggressive'
+  ) {
+    return applyPostRunDipProfile(partial.profile, {
+      persist: options?.persist,
+      enabled: partial.enabled,
+    });
+  }
+  if (partial.enabled !== undefined) {
+    config.postRunDip.enabled = Boolean(partial.enabled);
+    syncToggle('post_run_dip', config.postRunDip.enabled);
+    config.filters.enablePostRunDip = config.postRunDip.enabled;
+  }
+  if (
+    partial.sensitivity === 'low' ||
+    partial.sensitivity === 'medium' ||
+    partial.sensitivity === 'high'
+  ) {
+    config.postRunDip.sensitivity = partial.sensitivity;
+    config.filters.postRunDipSensitivity = partial.sensitivity;
+  }
+  if (partial.timeLimitMinutes !== undefined) {
+    const m = Number(partial.timeLimitMinutes);
+    if (Number.isFinite(m)) {
+      config.postRunDip.timeLimitMinutes = Math.max(30, Math.min(240, Math.round(m)));
+    }
+  }
+  if (partial.setupWatchMinutes !== undefined) {
+    const m = Number(partial.setupWatchMinutes);
+    if (Number.isFinite(m)) {
+      config.postRunDip.setupWatchMinutes = Math.max(15, Math.min(180, Math.round(m)));
+    }
+  }
+  if (partial.takeProfitPct !== undefined) {
+    const tp = Number(partial.takeProfitPct);
+    if (Number.isFinite(tp) && tp > 0) {
+      config.postRunDip.takeProfitPct = Math.min(80, Math.max(15, tp));
+    }
+  }
+  applySl(partial.stopLossPct, (n) => {
+    const abs = Math.min(30, Math.max(8, Math.abs(n)));
+    config.postRunDip.stopLossPct = -abs;
+  });
+  for (const key of [
+    'minRunPct',
+    'maxRunPct',
+    'minDipFromPeakPct',
+    'maxDipFromPeakPct',
+    'minTokenAgeHours',
+    'maxTokenAgeHours',
+    'minVolumeUsd',
+    'minLiquidityUsd',
+    'minHolders',
+    'boostPoints',
+    'boostPointsMax',
+    'nearTechnicalPct',
+    'minQualifyScore',
+  ] as const) {
+    if (partial[key] !== undefined) {
+      const n = Number(partial[key]);
+      if (!Number.isFinite(n)) continue;
+      if (key === 'minRunPct')
+        config.postRunDip.minRunPct = Math.max(20, Math.min(500, n));
+      else if (key === 'maxRunPct')
+        config.postRunDip.maxRunPct = Math.max(50, Math.min(1000, n));
+      else if (key === 'minDipFromPeakPct')
+        config.postRunDip.minDipFromPeakPct = Math.max(5, Math.min(80, n));
+      else if (key === 'maxDipFromPeakPct')
+        config.postRunDip.maxDipFromPeakPct = Math.max(20, Math.min(90, n));
+      else if (key === 'minTokenAgeHours')
+        config.postRunDip.minTokenAgeHours = Math.max(1, Math.min(72, n));
+      else if (key === 'maxTokenAgeHours')
+        config.postRunDip.maxTokenAgeHours = Math.max(6, Math.min(120, n));
+      else if (key === 'minVolumeUsd')
+        config.postRunDip.minVolumeUsd = Math.max(0, n);
+      else if (key === 'minLiquidityUsd')
+        config.postRunDip.minLiquidityUsd = Math.max(0, Math.min(250_000, n));
+      else if (key === 'minHolders')
+        config.postRunDip.minHolders = Math.max(0, Math.min(5000, Math.round(n)));
+      else if (key === 'boostPoints')
+        config.postRunDip.boostPoints = Math.max(1, Math.min(20, Math.round(n)));
+      else if (key === 'boostPointsMax')
+        config.postRunDip.boostPointsMax = Math.max(10, Math.min(25, Math.round(n)));
+      else if (key === 'nearTechnicalPct')
+        config.postRunDip.nearTechnicalPct = Math.max(0.5, Math.min(8, n));
+      else if (key === 'minQualifyScore')
+        config.postRunDip.minQualifyScore = Math.max(40, Math.min(90, Math.round(n)));
+    }
+  }
+  if (partial.preferredFibLevels !== undefined) {
+    const raw = partial.preferredFibLevels;
+    const list = Array.isArray(raw)
+      ? raw.map(Number)
+      : String(raw)
+          .split(',')
+          .map((s) => Number(s.trim()));
+    config.postRunDip.preferredFibLevels = list.filter((n) => Number.isFinite(n));
+  }
+  if (partial.preferredSessions !== undefined) {
+    const raw = partial.preferredSessions;
+    const list = Array.isArray(raw)
+      ? raw.map(String)
+      : String(raw)
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+    config.postRunDip.preferredSessions = list;
+  }
+  if (partial.preferNearTechnicals !== undefined) {
+    config.postRunDip.preferNearTechnicals = Boolean(partial.preferNearTechnicals);
+  }
+  if (partial.requireNearTechnicals !== undefined) {
+    config.postRunDip.requireNearTechnicals = Boolean(
+      partial.requireNearTechnicals
+    );
+  }
+  if (partial.preferSmartMoney !== undefined) {
+    config.postRunDip.preferSmartMoney = Boolean(partial.preferSmartMoney);
+  }
+  if (partial.stronglyPreferSmartMoney !== undefined) {
+    config.postRunDip.stronglyPreferSmartMoney = Boolean(
+      partial.stronglyPreferSmartMoney
+    );
+  }
+  if (partial.requireSmartMoney !== undefined) {
+    config.postRunDip.requireSmartMoney = Boolean(partial.requireSmartMoney);
+  }
+  if (partial.hardRequireSetup !== undefined) {
+    config.postRunDip.hardRequireSetup = Boolean(partial.hardRequireSetup);
+  }
+  if (partial.invalidateOnZoneBreak !== undefined) {
+    config.postRunDip.invalidateOnZoneBreak = Boolean(
+      partial.invalidateOnZoneBreak
+    );
+  }
+  if (partial.invalidateRequireVolume !== undefined) {
+    config.postRunDip.invalidateRequireVolume = Boolean(
+      partial.invalidateRequireVolume
+    );
+  }
+  if (partial.requireClearVolumeDryUp !== undefined) {
+    config.postRunDip.requireClearVolumeDryUp = Boolean(
+      partial.requireClearVolumeDryUp
+    );
+  }
+  if (partial.flexibleVolumeConfirmation !== undefined) {
+    config.postRunDip.flexibleVolumeConfirmation = Boolean(
+      partial.flexibleVolumeConfirmation
+    );
+  }
+  if (partial.requirePreferredSession !== undefined) {
+    config.postRunDip.requirePreferredSession = Boolean(
+      partial.requirePreferredSession
+    );
+  }
+  if (
+    partial.smartWalletDipSensitivity === 'low' ||
+    partial.smartWalletDipSensitivity === 'medium' ||
+    partial.smartWalletDipSensitivity === 'high'
+  ) {
+    config.postRunDip.smartWalletDipSensitivity =
+      partial.smartWalletDipSensitivity;
+  }
+  if (partial.smartWalletDipBoostPoints !== undefined) {
+    const n = Number(partial.smartWalletDipBoostPoints);
+    if (Number.isFinite(n)) {
+      config.postRunDip.smartWalletDipBoostPoints = Math.max(
+        0,
+        Math.min(15, Math.round(n))
+      );
+    }
+  }
+  if (partial.hardRequireSmartMoneyInConservative !== undefined) {
+    config.postRunDip.hardRequireSmartMoneyInConservative = Boolean(
+      partial.hardRequireSmartMoneyInConservative
+    );
+  }
+  if (options?.persist !== false) persistUserSettings();
+  return { ...config.postRunDip };
+}
+
+/**
+ * Apply Standard, Conservative, or Aggressive Post-Run Dip profile thresholds.
+ * Enables the strategy unless `enabled: false` is passed.
+ */
+export function applyPostRunDipProfile(
+  profile: PostRunDipProfile,
+  options?: { persist?: boolean; enabled?: boolean }
+): PostRunDipConfig {
+  const base =
+    profile === 'conservative'
+      ? { ...CONSERVATIVE_POST_RUN_DIP }
+      : profile === 'aggressive'
+        ? { ...AGGRESSIVE_POST_RUN_DIP }
+        : { ...DEFAULT_POST_RUN_DIP };
+  const keepEnabled =
+    options?.enabled !== undefined ? Boolean(options.enabled) : true;
+  config.postRunDip = {
+    ...base,
+    enabled: keepEnabled,
+    profile,
+  };
+  syncToggle('post_run_dip', config.postRunDip.enabled);
+  config.filters.enablePostRunDip = config.postRunDip.enabled;
+  config.filters.postRunDipSensitivity = config.postRunDip.sensitivity;
+  // Align global session preference with profile
+  if (profile === 'conservative') {
+    config.filters.marketSessionPreferred = ['us', 'europe_us'];
+  } else if (profile === 'aggressive') {
+    config.filters.marketSessionPreferred = [
+      'asia',
+      'europe',
+      'us',
+      'asia_europe',
+      'europe_us',
+    ];
+    config.filters.marketSessionAllowAsia = true;
+    config.filters.marketSessionAllowEurope = true;
+    config.filters.marketSessionAllowUs = true;
+    config.filters.marketSessionAllowOverlap = true;
+  }
+  if (options?.persist !== false) persistUserSettings();
+  console.log(
+    `[post-run-dip] Applied profile: ${POST_RUN_DIP_PROFILE_LABEL[profile]}`
+  );
+  return { ...config.postRunDip };
 }

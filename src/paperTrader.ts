@@ -39,6 +39,8 @@ import {
   shortTermExitLogTag,
   type ShortTermStrategyId,
 } from './shortTermStrategies';
+import { shouldInvalidatePostRunDipPosition } from './postRunDip';
+import { recordPriceTick } from './technicalLevels';
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -341,6 +343,7 @@ export class PaperTrader {
       break;
     }
     this.priceCache.set(mint, mark);
+    recordPriceTick(mint, mark);
     if (acceptedMc != null) {
       this.marketCapCache.set(mint, acceptedMc);
     } else if (!sawOpen && candidateMc != null) {
@@ -398,6 +401,73 @@ export class PaperTrader {
 
   getBalance(): number {
     return this.balanceSol;
+  }
+
+  /**
+   * Portfolio breakdown for Overview:
+   * Available (cash) + Positions Value (marks) = Total Equity.
+   * Unrealized = marks − cost; Realized = sum of closed trade PnL.
+   *
+   * Paper / Live Sim: available = cash ledger (buy deducts, sell credits).
+   * Live: pass `availableOverrideSol` = on-chain wallet SOL so Available
+   * reflects funds not locked in tracked open positions' market value.
+   */
+  getPortfolioSummary(availableOverrideSol?: number | null): {
+    availableBalanceSol: number;
+    positionsValueSol: number;
+    positionsCostSol: number;
+    unrealizedPnlSol: number;
+    realizedPnlSol: number;
+    totalEquitySol: number;
+    openCount: number;
+    markedCount: number;
+    startingBalanceSol: number;
+    returnPct: number;
+  } {
+    let positionsCostSol = 0;
+    let positionsValueSol = 0;
+    let markedCount = 0;
+    for (const p of this.positions.values()) {
+      const cost = Number(p.costSol) || 0;
+      positionsCostSol += cost;
+      const px = this.priceCache.get(p.mint);
+      if (
+        px != null &&
+        Number.isFinite(px) &&
+        px > 0 &&
+        Number(p.amountTokens) > 0
+      ) {
+        positionsValueSol += Number(p.amountTokens) * px;
+        markedCount += 1;
+      } else {
+        // Unmarked: hold at cost so unrealized stays 0 until a mark arrives
+        positionsValueSol += cost;
+      }
+    }
+    const availableBalanceSol =
+      availableOverrideSol != null && Number.isFinite(Number(availableOverrideSol))
+        ? Math.max(0, Number(availableOverrideSol))
+        : this.balanceSol;
+    const unrealizedPnlSol = positionsValueSol - positionsCostSol;
+    const totalEquitySol = availableBalanceSol + positionsValueSol;
+    const realizedPnlSol = this.closedPositions.reduce(
+      (sum, p) => sum + (p.pnlSol ?? 0),
+      0
+    );
+    const start = this.startingBalanceSol;
+    return {
+      availableBalanceSol,
+      positionsValueSol,
+      positionsCostSol,
+      unrealizedPnlSol,
+      realizedPnlSol,
+      totalEquitySol,
+      openCount: this.positions.size,
+      markedCount,
+      startingBalanceSol: start,
+      returnPct:
+        start > 0 ? ((totalEquitySol - start) / start) * 100 : 0,
+    };
   }
 
   /** True if any open/partial position already holds this mint */
@@ -1232,6 +1302,30 @@ export class PaperTrader {
         slPct: position.scalpSlPct ?? position.stopLossPct,
         momentumFailDropPct: position.scalpMomentumFailDropPct,
       });
+      // Post-Run Dip: clear Fib/S zone break + volume invalidation
+      if (
+        scalpAction.type === 'none' &&
+        position.shortTermStrategyId === 'post_run_dip'
+      ) {
+        const inv = shouldInvalidatePostRunDipPosition({
+          mint: position.mint,
+          priceSol: markPrice,
+        });
+        if (inv.invalidate && inv.reason) {
+          const tag = 'SCALP_SIGNAL_FAIL';
+          console.log(
+            `[scalp] ${tag} strategy=post_run_dip ${label} — ${inv.reason}`
+          );
+          this.log('sell', `${label}: [${tag}|post_run_dip] ${inv.reason}`);
+          this.simulateSell(position.id, markPrice, inv.reason);
+          return {
+            kind: 'scalp_signal_fail',
+            reason: inv.reason,
+            markPnlPct,
+            stillOpen: this.positions.has(positionId),
+          };
+        }
+      }
       if (scalpAction.type === 'full') {
         const strat =
           position.shortTermStrategyId || 'quick_scalper';
@@ -1678,6 +1772,26 @@ export class PaperTrader {
           slPct: position.scalpSlPct ?? position.stopLossPct,
           momentumFailDropPct: position.scalpMomentumFailDropPct,
         });
+        if (
+          scalpAction.type === 'none' &&
+          position.shortTermStrategyId === 'post_run_dip'
+        ) {
+          const inv = shouldInvalidatePostRunDipPosition({
+            mint: position.mint,
+            priceSol: currentPrice,
+          });
+          if (inv.invalidate && inv.reason) {
+            console.log(
+              `[scalp] SCALP_SIGNAL_FAIL strategy=post_run_dip ${label} — ${inv.reason}`
+            );
+            this.log(
+              'sell',
+              `${label}: [SCALP_SIGNAL_FAIL|post_run_dip] ${inv.reason}`
+            );
+            await this.closePositionByRules(position, currentPrice, inv.reason);
+            continue;
+          }
+        }
         if (scalpAction.type === 'full') {
           const strat =
             position.shortTermStrategyId || 'quick_scalper';
@@ -2275,8 +2389,13 @@ export class PaperTrader {
       openCount: this.positions.size,
       balanceSol: this.balanceSol,
       startingBalanceSol: start,
-      returnPct: start > 0 ? ((this.balanceSol - start) / start) * 100 : 0,
+      equitySol: this.getEquitySol(),
+      returnPct: (() => {
+        const eq = this.getEquitySol();
+        return start > 0 ? ((eq - start) / start) * 100 : 0;
+      })(),
       mode: this.mode,
+      portfolio: this.getPortfolioSummary(),
     };
   }
 

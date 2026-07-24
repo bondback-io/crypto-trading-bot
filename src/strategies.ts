@@ -22,6 +22,7 @@ import {
   DEFAULT_MOMENTUM_BURST,
   DEFAULT_POST_MIGRATION_SCALP,
   DEFAULT_REVERSAL_SCALP,
+  DEFAULT_POST_RUN_DIP,
 } from './config';
 import { SHORT_TERM_STRATEGIES } from './shortTermStrategies';
 
@@ -62,6 +63,9 @@ export type StrategyKey =
   | 'trending_narrative_boost'
   | 'volume_spike_filter'
   | 'confirmation_layer'
+  | 'market_session_filter'
+  | 'post_run_dip'
+  | 'technical_levels'
   | 'quick_scalper'
   | 'micro_scalper'
   | 'momentum_burst'
@@ -528,6 +532,36 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     frequencyWhenOn: 'slightly_fewer',
   },
   {
+    key: 'market_session_filter',
+    name: 'Market Session Filter',
+    group: 'filters',
+    description:
+      'Allow or block entries by UTC session (Asia, Europe, US, overlaps). Preferred sessions get a soft conviction boost. Off-hours blocked by default when enabled.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'post_run_dip',
+    name: 'Post-Run Dip / Rotation Buy',
+    group: 'advanced',
+    description:
+      'Standard / Conservative / Aggressive profiles. Dip-phase smart wallet confirmation (HQ buys, buybacks, Fib cluster, net flow) boosts conviction; optional Conservative hard-require. Soft boost by default. Default OFF.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'technical_levels',
+    name: 'Technical Levels (Fib + S/R)',
+    group: 'filters',
+    description:
+      'Pump.fun defaults — Fib: 2–6h, recent ≥50% impulse, 0.5/0.618 (+0.382/0.786) as ±2% zones. S&R: 1–4h (max 6), medium swings, ≥2 touches, zone ±2%, recent strong supports, volume reaction, break+close invalidation. Soft boost; optional hard filter. Paper / Live Sim / Backtester. Fail-open with thin history.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
     key: 'mev_protection',
     name: 'MEV Protection',
     group: 'advanced',
@@ -757,6 +791,20 @@ export interface StrategyProfileKnobs {
     minBuyPressureUsd: number;
     minDropFromPeakPct: number;
     minConvictionScore: number;
+  };
+  postRunDip: {
+    enabled: boolean;
+    sensitivity: 'low' | 'medium' | 'high';
+    timeLimitMinutes: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minRunPct: number;
+    minDipFromPeakPct: number;
+    maxDipFromPeakPct: number;
+    preferNearTechnicals: boolean;
+    requireNearTechnicals: boolean;
+    hardRequireSetup: boolean;
+    boostPoints: number;
   };
 }
 
@@ -1049,6 +1097,10 @@ export function deriveStrategyTogglesFromConfig(): StrategyToggleMap {
     config.filters.enableTrendingNarrativeBoost === true;
   d.volume_spike_filter = config.filters.enableVolumeSpikeFilter === true;
   d.confirmation_layer = config.filters.enableConfirmationLayer === true;
+  d.market_session_filter =
+    config.filters.enableMarketSessionFilter === true;
+  d.post_run_dip = config.postRunDip?.enabled === true;
+  d.technical_levels = config.technicalLevels?.enabled === true;
   d.mev_protection = config.mev.enableMEVProtection === true;
   d.momentum_confirmation =
     config.filters.requireMomentumConfirmation === true;
@@ -1153,6 +1205,9 @@ export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
   trending_narrative_boost: false,
   volume_spike_filter: false,
   confirmation_layer: false,
+  market_session_filter: false,
+  post_run_dip: false,
+  technical_levels: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1196,6 +1251,9 @@ export const WIN_RATE_55_60_PRESET: StrategyToggleMap = {
   trending_narrative_boost: false,
   volume_spike_filter: false,
   confirmation_layer: false,
+  market_session_filter: false,
+  post_run_dip: false,
+  technical_levels: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1234,6 +1292,9 @@ export const BALANCED_PRESET: StrategyToggleMap = {
   trending_narrative_boost: false,
   volume_spike_filter: false,
   confirmation_layer: false,
+  market_session_filter: false,
+  post_run_dip: false,
+  technical_levels: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1272,6 +1333,9 @@ export const AGGRESSIVE_PRESET: StrategyToggleMap = {
   trending_narrative_boost: false,
   volume_spike_filter: false,
   confirmation_layer: false,
+  market_session_filter: false,
+  post_run_dip: false,
+  technical_levels: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1310,6 +1374,9 @@ export const QUICK_SCALPER_PRESET: StrategyToggleMap = {
   trending_narrative_boost: false,
   volume_spike_filter: false,
   confirmation_layer: false,
+  market_session_filter: false,
+  post_run_dip: false,
+  technical_levels: false,
   quick_scalper: true,
   micro_scalper: false,
   momentum_burst: false,
@@ -1888,6 +1955,34 @@ export function captureStrategyProfileKnobs(): StrategyProfileKnobs {
         config.reversalScalp?.minConvictionScore ??
         DEFAULT_REVERSAL_SCALP.minConvictionScore,
     },
+    postRunDip: {
+      enabled: config.postRunDip?.enabled === true,
+      sensitivity:
+        config.postRunDip?.sensitivity === 'low' ||
+        config.postRunDip?.sensitivity === 'high'
+          ? config.postRunDip.sensitivity
+          : 'medium',
+      timeLimitMinutes: Math.max(
+        30,
+        Math.min(240, Number(config.postRunDip?.timeLimitMinutes) || 90)
+      ),
+      takeProfitPct:
+        config.postRunDip?.takeProfitPct ?? DEFAULT_POST_RUN_DIP.takeProfitPct,
+      stopLossPct:
+        config.postRunDip?.stopLossPct ?? DEFAULT_POST_RUN_DIP.stopLossPct,
+      minRunPct: config.postRunDip?.minRunPct ?? DEFAULT_POST_RUN_DIP.minRunPct,
+      minDipFromPeakPct:
+        config.postRunDip?.minDipFromPeakPct ??
+        DEFAULT_POST_RUN_DIP.minDipFromPeakPct,
+      maxDipFromPeakPct:
+        config.postRunDip?.maxDipFromPeakPct ??
+        DEFAULT_POST_RUN_DIP.maxDipFromPeakPct,
+      preferNearTechnicals: config.postRunDip?.preferNearTechnicals !== false,
+      requireNearTechnicals: config.postRunDip?.requireNearTechnicals === true,
+      hardRequireSetup: config.postRunDip?.hardRequireSetup === true,
+      boostPoints:
+        config.postRunDip?.boostPoints ?? DEFAULT_POST_RUN_DIP.boostPoints,
+    },
   };
 }
 
@@ -1916,6 +2011,9 @@ function applyStrategyProfileKnobs(knobs: StrategyProfileKnobs): void {
   }
   if (knobs.reversalScalp) {
     Object.assign(config.reversalScalp, knobs.reversalScalp);
+  }
+  if (knobs.postRunDip) {
+    Object.assign(config.postRunDip, knobs.postRunDip);
   }
   // Never undercut absolute floors
   config.filters.minLiquidity = Math.max(
@@ -1993,6 +2091,10 @@ export function syncUnderlyingFlagsFromToggles(
     toggles.trending_narrative_boost;
   config.filters.enableVolumeSpikeFilter = toggles.volume_spike_filter;
   config.filters.enableConfirmationLayer = toggles.confirmation_layer;
+  config.filters.enableMarketSessionFilter = toggles.market_session_filter;
+  config.postRunDip.enabled = toggles.post_run_dip === true;
+  config.filters.enablePostRunDip = toggles.post_run_dip === true;
+  config.technicalLevels.enabled = toggles.technical_levels === true;
   config.mev.enableMEVProtection = toggles.mev_protection;
   config.filters.requireMomentumConfirmation =
     toggles.momentum_confirmation ||
@@ -2943,6 +3045,8 @@ export function getStrategiesStatus() {
     momentumBurst: { ...config.momentumBurst },
     postMigrationScalp: { ...config.postMigrationScalp },
     reversalScalp: { ...config.reversalScalp },
+    postRunDip: { ...config.postRunDip },
+    technicalLevels: { ...config.technicalLevels },
     shortTermStrategies: SHORT_TERM_STRATEGIES.map((s) => ({
       id: s.id,
       label: s.label,

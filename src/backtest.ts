@@ -33,6 +33,10 @@ import {
 } from './signalQuality';
 import type { TradeSignal } from './monitor';
 import {
+  clearPriceHistory,
+  seedPriceHistoryFromCandles,
+} from './technicalLevels';
+import {
   atomicWriteJson,
   dataFile,
   ensureDataDir,
@@ -60,7 +64,9 @@ import {
   isAnyShortTermScalperActive,
   resolveShortTermEntry,
   seedShortTermPosition,
+  type ShortTermStrategyId,
 } from './shortTermStrategies';
+import { resolvePostRunDipForSignal } from './postRunDip';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -1273,6 +1279,53 @@ function buildBacktestSignal(
       flags: [],
       source: event.source === 'birdeye' ? 'birdeye' : 'none',
     },
+    metrics: {
+      liquidityUsd: event.liquidityUsd ?? null,
+      marketCapUsd: event.marketCapUsd ?? null,
+      volume24hUsd: event.volumeUsd ?? null,
+      volumeH1Usd: event.volumeUsd != null ? event.volumeUsd / 18 : null,
+      volumeM5Usd: event.volumeUsd != null ? event.volumeUsd / 200 : null,
+      recentBuyVolumeUsd: null,
+      txnsH1: null,
+      buysH1: null,
+      sellsH1: null,
+      buySellRatio: null,
+      priceUsd: null,
+      priceChangeH1Pct:
+        event.priceChangePct != null
+          ? Math.min(event.priceChangePct, event.priceChangePct * 0.2)
+          : null,
+      priceChange24hPct: event.priceChangePct ?? null,
+      holderCountEstimate: null,
+      topHolderPct: null,
+      top10HoldPct: null,
+      devHoldPct: null,
+      devActiveRecently: false,
+      mintAuthority: null,
+      source: event.source,
+    },
+    tokenAgeHours: (() => {
+      // Use candle timeline (not wall clock) so BT age matches sim
+      const idx = Math.min(
+        event.candles.length - 1,
+        Math.max(8, Math.floor(event.candles.length * 0.35))
+      );
+      const at = event.candles[idx]?.time ?? event.launchedAt;
+      return Math.max(0, (at - event.launchedAt) / 3_600_000);
+    })(),
+    candles: event.candles,
+    priceSol: event.entryPriceSol ?? event.candles[0]?.priceSol ?? null,
+    dropFromPeakPct: (() => {
+      const path = event.candles;
+      if (!path?.length) return undefined;
+      const last = path[Math.min(path.length - 1, 8)]?.priceSol ?? event.entryPriceSol;
+      const peak = path
+        .slice(0, Math.min(path.length, 24))
+        .reduce((m, c) => Math.max(m, c.priceSol || 0), 0);
+      if (!(peak > 0) || !(last > 0)) return undefined;
+      const drop = ((peak - last) / peak) * 100;
+      return drop > 1 ? drop : undefined;
+    })(),
   };
 }
 
@@ -1472,16 +1525,53 @@ function replayLaunch(
         ? ((peakBefore - botEntryPriceSol) / peakBefore) * 100
         : undefined;
 
-    const scalpResolved = isAnyShortTermScalperActive()
-      ? resolveShortTermEntry({
+    const tokenAgeHours = Math.max(
+      0,
+      (openedAt - event.launchedAt) / 3_600_000
+    );
+
+    let scalpResolved: { id: ShortTermStrategyId; reason: string } | null = null;
+    if (isStrategyEnabled('post_run_dip') || config.postRunDip?.enabled) {
+      const dip = resolvePostRunDipForSignal({
+        symbol: event.symbol,
+        mint: event.mint,
+        isMigration: event.migrated,
+        wallets: sourceNames,
+        walletNames: sourceNames,
+        convictionScore,
+        dropFromPeakPct,
+        tokenAgeHours,
+        metrics: {
           volume24hUsd: event.volumeUsd,
-          recentVolumeUsd: event.volumeUsd,
-          isSmartMoney: true,
-          isMigration: event.migrated === true,
-          convictionScore,
-          dropFromPeakPct,
-        })
-      : null;
+          volumeH1Usd: event.volumeUsd != null ? event.volumeUsd / 18 : null,
+          priceChange24hPct: event.priceChangePct,
+          priceChangeH1Pct:
+            event.priceChangePct != null
+              ? Math.min(event.priceChangePct, event.priceChangePct * 0.15)
+              : null,
+        },
+        candles: event.candles,
+        nowMs: openedAt,
+      });
+      if (dip?.seedExitMode && dip.report.qualifies) {
+        scalpResolved = { id: 'post_run_dip', reason: dip.report.detail };
+        if (dip.smartWalletInfluenced) {
+          console.log(
+            `[backtest] post-run-dip SM-INFLUENCE ${event.symbol} — ${dip.report.dipSmartWallet.detail}`
+          );
+        }
+      }
+    }
+    if (!scalpResolved && isAnyShortTermScalperActive()) {
+      scalpResolved = resolveShortTermEntry({
+        volume24hUsd: event.volumeUsd,
+        recentVolumeUsd: event.volumeUsd,
+        isSmartMoney: true,
+        isMigration: event.migrated === true,
+        convictionScore,
+        dropFromPeakPct,
+      });
+    }
     const useScalp = scalpResolved != null;
 
     const position = trader.simulateBuy(
@@ -2073,6 +2163,11 @@ function runSinglePass(
     const sourceNames = resolved.names;
 
     const signal = buildBacktestSignal(event, sourceNames);
+    // Deterministic Fib/S&R history from candle path (Paper / Live Sim / BT parity)
+    if (event.candles?.length) {
+      clearPriceHistory(event.mint);
+      seedPriceHistoryFromCandles(event.mint, event.candles);
+    }
     const conviction = evaluateSignalConviction(signal);
     if (
       (isStrategyEnabled('multi_factor_conviction') ||
@@ -2080,7 +2175,10 @@ function runSinglePass(
         isStrategyEnabled('profit_protected') ||
         isStrategyEnabled('social_sentiment_filter') ||
         isStrategyEnabled('volume_spike_filter') ||
-        isStrategyEnabled('confirmation_layer')) &&
+        isStrategyEnabled('confirmation_layer') ||
+        isStrategyEnabled('market_session_filter') ||
+        isStrategyEnabled('post_run_dip') ||
+        isStrategyEnabled('technical_levels')) &&
       !conviction.pass
     ) {
       skipped.push({

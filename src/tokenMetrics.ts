@@ -44,6 +44,8 @@ export interface TokenMetrics {
   priceChangeH1Pct: number | null;
   priceChange24hPct: number | null;
   priceUsd: number | null;
+  /** DexScreener pairCreatedAt (ms) when known — for token age */
+  pairCreatedAtMs: number | null;
   /** Circulating / total supply (UI amount) */
   supplyUi: number | null;
   holderCountEstimate: number | null;
@@ -109,6 +111,7 @@ function emptyMetrics(mint: string, error?: string): TokenMetrics {
     priceChangeH1Pct: null,
     priceChange24hPct: null,
     priceUsd: null,
+    pairCreatedAtMs: null,
     supplyUi: null,
     holderCountEstimate: null,
     topHolderPct: null,
@@ -214,6 +217,7 @@ export async function fetchTokenMetrics(
         priceChangeH1Pct: dex.priceChangeH1Pct ?? null,
         priceChange24hPct: dex.priceChange24hPct ?? null,
         priceUsd: dex.priceUsd ?? null,
+        pairCreatedAtMs: dex.pairCreatedAtMs ?? null,
         source: 'dexscreener+rpc',
         fetchedAt: Date.now(),
       };
@@ -292,6 +296,7 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
         };
         priceChange?: { m5?: number; h1?: number; h24?: number };
         priceUsd?: string;
+        pairCreatedAt?: number;
         baseToken?: { symbol?: string; name?: string };
       }>;
     };
@@ -350,6 +355,10 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
         ? Number(best.priceChange?.h24)
         : null,
       priceUsd: Number(best.priceUsd ?? 0) || null,
+      pairCreatedAtMs: (() => {
+        const t = Number(best.pairCreatedAt);
+        return Number.isFinite(t) && t > 1_000_000_000_000 ? t : null;
+      })(),
     };
   } catch (err) {
     logger.error('DexScreener', 'token metrics failed', {
@@ -664,6 +673,7 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
   buysH1: number | null;
   sellsH1: number | null;
   buySellRatio: number | null;
+  priceUsd: number | null;
   priceChangeH1Pct: number | null;
   priceChange24hPct: number | null;
   holderCountEstimate: number | null;
@@ -673,6 +683,8 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
   devActiveRecently: boolean;
   mintAuthority: string | null;
   source: string;
+  /** ms epoch when known */
+  pairCreatedAtMs?: number | null;
 } {
   const buys = m.buysH1;
   const sells = m.sellsH1;
@@ -693,6 +705,7 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
     buysH1: buys ?? null,
     sellsH1: sells ?? null,
     buySellRatio: ratio,
+    priceUsd: m.priceUsd,
     priceChangeH1Pct: m.priceChangeH1Pct,
     priceChange24hPct: m.priceChange24hPct,
     holderCountEstimate: m.holderCountEstimate,
@@ -702,6 +715,7 @@ export function summarizeTokenMetrics(m: TokenMetrics): {
     devActiveRecently: m.devActiveRecently,
     mintAuthority: m.mintAuthority,
     source: m.source,
+    pairCreatedAtMs: m.pairCreatedAtMs ?? null,
   };
 }
 

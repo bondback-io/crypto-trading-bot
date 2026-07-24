@@ -122,24 +122,67 @@ import {
   resolveShortTermEntry,
   type ShortTermStrategyId,
 } from './shortTermStrategies';
+import {
+  resolvePostRunDipForSignal,
+  logPostRunDipDecision,
+} from './postRunDip';
+import { registerDipBuyHistoryProvider } from './dipSmartWallet';
 
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
 
-/** Attach short-term scalp seed when an active strategy qualifies. */
+/** Attach short-term scalp / post-run dip seed when an active strategy qualifies. */
 function resolveScalpBuyFlag(signal: {
+  mint?: string;
+  symbol?: string;
   metrics?: {
     volume24hUsd?: number | null;
     recentVolumeUsd?: number | null;
     recentBuyVolumeUsd?: number | null;
+    volumeH1Usd?: number | null;
+    volumeM5Usd?: number | null;
+    priceChangeH1Pct?: number | null;
+    priceChange24hPct?: number | null;
+    priceUsd?: number | null;
   } | null;
+  birdeye?: { smartMoneyScore?: number | null; volume24hUsd?: number | null } | null;
   isMigration?: boolean;
+  nearMigration?: boolean;
+  wallets?: unknown[];
+  walletNames?: string[];
   convictionScore?: number;
   dropFromPeakPct?: number | null;
+  signalAgeMinutes?: number | null;
+  tokenAgeHours?: number | null;
 }): { scalpMode?: true; shortTermStrategyId?: ShortTermStrategyId } {
+  // Prefer Post-Run Dip when it fully qualifies (higher-timeframe path)
+  if (isStrategyEnabled('post_run_dip')) {
+    const dip = resolvePostRunDipForSignal({
+      symbol: signal.symbol,
+      mint: signal.mint,
+      isMigration: signal.isMigration,
+      nearMigration: signal.nearMigration,
+      wallets: signal.wallets,
+      walletNames: signal.walletNames,
+      convictionScore: signal.convictionScore,
+      dropFromPeakPct: signal.dropFromPeakPct,
+      signalAgeMinutes: signal.signalAgeMinutes,
+      tokenAgeHours: signal.tokenAgeHours,
+      metrics: signal.metrics,
+      birdeye: signal.birdeye,
+    });
+    if (dip?.seedExitMode && dip.report.qualifies) {
+      logPostRunDipDecision(signal.symbol || 'token', dip, 'take');
+      console.log(
+        `[post-run-dip] ENTRY ${signal.symbol} — ${dip.report.detail}`
+      );
+      return { scalpMode: true, shortTermStrategyId: 'post_run_dip' };
+    }
+  }
+
   if (!isAnyShortTermScalperActive()) return {};
   const resolved = resolveShortTermEntry({
     volume24hUsd: signal.metrics?.volume24hUsd,
-    recentVolumeUsd: signal.metrics?.recentVolumeUsd,
+    recentVolumeUsd: signal.metrics?.recentVolumeUsd ?? signal.metrics?.volumeH1Usd,
     recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd,
     isSmartMoney: true,
     isMigration: signal.isMigration === true,
@@ -255,6 +298,19 @@ export interface TradeSignal {
   momentumOk?: boolean;
   /** Single-wallet top-performer migration exception */
   allowSingleWalletException?: boolean;
+  /** Drop from recent peak % (positive) when known */
+  dropFromPeakPct?: number | null;
+  /** Estimated token age in hours when known */
+  tokenAgeHours?: number | null;
+  /** Optional candle path for Fib/S&R (backtester / Post-Run Dip) */
+  candles?: Array<{
+    time: number;
+    priceSol?: number;
+    price?: number;
+    volume?: number;
+  }>;
+  /** Spot price in SOL when known (technicals / marks) */
+  priceSol?: number | null;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -262,6 +318,12 @@ type SignalHandler = (signal: TradeSignal) => void;
 const recentBuys = new Map<string, WalletBuyEvent[]>();
 const lastSignature = new Map<string, string>();
 const walletLastActivity = new Map<string, WalletLastActivity>();
+
+// Dip SM buyback / prior-buy detection — live Paper + Live Sim path
+registerDipBuyHistoryProvider((mint) => {
+  const buys = recentBuys.get(mint) ?? [];
+  return buys.map((b) => ({ wallet: b.wallet, timestamp: b.timestamp }));
+});
 /** Mints we already bought (or intentionally blocked from re-entry). */
 const tradedMints = new Set<string>();
 /** In-flight buy claims — prevents concurrent duplicate opens while filters await. */
@@ -2665,18 +2727,51 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   ) {
     const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
     if (timingSkip) {
-      logStrategyDecision(
-        isStrategyEnabled('early_entry_only')
-          ? 'early_entry_only'
-          : 'time_based_entry',
-        'skip',
-        `${signal.symbol} — ${timingSkip}`
-      );
-      console.log(
-        `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${timingSkip}`
-      );
-      recordRejectedSignal(signal, timingSkip);
-      return false;
+      // Post-run dip setups intentionally target older runs — allow past early age gate
+      let dipBypass = false;
+      if (isStrategyEnabled('post_run_dip')) {
+        const dip = resolvePostRunDipForSignal({
+          symbol: signal.symbol,
+          mint: signal.mint,
+          isMigration: signal.isMigration,
+          nearMigration: signal.nearMigration,
+          earlyBuy: signal.earlyBuy,
+          wallets: signal.wallets,
+          walletNames: signal.walletNames,
+          dropFromPeakPct: signal.dropFromPeakPct,
+          signalAgeMinutes: signal.signalAgeMinutes,
+          tokenAgeHours: signal.tokenAgeHours,
+          metrics: signal.metrics,
+          birdeye: signal.birdeye,
+          candles: signal.candles,
+          nowMs: signal.timestamp,
+        });
+        dipBypass = dip?.report.qualifies === true;
+        if (dipBypass) {
+          console.log(
+            `[monitor] post-run dip bypasses entry-age gate for ${signal.symbol}`
+          );
+          logStrategyDecision(
+            'post_run_dip',
+            'take',
+            `${signal.symbol}: bypassed early age — ${dip?.report.detail}`
+          );
+        }
+      }
+      if (!dipBypass) {
+        logStrategyDecision(
+          isStrategyEnabled('early_entry_only')
+            ? 'early_entry_only'
+            : 'time_based_entry',
+          'skip',
+          `${signal.symbol} — ${timingSkip}`
+        );
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${timingSkip}`
+        );
+        recordRejectedSignal(signal, timingSkip);
+        return false;
+      }
     }
   }
 
@@ -2787,6 +2882,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     config.filters.enableAntiRug !== false;
   const needsMetrics =
     antiRugEnabled ||
+    isStrategyEnabled('post_run_dip') ||
+    isStrategyEnabled('technical_levels') ||
     (filters.minLiquidity ?? 0) > 0 ||
     (filters.maxDevHoldPct ?? 0) > 0 ||
     (filters.maxDevPercent ?? 0) > 0 ||
@@ -2924,6 +3021,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
+  // Derive token age for Post-Run Dip (pairCreatedAt from Dex metrics)
+  if (signal.tokenAgeHours == null) {
+    const created = Number(
+      (signal.metrics as { pairCreatedAtMs?: number | null } | undefined)
+        ?.pairCreatedAtMs
+    );
+    if (Number.isFinite(created) && created > 0) {
+      signal.tokenAgeHours = Math.max(0, (Date.now() - created) / 3_600_000);
+    }
+  }
+
   const conviction = evaluateSignalConviction(signal);
   signal.convictionScore = conviction.score;
   signal.sizeMultiplier = conviction.sizeMultiplier;
@@ -2934,7 +3042,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       isStrategyEnabled('profit_protected') ||
       isStrategyEnabled('social_sentiment_filter') ||
       isStrategyEnabled('volume_spike_filter') ||
-      isStrategyEnabled('confirmation_layer')) &&
+      isStrategyEnabled('confirmation_layer') ||
+      isStrategyEnabled('market_session_filter') ||
+      isStrategyEnabled('post_run_dip') ||
+      isStrategyEnabled('technical_levels')) &&
     !conviction.pass
   ) {
     const detail = conviction.reasons.join('; ') || 'below threshold';
@@ -2945,14 +3056,24 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     const confirmHit = conviction.reasons.some((r) =>
       /confirmation/i.test(r)
     );
+    const sessionHit = conviction.reasons.some((r) =>
+      /market session|session blocked/i.test(r)
+    );
+    const postDipHit = conviction.reasons.some((r) =>
+      /post-run dip/i.test(r)
+    );
     logStrategyDecision(
-      confirmHit
-        ? 'confirmation_layer'
-        : volSpikeHit
-          ? 'volume_spike_filter'
-          : socialHit
-            ? 'social_sentiment_filter'
-            : 'multi_factor_conviction',
+      postDipHit
+        ? 'post_run_dip'
+        : sessionHit
+          ? 'market_session_filter'
+          : confirmHit
+            ? 'confirmation_layer'
+            : volSpikeHit
+              ? 'volume_spike_filter'
+              : socialHit
+                ? 'social_sentiment_filter'
+                : 'multi_factor_conviction',
       'skip',
       `${signal.symbol} score=${conviction.score}/${conviction.minRequired}: ${detail}`
     );

@@ -246,6 +246,15 @@ export function createServer(): express.Application {
       ? performanceScoreFromStats(paperStats)
       : null;
 
+    const { marketSessionPublic } = require('./marketSession') as typeof import('./marketSession');
+
+    const availableBalance = usesPaperAccounting()
+      ? paperTrader.getBalance()
+      : liveBalance;
+    const portfolio = paperTrader.getPortfolioSummary(
+      usesPaperAccounting() ? null : liveBalance
+    );
+
     res.json({
       mode: config.mode,
       modeLabel:
@@ -259,9 +268,11 @@ export function createServer(): express.Application {
       forcesLiveMarketData: forcesLiveMarketData(),
       monitor,
       app: getAppVersion(),
-      balance: usesPaperAccounting()
-        ? paperTrader.getBalance()
-        : liveBalance,
+      marketSession: marketSessionPublic(),
+      /** Available cash (not in open trades) — Paper/Live Sim ledger or live wallet */
+      balance: availableBalance,
+      equity: portfolio.totalEquitySol,
+      portfolio,
       winRate: paperTrader.getWinRatePct(),
       stats: paperStats,
       performanceScore: liveSimScore,
@@ -345,9 +356,12 @@ export function createServer(): express.Application {
   app.get('/paper-status', (_req: Request, res: Response) => {
     const stats = paperTrader.getStats();
     const charts = paperTrader.getChartData();
+    const portfolio = paperTrader.getPortfolioSummary();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
+      equity: portfolio.totalEquitySol,
+      portfolio,
       stats,
       charts,
       useLiveData: config.paper.useLiveData,
@@ -360,9 +374,12 @@ export function createServer(): express.Application {
   app.get('/api/paper-status', (_req: Request, res: Response) => {
     const stats = paperTrader.getStats();
     const charts = paperTrader.getChartData();
+    const portfolio = paperTrader.getPortfolioSummary();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
+      equity: portfolio.totalEquitySol,
+      portfolio,
       stats,
       charts,
       useLiveData: config.paper.useLiveData,
@@ -839,6 +856,7 @@ export function createServer(): express.Application {
       momentumBurst: config.momentumBurst,
       postMigrationScalp: config.postMigrationScalp,
       reversalScalp: config.reversalScalp,
+      postRunDip: config.postRunDip,
     });
   });
 
@@ -883,6 +901,13 @@ export function createServer(): express.Application {
         });
         return;
       }
+      if (id === 'post_run_dip' || id === 'postRunDip') {
+        res.json({
+          ok: true,
+          config: st.updatePostRunDipConfig(body as never),
+        });
+        return;
+      }
       res.status(400).json({ error: `Unknown short-term strategy: ${id}` });
     } catch (err) {
       res.status(400).json({
@@ -901,14 +926,54 @@ export function createServer(): express.Application {
   // --- Positions & logs ---
 
   app.get('/api/positions', (_req: Request, res: Response) => {
+    const {
+      getTechnicalSnapshot,
+      technicalLevelsPublic,
+    } = require('./technicalLevels') as typeof import('./technicalLevels');
+    const open = paperTrader.getOpenPositions().map((p) => {
+      const priceSol = paperTrader.getTokenPrice(p.mint);
+      const snap = getTechnicalSnapshot(p.mint, {
+        priceSol,
+      });
+      return {
+        ...p,
+        technicalLevels: technicalLevelsPublic(snap),
+      };
+    });
     res.json({
-      open: paperTrader.getOpenPositions(),
+      open,
       closed: paperTrader.getClosedPositions(),
       sellHistory: getSellHistory(),
       rebuy: {
         status: getReBuyStatus(),
         candidates: getReBuyCandidates(),
       },
+    });
+  });
+
+  app.get('/api/technicals/:mint', (req: Request, res: Response) => {
+    const mint = String(req.params.mint || '').trim();
+    if (!mint) {
+      res.status(400).json({ error: 'mint required' });
+      return;
+    }
+    const {
+      getTechnicalSnapshot,
+      getFibLevels,
+      getNearestSupport,
+      getNearestResistance,
+      technicalLevelsPublic,
+    } = require('./technicalLevels') as typeof import('./technicalLevels');
+    const priceSol = paperTrader.getTokenPrice(mint);
+    const snap = getTechnicalSnapshot(mint, { priceSol });
+    res.json({
+      mint,
+      priceSol: priceSol ?? null,
+      snapshot: technicalLevelsPublic(snap),
+      fibLevels: getFibLevels(mint, { priceSol }),
+      nearestSupport: getNearestSupport(mint, priceSol),
+      nearestResistance: getNearestResistance(mint, priceSol),
+      detail: snap.detail,
     });
   });
 
@@ -1016,6 +1081,26 @@ export function createServer(): express.Application {
           config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
         riskMultiplier: config.trade.riskMultiplier ?? 0.4,
         convictionMultiplier: config.trade.convictionMultiplier ?? 1.45,
+      },
+    });
+  });
+
+  app.get('/api/post-run-dip/smart-wallet', (_req: Request, res: Response) => {
+    const { getRecentDipSmartWalletActivity } =
+      require('./postRunDip') as typeof import('./postRunDip');
+    res.json({
+      events: getRecentDipSmartWalletActivity(30),
+      config: {
+        sensitivity: config.postRunDip?.smartWalletDipSensitivity ?? 'medium',
+        boostPoints: config.postRunDip?.smartWalletDipBoostPoints ?? 8,
+        preferSmartMoney: config.postRunDip?.preferSmartMoney !== false,
+        stronglyPreferSmartMoney:
+          config.postRunDip?.stronglyPreferSmartMoney === true,
+        requireSmartMoney: config.postRunDip?.requireSmartMoney === true,
+        hardRequireSmartMoneyInConservative:
+          config.postRunDip?.hardRequireSmartMoneyInConservative === true,
+        profile: config.postRunDip?.profile ?? 'standard',
+        enabled: config.postRunDip?.enabled === true,
       },
     });
   });
@@ -1532,6 +1617,219 @@ export function createServer(): express.Application {
     res.json(config.trade);
   });
 
+  app.post('/api/config/technical-levels', (req: Request, res: Response) => {
+    if (!config.technicalLevels) {
+      const { DEFAULT_TECHNICAL_LEVELS } = require('./config') as typeof import('./config');
+      config.technicalLevels = { ...DEFAULT_TECHNICAL_LEVELS };
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.enabled !== undefined) {
+      config.technicalLevels.enabled = Boolean(body.enabled);
+      if (config.strategyToggles) {
+        config.strategyToggles.technical_levels = config.technicalLevels.enabled;
+      }
+    }
+    if (
+      body.sensitivity === 'low' ||
+      body.sensitivity === 'medium' ||
+      body.sensitivity === 'high'
+    ) {
+      config.technicalLevels.sensitivity = body.sensitivity;
+    }
+    if (body.lookbackBars !== undefined) {
+      const n = Number(body.lookbackBars);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.lookbackBars = Math.max(8, Math.min(400, Math.round(n)));
+      }
+    }
+    if (body.lookbackHours !== undefined) {
+      const n = Number(body.lookbackHours);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.lookbackHours = Math.max(0.5, Math.min(48, n));
+      }
+    }
+    if (body.lookbackHoursMin !== undefined) {
+      const n = Number(body.lookbackHoursMin);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.lookbackHoursMin = Math.max(0.5, Math.min(24, n));
+      }
+    }
+    if (body.lookbackHoursMax !== undefined) {
+      const n = Number(body.lookbackHoursMax);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.lookbackHoursMax = Math.max(1, Math.min(48, n));
+      }
+    }
+    if (body.minImpulsePct !== undefined) {
+      const n = Number(body.minImpulsePct);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.minImpulsePct = Math.max(10, Math.min(500, n));
+      }
+    }
+    if (body.preferRecentImpulse !== undefined) {
+      config.technicalLevels.preferRecentImpulse = Boolean(
+        body.preferRecentImpulse
+      );
+    }
+    if (body.pivotWindow !== undefined) {
+      const n = Number(body.pivotWindow);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.pivotWindow = Math.max(1, Math.min(6, Math.round(n)));
+      }
+    }
+    if (body.clusterPct !== undefined || body.zoneWidthPct !== undefined) {
+      const n = Number(
+        body.zoneWidthPct !== undefined ? body.zoneWidthPct : body.clusterPct
+      );
+      if (Number.isFinite(n)) {
+        const w = Math.max(0.5, Math.min(8, n));
+        config.technicalLevels.clusterPct = w;
+        config.technicalLevels.zoneWidthPct = w;
+      }
+    }
+    if (body.nearPct !== undefined) {
+      const n = Number(body.nearPct);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.nearPct = Math.max(0.5, Math.min(12, n));
+      }
+    }
+    if (body.minTouchesForValid !== undefined) {
+      const n = Number(body.minTouchesForValid);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.minTouchesForValid = Math.max(
+          1,
+          Math.min(8, Math.round(n))
+        );
+      }
+    }
+    if (body.minTouchesForStrong !== undefined) {
+      const n = Number(body.minTouchesForStrong);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.minTouchesForStrong = Math.max(
+          1,
+          Math.min(8, Math.round(n))
+        );
+      }
+    }
+    if (body.srLookbackHours !== undefined) {
+      const n = Number(body.srLookbackHours);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.srLookbackHours = Math.max(0.5, Math.min(6, n));
+      }
+    }
+    if (body.srLookbackHoursMin !== undefined) {
+      const n = Number(body.srLookbackHoursMin);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.srLookbackHoursMin = Math.max(0.5, Math.min(6, n));
+      }
+    }
+    if (body.srLookbackHoursMax !== undefined) {
+      const n = Number(body.srLookbackHoursMax);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.srLookbackHoursMax = Math.max(1, Math.min(6, n));
+      }
+    }
+    if (body.srLookbackHoursHardMax !== undefined) {
+      const n = Number(body.srLookbackHoursHardMax);
+      if (Number.isFinite(n)) {
+        config.technicalLevels.srLookbackHoursHardMax = Math.max(
+          1,
+          Math.min(24, n)
+        );
+      }
+    }
+    if (
+      body.swingStrength === 'low' ||
+      body.swingStrength === 'medium' ||
+      body.swingStrength === 'high'
+    ) {
+      config.technicalLevels.swingStrength = body.swingStrength;
+    }
+    if (body.preferRecentSupport !== undefined) {
+      config.technicalLevels.preferRecentSupport = Boolean(
+        body.preferRecentSupport
+      );
+    }
+    if (body.favourVolumeReaction !== undefined) {
+      config.technicalLevels.favourVolumeReaction = Boolean(
+        body.favourVolumeReaction
+      );
+    }
+    if (body.requireBreakCloseInvalidation !== undefined) {
+      config.technicalLevels.requireBreakCloseInvalidation = Boolean(
+        body.requireBreakCloseInvalidation
+      );
+    }
+    if (body.fibTreatAsZones !== undefined) {
+      config.technicalLevels.fibTreatAsZones = Boolean(body.fibTreatAsZones);
+    }
+    if (body.hardFilter !== undefined) {
+      config.technicalLevels.hardFilter = Boolean(body.hardFilter);
+    }
+    if (body.prioritizeFibLevels !== undefined) {
+      const raw = body.prioritizeFibLevels;
+      const list = Array.isArray(raw)
+        ? raw.map(Number)
+        : String(raw)
+            .split(',')
+            .map((s) => Number(s.trim()));
+      config.technicalLevels.prioritizeFibLevels = list.filter((n) =>
+        Number.isFinite(n)
+      );
+    }
+    if (body.secondaryFibLevels !== undefined) {
+      const raw = body.secondaryFibLevels;
+      const list = Array.isArray(raw)
+        ? raw.map(Number)
+        : String(raw)
+            .split(',')
+            .map((s) => Number(s.trim()));
+      config.technicalLevels.secondaryFibLevels = list.filter((n) =>
+        Number.isFinite(n)
+      );
+    }
+    // Keep Fib lookbackHours inside configured min/max band
+    config.technicalLevels.lookbackHours = Math.max(
+      config.technicalLevels.lookbackHoursMin,
+      Math.min(
+        config.technicalLevels.lookbackHoursMax,
+        config.technicalLevels.lookbackHours
+      )
+    );
+    // Keep S&R lookback inside preferred band and hard max (≤6 default)
+    const srHard = Math.min(
+      24,
+      Number(config.technicalLevels.srLookbackHoursHardMax) || 6
+    );
+    config.technicalLevels.srLookbackHoursMax = Math.min(
+      srHard,
+      config.technicalLevels.srLookbackHoursMax
+    );
+    config.technicalLevels.srLookbackHoursMin = Math.min(
+      config.technicalLevels.srLookbackHoursMax,
+      config.technicalLevels.srLookbackHoursMin
+    );
+    config.technicalLevels.srLookbackHours = Math.max(
+      config.technicalLevels.srLookbackHoursMin,
+      Math.min(
+        config.technicalLevels.srLookbackHoursMax,
+        config.technicalLevels.srLookbackHours
+      )
+    );
+    // Keep zone width aliases in sync
+    if (config.technicalLevels.zoneWidthPct == null) {
+      config.technicalLevels.zoneWidthPct = config.technicalLevels.clusterPct;
+    } else {
+      config.technicalLevels.clusterPct = config.technicalLevels.zoneWidthPct;
+    }
+    persistUserSettings();
+    res.json({ ok: true, technicalLevels: { ...config.technicalLevels } });
+  });
+
+  app.get('/api/config/technical-levels', (_req: Request, res: Response) => {
+    res.json({ technicalLevels: { ...config.technicalLevels } });
+  });
+
   app.post('/api/config/filters', (req: Request, res: Response) => {
     const keys = [
       'minWinRate',
@@ -1790,6 +2088,57 @@ export function createServer(): express.Application {
           Math.min(22, Math.round(n))
         );
       }
+    }
+    if (req.body.enableMarketSessionFilter !== undefined) {
+      config.filters.enableMarketSessionFilter = Boolean(
+        req.body.enableMarketSessionFilter
+      );
+    }
+    for (const key of [
+      'marketSessionAllowAsia',
+      'marketSessionAllowEurope',
+      'marketSessionAllowUs',
+      'marketSessionAllowOverlap',
+      'marketSessionAllowOffHours',
+    ] as const) {
+      if (req.body[key] !== undefined) {
+        config.filters[key] = Boolean(req.body[key]);
+      }
+    }
+    if (req.body.marketSessionPreferred !== undefined) {
+      const raw = req.body.marketSessionPreferred;
+      if (Array.isArray(raw)) {
+        config.filters.marketSessionPreferred = raw.map(String);
+      } else if (typeof raw === 'string') {
+        config.filters.marketSessionPreferred = raw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+    if (req.body.marketSessionPreferBoostPoints !== undefined) {
+      const n = Number(req.body.marketSessionPreferBoostPoints);
+      if (Number.isFinite(n)) {
+        config.filters.marketSessionPreferBoostPoints = Math.max(
+          0,
+          Math.min(10, Math.round(n))
+        );
+      }
+    }
+    if (req.body.enablePostRunDip !== undefined) {
+      config.filters.enablePostRunDip = Boolean(req.body.enablePostRunDip);
+      config.postRunDip.enabled = config.filters.enablePostRunDip;
+    }
+    if (
+      req.body.postRunDipSensitivity !== undefined &&
+      ['low', 'medium', 'high'].includes(String(req.body.postRunDipSensitivity))
+    ) {
+      const s = String(req.body.postRunDipSensitivity) as
+        | 'low'
+        | 'medium'
+        | 'high';
+      config.filters.postRunDipSensitivity = s;
+      config.postRunDip.sensitivity = s;
     }
     for (const key of [
       'maxSniperCount',

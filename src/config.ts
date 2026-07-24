@@ -347,6 +347,319 @@ export const DEFAULT_REVERSAL_SCALP: ReversalScalpConfig = {
   minConvictionScore: 52,
 };
 
+/**
+ * Post-Run Dip / Rotation — higher-timeframe dip buy after a strong early run.
+ * Longer holds than scalps; uses Fib/support + session awareness.
+ * Profiles: Standard | Conservative Post-Run Dip | Aggressive Post-Run Dip.
+ */
+export type PostRunDipProfile = 'standard' | 'conservative' | 'aggressive';
+
+export interface PostRunDipConfig {
+  enabled: boolean;
+  /** Active Post-Run Dip profile label */
+  profile: PostRunDipProfile;
+  sensitivity: 'low' | 'medium' | 'high';
+  /** Max hold minutes before timer exit (Standard hold ~90m) */
+  timeLimitMinutes: number;
+  /**
+   * Max minutes to wait for a dip setup after the run/peak
+   * (Standard band 45–90, default 60).
+   */
+  setupWatchMinutes: number;
+  takeProfitPct: number;
+  /** Negative stop / soft invalidation % */
+  stopLossPct: number;
+  /** Min estimated run % (Standard band 80–150, default 80) */
+  minRunPct: number;
+  /** Soft max run % — prefer setups in the Standard band */
+  maxRunPct: number;
+  /** Min pullback % from swing high to qualify as a dip */
+  minDipFromPeakPct: number;
+  /** Max pullback % (avoid knives) */
+  maxDipFromPeakPct: number;
+  /** Run age window hours (Standard 12–24) */
+  minTokenAgeHours: number;
+  maxTokenAgeHours: number;
+  preferNearTechnicals: boolean;
+  requireNearTechnicals: boolean;
+  /** Preferred Fib ratios for dip (default 0.5, 0.618) */
+  preferredFibLevels: number[];
+  /** Soft prefer smart money — boost, do not hard-require */
+  preferSmartMoney: boolean;
+  /** Conservative: larger score penalty / higher bar without SM */
+  stronglyPreferSmartMoney: boolean;
+  requireSmartMoney: boolean;
+  /** When true, only take trades that qualify as post-run dip setups */
+  hardRequireSetup: boolean;
+  minVolumeUsd: number;
+  /** Strategy-local liquidity floor (Standard $8k–$12k, default $10k) */
+  minLiquidityUsd: number;
+  /** Strategy-local holder floor (Standard 60+) */
+  minHolders: number;
+  /**
+   * Conviction boost when setup qualifies (Standard +10–20,
+   * extra when near key Fib/S + volume confirmation).
+   */
+  boostPoints: number;
+  /** Max boost cap */
+  boostPointsMax: number;
+  /** Proximity % to Fib/support (Standard ±2–3, default 2.5) */
+  nearTechnicalPct: number;
+  /** Exit on clear break below Fib/support zone */
+  invalidateOnZoneBreak: boolean;
+  /** Require elevated volume with zone-break invalidation */
+  invalidateRequireVolume: boolean;
+  /** Require clear volume dry-up then return (Conservative) */
+  requireClearVolumeDryUp: boolean;
+  /** Aggressive: floor / soft interest enough — skip strict dry-up pattern */
+  flexibleVolumeConfirmation: boolean;
+  /** Prefer / require peak US + overlap sessions */
+  preferredSessions: string[];
+  /** When true, setups outside preferred sessions do not qualify */
+  requirePreferredSession: boolean;
+  /** Extra score gate overlay (Conservative raises / Aggressive lowers) */
+  minQualifyScore: number;
+  /**
+   * Dip-phase smart wallet confirmation sensitivity
+   * (HQ buys, buybacks, Fib cluster, net flow).
+   */
+  smartWalletDipSensitivity: 'low' | 'medium' | 'high';
+  /** Max conviction boost from dip smart-wallet confirmation */
+  smartWalletDipBoostPoints: number;
+  /**
+   * Conservative: when true, require active dip SM to qualify
+   * (optional hard requirement — default off).
+   */
+  hardRequireSmartMoneyInConservative: boolean;
+}
+
+export const DEFAULT_POST_RUN_DIP: PostRunDipConfig = {
+  enabled: false,
+  profile: 'standard',
+  sensitivity: 'medium',
+  timeLimitMinutes: 90,
+  setupWatchMinutes: 60,
+  takeProfitPct: 35,
+  stopLossPct: -14,
+  minRunPct: 80,
+  maxRunPct: 150,
+  minDipFromPeakPct: 25,
+  maxDipFromPeakPct: 65,
+  minTokenAgeHours: 12,
+  maxTokenAgeHours: 24,
+  preferNearTechnicals: true,
+  requireNearTechnicals: false,
+  preferredFibLevels: [0.5, 0.618],
+  preferSmartMoney: true,
+  stronglyPreferSmartMoney: false,
+  requireSmartMoney: false,
+  hardRequireSetup: false,
+  minVolumeUsd: 5_000,
+  minLiquidityUsd: 10_000,
+  minHolders: 60,
+  boostPoints: 12,
+  boostPointsMax: 20,
+  nearTechnicalPct: 2.5,
+  invalidateOnZoneBreak: true,
+  invalidateRequireVolume: true,
+  requireClearVolumeDryUp: false,
+  flexibleVolumeConfirmation: false,
+  preferredSessions: ['us', 'europe_us'],
+  requirePreferredSession: false,
+  minQualifyScore: 55,
+  smartWalletDipSensitivity: 'medium',
+  smartWalletDipBoostPoints: 8,
+  hardRequireSmartMoneyInConservative: false,
+};
+
+/**
+ * Conservative Post-Run Dip — higher quality, fewer trades.
+ * Stricter run/age/Fib distance, liq/holders, volume, session, invalidation.
+ */
+export const CONSERVATIVE_POST_RUN_DIP: PostRunDipConfig = {
+  ...DEFAULT_POST_RUN_DIP,
+  profile: 'conservative',
+  sensitivity: 'high',
+  timeLimitMinutes: 55,
+  setupWatchMinutes: 45,
+  takeProfitPct: 32,
+  stopLossPct: -10,
+  minRunPct: 120,
+  maxRunPct: 400,
+  minDipFromPeakPct: 28,
+  maxDipFromPeakPct: 55,
+  minTokenAgeHours: 8,
+  maxTokenAgeHours: 18,
+  preferNearTechnicals: true,
+  requireNearTechnicals: true,
+  preferredFibLevels: [0.5, 0.618],
+  preferSmartMoney: true,
+  stronglyPreferSmartMoney: true,
+  requireSmartMoney: false,
+  hardRequireSetup: false,
+  minVolumeUsd: 8_000,
+  minLiquidityUsd: 12_000,
+  minHolders: 80,
+  boostPoints: 15,
+  boostPointsMax: 20,
+  nearTechnicalPct: 1.75,
+  invalidateOnZoneBreak: true,
+  /** Faster invalidation — don't wait for volume confirmation */
+  invalidateRequireVolume: false,
+  requireClearVolumeDryUp: true,
+  flexibleVolumeConfirmation: false,
+  preferredSessions: ['us', 'europe_us'],
+  requirePreferredSession: true,
+  minQualifyScore: 72,
+  smartWalletDipSensitivity: 'high',
+  smartWalletDipBoostPoints: 10,
+  /** Optional — enable in UI for Conservative hard SM gate */
+  hardRequireSmartMoneyInConservative: false,
+};
+
+/**
+ * Aggressive Post-Run Dip — more opportunities, looser thresholds.
+ * Softer run/age/Fib distance, liq/holders, flexible volume, SM optional.
+ */
+export const AGGRESSIVE_POST_RUN_DIP: PostRunDipConfig = {
+  ...DEFAULT_POST_RUN_DIP,
+  profile: 'aggressive',
+  sensitivity: 'low',
+  timeLimitMinutes: 120,
+  setupWatchMinutes: 90,
+  takeProfitPct: 38,
+  stopLossPct: -16,
+  minRunPct: 60,
+  maxRunPct: 100,
+  minDipFromPeakPct: 18,
+  maxDipFromPeakPct: 70,
+  minTokenAgeHours: 6,
+  maxTokenAgeHours: 36,
+  preferNearTechnicals: true,
+  requireNearTechnicals: false,
+  preferredFibLevels: [0.382, 0.5, 0.618],
+  preferSmartMoney: false,
+  stronglyPreferSmartMoney: false,
+  requireSmartMoney: false,
+  hardRequireSetup: false,
+  minVolumeUsd: 3_000,
+  minLiquidityUsd: 6_500,
+  minHolders: 40,
+  boostPoints: 10,
+  boostPointsMax: 18,
+  nearTechnicalPct: 3.5,
+  invalidateOnZoneBreak: true,
+  /** More patient — wait for volume on zone break */
+  invalidateRequireVolume: true,
+  requireClearVolumeDryUp: false,
+  flexibleVolumeConfirmation: true,
+  preferredSessions: ['asia', 'europe', 'us', 'asia_europe', 'europe_us'],
+  requirePreferredSession: false,
+  minQualifyScore: 45,
+  smartWalletDipSensitivity: 'low',
+  smartWalletDipBoostPoints: 5,
+  hardRequireSmartMoneyInConservative: false,
+};
+
+export const POST_RUN_DIP_PROFILE_LABEL: Record<PostRunDipProfile, string> = {
+  standard: 'Standard (Recommended)',
+  conservative: 'Conservative Post-Run Dip',
+  aggressive: 'Aggressive Post-Run Dip',
+};
+
+/** Fibonacci + Support/Resistance module settings (Pump.fun–optimised defaults) */
+export interface TechnicalLevelsConfig {
+  enabled: boolean;
+  sensitivity: 'low' | 'medium' | 'high';
+  /**
+   * Fib lookback hours (Pump.fun default band 2–6h).
+   * Preferred over lookbackBars when ticks have timestamps.
+   */
+  lookbackHours: number;
+  /** Min / max clamp for Fib lookbackHours */
+  lookbackHoursMin: number;
+  lookbackHoursMax: number;
+  /** Bars / ticks cap when history is dense (secondary) */
+  lookbackBars: number;
+  /** Pivot half-window for swing detection */
+  pivotWindow: number;
+  /**
+   * Cluster nearby swings / zone half-width ±% (S&R zone width).
+   * Pump.fun default ±2%.
+   */
+  clusterPct: number;
+  /** Alias kept in sync with clusterPct — zone width ±% */
+  zoneWidthPct: number;
+  /** Entry tolerance ±% for “near” Fib / support (default 2) */
+  nearPct: number;
+  /** Min impulse run % to use a swing for Fib (default 50 = strong pump) */
+  minImpulsePct: number;
+  /** Prefer most recent qualifying pump over older larger ones */
+  preferRecentImpulse: boolean;
+  /** Min touches for a valid S/R level (Pump.fun default 2) */
+  minTouchesForValid: number;
+  /** Min touches to treat support as strong (boost) */
+  minTouchesForStrong: number;
+  maxHistoryPoints: number;
+  /** Primary Fib ratios for dip buys (default 0.5, 0.618) */
+  prioritizeFibLevels: number[];
+  /** Secondary Fib ratios (default 0.382, 0.786) */
+  secondaryFibLevels: number[];
+  /** When true with strategy ON, block entries not near Fib/support */
+  hardFilter: boolean;
+
+  // ── Support & Resistance (Pump.fun defaults) ──────────────────────────
+  /** S&R lookback hours (preferred band 1–4h, absolute max 6) */
+  srLookbackHours: number;
+  srLookbackHoursMin: number;
+  srLookbackHoursMax: number;
+  /** Absolute hard cap on S&R lookback (default 6) */
+  srLookbackHoursHardMax: number;
+  /** Required swing strength for pivots used in S&R */
+  swingStrength: 'low' | 'medium' | 'high';
+  /** Prefer most recent strong supports when ranking */
+  preferRecentSupport: boolean;
+  /** Favour levels that showed a bounce / volume reaction */
+  favourVolumeReaction: boolean;
+  /** Invalidate level after clear break + close beyond the zone */
+  requireBreakCloseInvalidation: boolean;
+  /**
+   * Treat Fib levels as price zones (±nearPct / entry tolerance),
+   * not single tick prices. Pump.fun default: true.
+   */
+  fibTreatAsZones: boolean;
+}
+
+export const DEFAULT_TECHNICAL_LEVELS: TechnicalLevelsConfig = {
+  enabled: false,
+  sensitivity: 'medium',
+  lookbackHours: 4,
+  lookbackHoursMin: 2,
+  lookbackHoursMax: 6,
+  lookbackBars: 96,
+  pivotWindow: 2,
+  clusterPct: 2,
+  zoneWidthPct: 2,
+  nearPct: 2,
+  minImpulsePct: 50,
+  preferRecentImpulse: true,
+  minTouchesForValid: 2,
+  minTouchesForStrong: 2,
+  maxHistoryPoints: 240,
+  prioritizeFibLevels: [0.5, 0.618],
+  secondaryFibLevels: [0.382, 0.786],
+  hardFilter: false,
+  srLookbackHours: 2,
+  srLookbackHoursMin: 1,
+  srLookbackHoursMax: 4,
+  srLookbackHoursHardMax: 6,
+  swingStrength: 'medium',
+  preferRecentSupport: true,
+  favourVolumeReaction: true,
+  requireBreakCloseInvalidation: true,
+  fibTreatAsZones: true,
+};
+
 /** Recommended param band (Strategies UI + clamp on save). */
 export type ScalpParamBand = { min: number; max: number; default: number };
 
@@ -1221,6 +1534,22 @@ export interface FilterConfig {
   confirmationBoostPoints: number;
   /** When true, Very Weak confirmation can hard-block (volume data required) */
   confirmationHardFilter: boolean;
+  /**
+   * Market session filter — allow/block Asia, Europe, US, overlaps.
+   * Preferred sessions get a soft conviction boost.
+   */
+  enableMarketSessionFilter: boolean;
+  marketSessionAllowAsia: boolean;
+  marketSessionAllowEurope: boolean;
+  marketSessionAllowUs: boolean;
+  marketSessionAllowOverlap: boolean;
+  marketSessionAllowOffHours: boolean;
+  /** Preferred session ids: asia, europe, us, asia_europe, europe_us, overlap */
+  marketSessionPreferred: string[];
+  marketSessionPreferBoostPoints: number;
+  /** Mirror of postRunDip.enabled for filter API convenience */
+  enablePostRunDip: boolean;
+  postRunDipSensitivity: 'low' | 'medium' | 'high';
   /** Override max sniper wallet count (0 = use sensitivity default) */
   maxSniperCount: number;
   /** Override max bundler volume % (0 = use sensitivity default) */
@@ -1412,6 +1741,9 @@ export interface BotConfig {
   momentumBurst: MomentumBurstConfig;
   postMigrationScalp: PostMigrationScalpConfig;
   reversalScalp: ReversalScalpConfig;
+  postRunDip: PostRunDipConfig;
+  /** Fib + Support/Resistance analysis */
+  technicalLevels: TechnicalLevelsConfig;
   /** High-conviction entry gating and trade-rate limits */
   selective: SelectiveTradingConfig;
 
@@ -1655,6 +1987,16 @@ export const config: BotConfig = {
     confirmationNarrativeWeight: 25,
     confirmationBoostPoints: 10,
     confirmationHardFilter: false,
+    enableMarketSessionFilter: false,
+    marketSessionAllowAsia: true,
+    marketSessionAllowEurope: true,
+    marketSessionAllowUs: true,
+    marketSessionAllowOverlap: true,
+    marketSessionAllowOffHours: false,
+    marketSessionPreferred: ['us', 'europe_us'],
+    marketSessionPreferBoostPoints: 3,
+    enablePostRunDip: false,
+    postRunDipSensitivity: 'medium',
     maxSniperCount: 0,
     maxBundlerPct: 0,
     maxInsiderPct: 0,
@@ -1764,6 +2106,8 @@ export const config: BotConfig = {
   momentumBurst: { ...DEFAULT_MOMENTUM_BURST },
   postMigrationScalp: { ...DEFAULT_POST_MIGRATION_SCALP },
   reversalScalp: { ...DEFAULT_REVERSAL_SCALP },
+  postRunDip: { ...DEFAULT_POST_RUN_DIP },
+  technicalLevels: { ...DEFAULT_TECHNICAL_LEVELS },
 
   gmgn: {
     apiKey: process.env.GMGN_API_KEY?.trim() || '',
@@ -1970,6 +2314,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     momentumBurst: { ...config.momentumBurst },
     postMigrationScalp: { ...config.postMigrationScalp },
     reversalScalp: { ...config.reversalScalp },
+    postRunDip: { ...config.postRunDip },
+    technicalLevels: { ...config.technicalLevels },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile:
@@ -2347,6 +2693,18 @@ function applySettingsSnapshot(
         saved.reversalScalp
       ) as unknown as typeof config.reversalScalp;
     }
+    if (saved.postRunDip) {
+      config.postRunDip = deepMerge(
+        { ...DEFAULT_POST_RUN_DIP },
+        saved.postRunDip
+      ) as unknown as typeof config.postRunDip;
+    }
+    if (saved.technicalLevels) {
+      config.technicalLevels = deepMerge(
+        { ...DEFAULT_TECHNICAL_LEVELS },
+        saved.technicalLevels
+      ) as unknown as typeof config.technicalLevels;
+    }
     if (saved.selective) {
       config.selective = cloneJson(
         saved.selective
@@ -2408,6 +2766,15 @@ function applySettingsSnapshot(
       config.reversalScalp = deepMerge(
         config.reversalScalp,
         saved.reversalScalp
+      );
+    }
+    if (saved.postRunDip) {
+      config.postRunDip = deepMerge(config.postRunDip, saved.postRunDip);
+    }
+    if (saved.technicalLevels) {
+      config.technicalLevels = deepMerge(
+        config.technicalLevels,
+        saved.technicalLevels
       );
     }
     if (saved.selective) {
@@ -3836,6 +4203,8 @@ export function getConfigSnapshot() {
     momentumBurst: { ...config.momentumBurst },
     postMigrationScalp: { ...config.postMigrationScalp },
     reversalScalp: { ...config.reversalScalp },
+    postRunDip: { ...config.postRunDip },
+    technicalLevels: { ...config.technicalLevels },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile: config.strategyProfile || 'custom',
