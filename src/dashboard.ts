@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Backtester; Config / Logs via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Strategies; Config / Logs / Backtester via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -1133,7 +1133,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config and Logs" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config, Logs, and Backtester" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -1148,6 +1148,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
             Logs
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="backtester" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>
+            Backtester
           </button>
         </div>
       </div>
@@ -1178,7 +1182,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
-      <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts">Backtester</button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -2026,11 +2029,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         <div class="card">
           <div class="section-title">Paper / Live Simulation Prices <span class="tip" tabindex="0" data-tip="When on (or in Live Simulation mode), positions mark-to-market with live Dex/GMGN prices. Live Simulation forces this ON."></span></div>
-          <p class="text-sm text-slate-400 mb-2">Use <strong>Live Sim</strong> in the header for full live-parity filters with virtual fills. Advanced historical sims are in the <strong>Backtester</strong> tab.</p>
+          <p class="text-sm text-slate-400 mb-2">Use <strong>Live Sim</strong> in the header for full live-parity filters with virtual fills. Advanced historical sims are in <strong>Backtester</strong> (settings menu).</p>
           <div class="toggle-row"><span title="Update open paper / Live Sim positions using live price feeds">Live market marks</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
           <div class="flex flex-wrap gap-2 mt-2">
             <button class="btn btn-secondary" onclick="togglePaperLiveData()" title="Save the paper live-prices toggle">Save Live Price</button>
-            <button class="btn btn-primary" onclick="showTab('backtester', document.querySelector('[data-tab=backtester]'))">Open Backtester</button>
+            <button class="btn btn-primary" onclick="showTab('backtester')">Open Backtester</button>
             <span class="mint" id="paper-live-status"></span>
           </div>
         </div>
@@ -2422,7 +2425,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs');
+        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs' || name === 'backtester');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -3750,7 +3753,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         });
         setBtProgress(100, 'Complete');
         renderBacktestResult(data);
-        showTab('backtester', document.querySelector('[data-tab=backtester]'));
+        showTab('backtester');
         setTimeout(hideBtProgress, 1500);
       } catch (err) {
         if (status) status.textContent = err.message;
@@ -5255,7 +5258,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const riskSel = document.getElementById('bt-risk-level');
       if (riskSel) riskSel.value = 'current';
       onBtStrictModeChange();
-      showTab('backtester', document.querySelector('[data-tab=backtester]'));
+      showTab('backtester');
       await runBacktest({ matchLiveStrict: true });
     }
 
@@ -6496,7 +6499,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'backtester', 'config', 'logs'];
+    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'strategies', 'backtester', 'config', 'logs'];
     const startTab = tabNames.includes(savedTab) ? savedTab : 'overview';
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
   </script>
