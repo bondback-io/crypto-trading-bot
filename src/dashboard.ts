@@ -276,10 +276,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-settings-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .65rem; }
     .strategy-settings-controls .field { flex: 1 1 145px; min-width: 125px; }
     .strategy-settings-controls .toggle-row { flex: 1 1 100%; }
+    #strategy-controls-wallet_convergence {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: end;
+    }
+    #strategy-controls-wallet_convergence > .ctl { width: 100%; }
+    #strategy-controls-wallet_convergence > [data-strategy-control="allowSingleWalletTopPerformerMigration"],
+    #strategy-controls-wallet_convergence > [data-strategy-control="sel-require-convergence"],
+    #strategy-controls-wallet_convergence > [data-strategy-control="convergenceRequired"] {
+      grid-column: 1 / -1;
+    }
+    #strategy-controls-wallet_convergence > .ctl-check {
+      padding-top: .35rem;
+      white-space: normal;
+    }
+    #strategy-controls-wallet_convergence > .ctl-check > span { white-space: normal; }
     [data-strategy-source-card="true"] { display: none !important; }
     @media (max-width: 640px) {
       .strategy-settings-controls .ctl,
       .strategy-settings-controls .field { width: 100%; flex-basis: 100%; }
+      #strategy-controls-wallet_convergence { grid-template-columns: minmax(0, 1fr); }
       .strategy-settings summary { min-height: 42px; }
     }
     .card-open-positions {
@@ -1196,7 +1213,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="status-meta">
           <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
           <strong id="status-text" class="has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
-          <span id="mode-badge" class="badge badge-paper has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">PAPER</span>
+          <span id="mode-badge" class="badge badge-livesim has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">LIVE SIM</span>
           <span class="status-stat has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance">—</strong></span>
           <span class="status-stat has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl">—</strong></span>
           <span class="status-stat hidden sm:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active">—</strong></span>
@@ -1205,9 +1222,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="status-controls">
           <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
           <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh</span></button>
-          <button onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
-          <button onclick="setMode('liveSimulation')" class="btn btn-secondary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
-          <button onclick="setMode('live')" class="btn btn-danger" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
+          <button id="mode-paper" onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
+          <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
+          <button id="mode-live" onclick="setMode('live')" class="btn btn-secondary" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
         </div>
       </div>
     </div>
@@ -1250,37 +1267,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades. Closed count is shown in Closed Trades below."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
-        <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced recommended default">Medium</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="Aggressive — larger size, looser filters">High</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — basic rug/honeypot only, hard floors kept" style="border-color:#a855f7">Degen</button>
-          <span class="mint self-center" id="risk-level-label">—</span>
-        </div>
-        <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
-        <div class="mint text-sm" id="risk-level-summary">—</div>
-        <div class="mt-3 pt-3 border-t border-slate-700/80">
-          <div class="toggle-row">
-            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
-            <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
-          </div>
-          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
-          <div id="strict-intensity-row" class="mt-2">
-            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Strict-Low = most selective/safest Strict. Strict-High = more active (looser) — NOT safer than Low. Medium matches the original Strict defaults."></span></div>
-            <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
-            </div>
-            <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
-          </div>
-          <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
-        </div>
-        <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
       <div class="card card-open-positions" id="open-positions-panel">
@@ -1986,6 +1972,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="hidden space-y-4">
       <div class="card">
+        <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
+        <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced recommended default">Medium</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="Aggressive — larger size, looser filters">High</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — basic rug/honeypot only, hard floors kept" style="border-color:#a855f7">Degen</button>
+          <span class="mint self-center" id="risk-level-label">—</span>
+        </div>
+        <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
+        <div class="mint text-sm" id="risk-level-summary">—</div>
+        <div class="mt-3 pt-3 border-t border-slate-700/80">
+          <div class="toggle-row">
+            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
+            <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
+          </div>
+          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
+          <div id="strict-intensity-row" class="mt-2">
+            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Strict-Low = most selective/safest Strict. Strict-High = more active (looser) — NOT safer than Low. Medium matches the original Strict defaults."></span></div>
+            <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
+            </div>
+            <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
+          </div>
+          <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
+        </div>
+        <div class="mint mt-2" id="risk-status">—</div>
+      </div>
+
+      <div class="card">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div class="section-title">Strategy Control Center <span class="tip" tabindex="0" data-tip="Master switches apply to paper, Live Simulation, backtests, and live trading. Risk Level and Strict Mode still control thresholds."></span></div>
@@ -2343,7 +2360,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let _lastConfig = null;
 
     const STRATEGY_SETTING_IDS = {
-      wallet_convergence: ['convergenceRequired', 'sel-require-convergence', 'sel-min-wallets'],
+      wallet_convergence: ['sel-require-convergence', 'sel-min-wallets', 'convergenceRequired'],
       migration_priority: ['enableMigrationOnly', 'migrationSizeMultiplier', 'migrationSlippageBps'],
       near_migration_curve: ['nearMigrationCurvePct'],
       early_curve_smart_money: ['earlyCurveMaxPct', 'minEarlyBirdeyeSmartMoneyScore', 'earlyCurveMinSmartWallets'],
@@ -2361,11 +2378,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function extraStrategySettingsHtml(key) {
       const n = (id, label, value, min, max, step) =>
-        '<label class="ctl ctl-md"><span>' + label + '</span><input type="number" id="' + id + '" value="' + value + '"' +
+        '<label class="ctl ctl-md" data-strategy-control="' + id + '"><span>' + label + '</span><input type="number" id="' + id + '" value="' + value + '"' +
         (min != null ? ' min="' + min + '"' : '') + (max != null ? ' max="' + max + '"' : '') +
         (step != null ? ' step="' + step + '"' : '') + ' /></label>';
       const c = (id, label) =>
-        '<label class="ctl ctl-check"><input type="checkbox" id="' + id + '" /><span>' + label + '</span></label>';
+        '<label class="ctl ctl-check" data-strategy-control="' + id + '"><input type="checkbox" id="' + id + '" /><span>' + label + '</span></label>';
       const parts = {
         wallet_convergence:
           n('clusterMinWallets', 'Cluster wallets', 2, 1, 8, 1) +
@@ -2414,6 +2431,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           if (!el) return;
           const wrapper = el.closest('.field, .ctl, .toggle-row') || el;
           wrapper.setAttribute('data-strategy-setting', key);
+          wrapper.setAttribute('data-strategy-control', id);
           target.appendChild(wrapper);
         });
       });
@@ -4380,6 +4398,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         : status.mode === 'liveSimulation'
           ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
           : 'PAPER = simulated fills';
+      ['paper', 'liveSimulation', 'live'].forEach((mode) => {
+        const btn = document.getElementById('mode-' + mode);
+        if (!btn) return;
+        const active = status.mode === mode;
+        btn.className = active
+          ? (mode === 'live' ? 'btn btn-danger' : 'btn btn-primary')
+          : 'btn btn-secondary';
+      });
 
       // Live Sim vs Backtest compare UI lives on Backtester only
       refreshPerformanceCompare();
@@ -5185,7 +5211,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (mode === 'liveSimulation' && !confirm('Switch to LIVE SIMULATION? Uses live market data and the same filters as live, but fills stay virtual — no real funds.')) return;
       try {
         await fetchJSON('/api/config/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
-        refresh();
+        await refresh();
         loadTradingWallets();
         refreshPerformanceCompare();
       } catch (err) {
@@ -6296,6 +6322,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
     }
 
+    function applyPresetConfigSnapshot(cfg, strictStatus) {
+      if (!cfg) return;
+      _lastConfig = cfg;
+      window._cfgLoaded = false;
+      applyStrategyConfigValues(cfg);
+      updateRiskLevelUI(cfg);
+      updateStrictModeUI(cfg, strictStatus);
+    }
+
     async function toggleStrictMode(enabled) {
       try {
         const data = await fetchJSON('/api/config/strict-mode', {
@@ -6303,12 +6338,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ strictMode: !!enabled }),
         });
-        updateStrictModeUI(
+        applyPresetConfigSnapshot(
           data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
           data.status
         );
+        await refresh();
         if (data.warning && enabled) alert(data.warning);
-        refresh();
       } catch (err) {
         alert(err.message || String(err));
         ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
@@ -6325,11 +6360,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ intensity: intensity }),
         });
-        updateStrictModeUI(
+        applyPresetConfigSnapshot(
           data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
           data.status
         );
-        refresh();
+        await refresh();
       } catch (err) {
         alert(err.message || String(err));
       }
@@ -6522,15 +6557,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           body: JSON.stringify({ riskLevel: level }),
         });
         if (data.config) {
-          window._cfgLoaded = false;
-          updateRiskLevelUI(data.config);
+          applyPresetConfigSnapshot(data.config);
+          const strictStatus = await fetchJSON('/api/config/strict-mode').catch(() => null);
+          updateStrictModeUI(data.config, strictStatus);
         }
+        await refresh();
         alert(
           'Risk level set to ' + String(level).toUpperCase() +
           (data.warning ? '\\n' + data.warning : '') +
           '\\nRecommended settings applied.'
         );
-        refresh();
       } catch (err) {
         alert(err.message || String(err));
       }

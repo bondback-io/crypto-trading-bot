@@ -1243,7 +1243,7 @@ export interface BotConfig {
 }
 
 export const config: BotConfig = {
-  mode: 'paper',
+  mode: 'liveSimulation',
   riskLevel: 'medium',
   strictMode: false,
   strictModeIntensity: 'medium',
@@ -1553,6 +1553,8 @@ const MIN_MARKET_CAP_FLOOR_V1129 = 'minMarketCapFloor_v1129';
 const BUY_PUMP_FUN_ONLY_ON_V1131 = 'buyPumpFunOnly_on_v1131';
 /** One-shot: seed wallet quality + entry timing + cluster defaults (1.1.33). */
 const WALLET_QUALITY_ENTRY_V1133 = 'walletQualityEntry_v1133';
+/** One-shot: prefer live-parity simulation for persisted users still on plain paper. */
+const TRADING_MODE_LIVE_SIM_V1143 = 'tradingMode_liveSim_v1143';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -2044,6 +2046,14 @@ export function applyPersistedSettings(): boolean {
   applySettingsSnapshot(saved, 'merge');
   settingsMigrations = { ...(saved.migrations ?? {}) };
 
+  if (applyTradingModeLiveSimMigration()) {
+    settingsMigrations[TRADING_MODE_LIVE_SIM_V1143] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied tradingMode_liveSim_v1143 — mode=${config.mode}`
+    );
+  }
+
   if (applyPaperSignalRelaxMigration()) {
     settingsMigrations[PAPER_SIGNAL_RELAX_MIGRATION] = true;
     persistUserSettings();
@@ -2153,6 +2163,13 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  return true;
+}
+
+/** Migrate plain-paper installs once; never replace an existing live selection. */
+function applyTradingModeLiveSimMigration(): boolean {
+  if (settingsMigrations[TRADING_MODE_LIVE_SIM_V1143]) return false;
+  if (config.mode === 'paper') config.mode = 'liveSimulation';
   return true;
 }
 
