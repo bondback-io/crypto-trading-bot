@@ -169,7 +169,9 @@ export interface ReconcileMarkPriceResult {
  * Reconcile a live mark vs entry so paper PnL cannot explode from unit mismatches
  * (bonding-curve SOL/lamports, Dex native vs USD, decimal scale errors).
  *
- * Prefer MC-implied scale when price ratio disagrees with MC ratio by >10×.
+ * Prefer MC-implied scale when price ratio disagrees with MC ratio by >10× —
+ * but only when the MC ratio itself is within sane bounds. A bogus Dex FDV
+ * (e.g. $119B vs $25M entry) must never force a 50× price mark.
  */
 export function reconcileMarkPriceSol(
   input: ReconcileMarkPriceInput
@@ -202,19 +204,24 @@ export function reconcileMarkPriceSol(
   ) {
     const mcRatio = markMc / entryMc;
     if (Number.isFinite(mcRatio) && mcRatio > 0) {
+      const mcAbsurd =
+        mcRatio > MAX_SANE_MARK_PRICE_RATIO ||
+        mcRatio < 1 / MAX_SANE_MARK_PRICE_RATIO;
       const disagree =
         pxRatio / mcRatio > 10 || mcRatio / pxRatio > 10;
+
       if (disagree) {
-        const clampedMc = Math.min(
-          MAX_SANE_MARK_PRICE_RATIO,
-          Math.max(1 / MAX_SANE_MARK_PRICE_RATIO, mcRatio)
-        );
-        return {
-          priceSol: entry * clampedMc,
-          adjusted: true,
-          rejected: false,
-          reason: `mc-scaled (px ${pxRatio.toExponential(2)} vs mc ${mcRatio.toExponential(2)})`,
-        };
+        // Pathological FDV/MC — ignore it; fall through to price-only checks
+        if (mcAbsurd) {
+          // continue below
+        } else {
+          return {
+            priceSol: entry * mcRatio,
+            adjusted: true,
+            rejected: false,
+            reason: `mc-scaled (px ${pxRatio.toExponential(2)} vs mc ${mcRatio.toExponential(2)})`,
+          };
+        }
       }
     }
   }
@@ -233,6 +240,107 @@ export function reconcileMarkPriceSol(
   }
 
   return { priceSol: mark, adjusted: false, rejected: false };
+}
+
+export interface ResolveExitMarketCapInput {
+  entryMarketCapUsd?: number | null;
+  entryPriceSol: number;
+  /** Same mark used for PnL / fill (post-slippage ok) */
+  exitPriceSol: number;
+  liveMarketCapUsd?: number | null;
+}
+
+/**
+ * Exit MC must track the PnL mark. Prefer entry×(exit/entry); accept a live
+ * Dex MC only when it agrees with that move and stays within sane bounds.
+ */
+export function resolveExitMarketCapUsd(
+  input: ResolveExitMarketCapInput
+): number | undefined {
+  const entry = input.entryPriceSol;
+  const exit = input.exitPriceSol;
+  const entryMc = input.entryMarketCapUsd;
+  const liveMc = input.liveMarketCapUsd;
+
+  const scaled =
+    entryMc != null &&
+    Number.isFinite(entryMc) &&
+    entryMc > 0 &&
+    entry > 0 &&
+    exit >= 0
+      ? marketCapAtPrice(entryMc, entry, exit)
+      : undefined;
+
+  if (
+    liveMc != null &&
+    Number.isFinite(liveMc) &&
+    liveMc > 0 &&
+    entryMc != null &&
+    Number.isFinite(entryMc) &&
+    entryMc > 0 &&
+    entry > 0 &&
+    exit > 0
+  ) {
+    const mcRatio = liveMc / entryMc;
+    const pxRatio = exit / entry;
+    if (
+      Number.isFinite(mcRatio) &&
+      mcRatio > 0 &&
+      mcRatio <= MAX_SANE_MARK_PRICE_RATIO &&
+      mcRatio >= 1 / MAX_SANE_MARK_PRICE_RATIO &&
+      Number.isFinite(pxRatio) &&
+      pxRatio > 0 &&
+      pxRatio / mcRatio <= 10 &&
+      mcRatio / pxRatio <= 10
+    ) {
+      return liveMc;
+    }
+  }
+
+  if (scaled != null && scaled > 0) return scaled;
+
+  if (
+    liveMc != null &&
+    Number.isFinite(liveMc) &&
+    liveMc > 0 &&
+    (entryMc == null || !(entryMc > 0))
+  ) {
+    return liveMc;
+  }
+
+  return undefined;
+}
+
+/**
+ * True when a candidate mark MC is usable vs an open entry (guards FDV bugs).
+ */
+export function isSaneMarkMarketCapUsd(
+  entryMarketCapUsd: number | undefined | null,
+  markMarketCapUsd: number | undefined | null,
+  opts?: { maxRatio?: number }
+): boolean {
+  if (
+    markMarketCapUsd == null ||
+    !Number.isFinite(markMarketCapUsd) ||
+    markMarketCapUsd <= 0
+  ) {
+    return false;
+  }
+  if (
+    entryMarketCapUsd == null ||
+    !Number.isFinite(entryMarketCapUsd) ||
+    entryMarketCapUsd <= 0
+  ) {
+    return true;
+  }
+  const maxRatio = opts?.maxRatio ?? MAX_SANE_MARK_PRICE_RATIO;
+  const ratio = markMarketCapUsd / entryMarketCapUsd;
+  return (
+    Number.isFinite(ratio) &&
+    ratio > 0 &&
+    ratio <= maxRatio &&
+    ratio >= 1 / maxRatio
+  );
 }
 
 export type PriceChangePick = {
@@ -1280,17 +1388,18 @@ export async function refreshOpenMarketActivity(
         txnsH1: snap.txnsH1 ?? 0,
         updatedAt: now,
       });
-      if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
-        trader.setMarkMarketCapUsd?.(mint, snap.marketCapUsd);
-      }
       if (
         snap.priceSol != null &&
         snap.priceSol > 0 &&
         typeof trader.setTokenPrice === 'function'
       ) {
+        // Prefer setTokenPrice (reconciles MC + price together). Only fall back
+        // to setMarkMarketCapUsd when price is missing.
         trader.setTokenPrice(mint, snap.priceSol, {
           marketCapUsd: snap.marketCapUsd,
         });
+      } else if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+        trader.setMarkMarketCapUsd?.(mint, snap.marketCapUsd);
       }
       updated += 1;
     } catch {

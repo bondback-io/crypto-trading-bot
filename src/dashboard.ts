@@ -1227,13 +1227,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
             <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
           </div>
-          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups</div>
+          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
           <div id="strict-intensity-row" class="mt-2">
-            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Medium matches the original Strict defaults. You can pre-select intensity while Strict is OFF."></span></div>
+            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Strict-Low = most selective/safest Strict. Strict-High = more active (looser) — NOT safer than Low. Medium matches the original Strict defaults."></span></div>
             <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective — highest quality bars, fewest trades">Strict-Low</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="Still strict but more active — lower bars than Low">Strict-High</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
             </div>
             <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
           </div>
@@ -2113,13 +2113,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 <span title="Opt-in overlay on top of the risk level">Strict Mode</span>
                 <label class="switch"><input type="checkbox" id="cfg-strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
               </div>
-              <div id="cfg-strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups</div>
+              <div id="cfg-strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
               <div id="cfg-strict-intensity-row" class="mt-2">
                 <div class="text-xs text-slate-400 mb-1">Intensity</div>
                 <div class="flex flex-wrap gap-2 items-center">
-                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective — highest quality bars, fewest trades">Strict-Low</button>
+                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
                   <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced (default)">Strict-Medium</button>
-                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-high" onclick="setStrictModeIntensity('high')" title="Still strict, more active">Strict-High</button>
+                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
                 </div>
                 <div class="mint text-xs mt-1" id="cfg-strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
               </div>
@@ -2544,6 +2544,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function fmtUsdShort(n) {
       if (n == null || !Number.isFinite(Number(n))) return '—';
       const v = Number(n);
+      // Guard absurd historical exit MCs (pre-1.1.38 unit bugs)
+      if (v >= 1e11) return '—';
       if (v >= 1e9) return '$' + (v / 1e9).toFixed(2) + 'B';
       if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
       if (v >= 1e3) {
@@ -5910,9 +5912,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     const STRICT_INTENSITY_META = {
-      low: { label: 'Strict-Low', description: 'Most selective — highest quality bars, fewest trades' },
+      low: { label: 'Strict-Low', description: 'Most selective / safest Strict — highest bars, fewest trades (NOT “low risk mode”)' },
       medium: { label: 'Strict-Medium', description: 'Balanced strict overlay (default intensity)' },
-      high: { label: 'Strict-High', description: 'Still strict but more active — lower bars than Low' },
+      high: { label: 'Strict-High', description: 'More active Strict — looser bars than Low/Medium (NOT safer than Strict-Low)' },
     };
 
     function updateStrictModeUI(cfg, status) {
@@ -5955,7 +5957,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? (meta.label + ' ON · Q≥' + (ef.minWalletQualityScore ?? '?') +
            ' · conviction≥' + (ef.minConvictionScore ?? '?') +
            ' · cluster≥' + (ef.clusterMinWallets ?? '?') +
-           (ef.maxEntryAgeMinutes != null ? ' · entry≤' + ef.maxEntryAgeMinutes + 'm' : ''))
+           (ef.maxEntryAgeMinutes != null ? ' · entry≤' + ef.maxEntryAgeMinutes + 'm' : '') +
+           (ef.maxEntryMarketCapUsd > 0
+             ? ' · maxMC≤$' + (ef.maxEntryMarketCapUsd >= 1e6
+                 ? (ef.maxEntryMarketCapUsd / 1e6).toFixed(1) + 'M'
+                 : Math.round(ef.maxEntryMarketCapUsd / 1e3) + 'K')
+             : ''))
         : 'Strict Mode OFF — using risk-level presets';
       ['strict-mode-status', 'cfg-strict-mode-status'].forEach((id) => {
         const st = document.getElementById(id);

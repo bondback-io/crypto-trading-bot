@@ -15,6 +15,7 @@ import {
   evaluateBuyPumpFunOnlyGate,
   evaluateHolderConcentrationHardFloors,
 } from './deadTokenFilters';
+import { effectiveMaxEntryMarketCapUsd } from './strictMode';
 import {
   getKeypair,
   estimatePriorityFeeMicroLamports,
@@ -409,8 +410,18 @@ export async function executeBuy(
     );
     return { success: false, mode: config.mode, error: reason };
   }
+  const maxEntryMc = effectiveMaxEntryMarketCapUsd();
+  if (maxEntryMc > 0 && entryMarketCapUsd > maxEntryMc) {
+    const reason =
+      `Skipped — market cap too high ($${Math.round(entryMarketCapUsd)} > $${maxEntryMc}; already-pumped / dump risk)`;
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason}`
+    );
+    return { success: false, mode: config.mode, error: reason };
+  }
   console.log(
-    `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}`
+    `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}` +
+      (maxEntryMc > 0 ? ` · ≤ max $${maxEntryMc}` : '')
   );
 
   // Hard top-10 floor at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.

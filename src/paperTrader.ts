@@ -14,9 +14,16 @@ import {
 } from './risk';
 import {
   evaluateProfitAction,
+  adjustedStopLossPct,
   type ProfitPositionView,
 } from './profitStrategy';
-import { marketCapAtPrice, getCachedSolUsdPrice, reconcileMarkPriceSol } from './marketData';
+import {
+  marketCapAtPrice,
+  getCachedSolUsdPrice,
+  reconcileMarkPriceSol,
+  resolveExitMarketCapUsd,
+  isSaneMarkMarketCapUsd,
+} from './marketData';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
 import {
   effectiveDeadVolumeConsecutiveHours,
@@ -28,6 +35,16 @@ import {
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
+
+/**
+ * Max adverse gap beyond a hard stop-loss for paper / live-sim fills.
+ * Discrete Dex marks often jump past SL (−48% → −90%); fill near the stop
+ * instead of giving the full gap-through (realistic stop-limit + small slip).
+ */
+const HARD_SL_MAX_GAP_SLIPPAGE = 0.04; // 4% beyond SL threshold
+
+/** Live Simulation polls marks more often so SL/TP see gaps sooner. */
+const LIVE_SIM_CHECK_INTERVAL_MS = 2_000;
 
 export type PositionStatus = 'open' | 'closed' | 'partial';
 
@@ -144,6 +161,22 @@ function applyFee(amountSol: number, bps: number): number {
   return amountSol * (bps / 10_000);
 }
 
+/**
+ * Stop-limit style floor for paper / live-sim hard SL fills.
+ * Caps adverse gap beyond the SL threshold (plus a small slippage allowance).
+ */
+function hardStopMinFillPriceSol(
+  entryPriceSol: number,
+  hardSlPct: number
+): number | undefined {
+  if (!(entryPriceSol > 0) || !Number.isFinite(hardSlPct) || hardSlPct >= 0) {
+    return undefined;
+  }
+  const slPrice = entryPriceSol * (1 + hardSlPct / 100);
+  if (!(slPrice > 0)) return undefined;
+  return slPrice * (1 - HARD_SL_MAX_GAP_SLIPPAGE);
+}
+
 export class PaperTrader {
   private balanceSol: number;
   private startingBalanceSol: number;
@@ -239,30 +272,37 @@ export class PaperTrader {
   ): void {
     if (!(priceSol > 0) || !Number.isFinite(priceSol)) return;
 
-    if (
+    const candidateMc =
       meta?.marketCapUsd != null &&
       Number.isFinite(meta.marketCapUsd) &&
       meta.marketCapUsd > 0
-    ) {
-      this.marketCapCache.set(mint, meta.marketCapUsd);
-    }
+        ? meta.marketCapUsd
+        : undefined;
 
     let mark = priceSol;
+    let acceptedMc: number | undefined;
+    let sawOpen = false;
     for (const pos of this.positions.values()) {
       if (pos.mint !== mint || pos.status === 'closed') continue;
       if (!(pos.entryPriceSol > 0)) break;
+      sawOpen = true;
+      const markMcForReconcile =
+        candidateMc != null &&
+        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc)
+          ? candidateMc
+          : null;
       const reconciled = reconcileMarkPriceSol({
         entryPriceSol: pos.entryPriceSol,
         markPriceSol: priceSol,
         entryMarketCapUsd: pos.entryMarketCapUsd,
-        markMarketCapUsd:
-          meta?.marketCapUsd ?? this.marketCapCache.get(mint) ?? null,
+        markMarketCapUsd: markMcForReconcile,
       });
       if (reconciled.rejected) {
         console.warn(
           `[paper] Rejected absurd mark for ${mint.slice(0, 8)}… ` +
             `(${reconciled.reason}) — keeping prior price`
         );
+        // Do not poison MC cache with a rejected feed
         return;
       }
       if (reconciled.adjusted) {
@@ -273,20 +313,49 @@ export class PaperTrader {
         );
       }
       mark = reconciled.priceSol;
+      if (
+        candidateMc != null &&
+        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc)
+      ) {
+        acceptedMc = candidateMc;
+      } else if (candidateMc != null) {
+        console.warn(
+          `[paper] Rejected absurd mark MC $${Math.round(candidateMc).toLocaleString()} ` +
+            `for ${mint.slice(0, 8)}… (vs entry MC $${Math.round(pos.entryMarketCapUsd ?? 0).toLocaleString()})`
+        );
+      }
       break;
     }
     this.priceCache.set(mint, mark);
+    if (acceptedMc != null) {
+      this.marketCapCache.set(mint, acceptedMc);
+    } else if (!sawOpen && candidateMc != null) {
+      // No open position to sanity-check against — still cache for discovery UI
+      this.marketCapCache.set(mint, candidateMc);
+    }
   }
 
   /** Cache latest live market-cap USD for a mint (Live MC column / exit MC). */
   setMarkMarketCapUsd(mint: string, marketCapUsd: number | null | undefined): void {
     if (
-      marketCapUsd != null &&
-      Number.isFinite(marketCapUsd) &&
-      marketCapUsd > 0
+      marketCapUsd == null ||
+      !Number.isFinite(marketCapUsd) ||
+      !(marketCapUsd > 0)
     ) {
-      this.marketCapCache.set(mint, marketCapUsd);
+      return;
     }
+    for (const pos of this.positions.values()) {
+      if (pos.mint !== mint || pos.status === 'closed') continue;
+      if (!isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, marketCapUsd)) {
+        console.warn(
+          `[paper] Rejected absurd mark MC $${Math.round(marketCapUsd).toLocaleString()} ` +
+            `for ${mint.slice(0, 8)}… (vs entry MC $${Math.round(pos.entryMarketCapUsd ?? 0).toLocaleString()})`
+        );
+        return;
+      }
+      break;
+    }
+    this.marketCapCache.set(mint, marketCapUsd);
   }
 
   getMarkMarketCapUsd(mint: string): number | undefined {
@@ -362,6 +431,12 @@ export class PaperTrader {
 
     let liveMarketCapUsd: number | null =
       this.marketCapCache.get(position.mint) ?? null;
+    if (
+      liveMarketCapUsd != null &&
+      !isSaneMarkMarketCapUsd(position.entryMarketCapUsd, liveMarketCapUsd)
+    ) {
+      liveMarketCapUsd = null;
+    }
     if (
       (liveMarketCapUsd == null || !(liveMarketCapUsd > 0)) &&
       position.entryMarketCapUsd != null &&
@@ -709,6 +784,11 @@ export class PaperTrader {
       fraction?: number;
       sellPctOfInitial?: number;
       tokensToSell?: number;
+      /**
+       * Paper/live-sim stop-limit floor: fill will not go below this price
+       * (caps adverse gap-through on hard SL).
+       */
+      minFillPriceSol?: number;
     }
   ): Position | null {
     const position = this.positions.get(positionId);
@@ -736,8 +816,21 @@ export class PaperTrader {
     const { feeBps, slippageBps } = config.paper;
     // Guard against unit-mismatch marks that would credit absurd SOL to paper balance
     let safeMark = currentPriceSol;
+    if (
+      options?.minFillPriceSol != null &&
+      options.minFillPriceSol > 0 &&
+      Number.isFinite(options.minFillPriceSol)
+    ) {
+      if (safeMark < options.minFillPriceSol) {
+        console.warn(
+          `[paper] Cap SL gap fill ${safeMark.toExponential(3)} → ${options.minFillPriceSol.toExponential(3)} ` +
+            `for ${position.symbol || position.mint.slice(0, 8)}`
+        );
+        safeMark = options.minFillPriceSol;
+      }
+    }
     if (position.entryPriceSol > 0 && currentPriceSol > 0) {
-      const ratio = currentPriceSol / position.entryPriceSol;
+      const ratio = safeMark / position.entryPriceSol;
       if (
         ratio > MAX_EXIT_PRICE_MULTIPLE ||
         ratio < 1 / MAX_EXIT_PRICE_MULTIPLE
@@ -794,16 +887,12 @@ export class PaperTrader {
 
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
     const liveMc = this.marketCapCache.get(position.mint);
-    const exitMc =
-      liveMc != null && liveMc > 0
-        ? liveMc
-        : position.entryMarketCapUsd != null && position.entryPriceSol > 0
-          ? marketCapAtPrice(
-              position.entryMarketCapUsd,
-              position.entryPriceSol,
-              exitPrice
-            )
-          : undefined;
+    const exitMc = resolveExitMarketCapUsd({
+      entryMarketCapUsd: position.entryMarketCapUsd,
+      entryPriceSol: position.entryPriceSol,
+      exitPriceSol: exitPrice,
+      liveMarketCapUsd: liveMc,
+    });
 
     if (isPartial && position.amountTokens > 1e-12) {
       position.status = 'partial';
@@ -1124,7 +1213,20 @@ export class PaperTrader {
         action.type === 'trail_exit' ||
         action.type === 'full'
       ) {
-        this.simulateSell(position.id, markPrice, action.reason);
+        const minFill =
+          action.type === 'hard_sl'
+            ? hardStopMinFillPriceSol(
+                position.entryPriceSol,
+                adjustedStopLossPct(
+                  position.stopLossPct,
+                  position.antiRug?.riskScore,
+                  position.convictionScore
+                )
+              )
+            : undefined;
+        this.simulateSell(position.id, markPrice, action.reason, {
+          minFillPriceSol: minFill,
+        });
         const kind =
           action.type === 'hard_sl'
             ? 'hard_sl'
@@ -1188,7 +1290,12 @@ export class PaperTrader {
 
     if (markPnlPct <= hardSl) {
       const reason = `hard stop-loss ${hardSl}%`;
-      this.simulateSell(position.id, markPrice, reason);
+      this.simulateSell(position.id, markPrice, reason, {
+        minFillPriceSol: hardStopMinFillPriceSol(
+          position.entryPriceSol,
+          hardSl
+        ),
+      });
       return {
         kind: 'hard_sl',
         reason,
@@ -1450,7 +1557,13 @@ export class PaperTrader {
         await this.closePositionByRules(
           position,
           currentPrice,
-          `hard stop-loss ${hardSl}%`
+          `hard stop-loss ${hardSl}%`,
+          {
+            minFillPriceSol: hardStopMinFillPriceSol(
+              position.entryPriceSol,
+              hardSl
+            ),
+          }
         );
         continue;
       }
@@ -1595,7 +1708,20 @@ export class PaperTrader {
 
     if (action.type === 'hard_sl' || action.type === 'trail_exit' || action.type === 'full') {
       console.log(`[profit] 🔴 ${label} — ${action.reason}`);
-      await this.closePositionByRules(position, currentPrice, action.reason);
+      const minFill =
+        action.type === 'hard_sl'
+          ? hardStopMinFillPriceSol(
+              position.entryPriceSol,
+              adjustedStopLossPct(
+                position.stopLossPct,
+                position.antiRug?.riskScore,
+                position.convictionScore
+              )
+            )
+          : undefined;
+      await this.closePositionByRules(position, currentPrice, action.reason, {
+        minFillPriceSol: minFill,
+      });
       return;
     }
 
@@ -1711,7 +1837,8 @@ export class PaperTrader {
   private async closePositionByRules(
     position: Position,
     currentPriceSol: number,
-    reason: string
+    reason: string,
+    options?: { minFillPriceSol?: number }
   ): Promise<void> {
     if (position.tradeMode === 'live') {
       try {
@@ -1729,16 +1856,12 @@ export class PaperTrader {
           position.closedAt = Date.now();
           position.exitPriceSol = currentPriceSol;
           const liveMc = this.marketCapCache.get(position.mint);
-          position.exitMarketCapUsd =
-            liveMc != null && liveMc > 0
-              ? liveMc
-              : position.entryMarketCapUsd != null && position.entryPriceSol > 0
-                ? marketCapAtPrice(
-                    position.entryMarketCapUsd,
-                    position.entryPriceSol,
-                    currentPriceSol
-                  )
-                : undefined;
+          position.exitMarketCapUsd = resolveExitMarketCapUsd({
+            entryMarketCapUsd: position.entryMarketCapUsd,
+            entryPriceSol: position.entryPriceSol,
+            exitPriceSol: currentPriceSol,
+            liveMarketCapUsd: liveMc,
+          });
           position.reason = reason;
           const pnlPct =
             ((currentPriceSol - position.entryPriceSol) /
@@ -1775,7 +1898,9 @@ export class PaperTrader {
       return;
     }
 
-    this.simulateSell(position.id, currentPriceSol, reason);
+    this.simulateSell(position.id, currentPriceSol, reason, {
+      minFillPriceSol: options?.minFillPriceSol,
+    });
   }
 
   /**
@@ -1822,7 +1947,11 @@ export class PaperTrader {
   startAutoCheck(): void {
     if (this.checkTimer) return;
 
-    const interval = config.paper.positionCheckIntervalMs;
+    const baseInterval = config.paper.positionCheckIntervalMs;
+    const interval =
+      config.mode === 'liveSimulation'
+        ? Math.min(baseInterval, LIVE_SIM_CHECK_INTERVAL_MS)
+        : baseInterval;
     this.checkTimer = setInterval(() => {
       void (async () => {
         if (config.paper.useLiveData || config.mode === 'liveSimulation') {
@@ -1846,7 +1975,11 @@ export class PaperTrader {
 
     console.log(
       `[paper] Auto position check started (every ${interval}ms)` +
-        (config.paper.useLiveData ? ' [live data ON]' : '')
+        (config.mode === 'liveSimulation'
+          ? ' [LIVE SIM]'
+          : config.paper.useLiveData
+            ? ' [live data ON]'
+            : '')
     );
   }
 

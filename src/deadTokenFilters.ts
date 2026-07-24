@@ -22,6 +22,7 @@ import type { BondingCurveHealth } from './bondingCurve';
 import {
   effectiveMaxDrawdownFromRecentHighPct,
   effectiveMaxEntryAgeMinutes,
+  effectiveMaxEntryMarketCapUsd,
   effectiveRejectDumpingToken,
   effectiveStrictMinRecentBuyVolumeUsd,
   effectiveStrictMinRecentVolumeUsd,
@@ -197,6 +198,7 @@ export function evaluateDeadTokenHardFloors(
   // --- Non-bypassable entry market-cap floors (all risk levels, no early soft-pass) ---
   // Fail closed when MC is unknown — never allow a sub-$5k entry via missing Dex MC.
   const minMc = effectiveMinMarketCapUsd();
+  const maxMc = effectiveMaxEntryMarketCapUsd();
   const mc = snap.marketCapUsd;
   if (mc != null && Number.isFinite(mc) && mc > 0) {
     if (mc < minMc) {
@@ -209,6 +211,17 @@ export function evaluateDeadTokenHardFloors(
       });
       skipReasons.push(
         `Skipped — market cap too low (${formatMcShort(mc)} < ${formatMcShort(minMc)}; MC $${Math.round(mc)})`
+      );
+    } else if (maxMc > 0 && mc > maxMc) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_high_market_cap',
+        severity: 'critical',
+        label: 'Market cap too high',
+        detail: `MC $${Math.round(mc)} > max $${maxMc}`,
+      });
+      skipReasons.push(
+        `Skipped — market cap too high (${formatMcShort(mc)} > ${formatMcShort(maxMc)}; already-pumped / dump risk)`
       );
     } else if (
       mc < HARD_FILTER_FLOORS.lowMcNearZeroVolumeComboUsd &&

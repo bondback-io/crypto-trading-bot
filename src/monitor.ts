@@ -107,6 +107,7 @@ import {
 import {
   effectiveClusterMinWallets,
   effectiveMinWalletQualityScore,
+  effectiveMomentumMinHoldPct,
 } from './strictMode';
 
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
@@ -2834,7 +2835,7 @@ function checkConvergence(mint: string): TradeSignal | null {
   // Momentum: prefer non-negative short-term change when metrics exist
   const latestMetrics = [...recent].reverse().find((b) => b.metrics)?.metrics;
   const chg = latestMetrics?.priceChangeH1Pct;
-  const momMin = config.filters.momentumMinHoldPct ?? -5;
+  const momMin = effectiveMomentumMinHoldPct();
   const momentumOk =
     chg == null || !Number.isFinite(chg) ? undefined : chg >= momMin;
 

@@ -829,6 +829,11 @@ export interface FilterConfig {
    * Clamped to HARD_FILTER_FLOORS.minMarketCapUsd ($5k). Non-bypassable.
    */
   minMarketCapUsd: number;
+  /**
+   * Optional max entry / buy market-cap USD (0 = unlimited when Strict OFF).
+   * Strict Mode always applies an intensity cap via effectiveMaxEntryMarketCapUsd().
+   */
+  maxEntryMarketCapUsd: number;
   /** Skip if estimated dev/authority hold % exceeds this (0 = disabled) */
   maxDevHoldPct: number;
   /** Preferred alias for maxDevHoldPct (anti-rug) */
@@ -1187,6 +1192,7 @@ export const config: BotConfig = {
     minWinRate: 0,
     minLiquidity: 5_000,
     minMarketCapUsd: 5_000,
+    maxEntryMarketCapUsd: 0,
     maxDevHoldPct: 14,
     maxDevPercent: 14,
     maxTopHolderPct: 70,
@@ -1564,6 +1570,13 @@ function syncConfigAliases(): void {
       Number(config.filters.minMarketCapUsd),
       HARD_FILTER_FLOORS.minMarketCapUsd
     );
+  }
+  if (
+    config.filters.maxEntryMarketCapUsd == null ||
+    !Number.isFinite(Number(config.filters.maxEntryMarketCapUsd)) ||
+    Number(config.filters.maxEntryMarketCapUsd) < 0
+  ) {
+    config.filters.maxEntryMarketCapUsd = 0;
   }
   if (
     config.filters.minTop10HolderPct == null ||
@@ -2279,6 +2292,13 @@ function applyWalletQualityEntryMigration(): boolean {
   if (config.filters.maxEntryAgeMinutes == null) {
     config.filters.maxEntryAgeMinutes = 15;
   }
+  if (
+    config.filters.maxEntryMarketCapUsd == null ||
+    !Number.isFinite(Number(config.filters.maxEntryMarketCapUsd)) ||
+    Number(config.filters.maxEntryMarketCapUsd) < 0
+  ) {
+    config.filters.maxEntryMarketCapUsd = 0;
+  }
   if (config.filters.preferEntryWithinMinutes == null) {
     config.filters.preferEntryWithinMinutes = 10;
   }
@@ -2890,7 +2910,7 @@ export function setStrictMode(
       : 'medium';
   config.strictModeIntensity = intensity;
   const warning = config.strictMode
-    ? 'Higher quality trades only – fewer but better setups'
+    ? 'Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.'
     : null;
   console.log(
     `[config] Strict Mode → ${config.strictMode ? 'ON' : 'OFF'}` +
@@ -2921,7 +2941,7 @@ export function setStrictModeIntensity(
   }
   config.strictModeIntensity = intensity;
   const warning = config.strictMode
-    ? 'Higher quality trades only – fewer but better setups'
+    ? 'Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.'
     : null;
   console.log(
     `[config] Strict Mode intensity → ${intensity}` +
@@ -3086,6 +3106,7 @@ export function getRiskLevelSummary() {
       maxRiskScore: config.filters.maxRiskScore,
       minLiquidity: effectiveMinLiquidityUsd(),
       minMarketCapUsd: effectiveMinMarketCapUsd(),
+      maxEntryMarketCapUsd: Number(config.filters.maxEntryMarketCapUsd ?? 0) || 0,
       convergenceRequired: config.filters.convergenceRequired,
       maxConcurrentPositions: config.filters.maxConcurrentPositions,
       dailyLossLimitSol: config.filters.dailyLossLimitSol,

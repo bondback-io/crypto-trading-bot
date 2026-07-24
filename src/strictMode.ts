@@ -13,7 +13,7 @@ import { HARD_FILTER_FLOORS, config } from './config';
 export type StrictModeIntensity = 'low' | 'medium' | 'high';
 
 export const STRICT_MODE_WARNING =
-  'Higher quality trades only – fewer but better setups';
+  'Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.';
 
 export const STRICT_INTENSITY_META: Record<
   StrictModeIntensity,
@@ -22,7 +22,8 @@ export const STRICT_INTENSITY_META: Record<
   low: {
     label: 'Strict-Low',
     shortLabel: 'Low',
-    description: 'Most selective — highest quality bars, fewest trades',
+    description:
+      'Most selective / safest Strict — highest quality bars, fewest trades (NOT “low risk mode”)',
   },
   medium: {
     label: 'Strict-Medium',
@@ -32,9 +33,20 @@ export const STRICT_INTENSITY_META: Record<
   high: {
     label: 'Strict-High',
     shortLabel: 'High',
-    description: 'Still strict but more active — lower bars than Low',
+    description:
+      'More active Strict — looser bars than Low/Medium (NOT safer than Strict-Low)',
   },
 };
+
+/** Per-intensity max entry MC (USD) when Strict is ON — blocks already-pumped dumps. */
+export const STRICT_MAX_ENTRY_MC_USD: Record<StrictModeIntensity, number> = {
+  low: 150_000,
+  medium: 400_000,
+  high: 800_000,
+};
+
+/** Above this MC under Strict, require extra conviction / cluster. */
+export const STRICT_HIGH_MC_SOFT_USD = 100_000;
 
 /** Per-intensity deltas stacked on risk-level bases when Strict is ON. */
 export const STRICT_INTENSITY_DELTAS: Record<
@@ -54,6 +66,12 @@ export const STRICT_INTENSITY_DELTAS: Record<
     drawdownTighten: number;
     lowConvictionTrailAdd: number;
     lowConvictionTightenAdd: number;
+    /** Extra momentum hold floor (percentage points; more negative base becomes less permissive) */
+    momentumMinHoldAdd: number;
+    /** Extra conviction required when entry MC ≥ STRICT_HIGH_MC_SOFT_USD */
+    highMcConvictionAdd: number;
+    /** Extra cluster wallets when entry MC ≥ STRICT_HIGH_MC_SOFT_USD */
+    highMcClusterAdd: number;
   }
 > = {
   // Most selective
@@ -72,6 +90,9 @@ export const STRICT_INTENSITY_DELTAS: Record<
     drawdownTighten: 12,
     lowConvictionTrailAdd: 12,
     lowConvictionTightenAdd: 4,
+    momentumMinHoldAdd: 5,
+    highMcConvictionAdd: 15,
+    highMcClusterAdd: 1,
   },
   // Original v1.1.33 Strict deltas (default)
   medium: {
@@ -89,6 +110,9 @@ export const STRICT_INTENSITY_DELTAS: Record<
     drawdownTighten: 8,
     lowConvictionTrailAdd: 8,
     lowConvictionTightenAdd: 3,
+    momentumMinHoldAdd: 3,
+    highMcConvictionAdd: 12,
+    highMcClusterAdd: 1,
   },
   // Still strict, more active
   high: {
@@ -103,9 +127,12 @@ export const STRICT_INTENSITY_DELTAS: Record<
     deadVolumeUsdFactor: 0.85,
     deadVolumeHoursSubtract: 0,
     deadVolumeHoldFactor: 0.75,
-    drawdownTighten: 4,
+    drawdownTighten: 6,
     lowConvictionTrailAdd: 4,
     lowConvictionTightenAdd: 2,
+    momentumMinHoldAdd: 2,
+    highMcConvictionAdd: 10,
+    highMcClusterAdd: 1,
   },
 };
 
@@ -188,7 +215,72 @@ export function effectiveMaxDrawdownFromRecentHighPct(): number {
   const base = config.filters.maxDrawdownFromRecentHighPct ?? 35;
   if (!isStrictMode()) return base;
   const d = deltas();
-  return Math.max(20, base - d.drawdownTighten);
+  return Math.max(18, base - d.drawdownTighten);
+}
+
+/**
+ * Max entry market-cap USD. Strict intensity caps block already-pumped MCs
+ * that tend to dump. Config `maxEntryMarketCapUsd` (when >0) is an additional
+ * ceiling even when Strict is OFF.
+ * Returns 0 when unlimited.
+ */
+export function effectiveMaxEntryMarketCapUsd(): number {
+  const configured = Number(config.filters.maxEntryMarketCapUsd ?? 0);
+  const configCap =
+    Number.isFinite(configured) && configured > 0 ? configured : 0;
+  if (!isStrictMode()) return configCap;
+  const strictCap = STRICT_MAX_ENTRY_MC_USD[getStrictModeIntensity()];
+  if (configCap > 0) return Math.min(configCap, strictCap);
+  return strictCap;
+}
+
+/** Momentum hold floor — Strict raises the bar (less negative / more positive). */
+export function effectiveMomentumMinHoldPct(): number {
+  const base = config.filters.momentumMinHoldPct ?? -5;
+  if (!isStrictMode()) return base;
+  return base + deltas().momentumMinHoldAdd;
+}
+
+/**
+ * Min conviction for a given entry MC. Under Strict, high-MC entries need
+ * stronger conviction so High risk + Strict-High cannot freely chase pumps.
+ */
+export function effectiveMinConvictionScoreForMc(
+  entryMarketCapUsd?: number | null
+): number {
+  let min = effectiveMinConvictionScore();
+  if (
+    isStrictMode() &&
+    entryMarketCapUsd != null &&
+    Number.isFinite(entryMarketCapUsd) &&
+    entryMarketCapUsd >= STRICT_HIGH_MC_SOFT_USD
+  ) {
+    min = Math.min(85, min + deltas().highMcConvictionAdd);
+  }
+  return min;
+}
+
+/** Cluster floor for a given entry MC (Strict bumps further on high MC). */
+export function effectiveClusterMinWalletsForMc(
+  entryMarketCapUsd?: number | null
+): number {
+  let min = effectiveClusterMinWallets();
+  if (
+    isStrictMode() &&
+    entryMarketCapUsd != null &&
+    Number.isFinite(entryMarketCapUsd) &&
+    entryMarketCapUsd >= STRICT_HIGH_MC_SOFT_USD
+  ) {
+    min = Math.min(5, min + deltas().highMcClusterAdd);
+  }
+  return min;
+}
+
+export function effectiveDeadVolumeUsdPerHour(): number {
+  const base = config.risk.deadVolumeUsdPerHour ?? 60;
+  if (!isStrictMode()) return base;
+  const d = deltas();
+  return Math.max(30, Math.round(base * d.deadVolumeUsdFactor));
 }
 
 /** Volume filters — intensity bump on top of risk-level / hard floors. */
@@ -218,13 +310,6 @@ export function effectiveStrictMinRecentBuyVolumeUsd(): number {
   );
   if (!isStrictMode()) return base;
   return base + deltas().recentBuyVolumeAdd;
-}
-
-export function effectiveDeadVolumeUsdPerHour(): number {
-  const base = config.risk.deadVolumeUsdPerHour ?? 60;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.max(30, Math.round(base * d.deadVolumeUsdFactor));
 }
 
 export function effectiveDeadVolumeConsecutiveHours(): number {
@@ -269,6 +354,9 @@ export function getStrictModeStatus(): {
     maxEntryAgeMinutes: number;
     preferEntryWithinMinutes: number;
     requireMomentum: boolean;
+    maxEntryMarketCapUsd: number;
+    momentumMinHoldPct: number;
+    maxDrawdownFromRecentHighPct: number;
     minVolume24hUsd: number;
     minRecentVolumeUsd: number;
     minRecentBuyVolumeUsd: number;
@@ -293,6 +381,9 @@ export function getStrictModeStatus(): {
       maxEntryAgeMinutes: effectiveMaxEntryAgeMinutes(),
       preferEntryWithinMinutes: effectivePreferEntryWithinMinutes(),
       requireMomentum: effectiveRequireMomentumConfirmation(),
+      maxEntryMarketCapUsd: effectiveMaxEntryMarketCapUsd(),
+      momentumMinHoldPct: effectiveMomentumMinHoldPct(),
+      maxDrawdownFromRecentHighPct: effectiveMaxDrawdownFromRecentHighPct(),
       minVolume24hUsd: effectiveStrictMinVolume24hUsd(),
       minRecentVolumeUsd: effectiveStrictMinRecentVolumeUsd(),
       minRecentBuyVolumeUsd: effectiveStrictMinRecentBuyVolumeUsd(),

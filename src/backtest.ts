@@ -2685,12 +2685,12 @@ export function exportLastBacktestJson(): string | null {
 
 /**
  * Refresh open paper positions with live DexScreener prices
- * when config.paper.useLiveData is enabled.
+ * when live market data is forced (paper useLiveData or Live Simulation).
  */
 export async function refreshPaperPricesFromLive(
   trader: PaperTrader = paperTrader
 ): Promise<number> {
-  if (!config.paper.useLiveData) return 0;
+  if (!config.paper.useLiveData && config.mode !== 'liveSimulation') return 0;
 
   const open = trader.getOpenPositions();
   let updated = 0;

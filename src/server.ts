@@ -1331,6 +1331,7 @@ export function createServer(): express.Application {
       'minWinRate',
       'minLiquidity',
       'minMarketCapUsd',
+      'maxEntryMarketCapUsd',
       'maxDevHoldPct',
       'maxDevPercent',
       'maxTopHolderPct',

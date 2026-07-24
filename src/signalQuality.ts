@@ -20,9 +20,10 @@ import {
 } from './config';
 import type { TradeSignal } from './monitor';
 import {
-  effectiveClusterMinWallets,
+  effectiveClusterMinWalletsForMc,
   effectiveMaxEntryAgeMinutes,
-  effectiveMinConvictionScore,
+  effectiveMinConvictionScoreForMc,
+  effectiveMomentumMinHoldPct,
   effectivePreferEntryWithinMinutes,
   effectiveRequireMomentumConfirmation,
   effectiveStrictMinVolume24hUsd,
@@ -137,7 +138,12 @@ function formatBreakdown(b: ConvictionBreakdown): string {
  */
 export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict {
   const sel: SelectiveTradingConfig = config.selective;
-  const minRequired = effectiveMinConvictionScore();
+  const entryMcHint =
+    signal.sourceEntryMcUsd ??
+    (signal.metrics as { marketCapUsd?: number | null } | undefined)?.marketCapUsd ??
+    (signal.antiRug as { marketCapUsd?: number | null } | undefined)?.marketCapUsd ??
+    null;
+  const minRequired = effectiveMinConvictionScoreForMc(entryMcHint);
   const reasons: string[] = [];
   const breakdown: ConvictionBreakdown = {
     wallets: 0,
@@ -156,7 +162,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const flowWeight = clamp(config.filters.smartMoneyFlowWeight ?? 1.35, 0.5, 2.5);
 
   // --- Wallet convergence / cluster (0–28) ---
-  const baseRequired = effectiveClusterMinWallets();
+  const baseRequired = effectiveClusterMinWalletsForMc(entryMcHint);
   let requiredWallets = baseRequired;
   if (
     sel.enabled &&
@@ -305,12 +311,13 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   // --- Momentum confirmation (0–8) ---
   const requireMom = effectiveRequireMomentumConfirmation();
   const momLookback = config.filters.momentumLookbackMinutes ?? 15;
+  const momMinHold = effectiveMomentumMinHoldPct();
   const chg = priceChangeH1(signal);
   const momOk =
     signal.momentumOk === true ||
     (signal.momentumOk !== false &&
       chg != null &&
-      chg >= (config.filters.momentumMinHoldPct ?? -5));
+      chg >= momMinHold);
   if (signal.momentumOk === true) {
     breakdown.momentum = 8;
   } else if (momOk && chg != null && chg >= 0) {
@@ -320,7 +327,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   } else if (requireMom) {
     breakdown.momentum = 0;
     reasons.push(
-      `momentum failed (need hold ≥ ${config.filters.momentumMinHoldPct ?? -5}% over ~${momLookback}m)`
+      `momentum failed (need hold ≥ ${momMinHold}% over ~${momLookback}m)`
     );
   } else {
     breakdown.momentum = 2;
