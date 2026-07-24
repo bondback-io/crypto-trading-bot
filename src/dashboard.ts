@@ -245,6 +245,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
+    .config-panel > .grid,
+    #strategies-grid { align-items: start; gap: 1rem; }
+    .config-panel .card,
+    .strategies-panel .card { min-width: 0; }
+    .config-panel .section-title,
+    .strategies-panel .section-title { margin-bottom: .7rem; }
+    .config-panel .filters-row { row-gap: .7rem; }
+    .config-wide-card { grid-column: 1 / -1; }
+    .strategy-risk-card {
+      border-color: rgba(16, 185, 129, .42);
+      background: linear-gradient(135deg, rgba(16, 185, 129, .09), rgba(30, 41, 59, .98) 42%);
+    }
+    .strategy-risk-card #risk-level-toggle,
+    .strategy-risk-card #strict-intensity-toggle { gap: .5rem; }
+    .strategy-group-card { padding: .85rem 1rem; }
+    .strategy-row { padding: .85rem 0; }
     .strategy-settings {
       margin-top: .65rem;
       border: 1px solid #334155;
@@ -294,10 +310,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     #strategy-controls-wallet_convergence > .ctl-check > span { white-space: normal; }
     [data-strategy-source-card="true"] { display: none !important; }
     @media (max-width: 640px) {
+      .config-panel,
+      .strategies-panel { gap: .75rem; }
+      .config-panel .card,
+      .strategies-panel .card { padding: .85rem; }
+      .strategy-risk-card #risk-level-toggle .btn,
+      .strategy-risk-card #strict-intensity-toggle .btn {
+        flex: 1 1 calc(50% - .25rem);
+        justify-content: center;
+      }
       .strategy-settings-controls .ctl,
       .strategy-settings-controls .field { width: 100%; flex-basis: 100%; }
       #strategy-controls-wallet_convergence { grid-template-columns: minmax(0, 1fr); }
       .strategy-settings summary { min-height: 42px; }
+    }
+    @media (min-width: 1024px) {
+      .config-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     .card-open-positions {
       position: relative;
@@ -1970,8 +1998,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     </section>
 
     <!-- ========== TAB: Strategies ========== -->
-    <section data-tab-panel="strategies" class="hidden space-y-4">
-      <div class="card">
+    <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
+      <div class="card strategy-risk-card">
         <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
         <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
@@ -2002,7 +2030,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
-      <div class="card">
+      <div class="card strategy-control-card">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div class="section-title">Strategy Control Center <span class="tip" tabindex="0" data-tip="Master switches apply to paper, Live Simulation, backtests, and live trading. Risk Level and Strict Mode still control thresholds."></span></div>
@@ -2028,7 +2056,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     </section>
 
     <!-- ========== TAB: Config ========== -->
-    <section data-tab-panel="config" class="hidden space-y-4">
+    <section data-tab-panel="config" class="config-panel hidden space-y-4">
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
@@ -2095,9 +2123,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
-        <div class="card">
+        <div class="card config-wide-card">
           <div class="section-title">Filters &amp; Anti-Rug <span class="tip" tabindex="0" data-tip="Gates that must pass before a buy: convergence, liquidity, holder risk, honeypot, snipers."></span></div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="config-filter-grid grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="field"><label title="Distinct smart wallets that must buy before you copy">Convergence — <span class="val" id="v-convergenceRequired">2</span></label><input type="range" id="convergenceRequired" min="1" max="5" step="1" value="2" /></div>
             <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">12</span></label><input type="range" id="maxConcurrentPositions" min="1" max="50" step="1" value="12" /></div>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
@@ -2183,34 +2211,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
-          <div class="mb-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155">
-            <div class="text-sm font-semibold text-slate-200 mb-2">Risk Level Preset</div>
-            <div class="flex flex-wrap gap-2 items-center mb-2">
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-low" onclick="setRiskLevel('low')">Low</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-medium" onclick="setRiskLevel('medium')">Medium</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-high" onclick="setRiskLevel('high')">High</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-risk-lvl-degen" onclick="setRiskLevel('degen')" style="border-color:#a855f7">Degen</button>
-            </div>
-            <div id="cfg-risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
-            <div class="mint text-xs" id="cfg-risk-level-summary">Selecting a level applies recommended trade size, filters, stops, and selective gates.</div>
-            <div class="mt-3 pt-3 border-t border-slate-700/80">
-              <div class="toggle-row">
-                <span title="Opt-in overlay on top of the risk level">Strict Mode</span>
-                <label class="switch"><input type="checkbox" id="cfg-strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
-              </div>
-              <div id="cfg-strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
-              <div id="cfg-strict-intensity-row" class="mt-2">
-                <div class="text-xs text-slate-400 mb-1">Intensity</div>
-                <div class="flex flex-wrap gap-2 items-center">
-                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
-                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced (default)">Strict-Medium</button>
-                  <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="cfg-strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
-                </div>
-                <div class="mint text-xs mt-1" id="cfg-strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
-              </div>
-              <div class="mint text-xs mt-1" id="cfg-strict-mode-status">Strict Mode OFF — using risk-level presets</div>
-            </div>
-          </div>
           <div class="toggle-row"><span title="Enable the risk engine (limits, sizing, trails)">Risk engine</span><label class="switch"><input type="checkbox" id="riskEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Scale out in tiers as profit grows">Tiered selling</span><label class="switch"><input type="checkbox" id="tieredSellEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Pause the monitor when daily/weekly loss or DD limits trip">Auto-pause on limit</span><label class="switch"><input type="checkbox" id="autoPauseOnLimit" checked /><span class="slider"></span></label></div>
@@ -2504,14 +2504,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const registry = data.registry || [];
       grid.innerHTML = (data.groups || []).map(group => {
         const rows = (group.strategies || []).map(key => registry.find(s => s.key === key)).filter(Boolean);
-        return '<div class="card">' +
+        return '<div class="card strategy-group-card">' +
           '<div class="section-title">' + group.label + '</div>' +
           rows.map(s => {
             const safety = s.criticalSafety
               ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
               : '';
             const hasSettings = (STRATEGY_SETTING_IDS[s.key] || []).length > 0 || !!extraStrategySettingsHtml(s.key);
-            return '<div class="py-3 border-t border-slate-700/70 first:border-t-0">' +
+            return '<div class="strategy-row border-t border-slate-700/70 first:border-t-0">' +
               '<div class="flex items-center justify-between gap-3">' +
                 '<div class="font-medium text-slate-100">' + s.name + safety + '</div>' +
                 '<label class="switch"><input type="checkbox" ' + (s.enabled ? 'checked ' : '') +
