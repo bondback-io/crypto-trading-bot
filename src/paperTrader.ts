@@ -3,7 +3,7 @@
  * position tracking, and automatic take-profit / stop-loss checks.
  */
 
-import { config, randomTakeProfitPct } from './config';
+import { config, randomTakeProfitPct, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { formatTokenLabel, mintPrefix } from './tokenMeta';
 import { registerExitForReentry, getSellHistory } from './reBuy';
 import {
@@ -33,6 +33,12 @@ import {
   effectiveLowConvictionTrailTightenPct,
 } from './strictMode';
 import { isStrategyEnabled } from './strategies';
+import {
+  evaluateShortTermExit,
+  seedShortTermPosition,
+  shortTermExitLogTag,
+  type ShortTermStrategyId,
+} from './shortTermStrategies';
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -118,6 +124,13 @@ export interface Position {
   deadMarketBelowSince?: number;
   /** Conviction score at entry (for exit discipline) */
   convictionScore?: number;
+  /** Short-term / Quick Scalper timed exit mode */
+  scalpMode?: boolean;
+  shortTermStrategyId?: import('./shortTermStrategies').ShortTermStrategyId;
+  scalpDeadlineMs?: number;
+  scalpTpPct?: number;
+  scalpSlPct?: number;
+  scalpMomentumFailDropPct?: number;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -487,6 +500,8 @@ export class PaperTrader {
     entryMarketCapUsd?: number;
     sourceEntryMcUsd?: number;
     convictionScore?: number;
+    scalpMode?: boolean;
+    shortTermStrategyId?: ShortTermStrategyId;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -552,7 +567,20 @@ export class PaperTrader {
       convictionScore: input.convictionScore,
     };
 
+    if (input.scalpMode) {
+      const id = input.shortTermStrategyId || 'quick_scalper';
+      Object.assign(position, seedShortTermPosition(id, position.openedAt));
+      const suiteTag = isScalperSuiteProfile(config.strategyProfile)
+        ? ` [${getScalperSuiteVariantLabel(config.strategyProfile)}]`
+        : '';
+      this.log(
+        'info',
+        `${id}${suiteTag} armed on ${position.symbol} — TP +${position.scalpTpPct}% / SL ${position.scalpSlPct}% / timer ${Math.round(((position.scalpDeadlineMs ?? 0) - position.openedAt) / 1000)}s`
+      );
+    }
+
     if (
+      !position.scalpMode &&
       position.convictionScore != null &&
       position.convictionScore < effectiveLowConvictionTrailThreshold()
     ) {
@@ -664,6 +692,8 @@ export class PaperTrader {
       entryMarketCapUsd?: number;
       sourceEntryMcUsd?: number;
       convictionScore?: number;
+      scalpMode?: boolean;
+      shortTermStrategyId?: ShortTermStrategyId;
     }
   ): Position | null {
     const spendSol =
@@ -753,8 +783,21 @@ export class PaperTrader {
       convictionScore: meta?.convictionScore,
     };
 
+    if (meta?.scalpMode) {
+      const id = meta.shortTermStrategyId || 'quick_scalper';
+      Object.assign(position, seedShortTermPosition(id, position.openedAt));
+      const suiteTag = isScalperSuiteProfile(config.strategyProfile)
+        ? ` [${getScalperSuiteVariantLabel(config.strategyProfile)}]`
+        : '';
+      this.log(
+        'info',
+        `${id}${suiteTag} armed on ${label} — TP +${position.scalpTpPct}% / SL ${position.scalpSlPct}% / timer ${Math.round(((position.scalpDeadlineMs ?? 0) - position.openedAt) / 1000)}s`
+      );
+    }
+
     // Low-conviction: tighten trail at open
     if (
+      !position.scalpMode &&
       position.convictionScore != null &&
       position.convictionScore < effectiveLowConvictionTrailThreshold()
     ) {
@@ -1117,7 +1160,8 @@ export class PaperTrader {
    */
   evaluatePositionTickSync(
     positionId: string,
-    currentPrice: number
+    currentPrice: number,
+    nowMs: number = Date.now()
   ): {
     kind:
       | 'none'
@@ -1128,7 +1172,11 @@ export class PaperTrader {
       | 'trail_exit'
       | 'take_profit'
       | 'tier'
-      | 'info';
+      | 'info'
+      | 'scalp_tp'
+      | 'scalp_sl'
+      | 'scalp_timer'
+      | 'scalp_signal_fail';
     reason: string;
     markPnlPct: number;
     stillOpen: boolean;
@@ -1168,6 +1216,58 @@ export class PaperTrader {
     const markPnlPct =
       ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
+
+    // —— Quick Scalper / short-term timed exits (before tiered profit) ——
+    if (position.scalpMode && position.scalpDeadlineMs != null) {
+      const scalpAction = evaluateShortTermExit({
+        strategyId:
+          (position.shortTermStrategyId as ShortTermStrategyId) || 'quick_scalper',
+        entryPriceSol: position.entryPriceSol,
+        currentPriceSol: markPrice,
+        highWaterMarkSol: position.highWaterMarkSol,
+        openedAt: position.openedAt,
+        nowMs,
+        deadlineMs: position.scalpDeadlineMs,
+        tpPct: position.scalpTpPct ?? position.takeProfitPct,
+        slPct: position.scalpSlPct ?? position.stopLossPct,
+        momentumFailDropPct: position.scalpMomentumFailDropPct,
+      });
+      if (scalpAction.type === 'full') {
+        const strat =
+          position.shortTermStrategyId || 'quick_scalper';
+        const tag = shortTermExitLogTag(scalpAction.exitKind);
+        const minFill =
+          scalpAction.exitKind === 'scalp_sl'
+            ? hardStopMinFillPriceSol(
+                position.entryPriceSol,
+                position.scalpSlPct ?? position.stopLossPct
+              )
+            : undefined;
+        console.log(
+          `[scalp] ${tag} strategy=${strat} ${label} — ${scalpAction.reason}`
+        );
+        this.log(
+          'sell',
+          `${label}: [${tag}|${strat}] ${scalpAction.reason}`
+        );
+        this.simulateSell(position.id, markPrice, scalpAction.reason, {
+          minFillPriceSol: minFill,
+        });
+        return {
+          kind: scalpAction.exitKind,
+          reason: scalpAction.reason,
+          markPnlPct,
+          stillOpen: this.positions.has(positionId),
+        };
+      }
+      // Scalp positions skip tiered profit / legacy trail until timer/TP/SL
+      return {
+        kind: 'none',
+        reason: '',
+        markPnlPct,
+        stillOpen: true,
+      };
+    }
 
     // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
     if (
@@ -1424,13 +1524,14 @@ export class PaperTrader {
   runPositionTicksUntilIdle(
     positionId: string,
     currentPrice: number,
-    maxSteps = 4
+    maxSteps = 4,
+    nowMs: number = Date.now()
   ): Array<NonNullable<ReturnType<PaperTrader['evaluatePositionTickSync']>>> {
     const events: Array<
       NonNullable<ReturnType<PaperTrader['evaluatePositionTickSync']>>
     > = [];
     for (let step = 0; step < maxSteps; step++) {
-      const ev = this.evaluatePositionTickSync(positionId, currentPrice);
+      const ev = this.evaluatePositionTickSync(positionId, currentPrice, nowMs);
       if (!ev) break;
       if (ev.kind === 'none') break;
       events.push(ev);
@@ -1552,9 +1653,56 @@ export class PaperTrader {
       // Dead / inactive market force-exit (paper + live tracked)
       const deadReason = this.evaluateDeadMarketExit(position);
       if (deadReason) {
-        console.log(`[dead-vol] 🔴 ${label} — ${deadReason}`);
-        this.log('sell', `${label}: ${deadReason}`);
+        const scalpTag = position.scalpMode
+          ? ` [scalp=${position.shortTermStrategyId || 'scalp'}]`
+          : '';
+        console.log(`[dead-vol] 🔴 ${label}${scalpTag} — ${deadReason}`);
+        this.log('sell', `${label}: [DEAD_MARKET]${scalpTag} ${deadReason}`);
         await this.closePositionByRules(position, currentPrice, deadReason);
+        continue;
+      }
+
+      // Quick Scalper / short-term timed exits (before tiered profit)
+      if (position.scalpMode && position.scalpDeadlineMs != null) {
+        const scalpAction = evaluateShortTermExit({
+          strategyId:
+            (position.shortTermStrategyId as ShortTermStrategyId) ||
+            'quick_scalper',
+          entryPriceSol: position.entryPriceSol,
+          currentPriceSol: currentPrice,
+          highWaterMarkSol: position.highWaterMarkSol,
+          openedAt: position.openedAt,
+          nowMs: Date.now(),
+          deadlineMs: position.scalpDeadlineMs,
+          tpPct: position.scalpTpPct ?? position.takeProfitPct,
+          slPct: position.scalpSlPct ?? position.stopLossPct,
+          momentumFailDropPct: position.scalpMomentumFailDropPct,
+        });
+        if (scalpAction.type === 'full') {
+          const strat =
+            position.shortTermStrategyId || 'quick_scalper';
+          const tag = shortTermExitLogTag(scalpAction.exitKind);
+          console.log(
+            `[scalp] ${tag} strategy=${strat} ${label} — ${scalpAction.reason}`
+          );
+          this.log(
+            'sell',
+            `${label}: [${tag}|${strat}] ${scalpAction.reason}`
+          );
+          await this.closePositionByRules(
+            position,
+            currentPrice,
+            scalpAction.reason,
+            scalpAction.exitKind === 'scalp_sl'
+              ? {
+                  minFillPriceSol: hardStopMinFillPriceSol(
+                    position.entryPriceSol,
+                    position.scalpSlPct ?? position.stopLossPct
+                  ),
+                }
+              : undefined
+          );
+        }
         continue;
       }
 

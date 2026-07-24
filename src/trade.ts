@@ -175,6 +175,15 @@ export interface BuyOptions {
   top10HoldPct?: number | null;
   /** Entry conviction 0–100 for exit discipline */
   convictionScore?: number;
+  /** Seed Quick Scalper timed TP/SL/timer on open */
+  scalpMode?: boolean;
+  /** Which short-term strategy seeded the position */
+  shortTermStrategyId?:
+    | 'quick_scalper'
+    | 'micro_scalper'
+    | 'momentum_burst'
+    | 'post_migration_scalp'
+    | 'reversal_scalp';
 }
 
 /**
@@ -461,6 +470,8 @@ export async function executeBuy(
         entryMarketCapUsd,
         sourceEntryMcUsd,
         convictionScore: meta?.convictionScore,
+        scalpMode: meta?.scalpMode === true,
+        shortTermStrategyId: meta?.shortTermStrategyId,
       }
     );
     if (!position) {
@@ -546,6 +557,8 @@ export async function executeBuy(
         entryMarketCapUsd,
         sourceEntryMcUsd,
         convictionScore: meta?.convictionScore,
+        scalpMode: meta?.scalpMode === true,
+        shortTermStrategyId: meta?.shortTermStrategyId,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

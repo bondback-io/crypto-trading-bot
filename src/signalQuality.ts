@@ -11,6 +11,10 @@
  * - Time since launch / entry freshness
  * - Birdeye / GMGN smart-money flow (heavier weight)
  * - Momentum confirmation (price holding after smart buy)
+ * - Social sentiment (supporting filter; fail-open when unavailable)
+ * - Trending narrative soft boost (confirmation only; fail-open when unavailable)
+ * - Volume spike hard filter + soft boost (fail-open when unavailable)
+ * - Combined Volume+Sentiment+Narrative confirmation layer
  */
 
 import {
@@ -29,6 +33,22 @@ import {
   effectiveStrictMinVolume24hUsd,
 } from './strictMode';
 import { isStrategyEnabled } from './strategies';
+import {
+  resolveSocialSentimentForSignal,
+  logSocialSentimentDecision,
+} from './socialSentiment';
+import {
+  resolveTrendingNarrativeBoost,
+  logNarrativeBoostDecision,
+} from './trendingNarrative';
+import {
+  resolveVolumeSpikeForSignal,
+  logVolumeSpikeDecision,
+} from './volumeSpike';
+import {
+  resolveConfirmationLayerForSignal,
+  logConfirmationDecision,
+} from './confirmationLayer';
 
 export interface ConvictionBreakdown {
   wallets: number;
@@ -39,6 +59,14 @@ export interface ConvictionBreakdown {
   timing: number;
   smartFlow: number;
   momentum: number;
+  /** Supporting social sentiment (± points folded into score) */
+  social: number;
+  /** Soft trending-narrative confirmation boost (≥ 0) */
+  narrative: number;
+  /** Volume spike soft boost (≥ 0; hard skip tracked separately) */
+  volumeSpike: number;
+  /** Combined Volume+Sentiment+Narrative confirmation boost (≥ 0) */
+  confirmation: number;
 }
 
 export interface ConvictionVerdict {
@@ -126,10 +154,24 @@ function isPrioritySignal(signal: TradeSignal): boolean {
 }
 
 function formatBreakdown(b: ConvictionBreakdown): string {
+  const social =
+    b.social !== 0
+      ? ` social=${b.social >= 0 ? '+' : ''}${b.social}`
+      : '';
+  const narrative =
+    b.narrative !== 0 ? ` narr=+${b.narrative}` : '';
+  const volumeSpike =
+    b.volumeSpike !== 0 ? ` volSpike=+${b.volumeSpike}` : '';
+  const confirmation =
+    b.confirmation !== 0 ? ` confirm=+${b.confirmation}` : '';
   return (
     `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
     `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
-    `flow=${b.smartFlow} mom=${b.momentum}`
+    `flow=${b.smartFlow} mom=${b.momentum}` +
+    social +
+    narrative +
+    volumeSpike +
+    confirmation
   );
 }
 
@@ -155,6 +197,10 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     timing: 0,
     smartFlow: 0,
     momentum: 0,
+    social: 0,
+    narrative: 0,
+    volumeSpike: 0,
+    confirmation: 0,
   };
 
   const walletCount = signal.wallets.length;
@@ -338,6 +384,118 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.momentum = 2;
   }
 
+  // --- Social sentiment (supporting filter; fail-open when no data) ---
+  let socialSkip = false;
+  let socialSkipReason: string | undefined;
+  const socialVerdict = resolveSocialSentimentForSignal(signal);
+  if (socialVerdict) {
+    breakdown.social = socialVerdict.convictionDelta;
+    if (socialVerdict.influenced) {
+      if (socialVerdict.convictionDelta > 0) {
+        reasons.push(
+          `social boost +${socialVerdict.convictionDelta} (score ${socialVerdict.report.score})`
+        );
+        logSocialSentimentDecision(signal.symbol || 'token', socialVerdict, 'boost');
+      } else if (socialVerdict.convictionDelta < 0) {
+        reasons.push(
+          `social reduce ${socialVerdict.convictionDelta} (score ${socialVerdict.report.score})`
+        );
+        logSocialSentimentDecision(
+          signal.symbol || 'token',
+          socialVerdict,
+          socialVerdict.skip ? 'skip' : 'reduce'
+        );
+      }
+    } else if (socialVerdict.report.source === 'none') {
+      // Fail-open — do not log as influence
+    }
+    if (socialVerdict.skip) {
+      socialSkip = true;
+      socialSkipReason = socialVerdict.skipReason;
+      reasons.push(socialVerdict.skipReason || 'social sentiment skip');
+    }
+  }
+
+  // --- Trending narrative (soft boost only; fail-open when no match) ---
+  const narrativeVerdict = resolveTrendingNarrativeBoost(signal);
+  if (narrativeVerdict?.influenced) {
+    breakdown.narrative = narrativeVerdict.convictionDelta;
+    reasons.push(
+      `narrative boost +${narrativeVerdict.convictionDelta} (${narrativeVerdict.report.themes.join(',')})`
+    );
+    logNarrativeBoostDecision(signal.symbol || 'token', narrativeVerdict);
+  }
+
+  // --- Volume spike (hard filter + soft boost; fail-open when no data) ---
+  let volumeSpikeSkip = false;
+  let volumeSpikeSkipReason: string | undefined;
+  const volumeSpikeVerdict = resolveVolumeSpikeForSignal(signal);
+  if (volumeSpikeVerdict) {
+    if (volumeSpikeVerdict.convictionDelta > 0) {
+      breakdown.volumeSpike = volumeSpikeVerdict.convictionDelta;
+      const migTag = volumeSpikeVerdict.report.isMigration
+        ? ' post-mig combo'
+        : '';
+      reasons.push(
+        `volume spike boost +${volumeSpikeVerdict.convictionDelta}${migTag} (hits ${volumeSpikeVerdict.report.hitCount}, strength ${volumeSpikeVerdict.report.strength})`
+      );
+      logVolumeSpikeDecision(
+        signal.symbol || 'token',
+        volumeSpikeVerdict,
+        'boost'
+      );
+    }
+    if (volumeSpikeVerdict.skip) {
+      volumeSpikeSkip = true;
+      volumeSpikeSkipReason = volumeSpikeVerdict.skipReason;
+      reasons.push(
+        volumeSpikeVerdict.skipReason || 'volume spike filter skip'
+      );
+      logVolumeSpikeDecision(
+        signal.symbol || 'token',
+        volumeSpikeVerdict,
+        'skip'
+      );
+    }
+  }
+
+  // --- Combined Volume+Sentiment+Narrative confirmation layer ---
+  let confirmationSkip = false;
+  let confirmationSkipReason: string | undefined;
+  const confirmationVerdict = resolveConfirmationLayerForSignal(signal);
+  if (confirmationVerdict) {
+    if (confirmationVerdict.convictionDelta > 0) {
+      breakdown.confirmation = confirmationVerdict.convictionDelta;
+      const parts = confirmationVerdict.report.components
+        .map((c) =>
+          c.available
+            ? `${c.key}:${c.contribution.toFixed(1)}`
+            : `${c.key}:n/a`
+        )
+        .join(',');
+      reasons.push(
+        `confirmation ${confirmationVerdict.report.status} +${confirmationVerdict.convictionDelta} (score ${confirmationVerdict.report.score}; ${parts})`
+      );
+      logConfirmationDecision(
+        signal.symbol || 'token',
+        confirmationVerdict,
+        'boost'
+      );
+    }
+    if (confirmationVerdict.skip) {
+      confirmationSkip = true;
+      confirmationSkipReason = confirmationVerdict.skipReason;
+      reasons.push(
+        confirmationVerdict.skipReason || 'confirmation layer skip'
+      );
+      logConfirmationDecision(
+        signal.symbol || 'token',
+        confirmationVerdict,
+        'skip'
+      );
+    }
+  }
+
   let score =
     breakdown.wallets +
     breakdown.curve +
@@ -346,14 +504,18 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.risk +
     breakdown.timing +
     breakdown.smartFlow +
-    breakdown.momentum;
+    breakdown.momentum +
+    breakdown.social +
+    breakdown.narrative +
+    breakdown.volumeSpike +
+    breakdown.confirmation;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
   const breakdownLine = formatBreakdown(breakdown);
 
   if (!sel.enabled) {
     return {
-      pass: true,
+      pass: !socialSkip && !volumeSpikeSkip && !confirmationSkip,
       score,
       minRequired: 0,
       reasons,
@@ -386,8 +548,21 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const hardFail =
     !walletOk ||
     (requireMom && !momOk) ||
+    socialSkip ||
+    volumeSpikeSkip ||
+    confirmationSkip ||
     (requireHealthyCurve &&
       (curveHealth === 'dead' || curveHealth === 'stalled'));
+
+  if (socialSkip && socialSkipReason) {
+    // already in reasons
+  }
+  if (volumeSpikeSkip && volumeSpikeSkipReason) {
+    // already in reasons
+  }
+  if (confirmationSkip && confirmationSkipReason) {
+    // already in reasons
+  }
 
   return {
     pass: !hardFail && score >= minRequired,

@@ -159,17 +159,39 @@ function deltas() {
 /** Min wallet quality — intensity bump (cap 85). */
 export function effectiveMinWalletQualityScore(): number {
   const base = config.filters.minWalletQualityScore ?? 55;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.min(85, Math.max(base, base + d.walletQualityAdd));
+  let score = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    score = Math.min(85, Math.max(base, base + d.walletQualityAdd));
+  }
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    const ov = getQualityModeOverlays().minWalletQualityScore;
+    if (ov != null) score = Math.max(score, ov);
+  } catch {
+    /* ignore bootstrap */
+  }
+  return Math.min(85, score);
 }
 
 /** Min conviction — intensity bump (cap 80). */
 export function effectiveMinConvictionScore(): number {
   const base = config.selective?.minConvictionScore ?? 40;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.min(80, Math.max(base, base + d.convictionAdd));
+  let score = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    score = Math.min(80, Math.max(base, base + d.convictionAdd));
+  }
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    const ov = getQualityModeOverlays().minConvictionScore;
+    if (ov != null) score = Math.max(score, ov);
+  } catch {
+    /* ignore bootstrap */
+  }
+  return Math.min(80, score);
 }
 
 /** Cluster / convergence wallet floor — intensity add (cap 5). */
@@ -180,30 +202,78 @@ export function effectiveClusterMinWallets(): number {
     config.filters.convergenceRequired ?? 1,
     config.selective?.minWalletsForTrade ?? 1
   );
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.min(5, base + d.clusterMinAdd);
+  let floor = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    floor = Math.min(5, base + d.clusterMinAdd);
+  }
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    const ov = getQualityModeOverlays().minClusterWallets;
+    if (ov != null) floor = Math.max(floor, ov);
+  } catch {
+    /* ignore bootstrap */
+  }
+  return Math.min(5, floor);
 }
 
 /** Max entry age minutes — shorter = stricter. */
 export function effectiveMaxEntryAgeMinutes(): number {
   const base = config.filters.maxEntryAgeMinutes ?? 15;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.max(5, Math.round(base * d.entryAgeFactor));
+  let age = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    age = Math.max(5, Math.round(base * d.entryAgeFactor));
+  }
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    const ov = getQualityModeOverlays().maxEntryAgeMinutes;
+    if (ov != null) age = Math.min(age, ov);
+  } catch {
+    /* ignore bootstrap */
+  }
+  return Math.max(3, age);
 }
 
 export function effectivePreferEntryWithinMinutes(): number {
   const base = config.filters.preferEntryWithinMinutes ?? 10;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.max(3, Math.round(base * d.preferEntryFactor));
+  let pref = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    pref = Math.max(3, Math.round(base * d.preferEntryFactor));
+  }
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    const ov = getQualityModeOverlays().preferEntryWithinMinutes;
+    if (ov != null) pref = Math.min(pref, ov);
+  } catch {
+    /* ignore bootstrap */
+  }
+  return Math.max(2, pref);
 }
 
-/** Require momentum when Strict is on (or when filter already requires it). */
+/** Require momentum when Strict is on (or when filter / quality modes require it).
+ * Short-term scalper modes override for speed (still keeps hard safety floors elsewhere). */
 export function effectiveRequireMomentumConfirmation(): boolean {
+  try {
+    const { isAnyShortTermScalperActive } =
+      require('./shortTermStrategies') as typeof import('./shortTermStrategies');
+    if (isAnyShortTermScalperActive()) return false;
+  } catch {
+    /* ignore bootstrap */
+  }
   if (isStrictMode()) return true;
-  return config.filters.requireMomentumConfirmation === true;
+  if (config.filters.requireMomentumConfirmation === true) return true;
+  try {
+    const { getQualityModeOverlays } =
+      require('./strategies') as typeof import('./strategies');
+    return getQualityModeOverlays().forceMomentum === true;
+  } catch {
+    return false;
+  }
 }
 
 export function effectiveRejectDumpingToken(): boolean {
@@ -314,16 +384,66 @@ export function effectiveStrictMinRecentBuyVolumeUsd(): number {
 
 export function effectiveDeadVolumeConsecutiveHours(): number {
   const base = config.risk.deadVolumeConsecutiveHours ?? 2;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.max(1, base - d.deadVolumeHoursSubtract);
+  let hours = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    hours = Math.max(1, base - d.deadVolumeHoursSubtract);
+  }
+  try {
+    const {
+      getQualityModeOverlays,
+      QUALITY_MODE_FLOORS,
+    } = require('./strategies') as typeof import('./strategies');
+    if (getQualityModeOverlays().aggressiveDeadExit) {
+      const {
+        HIGH_WIN_RATE_THRESHOLDS,
+        WIN_RATE_55_60_THRESHOLDS,
+      } = require('./strategies') as typeof import('./strategies');
+      const { config: cfg } = require('./config') as typeof import('./config');
+      const aggressiveHours =
+        cfg.strategyProfile === 'high_win_rate'
+          ? HIGH_WIN_RATE_THRESHOLDS.deadVolumeConsecutiveHours
+          : cfg.strategyProfile === 'win_rate_55_60'
+            ? WIN_RATE_55_60_THRESHOLDS.deadVolumeConsecutiveHours
+            : QUALITY_MODE_FLOORS.profitProtected.deadVolumeConsecutiveHours;
+      hours = Math.min(hours, aggressiveHours);
+    }
+  } catch {
+    /* ignore */
+  }
+  return Math.max(1, hours);
 }
 
 export function effectiveDeadVolumeMinHoldMinutes(): number {
   const base = config.risk.deadVolumeMinHoldMinutes ?? 15;
-  if (!isStrictMode()) return base;
-  const d = deltas();
-  return Math.max(5, Math.round(base * d.deadVolumeHoldFactor));
+  let mins = base;
+  if (isStrictMode()) {
+    const d = deltas();
+    mins = Math.max(5, Math.round(base * d.deadVolumeHoldFactor));
+  }
+  try {
+    const {
+      getQualityModeOverlays,
+      QUALITY_MODE_FLOORS,
+    } = require('./strategies') as typeof import('./strategies');
+    if (getQualityModeOverlays().aggressiveDeadExit) {
+      const {
+        HIGH_WIN_RATE_THRESHOLDS,
+        WIN_RATE_55_60_THRESHOLDS,
+      } = require('./strategies') as typeof import('./strategies');
+      const { config: cfg } = require('./config') as typeof import('./config');
+      const aggressiveHold =
+        cfg.strategyProfile === 'high_win_rate'
+          ? HIGH_WIN_RATE_THRESHOLDS.deadVolumeMinHoldMinutes
+          : cfg.strategyProfile === 'win_rate_55_60'
+            ? WIN_RATE_55_60_THRESHOLDS.deadVolumeMinHoldMinutes
+            : QUALITY_MODE_FLOORS.profitProtected.deadVolumeMinHoldMinutes;
+      mins = Math.min(mins, aggressiveHold);
+    }
+  } catch {
+    /* ignore */
+  }
+  return Math.max(5, mins);
 }
 
 /** Low-conviction trail threshold — Strict raises bar. */

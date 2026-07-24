@@ -803,6 +803,94 @@ export function createServer(): express.Application {
     res.json({ ok: true, profitStrategy });
   });
 
+  app.get('/api/quick-scalper', (_req: Request, res: Response) => {
+    res.json({ quickScalper: config.quickScalper });
+  });
+
+  app.post('/api/quick-scalper', (req: Request, res: Response) => {
+    const { updateQuickScalperConfig } =
+      require('./shortTermStrategies') as typeof import('./shortTermStrategies');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const partial: Partial<typeof config.quickScalper> = {};
+    if (body.enabled !== undefined) partial.enabled = Boolean(body.enabled);
+    if (body.timeLimitMinutes !== undefined) {
+      partial.timeLimitMinutes = Number(body.timeLimitMinutes) as 1 | 2 | 3;
+    }
+    if (body.takeProfitPct !== undefined) {
+      partial.takeProfitPct = Number(body.takeProfitPct);
+    }
+    if (body.stopLossPct !== undefined) {
+      partial.stopLossPct = Number(body.stopLossPct);
+    }
+    if (body.minVolumeUsd !== undefined) {
+      partial.minVolumeUsd = Number(body.minVolumeUsd);
+    }
+    if (body.minBuyPressureUsd !== undefined) {
+      partial.minBuyPressureUsd = Number(body.minBuyPressureUsd);
+    }
+    const quickScalper = updateQuickScalperConfig(partial);
+    res.json({ ok: true, quickScalper });
+  });
+
+  app.get('/api/short-term', (_req: Request, res: Response) => {
+    res.json({
+      quickScalper: config.quickScalper,
+      microScalper: config.microScalper,
+      momentumBurst: config.momentumBurst,
+      postMigrationScalp: config.postMigrationScalp,
+      reversalScalp: config.reversalScalp,
+    });
+  });
+
+  app.post('/api/short-term/:id', (req: Request, res: Response) => {
+    const id = String(req.params.id || '');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const st =
+      require('./shortTermStrategies') as typeof import('./shortTermStrategies');
+    try {
+      if (id === 'quick_scalper' || id === 'quickScalper') {
+        res.json({
+          ok: true,
+          config: st.updateQuickScalperConfig(body as never),
+        });
+        return;
+      }
+      if (id === 'micro_scalper' || id === 'microScalper') {
+        res.json({
+          ok: true,
+          config: st.updateMicroScalperConfig(body as never),
+        });
+        return;
+      }
+      if (id === 'momentum_burst' || id === 'momentumBurst') {
+        res.json({
+          ok: true,
+          config: st.updateMomentumBurstConfig(body as never),
+        });
+        return;
+      }
+      if (id === 'post_migration_scalp' || id === 'postMigrationScalp') {
+        res.json({
+          ok: true,
+          config: st.updatePostMigrationScalpConfig(body as never),
+        });
+        return;
+      }
+      if (id === 'reversal_scalp' || id === 'reversalScalp') {
+        res.json({
+          ok: true,
+          config: st.updateReversalScalpConfig(body as never),
+        });
+        return;
+      }
+      res.status(400).json({ error: `Unknown short-term strategy: ${id}` });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/risk/clear-halt', (_req: Request, res: Response) => {
     clearRiskHalt();
     clearMonitorRiskHalt();
@@ -999,12 +1087,12 @@ export function createServer(): express.Application {
     const {
       updateStrategyToggles,
       setAllStrategyToggles,
-      applyHighWinRatePreset,
-      applyBalancedPreset,
+      applyStrategyPreset,
       restorePreviousStrategyProfile,
       getStrategiesStatus,
       isStrategyKey,
       getStrategyDefinition,
+      isNamedStrategyProfile,
     } = require('./strategies') as typeof import('./strategies');
 
     const body = (req.body ?? {}) as {
@@ -1016,8 +1104,19 @@ export function createServer(): express.Application {
         | 'enable_all'
         | 'disable_all'
         | 'high_win_rate'
+        | 'win_rate_55_60'
         | 'balanced'
+        | 'aggressive'
+        | 'quick_scalper'
+        | 'micro_scalper'
+        | 'momentum_burst'
+        | 'post_migration_scalp'
+        | 'reversal_scalp'
+        | 'scalper_suite'
+        | 'aggressive_scalper'
+        | 'conservative_scalper'
         | 'restore';
+      profile?: string;
     };
 
     const action = body.action || 'set';
@@ -1032,8 +1131,26 @@ export function createServer(): express.Application {
       res.json({ ok: true, ...getStrategiesStatus() });
       return;
     }
-    if (action === 'high_win_rate') {
-      const result = applyHighWinRatePreset();
+
+    const presetId =
+      action === 'high_win_rate' ||
+      action === 'win_rate_55_60' ||
+      action === 'balanced' ||
+      action === 'aggressive' ||
+      action === 'quick_scalper' ||
+      action === 'micro_scalper' ||
+      action === 'momentum_burst' ||
+      action === 'post_migration_scalp' ||
+      action === 'reversal_scalp' ||
+      action === 'scalper_suite' ||
+      action === 'aggressive_scalper' ||
+      action === 'conservative_scalper'
+        ? action
+        : isNamedStrategyProfile(body.profile)
+          ? body.profile
+          : null;
+    if (presetId) {
+      const result = applyStrategyPreset(presetId);
       res.json({
         ok: true,
         ...getStrategiesStatus(),
@@ -1042,11 +1159,7 @@ export function createServer(): express.Application {
       });
       return;
     }
-    if (action === 'balanced') {
-      applyBalancedPreset();
-      res.json({ ok: true, ...getStrategiesStatus() });
-      return;
-    }
+
     if (action === 'restore') {
       const restored = restorePreviousStrategyProfile();
       res.json({ ok: restored.ok, message: restored.message, ...getStrategiesStatus() });
@@ -1074,7 +1187,7 @@ export function createServer(): express.Application {
     if (Object.keys(partial).length === 0) {
       res.status(400).json({
         error:
-          'Provide action (enable_all|disable_all|high_win_rate|balanced|restore) or key/enabled or toggles',
+          'Provide action (enable_all|disable_all|high_win_rate|win_rate_55_60|balanced|aggressive|quick_scalper|micro_scalper|momentum_burst|post_migration_scalp|reversal_scalp|scalper_suite|aggressive_scalper|conservative_scalper|restore) or key/enabled or toggles',
       });
       return;
     }
@@ -1522,6 +1635,161 @@ export function createServer(): express.Application {
       config.filters.sniperSensitivity = String(
         req.body.sniperSensitivity
       ) as 'low' | 'medium' | 'high';
+    }
+    if (
+      req.body.socialSentimentSensitivity !== undefined &&
+      ['low', 'medium', 'high'].includes(
+        String(req.body.socialSentimentSensitivity)
+      )
+    ) {
+      config.filters.socialSentimentSensitivity = String(
+        req.body.socialSentimentSensitivity
+      ) as 'low' | 'medium' | 'high';
+    }
+    if (req.body.enableSocialSentimentFilter !== undefined) {
+      config.filters.enableSocialSentimentFilter = Boolean(
+        req.body.enableSocialSentimentFilter
+      );
+    }
+    if (
+      req.body.trendingNarrativeSensitivity !== undefined &&
+      ['low', 'medium', 'high'].includes(
+        String(req.body.trendingNarrativeSensitivity)
+      )
+    ) {
+      config.filters.trendingNarrativeSensitivity = String(
+        req.body.trendingNarrativeSensitivity
+      ) as 'low' | 'medium' | 'high';
+    }
+    if (req.body.enableTrendingNarrativeBoost !== undefined) {
+      config.filters.enableTrendingNarrativeBoost = Boolean(
+        req.body.enableTrendingNarrativeBoost
+      );
+    }
+    if (req.body.trendingNarrativeBoostPoints !== undefined) {
+      const n = Number(req.body.trendingNarrativeBoostPoints);
+      if (Number.isFinite(n)) {
+        config.filters.trendingNarrativeBoostPoints = Math.max(
+          1,
+          Math.min(20, Math.round(n))
+        );
+      }
+    }
+    if (
+      req.body.volumeSpikeSensitivity !== undefined &&
+      ['low', 'medium', 'high'].includes(String(req.body.volumeSpikeSensitivity))
+    ) {
+      config.filters.volumeSpikeSensitivity = String(
+        req.body.volumeSpikeSensitivity
+      ) as 'low' | 'medium' | 'high';
+    }
+    if (req.body.enableVolumeSpikeFilter !== undefined) {
+      config.filters.enableVolumeSpikeFilter = Boolean(
+        req.body.enableVolumeSpikeFilter
+      );
+    }
+    if (req.body.volumeSpikeHardFilter !== undefined) {
+      config.filters.volumeSpikeHardFilter = Boolean(
+        req.body.volumeSpikeHardFilter
+      );
+    }
+    if (req.body.volumeSpikeWindowMinutes !== undefined) {
+      const n = Number(req.body.volumeSpikeWindowMinutes);
+      if (Number.isFinite(n)) {
+        config.filters.volumeSpikeWindowMinutes = Math.max(
+          1,
+          Math.min(15, Math.round(n))
+        );
+      }
+    }
+    if (req.body.volumeSpikeMultiplier !== undefined) {
+      const n = Number(req.body.volumeSpikeMultiplier);
+      if (Number.isFinite(n)) {
+        config.filters.volumeSpikeMultiplier = Math.max(
+          1.5,
+          Math.min(8, n)
+        );
+      }
+    }
+    if (req.body.volumeSpikeBuySidePct !== undefined) {
+      const n = Number(req.body.volumeSpikeBuySidePct);
+      if (Number.isFinite(n)) {
+        config.filters.volumeSpikeBuySidePct = Math.max(
+          50,
+          Math.min(90, Math.round(n))
+        );
+      }
+    }
+    if (req.body.volumeSpikeMinUsd !== undefined) {
+      const n = Number(req.body.volumeSpikeMinUsd);
+      if (Number.isFinite(n)) {
+        config.filters.volumeSpikeMinUsd = Math.max(0, Math.round(n));
+      }
+    }
+    if (req.body.volumeSpikeBoostPoints !== undefined) {
+      const n = Number(req.body.volumeSpikeBoostPoints);
+      if (Number.isFinite(n)) {
+        config.filters.volumeSpikeBoostPoints = Math.max(
+          1,
+          Math.min(20, Math.round(n))
+        );
+      }
+    }
+    if (
+      req.body.confirmationSensitivity !== undefined &&
+      ['low', 'medium', 'high'].includes(
+        String(req.body.confirmationSensitivity)
+      )
+    ) {
+      config.filters.confirmationSensitivity = String(
+        req.body.confirmationSensitivity
+      ) as 'low' | 'medium' | 'high';
+    }
+    if (req.body.enableConfirmationLayer !== undefined) {
+      config.filters.enableConfirmationLayer = Boolean(
+        req.body.enableConfirmationLayer
+      );
+    }
+    if (req.body.confirmationHardFilter !== undefined) {
+      config.filters.confirmationHardFilter = Boolean(
+        req.body.confirmationHardFilter
+      );
+    }
+    if (req.body.confirmationVolumeWeight !== undefined) {
+      const n = Number(req.body.confirmationVolumeWeight);
+      if (Number.isFinite(n)) {
+        config.filters.confirmationVolumeWeight = Math.max(
+          0,
+          Math.min(100, Math.round(n))
+        );
+      }
+    }
+    if (req.body.confirmationSentimentWeight !== undefined) {
+      const n = Number(req.body.confirmationSentimentWeight);
+      if (Number.isFinite(n)) {
+        config.filters.confirmationSentimentWeight = Math.max(
+          0,
+          Math.min(100, Math.round(n))
+        );
+      }
+    }
+    if (req.body.confirmationNarrativeWeight !== undefined) {
+      const n = Number(req.body.confirmationNarrativeWeight);
+      if (Number.isFinite(n)) {
+        config.filters.confirmationNarrativeWeight = Math.max(
+          0,
+          Math.min(100, Math.round(n))
+        );
+      }
+    }
+    if (req.body.confirmationBoostPoints !== undefined) {
+      const n = Number(req.body.confirmationBoostPoints);
+      if (Number.isFinite(n)) {
+        config.filters.confirmationBoostPoints = Math.max(
+          1,
+          Math.min(22, Math.round(n))
+        );
+      }
     }
     for (const key of [
       'maxSniperCount',

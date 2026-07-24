@@ -38,9 +38,27 @@ export interface PersistedBotSettings {
   risk?: Record<string, unknown>;
   profitStrategy?: Record<string, unknown>;
   selective?: Record<string, unknown>;
+  quickScalper?: Record<string, unknown>;
+  microScalper?: Record<string, unknown>;
+  momentumBurst?: Record<string, unknown>;
+  postMigrationScalp?: Record<string, unknown>;
+  reversalScalp?: Record<string, unknown>;
   /** Strategies tab master toggles */
   strategyToggles?: Record<string, boolean>;
-  strategyProfile?: 'balanced' | 'high_win_rate' | 'custom';
+  strategyProfile?:
+    | 'high_win_rate'
+    | 'win_rate_55_60'
+    | 'balanced'
+    | 'aggressive'
+    | 'quick_scalper'
+    | 'micro_scalper'
+    | 'momentum_burst'
+    | 'post_migration_scalp'
+    | 'reversal_scalp'
+    | 'scalper_suite'
+    | 'aggressive_scalper'
+    | 'conservative_scalper'
+    | 'custom';
   highWinRatePresetActive?: boolean;
   strategyProfileSnapshot?: Record<string, unknown> | null;
   paper?: Record<string, unknown>;

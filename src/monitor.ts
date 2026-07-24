@@ -9,7 +9,7 @@ import {
   PartiallyDecodedInstruction,
   PublicKey,
 } from '@solana/web3.js';
-import { config, SmartWallet, persistWallets } from './config';
+import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
@@ -115,9 +115,54 @@ import {
   isStrategyEnabled,
   logStrategyDecision,
   ensureStrategyToggles,
+  getQualityModeOverlays,
 } from './strategies';
+import {
+  isAnyShortTermScalperActive,
+  resolveShortTermEntry,
+  type ShortTermStrategyId,
+} from './shortTermStrategies';
 
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
+
+/** Attach short-term scalp seed when an active strategy qualifies. */
+function resolveScalpBuyFlag(signal: {
+  metrics?: {
+    volume24hUsd?: number | null;
+    recentVolumeUsd?: number | null;
+    recentBuyVolumeUsd?: number | null;
+  } | null;
+  isMigration?: boolean;
+  convictionScore?: number;
+  dropFromPeakPct?: number | null;
+}): { scalpMode?: true; shortTermStrategyId?: ShortTermStrategyId } {
+  if (!isAnyShortTermScalperActive()) return {};
+  const resolved = resolveShortTermEntry({
+    volume24hUsd: signal.metrics?.volume24hUsd,
+    recentVolumeUsd: signal.metrics?.recentVolumeUsd,
+    recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd,
+    isSmartMoney: true,
+    isMigration: signal.isMigration === true,
+    convictionScore: signal.convictionScore,
+    dropFromPeakPct: signal.dropFromPeakPct,
+  });
+  if (!resolved) {
+    logStrategyDecision(
+      'quick_scalper',
+      'skip',
+      'no short-term strategy qualified'
+    );
+    return {};
+  }
+  const suite = isScalperSuiteProfile(config.strategyProfile)
+    ? ` [${getScalperSuiteVariantLabel(config.strategyProfile)}]`
+    : '';
+  console.log(
+    `[scalp] ENTRY strategy=${resolved.id}${suite} — ${resolved.reason}`
+  );
+  logStrategyDecision(resolved.id, 'take', resolved.reason);
+  return { scalpMode: true, shortTermStrategyId: resolved.id };
+}
 
 export interface WalletBuyEvent {
   wallet: string;
@@ -1459,6 +1504,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     convictionScore: signal.convictionScore,
+    ...resolveScalpBuyFlag(signal),
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2046,6 +2092,8 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sourceEntryMcUsd?: number;
     top10HoldPct?: number | null;
     convictionScore?: number;
+    scalpMode?: boolean;
+    shortTermStrategyId?: ShortTermStrategyId;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -2062,6 +2110,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     convictionScore: signal.convictionScore,
+    ...resolveScalpBuyFlag(signal),
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2286,6 +2335,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       sourceEntryMcUsd: signal.sourceEntryMcUsd,
       top10HoldPct: signal.metrics?.top10HoldPct ?? null,
       convictionScore: signal.convictionScore,
+      ...resolveScalpBuyFlag(signal),
       antiRug: signal.antiRug
         ? {
             riskScore: signal.antiRug.riskScore,
@@ -2576,7 +2626,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
   if (
-    isStrategyEnabled('wallet_quality_scoring') &&
+    (isStrategyEnabled('wallet_quality_scoring') ||
+      isStrategyEnabled('hard_quality_gate') ||
+      isStrategyEnabled('elite_convergence') ||
+      isStrategyEnabled('profit_protected')) &&
     config.filters.enableWalletQualityGate !== false
   ) {
     for (const addr of signal.wallets) {
@@ -2605,11 +2658,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     // Migration feed may lack cluster age — treat as fresh
     signal.signalAgeMinutes = 0;
   }
-  if (isStrategyEnabled('time_based_entry')) {
+  if (
+    isStrategyEnabled('time_based_entry') ||
+    isStrategyEnabled('early_entry_only') ||
+    isStrategyEnabled('elite_convergence')
+  ) {
     const timingSkip = evaluateEntryTimingGate(signal.signalAgeMinutes);
     if (timingSkip) {
       logStrategyDecision(
-        'time_based_entry',
+        isStrategyEnabled('early_entry_only')
+          ? 'early_entry_only'
+          : 'time_based_entry',
         'skip',
         `${signal.symbol} — ${timingSkip}`
       );
@@ -2622,29 +2681,36 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // Cluster floor (unified with selective min wallets + Strict overlay)
-  const clusterMin = isStrategyEnabled('wallet_convergence')
-    ? effectiveClusterMinWallets()
-    : 1;
+  const qualityModes = getQualityModeOverlays();
+  const clusterMin =
+    isStrategyEnabled('wallet_convergence') ||
+    isStrategyEnabled('elite_convergence')
+      ? effectiveClusterMinWallets()
+      : 1;
   const priority =
     signal.isMigration || signal.nearMigration || signal.earlyBuy;
-  if (
-    isStrategyEnabled('wallet_convergence') &&
-    signal.wallets.length < clusterMin &&
-    !(
-      signal.allowSingleWalletException &&
+  const allowSingle =
+    !qualityModes.blockSingleWalletEntries &&
+    ((signal.allowSingleWalletException &&
       signal.isMigration &&
-      signal.wallets.length >= 1
-    ) &&
-    !(
-      priority &&
-      config.selective?.allowSingleWalletMigration !== false &&
-      signal.wallets.length >= 1 &&
-      clusterMin <= 2
-    )
+      signal.wallets.length >= 1) ||
+      (priority &&
+        config.selective?.allowSingleWalletMigration !== false &&
+        signal.wallets.length >= 1 &&
+        clusterMin <= 2));
+  if (
+    (isStrategyEnabled('wallet_convergence') ||
+      isStrategyEnabled('elite_convergence')) &&
+    signal.wallets.length < clusterMin &&
+    !allowSingle
   ) {
-    const msg = `cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
+    const msg = isStrategyEnabled('elite_convergence')
+      ? `elite convergence need ${clusterMin} wallets (have ${signal.wallets.length})`
+      : `cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
     logStrategyDecision(
-      'wallet_convergence',
+      isStrategyEnabled('elite_convergence')
+        ? 'elite_convergence'
+        : 'wallet_convergence',
       'skip',
       `${signal.symbol} — ${msg}`
     );
@@ -2653,6 +2719,21 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     );
     recordRejectedSignal(signal, msg);
     return false;
+  }
+
+  if (qualityModes.requireMigrationOrNear) {
+    if (!signal.isMigration && !signal.nearMigration) {
+      logStrategyDecision(
+        'migration_sniper',
+        'skip',
+        `${signal.symbol} — Migration Sniper requires migration / near-migration`
+      );
+      console.log(
+        `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=migration_sniper`
+      );
+      recordRejectedSignal(signal, 'migration sniper — not migration/near');
+      return false;
+    }
   }
 
   if (strategy.enableMigrationOnly && !signal.isMigration) {
@@ -2848,12 +2929,30 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   signal.sizeMultiplier = conviction.sizeMultiplier;
   signal.convictionBreakdown = conviction.breakdownLine;
   if (
-    isStrategyEnabled('multi_factor_conviction') &&
+    (isStrategyEnabled('multi_factor_conviction') ||
+      isStrategyEnabled('elite_convergence') ||
+      isStrategyEnabled('profit_protected') ||
+      isStrategyEnabled('social_sentiment_filter') ||
+      isStrategyEnabled('volume_spike_filter') ||
+      isStrategyEnabled('confirmation_layer')) &&
     !conviction.pass
   ) {
     const detail = conviction.reasons.join('; ') || 'below threshold';
+    const socialHit = conviction.reasons.some((r) => /social/i.test(r));
+    const volSpikeHit = conviction.reasons.some((r) =>
+      /volume spike/i.test(r)
+    );
+    const confirmHit = conviction.reasons.some((r) =>
+      /confirmation/i.test(r)
+    );
     logStrategyDecision(
-      'multi_factor_conviction',
+      confirmHit
+        ? 'confirmation_layer'
+        : volSpikeHit
+          ? 'volume_spike_filter'
+          : socialHit
+            ? 'social_sentiment_filter'
+            : 'multi_factor_conviction',
       'skip',
       `${signal.symbol} score=${conviction.score}/${conviction.minRequired}: ${detail}`
     );
@@ -2872,7 +2971,12 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     );
     return false;
   }
-  if (!isStrategyEnabled('multi_factor_conviction') && !conviction.pass) {
+  if (
+    !isStrategyEnabled('multi_factor_conviction') &&
+    !isStrategyEnabled('elite_convergence') &&
+    !isStrategyEnabled('profit_protected') &&
+    !conviction.pass
+  ) {
     // Conviction strategy OFF — do not hard-block on selective score
     console.log(
       `[monitor] STRATEGY_SKIP multi_factor_conviction OFF — allowing ${signal.symbol} ` +

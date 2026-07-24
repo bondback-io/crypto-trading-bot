@@ -68,8 +68,72 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .switch input:checked + .slider { background: #059669; }
     .switch input:checked + .slider:before { transform: translateX(20px); }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
-    .dot-running { background: #34d399; box-shadow: 0 0 8px #34d399; }
+    .dot-running { background: #34d399; box-shadow: 0 0 8px #34d399; animation: status-pulse 1.6s ease-in-out infinite; }
     .dot-paused { background: #fbbf24; }
+    @keyframes status-pulse {
+      0%, 100% { box-shadow: 0 0 4px #34d39988; opacity: 1; }
+      50% { box-shadow: 0 0 10px #34d399; opacity: .85; }
+    }
+    .status-ico {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      display: inline-block;
+      vertical-align: -1px;
+    }
+    .run-status {
+      display: inline-flex;
+      align-items: center;
+      gap: .3rem;
+      padding: 1px 7px 1px 4px;
+      border-radius: 9999px;
+      border: 1px solid #334155;
+      background: #0f172a88;
+      line-height: 1.2;
+    }
+    .run-status.run-running {
+      border-color: rgba(52, 211, 153, .45);
+      background: rgba(6, 78, 59, .35);
+      color: #6ee7b7;
+    }
+    .run-status.run-paused {
+      border-color: rgba(251, 191, 36, .45);
+      background: rgba(120, 53, 15, .35);
+      color: #fcd34d;
+    }
+    .run-status.run-stopped {
+      border-color: rgba(248, 113, 113, .45);
+      background: rgba(127, 29, 29, .35);
+      color: #fca5a5;
+    }
+    .run-status #status-text { font-weight: 700; font-size: 0.75rem; }
+    .badge.status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .28rem;
+    }
+    .badge.status-badge .status-ico { width: 11px; height: 11px; }
+    .rpc-status {
+      display: inline-flex;
+      align-items: center;
+      gap: .28rem;
+    }
+    .rpc-status.rpc-ok { color: #6ee7b7; }
+    .rpc-status.rpc-bad { color: #fca5a5; }
+    .rpc-status.rpc-unknown { color: #94a3b8; }
+    .active-profile-extras {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .35rem .45rem;
+      margin-left: .15rem;
+    }
+    .active-profile-extras .run-status,
+    .active-profile-extras .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+    }
+    .active-profile-extras .status-ico { width: 11px; height: 11px; }
     .dot-stopped { background: #f87171; }
     .signal-light {
       display: inline-flex; align-items: center; gap: 8px;
@@ -83,6 +147,84 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .badge-paper { background: #1d4ed833; color: #93c5fd; }
     .badge-livesim { background: #0f766e55; color: #5eead4; }
     .badge-live { background: #7f1d1d55; color: #fca5a5; }
+    .strict-badge,
+    .risk-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .28rem;
+      vertical-align: middle;
+      padding: 2px 9px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .01em;
+      border: 1px solid transparent;
+      white-space: nowrap;
+      line-height: 1.25;
+    }
+    .strict-badge svg,
+    .risk-badge svg {
+      width: 11px;
+      height: 11px;
+      flex-shrink: 0;
+    }
+    .strict-badge-off {
+      background: #33415566;
+      color: #cbd5e1;
+      border-color: #475569;
+    }
+    .strict-badge-low {
+      background: #1d4ed855;
+      color: #93c5fd;
+      border-color: #3b82f6;
+    }
+    .strict-badge-medium {
+      background: #c2410c55;
+      color: #fdba74;
+      border-color: #fb923c;
+    }
+    .strict-badge-high {
+      background: #7e22ce55;
+      color: #e9d5ff;
+      border-color: #c084fc;
+    }
+    .risk-badge-low {
+      background: #05966955;
+      color: #6ee7b7;
+      border-color: #34d399;
+    }
+    .risk-badge-medium {
+      background: #0e749055;
+      color: #5eead4;
+      border-color: #2dd4bf;
+    }
+    .risk-badge-high {
+      background: #c2410c55;
+      color: #fdba74;
+      border-color: #fb923c;
+    }
+    .risk-badge-degen {
+      background: linear-gradient(135deg, #7f1d1d66, #6b21a866);
+      color: #fca5a5;
+      border-color: #c084fc;
+    }
+    .active-profile-banner .strict-badge,
+    .active-profile-banner .risk-badge {
+      font-size: 12px;
+      padding: 3px 10px;
+    }
+    .active-profile-banner .strict-badge svg,
+    .active-profile-banner .risk-badge svg {
+      width: 12px;
+      height: 12px;
+    }
+    .active-profile-plus {
+      color: #64748b;
+      font-weight: 700;
+      font-size: .95rem;
+      line-height: 1;
+      user-select: none;
+    }
     .score-card { text-align: center; }
     .score-grade { font-size: 2.25rem; font-weight: 800; line-height: 1; }
     .score-num { font-size: 1.1rem; font-weight: 600; margin-top: 4px; }
@@ -261,6 +403,109 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-risk-card #strict-intensity-toggle { gap: .5rem; }
     .strategy-group-card { padding: .85rem 1rem; }
     .strategy-row { padding: .85rem 0; }
+    .strategy-preset-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: .75rem;
+      margin-top: 1rem;
+    }
+    @media (min-width: 640px) {
+      .strategy-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (min-width: 900px) {
+      .strategy-preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    .strategy-preset-grid.short-term-presets {
+      margin-top: .75rem;
+    }
+    .strategy-preset-btn {
+      text-align: left;
+      width: 100%;
+      border-radius: .75rem;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: .85rem 1rem;
+      cursor: pointer;
+      transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+    }
+    .strategy-preset-btn:hover {
+      border-color: #64748b;
+      background: #111827;
+    }
+    .strategy-preset-btn.active {
+      border-color: #10b981;
+      background: linear-gradient(160deg, rgba(16,185,129,.16), rgba(15,23,42,.95) 55%);
+      box-shadow: inset 0 0 0 1px rgba(16,185,129,.25);
+    }
+    .strategy-preset-btn .preset-label {
+      display: block;
+      font-size: .92rem;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: .35rem;
+    }
+    .strategy-preset-btn .preset-desc {
+      display: block;
+      font-size: .78rem;
+      line-height: 1.35;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    .strategy-preset-btn.active .preset-desc { color: #cbd5e1; }
+    .active-profile-banner {
+      border-radius: .75rem;
+      border: 1px solid #334155;
+      padding: .85rem 1rem;
+      background: linear-gradient(135deg, rgba(30, 41, 59, .98), rgba(15, 23, 42, .96));
+      min-width: 0;
+    }
+    .active-profile-banner .active-profile-main {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .35rem .65rem;
+    }
+    .active-profile-banner .active-profile-kicker {
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .active-profile-banner .active-profile-combo {
+      display: none;
+    }
+    .active-profile-banner .active-profile-hint {
+      margin: .4rem 0 0;
+      font-size: .78rem;
+      line-height: 1.4;
+      color: #94a3b8;
+    }
+    .active-profile-banner.tone-low {
+      border-color: rgba(16, 185, 129, .55);
+      background: linear-gradient(135deg, rgba(16, 185, 129, .14), rgba(15, 23, 42, .96) 55%);
+    }
+    .active-profile-banner.tone-low .active-profile-combo { color: #6ee7b7; }
+    .active-profile-banner.tone-medium {
+      border-color: rgba(56, 189, 248, .45);
+      background: linear-gradient(135deg, rgba(14, 165, 233, .12), rgba(15, 23, 42, .96) 55%);
+    }
+    .active-profile-banner.tone-medium .active-profile-combo { color: #7dd3fc; }
+    .active-profile-banner.tone-high {
+      border-color: rgba(251, 146, 60, .55);
+      background: linear-gradient(135deg, rgba(249, 115, 22, .14), rgba(15, 23, 42, .96) 55%);
+    }
+    .active-profile-banner.tone-high .active-profile-combo { color: #fdba74; }
+    .active-profile-banner.tone-degen {
+      border-color: rgba(248, 113, 113, .55);
+      background: linear-gradient(135deg, rgba(239, 68, 68, .16), rgba(88, 28, 135, .22) 45%, rgba(15, 23, 42, .96) 75%);
+    }
+    .active-profile-banner.tone-degen .active-profile-combo { color: #fca5a5; }
+    @media (max-width: 639px) {
+      .active-profile-banner { padding: .75rem .85rem; }
+      .active-profile-plus { font-size: .85rem; }
+    }
     .strategy-settings {
       margin-top: .65rem;
       border: 1px solid #334155;
@@ -805,7 +1050,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .header-actions .status-stat strong { color: #e2e8f0; font-weight: 650; }
     .header-actions #status-text { font-size: 0.75rem; line-height: 1.2; }
     .header-actions .badge { padding: 1px 7px; font-size: 10px; letter-spacing: 0.02em; }
+    .header-actions .strict-badge,
+    .header-actions .risk-badge { padding: 1px 7px; font-size: 10px; }
+    .header-actions .strict-badge svg,
+    .header-actions .risk-badge svg { width: 10px; height: 10px; }
     .header-actions .dot { width: 8px; height: 8px; flex: 0 0 auto; }
+    .header-actions .status-ico { width: 11px; height: 11px; }
+    .header-actions .run-status { padding: 1px 6px 1px 3px; }
     .header-actions .btn {
       flex: 0 0 auto;
       min-height: 1.85rem;
@@ -1286,12 +1537,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
       <div class="header-actions card status-bar">
         <div class="status-meta">
-          <span id="status-dot" class="dot dot-running" title="Monitor status: green=running, yellow=paused, red=stopped"></span>
-          <strong id="status-text" class="has-tip" title="Whether the copy-trading monitor is actively polling wallets">Running</strong>
-          <span id="mode-badge" class="badge badge-livesim has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">LIVE SIM</span>
+          <span id="run-status" class="run-status run-running has-tip" title="Whether the copy-trading monitor is actively polling wallets">
+            <span id="status-dot" class="dot dot-running" aria-hidden="true"></span>
+            <svg id="run-status-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <strong id="status-text">Running</strong>
+          </span>
+          <span id="mode-badge" class="badge badge-livesim status-badge has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">
+            <svg id="mode-badge-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
+            <span id="mode-badge-label">LIVE SIM</span>
+          </span>
+          <span id="header-risk-badge" class="risk-badge risk-badge-medium has-tip" data-risk-badge title="Risk Level sets the base risk appetite">
+            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+            <span class="risk-badge-label">Medium</span>
+          </span>
+          <span id="header-strict-badge" class="strict-badge strict-badge-off has-tip" data-strict-badge title="Strict Mode is an extra quality filter on top of Risk Level">
+            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
+            <span class="strict-badge-label">Strict Off</span>
+          </span>
           <span class="status-stat has-tip" title="Current paper or live wallet SOL balance">Bal <strong id="balance">—</strong></span>
           <span class="status-stat has-tip" title="Realized PnL for the current UTC day">PnL <strong id="daily-pnl">—</strong></span>
-          <span class="status-stat hidden sm:inline has-tip" title="Active Solana RPC endpoint label">RPC <strong id="rpc-active">—</strong></span>
+          <span class="status-stat rpc-status rpc-unknown hidden sm:inline has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint label">
+            <svg id="rpc-health-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            RPC <strong id="rpc-active">—</strong>
+          </span>
           <span class="status-stat hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
         </div>
         <div class="status-controls">
@@ -1315,6 +1583,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Overview ========== -->
     <section data-tab-panel="overview" class="space-y-4">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-overview" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.">
+        <div class="active-profile-main">
+          <span class="active-profile-kicker">Active Profile</span>
+          <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
+            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+            <span class="risk-badge-label">Medium</span>
+          </span>
+          <span class="active-profile-plus" aria-hidden="true">+</span>
+          <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
+            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
+            <span class="strict-badge-label">Strict Off</span>
+          </span>
+          <span class="active-profile-extras" aria-label="Mode and run status">
+            <span class="run-status run-running has-tip" data-run-status title="Monitor run status">
+              <span class="dot dot-running" data-run-dot aria-hidden="true"></span>
+              <svg class="status-ico" data-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <strong data-run-label>Running</strong>
+            </span>
+            <span class="badge badge-livesim status-badge has-tip" data-mode-status title="Trading mode">
+              <svg class="status-ico" data-mode-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
+              <span data-mode-label>LIVE SIM</span>
+            </span>
+          </span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top."></span>
+        </div>
+        <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
+      </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
         <div class="card"><div class="stat-label">Balance <span class="tip tip-below" tabindex="0" data-tip="Available SOL for new buys (paper balance or live trading wallet)."></span></div><div class="stat" id="ov-balance-mirror">—</div><div class="mint mt-1">Daily <span id="ov-daily-mirror">—</span></div></div>
         <div class="card"><div class="stat-label">Open Positions <span class="tip tip-below" tabindex="0" data-tip="How many tokens you currently hold waiting for TP, SL, or trailing exit."></span></div><div class="stat" id="open-count">—</div></div>
@@ -1811,8 +2106,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
         <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #334155;color:#94a3b8">
-          <strong style="color:#e2e8f0">Backtest uses your risk presets + Strict Mode + selective entry gates</strong>
-          <span class="mint block mt-1" id="bt-config-banner">Applies conviction, wallet quality, cluster, volume, dead-market exits, and Strict intensity from the selected risk level (or live match). Overrides below are run-only.</span>
+          <strong style="color:#e2e8f0">Backtest uses your Strategy Preset + Risk Level + Strict Mode</strong>
+          <span class="mint block mt-1" id="bt-config-banner">Applies the active Strategies preset (including short-term scalps) plus conviction, wallet quality, cluster, volume, dead-market exits, and Strict intensity. Overrides below are run-only.</span>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
@@ -2047,6 +2342,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
       <div class="card strategy-risk-card">
+        <div class="active-profile-banner tone-medium mb-3" data-active-profile id="active-profile-strategies" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.">
+          <div class="active-profile-main">
+            <span class="active-profile-kicker">Active Profile</span>
+            <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
+              <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+              <span class="risk-badge-label">Medium</span>
+            </span>
+            <span class="active-profile-plus" aria-hidden="true">+</span>
+            <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
+              <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
+              <span class="strict-badge-label">Strict Off</span>
+            </span>
+            <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top."></span>
+          </div>
+          <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
+        </div>
         <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
         <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
@@ -2091,8 +2402,76 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="flex flex-wrap gap-2 mt-4">
           <button class="btn btn-primary" onclick="applyStrategiesAction('enable_all')">Enable All</button>
           <button class="btn btn-secondary" onclick="applyStrategiesAction('disable_all')">Disable All</button>
-          <button class="btn btn-warning" onclick="applyStrategiesAction('high_win_rate')">High Win-Rate Preset</button>
           <button class="btn btn-secondary" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous</button>
+        </div>
+        <div class="mt-4">
+          <div class="text-sm font-semibold text-slate-200 mb-1">Strategy Presets</div>
+          <p class="text-xs text-slate-400 mb-2">Sets module toggles + quality thresholds. Risk Level and Strict Mode still stack on top. Switching presets keeps your last custom overrides for Restore Previous.</p>
+          <div class="strategy-preset-grid" id="strategy-presets">
+            <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" onclick="applyStrategiesAction('high_win_rate')">
+              <span class="preset-label">60%+ Win Rate Profile</span>
+              <span class="preset-desc">Fewer trades expected – prioritises high win rate</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" onclick="applyStrategiesAction('win_rate_55_60')">
+              <span class="preset-label">55–60% Win Rate Profile</span>
+              <span class="preset-desc">Balanced high-quality profile – more trades than 60%+ version</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="balanced" onclick="applyStrategiesAction('balanced')">
+              <span class="preset-label">Balanced</span>
+              <span class="preset-desc">Best overall risk/reward balance</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="aggressive" onclick="applyStrategiesAction('aggressive')">
+              <span class="preset-label">Aggressive</span>
+              <span class="preset-desc">More opportunities, still protected</span>
+            </button>
+          </div>
+          <div class="text-sm font-semibold text-slate-200 mt-4 mb-1">Short-Term Presets</div>
+          <p class="text-xs text-slate-400 mb-2">Timed scalps with fixed TP / SL / timer. Can run as a profile or as toggles alongside other strategies.</p>
+          <div class="strategy-preset-grid short-term-presets" id="strategy-presets-short">
+            <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" onclick="applyStrategiesAction('scalper_suite')" style="border-color:#0f766e">
+              <span class="preset-label">Scalper Suite (Standard)</span>
+              <span class="preset-desc">Balanced timers · Micro + Momentum + Post-Mig (+ Reversal)</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" onclick="applyStrategiesAction('aggressive_scalper')" style="border-color:#ea580c">
+              <span class="preset-label">Aggressive Scalper</span>
+              <span class="preset-desc">Faster timers · higher TP · looser volume · larger size</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" onclick="applyStrategiesAction('conservative_scalper')" style="border-color:#0369a1">
+              <span class="preset-label">Conservative Scalper</span>
+              <span class="preset-desc">Tighter SL · stricter volume · smaller size · aggressive dead-market</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" onclick="applyStrategiesAction('quick_scalper')">
+              <span class="preset-label">Quick Scalper</span>
+              <span class="preset-desc">1–3 min holds · fixed TP · tight SL · hard timer</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" onclick="applyStrategiesAction('micro_scalper')">
+              <span class="preset-label">Micro-Scalper</span>
+              <span class="preset-desc">60–90s (def 75) · TP 15–22% · SL 6–10%</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" onclick="applyStrategiesAction('momentum_burst')">
+              <span class="preset-label">Momentum Burst</span>
+              <span class="preset-desc">2–4 min (def 3) · TP 28–40% · SL 10–14% · fade exit</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" onclick="applyStrategiesAction('post_migration_scalp')">
+              <span class="preset-label">Post-Migration Scalp</span>
+              <span class="preset-desc">Fresh migrations + volume · 90s–3m · TP 25–38%</span>
+            </button>
+            <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" onclick="applyStrategiesAction('reversal_scalp')">
+              <span class="preset-label">Reversal Scalp</span>
+              <span class="preset-desc">Selective wick snap-back · 60–150s · TP 18–28%</span>
+            </button>
+          </div>
+          <div id="scalper-suite-settings" class="card mt-3" style="border-color:#0f766e">
+            <div class="section-title !text-sm">Scalper Suite Settings</div>
+            <p class="mint text-xs mb-2">Pick <strong>Standard</strong>, <strong>Aggressive</strong>, or <strong>Conservative</strong> above to load that variant’s timers / TP / SL. Fine-tune anytime — Paper, Live Sim, and Backtester all honor these. Anti-Rug + Volume stay ON for every variant.</p>
+            <div class="grid sm:grid-cols-2 gap-3 text-xs">
+              <label class="ctl"><span>Suite max concurrent positions (2–3)</span><input type="number" id="suite-max-pos" min="2" max="3" step="1" value="3" /></label>
+              <label class="ctl"><span>Dead-market min hold (min) · aggressive</span><input type="number" id="suite-dead-hold" min="1" max="30" step="1" value="4" /></label>
+            </div>
+            <p class="text-xs text-slate-400 mt-2 mb-1">When suite is active: Dead Market Exit ON · Anti-Rug + Volume ON · Risk Medium/High recommended · Strict Off or Low · logs show which scalper fired.</p>
+            <button type="button" class="btn btn-primary mt-2" onclick="saveScalperSuiteSettings()">Save suite + member settings</button>
+            <div class="mint text-xs mt-2" id="suite-settings-status"></div>
+          </div>
         </div>
         <div id="strategies-warning" class="hidden mt-3 p-3 rounded-lg text-amber-200" style="background:#422006;border:1px solid #92400e"></div>
       </div>
@@ -2104,6 +2483,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="config-panel hidden space-y-4">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. Change Risk / Strict on the Strategies tab.">
+        <div class="active-profile-main">
+          <span class="active-profile-kicker">Active Profile</span>
+          <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
+            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+            <span class="risk-badge-label">Medium</span>
+          </span>
+          <span class="active-profile-plus" aria-hidden="true">+</span>
+          <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
+            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
+            <span class="strict-badge-label">Strict Off</span>
+          </span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. Change Risk / Strict on the Strategies tab."></span>
+        </div>
+        <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('strategies')">Edit on Strategies</button></p>
+      </div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
@@ -2420,6 +2815,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       tiered_profit_taking: ['enableAutoSell', 'tieredSellEnabled', 'minProfitPercent', 'maxProfitPercent', 'trailingActivationProfit', 'trailingStopPct', 'normalTrailPct', 'migTrailPct', 'ps-risk-adjust', 'ps-partial-at', 'ps-partial-sell', 'ps-take-initial', 'ps-bag', 'ps-trail-after', 'ps-trail-pct'],
       multi_factor_conviction: ['sel-min-conviction', 'sel-max-per-hour', 'sel-cooldown-sec', 'sel-risk-cutoff', 'sel-min-size-mult'],
       sniper_bundler_filters: ['sniperSensitivity'],
+      social_sentiment_filter: ['socialSentimentSensitivity'],
+      trending_narrative_boost: ['trendingNarrativeSensitivity', 'trendingNarrativeBoostPoints'],
+      volume_spike_filter: [
+        'volumeSpikeSensitivity',
+        'volumeSpikeWindowMinutes',
+        'volumeSpikeMultiplier',
+        'volumeSpikeBuySidePct',
+        'volumeSpikeMinUsd',
+        'volumeSpikeBoostPoints',
+        'volumeSpikeHardFilter',
+      ],
+      confirmation_layer: [
+        'confirmationSensitivity',
+        'confirmationVolumeWeight',
+        'confirmationSentimentWeight',
+        'confirmationNarrativeWeight',
+        'confirmationBoostPoints',
+        'confirmationHardFilter',
+      ],
       mev_protection: ['useJitoBundles', 'sandwichProtection', 'abortOnSandwichRisk', 'jitoTipLamports', 'tipMultiplier', 'priorityFeeMultiplier', 'sandwichMaxRecentBuys'],
     };
 
@@ -2453,6 +2867,103 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           n('maxSniperCount', 'Max snipers', 8, 0, 100, 1) +
           n('maxBundlerPct', 'Max bundler %', 30, 0, 100, 1) +
           n('maxSniperScore', 'Max sniper score', 70, 0, 100, 1),
+        social_sentiment_filter:
+          '<p class="mint text-xs mb-2">Supporting filter — not a primary signal. Uses social/proxy heat (mention surge, pos/neg bias, smart-money/KOL activity) when data is available. If data is missing, trades are unchanged (fail-open).</p>' +
+          '<label class="ctl strat-field" data-strategy-control="socialSentimentSensitivity"><span>Sensitivity</span>' +
+            '<select id="socialSentimentSensitivity">' +
+              '<option value="low">Low (gentle boost/skip)</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High (more reactive)</option>' +
+            '</select></label>',
+        trending_narrative_boost:
+          '<p class="mint text-xs mb-2">Boosts tokens tied to currently hot narratives – used as confirmation, not a primary signal. Soft conviction bump only; ignored when no theme match / data unavailable.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="trendingNarrativeSensitivity"><span>Sensitivity</span>' +
+            '<select id="trendingNarrativeSensitivity">' +
+              '<option value="low">Low</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High</option>' +
+            '</select></label>' +
+          n('trendingNarrativeBoostPoints', 'Base conviction boost points', 6, 1, 20, 1),
+        volume_spike_filter:
+          '<p class="mint text-xs mb-2">Recommended Medium: 3× surge, 1–5m window, ≥65% buy-side, prefer acceleration, meaningful floor, Medium–High relative volume. Hard-blocks very weak spikes; boosts conviction when strong. Extra weight near migration. Fail-open if volume data missing.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="volumeSpikeSensitivity"><span>Sensitivity</span>' +
+            '<select id="volumeSpikeSensitivity">' +
+              '<option value="low">Low (prefer accel)</option>' +
+              '<option value="medium" selected>Medium (prefer accel)</option>' +
+              '<option value="high">High (require accel)</option>' +
+            '</select></label>' +
+          n('volumeSpikeWindowMinutes', 'Time window (minutes, 1–5 recommended)', 3, 1, 15, 1) +
+          n('volumeSpikeMultiplier', 'Volume surge multiplier', 3, 1.5, 8, 0.1) +
+          n('volumeSpikeBuySidePct', 'Buy-side % threshold', 65, 50, 90, 1) +
+          n('volumeSpikeMinUsd', 'Min volume floor USD', 2500, 0, 500000, 100) +
+          n('volumeSpikeBoostPoints', 'Conviction boost points', 8, 1, 20, 1) +
+          c('volumeSpikeHardFilter', 'Hard filter (block weak spikes)'),
+        confirmation_layer:
+          '<p class="mint text-xs mb-2">Combines Volume Spike, Social Sentiment, and Trending Narrative into Weak / Moderate / Strong / Very Strong. Soft boost when Strong+; optional hard filter when Weak. Missing sentiment or narrative never blocks (weights renormalize). Volume weight highest by default for Pump.fun.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="confirmationSensitivity"><span>Sensitivity</span>' +
+            '<select id="confirmationSensitivity">' +
+              '<option value="low">Low</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High</option>' +
+            '</select></label>' +
+          n('confirmationVolumeWeight', 'Volume weight', 50, 0, 100, 1) +
+          n('confirmationSentimentWeight', 'Sentiment weight', 25, 0, 100, 1) +
+          n('confirmationNarrativeWeight', 'Narrative weight', 25, 0, 100, 1) +
+          n('confirmationBoostPoints', 'Strong confirmation boost points', 10, 1, 22, 1) +
+          c('confirmationHardFilter', 'Hard filter when confirmation is Weak'),
+        early_entry_only:
+          '<p class="mint text-xs mb-2">Tightens max entry age (≤8m) and prefer-within window. Stacks with Time-Based Entry.</p>',
+        hard_quality_gate:
+          '<p class="mint text-xs mb-2">Raises min wallet quality floor to ≥68 (stacks with Risk/Strict).</p>',
+        elite_convergence:
+          '<p class="mint text-xs mb-2">Requires multi-wallet clusters, blocks single-wallet entries, raises conviction/quality floors. (60%+ Win Rate Profile uses cluster ≥3 / quality ≥65 / conviction ≥75.)</p>',
+        migration_sniper:
+          '<p class="mint text-xs mb-2">Only migration or near-migration tokens — skips normal curve noise.</p>',
+        profit_protected:
+          '<p class="mint text-xs mb-2">Forces tiered profit + aggressive dead-market exit; raises quality/conviction floors.</p>',
+        quick_scalper:
+          '<p class="mint text-xs mb-2">Timed scalps with fixed TP / tight SL. Auto-closes when the timer ends if neither hit. Overrides some Strict filters for speed; Risk Level still stacks. Paper, Live Sim, and backtests honor the timer.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="qs-time-limit"><span>Scalp time limit</span>' +
+            '<select id="qs-time-limit">' +
+              '<option value="1">1 minute</option>' +
+              '<option value="2" selected>2 minutes</option>' +
+              '<option value="3">3 minutes</option>' +
+            '</select></label>' +
+          n('qs-take-profit', 'Take-profit %', 35, 5, 200, 1) +
+          n('qs-stop-loss', 'Stop-loss % (negative)', -12, -80, -1, 1) +
+          n('qs-min-volume', 'Min volume USD', 8000, 0, 500000, 100) +
+          n('qs-min-buy-pressure', 'Min buy pressure USD', 500, 0, 100000, 50),
+        micro_scalper:
+          '<p class="mint text-xs mb-2">Ultra-fast volume/buy spikes. Ranges depend on suite variant (Std 60–90s · Agg 45–75s · Cons 70–100s).</p>' +
+          n('ms-time-seconds', 'Time limit (seconds)', 75, 45, 100, 5) +
+          n('ms-take-profit', 'Take-profit %', 18, 12, 28, 1) +
+          n('ms-stop-loss', 'Stop-loss % (negative)', -8, -12, -5, 1) +
+          n('ms-min-volume', 'Min volume USD', 12000, 0, 500000, 100) +
+          n('ms-min-buy-pressure', 'Min buy pressure USD', 800, 0, 100000, 50),
+        momentum_burst:
+          '<p class="mint text-xs mb-2">Sudden buy momentum. Timer in seconds (variant-aware). Exits on TP/SL/timer/momentum fail.</p>' +
+          n('mb-time-seconds', 'Time limit (seconds)', 180, 90, 240, 15) +
+          n('mb-take-profit', 'Take-profit %', 32, 22, 50, 1) +
+          n('mb-stop-loss', 'Stop-loss % (negative)', -12, -16, -8, 1) +
+          n('mb-fail-drop', 'Momentum fail drop % from peak', 8, 2, 40, 1) +
+          n('mb-min-volume', 'Min volume USD', 15000, 0, 500000, 100) +
+          n('mb-min-buy-pressure', 'Min buy pressure USD', 1200, 0, 100000, 50),
+        post_migration_scalp:
+          '<p class="mint text-xs mb-2">Fresh migrations with meaningful volume only. Ranges depend on suite variant.</p>' +
+          n('pms-time-seconds', 'Time limit (seconds)', 120, 60, 180, 10) +
+          n('pms-take-profit', 'Take-profit %', 30, 20, 45, 1) +
+          n('pms-stop-loss', 'Stop-loss % (negative)', -11, -15, -7, 1) +
+          n('pms-min-volume', 'Min volume USD (meaningful)', 10000, 0, 500000, 100) +
+          n('pms-min-buy-pressure', 'Min buy pressure USD', 600, 0, 100000, 50),
+        reversal_scalp:
+          '<p class="mint text-xs mb-2">Optional / selective wick snap-back. Ranges depend on suite variant.</p>' +
+          n('rs-time-seconds', 'Time limit (seconds)', 90, 45, 150, 15) +
+          n('rs-take-profit', 'Take-profit %', 22, 15, 32, 1) +
+          n('rs-stop-loss', 'Stop-loss % (negative)', -9, -13, -6, 1) +
+          n('rs-min-drop', 'Min drop from peak %', 32, 5, 90, 1) +
+          n('rs-min-conviction', 'Min conviction (selective)', 52, 0, 100, 1) +
+          n('rs-min-volume', 'Min volume USD', 8000, 0, 500000, 100) +
+          n('rs-min-buy-pressure', 'Min buy pressure USD', 400, 0, 100000, 50),
         momentum_confirmation:
           c('requireMomentumConfirmation', 'Require momentum') +
           n('momentumLookbackMinutes', 'Lookback min', 15, 1, 120, 1) +
@@ -2540,19 +3051,84 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const restore = document.getElementById('strategies-restore');
       const warning = document.getElementById('strategies-warning');
       const grid = document.getElementById('strategies-grid');
+      const preset = String(data.strategyProfile || 'custom');
       if (count) count.textContent = data.enabledCount + ' / ' + data.totalCount + ' ON';
       if (profile) {
         profile.textContent =
-          'Profile: ' + String(data.strategyProfile || 'custom').replace(/_/g, ' ') +
+          'Profile: ' + preset.replace(/_/g, ' ') +
           ' · Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
           (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '');
       }
       if (restore) restore.disabled = !data.canRestorePrevious;
+      document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-preset') === preset);
+      });
       if (warning) {
-        warning.textContent = data.highWinRatePresetActive
-          ? '⚠ ' + data.highWinRateWarning
-          : '';
-        warning.classList.toggle('hidden', !data.highWinRatePresetActive);
+        const activePreset = (data.presets || []).find(p => p.active);
+        const warnText = data.highWinRatePresetActive
+          ? (data.highWinRateWarning || activePreset && activePreset.description)
+          : (activePreset && activePreset.description);
+        warning.textContent = warnText ? ('⚠ ' + warnText) : '';
+        warning.classList.toggle('hidden', !(data.highWinRatePresetActive || (preset !== 'custom' && warnText)));
+        const shortTermPresets = ['scalper_suite','aggressive_scalper','conservative_scalper','quick_scalper','micro_scalper','momentum_burst','post_migration_scalp','reversal_scalp'];
+        if (preset === 'high_win_rate' || data.highWinRatePresetActive) {
+          warning.style.background = '#422006';
+          warning.style.borderColor = '#92400e';
+          warning.style.color = '#fde68a';
+          warning.textContent = '⚠ ' + (data.highWinRateWarning || 'Fewer trades expected – prioritises high win rate');
+          warning.classList.toggle('hidden', false);
+        } else if (preset === 'win_rate_55_60') {
+          warning.style.background = '#1c1917';
+          warning.style.borderColor = '#a16207';
+          warning.style.color = '#fde68a';
+          warning.textContent = 'Active: ' + (data.winRate55_60Description || 'Balanced high-quality profile – more trades than 60%+ version');
+          warning.classList.toggle('hidden', false);
+        } else if (preset === 'balanced' || preset === 'aggressive') {
+          warning.style.background = '#0f172a';
+          warning.style.borderColor = '#334155';
+          warning.style.color = '#cbd5e1';
+          warning.textContent = activePreset ? ('Active: ' + activePreset.description) : '';
+          warning.classList.toggle('hidden', !activePreset);
+        } else if (preset === 'scalper_suite') {
+          warning.style.background = '#042f2e';
+          warning.style.borderColor = '#14b8a6';
+          warning.style.color = '#99f6e4';
+          warning.textContent = 'Active: ' + (data.scalperSuiteDescription || 'Scalper Suite (Standard)');
+          warning.classList.toggle('hidden', false);
+        } else if (preset === 'aggressive_scalper') {
+          warning.style.background = '#431407';
+          warning.style.borderColor = '#ea580c';
+          warning.style.color = '#fdba74';
+          warning.textContent = 'Active: ' + (data.aggressiveScalperDescription || 'Aggressive Scalper');
+          warning.classList.toggle('hidden', false);
+        } else if (preset === 'conservative_scalper') {
+          warning.style.background = '#0c1a2e';
+          warning.style.borderColor = '#0369a1';
+          warning.style.color = '#7dd3fc';
+          warning.textContent = 'Active: ' + (data.conservativeScalperDescription || 'Conservative Scalper');
+          warning.classList.toggle('hidden', false);
+        } else if (shortTermPresets.includes(preset)) {
+          warning.style.background = '#0c1a1a';
+          warning.style.borderColor = '#0f766e';
+          warning.style.color = '#99f6e4';
+          warning.textContent = activePreset
+            ? ('Active: ' + activePreset.description)
+            : '⚠ Timed scalp — TP / SL / timer / signal-fail exits';
+          warning.classList.toggle('hidden', false);
+        } else {
+          warning.style.background = '#422006';
+          warning.style.borderColor = '#92400e';
+          warning.style.color = '#fde68a';
+        }
+      }
+      const btBanner = document.getElementById('bt-config-banner');
+      if (btBanner) {
+        const rl = String(data.riskLevel || 'medium').toUpperCase();
+        btBanner.textContent =
+          'Live preset: ' + preset.replace(/_/g, ' ') +
+          ' · Risk ' + rl +
+          (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '') +
+          ' · Backtest / Live Sim inherit these gates (overrides below are run-only).';
       }
       if (!grid) return;
       stashStrategyControls();
@@ -2590,6 +3166,71 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '</div>';
       }).join('');
       attachStrategyControls(registry);
+      const fillShort = (cfg, map) => {
+        if (!cfg) return;
+        Object.entries(map).forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (el && val != null) el.value = val;
+        });
+      };
+      fillShort(data.quickScalper, {
+        'qs-time-limit': data.quickScalper?.timeLimitMinutes,
+        'qs-take-profit': data.quickScalper?.takeProfitPct,
+        'qs-stop-loss': data.quickScalper?.stopLossPct,
+        'qs-min-volume': data.quickScalper?.minVolumeUsd,
+        'qs-min-buy-pressure': data.quickScalper?.minBuyPressureUsd,
+      });
+      fillShort(data.microScalper, {
+        'ms-time-seconds': data.microScalper?.timeLimitSeconds,
+        'ms-take-profit': data.microScalper?.takeProfitPct,
+        'ms-stop-loss': data.microScalper?.stopLossPct,
+        'ms-min-volume': data.microScalper?.minVolumeUsd,
+        'ms-min-buy-pressure': data.microScalper?.minBuyPressureUsd,
+      });
+      fillShort(data.momentumBurst, {
+        'mb-time-seconds': data.momentumBurst?.timeLimitSeconds ??
+          ((data.momentumBurst?.timeLimitMinutes || 3) * 60),
+        'mb-take-profit': data.momentumBurst?.takeProfitPct,
+        'mb-stop-loss': data.momentumBurst?.stopLossPct,
+        'mb-fail-drop': data.momentumBurst?.momentumFailDropPct,
+        'mb-min-volume': data.momentumBurst?.minVolumeUsd,
+        'mb-min-buy-pressure': data.momentumBurst?.minBuyPressureUsd,
+      });
+      fillShort(data.postMigrationScalp, {
+        'pms-time-seconds': data.postMigrationScalp?.timeLimitSeconds ??
+          ((data.postMigrationScalp?.timeLimitMinutes || 2) * 60),
+        'pms-take-profit': data.postMigrationScalp?.takeProfitPct,
+        'pms-stop-loss': data.postMigrationScalp?.stopLossPct,
+        'pms-min-volume': data.postMigrationScalp?.minVolumeUsd,
+        'pms-min-buy-pressure': data.postMigrationScalp?.minBuyPressureUsd,
+      });
+      fillShort(data.reversalScalp, {
+        'rs-time-seconds': data.reversalScalp?.timeLimitSeconds ??
+          ((data.reversalScalp?.timeLimitMinutes || 1.5) * 60),
+        'rs-take-profit': data.reversalScalp?.takeProfitPct,
+        'rs-stop-loss': data.reversalScalp?.stopLossPct,
+        'rs-min-drop': data.reversalScalp?.minDropFromPeakPct,
+        'rs-min-conviction': data.reversalScalp?.minConvictionScore,
+        'rs-min-volume': data.reversalScalp?.minVolumeUsd,
+        'rs-min-buy-pressure': data.reversalScalp?.minBuyPressureUsd,
+      });
+      const suiteProfiles = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
+      const suiteMax = document.getElementById('suite-max-pos');
+      if (suiteMax) {
+        const maxPos =
+          suiteProfiles.includes(preset) && data.maxConcurrentPositions != null
+            ? data.maxConcurrentPositions
+            : (data.scalperSuiteDefaults?.maxConcurrentPositions ?? 3);
+        suiteMax.value = String(Math.max(2, Math.min(3, Number(maxPos) || 3)));
+      }
+      const suiteDead = document.getElementById('suite-dead-hold');
+      if (suiteDead) {
+        suiteDead.value = String(
+          data.deadVolumeMinHoldMinutes ??
+            data.scalperSuiteDefaults?.deadVolumeMinHoldMinutes ??
+            4
+        );
+      }
     }
 
     async function loadStrategies() {
@@ -2633,7 +3274,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function applyStrategiesAction(action) {
       if (action === 'disable_all' && !confirm('⚠ Disable every strategy module?\\n\\nHard safety floors remain, but optional safety, quality, and exit modules will be off.')) return;
-      if (action === 'high_win_rate' && !confirm('Apply High Win-Rate Preset?\\n\\nFewer trades expected – prioritises win rate over frequency. Your current strategy settings will be saved for Restore Previous.')) return;
+      if (action === 'high_win_rate' && !confirm('Apply 60%+ Win Rate Profile?\\n\\nFewer trades expected – prioritises high win rate.\\n\\nApplies quality ≥65, conviction ≥75, cluster ≥3, 8–10m entry window, healthy curve + momentum, aggressive dead-market exit, max 2 positions, partial TP ~+50%, trail ~22%, small bag left for runners.\\n\\nYour current settings are kept for Restore Previous.')) return;
+      if (action === 'win_rate_55_60' && !confirm('Apply 55–60% Win Rate Profile?\\n\\nBalanced high-quality profile – more trades than 60%+ version.\\n\\nApplies quality ~60, conviction ~68, cluster ≥2, 10–15m entry window, liq ~$6k, holders ~40, curve preferred, momentum preferred (not mandatory), max 3 positions, partial TP ~+42%, trail ~25%.\\n\\nYour current settings are kept for Restore Previous.')) return;
+      if (action === 'scalper_suite' && !confirm('Apply Scalper Suite (Standard)?\\n\\nBalanced timers/TP/SL for Micro + Momentum + Post-Migration (+ Reversal). Anti-Rug + Volume stay ON. Fine-tune after apply. Current settings kept for Restore Previous.')) return;
+      if (action === 'aggressive_scalper' && !confirm('Apply Aggressive Scalper?\\n\\nFaster timers, higher TP targets, looser volume filters, slightly larger size. Anti-Rug + Volume stay ON. Fine-tune after apply.')) return;
+      if (action === 'conservative_scalper' && !confirm('Apply Conservative Scalper?\\n\\nTighter stops, stricter volume/liquidity, smaller size, more aggressive dead-market exit. Anti-Rug + Volume stay ON. Fine-tune after apply.')) return;
+      if (action === 'balanced' && !confirm('Apply Balanced Preset?\\n\\nBest overall risk/reward balance. Your current custom settings are kept for Restore Previous.')) return;
+      if (action === 'aggressive' && !confirm('Apply Aggressive Preset?\\n\\nMore opportunities, still protected. Your current custom settings are kept for Restore Previous.')) return;
       if (action === 'restore' && !confirm('Restore the strategy settings saved before the preset?')) return;
       try {
         const data = await fetchJSON('/api/strategies', {
@@ -4434,31 +5081,68 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       }
 
+      const runWrap = document.getElementById('run-status');
       const dot = document.getElementById('status-dot');
       const statusText = document.getElementById('status-text');
+      const runIcon = document.getElementById('run-status-icon');
+      let runState = 'running';
+      let runLabel = 'Running';
+      let runIconKey = 'play';
       if (!status.monitor.running) {
-        dot.className = 'dot dot-stopped'; statusText.textContent = 'Stopped';
+        runState = 'stopped';
+        runLabel = 'Stopped';
+        runIconKey = 'stop';
       } else if (status.monitor.paused) {
-        dot.className = 'dot dot-paused'; statusText.textContent = 'Paused';
-      } else {
-        dot.className = 'dot dot-running'; statusText.textContent = 'Running';
+        runState = 'paused';
+        runLabel = 'Paused';
+        runIconKey = 'pause';
       }
+      if (dot) {
+        dot.className =
+          'dot ' +
+          (runState === 'paused'
+            ? 'dot-paused'
+            : runState === 'stopped'
+              ? 'dot-stopped'
+              : 'dot-running');
+      }
+      if (statusText) statusText.textContent = runLabel;
+      if (runWrap) {
+        runWrap.className = 'run-status run-' + runState + ' has-tip';
+        runWrap.title =
+          runState === 'running'
+            ? 'Monitor is running and polling wallets'
+            : runState === 'paused'
+              ? 'Monitor is paused — no new copy entries'
+              : 'Monitor is stopped';
+      }
+      setStatusIcon(runIcon, runIconKey);
+      syncOverviewRunModeStatus(runState, runLabel, runIconKey, status);
 
       document.getElementById('btn-pause').textContent = status.monitor.paused ? 'Resume' : 'Pause';
 
       const badge = document.getElementById('mode-badge');
+      const modeLabelEl = document.getElementById('mode-badge-label');
+      const modeIcon = document.getElementById('mode-badge-icon');
       const modeLabel = status.modeLabel || (status.mode === 'liveSimulation' ? 'LIVE SIM' : String(status.mode || 'paper').toUpperCase());
-      badge.textContent = modeLabel;
-      badge.className = 'badge ' + (
-        status.mode === 'live' ? 'badge-live' :
-        status.mode === 'liveSimulation' ? 'badge-livesim' :
-        'badge-paper'
+      if (modeLabelEl) modeLabelEl.textContent = modeLabel;
+      else if (badge) badge.textContent = modeLabel;
+      if (badge) {
+        badge.className = 'badge status-badge has-tip ' + (
+          status.mode === 'live' ? 'badge-live' :
+          status.mode === 'liveSimulation' ? 'badge-livesim' :
+          'badge-paper'
+        );
+        badge.title = status.mode === 'live'
+          ? 'LIVE = real swaps with trading wallet keys'
+          : status.mode === 'liveSimulation'
+            ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
+            : 'PAPER = simulated fills';
+      }
+      setStatusIcon(
+        modeIcon,
+        status.mode === 'live' ? 'live' : status.mode === 'liveSimulation' ? 'liveSim' : 'paper'
       );
-      badge.title = status.mode === 'live'
-        ? 'LIVE = real swaps with trading wallet keys'
-        : status.mode === 'liveSimulation'
-          ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
-          : 'PAPER = simulated fills';
       ['paper', 'liveSimulation', 'live'].forEach((mode) => {
         const btn = document.getElementById('mode-' + mode);
         if (!btn) return;
@@ -4523,10 +5207,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rpc = status.rpc || {};
       const activeEp = (rpc.endpoints || []).find(e => e.isActive) || {};
       const rpcActiveEl = document.getElementById('rpc-active');
+      const rpcWrap = document.getElementById('rpc-status-wrap');
+      const rpcIcon = document.getElementById('rpc-health-icon');
       if (rpcActiveEl) {
         rpcActiveEl.textContent = rpc.active || '—';
-        rpcActiveEl.style.color = rpc.ok === false ? 'var(--red)' : '';
+        rpcActiveEl.style.color = '';
       }
+      if (rpcWrap) {
+        rpcWrap.classList.remove('rpc-ok', 'rpc-bad', 'rpc-unknown');
+        if (rpc.ok === false) rpcWrap.classList.add('rpc-bad');
+        else if (rpc.ok === true) rpcWrap.classList.add('rpc-ok');
+        else rpcWrap.classList.add('rpc-unknown');
+        rpcWrap.title =
+          rpc.ok === false
+            ? (rpc.warning || 'RPC unhealthy — wallet buys may not be detected')
+            : 'Active Solana RPC: ' + (rpc.active || '—');
+      }
+      setStatusIcon(rpcIcon, rpc.ok === false ? 'activityBad' : 'activity');
       document.getElementById('rpc-latency').textContent =
         activeEp.latencyMs != null ? activeEp.latencyMs + 'ms' : '—';
       document.getElementById('rpc-summary').textContent =
@@ -4784,6 +5481,70 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (sensEl && cfg.filters.sniperSensitivity) {
           sensEl.value = cfg.filters.sniperSensitivity;
         }
+        const socialSens = document.getElementById('socialSentimentSensitivity');
+        if (socialSens && cfg.filters.socialSentimentSensitivity) {
+          socialSens.value = cfg.filters.socialSentimentSensitivity;
+        }
+        const narrSens = document.getElementById('trendingNarrativeSensitivity');
+        if (narrSens && cfg.filters.trendingNarrativeSensitivity) {
+          narrSens.value = cfg.filters.trendingNarrativeSensitivity;
+        }
+        const narrBoost = document.getElementById('trendingNarrativeBoostPoints');
+        if (narrBoost && cfg.filters.trendingNarrativeBoostPoints != null) {
+          narrBoost.value = cfg.filters.trendingNarrativeBoostPoints;
+        }
+        const volSens = document.getElementById('volumeSpikeSensitivity');
+        if (volSens && cfg.filters.volumeSpikeSensitivity) {
+          volSens.value = cfg.filters.volumeSpikeSensitivity;
+        }
+        const volWin = document.getElementById('volumeSpikeWindowMinutes');
+        if (volWin && cfg.filters.volumeSpikeWindowMinutes != null) {
+          volWin.value = cfg.filters.volumeSpikeWindowMinutes;
+        }
+        const volMult = document.getElementById('volumeSpikeMultiplier');
+        if (volMult && cfg.filters.volumeSpikeMultiplier != null) {
+          volMult.value = cfg.filters.volumeSpikeMultiplier;
+        }
+        const volBuy = document.getElementById('volumeSpikeBuySidePct');
+        if (volBuy && cfg.filters.volumeSpikeBuySidePct != null) {
+          volBuy.value = cfg.filters.volumeSpikeBuySidePct;
+        }
+        const volMin = document.getElementById('volumeSpikeMinUsd');
+        if (volMin && cfg.filters.volumeSpikeMinUsd != null) {
+          volMin.value = cfg.filters.volumeSpikeMinUsd;
+        }
+        const volBoost = document.getElementById('volumeSpikeBoostPoints');
+        if (volBoost && cfg.filters.volumeSpikeBoostPoints != null) {
+          volBoost.value = cfg.filters.volumeSpikeBoostPoints;
+        }
+        const volHard = document.getElementById('volumeSpikeHardFilter');
+        if (volHard) {
+          volHard.checked = cfg.filters.volumeSpikeHardFilter !== false;
+        }
+        const confSens = document.getElementById('confirmationSensitivity');
+        if (confSens && cfg.filters.confirmationSensitivity) {
+          confSens.value = cfg.filters.confirmationSensitivity;
+        }
+        const confVolW = document.getElementById('confirmationVolumeWeight');
+        if (confVolW && cfg.filters.confirmationVolumeWeight != null) {
+          confVolW.value = cfg.filters.confirmationVolumeWeight;
+        }
+        const confSentW = document.getElementById('confirmationSentimentWeight');
+        if (confSentW && cfg.filters.confirmationSentimentWeight != null) {
+          confSentW.value = cfg.filters.confirmationSentimentWeight;
+        }
+        const confNarrW = document.getElementById('confirmationNarrativeWeight');
+        if (confNarrW && cfg.filters.confirmationNarrativeWeight != null) {
+          confNarrW.value = cfg.filters.confirmationNarrativeWeight;
+        }
+        const confBoost = document.getElementById('confirmationBoostPoints');
+        if (confBoost && cfg.filters.confirmationBoostPoints != null) {
+          confBoost.value = cfg.filters.confirmationBoostPoints;
+        }
+        const confHard = document.getElementById('confirmationHardFilter');
+        if (confHard) {
+          confHard.checked = cfg.filters.confirmationHardFilter === true;
+        }
         if (cfg.strategy.migrationSizeMultiplier != null) {
           document.getElementById('migrationSizeMultiplier').value = cfg.strategy.migrationSizeMultiplier;
         }
@@ -4827,10 +5588,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (btBanner) {
           const rl = (cfg.riskLevel || 'medium').toUpperCase();
           const base = cfg.trade.baseTradeAmountSol ?? cfg.trade.tradeAmountSol;
+          const preset = String(cfg.strategyProfile || 'custom').replace(/_/g, ' ');
           btBanner.textContent =
-            'Saved: ' + rl + ' risk · base ' + base + ' SOL · SL ' +
+            'Live: ' + preset + ' preset · ' + rl + ' risk · base ' + base + ' SOL · SL ' +
             cfg.trade.stopLossPercent + '% · max profit ' + cfg.trade.maxProfitPercent +
-            '% · filters inherited when fields are 0. Overrides below are optional.';
+            '% · Backtest / Live Sim inherit these gates. Overrides below are optional.';
         }
         // Strict Mode status
         updateStrictModeUI(cfg);
@@ -4897,6 +5659,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setN('ps-bag', ps.bagPercent);
           setN('ps-trail-after', ps.trailingStopAfter);
           setN('ps-trail-pct', ps.trailingStopPct);
+        }
+        if (cfg.quickScalper) {
+          const qs = cfg.quickScalper;
+          const setN = (id, v) => {
+            const el = document.getElementById(id);
+            if (el && v != null) el.value = v;
+          };
+          setN('qs-time-limit', qs.timeLimitMinutes);
+          setN('qs-take-profit', qs.takeProfitPct);
+          setN('qs-stop-loss', qs.stopLossPct);
+          setN('qs-min-volume', qs.minVolumeUsd);
+          setN('qs-min-buy-pressure', qs.minBuyPressureUsd);
         }
         if (cfg.selective) {
           const sel = cfg.selective;
@@ -5632,6 +6406,54 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         sniperSensitivity: document.getElementById('sniperSensitivity')
           ? document.getElementById('sniperSensitivity').value
           : 'medium',
+        socialSentimentSensitivity: document.getElementById('socialSentimentSensitivity')
+          ? document.getElementById('socialSentimentSensitivity').value
+          : 'medium',
+        trendingNarrativeSensitivity: document.getElementById('trendingNarrativeSensitivity')
+          ? document.getElementById('trendingNarrativeSensitivity').value
+          : 'medium',
+        trendingNarrativeBoostPoints: document.getElementById('trendingNarrativeBoostPoints')
+          ? Number(document.getElementById('trendingNarrativeBoostPoints').value)
+          : 6,
+        volumeSpikeSensitivity: document.getElementById('volumeSpikeSensitivity')
+          ? document.getElementById('volumeSpikeSensitivity').value
+          : 'medium',
+        volumeSpikeHardFilter: document.getElementById('volumeSpikeHardFilter')
+          ? document.getElementById('volumeSpikeHardFilter').checked
+          : true,
+        volumeSpikeWindowMinutes: document.getElementById('volumeSpikeWindowMinutes')
+          ? Number(document.getElementById('volumeSpikeWindowMinutes').value)
+          : 3,
+        volumeSpikeMultiplier: document.getElementById('volumeSpikeMultiplier')
+          ? Number(document.getElementById('volumeSpikeMultiplier').value)
+          : 3,
+        volumeSpikeBuySidePct: document.getElementById('volumeSpikeBuySidePct')
+          ? Number(document.getElementById('volumeSpikeBuySidePct').value)
+          : 65,
+        volumeSpikeMinUsd: document.getElementById('volumeSpikeMinUsd')
+          ? Number(document.getElementById('volumeSpikeMinUsd').value)
+          : 2500,
+        volumeSpikeBoostPoints: document.getElementById('volumeSpikeBoostPoints')
+          ? Number(document.getElementById('volumeSpikeBoostPoints').value)
+          : 8,
+        confirmationSensitivity: document.getElementById('confirmationSensitivity')
+          ? document.getElementById('confirmationSensitivity').value
+          : 'medium',
+        confirmationHardFilter: document.getElementById('confirmationHardFilter')
+          ? document.getElementById('confirmationHardFilter').checked
+          : false,
+        confirmationVolumeWeight: document.getElementById('confirmationVolumeWeight')
+          ? Number(document.getElementById('confirmationVolumeWeight').value)
+          : 50,
+        confirmationSentimentWeight: document.getElementById('confirmationSentimentWeight')
+          ? Number(document.getElementById('confirmationSentimentWeight').value)
+          : 25,
+        confirmationNarrativeWeight: document.getElementById('confirmationNarrativeWeight')
+          ? Number(document.getElementById('confirmationNarrativeWeight').value)
+          : 25,
+        confirmationBoostPoints: document.getElementById('confirmationBoostPoints')
+          ? Number(document.getElementById('confirmationBoostPoints').value)
+          : 10,
         buyPumpFunOnly: document.getElementById('buyPumpFunOnly')
           ? document.getElementById('buyPumpFunOnly').checked
           : true,
@@ -6330,6 +7152,212 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       high: { label: 'Strict-High', description: 'More active Strict — looser bars than Low/Medium (NOT safer than Strict-Low)' },
     };
 
+    const ACTIVE_PROFILE_HINT =
+      'Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.';
+
+    const STATUS_ICONS = {
+      play: '<polygon points="5 3 19 12 5 21 5 3"/>',
+      pause: '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>',
+      stop: '<rect x="5" y="5" width="14" height="14" rx="2"/>',
+      paper: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/>',
+      liveSim: '<polygon points="5 3 19 12 5 21 5 3"/><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" opacity=".5"/>',
+      live: '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+      activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+      activityBad: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/><circle cx="12" cy="12" r="9" opacity=".25"/>',
+      riskLow: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>',
+      riskMed: '<path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/>',
+      riskHigh: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+      riskDegen: '<path d="M12 3c2 3 3 5.5 3 8a3 3 0 1 1-6 0c0-2.5 1-5 3-8z"/><path d="M9.5 15.5c.5 2 1.8 3.5 2.5 4.5.7-1 2-2.5 2.5-4.5"/>',
+      strictOff: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+      strictLow: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/>',
+      strictMed: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+      strictHigh: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+    };
+
+    function setStatusIcon(svgEl, key) {
+      if (!svgEl) return;
+      const html = STATUS_ICONS[key];
+      if (html) svgEl.innerHTML = html;
+    }
+
+    function syncOverviewRunModeStatus(runState, runLabel, runIconKey, status) {
+      document.querySelectorAll('[data-run-status]').forEach((el) => {
+        el.className = 'run-status run-' + runState + ' has-tip';
+        el.title =
+          runState === 'running'
+            ? 'Monitor is running and polling wallets'
+            : runState === 'paused'
+              ? 'Monitor is paused — no new copy entries'
+              : 'Monitor is stopped';
+        const d = el.querySelector('[data-run-dot]');
+        if (d) {
+          d.className =
+            'dot ' +
+            (runState === 'paused'
+              ? 'dot-paused'
+              : runState === 'stopped'
+                ? 'dot-stopped'
+                : 'dot-running');
+        }
+        const lab = el.querySelector('[data-run-label]');
+        if (lab) lab.textContent = runLabel;
+        setStatusIcon(el.querySelector('[data-run-icon]'), runIconKey);
+      });
+      const mode = (status && status.mode) || 'paper';
+      const modeLabel =
+        (status && status.modeLabel) ||
+        (mode === 'liveSimulation' ? 'LIVE SIM' : String(mode).toUpperCase());
+      const modeIconKey =
+        mode === 'live' ? 'live' : mode === 'liveSimulation' ? 'liveSim' : 'paper';
+      const modeClass =
+        mode === 'live'
+          ? 'badge-live'
+          : mode === 'liveSimulation'
+            ? 'badge-livesim'
+            : 'badge-paper';
+      document.querySelectorAll('[data-mode-status]').forEach((el) => {
+        el.className = 'badge status-badge ' + modeClass + ' has-tip';
+        el.title =
+          mode === 'live'
+            ? 'LIVE = real swaps with trading wallet keys'
+            : mode === 'liveSimulation'
+              ? 'LIVE SIM = virtual fills + live market data / live filters (no real funds)'
+              : 'PAPER = simulated fills';
+        const lab = el.querySelector('[data-mode-label]');
+        if (lab) lab.textContent = modeLabel;
+        setStatusIcon(el.querySelector('[data-mode-icon]'), modeIconKey);
+      });
+    }
+
+    function formatRiskLevelLabel(level) {
+      const raw = String(level || 'medium').toLowerCase();
+      if (raw === 'degen') return 'Degen';
+      return raw.charAt(0).toUpperCase() + raw.slice(1);
+    }
+
+    function getRiskBadgeState(cfg) {
+      const level = String((cfg && cfg.riskLevel) || 'medium').toLowerCase();
+      const label = formatRiskLevelLabel(level);
+      const titles = {
+        low: 'Low risk — tight filters, smaller size, stricter stops',
+        medium: 'Medium risk — balanced recommended default',
+        high: 'High risk — larger size, looser filters (use with caution)',
+        degen: 'Degen — max entries, basic rug/honeypot only + hard floors',
+      };
+      const tone =
+        level === 'low'
+          ? 'risk-badge-low'
+          : level === 'high'
+            ? 'risk-badge-high'
+            : level === 'degen'
+              ? 'risk-badge-degen'
+              : 'risk-badge-medium';
+      const icon =
+        level === 'low'
+          ? 'riskLow'
+          : level === 'high'
+            ? 'riskHigh'
+            : level === 'degen'
+              ? 'riskDegen'
+              : 'riskMed';
+      return {
+        label,
+        tone,
+        icon,
+        title: titles[level] || titles.medium,
+      };
+    }
+
+    function updateRiskBadges(cfg) {
+      const state = getRiskBadgeState(cfg);
+      document.querySelectorAll('[data-risk-badge]').forEach((el) => {
+        el.classList.remove(
+          'risk-badge-low',
+          'risk-badge-medium',
+          'risk-badge-high',
+          'risk-badge-degen'
+        );
+        el.classList.add(state.tone);
+        el.title = state.title;
+        const label = el.querySelector('.risk-badge-label');
+        if (label) label.textContent = state.label;
+        setStatusIcon(el.querySelector('.risk-badge-icon'), state.icon);
+      });
+    }
+
+    function getStrictBadgeState(cfg) {
+      const on = !!(cfg && cfg.strictMode);
+      if (!on) {
+        return {
+          label: 'Strict Off',
+          tone: 'strict-badge-off',
+          icon: 'strictOff',
+          title: 'Strict Mode OFF — using Risk Level presets only. Strict Mode adds an extra quality filter on top when enabled.',
+        };
+      }
+      const intensity = (cfg && cfg.strictModeIntensity) || 'medium';
+      const meta = STRICT_INTENSITY_META[intensity] || STRICT_INTENSITY_META.medium;
+      const tone =
+        intensity === 'low'
+          ? 'strict-badge-low'
+          : intensity === 'high'
+            ? 'strict-badge-high'
+            : 'strict-badge-medium';
+      const icon =
+        intensity === 'low'
+          ? 'strictLow'
+          : intensity === 'high'
+            ? 'strictHigh'
+            : 'strictMed';
+      return {
+        label: meta.label,
+        tone,
+        icon,
+        title: meta.label + ' ON — ' + meta.description,
+      };
+    }
+
+    function updateStrictBadges(cfg) {
+      const state = getStrictBadgeState(cfg);
+      document.querySelectorAll('[data-strict-badge]').forEach((el) => {
+        el.classList.remove(
+          'strict-badge-off',
+          'strict-badge-low',
+          'strict-badge-medium',
+          'strict-badge-high'
+        );
+        el.classList.add(state.tone);
+        el.title = state.title;
+        const label = el.querySelector('.strict-badge-label');
+        if (label) label.textContent = state.label;
+        setStatusIcon(el.querySelector('.strict-badge-icon'), state.icon);
+      });
+    }
+
+    function activeProfileToneClass(cfg) {
+      const level = String((cfg && cfg.riskLevel) || 'medium').toLowerCase();
+      if (level === 'degen') return 'tone-degen';
+      if (level === 'high') return 'tone-high';
+      if (level === 'low') return 'tone-low';
+      return 'tone-medium';
+    }
+
+    function updateActiveProfileSummary(cfg) {
+      const source = cfg || _lastConfig || window._lastConfig;
+      if (!source) return;
+      const tone = activeProfileToneClass(source);
+      document.querySelectorAll('[data-active-profile]').forEach((el) => {
+        el.classList.remove('tone-low', 'tone-medium', 'tone-high', 'tone-degen');
+        el.classList.add(tone);
+        const hint = el.querySelector('.active-profile-hint');
+        if (hint && !hint.querySelector('button')) {
+          hint.textContent = ACTIVE_PROFILE_HINT;
+        }
+      });
+      updateRiskBadges(source);
+      updateStrictBadges(source);
+    }
+
     function updateStrictModeUI(cfg, status) {
       const on = !!(cfg && cfg.strictMode);
       const intensity =
@@ -6381,6 +7409,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const st = document.getElementById(id);
         if (st) st.textContent = statusText;
       });
+      updateActiveProfileSummary(
+        Object.assign({}, _lastConfig || {}, cfg || {}, {
+          strictMode: on,
+          strictModeIntensity: intensity,
+        })
+      );
     }
 
     function applyPresetConfigSnapshot(cfg, strictStatus) {
@@ -6590,12 +7624,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const btBanner = document.getElementById('bt-config-banner');
       if (btBanner && cfg && cfg.trade) {
         const base = cfg.trade.baseTradeAmountSol ?? cfg.trade.tradeAmountSol;
+        const preset = String(cfg.strategyProfile || 'custom').replace(/_/g, ' ');
         btBanner.textContent =
-          'Saved: ' + String(level).toUpperCase() + ' risk · base ' + base +
+          'Live: ' + preset + ' preset · ' + String(level).toUpperCase() +
+          ' risk · base ' + base +
           ' SOL · SL ' + cfg.trade.stopLossPercent + '% · max profit ' +
           cfg.trade.maxProfitPercent +
-          '% · filters inherited when fields are 0. Overrides below are optional.';
+          '% · Backtest / Live Sim inherit these gates. Overrides below are optional.';
       }
+      updateActiveProfileSummary(Object.assign({}, _lastConfig || {}, cfg || {}));
     }
 
     async function setRiskLevel(level) {
@@ -6661,6 +7698,132 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    async function saveQuickScalperConfig(silent) {
+      let sl = Number(document.getElementById('qs-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      await fetchJSON('/api/short-term/quick_scalper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeLimitMinutes: Number(document.getElementById('qs-time-limit')?.value) || 2,
+          takeProfitPct: Number(document.getElementById('qs-take-profit')?.value),
+          stopLossPct: sl,
+          minVolumeUsd: Number(document.getElementById('qs-min-volume')?.value),
+          minBuyPressureUsd: Number(document.getElementById('qs-min-buy-pressure')?.value),
+        }),
+      });
+      if (!silent) alert('Quick Scalper settings saved');
+      refresh();
+    }
+
+    async function saveMicroScalperConfig(silent) {
+      let sl = Number(document.getElementById('ms-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      await fetchJSON('/api/short-term/micro_scalper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeLimitSeconds: Number(document.getElementById('ms-time-seconds')?.value) || 75,
+          takeProfitPct: Number(document.getElementById('ms-take-profit')?.value),
+          stopLossPct: sl,
+          minVolumeUsd: Number(document.getElementById('ms-min-volume')?.value),
+          minBuyPressureUsd: Number(document.getElementById('ms-min-buy-pressure')?.value),
+        }),
+      });
+      if (!silent) alert('Micro-Scalper settings saved');
+      refresh();
+    }
+
+    async function saveMomentumBurstConfig(silent) {
+      let sl = Number(document.getElementById('mb-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      await fetchJSON('/api/short-term/momentum_burst', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeLimitSeconds: Number(document.getElementById('mb-time-seconds')?.value) || 180,
+          takeProfitPct: Number(document.getElementById('mb-take-profit')?.value),
+          stopLossPct: sl,
+          momentumFailDropPct: Number(document.getElementById('mb-fail-drop')?.value),
+          minVolumeUsd: Number(document.getElementById('mb-min-volume')?.value),
+          minBuyPressureUsd: Number(document.getElementById('mb-min-buy-pressure')?.value),
+        }),
+      });
+      if (!silent) alert('Momentum Burst settings saved');
+      refresh();
+    }
+
+    async function savePostMigrationScalpConfig(silent) {
+      let sl = Number(document.getElementById('pms-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      await fetchJSON('/api/short-term/post_migration_scalp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeLimitSeconds: Number(document.getElementById('pms-time-seconds')?.value) || 120,
+          takeProfitPct: Number(document.getElementById('pms-take-profit')?.value),
+          stopLossPct: sl,
+          minVolumeUsd: Number(document.getElementById('pms-min-volume')?.value),
+          minBuyPressureUsd: Number(document.getElementById('pms-min-buy-pressure')?.value),
+        }),
+      });
+      if (!silent) alert('Post-Migration Scalp settings saved');
+      refresh();
+    }
+
+    async function saveReversalScalpConfig(silent) {
+      let sl = Number(document.getElementById('rs-stop-loss')?.value);
+      if (Number.isFinite(sl) && sl > 0) sl = -sl;
+      await fetchJSON('/api/short-term/reversal_scalp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeLimitSeconds: Number(document.getElementById('rs-time-seconds')?.value) || 90,
+          takeProfitPct: Number(document.getElementById('rs-take-profit')?.value),
+          stopLossPct: sl,
+          minDropFromPeakPct: Number(document.getElementById('rs-min-drop')?.value),
+          minConvictionScore: Number(document.getElementById('rs-min-conviction')?.value),
+          minVolumeUsd: Number(document.getElementById('rs-min-volume')?.value),
+          minBuyPressureUsd: Number(document.getElementById('rs-min-buy-pressure')?.value),
+        }),
+      });
+      if (!silent) alert('Reversal Scalp settings saved');
+      refresh();
+    }
+
+    async function saveScalperSuiteSettings() {
+      const status = document.getElementById('suite-settings-status');
+      try {
+        await saveMicroScalperConfig(true);
+        await saveMomentumBurstConfig(true);
+        await savePostMigrationScalpConfig(true);
+        await saveReversalScalpConfig(true);
+        let maxPos = Number(document.getElementById('suite-max-pos')?.value) || 3;
+        maxPos = Math.max(2, Math.min(3, maxPos));
+        const deadHold = Number(document.getElementById('suite-dead-hold')?.value) || 4;
+        await fetchJSON('/api/config/filters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ maxConcurrentPositions: maxPos }),
+        });
+        await fetchJSON('/api/config/risk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enableDeadVolumeExit: true,
+            deadVolumeMinHoldMinutes: deadHold,
+            deadVolumeConsecutiveHours: 1,
+            deadVolumeUsdPerHour: 80,
+          }),
+        }).catch(() => null);
+        if (status) status.textContent = 'Suite + member settings saved · maxPos=' + maxPos;
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Save failed: ' + (err.message || String(err)));
+      }
+    }
+
     async function saveMevConfig(silent) {
       await fetchJSON('/api/mev', {
         method: 'POST',
@@ -6700,6 +7863,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           await saveProfitStrategy(true);
         } else if (key === 'mev_protection') {
           await saveMevConfig(true);
+        } else if (key === 'quick_scalper') {
+          await saveQuickScalperConfig(true);
+        } else if (key === 'micro_scalper') {
+          await saveMicroScalperConfig(true);
+        } else if (key === 'momentum_burst') {
+          await saveMomentumBurstConfig(true);
+        } else if (key === 'post_migration_scalp') {
+          await savePostMigrationScalpConfig(true);
+        } else if (key === 'reversal_scalp') {
+          await saveReversalScalpConfig(true);
         } else {
           await saveFilterConfig(true);
         }

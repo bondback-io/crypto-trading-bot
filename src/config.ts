@@ -227,6 +227,274 @@ export const DEFAULT_PROFIT_STRATEGY: ProfitStrategyConfig = {
   highRiskScoreThreshold: 55,
 };
 
+/** Quick Scalper — short timed holds with fixed TP / tight SL */
+export interface QuickScalperConfig {
+  enabled: boolean;
+  /** Hard hold limit in minutes (1 / 2 / 3) */
+  timeLimitMinutes: 1 | 2 | 3;
+  /** Fixed take-profit % */
+  takeProfitPct: number;
+  /** Tight stop-loss % (negative) */
+  stopLossPct: number;
+  /** Min volume USD for scalp entry */
+  minVolumeUsd: number;
+  /** Min recent buy volume USD (buy pressure); 0 = off */
+  minBuyPressureUsd: number;
+}
+
+export const DEFAULT_QUICK_SCALPER: QuickScalperConfig = {
+  enabled: false,
+  timeLimitMinutes: 2,
+  takeProfitPct: 35,
+  stopLossPct: -12,
+  minVolumeUsd: 8_000,
+  minBuyPressureUsd: 500,
+};
+
+/** Micro-Scalper — 60–90s ultra-fast spikes */
+export interface MicroScalperConfig {
+  enabled: boolean;
+  /** Hard hold limit in seconds (60–90) */
+  timeLimitSeconds: number;
+  takeProfitPct: number;
+  stopLossPct: number;
+  minVolumeUsd: number;
+  minBuyPressureUsd: number;
+}
+
+export const DEFAULT_MICRO_SCALPER: MicroScalperConfig = {
+  enabled: false,
+  timeLimitSeconds: 75,
+  takeProfitPct: 18,
+  stopLossPct: -8,
+  minVolumeUsd: 12_000,
+  minBuyPressureUsd: 800,
+};
+
+/** Momentum Burst — timed momentum holds with fade exit */
+export interface MomentumBurstConfig {
+  enabled: boolean;
+  /** Hold limit in seconds (preferred; supports fractional-minute windows). */
+  timeLimitSeconds: number;
+  /** @deprecated legacy minutes — converted to seconds if seconds missing */
+  timeLimitMinutes?: 2 | 3 | 4;
+  takeProfitPct: number;
+  stopLossPct: number;
+  minVolumeUsd: number;
+  minBuyPressureUsd: number;
+  /** Exit if price drops this % from peak before TP */
+  momentumFailDropPct: number;
+}
+
+export const DEFAULT_MOMENTUM_BURST: MomentumBurstConfig = {
+  enabled: false,
+  timeLimitSeconds: 180,
+  timeLimitMinutes: 3,
+  takeProfitPct: 32,
+  stopLossPct: -12,
+  minVolumeUsd: 15_000,
+  minBuyPressureUsd: 1_200,
+  momentumFailDropPct: 8,
+};
+
+/** Post-Migration Scalp — fresh migrations only (90s–3m) */
+export interface PostMigrationScalpConfig {
+  enabled: boolean;
+  /** Hold limit in seconds (90–180). Preferred. */
+  timeLimitSeconds: number;
+  /** @deprecated legacy minutes — converted to seconds if seconds missing */
+  timeLimitMinutes?: 1 | 2 | 3 | 4;
+  takeProfitPct: number;
+  stopLossPct: number;
+  minVolumeUsd: number;
+  minBuyPressureUsd: number;
+}
+
+export const DEFAULT_POST_MIGRATION_SCALP: PostMigrationScalpConfig = {
+  enabled: false,
+  timeLimitSeconds: 120,
+  takeProfitPct: 30,
+  stopLossPct: -11,
+  minVolumeUsd: 10_000,
+  minBuyPressureUsd: 600,
+};
+
+/** Reversal Scalp — mean-reversion on sharp wicks (60–150s) */
+export interface ReversalScalpConfig {
+  enabled: boolean;
+  /** Hold limit in seconds (60–150). Preferred. */
+  timeLimitSeconds: number;
+  /** @deprecated legacy minutes */
+  timeLimitMinutes?: 1 | 2 | 3 | 4 | 5;
+  takeProfitPct: number;
+  stopLossPct: number;
+  minVolumeUsd: number;
+  minBuyPressureUsd: number;
+  /** Min drop from recent peak % to qualify (wick / over-extension) */
+  minDropFromPeakPct: number;
+  /** Min conviction for selective entries */
+  minConvictionScore: number;
+}
+
+export const DEFAULT_REVERSAL_SCALP: ReversalScalpConfig = {
+  enabled: false,
+  timeLimitSeconds: 90,
+  takeProfitPct: 22,
+  stopLossPct: -9,
+  minVolumeUsd: 8_000,
+  minBuyPressureUsd: 400,
+  minDropFromPeakPct: 32,
+  minConvictionScore: 52,
+};
+
+/** Recommended param band (Strategies UI + clamp on save). */
+export type ScalpParamBand = { min: number; max: number; default: number };
+
+export type ScalpStrategyRanges = {
+  micro_scalper: {
+    timerSec: ScalpParamBand;
+    takeProfitPct: ScalpParamBand;
+    stopLossAbs: ScalpParamBand;
+  };
+  momentum_burst: {
+    timerSec: ScalpParamBand;
+    takeProfitPct: ScalpParamBand;
+    stopLossAbs: ScalpParamBand;
+  };
+  post_migration_scalp: {
+    timerSec: ScalpParamBand;
+    takeProfitPct: ScalpParamBand;
+    stopLossAbs: ScalpParamBand;
+  };
+  reversal_scalp: {
+    timerSec: ScalpParamBand;
+    takeProfitPct: ScalpParamBand;
+    stopLossAbs: ScalpParamBand;
+  };
+};
+
+export type ScalperSuiteVariantId =
+  | 'standard'
+  | 'aggressive'
+  | 'conservative';
+
+/** Standard Scalper Suite ranges (default recipe). */
+export const SCALP_PARAM_RANGES_STANDARD: ScalpStrategyRanges = {
+  micro_scalper: {
+    timerSec: { min: 60, max: 90, default: 75 },
+    takeProfitPct: { min: 15, max: 22, default: 18 },
+    stopLossAbs: { min: 6, max: 10, default: 8 },
+  },
+  momentum_burst: {
+    timerSec: { min: 120, max: 240, default: 180 },
+    takeProfitPct: { min: 28, max: 40, default: 32 },
+    stopLossAbs: { min: 10, max: 14, default: 12 },
+  },
+  post_migration_scalp: {
+    timerSec: { min: 90, max: 180, default: 120 },
+    takeProfitPct: { min: 25, max: 38, default: 30 },
+    stopLossAbs: { min: 9, max: 13, default: 11 },
+  },
+  reversal_scalp: {
+    timerSec: { min: 60, max: 150, default: 90 },
+    takeProfitPct: { min: 18, max: 28, default: 22 },
+    stopLossAbs: { min: 7, max: 11, default: 9 },
+  },
+};
+
+/** Aggressive Scalper — faster timers, higher TP/SL, looser volume. */
+export const SCALP_PARAM_RANGES_AGGRESSIVE: ScalpStrategyRanges = {
+  micro_scalper: {
+    timerSec: { min: 45, max: 75, default: 60 },
+    takeProfitPct: { min: 18, max: 28, default: 23 },
+    stopLossAbs: { min: 8, max: 12, default: 10 },
+  },
+  momentum_burst: {
+    timerSec: { min: 90, max: 210, default: 150 },
+    takeProfitPct: { min: 35, max: 50, default: 42 },
+    stopLossAbs: { min: 12, max: 16, default: 14 },
+  },
+  post_migration_scalp: {
+    timerSec: { min: 60, max: 150, default: 105 },
+    takeProfitPct: { min: 30, max: 45, default: 37 },
+    stopLossAbs: { min: 11, max: 15, default: 13 },
+  },
+  reversal_scalp: {
+    timerSec: { min: 45, max: 90, default: 68 },
+    takeProfitPct: { min: 22, max: 32, default: 27 },
+    stopLossAbs: { min: 9, max: 13, default: 11 },
+  },
+};
+
+/** Conservative Scalper — slower timers, tighter TP/SL, stricter filters. */
+export const SCALP_PARAM_RANGES_CONSERVATIVE: ScalpStrategyRanges = {
+  micro_scalper: {
+    timerSec: { min: 70, max: 100, default: 85 },
+    takeProfitPct: { min: 12, max: 18, default: 15 },
+    stopLossAbs: { min: 5, max: 8, default: 6 },
+  },
+  momentum_burst: {
+    timerSec: { min: 150, max: 240, default: 195 },
+    takeProfitPct: { min: 22, max: 32, default: 27 },
+    stopLossAbs: { min: 8, max: 11, default: 9 },
+  },
+  post_migration_scalp: {
+    timerSec: { min: 90, max: 180, default: 135 },
+    takeProfitPct: { min: 20, max: 30, default: 25 },
+    stopLossAbs: { min: 7, max: 10, default: 8 },
+  },
+  reversal_scalp: {
+    timerSec: { min: 60, max: 120, default: 90 },
+    takeProfitPct: { min: 15, max: 22, default: 18 },
+    stopLossAbs: { min: 6, max: 9, default: 7 },
+  },
+};
+
+/** Alias for Standard ranges (legacy imports). Prefer getActiveScalpParamRanges(). */
+export const SCALP_PARAM_RANGES = SCALP_PARAM_RANGES_STANDARD;
+
+export function getScalperSuiteVariantFromProfile(
+  profile?: string | null
+): ScalperSuiteVariantId | null {
+  if (profile === 'scalper_suite') return 'standard';
+  if (profile === 'aggressive_scalper') return 'aggressive';
+  if (profile === 'conservative_scalper') return 'conservative';
+  return null;
+}
+
+export function isScalperSuiteProfile(
+  profile?: string | null
+): boolean {
+  return getScalperSuiteVariantFromProfile(profile) != null;
+}
+
+/** Variant-aware clamp ranges for UI + save. Falls back to Standard. */
+export function getActiveScalpParamRanges(
+  profile?: string | null
+): ScalpStrategyRanges {
+  const v = getScalperSuiteVariantFromProfile(
+    profile ?? config.strategyProfile
+  );
+  if (v === 'aggressive') return SCALP_PARAM_RANGES_AGGRESSIVE;
+  if (v === 'conservative') return SCALP_PARAM_RANGES_CONSERVATIVE;
+  return SCALP_PARAM_RANGES_STANDARD;
+}
+
+export function getScalperSuiteVariantLabel(
+  profileOrVariant?: string | null
+): string {
+  const v =
+    profileOrVariant === 'standard' ||
+    profileOrVariant === 'aggressive' ||
+    profileOrVariant === 'conservative'
+      ? profileOrVariant
+      : getScalperSuiteVariantFromProfile(profileOrVariant);
+  if (v === 'aggressive') return 'Aggressive Scalper';
+  if (v === 'conservative') return 'Conservative Scalper';
+  if (v === 'standard') return 'Scalper Suite (Standard)';
+  return 'Scalper Suite';
+}
+
 /** Selective entry gating — high-conviction setups only */
 export interface SelectiveTradingConfig {
   enabled: boolean;
@@ -901,6 +1169,58 @@ export interface FilterConfig {
   enableSniperFilter: boolean;
   /** How strict sniper thresholds are */
   sniperSensitivity: 'low' | 'medium' | 'high';
+  /**
+   * Supporting social sentiment filter (not a primary signal).
+   * When OFF or data unavailable, entries are unchanged (fail-open).
+   */
+  enableSocialSentimentFilter: boolean;
+  /** How reactive social sentiment boost / skip is */
+  socialSentimentSensitivity: 'low' | 'medium' | 'high';
+  /**
+   * Soft boost for tokens tied to hot narratives (confirmation only).
+   * When OFF or data unavailable, entries are unchanged (fail-open).
+   */
+  enableTrendingNarrativeBoost: boolean;
+  /** How strong the narrative conviction bump is */
+  trendingNarrativeSensitivity: 'low' | 'medium' | 'high';
+  /** Base conviction points added when a hot narrative matches (1–20) */
+  trendingNarrativeBoostPoints: number;
+  /** Optional extra theme → keywords map merged with built-ins */
+  trendingNarrativeKeywords?: Record<string, string[]>;
+  /**
+   * Advanced volume spike filter (hard gate + soft boost).
+   * When OFF or volume data unavailable, entries are unchanged (fail-open).
+   */
+  enableVolumeSpikeFilter: boolean;
+  /** How strict hard skips / strong boosts are */
+  volumeSpikeSensitivity: 'low' | 'medium' | 'high';
+  /** Short-term window for surge / relative checks (minutes; 1–5 recommended) */
+  volumeSpikeWindowMinutes: number;
+  /** Short-term volume vs expected average multiplier (default 3×) */
+  volumeSpikeMultiplier: number;
+  /** Buy-side share % required for dominance (default 65) */
+  volumeSpikeBuySidePct: number;
+  /** Absolute minimum short-window volume USD floor (reject near-zero) */
+  volumeSpikeMinUsd: number;
+  /** Conviction points added on a strong spike (1–20) */
+  volumeSpikeBoostPoints: number;
+  /** When true, weak / below-floor volume can hard-block entries */
+  volumeSpikeHardFilter: boolean;
+  /**
+   * Combined Volume + Sentiment + Narrative confirmation layer.
+   * Soft boost when Strong+; optional hard filter when Weak.
+   * Missing sentiment/narrative never blocks (fail-open).
+   */
+  enableConfirmationLayer: boolean;
+  confirmationSensitivity: 'low' | 'medium' | 'high';
+  /** Relative weight for volume spike component (usually highest) */
+  confirmationVolumeWeight: number;
+  confirmationSentimentWeight: number;
+  confirmationNarrativeWeight: number;
+  /** Base conviction points for Strong confirmation (1–22) */
+  confirmationBoostPoints: number;
+  /** When true, Very Weak confirmation can hard-block (volume data required) */
+  confirmationHardFilter: boolean;
   /** Override max sniper wallet count (0 = use sensitivity default) */
   maxSniperCount: number;
   /** Override max bundler volume % (0 = use sensitivity default) */
@@ -1086,6 +1406,12 @@ export interface BotConfig {
   risk: RiskConfig;
   /** Tiered profit-taking: recover initial → partials → trail + bag */
   profitStrategy: ProfitStrategyConfig;
+  /** Quick Scalper timed TP/SL/timer exits */
+  quickScalper: QuickScalperConfig;
+  microScalper: MicroScalperConfig;
+  momentumBurst: MomentumBurstConfig;
+  postMigrationScalp: PostMigrationScalpConfig;
+  reversalScalp: ReversalScalpConfig;
   /** High-conviction entry gating and trade-rate limits */
   selective: SelectiveTradingConfig;
 
@@ -1094,14 +1420,40 @@ export interface BotConfig {
    * logic is skipped entirely. Defaults match pre-1.1.40 always-on behaviour.
    */
   strategyToggles: Record<string, boolean>;
-  /** Active strategy profile: balanced | high_win_rate | custom */
-  strategyProfile: 'balanced' | 'high_win_rate' | 'custom';
+  /** Active strategy profile */
+  strategyProfile:
+    | 'high_win_rate'
+    | 'win_rate_55_60'
+    | 'balanced'
+    | 'aggressive'
+    | 'quick_scalper'
+    | 'micro_scalper'
+    | 'momentum_burst'
+    | 'post_migration_scalp'
+    | 'reversal_scalp'
+    | 'scalper_suite'
+    | 'aggressive_scalper'
+    | 'conservative_scalper'
+    | 'custom';
   /** True when High Win-Rate Preset thresholds + toggles are active */
   highWinRatePresetActive: boolean;
-  /** Snapshot taken before applying High Win-Rate / leaving a profile */
+  /** Snapshot taken before applying a named preset (preserves custom overrides) */
   strategyProfileSnapshot: {
     savedAt: number;
-    fromProfile: 'balanced' | 'high_win_rate' | 'custom';
+    fromProfile:
+      | 'high_win_rate'
+      | 'win_rate_55_60'
+      | 'balanced'
+      | 'aggressive'
+      | 'quick_scalper'
+      | 'micro_scalper'
+      | 'momentum_burst'
+      | 'post_migration_scalp'
+      | 'reversal_scalp'
+      | 'scalper_suite'
+      | 'aggressive_scalper'
+      | 'conservative_scalper'
+      | 'custom';
     knobs: Record<string, unknown>;
   } | null;
 
@@ -1283,6 +1635,26 @@ export const config: BotConfig = {
     skipIfMintAuthority: false,
     enableSniperFilter: true,
     sniperSensitivity: 'medium',
+    enableSocialSentimentFilter: false,
+    socialSentimentSensitivity: 'medium',
+    enableTrendingNarrativeBoost: false,
+    trendingNarrativeSensitivity: 'medium',
+    trendingNarrativeBoostPoints: 6,
+    enableVolumeSpikeFilter: false,
+    volumeSpikeSensitivity: 'medium',
+    volumeSpikeWindowMinutes: 3,
+    volumeSpikeMultiplier: 3,
+    volumeSpikeBuySidePct: 65,
+    volumeSpikeMinUsd: 2_500,
+    volumeSpikeBoostPoints: 8,
+    volumeSpikeHardFilter: true,
+    enableConfirmationLayer: false,
+    confirmationSensitivity: 'medium',
+    confirmationVolumeWeight: 50,
+    confirmationSentimentWeight: 25,
+    confirmationNarrativeWeight: 25,
+    confirmationBoostPoints: 10,
+    confirmationHardFilter: false,
     maxSniperCount: 0,
     maxBundlerPct: 0,
     maxInsiderPct: 0,
@@ -1386,6 +1758,12 @@ export const config: BotConfig = {
       process.env.PROFIT_RISK_ADJUST !== '0' &&
       process.env.PROFIT_RISK_ADJUST !== 'false',
   },
+
+  quickScalper: { ...DEFAULT_QUICK_SCALPER },
+  microScalper: { ...DEFAULT_MICRO_SCALPER },
+  momentumBurst: { ...DEFAULT_MOMENTUM_BURST },
+  postMigrationScalp: { ...DEFAULT_POST_MIGRATION_SCALP },
+  reversalScalp: { ...DEFAULT_REVERSAL_SCALP },
 
   gmgn: {
     apiKey: process.env.GMGN_API_KEY?.trim() || '',
@@ -1587,11 +1965,26 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       },
     },
     profitStrategy: { ...config.profitStrategy },
+    quickScalper: { ...config.quickScalper },
+    microScalper: { ...config.microScalper },
+    momentumBurst: { ...config.momentumBurst },
+    postMigrationScalp: { ...config.postMigrationScalp },
+    reversalScalp: { ...config.reversalScalp },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile:
       config.strategyProfile === 'balanced' ||
-      config.strategyProfile === 'high_win_rate'
+      config.strategyProfile === 'high_win_rate' ||
+      config.strategyProfile === 'win_rate_55_60' ||
+      config.strategyProfile === 'aggressive' ||
+      config.strategyProfile === 'quick_scalper' ||
+      config.strategyProfile === 'micro_scalper' ||
+      config.strategyProfile === 'momentum_burst' ||
+      config.strategyProfile === 'post_migration_scalp' ||
+      config.strategyProfile === 'reversal_scalp' ||
+      config.strategyProfile === 'scalper_suite' ||
+      config.strategyProfile === 'aggressive_scalper' ||
+      config.strategyProfile === 'conservative_scalper'
         ? config.strategyProfile
         : 'custom',
     highWinRatePresetActive: config.highWinRatePresetActive === true,
@@ -1929,6 +2322,31 @@ function applySettingsSnapshot(
         saved.profitStrategy
       ) as unknown as typeof config.profitStrategy;
     }
+    if (saved.quickScalper) {
+      config.quickScalper = cloneJson(
+        saved.quickScalper
+      ) as unknown as typeof config.quickScalper;
+    }
+    if (saved.microScalper) {
+      config.microScalper = cloneJson(
+        saved.microScalper
+      ) as unknown as typeof config.microScalper;
+    }
+    if (saved.momentumBurst) {
+      config.momentumBurst = cloneJson(
+        saved.momentumBurst
+      ) as unknown as typeof config.momentumBurst;
+    }
+    if (saved.postMigrationScalp) {
+      config.postMigrationScalp = cloneJson(
+        saved.postMigrationScalp
+      ) as unknown as typeof config.postMigrationScalp;
+    }
+    if (saved.reversalScalp) {
+      config.reversalScalp = cloneJson(
+        saved.reversalScalp
+      ) as unknown as typeof config.reversalScalp;
+    }
     if (saved.selective) {
       config.selective = cloneJson(
         saved.selective
@@ -1963,6 +2381,33 @@ function applySettingsSnapshot(
       config.profitStrategy = deepMerge(
         config.profitStrategy,
         saved.profitStrategy
+      );
+    }
+    if (saved.quickScalper) {
+      config.quickScalper = deepMerge(
+        config.quickScalper,
+        saved.quickScalper
+      );
+    }
+    if (saved.microScalper) {
+      config.microScalper = deepMerge(config.microScalper, saved.microScalper);
+    }
+    if (saved.momentumBurst) {
+      config.momentumBurst = deepMerge(
+        config.momentumBurst,
+        saved.momentumBurst
+      );
+    }
+    if (saved.postMigrationScalp) {
+      config.postMigrationScalp = deepMerge(
+        config.postMigrationScalp,
+        saved.postMigrationScalp
+      );
+    }
+    if (saved.reversalScalp) {
+      config.reversalScalp = deepMerge(
+        config.reversalScalp,
+        saved.reversalScalp
       );
     }
     if (saved.selective) {
@@ -2011,12 +2456,32 @@ function applySettingsSnapshot(
   if (
     saved.strategyProfile === 'balanced' ||
     saved.strategyProfile === 'high_win_rate' ||
+    saved.strategyProfile === 'win_rate_55_60' ||
+    saved.strategyProfile === 'aggressive' ||
+    saved.strategyProfile === 'quick_scalper' ||
+    saved.strategyProfile === 'micro_scalper' ||
+    saved.strategyProfile === 'momentum_burst' ||
+    saved.strategyProfile === 'post_migration_scalp' ||
+    saved.strategyProfile === 'reversal_scalp' ||
+    saved.strategyProfile === 'scalper_suite' ||
+    saved.strategyProfile === 'aggressive_scalper' ||
+    saved.strategyProfile === 'conservative_scalper' ||
     saved.strategyProfile === 'custom'
   ) {
     config.strategyProfile = saved.strategyProfile;
   }
   if (typeof saved.highWinRatePresetActive === 'boolean') {
     config.highWinRatePresetActive = saved.highWinRatePresetActive;
+  }
+  // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
+  {
+    const mb = config.momentumBurst;
+    let sec = Number(mb?.timeLimitSeconds);
+    if (!Number.isFinite(sec) || sec < 60) {
+      const mins = Number(mb?.timeLimitMinutes);
+      sec = [2, 3, 4].includes(mins) ? mins * 60 : DEFAULT_MOMENTUM_BURST.timeLimitSeconds;
+    }
+    config.momentumBurst.timeLimitSeconds = Math.max(60, Math.min(300, Math.round(sec)));
   }
   if (saved.strategyProfileSnapshot === null) {
     config.strategyProfileSnapshot = null;
@@ -3253,6 +3718,20 @@ export function applyRiskLevel(
 
   syncConfigAliases();
 
+  // Re-assert active strategy preset thresholds/toggles on top of risk knobs
+  // so Risk Level + Strategy Preset stack (Strict Mode still overlays after).
+  try {
+    const {
+      isNamedStrategyProfile,
+      applyStrategyPreset,
+    } = require('./strategies') as typeof import('./strategies');
+    if (isNamedStrategyProfile(config.strategyProfile)) {
+      applyStrategyPreset(config.strategyProfile, { persist: false });
+    }
+  } catch {
+    // Ignore during early bootstrap if strategies is not ready
+  }
+
   if (options.persist !== false) {
     persistUserSettings();
   }
@@ -3352,6 +3831,11 @@ export function getConfigSnapshot() {
       },
     },
     profitStrategy: { ...config.profitStrategy },
+    quickScalper: { ...config.quickScalper },
+    microScalper: { ...config.microScalper },
+    momentumBurst: { ...config.momentumBurst },
+    postMigrationScalp: { ...config.postMigrationScalp },
+    reversalScalp: { ...config.reversalScalp },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile: config.strategyProfile || 'custom',

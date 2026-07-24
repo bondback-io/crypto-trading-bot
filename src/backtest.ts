@@ -55,7 +55,12 @@ import {
   type StrictModeIntensity,
 } from './strictMode';
 import { passesWalletQualityGate } from './walletQuality';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabled, getQualityModeOverlays } from './strategies';
+import {
+  isAnyShortTermScalperActive,
+  resolveShortTermEntry,
+  seedShortTermPosition,
+} from './shortTermStrategies';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -1144,7 +1149,8 @@ function resolveStrategyKind(
     }
     if (
       config.strategy.enableConvergence &&
-      isStrategyEnabled('wallet_convergence')
+      (isStrategyEnabled('wallet_convergence') ||
+        isStrategyEnabled('elite_convergence'))
     ) {
       return 'convergence';
     }
@@ -1154,7 +1160,10 @@ function resolveStrategyKind(
     return isStrategyEnabled('migration_priority') ? 'migration' : 'single';
   }
   if (strategyType === 'convergence') {
-    return isStrategyEnabled('wallet_convergence') ? 'convergence' : 'single';
+    return isStrategyEnabled('wallet_convergence') ||
+      isStrategyEnabled('elite_convergence')
+      ? 'convergence'
+      : 'single';
   }
   return 'single';
 }
@@ -1175,11 +1184,15 @@ function resolveSourceNames(
   }
 
   const kind = resolveStrategyKind(event, strategyType);
-  if (kind === 'migration' || kind === 'single') {
+  const qualityModes = getQualityModeOverlays();
+  if (
+    (kind === 'migration' || kind === 'single') &&
+    !qualityModes.blockSingleWalletEntries
+  ) {
     return { names: [unique[index % unique.length]] };
   }
 
-  // Convergence: require distinct wallets matching live Strict-aware cluster floor
+  // Convergence / Elite: require distinct wallets matching Strict + quality floors
   const needed = Math.max(effectiveClusterMinWallets(), 2);
   if (unique.length < needed) {
     return {
@@ -1362,8 +1375,17 @@ function formatBacktestExitLog(
   if (kind === 'trail_exit') {
     return `Sold ${symbol} at ${pct} due to trailing stop — ${reason}`;
   }
-  if (kind === 'hard_sl') {
-    return `Sold ${symbol} at ${pct} due to stop-loss — ${reason}`;
+  if (kind === 'hard_sl' || kind === 'scalp_sl') {
+    return `Sold ${symbol} at ${pct} due to stop-loss (SCALP_SL) — ${reason}`;
+  }
+  if (kind === 'scalp_tp') {
+    return `Sold ${symbol} at ${pct} due to take-profit (SCALP_TP) — ${reason}`;
+  }
+  if (kind === 'scalp_timer') {
+    return `Sold ${symbol} at ${pct} due to timer (SCALP_TIMER) — ${reason}`;
+  }
+  if (kind === 'scalp_signal_fail') {
+    return `Sold ${symbol} at ${pct} due to momentum fail (SCALP_SIGNAL_FAIL) — ${reason}`;
   }
   if (kind === 'take_profit' || kind === 'full') {
     return `Sold ${symbol} at ${pct} due to take-profit — ${reason}`;
@@ -1442,6 +1464,26 @@ function replayLaunch(
     const feeBps = config.paper.feeBps ?? 30;
     const roundTripCostBps = feeBps * 2 + slipBps * 2;
 
+    const peakBefore = event.candles
+      .slice(0, Math.max(1, fromIdx + 1))
+      .reduce((m, c) => Math.max(m, c.priceSol || 0), 0);
+    const dropFromPeakPct =
+      peakBefore > 0 && botEntryPriceSol > 0
+        ? ((peakBefore - botEntryPriceSol) / peakBefore) * 100
+        : undefined;
+
+    const scalpResolved = isAnyShortTermScalperActive()
+      ? resolveShortTermEntry({
+          volume24hUsd: event.volumeUsd,
+          recentVolumeUsd: event.volumeUsd,
+          isSmartMoney: true,
+          isMigration: event.migrated === true,
+          convictionScore,
+          dropFromPeakPct,
+        })
+      : null;
+    const useScalp = scalpResolved != null;
+
     const position = trader.simulateBuy(
       event.mint,
       event.symbol,
@@ -1455,6 +1497,8 @@ function replayLaunch(
         name: event.name || event.symbol,
         strategyKind,
         convictionScore,
+        scalpMode: useScalp,
+        shortTermStrategyId: scalpResolved?.id,
         // Same slippage as paper — omit override so config.paper.slippageBps applies
         antiRug:
           event.riskScoreHint != null
@@ -1476,6 +1520,15 @@ function replayLaunch(
 
     // Keep SL/TP/trail exactly as simulateBuy seeded them (matches paper/live)
     position.openedAt = openedAt;
+    if (position.scalpMode) {
+      Object.assign(
+        position,
+        seedShortTermPosition(
+          position.shortTermStrategyId || scalpResolved?.id || 'quick_scalper',
+          openedAt
+        )
+      );
+    }
 
     const debugLog: string[] = [];
     const entryMarkNote =
@@ -1484,8 +1537,15 @@ function replayLaunch(
       ` · size ${sizing.sizeSol.toFixed(4)} SOL` +
       ` · conviction ${convictionScore}` +
       ` · TP ${position.takeProfitPct.toFixed(0)}% / SL ${position.stopLossPct}%` +
-      ` · trail ${position.trailingStopPct}%` +
-      (config.profitStrategy?.enabled ? ' · profit strategy ON' : ' · legacy TP/SL/trail');
+      (position.scalpMode
+        ? ` · ${position.shortTermStrategyId || 'scalp'} ${Math.round(((position.scalpDeadlineMs ?? openedAt) - openedAt) / 1000)}s timer` +
+          (scalpResolved ? ` · ${scalpResolved.reason}` : '')
+        : ` · trail ${position.trailingStopPct}%`) +
+      (position.scalpMode
+        ? ''
+        : config.profitStrategy?.enabled
+          ? ' · profit strategy ON'
+          : ' · legacy TP/SL/trail');
     debugLog.push(entryMarkNote);
     logger.info('Backtest', entryMarkNote, { mint: event.mint, simulation });
 
@@ -1575,7 +1635,11 @@ function replayLaunch(
         const deadLine = formatBacktestExitLog(
           event.symbol,
           pnlPct,
-          deadReason,
+          `[DEAD_MARKET]${
+            position.scalpMode
+              ? ` [scalp=${position.shortTermStrategyId || 'scalp'}]`
+              : ''
+          } ${deadReason}`,
           'full'
         );
         debugLog.push(deadLine);
@@ -1584,12 +1648,19 @@ function replayLaunch(
         break;
       }
 
-      const events = trader.runPositionTicksUntilIdle(position.id, c.priceSol, 12);
+      const events = trader.runPositionTicksUntilIdle(
+        position.id,
+        c.priceSol,
+        12,
+        c.time ?? Date.now()
+      );
       for (const ev of events) {
         const line = formatBacktestExitLog(
           event.symbol,
           ev.markPnlPct,
-          ev.reason,
+          position.scalpMode
+            ? `[${position.shortTermStrategyId || 'scalp'}] ${ev.reason}`
+            : ev.reason,
           ev.kind
         );
         debugLog.push(line);
@@ -1606,7 +1677,11 @@ function replayLaunch(
           ev.kind === 'full' ||
           ev.kind === 'hard_sl' ||
           ev.kind === 'trail_exit' ||
-          ev.kind === 'take_profit'
+          ev.kind === 'take_profit' ||
+          ev.kind === 'scalp_tp' ||
+          ev.kind === 'scalp_sl' ||
+          ev.kind === 'scalp_timer' ||
+          ev.kind === 'scalp_signal_fail'
         ) {
           const after =
             trader.getOpenPositions().find((p) => p.id === position.id) ??
@@ -1903,7 +1978,10 @@ function runSinglePass(
     .filter((w) => {
       if (!w.enabled) return false;
       if (
-        !isStrategyEnabled('wallet_quality_scoring') ||
+        (!isStrategyEnabled('wallet_quality_scoring') &&
+          !isStrategyEnabled('hard_quality_gate') &&
+          !isStrategyEnabled('elite_convergence') &&
+          !isStrategyEnabled('profit_protected')) ||
         config.filters.enableWalletQualityGate === false
       ) {
         return true;
@@ -1946,6 +2024,32 @@ function runSinglePass(
       continue;
     }
 
+    const qualityModes = getQualityModeOverlays();
+    if (qualityModes.requireMigrationOrNear) {
+      // Backtest LaunchEvent has no curve % — require migrated (live also allows near-migration)
+      if (!event.migrated) {
+        skipped.push({
+          mint: event.mint,
+          reason: 'migration sniper — not migration/near',
+        });
+        continue;
+      }
+    }
+    if (qualityModes.blockSingleWalletEntries) {
+      // Elite Convergence forces multi-wallet resolution below
+      if (
+        !config.strategy.enableConvergence &&
+        !isStrategyEnabled('wallet_convergence') &&
+        !isStrategyEnabled('elite_convergence')
+      ) {
+        skipped.push({
+          mint: event.mint,
+          reason: 'elite convergence requires clustering',
+        });
+        continue;
+      }
+    }
+
     cacheTokenMeta(event.mint, event.symbol, event.name);
 
     if (options.strategyType === 'migration' && !event.migrated) {
@@ -1971,7 +2075,12 @@ function runSinglePass(
     const signal = buildBacktestSignal(event, sourceNames);
     const conviction = evaluateSignalConviction(signal);
     if (
-      isStrategyEnabled('multi_factor_conviction') &&
+      (isStrategyEnabled('multi_factor_conviction') ||
+        isStrategyEnabled('elite_convergence') ||
+        isStrategyEnabled('profit_protected') ||
+        isStrategyEnabled('social_sentiment_filter') ||
+        isStrategyEnabled('volume_spike_filter') ||
+        isStrategyEnabled('confirmation_layer')) &&
       !conviction.pass
     ) {
       skipped.push({
