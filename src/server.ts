@@ -1627,6 +1627,15 @@ export function createServer(): express.Application {
       confirmationThreshold,
       reBuyVolumeIncreasePct,
       reBuyMaxPerMint,
+      postStopReentryEnabled,
+      reEntryMaxPerMint,
+      reEntryWatchMinutes,
+      reEntryMinReclaimPct,
+      reEntryMinVolumeIncreasePct,
+      reEntryConfirmationWallets,
+      reEntrySizeMultiplier,
+      reEntryCooldownMinutes,
+      reEntryAfterMaxProfitEnabled,
     } = req.body as {
       enableConvergence?: boolean;
       enableMigrationOnly?: boolean;
@@ -1647,6 +1656,15 @@ export function createServer(): express.Application {
       confirmationThreshold?: number;
       reBuyVolumeIncreasePct?: number;
       reBuyMaxPerMint?: number;
+      postStopReentryEnabled?: boolean;
+      reEntryMaxPerMint?: number;
+      reEntryWatchMinutes?: number;
+      reEntryMinReclaimPct?: number;
+      reEntryMinVolumeIncreasePct?: number;
+      reEntryConfirmationWallets?: number;
+      reEntrySizeMultiplier?: number;
+      reEntryCooldownMinutes?: number;
+      reEntryAfterMaxProfitEnabled?: boolean;
     };
 
     updateStrategyConfig({
@@ -1696,6 +1714,33 @@ export function createServer(): express.Application {
       }),
       ...(reBuyMaxPerMint !== undefined && {
         reBuyMaxPerMint: Number(reBuyMaxPerMint),
+      }),
+      ...(postStopReentryEnabled !== undefined && {
+        postStopReentryEnabled: Boolean(postStopReentryEnabled),
+      }),
+      ...(reEntryMaxPerMint !== undefined && {
+        reEntryMaxPerMint: Number(reEntryMaxPerMint),
+      }),
+      ...(reEntryWatchMinutes !== undefined && {
+        reEntryWatchMinutes: Number(reEntryWatchMinutes),
+      }),
+      ...(reEntryMinReclaimPct !== undefined && {
+        reEntryMinReclaimPct: Number(reEntryMinReclaimPct),
+      }),
+      ...(reEntryMinVolumeIncreasePct !== undefined && {
+        reEntryMinVolumeIncreasePct: Number(reEntryMinVolumeIncreasePct),
+      }),
+      ...(reEntryConfirmationWallets !== undefined && {
+        reEntryConfirmationWallets: Number(reEntryConfirmationWallets),
+      }),
+      ...(reEntrySizeMultiplier !== undefined && {
+        reEntrySizeMultiplier: Number(reEntrySizeMultiplier),
+      }),
+      ...(reEntryCooldownMinutes !== undefined && {
+        reEntryCooldownMinutes: Number(reEntryCooldownMinutes),
+      }),
+      ...(reEntryAfterMaxProfitEnabled !== undefined && {
+        reEntryAfterMaxProfitEnabled: Boolean(reEntryAfterMaxProfitEnabled),
       }),
     });
 

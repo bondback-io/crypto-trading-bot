@@ -5,7 +5,7 @@
 
 import { config, randomTakeProfitPct } from './config';
 import { formatTokenLabel, mintPrefix } from './tokenMeta';
-import { registerProfitSell, getSellHistory } from './reBuy';
+import { registerExitForReentry, getSellHistory } from './reBuy';
 import {
   getStrategyRiskRules,
   computeEquitySol,
@@ -984,21 +984,20 @@ export class PaperTrader {
       }
     );
 
-    if (totalPct > 0) {
-      registerProfitSell({
-        mint: position.mint,
-        symbol: position.symbol,
-        name: position.name,
-        positionId: position.id,
-        soldAt: position.closedAt!,
-        sellPriceSol: exitPrice,
-        pnlPct: totalPct,
-        pnlSol: totalPnl,
-        reason,
-        sourceWallets: position.sourceWallets,
-        sourceNames: position.sourceNames,
-      });
-    }
+    registerExitForReentry({
+      mint: position.mint,
+      symbol: position.symbol,
+      name: position.name,
+      positionId: position.id,
+      soldAt: position.closedAt!,
+      sellPriceSol: exitPrice,
+      entryPriceSol: position.entryPriceSol,
+      pnlPct: totalPct,
+      pnlSol: totalPnl,
+      reason,
+      sourceWallets: position.sourceWallets,
+      sourceNames: position.sourceNames,
+    });
 
     this.persistState();
     return position;
@@ -1874,21 +1873,20 @@ export class PaperTrader {
             `Live trailing/exit ${formatTokenLabel(position.symbol, position.name, position.mint)} [${reason}]`,
             { mint: position.mint, symbol: position.symbol, pnlSol: position.pnlSol }
           );
-          if (pnlPct > 0) {
-            registerProfitSell({
-              mint: position.mint,
-              symbol: position.symbol,
-              name: position.name,
-              positionId: position.id,
-              soldAt: position.closedAt,
-              sellPriceSol: currentPriceSol,
-              pnlPct,
-              pnlSol: position.pnlSol ?? 0,
-              reason,
-              sourceWallets: position.sourceWallets,
-              sourceNames: position.sourceNames,
-            });
-          }
+          registerExitForReentry({
+            mint: position.mint,
+            symbol: position.symbol,
+            name: position.name,
+            positionId: position.id,
+            soldAt: position.closedAt,
+            sellPriceSol: currentPriceSol,
+            entryPriceSol: position.entryPriceSol,
+            pnlPct,
+            pnlSol: position.pnlSol ?? 0,
+            reason,
+            sourceWallets: position.sourceWallets,
+            sourceNames: position.sourceNames,
+          });
         } else {
           console.error(`[trail] Live sell failed: ${result.error}`);
         }

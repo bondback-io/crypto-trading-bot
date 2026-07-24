@@ -1312,7 +1312,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="mint mt-2" id="paper-fund-status"></div>
         </div>
         <div class="card">
-          <div class="section-title">Migrations / Re-Buy <span class="tip" tabindex="0" data-tip="Pump.fun graduations to Raydium/PumpSwap and dip re-entry watches after take-profit."></span></div>
+          <div class="section-title">Migrations / Re-Entry <span class="tip" tabindex="0" data-tip="Pump.fun graduations and post-exit re-entry watches (profit-dip + stop-loss reclaim)."></span></div>
           <div class="mint mb-2" id="mig-live-status">WS: —</div>
           <div id="migrations" class="max-h-28 overflow-y-auto text-sm mb-2"></div>
           <div class="mint" id="rebuy-status">—</div>
@@ -1357,7 +1357,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Migrations / Re-Buy <span class="tip" tabindex="0" data-tip="Pump.fun graduations to Raydium/PumpSwap and dip re-entry watches after take-profit."></span></div>
+        <div class="section-title">Migrations / Re-Entry <span class="tip" tabindex="0" data-tip="Pump.fun graduations and post-exit re-entry watches (profit-dip + stop-loss reclaim)."></span></div>
         <div class="mint mb-2" id="trades-mig-live-status">WS: —</div>
         <div id="trades-migrations" class="max-h-40 overflow-y-auto text-sm mb-2"></div>
         <div class="mint" id="trades-rebuy-status">—</div>
@@ -1685,10 +1685,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="card">
-        <div class="section-title">Re-Buy Watch <span class="tip" tabindex="0" data-tip="After a take-profit, watches for a dip + confirmation buys from smart wallets before re-entering."></span></div>
+        <div class="section-title">Re-Entry Watch <span class="tip" tabindex="0" data-tip="Armed watches after TP (dip) or stop-loss (reclaim). Shows mint, stop reason, armed time, and status until confirm or expire."></span></div>
         <div class="overflow-x-auto">
           <table id="rebuy-table">
-            <thead><tr><th>Token</th><th>Status</th><th title="Current dip from peak">Dip</th><th title="Confirming smart wallets">Wallets</th><th>Volume</th><th>Reason</th></tr></thead>
+            <thead><tr><th>Token</th><th>Kind</th><th>Status</th><th title="Dip from peak or reclaim from trough">Move</th><th title="Confirming smart wallets">Wallets</th><th>Volume</th><th>Armed</th><th>Reason</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -2079,6 +2079,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="toggle-row"><span title="Prioritize early-curve buys when smart wallets pile in">Early-curve smart money priority</span><label class="switch"><input type="checkbox" id="enableEarlyCurvePriority" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Automatically sell on TP / SL / trailing rules">Auto-Sell</span><label class="switch"><input type="checkbox" id="enableAutoSell" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="After TP, watch for a dip + confirmation buys to re-enter">Re-Buy on Dip</span><label class="switch"><input type="checkbox" id="reBuyEnabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="After hard stop-loss / early defensive exit, watch for reclaim + confirmation to re-enter">Post-Stop Re-Entry</span><label class="switch"><input type="checkbox" id="postStopReentryEnabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Also arm profit-dip watch after max-profit / full runner close (off by default)">Re-Entry After Max Profit</span><label class="switch"><input type="checkbox" id="reEntryAfterMaxProfitEnabled" /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Priority x <span class="tip" tabindex="0" data-tip="Size multiplier for priority migration entries."></span></span><input type="number" id="migrationSizeMultiplier" value="1.5" min="1" max="3" step="0.1" /></label>
             <label class="ctl ctl-md"><span>Slip bps <span class="tip" tabindex="0" data-tip="Extra slippage (basis points) allowed on migration buys."></span></span><input type="number" id="migrationSlippageBps" value="100" min="50" max="500" step="10" /></label>
@@ -2090,6 +2092,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <label class="ctl ctl-md"><span>Dip % <span class="tip" tabindex="0" data-tip="Required pullback from peak before considering re-entry (negative)."></span></span><input type="number" id="reBuyDipPercent" value="-30" /></label>
             <label class="ctl ctl-sm"><span>Wallets <span class="tip" tabindex="0" data-tip="Confirming smart wallets needed to re-buy the dip."></span></span><input type="number" id="confirmationThreshold" value="4" /></label>
             <label class="ctl ctl-sm"><span>Vol +% <span class="tip" tabindex="0" data-tip="Extra volume increase % required to confirm the re-buy."></span></span><input type="number" id="reBuyVolumeIncreasePct" value="50" /></label>
+            <label class="ctl ctl-sm"><span>Max/mint <span class="tip" tabindex="0" data-tip="Max successful re-entries per mint (cap + cooldown prevent loops)."></span></span><input type="number" id="reEntryMaxPerMint" value="2" min="1" max="8" /></label>
+            <label class="ctl ctl-md"><span>Watch min <span class="tip" tabindex="0" data-tip="Minutes to keep watching after exit before the watch expires."></span></span><input type="number" id="reEntryWatchMinutes" value="90" min="5" max="360" /></label>
+            <label class="ctl ctl-md"><span>Reclaim % <span class="tip" tabindex="0" data-tip="Min % bounce from post-stop trough (or sell/entry zone) before arming reclaim."></span></span><input type="number" id="reEntryMinReclaimPct" value="8" min="1" max="50" step="1" /></label>
+            <label class="ctl ctl-md"><span>SL vol +% <span class="tip" tabindex="0" data-tip="Volume increase % to confirm stop re-entry (falls back to Vol +% if unset)."></span></span><input type="number" id="reEntryMinVolumeIncreasePct" value="50" min="5" max="200" /></label>
+            <label class="ctl ctl-sm"><span>Size × <span class="tip" tabindex="0" data-tip="Position size multiplier for re-entries (usually smaller than first entry)."></span></span><input type="number" id="reEntrySizeMultiplier" value="0.65" min="0.15" max="1.5" step="0.05" /></label>
+            <label class="ctl ctl-sm"><span>Cooldown m <span class="tip" tabindex="0" data-tip="Minutes between re-entry attempts on the same mint."></span></span><input type="number" id="reEntryCooldownMinutes" value="8" min="0" max="120" /></label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveStrategyConfig()" title="Save strategy toggles and parameters">Save Strategy</button></div>
         </div>
@@ -4428,6 +4436,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           earlyW.value = cfg.strategy.earlyCurveMinSmartWallets;
         }
         document.getElementById('reBuyEnabled').checked = cfg.strategy.reBuyEnabled !== false;
+        const postStopEl = document.getElementById('postStopReentryEnabled');
+        if (postStopEl) postStopEl.checked = cfg.strategy.postStopReentryEnabled !== false;
+        const afterMaxEl = document.getElementById('reEntryAfterMaxProfitEnabled');
+        if (afterMaxEl) afterMaxEl.checked = cfg.strategy.reEntryAfterMaxProfitEnabled === true;
         // Prefill Backtester filters from saved config (0 = inherit at run time)
         const btLiq = document.getElementById('bt-min-liq');
         const btVol = document.getElementById('bt-min-vol');
@@ -4466,6 +4478,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (cfg.strategy.reBuyVolumeIncreasePct != null) {
           document.getElementById('reBuyVolumeIncreasePct').value = cfg.strategy.reBuyVolumeIncreasePct;
         }
+        const setNum = (id, v) => {
+          const el = document.getElementById(id);
+          if (el && v != null) el.value = v;
+        };
+        setNum('reEntryMaxPerMint', cfg.strategy.reEntryMaxPerMint ?? cfg.strategy.reBuyMaxPerMint);
+        setNum('reEntryWatchMinutes', cfg.strategy.reEntryWatchMinutes);
+        setNum('reEntryMinReclaimPct', cfg.strategy.reEntryMinReclaimPct);
+        setNum('reEntryMinVolumeIncreasePct', cfg.strategy.reEntryMinVolumeIncreasePct ?? cfg.strategy.reBuyVolumeIncreasePct);
+        setNum('reEntrySizeMultiplier', cfg.strategy.reEntrySizeMultiplier);
+        setNum('reEntryCooldownMinutes', cfg.strategy.reEntryCooldownMinutes);
         if (cfg.risk) {
           document.getElementById('riskEnabled').checked = cfg.risk.enabled !== false;
           document.getElementById('useRiskSizing').checked = cfg.risk.useRiskSizing !== false;
@@ -4720,7 +4742,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rbText =
         (rbStatus.enabled ? 'ON' : 'OFF') +
         ' · watching ' + (rbStatus.watching ?? 0) +
+        (rbStatus.stopWatches != null ? ' · stop ' + rbStatus.stopWatches : '') +
+        (rbStatus.profitWatches != null ? ' · dip ' + rbStatus.profitWatches : '') +
         ' · dip-armed ' + (rbStatus.dipArmed ?? 0) +
+        ' · reclaim-armed ' + (rbStatus.reclaimArmed ?? 0) +
         ' · sells tracked ' + (rbStatus.sellHistoryCount ?? (positions.sellHistory || []).length);
       ['rebuy-status', 'trades-rebuy-status'].forEach((id) => {
         const rbEl = document.getElementById(id);
@@ -4729,16 +4754,35 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rtbody = document.querySelector('#rebuy-table tbody');
       const candidates = rb.candidates || [];
       if (rtbody) {
+        const fmtArmed = (c) => {
+          const ts = c.reclaimArmedAt || c.dipArmedAt || c.createdAt;
+          if (!ts) return '—';
+          try { return fmtTimeAgoCell(ts); } catch (_) { return new Date(ts).toLocaleTimeString(); }
+        };
+        const fmtMove = (c) => {
+          if (c.kind === 'stop_reentry') {
+            return c.reclaimPctFromTrough != null
+              ? ('+' + Number(c.reclaimPctFromTrough).toFixed(1) + '% reclaim')
+              : '—';
+          }
+          return c.dipPctFromPeak != null
+            ? (Number(c.dipPctFromPeak).toFixed(1) + '% dip')
+            : '—';
+        };
+        const kindLabel = (c) =>
+          c.kind === 'stop_reentry' ? 'stop' : (c.kind === 'profit_dip' ? 'dip' : (c.kind || '—'));
         rtbody.innerHTML = candidates.length === 0
-          ? '<tr><td colspan="6" style="color:var(--muted)">No re-buy watches — profitable TP sells start monitoring</td></tr>'
-          : candidates.slice(0, 15).map(c => \`
+          ? '<tr><td colspan="8" style="color:var(--muted)">No re-entry watches — stop-loss or profitable TP sells arm monitoring</td></tr>'
+          : candidates.slice(0, 20).map(c => \`
             <tr>
               <td>\${fmtToken(c.symbol, c.name, c.mint)}</td>
+              <td class="mint">\${kindLabel(c)}</td>
               <td>\${c.status}</td>
-              <td>\${c.dipPctFromPeak != null ? c.dipPctFromPeak.toFixed(1) + '%' : '—'}</td>
+              <td>\${fmtMove(c)}</td>
               <td>\${(c.confirmationWallets || []).length}\${c.confirmationWalletNames?.length ? ' (' + c.confirmationWalletNames.slice(0,3).join(', ') + ')' : ''}</td>
               <td>\${c.volumeChangePct != null ? ((c.volumeChangePct>=0?'+':'') + c.volumeChangePct.toFixed(0) + '%') : '—'}</td>
-              <td class="mint">\${c.lastReason || '—'}</td>
+              <td class="mint" title="\${escHtml(String((c.sell && c.sell.reason) || ''))}">\${fmtArmed(c)}</td>
+              <td class="mint">\${escHtml(String(c.lastReason || (c.sell && c.sell.reason) || '—'))}</td>
             </tr>\`).join('');
       }
 
@@ -6056,6 +6100,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           reBuyDipPercent: Number(document.getElementById('reBuyDipPercent').value),
           confirmationThreshold: Number(document.getElementById('confirmationThreshold').value),
           reBuyVolumeIncreasePct: Number(document.getElementById('reBuyVolumeIncreasePct').value),
+          postStopReentryEnabled: document.getElementById('postStopReentryEnabled').checked,
+          reEntryAfterMaxProfitEnabled: document.getElementById('reEntryAfterMaxProfitEnabled').checked,
+          reEntryMaxPerMint: Number(document.getElementById('reEntryMaxPerMint').value),
+          reEntryWatchMinutes: Number(document.getElementById('reEntryWatchMinutes').value),
+          reEntryMinReclaimPct: Number(document.getElementById('reEntryMinReclaimPct').value),
+          reEntryMinVolumeIncreasePct: Number(document.getElementById('reEntryMinVolumeIncreasePct').value),
+          reEntrySizeMultiplier: Number(document.getElementById('reEntrySizeMultiplier').value),
+          reEntryCooldownMinutes: Number(document.getElementById('reEntryCooldownMinutes').value),
+          reBuyMaxPerMint: Number(document.getElementById('reEntryMaxPerMint').value),
         }),
       });
       alert('Strategy saved');

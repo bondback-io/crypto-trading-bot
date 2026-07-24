@@ -56,10 +56,12 @@ import {
   recordConfirmationBuy,
   evaluateConfirmation,
   markReBought,
+  markReEntryAttempt,
   refreshCandidateMarketData,
   getReBuyCandidates,
   updateCandidatePrice,
   getReBuyStatus,
+  getReEntryEffectiveParams,
 } from './reBuy';
 import {
   calculateDynamicPositionSize,
@@ -1652,18 +1654,24 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   // Dex/Birdeye often lag on brand-new mints — refresh feed metrics shortly
   scheduleSignalMetricsRefresh(buy.mint, buy.signature);
 
-  // Feed re-buy confirmation if we're watching this mint after a profit sell
-  if (config.strategy.reBuyEnabled && isReBuyWatching(buy.mint)) {
-    recordConfirmationBuy(buy.mint, buy.wallet, buy.walletName);
-    const price = paperTrader.getTokenPrice(buy.mint);
-    if (price != null) updateCandidatePrice(buy.mint, price);
-    const triggered = await tryExecuteReBuy(buy.mint);
-    if (triggered) {
-      annotateActivityFeed(buy.mint, buy.signature, {
-        tradeStatus: 'taken',
-        skipReason: undefined,
-      });
-      return; // re-buy path handled entry
+  // Feed re-entry confirmation if we're watching this mint after exit
+  {
+    const reParams = getReEntryEffectiveParams();
+    if (
+      (reParams.profitDipEnabled || reParams.stopReentryEnabled) &&
+      isReBuyWatching(buy.mint)
+    ) {
+      recordConfirmationBuy(buy.mint, buy.wallet, buy.walletName);
+      const price = paperTrader.getTokenPrice(buy.mint);
+      if (price != null) updateCandidatePrice(buy.mint, price);
+      const triggered = await tryExecuteReBuy(buy.mint);
+      if (triggered) {
+        annotateActivityFeed(buy.mint, buy.signature, {
+          tradeStatus: 'taken',
+          skipReason: undefined,
+        });
+        return; // re-entry path handled entry
+      }
     }
   }
 
@@ -1952,11 +1960,11 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   if (!beginBuy(buy.mint)) {
     if (isReBuyWatching(buy.mint)) {
       console.log(
-        `[monitor] ${label} already traded — waiting for re-buy confirmation (dip + wallets/volume)`
+        `[monitor] ${label} already traded — waiting for re-entry confirmation (reclaim/dip + wallets/volume)`
       );
       annotateActivityFeed(buy.mint, buy.signature, {
         tradeStatus: 'waiting',
-        skipReason: 'already traded — re-buy watch',
+        skipReason: 'already traded — re-entry watch',
       });
     } else {
       console.log(`[monitor] Signal skipped — already traded ${label}`);
@@ -2098,10 +2106,16 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
  * Refresh market data for watched mints and execute when confirmation is met.
  */
 async function evaluateReBuyOpportunities(): Promise<void> {
-  if (!config.strategy.reBuyEnabled || paused) return;
+  const params = getReEntryEffectiveParams();
+  if ((!params.profitDipEnabled && !params.stopReentryEnabled) || paused) {
+    return;
+  }
 
   const active = getReBuyCandidates().filter(
-    (c) => c.status === 'watching' || c.status === 'dip_armed'
+    (c) =>
+      c.status === 'watching' ||
+      c.status === 'dip_armed' ||
+      c.status === 'reclaim_armed'
   );
   if (active.length === 0) return;
 
@@ -2128,117 +2142,145 @@ async function evaluateReBuyOpportunities(): Promise<void> {
 }
 
 /**
- * If dip + confirmation are ready, execute a re-buy (paper or live).
+ * If arm + confirmation are ready, execute a re-entry (paper, live-sim, or live).
  * Returns true if a re-buy was attempted/executed.
  */
 async function tryExecuteReBuy(mint: string): Promise<boolean> {
-  if (!config.strategy.reBuyEnabled) return false;
+  const params = getReEntryEffectiveParams();
+  if (!params.profitDipEnabled && !params.stopReentryEnabled) return false;
 
   const conf = evaluateConfirmation(mint);
   if (!conf.ready) {
     // Periodic debug at low rate for armed candidates
     const c = getReBuyCandidates().find((x) => x.mint === mint);
-    if (c?.status === 'dip_armed' && Math.random() < 0.15) {
-      console.log(`[rebuy] ${c.symbol}: ${conf.reason}`);
+    if (
+      (c?.status === 'dip_armed' || c?.status === 'reclaim_armed') &&
+      Math.random() < 0.15
+    ) {
+      console.log(`[reentry] ${c.symbol}: ${conf.reason}`);
     }
     return false;
   }
 
   // Already holding — don't double up
   if (paperTrader.hasOpenMint(mint)) {
-    console.log(`[rebuy] Skip — already holding open position on ${mint.slice(0, 8)}…`);
+    console.log(
+      `[reentry] Skip — already holding open position on ${mint.slice(0, 8)}…`
+    );
     return false;
   }
 
   if (!beginBuy(mint, { allowRetrade: true })) {
-    console.log(`[rebuy] Skip — buy already in progress for ${mint.slice(0, 8)}…`);
-    return false;
-  }
-
-  try {
-  const candidate = getReBuyCandidates().find((c) => c.mint === mint);
-  if (!candidate) {
-    finishBuy(mint, false);
-    return false;
-  }
-
-  const label = formatTokenLabel(candidate.symbol, candidate.name, mint);
-  const reason = conf.reason;
-
-  console.log(
-    `[monitor] 🔁 ${reason} — ${label} ` +
-      `(dip ${conf.dipPct?.toFixed(1) ?? '?'}% from peak, ` +
-      `${conf.walletCount} wallets` +
-      (conf.volumeChangePct != null
-        ? `, vol ${conf.volumeChangePct >= 0 ? '+' : ''}${conf.volumeChangePct.toFixed(0)}%`
-        : '') +
-      `)`
-  );
-
-  const signal: TradeSignal = {
-    mint,
-    symbol: candidate.symbol,
-    name: candidate.name,
-    wallets: candidate.confirmationWallets,
-    walletNames: candidate.confirmationWalletNames,
-    isMigration: isRecentlyMigrated(mint),
-    timestamp: Date.now(),
-  };
-
-  if (!(await passesFilters(signal))) {
-    console.log(`[rebuy] Filters blocked re-buy for ${label}`);
-    finishBuy(mint, false);
-    return false;
-  }
-
-  try {
-    signal.sourceEntryMcUsd = await resolveSourceEntryMcUsd(mint);
-  } catch {
-    /* non-fatal */
-  }
-
-  onSignalHandler?.(signal);
-
-  const sizing = resolveTradeSize(signal.isMigration ? 'migration' : 'normal', {
-    riskScore: signal.antiRug?.riskScore,
-    convictionScore: signal.convictionScore,
-    sizeMultiplier: signal.sizeMultiplier,
-  });
-  recordSignalSizing(signal, sizing, true);
-  console.log(`[monitor] ${sizing.reason}`);
-
-  const result = await executeBuy(mint, candidate.symbol, {
-    sourceWallets: signal.wallets,
-    sourceNames: signal.walletNames,
-    name: candidate.name,
-    solAmount: sizing.sizeSol,
-    sizeReason: sizing.reason,
-    strategyKind: signal.isMigration ? 'migration' : 'normal',
-    sourceEntryMcUsd: signal.sourceEntryMcUsd,
-    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
-    convictionScore: signal.convictionScore,
-    antiRug: signal.antiRug
-      ? {
-          riskScore: signal.antiRug.riskScore,
-          riskLevel: signal.antiRug.riskLevel,
-          flags: signal.antiRug.flags,
-          ok: signal.antiRug.ok,
-        }
-      : undefined,
-  });
-
-  finishBuy(mint, result.success);
-  if (result.success) {
-    recordTradeExecuted();
-    markReBought(mint, reason);
     console.log(
-      `[monitor] Re-buy executed (${result.mode}): ${label} — ${reason}`
+      `[reentry] Skip — buy already in progress for ${mint.slice(0, 8)}…`
     );
-    return true;
+    return false;
   }
 
-  console.error(`[monitor] Re-buy failed: ${result.error}`);
-  return false;
+  try {
+    const candidate = getReBuyCandidates().find((c) => c.mint === mint);
+    if (!candidate) {
+      finishBuy(mint, false);
+      return false;
+    }
+
+    // Kind-specific enable gates
+    if (candidate.kind === 'profit_dip' && !params.profitDipEnabled) {
+      finishBuy(mint, false);
+      return false;
+    }
+    if (candidate.kind === 'stop_reentry' && !params.stopReentryEnabled) {
+      finishBuy(mint, false);
+      return false;
+    }
+
+    const label = formatTokenLabel(candidate.symbol, candidate.name, mint);
+    const reason = conf.reason;
+
+    console.log(
+      `[monitor] 🔁 ${reason} — ${label} ` +
+        `(${candidate.kind}` +
+        (conf.reclaimPct != null
+          ? `, reclaim +${conf.reclaimPct.toFixed(1)}%`
+          : '') +
+        (conf.dipPct != null ? `, dip ${conf.dipPct.toFixed(1)}%` : '') +
+        `, ${conf.walletCount} wallets` +
+        (conf.volumeChangePct != null
+          ? `, vol ${conf.volumeChangePct >= 0 ? '+' : ''}${conf.volumeChangePct.toFixed(0)}%`
+          : '') +
+        `, size ×${conf.sizeMultiplier.toFixed(2)})`
+    );
+
+    const signal: TradeSignal = {
+      mint,
+      symbol: candidate.symbol,
+      name: candidate.name,
+      wallets: candidate.confirmationWallets,
+      walletNames: candidate.confirmationWalletNames,
+      isMigration: isRecentlyMigrated(mint),
+      timestamp: Date.now(),
+      sizeMultiplier: conf.sizeMultiplier,
+    };
+
+    if (!(await passesFilters(signal))) {
+      console.log(`[reentry] Filters blocked re-entry for ${label}`);
+      markReEntryAttempt(mint, `filters blocked: ${reason}`);
+      finishBuy(mint, false);
+      return false;
+    }
+
+    try {
+      signal.sourceEntryMcUsd = await resolveSourceEntryMcUsd(mint);
+    } catch {
+      /* non-fatal */
+    }
+
+    onSignalHandler?.(signal);
+
+    const sizing = resolveTradeSize(
+      signal.isMigration ? 'migration' : 'normal',
+      {
+        riskScore: signal.antiRug?.riskScore,
+        convictionScore: signal.convictionScore,
+        sizeMultiplier: conf.sizeMultiplier,
+      }
+    );
+    recordSignalSizing(signal, sizing, true);
+    console.log(`[monitor] ${sizing.reason}`);
+
+    const result = await executeBuy(mint, candidate.symbol, {
+      sourceWallets: signal.wallets,
+      sourceNames: signal.walletNames,
+      name: candidate.name,
+      solAmount: sizing.sizeSol,
+      sizeReason: sizing.reason,
+      strategyKind: signal.isMigration ? 'migration' : 'normal',
+      sourceEntryMcUsd: signal.sourceEntryMcUsd,
+      top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+      convictionScore: signal.convictionScore,
+      antiRug: signal.antiRug
+        ? {
+            riskScore: signal.antiRug.riskScore,
+            riskLevel: signal.antiRug.riskLevel,
+            flags: signal.antiRug.flags,
+            ok: signal.antiRug.ok,
+          }
+        : undefined,
+    });
+
+    finishBuy(mint, result.success);
+    if (result.success) {
+      recordTradeExecuted();
+      markReBought(mint, reason);
+      console.log(
+        `[monitor] Re-entry executed (${result.mode}): ${label} — ${reason}`
+      );
+      return true;
+    }
+
+    markReEntryAttempt(mint, result.error ?? 'buy failed');
+    console.error(`[monitor] Re-entry failed: ${result.error}`);
+    return false;
   } catch (err) {
     finishBuy(mint, false);
     throw err;

@@ -406,6 +406,15 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       migrationSizeMultiplier: 1.25,
       confirmationThreshold: 4,
       reBuyMinProfitPct: 75,
+      postStopReentryEnabled: true,
+      reEntryMaxPerMint: 1,
+      reEntryWatchMinutes: 45,
+      reEntryMinReclaimPct: 12,
+      reEntryMinVolumeIncreasePct: 80,
+      reEntryConfirmationWallets: 4,
+      reEntrySizeMultiplier: 0.45,
+      reEntryCooldownMinutes: 15,
+      reEntryAfterMaxProfitEnabled: false,
     },
   },
   medium: {
@@ -516,6 +525,15 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       migrationSizeMultiplier: 1.55,
       confirmationThreshold: 3,
       reBuyMinProfitPct: 90,
+      postStopReentryEnabled: true,
+      reEntryMaxPerMint: 2,
+      reEntryWatchMinutes: 90,
+      reEntryMinReclaimPct: 8,
+      reEntryMinVolumeIncreasePct: 50,
+      reEntryConfirmationWallets: 3,
+      reEntrySizeMultiplier: 0.65,
+      reEntryCooldownMinutes: 8,
+      reEntryAfterMaxProfitEnabled: false,
     },
   },
   high: {
@@ -627,6 +645,15 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       migrationSizeMultiplier: 1.9,
       confirmationThreshold: 2,
       reBuyMinProfitPct: 70,
+      postStopReentryEnabled: true,
+      reEntryMaxPerMint: 3,
+      reEntryWatchMinutes: 120,
+      reEntryMinReclaimPct: 5,
+      reEntryMinVolumeIncreasePct: 35,
+      reEntryConfirmationWallets: 2,
+      reEntrySizeMultiplier: 0.8,
+      reEntryCooldownMinutes: 4,
+      reEntryAfterMaxProfitEnabled: false,
     },
   },
   degen: {
@@ -739,6 +766,15 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       migrationSizeMultiplier: 2.0,
       confirmationThreshold: 1,
       reBuyMinProfitPct: 50,
+      postStopReentryEnabled: true,
+      reEntryMaxPerMint: 4,
+      reEntryWatchMinutes: 180,
+      reEntryMinReclaimPct: 3,
+      reEntryMinVolumeIncreasePct: 25,
+      reEntryConfirmationWallets: 1,
+      reEntrySizeMultiplier: 0.95,
+      reEntryCooldownMinutes: 2,
+      reEntryAfterMaxProfitEnabled: false,
     },
     bondingCurve: {
       requireHealthyCurve: false,
@@ -1000,6 +1036,28 @@ export interface StrategyConfig {
   reBuyVolumeIncreasePct: number;
   /** Max successful re-buys per mint */
   reBuyMaxPerMint: number;
+  /**
+   * After hard stop-loss / early defensive exit, arm reclaim re-entry watch.
+   * Default ON — does not re-enter after max-profit bag close unless
+   * reEntryAfterMaxProfitEnabled is also ON.
+   */
+  postStopReentryEnabled: boolean;
+  /** Cap successful re-entries per mint (profit-dip + stop re-entry combined) */
+  reEntryMaxPerMint: number;
+  /** Minutes to keep watching after exit before expiring */
+  reEntryWatchMinutes: number;
+  /** Min % reclaim from post-stop trough (or sell/entry zone) before arming */
+  reEntryMinReclaimPct: number;
+  /** Volume increase % vs baseline to confirm stop re-entry */
+  reEntryMinVolumeIncreasePct: number;
+  /** Smart wallets needed to confirm stop re-entry (falls back to confirmationThreshold) */
+  reEntryConfirmationWallets: number;
+  /** Position size multiplier for re-entries (usually < 1) */
+  reEntrySizeMultiplier: number;
+  /** Cooldown minutes between re-entry attempts on the same mint */
+  reEntryCooldownMinutes: number;
+  /** Optional: also arm profit-dip watch after successful max-profit / runner close */
+  reEntryAfterMaxProfitEnabled: boolean;
 }
 
 export interface BotConfig {
@@ -1266,6 +1324,15 @@ export const config: BotConfig = {
     confirmationThreshold: 3,
     reBuyVolumeIncreasePct: 50,
     reBuyMaxPerMint: 2,
+    postStopReentryEnabled: true,
+    reEntryMaxPerMint: 2,
+    reEntryWatchMinutes: 90,
+    reEntryMinReclaimPct: 8,
+    reEntryMinVolumeIncreasePct: 50,
+    reEntryConfirmationWallets: 3,
+    reEntrySizeMultiplier: 0.65,
+    reEntryCooldownMinutes: 8,
+    reEntryAfterMaxProfitEnabled: false,
   },
 
   risk: { ...DEFAULT_RISK },
@@ -1743,6 +1810,36 @@ function syncConfigAliases(): void {
   if (config.risk.lowConvictionTrailTightenPct == null) {
     config.risk.lowConvictionTrailTightenPct =
       DEFAULT_RISK.lowConvictionTrailTightenPct;
+  }
+  // Post-exit re-entry defaults (v1.1.39+) for older persisted strategy blobs
+  if (config.strategy.postStopReentryEnabled == null) {
+    config.strategy.postStopReentryEnabled = true;
+  }
+  if (config.strategy.reEntryMaxPerMint == null) {
+    config.strategy.reEntryMaxPerMint = config.strategy.reBuyMaxPerMint ?? 2;
+  }
+  if (config.strategy.reEntryWatchMinutes == null) {
+    config.strategy.reEntryWatchMinutes = 90;
+  }
+  if (config.strategy.reEntryMinReclaimPct == null) {
+    config.strategy.reEntryMinReclaimPct = 8;
+  }
+  if (config.strategy.reEntryMinVolumeIncreasePct == null) {
+    config.strategy.reEntryMinVolumeIncreasePct =
+      config.strategy.reBuyVolumeIncreasePct ?? 50;
+  }
+  if (config.strategy.reEntryConfirmationWallets == null) {
+    config.strategy.reEntryConfirmationWallets =
+      config.strategy.confirmationThreshold ?? 3;
+  }
+  if (config.strategy.reEntrySizeMultiplier == null) {
+    config.strategy.reEntrySizeMultiplier = 0.65;
+  }
+  if (config.strategy.reEntryCooldownMinutes == null) {
+    config.strategy.reEntryCooldownMinutes = 8;
+  }
+  if (config.strategy.reEntryAfterMaxProfitEnabled == null) {
+    config.strategy.reEntryAfterMaxProfitEnabled = false;
   }
 }
 
