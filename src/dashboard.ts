@@ -738,6 +738,81 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 12px;
       color: #64748b;
     }
+    .pos-partial-line {
+      margin-top: 0.2rem;
+      font-size: 10px;
+      line-height: 1.35;
+      color: #94a3b8;
+      white-space: normal;
+      max-width: 16rem;
+    }
+    .pos-partial-bar {
+      margin-top: 0.35rem;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(51, 65, 85, 0.85);
+      overflow: hidden;
+      max-width: 11rem;
+    }
+    .pos-partial-bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #34d399, #22d3ee);
+    }
+    .pos-size-label {
+      font-size: 10px;
+      color: #64748b;
+      margin-bottom: 0.1rem;
+    }
+    .trade-group-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.35rem;
+      height: 1.35rem;
+      margin-right: 0.25rem;
+      padding: 0;
+      border-radius: 0.35rem;
+      border: 1px solid rgba(100, 116, 139, 0.45);
+      background: rgba(30, 41, 59, 0.9);
+      color: #cbd5e1;
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+      vertical-align: middle;
+    }
+    .trade-group-toggle:hover {
+      border-color: rgba(52, 211, 153, 0.45);
+      color: #e2e8f0;
+    }
+    .trade-group-parent td {
+      background: rgba(15, 23, 42, 0.35);
+    }
+    .trade-group-child td {
+      background: rgba(15, 23, 42, 0.18);
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .trade-group-child td:first-child {
+      padding-left: 1.65rem;
+    }
+    .trade-exit-label {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: #7dd3fc;
+      margin-bottom: 0.15rem;
+    }
+    .trade-exit-label.is-final {
+      color: #86efac;
+    }
+    .trade-group-meta {
+      font-size: 10px;
+      color: #64748b;
+      margin-top: 0.15rem;
+    }
     .stat { font-size: 1.5rem; font-weight: 700; color: #34d399; }
     .ov-equity-panel {
       display: grid;
@@ -1780,7 +1855,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position. Low 1h volume can trigger dead-market force-sell."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL on the remaining size, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
@@ -1801,7 +1876,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others — hover/tap username for their entry MC), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade."></span></div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
             <table id="closed-table">
               <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -1860,7 +1935,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Trades</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, cost (SOL + USD), converging wallets (hover/tap username for their entry MC), 1h volume, unrealized PnL, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size, partial take-profit progress, converging wallets, 1h volume, unrealized PnL on remaining size, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
@@ -1876,7 +1951,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades with buy/exit MC, buy-in cost, copied wallet (+ others — hover/tap username for their entry MC), exit reason (TP, SL, trail, manual, migration, etc.)."></span></div>
+        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade."></span></div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
             <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -4085,6 +4160,208 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return solBit + ' · $' + usd.toFixed(2);
     }
 
+    function fmtSolShort(sol) {
+      const n = Number(sol || 0);
+      if (!Number.isFinite(n)) return '0';
+      const abs = Math.abs(n);
+      if (abs >= 1) return n.toFixed(2);
+      if (abs >= 0.01) return n.toFixed(3);
+      return n.toFixed(4);
+    }
+
+    function isPartialCloseSlice(p) {
+      const reason = String((p && p.reason) || '');
+      if (/^partial:/i.test(reason)) return true;
+      if (p && p.parentPositionId && String(p.id || '').startsWith('part-')) return true;
+      return false;
+    }
+
+    function tradeGroupKey(p) {
+      if (p && p.parentPositionId) return 'pid:' + p.parentPositionId;
+      if (isPartialCloseSlice(p) && p.mint && p.openedAt) {
+        return 'mo:' + p.mint + '|' + p.openedAt;
+      }
+      if (p && p.id && !String(p.id).startsWith('part-')) return 'pid:' + p.id;
+      if (p && p.mint && p.openedAt) return 'mo:' + p.mint + '|' + p.openedAt;
+      return 'id:' + ((p && p.id) || 'unknown');
+    }
+
+    /** Open position size + partial take-profit progress. */
+    function fmtOpenSizeCell(p) {
+      const initial = Number(
+        p.initialCostSol != null && p.initialCostSol > 0
+          ? p.initialCostSol
+          : p.costSol || 0
+      );
+      const remain = Number(p.costSol || 0);
+      const taken = Math.max(0, initial - remain);
+      const takenPct = initial > 0 ? (taken / initial) * 100 : 0;
+      const remainPct = initial > 0 ? (remain / initial) * 100 : 100;
+      const hasPartial =
+        takenPct >= 0.5 ||
+        p.status === 'partial' ||
+        p.partialSellDone === true ||
+        (Number(p.solReturned) || 0) > 0;
+      if (!hasPartial) {
+        return fmtCostSolUsd(remain || initial, p.costUsd, p.solUsd);
+      }
+      const origUsd =
+        p.initialCostUsd != null
+          ? p.initialCostUsd
+          : (p.solUsd != null && initial > 0 ? initial * Number(p.solUsd) : null);
+      return (
+        '<div class="pos-size-label">Original</div>' +
+        '<div>' + fmtCostSolUsd(initial, origUsd, p.solUsd) + '</div>' +
+        '<div class="pos-partial-line" title="Share of original size already exited vs still held">' +
+          'Taken: ' + takenPct.toFixed(0) + '% (' + fmtSolShort(taken) + ' SOL)' +
+          ' | Remaining: ' + remainPct.toFixed(0) + '% (' + fmtSolShort(remain) + ' SOL)' +
+        '</div>' +
+        '<div class="pos-partial-bar" title="' + takenPct.toFixed(0) + '% taken">' +
+          '<span style="width:' + Math.min(100, Math.max(0, takenPct)).toFixed(1) + '%"></span>' +
+        '</div>'
+      );
+    }
+
+    function fmtOpenPnlCell(p) {
+      const pnl = p.pnlPct;
+      const initial = Number(p.initialCostSol) || 0;
+      const remain = Number(p.costSol) || 0;
+      const hasPartial =
+        (initial > 0 && remain + 1e-12 < initial) ||
+        p.status === 'partial' ||
+        p.partialSellDone === true;
+      const main = pnl == null
+        ? '—'
+        : '<span style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+          (pnl >= 0 ? '+' : '') + Number(pnl).toFixed(1) + '%</span>';
+      if (!hasPartial) return main;
+      const realized = Number(p.realizedPnlSol);
+      const realizedBit =
+        Number.isFinite(realized) && Math.abs(realized) > 1e-8
+          ? '<div class="mint">realized ' +
+            (realized >= 0 ? '+' : '') + realized.toFixed(4) + ' SOL</div>'
+          : '';
+      return main +
+        '<div class="mint">unrealized on remaining</div>' +
+        realizedBit;
+    }
+
+    function labelClosedExit(slice, partialIndex, initialCostSol) {
+      if (!isPartialCloseSlice(slice)) {
+        return '<span class="trade-exit-label is-final">Final Exit</span>';
+      }
+      const cost = Number(slice.costSol || 0);
+      const pct =
+        initialCostSol > 0
+          ? Math.round((cost / initialCostSol) * 100)
+          : null;
+      const pctBit = pct != null && Number.isFinite(pct) ? ' – ' + pct + '%' : '';
+      return (
+        '<span class="trade-exit-label">Partial TP ' +
+        (partialIndex + 1) +
+        pctBit +
+        '</span>'
+      );
+    }
+
+    function buildClosedTradeGroups(closedFlat, openList) {
+      const openKeys = new Set();
+      (openList || []).forEach((p) => {
+        if (p && p.id) openKeys.add('pid:' + p.id);
+        if (p && p.mint && p.openedAt) openKeys.add('mo:' + p.mint + '|' + p.openedAt);
+      });
+      const map = new Map();
+      (closedFlat || []).forEach((p) => {
+        const key = tradeGroupKey(p);
+        const list = map.get(key) || [];
+        list.push(p);
+        map.set(key, list);
+      });
+      const groups = [];
+      map.forEach((rows, key) => {
+        const partials = rows
+          .filter(isPartialCloseSlice)
+          .slice()
+          .sort((a, b) => (a.closedAt || 0) - (b.closedAt || 0));
+        const finals = rows
+          .filter((p) => !isPartialCloseSlice(p))
+          .slice()
+          .sort((a, b) => (a.closedAt || 0) - (b.closedAt || 0));
+        const final = finals.length ? finals[finals.length - 1] : null;
+        if (!final && openKeys.has(key)) return; // still open — shown on Open
+        const parent = final || partials[partials.length - 1];
+        if (!parent) return;
+        const initialCost = Number(
+          parent.initialCostSol || parent.costSol || 0
+        );
+        const children = final ? partials : partials.slice(0, -1);
+        const latestAt = Math.max(
+          final ? final.closedAt || 0 : 0,
+          ...partials.map((p) => p.closedAt || 0)
+        );
+        groups.push({
+          key,
+          gid: encodeURIComponent(key),
+          parent,
+          final,
+          children,
+          partials,
+          initialCost,
+          latestAt,
+        });
+      });
+      groups.sort((a, b) => b.latestAt - a.latestAt);
+      return groups;
+    }
+
+    function renderClosedTradeRow(p, opts) {
+      opts = opts || {};
+      const exitLabel = opts.exitLabel || '';
+      const toggle = opts.toggleHtml || '';
+      const meta = opts.metaHtml || '';
+      const reason =
+        opts.reasonOverride != null
+          ? opts.reasonOverride
+          : (p.reason || '—');
+      return (
+        '<tr class="' + (opts.rowClass || '') + '"' +
+          (opts.groupAttr || '') +
+          (opts.hidden ? ' hidden' : '') +
+        '>' +
+          '<td>' + toggle + fmtToken(p.symbol, p.name, p.mint) + meta + '</td>' +
+          '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
+          '<td class="mint" title="Market cap at your buy">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
+          '<td class="mint" title="Market cap at exit">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
+          '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
+            fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd) +
+          '</td>' +
+          '<td class="mint" title="Copied wallet — hover/tap for their entry MC">' +
+            fmtWalletConvergence(p) +
+          '</td>' +
+          '<td style="color:' + ((p.pnlSol || 0) >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+            ((p.pnlSol || 0) >= 0 ? '+' : '') + (p.pnlSol || 0).toFixed(4) + ' SOL' +
+            '<span class="mint">(' + (p.pnlPct || 0).toFixed(0) + '%)</span>' +
+          '</td>' +
+          '<td class="mint">' + reason + '</td>' +
+          '<td>' + (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') + '</td>' +
+        '</tr>'
+      );
+    }
+
+    function toggleClosedTradeGroup(btn) {
+      if (!btn) return;
+      const gid = btn.getAttribute('data-group');
+      if (!gid) return;
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      const next = !expanded;
+      btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+      btn.textContent = next ? '▼' : '▶';
+      document.querySelectorAll('tr.trade-group-child[data-group="' + gid + '"]').forEach((row) => {
+        row.hidden = !next;
+      });
+    }
+    window.toggleClosedTradeGroup = toggleClosedTradeGroup;
+
     /**
      * Copied wallet + converging wallets.
      * Hover (desktop) / tap (mobile) shows smart-wallet entry MC when known.
@@ -5710,16 +5987,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         status.monitor && status.monitor.dailyPnlSol != null
           ? Number(status.monitor.dailyPnlSol).toFixed(4)
           : '—';
-      const pf = status.portfolio || {};
-      const availSol = pf.availableBalanceSol != null ? Number(pf.availableBalanceSol)
+      const port = status.portfolio || {};
+      const availSol = port.availableBalanceSol != null ? Number(port.availableBalanceSol)
         : (status.balance != null ? Number(status.balance) : null);
-      const posValSol = pf.positionsValueSol != null ? Number(pf.positionsValueSol) : null;
-      const equitySol = pf.totalEquitySol != null ? Number(pf.totalEquitySol)
+      const posValSol = port.positionsValueSol != null ? Number(port.positionsValueSol) : null;
+      const equitySol = port.totalEquitySol != null ? Number(port.totalEquitySol)
         : (status.equity != null ? Number(status.equity) : null);
-      const unrealSol = pf.unrealizedPnlSol != null ? Number(pf.unrealizedPnlSol) : null;
-      const realizedSol = pf.realizedPnlSol != null ? Number(pf.realizedPnlSol)
+      const unrealSol = port.unrealizedPnlSol != null ? Number(port.unrealizedPnlSol) : null;
+      const realizedSol = port.realizedPnlSol != null ? Number(port.realizedPnlSol)
         : (status.stats && status.stats.netPnlSol != null ? Number(status.stats.netPnlSol) : null);
-      const openCnt = pf.openCount != null ? pf.openCount
+      const openCnt = port.openCount != null ? port.openCount
         : (status.stats && status.stats.openTrades != null ? status.stats.openTrades : null);
 
       const fmtSolCompact = (n) => {
@@ -5738,8 +6015,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (eqEl) {
         eqEl.innerHTML = (equitySol != null ? fmtSolCompact(equitySol) : '—') +
           '<span class="ov-unit">SOL</span>';
-        colorPnL(eqEl, equitySol != null && pf.startingBalanceSol != null
-          ? equitySol - Number(pf.startingBalanceSol)
+        colorPnL(eqEl, equitySol != null && port.startingBalanceSol != null
+          ? equitySol - Number(port.startingBalanceSol)
           : null);
         if (equitySol != null) eqEl.style.color = '#34d399';
       }
@@ -6367,11 +6644,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const positionsHtml = posOpenN === 0
         ? '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
-          const pnl = p.pnlPct;
-          const pnlCell = pnl == null
-            ? '—'
-            : '<span style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
-              (pnl >= 0 ? '+' : '') + pnl.toFixed(1) + '%</span>';
+          const pnlCell = fmtOpenPnlCell(p);
           let trailCell;
           if (p.trailingActive) {
             const stop = p.trailingStopPriceSol != null
@@ -6432,7 +6705,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
-          const costCell = fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd);
+          const costCell = fmtOpenSizeCell(p);
           const walletsCell = fmtWalletConvergence(p);
           const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
@@ -6443,7 +6716,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at your buy">\${buyMc}</td>
             <td class="mint" title="Current market cap (live mark)">\${liveMc}</td>
-            <td class="pos-cost-cell" title="Position cost">\${costCell}</td>
+            <td class="pos-cost-cell" title="Original size and partial take-profit progress">\${costCell}</td>
             <td class="mint" title="Copied wallet — hover/tap for their entry MC">\${walletsCell}</td>
             <td>\${volCell}</td>
             <td>\${pnlCell}</td>
@@ -6460,24 +6733,61 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       ensurePosHoldTicker();
       tickOpenPositionHolds();
 
-      const closed = (positions.closed || []).slice().reverse().slice(0, 25);
-      const closedHtml = closed.length === 0
+      const closedGroups = buildClosedTradeGroups(
+        positions.closed || [],
+        positions.open || []
+      ).slice(0, 25);
+      const closedHtml = closedGroups.length === 0
         ? '<tr><td colspan="9" style="color:var(--muted)">No closed trades yet</td></tr>'
-        : closed.map(p => \`
-          <tr>
-            <td>\${fmtToken(p.symbol, p.name, p.mint)}</td>
-            <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
-            <td class="mint" title="Market cap at your buy">\${fmtUsdShort(p.entryMarketCapUsd)}</td>
-            <td class="mint" title="Market cap at exit">\${fmtUsdShort(p.exitMarketCapUsd)}</td>
-            <td class="pos-cost-cell" title="Buy-in / cost basis of sold portion">\${fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd)}</td>
-            <td class="mint" title="Copied wallet — hover/tap for their entry MC">\${fmtWalletConvergence(p)}</td>
-            <td style="color:\${(p.pnlSol||0)>=0?'var(--green)':'var(--red)'}">
-              \${(p.pnlSol||0)>=0?'+':''}\${(p.pnlSol||0).toFixed(4)} SOL
-              <span class="mint">(\${(p.pnlPct||0).toFixed(0)}%)</span>
-            </td>
-            <td class="mint">\${p.reason || '—'}</td>
-            <td>\${p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—'}</td>
-          </tr>\`).join('');
+        : closedGroups.map((g) => {
+            const p = g.parent;
+            const hasKids = g.children && g.children.length > 0;
+            const toggleHtml = hasKids
+              ? '<button type="button" class="trade-group-toggle" data-group="' +
+                g.gid +
+                '" aria-expanded="false" onclick="toggleClosedTradeGroup(this)" title="Show partial exits">▶</button>'
+              : '';
+            const metaHtml = hasKids
+              ? '<div class="trade-group-meta">' +
+                (g.children.length + (g.final ? 1 : 0)) +
+                ' exits · expand for partials</div>'
+              : '';
+            const reasonOverride = hasKids
+              ? (g.final
+                  ? (g.children.length + ' partial' + (g.children.length === 1 ? '' : 's') +
+                    ' + ' + (g.final.reason || 'final'))
+                  : (p.reason || '—'))
+              : undefined;
+            const parentRow = renderClosedTradeRow(p, {
+              rowClass: hasKids ? 'trade-group-parent' : '',
+              toggleHtml,
+              metaHtml,
+              reasonOverride,
+              exitLabel: hasKids
+                ? '<span class="trade-exit-label is-final">Full trade</span><br/>'
+                : '',
+            });
+            if (!hasKids) return parentRow;
+            const childRows = g.children.map((c, idx) =>
+              renderClosedTradeRow(c, {
+                rowClass: 'trade-group-child',
+                groupAttr: ' data-group="' + g.gid + '"',
+                hidden: true,
+                exitLabel: labelClosedExit(c, idx, g.initialCost) + '<br/>',
+                reasonOverride: String(c.reason || '').replace(/^partial:\s*/i, '') || '—',
+              })
+            ).join('');
+            const finalChild = g.final
+              ? renderClosedTradeRow(g.final, {
+                  rowClass: 'trade-group-child',
+                  groupAttr: ' data-group="' + g.gid + '"',
+                  hidden: true,
+                  exitLabel: labelClosedExit(g.final, 0, g.initialCost) + '<br/>',
+                  reasonOverride: g.final.reason || '—',
+                })
+              : '';
+            return parentRow + childRows + finalChild;
+          }).join('');
       document.querySelectorAll('#closed-table tbody, #trades-closed-table tbody').forEach((ctbody) => {
         ctbody.innerHTML = closedHtml;
       });

@@ -94,7 +94,7 @@ export interface Position {
   tradeMode?: 'paper' | 'live';
   /** Live token amount string for Jupiter sells */
   liveTokenAmount?: string;
-  /** Realized PnL from partial sells */
+  /** Realized PnL from partial sells so far (cost-basis of sells) */
   realizedPnlSol: number;
   openedAt: number;
   closedAt?: number;
@@ -103,6 +103,11 @@ export interface Position {
   pnlPct?: number;
   status: PositionStatus;
   reason?: string;
+  /**
+   * When this closed row is a partial-take slice, links back to the open
+   * (or final) position id for UI grouping. Display/history only.
+   */
+  parentPositionId?: string;
   /** Source wallets that triggered this copy trade */
   sourceWallets?: string[];
   sourceNames?: string[];
@@ -166,6 +171,141 @@ let logCounter = 0;
 function nextId(prefix: string): string {
   logCounter += 1;
   return `${prefix}-${Date.now()}-${logCounter}`;
+}
+
+/** Closed-history row for a partial take (not the final full exit). */
+export function isPartialCloseSlice(p: {
+  id?: string;
+  reason?: string;
+  parentPositionId?: string;
+}): boolean {
+  const reason = String(p.reason || '');
+  if (/^partial:/i.test(reason)) return true;
+  if (p.parentPositionId && String(p.id || '').startsWith('part-')) return true;
+  return false;
+}
+
+/**
+ * Group key for a trade lifecycle (entry → partials → final).
+ * Prefer parentPositionId / original id; fall back to mint+openedAt.
+ */
+export function tradeGroupKey(p: {
+  id?: string;
+  mint?: string;
+  openedAt?: number;
+  parentPositionId?: string;
+  reason?: string;
+}): string {
+  if (p.parentPositionId) return `pid:${p.parentPositionId}`;
+  if (isPartialCloseSlice(p) && p.mint && p.openedAt) {
+    return `mo:${p.mint}|${p.openedAt}`;
+  }
+  if (p.id && !String(p.id).startsWith('part-')) return `pid:${p.id}`;
+  if (p.mint && p.openedAt) return `mo:${p.mint}|${p.openedAt}`;
+  return `id:${p.id || 'unknown'}`;
+}
+
+/**
+ * Realized PnL without double-counting partial slices once a final exit exists.
+ * While a trade is still open, partial slice PnL is counted.
+ */
+export function realizedPnlFromClosedHistory(
+  closed: Array<{
+    id?: string;
+    mint?: string;
+    openedAt?: number;
+    closedAt?: number;
+    parentPositionId?: string;
+    reason?: string;
+    pnlSol?: number;
+  }>
+): number {
+  const groups = new Map<string, typeof closed>();
+  for (const p of closed) {
+    const key = tradeGroupKey(p);
+    const list = groups.get(key) || [];
+    list.push(p);
+    groups.set(key, list);
+  }
+  let total = 0;
+  for (const list of groups.values()) {
+    const finals = list.filter((p) => !isPartialCloseSlice(p));
+    if (finals.length > 0) {
+      finals.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
+      total += finals[finals.length - 1].pnlSol ?? 0;
+    } else {
+      for (const p of list) total += p.pnlSol ?? 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * One representative closed trade per group (final if present, else last partial).
+ * Used for win-rate / best-worst without double-counting partials.
+ */
+export function representativeClosedTrades<T extends {
+  id?: string;
+  mint?: string;
+  openedAt?: number;
+  closedAt?: number;
+  parentPositionId?: string;
+  reason?: string;
+  pnlSol?: number;
+}>(closed: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const p of closed) {
+    const key = tradeGroupKey(p);
+    const list = groups.get(key) || [];
+    list.push(p);
+    groups.set(key, list);
+  }
+  const out: T[] = [];
+  for (const list of groups.values()) {
+    const finals = list.filter((p) => !isPartialCloseSlice(p));
+    if (finals.length > 0) {
+      finals.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
+      out.push(finals[finals.length - 1]);
+    } else {
+      list.sort((a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0));
+      out.push(list[list.length - 1]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Incremental realized PnL events that avoid double-counting partials
+ * once a final exit (total PnL) is recorded.
+ */
+export function chronologicalRealizedDeltas<T extends {
+  id?: string;
+  mint?: string;
+  openedAt?: number;
+  closedAt?: number;
+  parentPositionId?: string;
+  reason?: string;
+  pnlSol?: number;
+}>(closed: T[]): Array<{ time: number; pnlSol: number; position: T }> {
+  const sorted = [...closed].sort(
+    (a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0)
+  );
+  const partialSumByKey = new Map<string, number>();
+  const out: Array<{ time: number; pnlSol: number; position: T }> = [];
+  for (const p of sorted) {
+    const key = tradeGroupKey(p);
+    const pnl = p.pnlSol ?? 0;
+    const time = p.closedAt ?? p.openedAt ?? 0;
+    if (isPartialCloseSlice(p)) {
+      partialSumByKey.set(key, (partialSumByKey.get(key) ?? 0) + pnl);
+      out.push({ time, pnlSol: pnl, position: p });
+    } else {
+      const prior = partialSumByKey.get(key) ?? 0;
+      out.push({ time, pnlSol: pnl - prior, position: p });
+      partialSumByKey.set(key, pnl);
+    }
+  }
+  return out;
 }
 
 function applySlippage(price: number, bps: number, direction: 'buy' | 'sell'): number {
@@ -450,10 +590,7 @@ export class PaperTrader {
         : this.balanceSol;
     const unrealizedPnlSol = positionsValueSol - positionsCostSol;
     const totalEquitySol = availableBalanceSol + positionsValueSol;
-    const realizedPnlSol = this.closedPositions.reduce(
-      (sum, p) => sum + (p.pnlSol ?? 0),
-      0
-    );
+    const realizedPnlSol = realizedPnlFromClosedHistory(this.closedPositions);
     const start = this.startingBalanceSol;
     return {
       availableBalanceSol,
@@ -489,6 +626,7 @@ export class PaperTrader {
     volumeH1Usd?: number | null;
     txnsH1?: number | null;
     costUsd?: number;
+    initialCostUsd?: number;
     solUsd?: number;
     /** Current market cap (mark); falls back to entry MC scaled by mark/entry price */
     liveMarketCapUsd?: number | null;
@@ -511,6 +649,10 @@ export class PaperTrader {
     const costUsd =
       position.costSol > 0 && solUsd > 0
         ? Number((position.costSol * solUsd).toFixed(2))
+        : undefined;
+    const initialCostUsd =
+      position.initialCostSol > 0 && solUsd > 0
+        ? Number((position.initialCostSol * solUsd).toFixed(2))
         : undefined;
 
     let liveMarketCapUsd: number | null =
@@ -544,6 +686,7 @@ export class PaperTrader {
       volumeH1Usd: activity ? activity.volumeH1Usd : null,
       txnsH1: activity ? activity.txnsH1 : null,
       costUsd,
+      initialCostUsd,
       solUsd,
       liveMarketCapUsd:
         liveMarketCapUsd != null && liveMarketCapUsd > 0
@@ -1038,10 +1181,11 @@ export class PaperTrader {
         }
       );
 
-      // Record slice in closed history for tracking
+      // Record slice in closed history for tracking / UI grouping
       const slice: Position = {
         ...position,
         id: nextId('part'),
+        parentPositionId: position.id,
         amountTokens: tokensToSell,
         costSol: costBasisSold,
         status: 'closed',
@@ -2056,13 +2200,17 @@ export class PaperTrader {
             position.initialAmountTokens * (action.sellPctOfInitial / 100);
           const sellAmt = Math.min(position.amountTokens, tokensToSell);
           if (sellAmt > 0 && position.amountTokens > 0) {
+            const parentId = position.id;
             const costBasisSold =
               position.costSol * (sellAmt / position.amountTokens);
             const estSol = sellAmt * currentPrice;
+            const slicePnl = estSol - costBasisSold;
+            const slicePct =
+              costBasisSold > 0 ? (slicePnl / costBasisSold) * 100 : 0;
             position.amountTokens -= sellAmt;
             position.costSol -= costBasisSold;
             position.solReturned = (position.solReturned ?? 0) + estSol;
-            position.realizedPnlSol += estSol - costBasisSold;
+            position.realizedPnlSol += slicePnl;
             if (raw) {
               try {
                 const remain = BigInt(raw) - BigInt(sellRaw || '0');
@@ -2086,6 +2234,31 @@ export class PaperTrader {
               this.closedPositions.push(position);
             } else {
               position.status = 'partial';
+              // Display/history slice so Closed Trades can group partial TPs
+              const liveMc = this.marketCapCache.get(position.mint);
+              const exitMc = resolveExitMarketCapUsd({
+                entryMarketCapUsd: position.entryMarketCapUsd,
+                entryPriceSol: position.entryPriceSol,
+                exitPriceSol: currentPrice,
+                liveMarketCapUsd: liveMc,
+              });
+              this.closedPositions.push({
+                ...position,
+                id: nextId('part'),
+                parentPositionId: parentId,
+                amountTokens: sellAmt,
+                costSol: costBasisSold,
+                status: 'closed',
+                closedAt: Date.now(),
+                exitPriceSol: currentPrice,
+                exitMarketCapUsd: exitMc,
+                pnlSol: slicePnl,
+                pnlPct: slicePct,
+                reason: `partial: ${action.reason}`,
+              });
+              if (this.closedPositions.length > 200) {
+                this.closedPositions = this.closedPositions.slice(-200);
+              }
             }
           }
         } catch (err) {
@@ -2269,25 +2442,28 @@ export class PaperTrader {
   getDailyPnlSol(): number {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
+    const startMs = startOfDay.getTime();
 
-    return this.closedPositions
-      .filter((p) => p.closedAt && p.closedAt >= startOfDay.getTime())
-      .reduce((sum, p) => sum + (p.pnlSol ?? 0), 0);
+    return chronologicalRealizedDeltas(this.closedPositions)
+      .filter((d) => d.time >= startMs)
+      .reduce((sum, d) => sum + d.pnlSol, 0);
   }
 
   /** Simple win-rate % from closed positions (for filter checks) */
   getWinRatePct(): number {
-    if (this.closedPositions.length === 0) return 0;
-    const wins = this.closedPositions.filter((p) => (p.pnlSol ?? 0) > 0).length;
-    return (wins / this.closedPositions.length) * 100;
+    const reps = representativeClosedTrades(this.closedPositions);
+    if (reps.length === 0) return 0;
+    const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
+    return (wins / reps.length) * 100;
   }
 
   /** Aggregate stats for dashboard / backtest */
   getStats() {
-    const closed = this.closedPositions;
+    const closedRaw = this.closedPositions;
+    const closed = representativeClosedTrades(closedRaw);
     const wins = closed.filter((p) => (p.pnlSol ?? 0) > 0);
     const losses = closed.filter((p) => (p.pnlSol ?? 0) <= 0);
-    const netPnlSol = closed.reduce((sum, p) => sum + (p.pnlSol ?? 0), 0);
+    const netPnlSol = realizedPnlFromClosedHistory(closedRaw);
     const avgWinPct =
       wins.length > 0
         ? wins.reduce((s, p) => s + (p.pnlPct ?? 0), 0) / wins.length
@@ -2332,11 +2508,8 @@ export class PaperTrader {
     let peakEquity = start;
     let equity = start;
     let maxDrawdownPct = 0;
-    const sortedClosed = [...closed].sort(
-      (a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0)
-    );
-    for (const p of sortedClosed) {
-      equity += p.pnlSol ?? 0;
+    for (const d of chronologicalRealizedDeltas(closedRaw)) {
+      equity += d.pnlSol;
       if (equity > peakEquity) peakEquity = equity;
       if (peakEquity > 0) {
         const dd = ((peakEquity - equity) / peakEquity) * 100;
@@ -2406,9 +2579,8 @@ export class PaperTrader {
    * - winLoss: win vs loss counts (and SOL totals)
    */
   getChartData() {
-    const closed = [...this.closedPositions].sort(
-      (a, b) => (a.closedAt ?? 0) - (b.closedAt ?? 0)
-    );
+    const closedRaw = this.closedPositions;
+    const closed = representativeClosedTrades(closedRaw);
 
     let cumulative = 0;
     const cumulativePnl = {
@@ -2424,10 +2596,10 @@ export class PaperTrader {
       }[],
     };
 
-    for (const p of closed) {
-      const pnl = p.pnlSol ?? 0;
-      cumulative += pnl;
-      const time = p.closedAt ?? p.openedAt;
+    for (const d of chronologicalRealizedDeltas(closedRaw)) {
+      const p = d.position;
+      cumulative += d.pnlSol;
+      const time = d.time;
       const label = new Date(time).toLocaleString(undefined, {
         month: 'short',
         day: 'numeric',
@@ -2439,7 +2611,7 @@ export class PaperTrader {
       cumulativePnl.points.push({
         time,
         label,
-        pnlSol: pnl,
+        pnlSol: d.pnlSol,
         cumulative,
         symbol: p.symbol,
         name: p.name || p.symbol,
