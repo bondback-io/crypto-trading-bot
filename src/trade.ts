@@ -196,6 +196,9 @@ export interface BuyOptions {
   profileTrailingStopPct?: number;
   profileForceScalp?: boolean;
   profileSizeMultiplier?: number;
+  /** Scalper hard timer (seconds) frozen from profile */
+  profileHardTimeLimitSec?: number;
+  profileOverrideScalpParams?: boolean;
 }
 
 /**
@@ -492,6 +495,8 @@ export async function executeBuy(
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
         profileForceScalp: meta?.profileForceScalp,
+        profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
+        profileOverrideScalpParams: meta?.profileOverrideScalpParams,
       }
     );
     if (!position) {
@@ -587,6 +592,8 @@ export async function executeBuy(
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
         profileForceScalp: meta?.profileForceScalp,
+        profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
+        profileOverrideScalpParams: meta?.profileOverrideScalpParams,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

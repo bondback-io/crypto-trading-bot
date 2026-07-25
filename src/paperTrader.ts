@@ -732,6 +732,8 @@ export class PaperTrader {
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
     profileForceScalp?: boolean;
+    profileHardTimeLimitSec?: number;
+    profileOverrideScalpParams?: boolean;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -821,6 +823,8 @@ export class PaperTrader {
         trailingStopPct: input.profileTrailingStopPct,
         forceScalp: input.profileForceScalp,
         shortTermStrategyId: input.shortTermStrategyId,
+        hardTimeLimitSec: input.profileHardTimeLimitSec,
+        overrideScalpParams: input.profileOverrideScalpParams,
       },
       seedShortTermPosition
     );
@@ -951,6 +955,8 @@ export class PaperTrader {
       profileStopLossPct?: number;
       profileTrailingStopPct?: number;
       profileForceScalp?: boolean;
+      profileHardTimeLimitSec?: number;
+      profileOverrideScalpParams?: boolean;
     }
   ): Position | null {
     const spendSol =
@@ -1064,6 +1070,8 @@ export class PaperTrader {
         trailingStopPct: meta?.profileTrailingStopPct,
         forceScalp: meta?.profileForceScalp,
         shortTermStrategyId: meta?.shortTermStrategyId,
+        hardTimeLimitSec: meta?.profileHardTimeLimitSec,
+        overrideScalpParams: meta?.profileOverrideScalpParams,
       },
       seedShortTermPosition
     );

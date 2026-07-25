@@ -2168,6 +2168,8 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
     profileForceScalp?: boolean;
+    profileHardTimeLimitSec?: number;
+    profileOverrideScalpParams?: boolean;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -2230,6 +2232,18 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     dropFromPeakPct: signal.dropFromPeakPct,
     strategyKind: buyOpts.strategyKind,
     symbol: signal.symbol,
+    marketCapUsd:
+      signal.sourceEntryMcUsd ??
+      signal.metrics?.marketCapUsd ??
+      null,
+    holderCount: signal.metrics?.holderCountEstimate ?? null,
+    volumeH1Usd:
+      signal.metrics?.volumeH1Usd ??
+      signal.metrics?.recentBuyVolumeUsd ??
+      null,
+    tokenAgeHours: signal.tokenAgeHours ?? null,
+    priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
+    smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,
   });
   Object.assign(buyOpts, stampFromAssignment(profileAssignment));
   const er = profileAssignment.exitRules;
@@ -2238,10 +2252,16 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   if (er.trailingStopPct != null) {
     buyOpts.profileTrailingStopPct = er.trailingStopPct;
   }
+  if (er.hardTimeLimitSec != null) {
+    buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
+  }
+  if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
   if (er.forceScalp) {
     buyOpts.profileForceScalp = true;
     if (!buyOpts.scalpMode && er.shortTermStrategyId) {
       buyOpts.scalpMode = true;
+      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
+    } else if (er.shortTermStrategyId && !buyOpts.shortTermStrategyId) {
       buyOpts.shortTermStrategyId = er.shortTermStrategyId;
     }
   }

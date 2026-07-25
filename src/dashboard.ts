@@ -4370,8 +4370,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         toggles.innerHTML = (tp.profiles || []).map(function (p) {
           const checked = p.enabled !== false ? ' checked' : '';
           const disabled = p.id === 'default' ? ' disabled' : '';
+          const rules = Array.isArray(p.rulesSummary) && p.rulesSummary.length
+            ? '<ul class="tp-desc" style="margin:0.35rem 0 0;padding-left:1rem;list-style:disc">' +
+              p.rulesSummary.slice(0, 6).map(function (r) {
+                return '<li>' + escHtml(r) + '</li>';
+              }).join('') +
+              '</ul>'
+            : '<div class="tp-desc">' + escHtml(p.description || '') + '</div>';
           return (
-            '<div class="tp-toggle-card" style="border-color:' + (p.color || '#334155') + '55">' +
+            '<div class="tp-toggle-card" style="border-color:' + (p.color || '#334155') + '55;max-width:18rem">' +
               '<div class="tp-head">' +
                 '<span class="tp-name" style="color:' + (p.color || '#e2e8f0') + '">' +
                   escHtml(p.icon || '') + ' ' + escHtml(p.name) +
@@ -4379,7 +4386,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<input type="checkbox"' + checked + disabled +
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="Enable ' + escHtml(p.name) + '" />' +
               '</div>' +
-              '<div class="tp-desc">' + escHtml(p.description || '') + '</div>' +
+              rules +
             '</div>'
           );
         }).join('');
