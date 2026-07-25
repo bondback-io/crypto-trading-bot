@@ -2193,6 +2193,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
+    profileMomentumFailDropPct?: number;
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
     antiRug?: {
@@ -2346,6 +2347,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   }
   if (er.hardTimeLimitSec != null) {
     buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
+  }
+  if (
+    er.momentumFailDropPct != null &&
+    Number.isFinite(er.momentumFailDropPct) &&
+    er.momentumFailDropPct > 0
+  ) {
+    buyOpts.profileMomentumFailDropPct = er.momentumFailDropPct;
   }
   if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
   if (

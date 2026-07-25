@@ -202,6 +202,8 @@ export interface BuyOptions {
   /** Scalper hard timer (seconds) frozen from profile */
   profileHardTimeLimitSec?: number;
   profileOverrideScalpParams?: boolean;
+  /** Scalp fade-from-peak % frozen from profile */
+  profileMomentumFailDropPct?: number;
   /** Aggressive dead-market min-hold (minutes) from profile */
   profileDeadVolumeMinHoldMinutes?: number;
   profileAggressiveDeadMarket?: boolean;
@@ -517,6 +519,7 @@ export async function executeBuy(
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,
+        profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
       }
@@ -619,6 +622,7 @@ export async function executeBuy(
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,
+        profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
       });

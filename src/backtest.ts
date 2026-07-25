@@ -1821,6 +1821,7 @@ function replayLaunch(
         profileForceScalp: er.forceScalp === true,
         profileHardTimeLimitSec: er.hardTimeLimitSec,
         profileOverrideScalpParams: er.overrideScalpParams === true,
+        profileMomentumFailDropPct: er.momentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: er.deadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: er.aggressiveDeadMarket === true,
         antiRug:
@@ -1864,12 +1865,37 @@ function replayLaunch(
         position.scalpSlPct = sl;
       }
       if (
+        er.trailingStopPct != null &&
+        Number.isFinite(er.trailingStopPct) &&
+        er.trailingStopPct > 0
+      ) {
+        position.trailingStopPct = er.trailingStopPct;
+      }
+      if (
+        er.trailingActivationProfit != null &&
+        Number.isFinite(er.trailingActivationProfit) &&
+        er.trailingActivationProfit > 0
+      ) {
+        position.trailingActivationProfit = er.trailingActivationProfit;
+      }
+      if (
+        er.momentumFailDropPct != null &&
+        Number.isFinite(er.momentumFailDropPct) &&
+        er.momentumFailDropPct > 0
+      ) {
+        position.scalpMomentumFailDropPct = Math.min(
+          40,
+          Number(er.momentumFailDropPct)
+        );
+      }
+      if (
         er.hardTimeLimitSec != null &&
         Number.isFinite(er.hardTimeLimitSec) &&
         er.hardTimeLimitSec > 0
       ) {
-        position.scalpDeadlineMs =
-          openedAt + Math.round(er.hardTimeLimitSec) * 1000;
+        const holdMs = Math.round(er.hardTimeLimitSec) * 1000;
+        position.scalpDeadlineMs = openedAt + holdMs;
+        position.scalpHardDeadlineMs = openedAt + Math.round(holdMs * 1.4);
       }
     }
 

@@ -294,7 +294,8 @@ export const DEFAULT_MOMENTUM_BURST: MomentumBurstConfig = {
   stopLossPct: -12,
   minVolumeUsd: 15_000,
   minBuyPressureUsd: 1_200,
-  momentumFailDropPct: 8,
+  /** Tighter fade so burst dies before the flat timer dump */
+  momentumFailDropPct: 6,
 };
 
 /** Post-Migration Scalp — fresh migrations only (90s–3m) */
@@ -774,14 +775,14 @@ export const SCALP_PARAM_RANGES_STANDARD: ScalpStrategyRanges = {
     stopLossAbs: { min: 6, max: 10, default: 8 },
   },
   momentum_burst: {
-    timerSec: { min: 120, max: 240, default: 180 },
-    takeProfitPct: { min: 28, max: 40, default: 32 },
+    timerSec: { min: 140, max: 360, default: 210 },
+    takeProfitPct: { min: 28, max: 45, default: 32 },
     stopLossAbs: { min: 10, max: 14, default: 12 },
   },
   post_migration_scalp: {
-    timerSec: { min: 90, max: 180, default: 120 },
-    takeProfitPct: { min: 25, max: 38, default: 30 },
-    stopLossAbs: { min: 9, max: 13, default: 11 },
+    timerSec: { min: 90, max: 360, default: 180 },
+    takeProfitPct: { min: 25, max: 45, default: 30 },
+    stopLossAbs: { min: 9, max: 15, default: 11 },
   },
   reversal_scalp: {
     timerSec: { min: 60, max: 150, default: 90 },
@@ -798,12 +799,12 @@ export const SCALP_PARAM_RANGES_AGGRESSIVE: ScalpStrategyRanges = {
     stopLossAbs: { min: 8, max: 12, default: 10 },
   },
   momentum_burst: {
-    timerSec: { min: 90, max: 210, default: 150 },
+    timerSec: { min: 90, max: 300, default: 160 },
     takeProfitPct: { min: 35, max: 50, default: 42 },
     stopLossAbs: { min: 12, max: 16, default: 14 },
   },
   post_migration_scalp: {
-    timerSec: { min: 60, max: 150, default: 105 },
+    timerSec: { min: 60, max: 300, default: 140 },
     takeProfitPct: { min: 30, max: 45, default: 37 },
     stopLossAbs: { min: 11, max: 15, default: 13 },
   },
@@ -822,12 +823,12 @@ export const SCALP_PARAM_RANGES_CONSERVATIVE: ScalpStrategyRanges = {
     stopLossAbs: { min: 5, max: 8, default: 6 },
   },
   momentum_burst: {
-    timerSec: { min: 150, max: 240, default: 195 },
+    timerSec: { min: 150, max: 360, default: 220 },
     takeProfitPct: { min: 22, max: 32, default: 27 },
     stopLossAbs: { min: 8, max: 11, default: 9 },
   },
   post_migration_scalp: {
-    timerSec: { min: 90, max: 180, default: 135 },
+    timerSec: { min: 90, max: 300, default: 180 },
     takeProfitPct: { min: 20, max: 30, default: 25 },
     stopLossAbs: { min: 7, max: 10, default: 8 },
   },

@@ -64,14 +64,14 @@ export const SHORT_TERM_STRATEGIES: readonly ShortTermStrategyDefinition[] = [
     id: 'momentum_burst',
     label: 'Momentum Burst',
     description:
-      'Sudden buy momentum. Timer 2–4 min (def 3), TP 28–40% (def 32), SL 10–14% (def 12). Exit on TP/SL/timer/fade.',
-    frequencyNote: 'Burst trades · 2–4 minute windows',
+      'Sudden buy momentum. Profile timer ~2.5–7 min, TP 28–45%, SL 10–14%. Exit on TP/SL/fade/stall/trail — timer is last resort.',
+    frequencyNote: 'Burst trades · multi-minute windows',
   },
   {
     id: 'post_migration_scalp',
     label: 'Post-Migration Scalp',
     description:
-      'Fresh migrations with meaningful volume only. Timer 90s–3 min (def 2 min), TP 25–38% (def 30), SL 9–13% (def 11).',
+      'Fresh migrations with meaningful volume only. Profile timer ~1.5–7 min, TP 25–45%, trail after modest green. Timer is a backstop.',
     frequencyNote: 'Migration-only · short post-grad holds',
   },
   {
@@ -119,11 +119,31 @@ export interface ShortTermExitView {
   openedAt: number;
   nowMs: number;
   deadlineMs: number;
+  /**
+   * Absolute max hold (soft deadline may defer a green trade to trail).
+   * Defaults to 1.4× the primary timer window when omitted.
+   */
+  hardDeadlineMs?: number;
   tpPct: number;
   slPct: number;
-  /** Momentum Burst: exit if drop from peak ≥ this % before TP */
+  /** Momentum Burst / scalp protect: exit if drop from peak ≥ this % before TP */
   momentumFailDropPct?: number;
 }
+
+/** Intra-timer trail for scalp profiles that freeze trailingStopPct */
+export interface ScalpProtectiveTrailView {
+  entryPriceSol: number;
+  currentPriceSol: number;
+  highWaterMarkSol: number;
+  trailingActive: boolean;
+  trailingStopPct?: number;
+  trailingActivationProfit?: number;
+}
+
+export type ScalpProtectiveTrailAction =
+  | { type: 'none' }
+  | { type: 'arm_trail'; reason: string; trailPct: number }
+  | { type: 'trail_exit'; reason: string };
 
 export type ShortTermExitKind =
   | 'scalp_tp'
@@ -139,6 +159,7 @@ export interface ShortTermSeedFields {
   scalpMode: true;
   shortTermStrategyId: ShortTermStrategyId;
   scalpDeadlineMs: number;
+  scalpHardDeadlineMs: number;
   scalpTpPct: number;
   scalpSlPct: number;
   takeProfitPct: number;
@@ -588,6 +609,7 @@ export function seedShortTermPosition(
     scalpMode: true,
     shortTermStrategyId: id,
     scalpDeadlineMs: openedAtMs + p.maxHoldMs,
+    scalpHardDeadlineMs: openedAtMs + Math.round(p.maxHoldMs * 1.4),
     scalpTpPct: p.takeProfitPct,
     scalpSlPct: p.stopLossPct,
     takeProfitPct: p.takeProfitPct,
@@ -605,11 +627,15 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
 }
 
 /**
- * Evaluate short-term exit: SL → TP → momentum fail → timer.
+ * Evaluate short-term exit: SL → TP → momentum fail → stall → timer.
  * Call before tiered profit strategy when scalpMode is set.
  *
  * SL has a short grace after open so fill/Dex mark mismatches cannot
  * instantly stop out a Scalper (seen as 0.1s holds with −10% phantom marks).
+ *
+ * Soft timer: a still-green trade past the primary deadline is deferred to
+ * protective trail / momentum-fail until hardDeadline (1.4× window) so we
+ * don't systematically dump flat/slightly-green marks on identical timers.
  */
 export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction {
   if (!(view.entryPriceSol > 0) || !(view.currentPriceSol > 0)) {
@@ -619,11 +645,22 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
   const pnlPct =
     ((view.currentPriceSol - view.entryPriceSol) / view.entryPriceSol) * 100;
   const ageMs = Math.max(0, view.nowMs - view.openedAt);
+  const windowMs = Math.max(1_000, view.deadlineMs - view.openedAt);
+  const hardDeadlineMs =
+    view.hardDeadlineMs != null && view.hardDeadlineMs > view.deadlineMs
+      ? view.hardDeadlineMs
+      : view.openedAt + Math.round(windowMs * 1.4);
   /** Ignore modest SL marks until feeds settle; still honour violent rugs. */
   const SL_GRACE_MS = 15_000;
   const SL_GRACE_RUG_PCT = -35;
   // Profiles may stamp positive loss magnitude; exit compare needs negative %.
   const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
+  const hwm =
+    view.highWaterMarkSol != null && view.highWaterMarkSol > 0
+      ? view.highWaterMarkSol
+      : view.entryPriceSol;
+  const peakPnlPct =
+    ((hwm - view.entryPriceSol) / view.entryPriceSol) * 100;
 
   if (pnlPct <= slPct) {
     const inGrace = ageMs < SL_GRACE_MS && pnlPct > SL_GRACE_RUG_PCT;
@@ -643,16 +680,14 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     };
   }
 
-  // Momentum Burst: fade from peak before TP
+  // Fade from peak before TP (Momentum Burst + any profile that stamps fail %)
   if (
     view.momentumFailDropPct != null &&
     view.momentumFailDropPct > 0 &&
-    view.highWaterMarkSol != null &&
-    view.highWaterMarkSol > view.entryPriceSol
+    hwm > view.entryPriceSol
   ) {
     const dropFromPeak =
-      ((view.currentPriceSol - view.highWaterMarkSol) / view.highWaterMarkSol) *
-      100;
+      ((view.currentPriceSol - hwm) / hwm) * 100;
     if (dropFromPeak <= -view.momentumFailDropPct) {
       return {
         type: 'full',
@@ -662,12 +697,93 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     }
   }
 
+  // Early stall: no meaningful pop by ~40% of the timer → cut before flat dump.
+  // Skip for Post-Run Dip — those holds are designed to wait through quiet periods.
+  const stallAfterMs = Math.max(45_000, Math.round(windowMs * 0.4));
+  if (
+    view.strategyId !== 'post_run_dip' &&
+    ageMs >= stallAfterMs &&
+    view.nowMs < view.deadlineMs
+  ) {
+    const neverPopped = peakPnlPct < 4;
+    const stillFlat = Math.abs(pnlPct) < 2.5;
+    if (neverPopped && stillFlat) {
+      const heldSec = Math.max(0, Math.round(ageMs / 1000));
+      return {
+        type: 'full',
+        exitKind: 'scalp_signal_fail',
+        reason: `${label} momentum stalled after ${heldSec}s (peak +${peakPnlPct.toFixed(1)}%, mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+      };
+    }
+  }
+
   if (view.nowMs >= view.deadlineMs) {
-    const heldSec = Math.max(0, Math.round((view.nowMs - view.openedAt) / 1000));
+    const heldSec = Math.max(0, Math.round(ageMs / 1000));
+    // Soft green floor: ~25% of the way to TP (capped) — defer dump to trail
+    const softGreen = Math.min(
+      12,
+      Math.max(5, Number.isFinite(view.tpPct) ? view.tpPct * 0.25 : 5)
+    );
+    const stillWorking =
+      pnlPct >= softGreen && peakPnlPct >= softGreen && hwm > view.entryPriceSol;
+    if (stillWorking && view.nowMs < hardDeadlineMs) {
+      return { type: 'none' };
+    }
     return {
       type: 'full',
       exitKind: 'scalp_timer',
       reason: `${label} timer expired after ${heldSec}s (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+    };
+  }
+  return { type: 'none' };
+}
+
+/**
+ * Protective trail for scalp positions that carry profile trailingStopPct.
+ * Previously scalpMode skipped all trail logic → Migration/Momentum always
+ * waited for the hard timer and dumped near-flat marks.
+ */
+export function evaluateScalpProtectiveTrail(
+  view: ScalpProtectiveTrailView
+): ScalpProtectiveTrailAction {
+  const trailPct = view.trailingStopPct;
+  if (
+    trailPct == null ||
+    !Number.isFinite(trailPct) ||
+    trailPct <= 0 ||
+    !(view.entryPriceSol > 0) ||
+    !(view.currentPriceSol > 0) ||
+    !(view.highWaterMarkSol > 0)
+  ) {
+    return { type: 'none' };
+  }
+  const pnlPct =
+    ((view.currentPriceSol - view.entryPriceSol) / view.entryPriceSol) * 100;
+  const activation =
+    view.trailingActivationProfit != null &&
+    Number.isFinite(view.trailingActivationProfit) &&
+    view.trailingActivationProfit > 0
+      ? view.trailingActivationProfit
+      : Math.max(8, trailPct);
+
+  if (!view.trailingActive && pnlPct >= activation) {
+    return {
+      type: 'arm_trail',
+      trailPct,
+      reason: `Scalp trail ARMED at +${pnlPct.toFixed(1)}% — ${trailPct}% from peak`,
+    };
+  }
+  if (!view.trailingActive) return { type: 'none' };
+
+  const trailTrigger = view.highWaterMarkSol * (1 - trailPct / 100);
+  if (view.currentPriceSol <= trailTrigger) {
+    const dropFromPeak =
+      ((view.currentPriceSol - view.highWaterMarkSol) /
+        view.highWaterMarkSol) *
+      100;
+    return {
+      type: 'trail_exit',
+      reason: `scalp trailing stop ${trailPct}% (peak drop ${dropFromPeak.toFixed(1)}%)`,
     };
   }
   return { type: 'none' };

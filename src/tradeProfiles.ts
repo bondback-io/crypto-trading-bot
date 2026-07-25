@@ -93,6 +93,11 @@ export interface TradeProfileExitRules {
   hardTimeLimitSec?: number;
   hardTimeLimitSecMin?: number;
   hardTimeLimitSecMax?: number;
+  /**
+   * Exit if price drops this % from high-water before TP (Momentum Burst / scalp protect).
+   * Frozen onto position.scalpMomentumFailDropPct.
+   */
+  momentumFailDropPct?: number;
   /** Optional size multiplier vs dynamic size (1 = unchanged) */
   sizeMultiplier?: number;
   /**
@@ -316,10 +321,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Quick Scalp',
     rulesSummary: [
       'TP 18–30% · SL 7–12%',
-      'Max hold 1–3.5 minutes',
+      'Max hold 1–3.5 minutes · trail after +12%',
       'Smaller position size (~65%)',
       'Focus: small MC + volume spike',
-      'Aggressive dead-market exit',
+      'Aggressive dead-market exit · early stall cut',
     ],
     priority: 80,
     defaultEnabled: true,
@@ -338,8 +343,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       takeProfitPctMax: 30,
       stopLossPctMin: 7,
       stopLossPctMax: 12,
-      hardTimeLimitSecMin: 60,
-      hardTimeLimitSecMax: 210,
+      trailingStopPct: 8,
+      trailingActivationProfit: 12,
+      hardTimeLimitSecMin: 55,
+      hardTimeLimitSecMax: 220,
+      momentumFailDropPct: 9,
       sizeMultiplier: 0.65,
       aggressiveDeadMarket: true,
       deadVolumeMinHoldMinutes: 3,
@@ -455,8 +463,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Only fresh post-grad (≤2h / MC ≤$450K)',
       'Not for near-curve, early-buy, or mature DEX tokens',
       'Required: meaningful post-mig volume',
-      'Hold: short to medium (2–8 min timer)',
-      'Priority sizing (~1.15×)',
+      'Hold: 1.5–7 min timer · trail arms at +15%',
+      'Priority sizing (~1.15×) · early stall / fade exits',
     ],
     priority: 88,
     defaultEnabled: true,
@@ -477,10 +485,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       takeProfitPctMax: 45,
       stopLossPctMin: 10,
       stopLossPctMax: 15,
-      trailingStopPct: 12,
-      trailingActivationProfit: 20,
-      hardTimeLimitSecMin: 120,
-      hardTimeLimitSecMax: 480,
+      trailingStopPct: 10,
+      trailingActivationProfit: 15,
+      hardTimeLimitSecMin: 90,
+      hardTimeLimitSecMax: 420,
+      momentumFailDropPct: 9,
       forceScalp: true,
       shortTermStrategyId: 'post_migration_scalp',
       overrideScalpParams: true,
@@ -558,8 +567,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     rulesSummary: [
       'TP 28–45% · SL 10–14%',
       'Entry: strong volume acceleration + buy dominance',
-      'Max hold 3–6 minutes',
-      'Exit on momentum failure or target',
+      'Max hold ~2.5–7 min · trail after +10%',
+      'Exit on fade / stall / trail — timer is backstop',
     ],
     priority: 82,
     defaultEnabled: true,
@@ -580,8 +589,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       takeProfitPctMax: 45,
       stopLossPctMin: 10,
       stopLossPctMax: 14,
-      hardTimeLimitSecMin: 180,
-      hardTimeLimitSecMax: 360,
+      trailingStopPct: 9,
+      trailingActivationProfit: 10,
+      hardTimeLimitSecMin: 140,
+      hardTimeLimitSecMax: 420,
+      momentumFailDropPct: 6,
       sizeMultiplier: 0.9,
     },
   },
@@ -642,8 +654,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     rulesSummary: [
       'TP 15–25% · SL 6–10%',
       'Entry: sharp wick / over-extension',
-      'Max hold 1–2.5 minutes',
-      'Fast mean-reversion',
+      'Max hold 1–2.5 minutes · trail after +10%',
+      'Fast mean-reversion · early stall cut',
     ],
     priority: 83,
     defaultEnabled: true,
@@ -663,8 +675,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       takeProfitPctMax: 25,
       stopLossPctMin: 6,
       stopLossPctMax: 10,
-      hardTimeLimitSecMin: 60,
-      hardTimeLimitSecMax: 150,
+      trailingStopPct: 7,
+      trailingActivationProfit: 10,
+      hardTimeLimitSecMin: 50,
+      hardTimeLimitSecMax: 160,
+      momentumFailDropPct: 8,
       sizeMultiplier: 0.7,
     },
   },
@@ -2416,6 +2431,7 @@ export function applyTradeProfileExitRules(
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
     scalpDeadlineMs?: number;
+    scalpHardDeadlineMs?: number;
     scalpTpPct?: number;
     scalpSlPct?: number;
     scalpMomentumFailDropPct?: number;
@@ -2430,6 +2446,7 @@ export function applyTradeProfileExitRules(
     scalpMode: boolean;
     shortTermStrategyId: ShortTermStrategyId;
     scalpDeadlineMs: number;
+    scalpHardDeadlineMs: number;
     scalpTpPct: number;
     scalpSlPct: number;
     scalpMomentumFailDropPct: number;
@@ -2477,14 +2494,26 @@ export function applyTradeProfileExitRules(
     position.trailingActivationProfit = rules.trailingActivationProfit;
   }
   if (
+    rules.momentumFailDropPct != null &&
+    Number.isFinite(rules.momentumFailDropPct) &&
+    rules.momentumFailDropPct > 0
+  ) {
+    position.scalpMomentumFailDropPct = Math.min(
+      40,
+      Number(rules.momentumFailDropPct)
+    );
+  }
+  if (
     rules.hardTimeLimitSec != null &&
     Number.isFinite(rules.hardTimeLimitSec) &&
     rules.hardTimeLimitSec > 0 &&
     (position.scalpMode || rules.forceScalp)
   ) {
     position.scalpMode = true;
-    position.scalpDeadlineMs =
-      position.openedAt + Math.round(rules.hardTimeLimitSec) * 1000;
+    const holdMs = Math.round(rules.hardTimeLimitSec) * 1000;
+    position.scalpDeadlineMs = position.openedAt + holdMs;
+    // Soft timer may defer a green trade; hard cap at 1.4× primary window
+    position.scalpHardDeadlineMs = position.openedAt + Math.round(holdMs * 1.4);
   }
   if (
     (rules.aggressiveDeadMarket || rules.deadVolumeMinHoldMinutes != null) &&

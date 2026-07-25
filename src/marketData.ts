@@ -459,6 +459,9 @@ export function liquidityAtPrice(
  *
  * Floor path duration at ≥1h when the token is old enough; cap at a few hours so
  * we don't stretch pairCreated→now into multi-day holds for mature launches.
+ *
+ * Scalp timers top out around 7–8 minutes — the ≥45m/1h floors keep path length
+ * well beyond any profile hardTimeLimit so timer/TP/SL/trail can fire first.
  */
 export function resolveLaunchPathWindow(opts: {
   launchedAt: number;
@@ -487,7 +490,8 @@ export function resolveLaunchPathWindow(opts: {
     maxPath
   );
   if (ageMs > 0 && ageMs < minPath) {
-    // Truly young / near end of lookback — use remaining age (real EOW)
+    // Truly young / near end of lookback — use remaining age (real EOW).
+    // Cannot invent future beyond now; scalpCover (~12m) is informational only.
     durationMs = Math.max(3 * 60_000, ageMs);
   } else {
     durationMs = Math.max(minPath, durationMs);

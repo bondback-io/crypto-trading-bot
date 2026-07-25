@@ -34,6 +34,7 @@ import {
 } from './strictMode';
 import { isStrategyEnabled } from './strategies';
 import {
+  evaluateScalpProtectiveTrail,
   evaluateShortTermExit,
   seedShortTermPosition,
   shortTermExitLogTag,
@@ -136,6 +137,8 @@ export interface Position {
   scalpMode?: boolean;
   shortTermStrategyId?: import('./shortTermStrategies').ShortTermStrategyId;
   scalpDeadlineMs?: number;
+  /** Absolute max hold when soft timer defers a green scalp (1.4× primary) */
+  scalpHardDeadlineMs?: number;
   scalpTpPct?: number;
   scalpSlPct?: number;
   scalpMomentumFailDropPct?: number;
@@ -747,6 +750,7 @@ export class PaperTrader {
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
+    profileMomentumFailDropPct?: number;
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
   }): Position {
@@ -843,6 +847,7 @@ export class PaperTrader {
         shortTermStrategyId: input.shortTermStrategyId,
         hardTimeLimitSec: input.profileHardTimeLimitSec,
         overrideScalpParams: input.profileOverrideScalpParams,
+        momentumFailDropPct: input.profileMomentumFailDropPct,
         aggressiveDeadMarket: input.profileAggressiveDeadMarket,
         deadVolumeMinHoldMinutes: input.profileDeadVolumeMinHoldMinutes,
       },
@@ -983,6 +988,7 @@ export class PaperTrader {
       profileForceScalp?: boolean;
       profileHardTimeLimitSec?: number;
       profileOverrideScalpParams?: boolean;
+      profileMomentumFailDropPct?: number;
       profileDeadVolumeMinHoldMinutes?: number;
       profileAggressiveDeadMarket?: boolean;
     }
@@ -1117,6 +1123,7 @@ export class PaperTrader {
         shortTermStrategyId: meta?.shortTermStrategyId,
         hardTimeLimitSec: meta?.profileHardTimeLimitSec,
         overrideScalpParams: meta?.profileOverrideScalpParams,
+        momentumFailDropPct: meta?.profileMomentumFailDropPct,
         aggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
         deadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
       },
@@ -1560,6 +1567,7 @@ export class PaperTrader {
         openedAt: position.openedAt,
         nowMs,
         deadlineMs: position.scalpDeadlineMs,
+        hardDeadlineMs: position.scalpHardDeadlineMs,
         tpPct: position.scalpTpPct ?? position.takeProfitPct,
         slPct: position.scalpSlPct ?? position.stopLossPct,
         momentumFailDropPct: position.scalpMomentumFailDropPct,
@@ -1616,7 +1624,38 @@ export class PaperTrader {
           stillOpen: this.positions.has(positionId),
         };
       }
-      // Scalp positions skip tiered profit / legacy trail until timer/TP/SL
+      // Protective trail while waiting on soft timer / before primary deadline
+      const trailAct = evaluateScalpProtectiveTrail({
+        entryPriceSol: position.entryPriceSol,
+        currentPriceSol: markPrice,
+        highWaterMarkSol: position.highWaterMarkSol,
+        trailingActive: position.trailingActive === true,
+        trailingStopPct: position.trailingStopPct,
+        trailingActivationProfit: position.trailingActivationProfit,
+      });
+      if (trailAct.type === 'arm_trail') {
+        position.trailingActive = true;
+        position.trailingActivatedAt = nowMs;
+        position.trailingStopPct = trailAct.trailPct;
+        position.trailingStopPriceSol =
+          position.highWaterMarkSol * (1 - trailAct.trailPct / 100);
+        this.log('info', `${label}: ${trailAct.reason}`);
+        return {
+          kind: 'arm_trail',
+          reason: trailAct.reason,
+          markPnlPct,
+          stillOpen: true,
+        };
+      }
+      if (trailAct.type === 'trail_exit') {
+        this.simulateSell(position.id, markPrice, trailAct.reason);
+        return {
+          kind: 'trail_exit',
+          reason: trailAct.reason,
+          markPnlPct,
+          stillOpen: this.positions.has(positionId),
+        };
+      }
       return {
         kind: 'none',
         reason: '',
@@ -2041,6 +2080,7 @@ export class PaperTrader {
           openedAt: position.openedAt,
           nowMs: Date.now(),
           deadlineMs: position.scalpDeadlineMs,
+          hardDeadlineMs: position.scalpHardDeadlineMs,
           tpPct: position.scalpTpPct ?? position.takeProfitPct,
           slPct: position.scalpSlPct ?? position.stopLossPct,
           momentumFailDropPct: position.scalpMomentumFailDropPct,
@@ -2089,6 +2129,33 @@ export class PaperTrader {
                 }
               : undefined
           );
+          continue;
+        }
+        // Protective trail for scalp profiles (Migration / Momentum / Scalper)
+        const trailAct = evaluateScalpProtectiveTrail({
+          entryPriceSol: position.entryPriceSol,
+          currentPriceSol: currentPrice,
+          highWaterMarkSol: position.highWaterMarkSol,
+          trailingActive: position.trailingActive === true,
+          trailingStopPct: position.trailingStopPct,
+          trailingActivationProfit: position.trailingActivationProfit,
+        });
+        if (trailAct.type === 'arm_trail') {
+          position.trailingActive = true;
+          position.trailingActivatedAt = Date.now();
+          position.trailingStopPct = trailAct.trailPct;
+          position.trailingStopPriceSol =
+            position.highWaterMarkSol * (1 - trailAct.trailPct / 100);
+          this.log('info', `${label}: ${trailAct.reason}`);
+          continue;
+        }
+        if (trailAct.type === 'trail_exit') {
+          console.log(
+            `[scalp] TRAIL strategy=${position.shortTermStrategyId || 'scalp'} ${label} — ${trailAct.reason}`
+          );
+          this.log('sell', `${label}: [SCALP_TRAIL] ${trailAct.reason}`);
+          await this.closePositionByRules(position, currentPrice, trailAct.reason);
+          continue;
         }
         continue;
       }
