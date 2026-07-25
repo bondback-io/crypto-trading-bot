@@ -607,6 +607,9 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
 /**
  * Evaluate short-term exit: SL → TP → momentum fail → timer.
  * Call before tiered profit strategy when scalpMode is set.
+ *
+ * SL has a short grace after open so fill/Dex mark mismatches cannot
+ * instantly stop out a Scalper (seen as 0.1s holds with −10% phantom marks).
  */
 export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction {
   if (!(view.entryPriceSol > 0) || !(view.currentPriceSol > 0)) {
@@ -615,13 +618,20 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
   const label = LABEL[view.strategyId] || 'Scalp';
   const pnlPct =
     ((view.currentPriceSol - view.entryPriceSol) / view.entryPriceSol) * 100;
+  const ageMs = Math.max(0, view.nowMs - view.openedAt);
+  /** Ignore modest SL marks until feeds settle; still honour violent rugs. */
+  const SL_GRACE_MS = 15_000;
+  const SL_GRACE_RUG_PCT = -35;
 
   if (pnlPct <= view.slPct) {
-    return {
-      type: 'full',
-      exitKind: 'scalp_sl',
-      reason: `${label} SL ${view.slPct}% (mark ${pnlPct.toFixed(1)}%)`,
-    };
+    const inGrace = ageMs < SL_GRACE_MS && pnlPct > SL_GRACE_RUG_PCT;
+    if (!inGrace) {
+      return {
+        type: 'full',
+        exitKind: 'scalp_sl',
+        reason: `${label} SL ${view.slPct}% (mark ${pnlPct.toFixed(1)}%)`,
+      };
+    }
   }
   if (pnlPct >= view.tpPct) {
     return {

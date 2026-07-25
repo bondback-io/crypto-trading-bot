@@ -191,40 +191,9 @@ export function reconcileMarkPriceSol(
   }
 
   const pxRatio = mark / entry;
-  const entryMc = input.entryMarketCapUsd;
-  const markMc = input.markMarketCapUsd ?? undefined;
-
-  if (
-    entryMc != null &&
-    markMc != null &&
-    Number.isFinite(entryMc) &&
-    Number.isFinite(markMc) &&
-    entryMc > 0 &&
-    markMc > 0
-  ) {
-    const mcRatio = markMc / entryMc;
-    if (Number.isFinite(mcRatio) && mcRatio > 0) {
-      const mcAbsurd =
-        mcRatio > MAX_SANE_MARK_PRICE_RATIO ||
-        mcRatio < 1 / MAX_SANE_MARK_PRICE_RATIO;
-      const disagree =
-        pxRatio / mcRatio > 10 || mcRatio / pxRatio > 10;
-
-      if (disagree) {
-        // Pathological FDV/MC — ignore it; fall through to price-only checks
-        if (mcAbsurd) {
-          // continue below
-        } else {
-          return {
-            priceSol: entry * mcRatio,
-            adjusted: true,
-            rejected: false,
-            reason: `mc-scaled (px ${pxRatio.toExponential(2)} vs mc ${mcRatio.toExponential(2)})`,
-          };
-        }
-      }
-    }
-  }
+  // NOTE: We intentionally do not scale the mark price from Dex MC.
+  // Fresh pumps often have MC that disagrees with fill price; MC-scaling
+  // previously invented fake −40% marks and instant Scalper stops.
 
   if (
     pxRatio > MAX_SANE_MARK_PRICE_RATIO ||
@@ -252,7 +221,7 @@ export interface ResolveExitMarketCapInput {
 
 /**
  * Exit MC must track the PnL mark. Prefer entry×(exit/entry); accept a live
- * Dex MC only when it agrees with that move and stays within sane bounds.
+ * Dex MC only when it closely agrees with that move (not just within 10×).
  */
 export function resolveExitMarketCapUsd(
   input: ResolveExitMarketCapInput
@@ -271,6 +240,9 @@ export function resolveExitMarketCapUsd(
       ? marketCapAtPrice(entryMc, entry, exit)
       : undefined;
 
+  // Live Dex MC may use a different supply/pool than entry. Only trust it when
+  // it tracks the price move tightly; otherwise display follows PnL.
+  const MAX_EXIT_MC_DISAGREE = 1.25;
   if (
     liveMc != null &&
     Number.isFinite(liveMc) &&
@@ -290,8 +262,8 @@ export function resolveExitMarketCapUsd(
       mcRatio >= 1 / MAX_SANE_MARK_PRICE_RATIO &&
       Number.isFinite(pxRatio) &&
       pxRatio > 0 &&
-      pxRatio / mcRatio <= 10 &&
-      mcRatio / pxRatio <= 10
+      pxRatio / mcRatio <= MAX_EXIT_MC_DISAGREE &&
+      mcRatio / pxRatio <= MAX_EXIT_MC_DISAGREE
     ) {
       return liveMc;
     }

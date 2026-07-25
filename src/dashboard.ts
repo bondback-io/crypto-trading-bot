@@ -348,21 +348,51 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       letter-spacing: .02em;
       white-space: nowrap;
     }
-    .ctl input, .ctl select {
+    .ctl input:not([type="checkbox"]):not([type="radio"]),
+    .ctl select {
       width: 100%;
       min-width: 4.5rem;
+    }
+    .ctl input[type="checkbox"],
+    .ctl input[type="radio"] {
+      width: auto;
+      min-width: 0;
+      flex-shrink: 0;
+      accent-color: #10b981;
     }
     .ctl-sm { width: 4.75rem; }
     .ctl-md { width: 5.75rem; }
     .ctl-lg { width: 7.5rem; }
     .ctl-check {
+      display: inline-flex;
       flex-direction: row;
       align-items: center;
       gap: 0.4rem;
-      padding-top: 1.1rem;
+      padding-top: 0;
       color: var(--muted);
       font-size: 12px;
-      white-space: nowrap;
+      white-space: normal;
+      line-height: 1.3;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .ctl-check input[type="checkbox"] {
+      width: 1rem !important;
+      height: 1rem;
+      min-width: 1rem;
+      max-width: 1rem;
+      flex-shrink: 0;
+      accent-color: #10b981;
+    }
+    .ctl-check > span {
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: normal;
+    }
+    /* When ctl-check sits beside labeled fields in a form grid, align to field baseline */
+    .filters-row > .ctl-check,
+    .grid > .ctl.ctl-check {
+      padding-top: 1.1rem;
     }
     .filters-row {
       display: flex;
@@ -1152,6 +1182,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       gap: 0.4rem;
       margin-bottom: 0.25rem;
     }
+    .tp-toggle-card .tp-head input[type="checkbox"] {
+      width: 1rem;
+      height: 1rem;
+      min-width: 1rem;
+      flex-shrink: 0;
+      accent-color: #10b981;
+    }
     .tp-toggle-card .tp-name { font-weight: 600; font-size: 0.8rem; }
     .tp-toggle-card .tp-blurb {
       margin: 0.35rem 0 0.25rem;
@@ -1244,14 +1281,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       grid-template-columns: 1fr 1fr;
       gap: 0.3rem 0.45rem;
     }
-    .tp-params label {
+    .tp-params > label {
       display: flex;
       flex-direction: column;
       gap: 0.1rem;
       font-size: 0.62rem;
       color: #94a3b8;
+      min-width: 0;
     }
-    .tp-params input {
+    .tp-params > label > input:not([type="checkbox"]),
+    .tp-params > label > select {
       width: 100%;
       background: #020617;
       border: 1px solid #334155;
@@ -1260,10 +1299,71 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 0.72rem;
       padding: 0.2rem 0.35rem;
     }
+    .tp-qf {
+      grid-column: 1 / -1;
+      margin-top: 0.35rem;
+      padding-top: 0.45rem;
+      border-top: 1px solid #334155;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.35rem 0.5rem;
+      min-width: 0;
+    }
+    .tp-qf > p {
+      grid-column: 1 / -1;
+    }
+    .tp-qf > label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      font-size: 0.62rem;
+      color: #94a3b8;
+      min-width: 0;
+    }
+    .tp-qf > label > input:not([type="checkbox"]),
+    .tp-qf > label > select {
+      width: 100%;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 0.3rem;
+      color: #e2e8f0;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.35rem;
+    }
+    .tp-qf > label.tp-check,
+    .tp-params label.tp-check {
+      grid-column: 1 / -1;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.7rem;
+      color: #cbd5e1;
+      line-height: 1.3;
+      white-space: normal;
+    }
+    .tp-qf > label.tp-check > input[type="checkbox"],
+    .tp-params label.tp-check > input[type="checkbox"] {
+      width: 1rem;
+      height: 1rem;
+      min-width: 1rem;
+      flex-shrink: 0;
+      margin: 0;
+      accent-color: #10b981;
+      background: transparent;
+      border: none;
+      padding: 0;
+    }
+    .tp-qf > label.tp-check > span,
+    .tp-params label.tp-check > span {
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: normal;
+    }
     .tp-params-actions {
       grid-column: 1 / -1;
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 0.35rem;
       margin-top: 0.25rem;
     }
@@ -2378,7 +2478,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         min-height: 2.25rem;
       }
       .ctl-sm, .ctl-md, .ctl-lg { width: 100%; }
-      .ctl input, .ctl select { min-width: 0; }
+      .ctl input:not([type="checkbox"]):not([type="radio"]),
+      .ctl select { min-width: 0; }
       .toggle-row {
         gap: 0.75rem;
         padding: 0.65rem 0;
@@ -3631,7 +3732,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
             </div>
             <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
-              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" /> Multi-profile ON
+              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
+              <span>Multi-profile ON</span>
             </label>
           </div>
           <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
@@ -3649,13 +3751,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 <p class="text-xs text-slate-400 mb-0">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
               </div>
               <label class="ctl-check" title="Enable weighted auto-scoring">
-                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" /> Auto-score ON
+                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" />
+                <span>Auto-score ON</span>
               </label>
             </div>
-            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs mb-2">
-              <label class="ctl"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
-              <label class="ctl ctl-check" style="align-items:flex-end;padding-bottom:0.35rem"><input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" /> Skip below min</label>
-              <label class="ctl"><span>Force profile</span>
+            <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
+              <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
+              <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
+                <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
+                <span>Skip below min</span>
+              </label>
+              <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
                 <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
                   <option value="">— none (auto pick) —</option>
                 </select>
@@ -4616,10 +4722,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ids.forEach(id => {
           const el = document.getElementById(id);
           if (!el) return;
-          const wrapper = el.closest('.field, .ctl, .toggle-row') || el;
+          // Keep checkbox/radio with their label text — never orphan the input alone.
+          const wrapper =
+            el.closest('.field, .ctl, .toggle-row, label.strat-check, label.ctl-check, label.strat-field') ||
+            ((el.type === 'checkbox' || el.type === 'radio') ? el.closest('label') : null) ||
+            el;
+          if (wrapper.parentElement === target) return; // already in place
           wrapper.setAttribute('data-strategy-setting', key);
           wrapper.setAttribute('data-strategy-control', id);
-          if (wrapper.classList.contains('toggle-row') || wrapper.classList.contains('ctl-check')) {
+          if (
+            wrapper.classList.contains('toggle-row') ||
+            wrapper.classList.contains('ctl-check') ||
+            wrapper.classList.contains('strat-check') ||
+            ((el.type === 'checkbox' || el.type === 'radio') && wrapper.tagName === 'LABEL')
+          ) {
             wrapper.classList.add('strat-check');
           } else {
             wrapper.classList.add('strat-field');
@@ -5190,9 +5306,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                         match.qualityFilter || {}
                       );
                       return (
-                        '<div class="tp-qf" style="grid-column:1/-1;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid #334155">' +
-                          '<p class="mint text-xs" style="margin:0 0 0.4rem"><strong style="color:#4ade80">Quality Filter</strong> — stricter MC / liq / volume / holders on technical patterns (HWR only)</p>' +
-                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                        '<div class="tp-qf">' +
+                          '<p class="mint text-xs" style="margin:0"><strong style="color:#4ade80">Quality Filter</strong> — stricter MC / liq / volume / holders on technicals (HWR only)</p>' +
+                          '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="enabled"' + (qf.enabled !== false ? ' checked' : '') + ' />' +
                             '<span>Enable Quality Filter</span></label>' +
                           '<label>Mode<select data-qf="mode">' +
@@ -5207,12 +5323,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                           '<label>Min pattern conf<input type="number" data-qf="minPatternConfidence" step="1" min="30" max="95" value="' + escHtml(String(qf.minPatternConfidence)) + '" /></label>' +
                           '<label>Weak penalty<input type="number" data-qf="weakSetupPenalty" step="1" value="' + escHtml(String(qf.weakSetupPenalty)) + '" /></label>' +
                           '<label>Clean bonus<input type="number" data-qf="cleanSetupBonus" step="1" value="' + escHtml(String(qf.cleanSetupBonus)) + '" /></label>' +
-                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                          '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="applyToFibSupport"' + (qf.applyToFibSupport !== false ? ' checked' : '') + ' />' +
                             '<span>Apply to Fib / Support</span></label>' +
-                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                          '<label class="tp-check">' +
                             '<input type="checkbox" data-qf="preferFibOrSupport"' + (qf.preferFibOrSupport !== false ? ' checked' : '') + ' />' +
-                            '<span>Pullbacks need Fib/Support</span></label>' +
+                            '<span>Pullbacks need Fib / Support</span></label>' +
                         '</div>'
                       );
                     })()

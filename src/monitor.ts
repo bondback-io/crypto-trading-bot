@@ -135,6 +135,17 @@ import { registerDipBuyHistoryProvider } from './dipSmartWallet';
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
 
 /** Attach short-term scalp / post-run dip seed when an active strategy qualifies. */
+/**
+ * Seed short-term / scalp hints before multi-profile assignment.
+ *
+ * When Multi-profile is ON we avoid blanket-tagging every smart-money buy as
+ * Quick/Micro scalp — that used to force almost every trade onto the Scalper
+ * profile and zero-out High Win-Rate / Trend / Compounder.
+ *
+ * Specialty engines (migration / momentum / reversal / post-run dip) still
+ * pre-tag so their matching profiles can win. Generic quick/micro only pre-tag
+ * when Multi-profile is OFF (legacy single-stack behaviour).
+ */
 function resolveScalpBuyFlag(signal: {
   mint?: string;
   symbol?: string;
@@ -201,6 +212,19 @@ function resolveScalpBuyFlag(signal: {
     );
     return {};
   }
+
+  const multiOn = config.tradeProfiles?.enabled !== false;
+  const genericQuick =
+    resolved.id === 'quick_scalper' || resolved.id === 'micro_scalper';
+  // Multi-profile: leave generic quick/micro untagged so Scalper must win on
+  // small-MC / volume match — not by pre-empting every copy trade.
+  if (multiOn && genericQuick) {
+    console.log(
+      `[scalp] defer ${resolved.id} until profile assign — ${resolved.reason}`
+    );
+    return {};
+  }
+
   const suite = isScalperSuiteProfile(config.strategyProfile)
     ? ` [${getScalperSuiteVariantLabel(config.strategyProfile)}]`
     : '';

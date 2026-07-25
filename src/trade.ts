@@ -208,9 +208,9 @@ export interface BuyOptions {
 
 /**
  * Resolve Buy MC at our fill.
- * Prefer active bonding-curve MC (pump truth) over Dex FDV/MC, which often
- * reports absurd tens-of-millions figures for early curve tokens when price
- * units disagree with Jupiter/curve fills.
+ * Prefer Dex circulating MC (what charts show) when its price agrees with the
+ * fill; bonding-curve full-supply estimates often read ~1.5–2× high vs Dex.
+ * Fall back to curve when Dex is missing or price-unit mismatched.
  */
 async function resolveEntryMarketCapUsd(
   mint: string,
@@ -230,8 +230,7 @@ async function resolveEntryMarketCapUsd(
         curvePx > 0 &&
         fillPriceSol > 0
       ) {
-        mc =
-          marketCapAtPrice(mc, curvePx, fillPriceSol) ?? mc;
+        mc = marketCapAtPrice(mc, curvePx, fillPriceSol) ?? mc;
       }
       if (mc != null && Number.isFinite(mc) && mc > 0) curveMc = mc;
     }
@@ -240,24 +239,27 @@ async function resolveEntryMarketCapUsd(
   }
 
   let dexMc: number | undefined;
+  let dexPriceAgrees = false;
   try {
     const snap = await fetchLiveTokenSnapshot(mint);
     if (snap?.marketCapUsd && snap.marketCapUsd > 0) {
       if (snap.priceSol != null && snap.priceSol > 0 && fillPriceSol > 0) {
         const ratio = fillPriceSol / snap.priceSol;
-        // Price-unit mismatch vs Dex → distrust Dex MC when we have curve.
-        if (
-          Number.isFinite(ratio) &&
-          ratio >= 0.1 &&
-          ratio <= 10
-        ) {
+        if (Number.isFinite(ratio) && ratio >= 0.7 && ratio <= 1.35) {
+          dexPriceAgrees = true;
           dexMc =
             marketCapAtPrice(
               snap.marketCapUsd,
               snap.priceSol,
               fillPriceSol
             ) ?? snap.marketCapUsd;
-        } else if (curveMc == null) {
+        } else if (
+          Number.isFinite(ratio) &&
+          ratio >= 0.1 &&
+          ratio <= 10 &&
+          curveMc == null
+        ) {
+          // Wide mismatch — only use Dex when we have no curve truth
           dexMc =
             marketCapAtPrice(
               snap.marketCapUsd,
@@ -273,15 +275,24 @@ async function resolveEntryMarketCapUsd(
     /* non-fatal */
   }
 
-  // Prefer curve MC for active pumps (Dex FDV often missing/inflated).
-  // Display + gate must use the same truth so Buy MC cannot show ~$2.5k
-  // after a filter that saw a higher Dex MC.
-  const resolved = curveMc ?? dexMc;
+  // Dex (chart MC) first when price agrees; curve often overstates vs circulating.
+  let resolved: number | undefined;
+  if (dexMc != null && dexPriceAgrees) {
+    resolved = dexMc;
+    // If curve is much higher than Dex, keep Dex (full-supply inflation)
+  } else if (
+    curveMc != null &&
+    dexMc != null &&
+    curveMc > dexMc * 1.35
+  ) {
+    resolved = dexMc;
+  } else {
+    resolved = curveMc ?? dexMc;
+  }
 
   if (provided != null && Number.isFinite(provided) && provided > 0) {
-    // Reject provided values that look like Dex FDV blow-ups vs curve
-    if (curveMc != null && provided / curveMc > 10) return curveMc;
-    // Still prefer lower curve when provided is above curve on active pump
+    if (resolved != null && provided / resolved > 10) return resolved;
+    if (dexMc != null && dexPriceAgrees) return Math.min(provided, dexMc);
     if (curveMc != null && curveMc > 0) return Math.min(provided, curveMc);
     return provided;
   }

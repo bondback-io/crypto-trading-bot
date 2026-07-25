@@ -1310,41 +1310,60 @@ function scoreProfile(
   }
 
   if (m.preferScalp) {
+    // Hard gate: Scalper is for small-MC only when preferSmallMc is set
+    if (m.preferSmallMc && m.maxMarketCapUsd != null) {
+      if (mc == null || mc <= 0 || mc > m.maxMarketCapUsd) {
+        return {
+          score: 0,
+          reason:
+            mc == null
+              ? 'need MC for scalper'
+              : `MC $${Math.round(mc)} above scalper max $${m.maxMarketCapUsd}`,
+        };
+      }
+    }
     const smallMc =
-      m.preferSmallMc &&
       mc != null &&
       m.maxMarketCapUsd != null &&
       mc > 0 &&
       mc <= m.maxMarketCapUsd;
     const genericScalp =
       isScalp &&
-      ctx.shortTermStrategyId !== 'momentum_burst' &&
-      ctx.shortTermStrategyId !== 'reversal_scalp';
-    if (genericScalp) {
-      score += 90;
+      (ctx.shortTermStrategyId === 'quick_scalper' ||
+        ctx.shortTermStrategyId === 'micro_scalper');
+    // Specialty engines belong to other profiles — do not claim them as Scalper
+    if (
+      ctx.shortTermStrategyId === 'momentum_burst' ||
+      ctx.shortTermStrategyId === 'reversal_scalp' ||
+      ctx.shortTermStrategyId === 'post_migration_scalp'
+    ) {
+      return { score: 0, reason: `defer to ${ctx.shortTermStrategyId}` };
+    }
+    if (genericScalp && smallMc) {
+      score += 88;
       bits.push(`scalp:${ctx.shortTermStrategyId}`);
-      if (smallMc) {
-        score += 12;
-        bits.push(`small MC $${Math.round(mc!)}`);
-      }
       if (
         m.preferVolumeSpike &&
         volM5 != null &&
         volM5 >= (m.minVolumeM5Usd ?? 800)
       ) {
-        score += 10;
+        score += 12;
         bits.push(`vol spike M5 $${Math.round(volM5)}`);
       }
     } else if (smallMc && !isDip && !isMig && !isMomentum && !isReversal) {
-      score += 55;
+      // Untagged small-MC candidate (multi-profile path) — competitive but not automatic winner
+      score += 62;
       bits.push(`small-MC scalp candidate $${Math.round(mc!)}`);
       if (
         m.preferVolumeSpike &&
         volM5 != null &&
         volM5 >= (m.minVolumeM5Usd ?? 800)
       ) {
-        score += 8;
+        score += 14;
         bits.push('volume spike');
+      } else if (volM5 == null && volH1 != null && volH1 >= 1_500) {
+        score += 6;
+        bits.push('vol1h confirm');
       }
     } else {
       return { score: 0, reason: 'not a scalp / small-MC setup' };
@@ -2229,13 +2248,18 @@ export function applyTradeProfileExitRules(
   }>
 ): void {
   if (rules.forceScalp && rules.shortTermStrategyId && seedShortTerm) {
-    if (!position.scalpMode) {
+    // Always re-seed when the assigned profile wants a different engine.
+    // Previously we kept an earlier scalpMode seed (e.g. post_migration_scalp)
+    // even when Scalper profile required quick_scalper — causing wrong SL/timer labels
+    // and instant exits on mismatched marks.
+    if (
+      !position.scalpMode ||
+      position.shortTermStrategyId !== rules.shortTermStrategyId
+    ) {
       Object.assign(
         position,
         seedShortTerm(rules.shortTermStrategyId, position.openedAt)
       );
-    } else if (!position.shortTermStrategyId && rules.shortTermStrategyId) {
-      position.shortTermStrategyId = rules.shortTermStrategyId;
     }
   }
 

@@ -230,6 +230,24 @@ export function computeFactorAffinities(
     volatility = lowIsBetter(speed, 3, 25);
   }
 
+  // Market-cap fit already computed — crush Scalper affinity on larger tokens
+  if (m.preferScalp || m.preferSmallMc) {
+    if (mc != null && m.maxMarketCapUsd != null && mc > m.maxMarketCapUsd) {
+      // Force near-zero so auto-score cannot pick Scalper on mid/high MC
+      return {
+        volume: 0.15,
+        smartMoney: 0.35,
+        tokenAge: 0.2,
+        volatility: 0.2,
+        supportFib: 0.2,
+        chartPatterns: 0.15,
+        migration: 0.2,
+        liquidityHolders: 0.2,
+        session: sessionAffinity(preferredSession),
+      };
+    }
+  }
+
   // Support / Fib
   let supportFib = 0.5;
   if (m.preferFibOrSupport || m.preferDip) {

@@ -1007,7 +1007,26 @@ export class PaperTrader {
     const amountTokens = netSol / entryPrice;
 
     this.balanceSol -= spendSol;
-    this.priceCache.set(mint, priceSol);
+    // Mark must match fill — seeding cache with raw quote instantly marks −slip%
+    this.priceCache.set(mint, entryPrice);
+
+    // Align Buy MC to the slipped fill price (MC was resolved at raw quote)
+    let entryMarketCapUsd =
+      meta?.entryMarketCapUsd != null &&
+      Number.isFinite(meta.entryMarketCapUsd) &&
+      meta.entryMarketCapUsd > 0
+        ? meta.entryMarketCapUsd
+        : undefined;
+    if (
+      entryMarketCapUsd != null &&
+      priceSol > 0 &&
+      entryPrice > 0 &&
+      Math.abs(entryPrice - priceSol) / priceSol > 0.0005
+    ) {
+      entryMarketCapUsd =
+        marketCapAtPrice(entryMarketCapUsd, priceSol, entryPrice) ??
+        entryMarketCapUsd;
+    }
 
     const position: Position = {
       id: nextId('pos'),
@@ -1048,12 +1067,7 @@ export class PaperTrader {
       sourceWallets: meta?.sourceWallets,
       sourceNames: meta?.sourceNames,
       antiRug: meta?.antiRug,
-      entryMarketCapUsd:
-        meta?.entryMarketCapUsd != null &&
-        Number.isFinite(meta.entryMarketCapUsd) &&
-        meta.entryMarketCapUsd > 0
-          ? meta.entryMarketCapUsd
-          : undefined,
+      entryMarketCapUsd,
       sourceEntryMcUsd:
         meta?.sourceEntryMcUsd != null &&
         Number.isFinite(meta.sourceEntryMcUsd) &&
