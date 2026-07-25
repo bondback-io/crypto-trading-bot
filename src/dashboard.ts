@@ -2457,6 +2457,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       line-height: 1.2;
     }
     .header-actions .status-stat strong { color: #e2e8f0; font-weight: 650; }
+    .header-actions #rpc-status-wrap {
+      max-width: 9.5rem;
+      overflow: hidden;
+    }
+    .header-actions #rpc-active {
+      display: inline-block;
+      max-width: 7.5rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: bottom;
+      white-space: nowrap;
+    }
+    .header-actions #rpc-latency {
+      display: inline-block;
+      min-width: 3.75rem;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
     .header-actions #status-text { font-size: 0.75rem; line-height: 1.2; }
     .header-actions .badge { padding: 1px 7px; font-size: 10px; letter-spacing: 0.02em; }
     .header-actions .strict-badge,
@@ -2710,7 +2728,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         flex: 1 1 100%;
         margin-left: 0;
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.3rem;
       }
       .header-actions .btn {
@@ -2720,9 +2738,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         min-height: 2.15rem;
         padding: 0.35rem 0.4rem;
         font-size: 11px;
-      }
-      .header-actions .status-controls .btn:nth-child(2) {
-        grid-column: span 2;
       }
       .nav-tabs {
         scroll-snap-type: x proximity;
@@ -2848,16 +2863,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         flex-wrap: nowrap;
         gap: 0.4rem 0.55rem;
         padding: 0.3rem 0.55rem !important;
-        overflow-x: auto;
-        scrollbar-width: thin;
+        overflow: hidden;
+        min-width: 0;
       }
       .header-actions .status-meta {
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         flex-wrap: nowrap;
         justify-content: flex-end;
         align-items: center;
         gap: 0.28rem 0.4rem;
         min-width: 0;
+        overflow: hidden;
       }
       .header-actions .status-controls {
         flex: 0 0 auto;
@@ -3011,7 +3027,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="status-controls">
           <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
-          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop"><span class="btn-label-short">Refresh</span><span class="btn-label-full">Force Refresh</span></button>
           <button id="mode-paper" onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
           <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
           <button id="mode-live" onclick="setMode('live')" class="btn btn-secondary" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
@@ -3288,9 +3303,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- ========== TAB: Smart Wallets ========== -->
     <section data-tab-panel="wallets" class="hidden space-y-4">
       <div class="card">
-        <div class="flex flex-wrap gap-3 items-center justify-between mb-2">
-          <div class="section-title !mb-0">Discovery Status <span class="tip" tabindex="0" data-tip="Health of wallet discovery APIs (GMGN/Kolscan/Birdeye): last fetch, errors, and auto-refresh interval."></span></div>
-          <span class="mint" id="discovery-status">—</span>
+        <div class="flex flex-wrap gap-2 items-center justify-between mb-2">
+          <div class="section-title !mb-0">Monitor &amp; Discovery <span class="tip" tabindex="0" data-tip="Force Refresh re-enables tracked wallets and restarts the poll loop. Discovery status shows API health for GMGN/Kolscan/Birdeye."></span></div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button class="btn btn-primary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop">Force Refresh Monitoring</button>
+            <button class="btn btn-secondary" onclick="refreshDiscoveryStatus()" title="Poll discovery health without starting a full search">Refresh status</button>
+            <span class="mint" id="discovery-status">—</span>
+          </div>
         </div>
         <div class="mint text-sm mb-2" id="discovery-sources-status">Sources — checking…</div>
         <div class="mint text-amber-300 text-sm mb-1 hidden" id="discovery-setup-hint" style="display:none;color:#fbbf24"></div>
@@ -3302,7 +3321,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <input type="number" id="disc-auto-min" value="15" min="0" max="120" />
           </label>
           <button class="btn btn-secondary" onclick="saveDiscoveryConfig()" title="Save the auto-refresh interval">Save interval</button>
-          <button class="btn btn-secondary" onclick="refreshDiscoveryStatus()" title="Poll discovery health without starting a full search">Refresh status</button>
         </div>
       </div>
 
@@ -9195,7 +9213,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rpcWrap = document.getElementById('rpc-status-wrap');
       const rpcIcon = document.getElementById('rpc-health-icon');
       if (rpcActiveEl) {
-        rpcActiveEl.textContent = rpc.active || '—';
+        const rpcLabel = String(rpc.active || '—');
+        rpcActiveEl.textContent = rpcLabel.length > 18
+          ? rpcLabel.slice(0, 16) + '…'
+          : rpcLabel;
         rpcActiveEl.style.color = '';
       }
       if (rpcWrap) {
