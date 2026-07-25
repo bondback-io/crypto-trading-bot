@@ -4059,8 +4059,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
-    </section>
-
     <!-- ========== TAB: Market Scanner ========== -->
     <section data-tab-panel="scanner" class="hidden space-y-4">
       <div class="card">
@@ -7380,12 +7378,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const reason = String(p.reason || p.skipReason || '');
       const nameHit =
         names.some(function (n) {
-          return /market\s*scanner/i.test(String(n));
-        }) || /market\s*scanner/i.test(walletName);
-      const reasonHit = /market\s*scanner|\bscanner\b/i.test(reason);
+          return /market\\s*scanner/i.test(String(n));
+        }) || /market\\s*scanner/i.test(walletName);
+      const reasonHit = /market\\s*scanner|\\bscanner\\b/i.test(reason);
       const isHybrid =
         entrySrc === 'hybrid' ||
-        (nameHit && /\+?\s*wallets/i.test(walletName));
+        (nameHit && /\\+?\\s*wallets/i.test(walletName));
       const isScanner =
         entrySrc === 'scanner' ||
         entrySrc === 'hybrid' ||
@@ -7432,7 +7430,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function fmtWalletConvergence(p) {
       const entrySrc = p && p.entrySource;
       const namesHit = ((p && p.sourceNames) || []).some(function (n) {
-        return /market\s*scanner/i.test(String(n));
+        return /market\\s*scanner/i.test(String(n));
       });
       if (
         entrySrc === 'scanner' ||
