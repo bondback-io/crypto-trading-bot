@@ -432,6 +432,8 @@ export function createServer(): express.Application {
         strictModeIntensity?: 'low' | 'medium' | 'high';
         /** When true, force Strict + intensity to match current live config */
         matchLiveStrict?: boolean;
+        /** Live-Sim parity (default true). Synthetic / multi-sim are Advanced. */
+        parityMode?: boolean;
       };
 
       const { runBacktest } = await import('./backtest');
@@ -488,7 +490,9 @@ export function createServer(): express.Application {
           body.useLiveData !== undefined
             ? Boolean(body.useLiveData)
             : config.paper.useLiveData || config.mode === 'liveSimulation',
-        allowSynthetic: body.allowSynthetic !== false,
+        // Parity default: synthetic off unless Advanced checkbox explicitly on
+        allowSynthetic: body.allowSynthetic === true,
+        parityMode: body.parityMode !== false,
         startingBalanceSol:
           body.startingBalanceSol != null
             ? Number(body.startingBalanceSol)
@@ -539,7 +543,8 @@ export function createServer(): express.Application {
         minLiquidityUsd: Number(req.query.minLiquidity) || 0,
         minMarketCapUsd: Number(req.query.minMc) || 0,
         maxRiskScore: Number(req.query.maxRisk) || 0,
-        allowSynthetic: req.query.synthetic !== '0',
+        allowSynthetic: req.query.synthetic === '1' || req.query.synthetic === 'true',
+        parityMode: req.query.parity !== '0',
         riskLevel: isRiskLevel(riskQ) ? riskQ : 'current',
         compareRiskLevels:
           req.query.compareRisk === '1' || req.query.compareRisk === 'true',

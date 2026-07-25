@@ -2254,6 +2254,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     isMigration: signal.isMigration,
     nearMigration: signal.nearMigration,
     earlyBuy: signal.earlyBuy,
+    migrationFresh: isRecentlyMigrated(signal.mint),
     scalpMode: buyOpts.scalpMode,
     shortTermStrategyId: buyOpts.shortTermStrategyId,
     convictionScore: signal.convictionScore,

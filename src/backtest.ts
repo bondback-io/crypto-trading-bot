@@ -10,6 +10,9 @@ import {
   getRiskLevelSummary,
   HARD_FILTER_FLOORS,
   isRiskLevel,
+  effectiveMinMarketCapUsd,
+  isScalperSuiteProfile,
+  getScalperSuiteVariantLabel,
   type RiskLevel,
 } from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
@@ -67,6 +70,13 @@ import {
   type ShortTermStrategyId,
 } from './shortTermStrategies';
 import { resolvePostRunDipForSignal } from './postRunDip';
+import {
+  assignTradeProfile,
+  stampFromAssignment,
+  ensureTradeProfilesInitialized,
+  FRESH_MIGRATION_MAX_AGE_HOURS,
+  type TradeProfileId,
+} from './tradeProfiles';
 
 export type BacktestStrategyType =
   | 'convergence'
@@ -136,6 +146,12 @@ export interface BacktestOptions {
    * Ignored when Strict is OFF. Default: live intensity / medium.
    */
   strictModeIntensity?: StrictModeIntensity;
+  /**
+   * Parity mode (default true): inherit live Risk/Strict/toggles/profiles,
+   * fail-closed on missing MC/vol when live would reject, synthetic off unless
+   * allowSynthetic explicitly true, simulations capped at 1 unless Advanced.
+   */
+  parityMode?: boolean;
 }
 
 export type BacktestExitTakeStage =
@@ -224,6 +240,18 @@ export interface BacktestTradeResult {
   roundTripCostBps?: number;
   /** Step-by-step exit debug lines for this trade */
   debugLog?: string[];
+  /** Trade Profile assignment (Live Sim parity) */
+  tradeProfileId?: string;
+  tradeProfileName?: string;
+  tradeProfileIcon?: string;
+  tradeProfileColor?: string;
+  tradeProfileScore?: number;
+  tradeProfileReason?: string;
+  /** Armed short-term / scalp engine id when applicable */
+  shortTermStrategyId?: string;
+  scalpMode?: boolean;
+  /** True when closed by end-of-window MTM (excluded from strategy WR quality metrics when tagged) */
+  forcedEndOfWindow?: boolean;
 }
 
 export interface BacktestProgress {
@@ -249,6 +277,19 @@ export interface StrategyBreakdownMetrics {
   avgLossPct: number;
   avgHoldMs: number;
   maxDrawdownPct: number;
+}
+
+export interface ProfileBreakdownMetrics {
+  profileId: string;
+  name: string;
+  icon: string;
+  color: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRatePct: number;
+  totalPnlSol: number;
+  avgPnlPct: number;
 }
 
 export interface BacktestSummary {
@@ -290,6 +331,10 @@ export interface BacktestSummary {
   winLossRatio: number;
   reBuyTrades: number;
   strategyBreakdown: StrategyBreakdownMetrics[];
+  /** Per Trade Profile performance (Live Sim parity) */
+  profileBreakdown: ProfileBreakdownMetrics[];
+  /** Trades closed only because candles ran out (not a strategy exit) */
+  forcedEndOfWindowTrades: number;
 }
 
 export interface BacktestResult {
@@ -310,6 +355,7 @@ export interface BacktestResult {
     maxRiskScore: number;
     useLiveData: boolean;
     allowSynthetic: boolean;
+    parityMode?: boolean;
     startingBalanceSol: number;
     riskLevel: RiskLevel | 'current';
     compareRiskLevels: boolean;
@@ -325,11 +371,16 @@ export interface BacktestResult {
     strictModeIntensity: StrictModeIntensity;
     /** Display e.g. "Strict: OFF" or "Strict: ON · Medium" */
     strictLabel: string;
+    strategyRecipeMode?: 'synced' | 'custom';
+    strategyProfile?: string;
+    tradeProfilesEnabled?: boolean;
+    tradeProfilesOnCount?: number;
     baseTradeAmountSol: number;
     stopLossPercent: number;
     maxProfitPercent: number;
     maxRiskScore: number;
     minLiquidity: number;
+    minMarketCapUsd?: number;
     convergenceRequired: number;
     maxConcurrentPositions: number;
     riskPercentPerTrade: number;
@@ -572,8 +623,11 @@ function metricsForTrades(
   trades: BacktestTradeResult[],
   strategyKind: 'migration' | 'normal'
 ): StrategyBreakdownMetrics {
-  const wins = trades.filter((t) => t.pnlSol > 0);
-  const losses = trades.filter((t) => t.pnlSol <= 0);
+  // Exclude forced end-of-window MTM from strategy WR so lookback truncations
+  // do not inflate quality metrics (PnL still counted in totals).
+  const scored = trades.filter((t) => !t.forcedEndOfWindow);
+  const wins = scored.filter((t) => t.pnlSol > 0);
+  const losses = scored.filter((t) => t.pnlSol <= 0);
   const grossWin = wins.reduce((s, t) => s + t.pnlSol, 0);
   const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnlSol, 0));
   const profitFactor =
@@ -600,7 +654,7 @@ function metricsForTrades(
     trades: trades.length,
     wins: wins.length,
     losses: losses.length,
-    winRatePct: trades.length ? (wins.length / trades.length) * 100 : 0,
+    winRatePct: scored.length ? (wins.length / scored.length) * 100 : 0,
     totalPnlSol: Number(
       trades.reduce((s, t) => s + t.pnlSol, 0).toFixed(6)
     ),
@@ -616,6 +670,59 @@ function metricsForTrades(
       : 0,
     maxDrawdownPct: Number(maxDd.toFixed(2)),
   };
+}
+
+function buildProfileBreakdown(
+  trades: BacktestTradeResult[]
+): ProfileBreakdownMetrics[] {
+  const map = new Map<
+    string,
+    {
+      profileId: string;
+      name: string;
+      icon: string;
+      color: string;
+      trades: BacktestTradeResult[];
+    }
+  >();
+  for (const t of trades) {
+    const id = t.tradeProfileId || 'unassigned';
+    const cur = map.get(id);
+    if (cur) {
+      cur.trades.push(t);
+    } else {
+      map.set(id, {
+        profileId: id,
+        name: t.tradeProfileName || 'Unassigned',
+        icon: t.tradeProfileIcon || '○',
+        color: t.tradeProfileColor || '#94a3b8',
+        trades: [t],
+      });
+    }
+  }
+  return [...map.values()]
+    .map((g) => {
+      const wins = g.trades.filter((t) => t.pnlSol > 0);
+      return {
+        profileId: g.profileId,
+        name: g.name,
+        icon: g.icon,
+        color: g.color,
+        trades: g.trades.length,
+        wins: wins.length,
+        losses: g.trades.length - wins.length,
+        winRatePct: g.trades.length
+          ? (wins.length / g.trades.length) * 100
+          : 0,
+        totalPnlSol: Number(
+          g.trades.reduce((s, t) => s + t.pnlSol, 0).toFixed(6)
+        ),
+        avgPnlPct: g.trades.length
+          ? g.trades.reduce((s, t) => s + t.pnlPct, 0) / g.trades.length
+          : 0,
+      };
+    })
+    .sort((a, b) => b.trades - a.trades);
 }
 
 function buildSummary(
@@ -752,6 +859,8 @@ function buildSummary(
     ),
     reBuyTrades: trades.filter((t) => t.isReBuy).length,
     strategyBreakdown: [migration, normal],
+    profileBreakdown: buildProfileBreakdown(trades),
+    forcedEndOfWindowTrades: trades.filter((t) => t.forcedEndOfWindow).length,
   };
 }
 
@@ -903,11 +1012,17 @@ function passesFilters(
       event.lastPriceSol,
       event.entryPriceSol
     ) ?? event.marketCapUsd;
-  if (options.minMarketCapUsd > 0) {
+  const minMc = Math.max(
+    options.minMarketCapUsd || 0,
+    effectiveMinMarketCapUsd()
+  );
+  if (minMc > 0) {
     if (mcAtEntry == null || mcAtEntry <= 0) {
-      // Don't reject solely for missing MC when other filters pass
-    } else if (mcAtEntry < options.minMarketCapUsd) {
-      return `low MC ($${mcAtEntry.toFixed(0)} < $${options.minMarketCapUsd})`;
+      // Parity with live executeBuy — missing MC fails closed
+      return `missing market cap (need ≥ $${minMc})`;
+    }
+    if (mcAtEntry < minMc) {
+      return `low MC ($${mcAtEntry.toFixed(0)} < $${minMc})`;
     }
   }
 
@@ -1378,6 +1493,8 @@ function summarizeSkipReasons(
     else if (key.startsWith('daily loss')) key = 'daily loss';
     else if (key.startsWith('already dumped')) key = 'dumped';
     else if (key.startsWith('need ')) key = 'wallets';
+    else if (key.startsWith('trade profile')) key = 'trade profile';
+    else if (key.startsWith('missing market cap')) key = 'market cap';
     else key = key.replace(/\s*\(.*$/, '').slice(0, 28);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
@@ -1462,8 +1579,10 @@ function replayLaunch(
     reBuyEnabled: false,
     solUsd: 150,
   }
-): BacktestTradeResult[] {
-  if (event.candles.length < 2) return [];
+): { trades: BacktestTradeResult[]; skipReason?: string } {
+  if (event.candles.length < 2) {
+    return { trades: [], skipReason: 'insufficient candles' };
+  }
 
   const results: BacktestTradeResult[] = [];
   const strategyKind: 'migration' | 'normal' = event.migrated
@@ -1482,7 +1601,11 @@ function replayLaunch(
   const runOne = (
     fromIdx: number,
     isReBuy: boolean
-  ): { trade: BacktestTradeResult | null; exitIdx: number } => {
+  ): {
+    trade: BacktestTradeResult | null;
+    exitIdx: number;
+    profileSkip?: boolean;
+  } => {
     if (fromIdx >= event.candles.length - 1) {
       return { trade: null, exitIdx: fromIdx };
     }
@@ -1531,6 +1654,7 @@ function replayLaunch(
     );
 
     let scalpResolved: { id: ShortTermStrategyId; reason: string } | null = null;
+    // Match Live Sim: specialty engines can pre-tag; generic quick/micro defer when Multi-profile ON
     if (isStrategyEnabled('post_run_dip') || config.postRunDip?.enabled) {
       const dip = resolvePostRunDipForSignal({
         symbol: event.symbol,
@@ -1555,15 +1679,10 @@ function replayLaunch(
       });
       if (dip?.seedExitMode && dip.report.qualifies) {
         scalpResolved = { id: 'post_run_dip', reason: dip.report.detail };
-        if (dip.smartWalletInfluenced) {
-          console.log(
-            `[backtest] post-run-dip SM-INFLUENCE ${event.symbol} — ${dip.report.dipSmartWallet.detail}`
-          );
-        }
       }
     }
     if (!scalpResolved && isAnyShortTermScalperActive()) {
-      scalpResolved = resolveShortTermEntry({
+      const resolved = resolveShortTermEntry({
         volume24hUsd: event.volumeUsd,
         recentVolumeUsd: event.volumeUsd,
         isSmartMoney: true,
@@ -1571,14 +1690,88 @@ function replayLaunch(
         convictionScore,
         dropFromPeakPct,
       });
+      if (resolved) {
+        const multiOn = config.tradeProfiles?.enabled !== false;
+        const genericQuick =
+          resolved.id === 'quick_scalper' || resolved.id === 'micro_scalper';
+        if (!(multiOn && genericQuick)) {
+          scalpResolved = resolved;
+        }
+      }
     }
-    const useScalp = scalpResolved != null;
 
+    const entryMc =
+      marketCapAtPrice(
+        event.marketCapUsd,
+        event.lastPriceSol,
+        botEntryPriceSol
+      ) ?? event.marketCapUsd;
+    const entryLiq =
+      liquidityAtPrice(
+        event.liquidityUsd,
+        event.lastPriceSol,
+        botEntryPriceSol
+      ) ?? event.liquidityUsd;
+
+    ensureTradeProfilesInitialized();
+    const profileAssignment = assignTradeProfile({
+      isMigration: event.migrated,
+      // LaunchEvent.migrated ≠ near-curve; never stamp nearMigration from that flag
+      nearMigration: false,
+      earlyBuy: !event.migrated && tokenAgeHours < 0.25,
+      migrationFresh:
+        event.migrated === true &&
+        tokenAgeHours <= FRESH_MIGRATION_MAX_AGE_HOURS,
+      scalpMode: scalpResolved != null,
+      shortTermStrategyId: scalpResolved?.id ?? null,
+      convictionScore,
+      dropFromPeakPct,
+      strategyKind,
+      symbol: event.symbol,
+      marketCapUsd: entryMc ?? null,
+      holderCount: null,
+      volumeH1Usd: event.volumeUsd != null ? event.volumeUsd / 18 : null,
+      volumeM5Usd: event.volumeUsd != null ? event.volumeUsd / 48 : null,
+      recentBuyVolumeUsd: event.volumeUsd != null ? event.volumeUsd / 30 : null,
+      tokenAgeHours,
+      priceChange24hPct: event.priceChangePct ?? null,
+      priceChangeH1Pct:
+        event.priceChangePct != null
+          ? Math.min(event.priceChangePct, event.priceChangePct * 0.15)
+          : null,
+      smartMoneyScore: null,
+      liquidityUsd: entryLiq ?? null,
+      walletCount: sourceNames.length,
+      walletQualityAvg: null,
+    });
+
+    if (profileAssignment.skipped) {
+      return { trade: null, exitIdx: fromIdx, profileSkip: true };
+    }
+
+    let sizeSol = sizing.sizeSol;
+    const er = profileAssignment.exitRules;
+    if (
+      er.sizeMultiplier != null &&
+      Number.isFinite(er.sizeMultiplier) &&
+      er.sizeMultiplier > 0
+    ) {
+      sizeSol = Number((sizeSol * er.sizeMultiplier).toFixed(6));
+    }
+
+    let useScalp = scalpResolved != null;
+    let shortTermId = scalpResolved?.id;
+    if (er.forceScalp && er.shortTermStrategyId) {
+      useScalp = true;
+      shortTermId = er.shortTermStrategyId as ShortTermStrategyId;
+    }
+
+    const stamp = stampFromAssignment(profileAssignment);
     const position = trader.simulateBuy(
       event.mint,
       event.symbol,
       botEntryPriceSol,
-      sizing.sizeSol,
+      sizeSol,
       {
         sourceWallets: sourceNames.map(
           (_, i) => `bt-${simulation}-${isReBuy ? 'rb' : 'e'}-${i}`
@@ -1588,8 +1781,20 @@ function replayLaunch(
         strategyKind,
         convictionScore,
         scalpMode: useScalp,
-        shortTermStrategyId: scalpResolved?.id,
-        // Same slippage as paper — omit override so config.paper.slippageBps applies
+        shortTermStrategyId: shortTermId,
+        entryMarketCapUsd: entryMc != null ? entryMc : undefined,
+        sourceEntryMcUsd: entryMc != null ? entryMc : undefined,
+        ...stamp,
+        tradeProfileScore: profileAssignment.score,
+        tradeProfileReason: profileAssignment.reason,
+        profileTakeProfitPct: er.takeProfitPct,
+        profileStopLossPct: er.stopLossPct,
+        profileTrailingStopPct: er.trailingStopPct,
+        profileForceScalp: er.forceScalp === true,
+        profileHardTimeLimitSec: er.hardTimeLimitSec,
+        profileOverrideScalpParams: er.overrideScalpParams === true,
+        profileDeadVolumeMinHoldMinutes: er.deadVolumeMinHoldMinutes,
+        profileAggressiveDeadMarket: er.aggressiveDeadMarket === true,
         antiRug:
           event.riskScoreHint != null
             ? {
@@ -1608,24 +1813,42 @@ function replayLaunch(
     );
     if (!position) return { trade: null, exitIdx: fromIdx };
 
-    // Keep SL/TP/trail exactly as simulateBuy seeded them (matches paper/live)
+    // Keep SL/TP/trail exactly as simulateBuy + profile rules seeded them
     position.openedAt = openedAt;
     if (position.scalpMode) {
       Object.assign(
         position,
         seedShortTermPosition(
-          position.shortTermStrategyId || scalpResolved?.id || 'quick_scalper',
+          position.shortTermStrategyId || shortTermId || 'quick_scalper',
           openedAt
         )
       );
+      // Re-apply profile concrete overrides after reseeding timer base
+      if (er.takeProfitPct != null) {
+        position.takeProfitPct = er.takeProfitPct;
+        position.scalpTpPct = er.takeProfitPct;
+      }
+      if (er.stopLossPct != null) {
+        position.stopLossPct = er.stopLossPct;
+        position.scalpSlPct = er.stopLossPct;
+      }
+      if (
+        er.hardTimeLimitSec != null &&
+        Number.isFinite(er.hardTimeLimitSec) &&
+        er.hardTimeLimitSec > 0
+      ) {
+        position.scalpDeadlineMs =
+          openedAt + Math.round(er.hardTimeLimitSec) * 1000;
+      }
     }
 
     const debugLog: string[] = [];
     const entryMarkNote =
       `Opened ${event.symbol} @ ${position.entryPriceSol.toExponential(4)} SOL` +
       ` (mark ${botEntryPriceSol.toExponential(4)}, slip ${slipBps}bps, fee ${feeBps}bps)` +
-      ` · size ${sizing.sizeSol.toFixed(4)} SOL` +
+      ` · size ${sizeSol.toFixed(4)} SOL` +
       ` · conviction ${convictionScore}` +
+      ` · profile ${profileAssignment.icon} ${profileAssignment.name}` +
       ` · TP ${position.takeProfitPct.toFixed(0)}% / SL ${position.stopLossPct}%` +
       (position.scalpMode
         ? ` · ${position.shortTermStrategyId || 'scalp'} ${Math.round(((position.scalpDeadlineMs ?? openedAt) - openedAt) / 1000)}s timer` +
@@ -1810,6 +2033,7 @@ function replayLaunch(
     }
 
     // Still open when lookback candles run out — forced mark-to-market exit
+    let forcedEndOfWindow = false;
     if (!closed && trader.getOpenPositions().find((p) => p.id === position.id)) {
       const last = event.candles[event.candles.length - 1];
       const markPnl =
@@ -1820,6 +2044,7 @@ function replayLaunch(
       pushTake(undefined, closed?.reason ?? 'end-of-window', closed);
       lastExitPrice = closed?.exitPriceSol ?? last.priceSol;
       sellReasons.push(closed?.reason ?? 'end-of-window');
+      forcedEndOfWindow = true;
       const forceLine = formatBacktestExitLog(
         event.symbol,
         markPnl,
@@ -2000,11 +2225,28 @@ function replayLaunch(
       strategyKind,
       roundTripCostBps,
       debugLog,
+      tradeProfileId: position.tradeProfileId || stamp.tradeProfileId,
+      tradeProfileName: position.tradeProfileName || stamp.tradeProfileName,
+      tradeProfileIcon: position.tradeProfileIcon || stamp.tradeProfileIcon,
+      tradeProfileColor: position.tradeProfileColor || stamp.tradeProfileColor,
+      tradeProfileScore:
+        position.tradeProfileScore ?? stamp.tradeProfileScore,
+      tradeProfileReason:
+        position.tradeProfileReason || stamp.tradeProfileReason,
+      shortTermStrategyId: position.shortTermStrategyId,
+      scalpMode: position.scalpMode === true,
+      forcedEndOfWindow,
     };
     return { trade, exitIdx };
   };
 
   const first = runOne(pickEntryIdx(), false);
+  if (first.profileSkip) {
+    return {
+      trades: [],
+      skipReason: 'trade profile auto-score below min',
+    };
+  }
   if (first.trade) results.push(first.trade);
 
   // Optional dip re-entry after profitable TP
@@ -2033,7 +2275,7 @@ function replayLaunch(
     }
   }
 
-  return results;
+  return { trades: results };
 }
 
 function runSinglePass(
@@ -2231,14 +2473,16 @@ function runSinglePass(
       solUsd: options.solUsd || event.solUsd || 150,
       convictionScore: conviction.score,
     });
-    if (batch.length === 0) {
+    if (batch.trades.length === 0) {
       skipped.push({
         mint: event.mint,
-        reason: 'insufficient balance, late dump, or bad path',
+        reason:
+          batch.skipReason ||
+          'insufficient balance, late dump, or bad path',
       });
       continue;
     }
-    for (const t of batch) {
+    for (const t of batch.trades) {
       if (trades.length >= maxTrades) break;
       trades.push(t);
       const openedAt = t.openedAt || openAt;
@@ -2273,13 +2517,20 @@ function captureTradingConfigSnapshot() {
     },
     selective: { ...config.selective },
     profitStrategy: { ...config.profitStrategy },
-    strategy: {
-      migrationSizeMultiplier: config.strategy.migrationSizeMultiplier,
-      confirmationThreshold: config.strategy.confirmationThreshold,
-      reBuyMinProfitPct: config.strategy.reBuyMinProfitPct,
-      reBuyEnabled: config.strategy.reBuyEnabled,
-      enableMigrationOnly: config.strategy.enableMigrationOnly,
-    },
+    strategy: { ...config.strategy },
+    strategyToggles: { ...(config.strategyToggles || {}) },
+    strategyRecipeMode: config.strategyRecipeMode,
+    strategyRecipeRiskLevel: config.strategyRecipeRiskLevel,
+    strategyProfile: config.strategyProfile,
+    highWinRatePresetActive: config.highWinRatePresetActive,
+    tradeProfiles: config.tradeProfiles
+      ? JSON.parse(JSON.stringify(config.tradeProfiles))
+      : null,
+    quickScalper: { ...config.quickScalper },
+    microScalper: { ...config.microScalper },
+    momentumBurst: { ...config.momentumBurst },
+    postMigrationScalp: { ...config.postMigrationScalp },
+    reversalScalp: { ...config.reversalScalp },
   };
 }
 
@@ -2308,6 +2559,20 @@ function restoreTradingConfigSnapshot(
   Object.assign(config.selective, snap.selective);
   Object.assign(config.profitStrategy, snap.profitStrategy);
   Object.assign(config.strategy, snap.strategy);
+  config.strategyToggles = { ...(snap.strategyToggles || {}) };
+  config.strategyRecipeMode =
+    snap.strategyRecipeMode === 'custom' ? 'custom' : 'synced';
+  config.strategyRecipeRiskLevel = snap.strategyRecipeRiskLevel ?? null;
+  config.strategyProfile = snap.strategyProfile || 'custom';
+  config.highWinRatePresetActive = snap.highWinRatePresetActive === true;
+  if (snap.tradeProfiles) {
+    config.tradeProfiles = snap.tradeProfiles;
+  }
+  Object.assign(config.quickScalper, snap.quickScalper);
+  Object.assign(config.microScalper, snap.microScalper);
+  Object.assign(config.momentumBurst, snap.momentumBurst);
+  Object.assign(config.postMigrationScalp, snap.postMigrationScalp);
+  Object.assign(config.reversalScalp, snap.reversalScalp);
 }
 
 function buildConfigUsedSnapshot() {
@@ -2316,6 +2581,11 @@ function buildConfigUsedSnapshot() {
   const strictOn = isStrictMode();
   const intensityLabel =
     intensity === 'low' ? 'Low' : intensity === 'high' ? 'High' : 'Medium';
+  ensureTradeProfilesInitialized();
+  const tp = config.tradeProfiles;
+  const profilesOn = tp?.profiles
+    ? Object.entries(tp.profiles).filter(([, on]) => on).length
+    : 0;
   return {
     riskLevel: (config.riskLevel || 'medium') as RiskLevel,
     strictMode: strictOn,
@@ -2323,12 +2593,20 @@ function buildConfigUsedSnapshot() {
     strictLabel: strictOn
       ? `Strict: ON · ${intensityLabel}`
       : 'Strict: OFF',
+    strategyRecipeMode:
+      (config.strategyRecipeMode === 'custom' ? 'custom' : 'synced') as
+        | 'synced'
+        | 'custom',
+    strategyProfile: config.strategyProfile || 'custom',
+    tradeProfilesEnabled: tp?.enabled !== false,
+    tradeProfilesOnCount: profilesOn,
     baseTradeAmountSol:
       config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
     stopLossPercent: config.trade.stopLossPercent,
     maxProfitPercent: config.trade.maxProfitPercent,
     maxRiskScore: config.filters.maxRiskScore,
     minLiquidity: config.filters.minLiquidity,
+    minMarketCapUsd: effectiveMinMarketCapUsd(),
     convergenceRequired: config.filters.convergenceRequired,
     maxConcurrentPositions: config.filters.maxConcurrentPositions,
     riskPercentPerTrade: config.risk.riskPercentPerTrade,
@@ -2396,7 +2674,11 @@ export async function runBacktest(
     const hours = options.hours ?? 24;
     const fromMs = options.fromMs ?? toMs - hours * 60 * 60 * 1000;
     const useLiveData = options.useLiveData ?? config.paper.useLiveData;
-    const allowSynthetic = options.allowSynthetic !== false;
+    // Parity mode (default): synthetic off unless Advanced explicitly opts in
+    const parityMode = options.parityMode !== false;
+    const allowSynthetic = parityMode
+      ? options.allowSynthetic === true
+      : options.allowSynthetic !== false;
     const maxTrades = options.maxTrades ?? 20;
     const simulations = Math.min(Math.max(options.simulations ?? 1, 1), 20);
     const migrationsOnly =
@@ -2426,7 +2708,11 @@ export async function runBacktest(
       : useSavedConfigFilters
         ? config.filters.minLiquidity || 0
         : 0;
-    const minMarketCapUsd = options.minMarketCapUsd ?? 0;
+    // 0 / omitted → inherit live effective min MC (parity with executeBuy)
+    const minMarketCapUsd =
+      options.minMarketCapUsd != null && options.minMarketCapUsd > 0
+        ? options.minMarketCapUsd
+        : effectiveMinMarketCapUsd();
     const maxRiskScore = explicitRisk
       ? (options.maxRiskScore as number)
       : useSavedConfigFilters
@@ -2716,6 +3002,7 @@ export async function runBacktest(
         maxRiskScore,
         useLiveData: Boolean(useLiveData),
         allowSynthetic,
+        parityMode,
         startingBalanceSol: startingBalance,
         riskLevel: requestedLevel,
         compareRiskLevels,
@@ -2810,6 +3097,15 @@ export function tradesToCsv(trades: BacktestTradeResult[]): string {
     'source',
     'strategyKind',
     'roundTripCostBps',
+    'tradeProfileId',
+    'tradeProfileName',
+    'tradeProfileIcon',
+    'tradeProfileColor',
+    'tradeProfileScore',
+    'tradeProfileReason',
+    'shortTermStrategyId',
+    'scalpMode',
+    'forcedEndOfWindow',
   ];
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v);
@@ -2858,6 +3154,15 @@ export function tradesToCsv(trades: BacktestTradeResult[]): string {
       t.source,
       t.strategyKind ?? (t.migrated ? 'migration' : 'normal'),
       t.roundTripCostBps ?? '',
+      t.tradeProfileId ?? '',
+      t.tradeProfileName ?? '',
+      t.tradeProfileIcon ?? '',
+      t.tradeProfileColor ?? '',
+      t.tradeProfileScore ?? '',
+      t.tradeProfileReason ?? '',
+      t.shortTermStrategyId ?? '',
+      t.scalpMode ? 1 : 0,
+      t.forcedEndOfWindow ? 1 : 0,
     ]
       .map(esc)
       .join(',')
@@ -2907,11 +3212,15 @@ export function exportLastBacktestJson(): string | null {
       winLossRatio: lastResult.summary.winLossRatio,
       reBuyTrades: lastResult.summary.reBuyTrades,
       strategyBreakdown: lastResult.summary.strategyBreakdown,
+      profileBreakdown: lastResult.summary.profileBreakdown,
+      forcedEndOfWindowTrades: lastResult.summary.forcedEndOfWindowTrades,
       bestTrade: lastResult.summary.bestTrade
         ? {
             symbol: lastResult.summary.bestTrade.symbol,
             pnlPct: lastResult.summary.bestTrade.pnlPct,
             pnlSol: lastResult.summary.bestTrade.pnlSol,
+            tradeProfileId: lastResult.summary.bestTrade.tradeProfileId,
+            tradeProfileName: lastResult.summary.bestTrade.tradeProfileName,
           }
         : null,
       worstTrade: lastResult.summary.worstTrade
@@ -2919,6 +3228,8 @@ export function exportLastBacktestJson(): string | null {
             symbol: lastResult.summary.worstTrade.symbol,
             pnlPct: lastResult.summary.worstTrade.pnlPct,
             pnlSol: lastResult.summary.worstTrade.pnlSol,
+            tradeProfileId: lastResult.summary.worstTrade.tradeProfileId,
+            tradeProfileName: lastResult.summary.worstTrade.tradeProfileName,
           }
         : null,
     },

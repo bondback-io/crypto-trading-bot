@@ -116,6 +116,11 @@ export interface TradeProfileMatchRules {
   preferVolumeSpike?: boolean;
   /** Prefer established tokens */
   minTokenAgeHours?: number;
+  /**
+   * Migration Sniper: max hours since launch/pair for a "fresh" graduation.
+   * Older PumpSwap buys must not inherit Migration Sniper.
+   */
+  maxTokenAgeHours?: number;
   minHolders?: number;
   minVolumeH1Usd?: number;
   minVolumeM5Usd?: number;
@@ -436,13 +441,14 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '🚀',
     color: TRADE_PROFILE_COLORS.migration_sniper,
     description:
-      'Targets fresh migrations with volume and early momentum.',
+      'Only freshly graduated pump.fun → DEX migrations (not older PumpSwap trades).',
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
       'TP 25–45% · SL 10–15%',
-      'Timing: very early after migration',
-      'Required: fresh migration + meaningful volume',
+      'Only fresh post-grad (≤2h / MC ≤$450K)',
+      'Not for near-curve, early-buy, or mature DEX tokens',
+      'Required: meaningful post-mig volume',
       'Hold: short to medium (2–8 min timer)',
       'Priority sizing (~1.15×)',
     ],
@@ -455,6 +461,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternSensitivity: 'high',
       minVolumeH1Usd: 2_500,
       minConviction: 35,
+      /** Fresh graduation window — older PumpSwap buys are not snipes */
+      maxTokenAgeHours: 2,
+      /** Mature / high-holder tokens belong to Trend / HWR / Dip */
+      maxMarketCapUsd: 450_000,
     },
     exitRules: {
       takeProfitPctMin: 25,
@@ -736,6 +746,11 @@ export interface TradeProfileMatchContext {
   isMigration?: boolean;
   nearMigration?: boolean;
   earlyBuy?: boolean;
+  /**
+   * True when migration listener marked this mint within TTL (true fresh grad).
+   * PumpSwap venue alone does NOT imply freshness.
+   */
+  migrationFresh?: boolean;
   scalpMode?: boolean;
   shortTermStrategyId?: string | null;
   convictionScore?: number | null;
@@ -1170,6 +1185,102 @@ export function resetTradeProfileParams(
   return getTradeProfilesStatus();
 }
 
+/** Default freshness gates for Migration Sniper (pump.fun → DEX grads only). */
+export const FRESH_MIGRATION_MAX_AGE_HOURS = 2;
+export const FRESH_MIGRATION_MAX_MC_USD = 450_000;
+
+/**
+ * True only for freshly graduated migrations — not older PumpSwap venue trades,
+ * not near-curve, not early-buy alone.
+ *
+ * PumpSwap buys set isMigration on the wire forever; without age/MC/fresh TTL
+ * gates, mature ~$900K tokens were incorrectly stamped Migration Sniper.
+ */
+export function evaluateFreshMigrationEligibility(
+  ctx: TradeProfileMatchContext,
+  rules?: Pick<TradeProfileMatchRules, 'maxTokenAgeHours' | 'maxMarketCapUsd'>
+): { ok: boolean; reason: string } {
+  if (ctx.isMigration !== true) {
+    if (ctx.nearMigration === true) {
+      return {
+        ok: false,
+        reason: 'near-migration (pre-DEX) — not Migration Sniper',
+      };
+    }
+    if (ctx.earlyBuy === true) {
+      return {
+        ok: false,
+        reason: 'early curve buy — not a graduated migration',
+      };
+    }
+    if (ctx.strategyKind === 'migration') {
+      return {
+        ok: false,
+        reason: 'migration strategyKind without post-grad flag',
+      };
+    }
+    return { ok: false, reason: 'not a graduated migration' };
+  }
+
+  const maxAgeH =
+    rules?.maxTokenAgeHours != null && Number.isFinite(rules.maxTokenAgeHours)
+      ? Number(rules.maxTokenAgeHours)
+      : FRESH_MIGRATION_MAX_AGE_HOURS;
+  const maxMc =
+    rules?.maxMarketCapUsd != null && Number.isFinite(rules.maxMarketCapUsd)
+      ? Number(rules.maxMarketCapUsd)
+      : FRESH_MIGRATION_MAX_MC_USD;
+
+  const ageH =
+    ctx.tokenAgeHours != null && Number.isFinite(ctx.tokenAgeHours)
+      ? Number(ctx.tokenAgeHours)
+      : null;
+  const mc =
+    ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
+      ? Number(ctx.marketCapUsd)
+      : null;
+
+  if (ageH != null && ageH > maxAgeH) {
+    return {
+      ok: false,
+      reason: `stale migration age ${ageH.toFixed(1)}h > ${maxAgeH}h`,
+    };
+  }
+  if (mc != null && mc > maxMc) {
+    return {
+      ok: false,
+      reason: `MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
+    };
+  }
+
+  // Fail closed when we cannot prove freshness (common on older PumpSwap copies)
+  if (ageH == null && mc == null && ctx.migrationFresh !== true) {
+    return {
+      ok: false,
+      reason: 'need age/MC or recent migration event for Migration Sniper',
+    };
+  }
+  if (
+    ageH == null &&
+    ctx.migrationFresh === false &&
+    (mc == null || mc > maxMc * 0.65)
+  ) {
+    return {
+      ok: false,
+      reason: 'PumpSwap buy is not a recent migration event',
+    };
+  }
+
+  return { ok: true, reason: 'fresh post-grad migration' };
+}
+
+/** Soft category: fresh mig only — stale DEX tokens must compete as trend/dip/HWR. */
+export function isFreshMigrationContext(
+  ctx: TradeProfileMatchContext
+): boolean {
+  return evaluateFreshMigrationEligibility(ctx).ok;
+}
+
 function scoreProfile(
   def: TradeProfileDefinition,
   ctx: TradeProfileMatchContext
@@ -1230,10 +1341,13 @@ function scoreProfile(
     ctx.scalpMode === true &&
     ctx.shortTermStrategyId != null &&
     ctx.shortTermStrategyId !== 'post_run_dip';
-  const isMig =
-    ctx.isMigration === true ||
-    ctx.nearMigration === true ||
-    ctx.strategyKind === 'migration';
+  // Only FRESH grads count as migration for profile routing.
+  // Older PumpSwap venue trades must not block Trend / HWR / Dip.
+  const freshMig = evaluateFreshMigrationEligibility(ctx, {
+    maxTokenAgeHours: m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS,
+    maxMarketCapUsd: m.maxMarketCapUsd ?? FRESH_MIGRATION_MAX_MC_USD,
+  });
+  const isMig = freshMig.ok;
   const isMomentum =
     ctx.shortTermStrategyId === 'momentum_burst' ||
     (volM5 != null &&
@@ -1258,6 +1372,8 @@ function scoreProfile(
 
   if (m.preferDip) {
     if (!isDip) return { score: 0, reason: 'not a dip setup' };
+    // Fresh migrations belong to Migration Sniper, not Dip Buyer
+    if (isMig) return { score: 0, reason: 'defer to fresh migration' };
     score += 100;
     bits.push('dip setup');
     if (ctx.shortTermStrategyId === 'post_run_dip') {
@@ -1339,6 +1455,9 @@ function scoreProfile(
     ) {
       return { score: 0, reason: `defer to ${ctx.shortTermStrategyId}` };
     }
+    if (isMig) {
+      return { score: 0, reason: 'defer to fresh migration' };
+    }
     if (genericScalp && smallMc) {
       score += 88;
       bits.push(`scalp:${ctx.shortTermStrategyId}`);
@@ -1371,17 +1490,21 @@ function scoreProfile(
   }
 
   if (m.preferMigration) {
-    if (!isMig && !ctx.earlyBuy) {
-      return { score: 0, reason: 'not a migration setup' };
+    if (!freshMig.ok) {
+      return { score: 0, reason: freshMig.reason };
     }
     score += 90;
-    bits.push(
-      ctx.isMigration
-        ? 'migration'
-        : ctx.nearMigration
-          ? 'near-migration'
-          : 'early/priority'
-    );
+    bits.push('fresh post-grad migration');
+    if (ageH != null) {
+      bits.push(`age ${ageH.toFixed(2)}h`);
+    }
+    if (mc != null) {
+      bits.push(`MC $${Math.round(mc)}`);
+    }
+    if (ctx.migrationFresh === true) {
+      score += 8;
+      bits.push('recent migration event');
+    }
     if (volH1 != null && volH1 >= (m.minVolumeH1Usd ?? 2000)) {
       score += 12;
       bits.push(`vol $${Math.round(volH1)}`);
@@ -1439,11 +1562,16 @@ function scoreProfile(
       return { score: 0, reason: 'conviction too low for trend' };
     }
     let quality = 0;
+    // Established MC tokens can qualify earlier than pure age floors
+    const ageFloor =
+      mc != null && mc >= 300_000
+        ? Math.min(m.minTokenAgeHours ?? 6, 1)
+        : (m.minTokenAgeHours ?? 6);
     if (m.minTokenAgeHours != null) {
-      if (ageH != null && ageH >= m.minTokenAgeHours) {
+      if (ageH != null && ageH >= ageFloor) {
         quality += 1;
         bits.push(`age ${ageH.toFixed(1)}h`);
-      } else if (ageH != null && ageH < m.minTokenAgeHours) {
+      } else if (ageH != null && ageH < ageFloor) {
         return { score: 0, reason: `token too young (${ageH.toFixed(1)}h)` };
       }
     }
@@ -1468,6 +1596,10 @@ function scoreProfile(
     }
     score += 50 + Math.min(35, (conv - 50) * 0.7) + quality * 8;
     bits.push(`trend conviction ${conv}`);
+    if (mc != null && mc >= 300_000) {
+      score += 14;
+      bits.push(`established MC $${Math.round(mc)}`);
+    }
   }
 
   if (m.preferSteadyCompounder) {
@@ -1477,7 +1609,11 @@ function scoreProfile(
     if (conv == null || conv < (m.minConviction ?? 45)) {
       return { score: 0, reason: 'conviction too low for compounder' };
     }
-    if (m.minTokenAgeHours != null && ageH != null && ageH < m.minTokenAgeHours) {
+    const ageFloor =
+      mc != null && mc >= 300_000
+        ? Math.min(m.minTokenAgeHours ?? 8, 1.5)
+        : (m.minTokenAgeHours ?? 8);
+    if (m.minTokenAgeHours != null && ageH != null && ageH < ageFloor) {
       return { score: 0, reason: `token too young (${ageH.toFixed(1)}h)` };
     }
     if (m.minHolders != null && holders != null && holders < m.minHolders) {
@@ -1490,7 +1626,7 @@ function scoreProfile(
       };
     }
     let q = 0;
-    if (ageH != null && m.minTokenAgeHours != null && ageH >= m.minTokenAgeHours) {
+    if (ageH != null && m.minTokenAgeHours != null && ageH >= ageFloor) {
       q += 1;
       bits.push(`age ${ageH.toFixed(1)}h`);
     }
@@ -1504,6 +1640,10 @@ function scoreProfile(
     }
     score += 48 + Math.min(25, (conv - 45) * 0.5) + q * 10;
     bits.push(`compounder conviction ${conv}`);
+    if (mc != null && mc >= 300_000) {
+      score += 10;
+      bits.push(`established MC $${Math.round(mc)}`);
+    }
   }
 
   if (m.preferSmartMoneyMirror) {

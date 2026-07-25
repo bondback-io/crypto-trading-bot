@@ -3705,15 +3705,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- ========== TAB: Backtester ========== -->
     <section data-tab-panel="backtester" class="hidden space-y-4">
       <div class="card">
-        <div class="section-title">Advanced Backtester <span class="tip" tabindex="0" data-tip="Replay your strategy on recent launches with filters. Paper-only — no live orders."></span></div>
-        <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #334155;color:#94a3b8">
-          <strong style="color:#e2e8f0">Backtest uses your Strategy Preset + Risk Level + Strict Mode</strong>
-          <span class="mint block mt-1" id="bt-config-banner">Applies the active Strategies preset (including short-term scalps) plus conviction, wallet quality, cluster, volume, dead-market exits, and Strict intensity. Overrides below are run-only.</span>
+        <div class="section-title">Backtester <span class="tip" tabindex="0" data-tip="Historical candle replay with Live Sim decision + exit parity. Paper-only — no live orders."></span></div>
+        <div class="mb-3 p-3 rounded-lg text-sm" style="background:#0f172a;border:1px solid #34d399;color:#94a3b8">
+          <strong style="color:#e2e8f0">Parity with Live Sim — using your current Risk, Strict, modules, and Trade Profiles.</strong>
+          <span class="mint block mt-1" id="bt-config-banner">Same entry gates, assignTradeProfile stamps, and exit ticks as paper / Live Sim. Historical prices only — fills will not match live 100%. Settings auto-track live (no separate BT store).</span>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
           <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Soft cap on simulated entries. Selective rate limits + risk level may take fewer."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
-          <label class="ctl ctl-md"><span>Simulations <span class="tip" tabindex="0" data-tip="Repeat the run N times (useful when synthetic noise is allowed)."></span></span><input type="number" id="bt-sims" value="1" min="1" max="20" /></label>
           <label class="ctl ctl-md"><span>Start SOL <span class="tip" tabindex="0" data-tip="Starting paper bankroll for the simulation."></span></span><input type="number" id="bt-start-bal" value="10" min="0.5" max="100" step="0.5" /></label>
           <label class="ctl ctl-lg"><span>Strategy <span class="tip" tabindex="0" data-tip="Auto = bot defaults. Convergence = multi-wallet. Migration = grads only. Single = first wallet buy."></span></span>
             <select id="bt-strategy">
@@ -3723,16 +3722,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="single">Single wallet</option>
             </select>
           </label>
-          <label class="ctl ctl-lg"><span>Risk level for this run only <span class="tip" tabindex="0" data-tip="Overrides riskLevel for this backtest only (not saved). Current = your live saved settings. Low/Med/High/Degen apply that preset temporarily then restore."></span></span>
+          <label class="ctl ctl-lg"><span>Risk level <span class="tip" tabindex="0" data-tip="Current = your live saved Risk Level (parity default). Overrides apply for this run only then restore."></span></span>
             <select id="bt-risk-level">
-              <option value="current" selected>Current saved</option>
+              <option value="current" selected>Current (parity)</option>
               <option value="low">Override → Low</option>
               <option value="medium">Override → Medium</option>
               <option value="high">Override → High</option>
               <option value="degen">Override → Degen</option>
             </select>
           </label>
-          <label class="ctl ctl-lg"><span>Strict Mode for this run <span class="tip" tabindex="0" data-tip="Match live = use current Strict ON/OFF + intensity. Force Off/On overrides for this run only (not saved)."></span></span>
+          <label class="ctl ctl-lg"><span>Strict Mode <span class="tip" tabindex="0" data-tip="Match live = parity default. Force Off/On overrides for this run only (not saved)."></span></span>
             <select id="bt-strict-mode" onchange="onBtStrictModeChange()">
               <option value="match" selected>Match live</option>
               <option value="off">Force OFF</option>
@@ -3748,25 +3747,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </label>
         </div>
         <div class="filters-row mb-3">
-          <label class="ctl ctl-md"><span>Min liquidity $ <span class="tip" tabindex="0" data-tip="Skip tokens below this liquidity."></span></span><input type="number" id="bt-min-liq" value="0" min="0" step="1000" /></label>
-          <label class="ctl ctl-md"><span>Min MC $ <span class="tip" tabindex="0" data-tip="Skip tokens below this market cap at entry."></span></span><input type="number" id="bt-min-mc" value="0" min="0" step="1000" /></label>
-          <label class="ctl ctl-md"><span>Min volume $ <span class="tip" tabindex="0" data-tip="Skip tokens below this 24h volume."></span></span><input type="number" id="bt-min-vol" value="0" min="0" step="1000" /></label>
-          <label class="ctl ctl-md"><span>Max risk score <span class="tip" tabindex="0" data-tip="0 = no filter. Otherwise skip tokens with risk above this (0–100)."></span></span><input type="number" id="bt-max-risk" value="0" min="0" max="100" step="5" /></label>
-          <label class="ctl ctl-md"><span>Min conviction <span class="tip" tabindex="0" data-tip="Override selective min conviction for this run only (0 = use live config)."></span></span><input type="number" id="bt-min-conviction" value="0" min="0" max="90" step="5" /></label>
-          <label class="ctl ctl-md"><span>Min wallet Q <span class="tip" tabindex="0" data-tip="Override wallet quality cutoff for this run only (0 = use live config)."></span></span><input type="number" id="bt-min-wallet-q" value="0" min="0" max="90" step="5" /></label>
-        </div>
-        <div class="filters-row mb-3">
           <label class="ctl-check" title="Use live DexScreener/GMGN market data when available"><input type="checkbox" id="bt-live" checked /> Live data</label>
           <label class="ctl-check" title="Only simulate Pump.fun → DEX graduation plays"><input type="checkbox" id="bt-mig-only" /> Migration plays only</label>
           <label class="ctl-check" title="Only include Pump.fun / pump-tagged launches"><input type="checkbox" id="bt-pump-only" /> Pump.fun only</label>
           <label class="ctl-check" title="Allow dip re-entry after take-profit in the sim"><input type="checkbox" id="bt-rebuy" /> Re-buy enabled</label>
-          <label class="ctl-check" title="If live data is thin, generate synthetic price paths so the sim still runs"><input type="checkbox" id="bt-synthetic" checked /> Allow synthetic</label>
-          <label class="ctl-check" title="Also run Low, Medium, High, and Degen on the same events for side-by-side comparison (does not change live settings)"><input type="checkbox" id="bt-compare-risk" /> Compare Low / Med / High / Degen</label>
         </div>
+        <details class="mb-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155" id="bt-advanced">
+          <summary class="mint cursor-pointer text-sm" style="color:#e2e8f0">Advanced — Compare Risk · synthetic · multi-sim · filter overrides</summary>
+          <p class="mint text-xs mt-2 mb-2">These break strict Live-Sim parity. Leave collapsed for default parity runs (synthetic OFF, 1 simulation, inherit live floors).</p>
+          <div class="filters-row mb-2 mt-2">
+            <label class="ctl ctl-md"><span>Simulations <span class="tip" tabindex="0" data-tip="Repeat the run N times (non-parity when &gt;1)."></span></span><input type="number" id="bt-sims" value="1" min="1" max="20" /></label>
+            <label class="ctl ctl-md"><span>Min liquidity $ <span class="tip" tabindex="0" data-tip="0 = inherit live. Otherwise override for this run."></span></span><input type="number" id="bt-min-liq" value="0" min="0" step="1000" /></label>
+            <label class="ctl ctl-md"><span>Min MC $ <span class="tip" tabindex="0" data-tip="0 = inherit live effective min MC. Otherwise override."></span></span><input type="number" id="bt-min-mc" value="0" min="0" step="1000" /></label>
+            <label class="ctl ctl-md"><span>Min volume $ <span class="tip" tabindex="0" data-tip="0 = inherit live. Otherwise override."></span></span><input type="number" id="bt-min-vol" value="0" min="0" step="1000" /></label>
+            <label class="ctl ctl-md"><span>Max risk score <span class="tip" tabindex="0" data-tip="0 = use live risk cap."></span></span><input type="number" id="bt-max-risk" value="0" min="0" max="100" step="5" /></label>
+            <label class="ctl ctl-md"><span>Min conviction <span class="tip" tabindex="0" data-tip="0 = use live config."></span></span><input type="number" id="bt-min-conviction" value="0" min="0" max="90" step="5" /></label>
+            <label class="ctl ctl-md"><span>Min wallet Q <span class="tip" tabindex="0" data-tip="0 = use live config."></span></span><input type="number" id="bt-min-wallet-q" value="0" min="0" max="90" step="5" /></label>
+          </div>
+          <div class="filters-row mb-1">
+            <label class="ctl-check" title="Non-parity: invent price paths when live data is thin"><input type="checkbox" id="bt-synthetic" /> Allow synthetic</label>
+            <label class="ctl-check" title="Non-parity: also run Low/Med/High/Degen on the same events"><input type="checkbox" id="bt-compare-risk" /> Compare Low / Med / High / Degen</label>
+          </div>
+        </details>
         <div id="bt-config-used" class="mint text-sm mb-2 hidden"></div>
         <div class="flex flex-wrap gap-2 items-center mb-2">
-          <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Start the simulation with current filters">Run Backtest</button>
-          <button class="btn btn-secondary" onclick="runBacktestMatchingLive()" title="Run with current live risk + Strict Mode settings">Match live Strict</button>
+          <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Run with Live Sim parity defaults">Run Backtest</button>
+          <button class="btn btn-secondary" onclick="runBacktestMatchingLive()" title="Force current live risk + Strict Mode">Match live Strict</button>
           <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
           <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV"><span class="btn-label-short">CSV</span><span class="btn-label-full">Export CSV</span></button>
           <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON"><span class="btn-label-short">JSON</span><span class="btn-label-full">Export JSON</span></button>
@@ -3841,6 +3847,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </table>
         </div>
 
+        <div class="section-title !text-sm">Trade Profile Breakdown <span class="tip" tabindex="0" data-tip="Same profile badges as Overview / Trades. Win rate excludes forced end-of-window MTM exits from strategy quality; profile table includes all closed trades."></span></div>
+        <div class="overflow-x-auto mb-4">
+          <table id="bt-profile-table">
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>W / L</th>
+                <th>PnL SOL</th>
+                <th>Avg PnL %</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="6" class="text-slate-500">Run a backtest to see profile breakdown</td></tr></tbody>
+          </table>
+        </div>
+
         <div id="bt-risk-compare" class="hidden">
           <div class="section-title !text-sm">Risk Level Breakdown <span class="tip" tabindex="0" data-tip="Enable Compare Low / Med / High / Degen on the run controls to populate this table and chart. Does not change live settings."></span></div>
           <p class="mint text-xs mb-2">Enable <strong>Compare Low / Med / High / Degen</strong> above, then re-run to compare the same events across risk presets.</p>
@@ -3912,6 +3935,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <thead>
               <tr>
                 <th title="Hover for contract address · click ticker to copy">Token</th>
+                <th title="Assigned Trade Profile (same badges as Overview / Trades)">Profile</th>
                 <th title="PnL %">PnL %</th>
                 <th title="Profit/loss in SOL and USD">PnL SOL / USD</th>
                 <th title="Staged profit takes: partial → recover initial → remainder">Takes</th>
@@ -3929,7 +3953,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="15" class="text-slate-500">No backtest results yet</td></tr>
+              <tr><td colspan="16" class="text-slate-500">No backtest results yet</td></tr>
             </tbody>
           </table>
         </div>
@@ -4988,7 +5012,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         elite_convergence:
           '<p class="mint text-xs mb-2">Requires multi-wallet clusters, blocks single-wallet entries, raises conviction/quality floors. (60%+ Win Rate Profile uses cluster ≥3 / quality ≥65 / conviction ≥75.)</p>',
         migration_sniper:
-          '<p class="mint text-xs mb-2">Only migration or near-migration tokens — skips normal curve noise.</p>',
+          '<p class="mint text-xs mb-2">Only <strong>fresh</strong> pump.fun → DEX graduations (≤2h / MC ≤$450K). Older PumpSwap trades go to Trend / Dip / High Win-Rate instead.</p>',
         profit_protected:
           '<p class="mint text-xs mb-2">Forces tiered profit + aggressive dead-market exit; raises quality/conviction floors.</p>',
         quick_scalper:
@@ -7750,10 +7774,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             : (cu.strictMode
               ? ('Strict: ON · ' + String(cu.strictModeIntensity || 'medium'))
               : 'Strict: OFF');
+          const recipeTxt = cu.strategyRecipeMode === 'custom' ? 'recipe: custom' : 'recipe: synced';
+          const profilesTxt = cu.tradeProfilesEnabled === false
+            ? 'Multi-profile OFF'
+            : ('Multi-profile ON · ' + Number(cu.tradeProfilesOnCount || 0) + ' active');
           cfgUsedEl.innerHTML =
             'Config used: <strong style="color:#e2e8f0">' + String(cu.riskLevel).toUpperCase() +
             (cu.label ? ' (' + cu.label + ')' : '') + '</strong>' +
             ' · <strong style="color:#e2e8f0">' + strictTxt + '</strong>' +
+            ' · ' + recipeTxt +
+            ' · ' + profilesTxt +
             (cu.effectiveMinConvictionScore != null
               ? ' · conviction≥' + cu.effectiveMinConvictionScore
               : '') +
@@ -7763,6 +7793,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             (cu.effectiveClusterMinWallets != null
               ? ' · cluster≥' + cu.effectiveClusterMinWallets
               : '') +
+            (cu.minMarketCapUsd != null
+              ? ' · min MC $' + Number(cu.minMarketCapUsd).toLocaleString()
+              : '') +
             ' · base ' + Number(cu.baseTradeAmountSol || 0) + ' SOL' +
             ' · SL ' + Number(cu.stopLossPercent || 0) + '%' +
             ' · max profit ' + Number(cu.maxProfitPercent || 0) + '%' +
@@ -7771,7 +7804,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ' · fee ' + Number(cu.feeBps || 0) + 'bps / slip ' + Number(cu.slippageBps || 0) + 'bps' +
             (cu.profitStrategyEnabled
               ? ' · profit tiers (partial@' + Number(cu.partialSellAt || 0) + '% / trail@' + Number(cu.trailingStopAfter || 0) + '%)'
-              : ' · profit strategy off');
+              : ' · profit strategy off') +
+            (sum.forcedEndOfWindowTrades
+              ? ' · EOW exits ' + sum.forcedEndOfWindowTrades
+              : '');
         } else {
           cfgUsedEl.classList.add('hidden');
           cfgUsedEl.textContent = '';
@@ -7945,11 +7981,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             }).join('');
       }
 
+      const profileBody = document.querySelector('#bt-profile-table tbody');
+      if (profileBody) {
+        const rows = sum.profileBreakdown || [];
+        profileBody.innerHTML = rows.length === 0
+          ? '<tr><td colspan="6" class="text-slate-500">No profile breakdown</td></tr>'
+          : rows.map(r => {
+              const badge = fmtTradeProfileBadge({
+                tradeProfileId: r.profileId,
+                tradeProfileName: r.name,
+                tradeProfileIcon: r.icon,
+                tradeProfileColor: r.color,
+              }, { hideScore: true });
+              const pnl = Number(r.totalPnlSol || 0);
+              return '<tr>' +
+                '<td>' + badge + '</td>' +
+                '<td>' + (r.trades || 0) + '</td>' +
+                '<td>' + Number(r.winRatePct || 0).toFixed(0) + '%</td>' +
+                '<td>' + (r.wins || 0) + ' / ' + (r.losses || 0) + '</td>' +
+                '<td style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+                  (pnl >= 0 ? '+' : '') + pnl.toFixed(4) + '</td>' +
+                '<td style="color:' + (Number(r.avgPnlPct || 0) >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+                  (Number(r.avgPnlPct || 0) >= 0 ? '+' : '') + Number(r.avgPnlPct || 0).toFixed(1) + '%</td>' +
+                '</tr>';
+            }).join('');
+      }
+
       const tbody = document.querySelector('#bt-results-table tbody');
       const trades = data.trades || [];
       if (tbody) {
         tbody.innerHTML = trades.length === 0
-          ? '<tr><td colspan="15" style="color:var(--muted)">No trades in this run</td></tr>'
+          ? '<tr><td colspan="16" style="color:var(--muted)">No trades in this run</td></tr>'
           : trades.map(t => {
               const pct = Number(t.pnlPct || 0);
               const sol = Number(t.pnlSol || 0);
@@ -7966,10 +8028,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               const debugLines = (t.debugLog || []).join('\\n');
               const reasonTip = (t.reasonDetail || reason).replace(/"/g, '&quot;') +
                 (debugLines ? '\\n\\n— Debug —\\n' + debugLines.replace(/"/g, '&quot;') : '');
+              const scalpChip = t.shortTermStrategyId
+                ? ' <span class="mint text-xs" style="opacity:.85" title="Scalp engine">' +
+                  String(t.shortTermStrategyId).replace(/_/g, ' ') + '</span>'
+                : '';
+              const eowChip = t.forcedEndOfWindow
+                ? ' <span class="mint text-xs" title="Forced mark-to-market at end of lookback">EOW</span>'
+                : '';
               return '<tr class="' + rowClass + '">' +
                 '<td>' + fmtBacktestToken(t.symbol, t.name, t.mint) +
                 (t.migrated ? ' 🚀' : t.isPumpFun ? ' 🎯' : '') +
-                (t.isReBuy ? ' <span class="mint">rebuy</span>' : '') + '</td>' +
+                (t.isReBuy ? ' <span class="mint">rebuy</span>' : '') + eowChip + '</td>' +
+                '<td>' + fmtTradeProfileBadge(t) + scalpChip + '</td>' +
                 '<td style="color:' + color + ';font-weight:700">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</td>' +
                 '<td>' + fmtPnlSolUsd(t) + '</td>' +
                 '<td>' + fmtExitTakes(t) + '</td>' +
@@ -8198,6 +8268,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             riskLevel: (document.getElementById('bt-risk-level') || {}).value || 'current',
             compareRiskLevels: !!(document.getElementById('bt-compare-risk') || {}).checked,
             useSavedConfigFilters: true,
+            parityMode: true,
             minLiquidityUsd: Number((document.getElementById('bt-min-liq') || {}).value) || 0,
             minMarketCapUsd: Number((document.getElementById('bt-min-mc') || {}).value) || 0,
             minVolumeUsd: Number((document.getElementById('bt-min-vol') || {}).value) || 0,
@@ -8208,7 +8279,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             migrationsOnly: document.getElementById('bt-mig-only').checked,
             pumpFunOnly: (document.getElementById('bt-pump-only') || {}).checked,
             reBuyEnabled: (document.getElementById('bt-rebuy') || {}).checked,
-            allowSynthetic: (document.getElementById('bt-synthetic') || { checked: true }).checked,
+            allowSynthetic: !!(document.getElementById('bt-synthetic') || {}).checked,
           }, strict, extraOpts || {})),
           timeoutMs: 180000,
         });

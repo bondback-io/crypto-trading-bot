@@ -374,7 +374,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     name: 'Migration Sniper Mode',
     group: 'entry',
     description:
-      'Only take migration or near-migration setups — skips normal early-curve noise. Strong runners focus.',
+      'Only take fresh pump.fun → DEX graduations (not older PumpSwap / mature tokens). Strong post-mig runners focus.',
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',

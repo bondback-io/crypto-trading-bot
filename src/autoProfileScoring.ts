@@ -10,6 +10,11 @@ import type {
   TradeProfileMatchContext,
 } from './tradeProfiles';
 import {
+  evaluateFreshMigrationEligibility,
+  FRESH_MIGRATION_MAX_AGE_HOURS,
+  FRESH_MIGRATION_MAX_MC_USD,
+} from './tradeProfiles';
+import {
   evaluateHwrQualityFilter,
   normalizeHwrQualityFilter,
 } from './hwrQualityFilter';
@@ -167,10 +172,12 @@ export function computeFactorAffinities(
   const wq = num(ctx.walletQualityAvg);
   const wallets = num(ctx.walletCount);
 
-  const isMig =
-    ctx.isMigration === true ||
-    ctx.nearMigration === true ||
-    ctx.strategyKind === 'migration';
+  const freshMig = evaluateFreshMigrationEligibility(ctx, {
+    maxTokenAgeHours:
+      m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS,
+    maxMarketCapUsd: m.maxMarketCapUsd ?? FRESH_MIGRATION_MAX_MC_USD,
+  });
+  const isMig = freshMig.ok;
 
   const session = detectMarketSession();
   const preferredSession =
@@ -185,7 +192,7 @@ export function computeFactorAffinities(
   } else if (m.preferTrend || m.preferSteadyCompounder) {
     marketCap = highIsBetter(mc, 50_000, 2_000_000);
   } else if (m.preferMigration) {
-    marketCap = lowIsBetter(mc, 10_000, 500_000);
+    marketCap = lowIsBetter(mc, 10_000, m.maxMarketCapUsd ?? FRESH_MIGRATION_MAX_MC_USD);
   } else if (m.preferHighWinRate || m.preferSmartMoneyMirror) {
     marketCap = nearIdeal(mc, 400_000, 800_000);
   }
@@ -193,7 +200,11 @@ export function computeFactorAffinities(
   // Token age
   let tokenAge = 0.5;
   if (m.preferMigration || m.preferScalp || m.preferMomentumBurst) {
-    tokenAge = lowIsBetter(age, 0.1, 12);
+    tokenAge = lowIsBetter(
+      age,
+      0.05,
+      m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS
+    );
   } else if (m.preferTrend || m.preferSteadyCompounder) {
     const minH = m.minTokenAgeHours ?? 6;
     tokenAge = highIsBetter(age, minH * 0.5, minH * 4);
@@ -246,6 +257,21 @@ export function computeFactorAffinities(
         session: sessionAffinity(preferredSession),
       };
     }
+  }
+
+  // Crush Migration Sniper affinity on stale / mature PumpSwap tokens
+  if (m.preferMigration && !isMig) {
+    return {
+      volume: 0.25,
+      smartMoney: 0.35,
+      tokenAge: 0.1,
+      volatility: 0.25,
+      supportFib: 0.25,
+      chartPatterns: 0.2,
+      migration: 0.05,
+      liquidityHolders: 0.3,
+      session: sessionAffinity(preferredSession),
+    };
   }
 
   // Support / Fib
@@ -443,13 +469,14 @@ export function computeFactorAffinities(
   // Migration
   let migration = 0.5;
   if (m.preferMigration) {
-    migration = isMig || ctx.earlyBuy ? 1 : 0.05;
+    migration = isMig ? 1 : 0.05;
   } else if (isMig && (m.preferScalp || m.preferMomentumBurst)) {
     migration = 0.35;
   } else if (isMig && (m.preferTrend || m.preferSteadyCompounder)) {
     migration = 0.15;
   } else {
-    migration = isMig ? 0.4 : 0.6;
+    // Stale PumpSwap / near-mig should not suppress trend/HWR affinity
+    migration = isMig ? 0.4 : 0.65;
   }
 
   // Holders
