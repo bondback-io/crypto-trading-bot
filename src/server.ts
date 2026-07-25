@@ -1274,6 +1274,12 @@ export function createServer(): express.Application {
         minRankScore: 42,
         requireTaSetup: true,
         minPatternConfidence: 55,
+        preferRealCandles: true,
+        syntheticPenalty: 8,
+        minConfluenceScore: 55,
+        playbookMode: 'auto',
+        pauseScannerOnlyInRiskOff: true,
+        requireRsForMomentum: true,
       };
     }
     const ms = config.marketScanner;

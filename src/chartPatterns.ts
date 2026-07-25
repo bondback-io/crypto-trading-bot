@@ -94,6 +94,11 @@ export interface ChartPatternAnalyzeInput extends TechnicalAnalyzeInput {
   marketCapUsd?: number | null;
   /** Prefer cleaner (higher-confidence / breakout) hits — High Win-Rate / large MC */
   preferClean?: boolean;
+  /**
+   * When true, evaluate config-enabled patterns without requiring strategy
+   * toggles — so scanner ranking isn't empty when pattern strategies are OFF.
+   */
+  ignoreStrategyGates?: boolean;
 }
 
 const PATTERN_NAMES: Record<ChartPatternId, string> = {
@@ -167,10 +172,14 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
+/** Thread-local: set during analyzeChartPatterns when ignoreStrategyGates */
+let _ignoreStrategyGates = false;
+
 function patternEnabled(id: ChartPatternId): boolean {
   const p = config.chartPatterns?.patterns?.[id];
   const cfgOn = p && typeof p.enabled === 'boolean' ? p.enabled : DEFAULT_PATTERN_ON[id] !== false;
   if (!cfgOn) return false;
+  if (_ignoreStrategyGates) return true;
   // Core patterns gated by their dedicated strategy toggles
   if ((CORE_CHART_PATTERN_IDS as readonly string[]).includes(id)) {
     const key = CORE_PATTERN_STRATEGY_KEY[id as CoreChartPatternId];
@@ -655,6 +664,21 @@ export function analyzeChartPatterns(
     return { ...empty, summary: 'insufficient history' };
   }
 
+  const prevIgnore = _ignoreStrategyGates;
+  _ignoreStrategyGates = input.ignoreStrategyGates === true;
+  try {
+    return analyzeChartPatternsInner(input, points, source, price);
+  } finally {
+    _ignoreStrategyGates = prevIgnore;
+  }
+}
+
+function analyzeChartPatternsInner(
+  input: ChartPatternAnalyzeInput,
+  points: PricePoint[],
+  source: ChartPatternReport['source'],
+  price: number
+): ChartPatternReport {
   _activeCleanMode = wantsClean(input);
   const drop = num(input.dropFromPeakPct);
   const detectors: Array<() => DetectedPattern | null> = [

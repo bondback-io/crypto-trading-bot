@@ -13,6 +13,9 @@ export interface MarketCandle {
   time: number;
   /** Price in SOL per token (approx) */
   priceSol: number;
+  high?: number;
+  low?: number;
+  volume?: number;
 }
 
 export interface LaunchEvent {
@@ -46,6 +49,12 @@ export interface LaunchEvent {
   url?: string;
   /** SOL/USD used when this event was built (for PnL $ display) */
   solUsd?: number;
+  /** Real OHLCV vs synthetic path */
+  candleSource?: 'real' | 'synthetic';
+  volumeM5Usd?: number;
+  volumeH1Usd?: number;
+  priceChangeH1Pct?: number;
+  holderCount?: number;
 }
 
 function isValidMint(m: string): boolean {
@@ -1418,4 +1427,280 @@ export async function refreshOpenMarketActivity(
   }
 
   return updated;
+}
+
+const OHLCV_CACHE_TTL_MS = 105_000;
+const ohlcvCache = new Map<
+  string,
+  {
+    candles: MarketCandle[];
+    source: 'birdeye' | 'geckoterminal' | 'none';
+    solUsd?: number;
+    at: number;
+  }
+>();
+
+function usdClosesToSolCandles(
+  rows: Array<{
+    time: number;
+    close: number;
+    high?: number;
+    low?: number;
+    volume?: number;
+  }>,
+  solUsd: number
+): MarketCandle[] {
+  if (!(solUsd > 0)) return [];
+  const out: MarketCandle[] = [];
+  for (const r of rows) {
+    if (!(r.close > 0) || !(r.time > 0)) continue;
+    const priceSol = r.close / solUsd;
+    const c: MarketCandle = { time: r.time, priceSol };
+    if (r.high != null && r.high > 0) c.high = r.high / solUsd;
+    if (r.low != null && r.low > 0) c.low = r.low / solUsd;
+    if (r.volume != null && Number.isFinite(r.volume)) c.volume = r.volume;
+    out.push(c);
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
+async function fetchBirdeyeOhlcv(
+  mint: string,
+  solUsd: number
+): Promise<MarketCandle[]> {
+  try {
+    const { hasBirdeyeKey, birdeyeRequest } = await import('./birdeye');
+    if (!hasBirdeyeKey()) return [];
+    const nowSec = Math.floor(Date.now() / 1000);
+    const fromSec = nowSec - 8 * 3600;
+    const path =
+      `/defi/v3/ohlcv?address=${encodeURIComponent(mint)}` +
+      `&type=5m&currency=usd&time_from=${fromSec}&time_to=${nowSec}` +
+      `&mode=count&count_limit=100`;
+    const res = await birdeyeRequest(path, 'ohlcv');
+    if (!res.ok || !res.data) {
+      // Legacy fallback
+      const legacy = await birdeyeRequest(
+        `/defi/ohlcv?address=${encodeURIComponent(mint)}&type=5m` +
+          `&time_from=${fromSec}&time_to=${nowSec}`,
+        'ohlcv-legacy'
+      );
+      if (!legacy.ok || !legacy.data) return [];
+      const items =
+        (legacy.data as { data?: { items?: unknown[] } })?.data?.items ??
+        (legacy.data as { data?: unknown[] })?.data ??
+        [];
+      if (!Array.isArray(items)) return [];
+      const rows = items.map((it) => {
+        const r = it as Record<string, unknown>;
+        const t = Number(r.unixTime ?? r.unix_time ?? r.t ?? 0);
+        return {
+          time: t > 1e12 ? t : t * 1000,
+          close: Number(r.c ?? r.close ?? 0),
+          high: Number(r.h ?? r.high ?? 0) || undefined,
+          low: Number(r.l ?? r.low ?? 0) || undefined,
+          volume: Number(r.v ?? r.v_usd ?? r.volume ?? 0) || undefined,
+        };
+      });
+      return usdClosesToSolCandles(rows, solUsd);
+    }
+    const payload = res.data as {
+      data?: { items?: unknown[]; list?: unknown[] } | unknown[];
+      success?: boolean;
+    };
+    const raw =
+      (payload.data as { items?: unknown[] } | undefined)?.items ??
+      (payload.data as { list?: unknown[] } | undefined)?.list ??
+      (Array.isArray(payload.data) ? payload.data : []);
+    if (!Array.isArray(raw)) return [];
+    const rows = raw.map((it) => {
+      const r = it as Record<string, unknown>;
+      const t = Number(r.unix_time ?? r.unixTime ?? r.t ?? 0);
+      return {
+        time: t > 1e12 ? t : t * 1000,
+        close: Number(r.c ?? r.close ?? 0),
+        high: Number(r.h ?? r.high ?? 0) || undefined,
+        low: Number(r.l ?? r.low ?? 0) || undefined,
+        volume: Number(r.v_usd ?? r.v ?? r.volume ?? 0) || undefined,
+      };
+    });
+    return usdClosesToSolCandles(rows, solUsd);
+  } catch (err) {
+    logger.warn('MarketData', 'Birdeye OHLCV failed', errorToMeta(err));
+    return [];
+  }
+}
+
+async function fetchGeckoOhlcv(
+  mint: string,
+  solUsd: number
+): Promise<MarketCandle[]> {
+  try {
+    const url =
+      `https://api.geckoterminal.com/api/v2/networks/solana/tokens/` +
+      `${encodeURIComponent(mint)}/ohlcv/minute?aggregate=5&limit=100`;
+    const res = await loggedFetch(url, {
+      context: 'GeckoTerminal',
+      label: 'ohlcv',
+      timeoutMs: 12_000,
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'solana-smart-copy-bot/1.0',
+      },
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as {
+      data?: { attributes?: { ohlcv_list?: unknown[] } };
+    };
+    const list = json?.data?.attributes?.ohlcv_list;
+    if (!Array.isArray(list)) return [];
+    const rows = list.map((row) => {
+      const a = row as unknown[];
+      const t = Number(a[0] ?? 0);
+      return {
+        time: t > 1e12 ? t : t * 1000,
+        close: Number(a[4] ?? 0),
+        high: Number(a[2] ?? 0) || undefined,
+        low: Number(a[3] ?? 0) || undefined,
+        volume: Number(a[5] ?? 0) || undefined,
+      };
+    });
+    return usdClosesToSolCandles(rows, solUsd);
+  } catch (err) {
+    logger.warn('MarketData', 'GeckoTerminal OHLCV failed', errorToMeta(err));
+    return [];
+  }
+}
+
+export interface FetchTokenOhlcvResult {
+  candles: MarketCandle[];
+  source: 'birdeye' | 'geckoterminal' | 'none';
+  solUsd?: number;
+}
+
+/**
+ * Real OHLCV for scanner ranking. Prefer Birdeye when keyed; else GeckoTerminal.
+ * Cached ~90–120s per mint.
+ */
+export async function fetchTokenOhlcvCandles(
+  mint: string,
+  opts?: { force?: boolean; solUsd?: number }
+): Promise<FetchTokenOhlcvResult> {
+  if (!isCopyTargetMint(mint)) {
+    return { candles: [], source: 'none' };
+  }
+  const cached = ohlcvCache.get(mint);
+  if (
+    !opts?.force &&
+    cached &&
+    Date.now() - cached.at < OHLCV_CACHE_TTL_MS
+  ) {
+    return {
+      candles: cached.candles,
+      source: cached.source,
+      solUsd: cached.solUsd,
+    };
+  }
+
+  const solUsd = opts?.solUsd ?? (await fetchSolUsdPrice());
+  let candles = await fetchBirdeyeOhlcv(mint, solUsd);
+  let source: FetchTokenOhlcvResult['source'] =
+    candles.length >= 8 ? 'birdeye' : 'none';
+  if (candles.length < 8) {
+    candles = await fetchGeckoOhlcv(mint, solUsd);
+    source = candles.length >= 8 ? 'geckoterminal' : 'none';
+  }
+  if (source === 'none') candles = [];
+
+  ohlcvCache.set(mint, { candles, source, solUsd, at: Date.now() });
+  return { candles, source, solUsd };
+}
+
+/** Best-effort DexScreener volume / change enrich onto a launch event. */
+async function enrichDexPairMetrics(
+  event: LaunchEvent
+): Promise<LaunchEvent> {
+  try {
+    const data = await fetchJson(
+      `https://api.dexscreener.com/latest/dex/tokens/${event.mint}`
+    );
+    const pairs =
+      (data as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
+    const solPairs = pairs.filter((p) => String(p.chainId) === 'solana');
+    if (solPairs.length === 0) return event;
+    let best = solPairs[0]!;
+    let bestLiq = Number(
+      (best.liquidity as { usd?: number } | undefined)?.usd ?? 0
+    );
+    for (const p of solPairs) {
+      const liq = Number(
+        (p.liquidity as { usd?: number } | undefined)?.usd ?? 0
+      );
+      if (liq > bestLiq) {
+        best = p;
+        bestLiq = liq;
+      }
+    }
+    const vol = best.volume as { m5?: number; h1?: number; h24?: number } | undefined;
+    const pc = best.priceChange as { h1?: number; h24?: number } | undefined;
+    const next: LaunchEvent = { ...event };
+    const m5 = Number(vol?.m5);
+    const h1 = Number(vol?.h1);
+    if (Number.isFinite(m5) && m5 >= 0) next.volumeM5Usd = m5;
+    if (Number.isFinite(h1) && h1 >= 0) next.volumeH1Usd = h1;
+    const chgH1 = Number(pc?.h1);
+    if (Number.isFinite(chgH1)) next.priceChangeH1Pct = chgH1;
+    if (!(next.volumeUsd && next.volumeUsd > 0)) {
+      const h24 = Number(vol?.h24);
+      if (Number.isFinite(h24) && h24 > 0) next.volumeUsd = h24;
+    }
+    return next;
+  } catch {
+    return event;
+  }
+}
+
+/**
+ * Replace synthetic candles with real OHLCV when preferRealCandles and ≥16 bars.
+ */
+export async function enrichLaunchWithRealCandles(
+  event: LaunchEvent
+): Promise<LaunchEvent & { candleSource: 'real' | 'synthetic' }> {
+  const prefer =
+    (await import('./config')).config.marketScanner?.preferRealCandles !== false;
+  let next = await enrichDexPairMetrics(event);
+
+  if (!prefer) {
+    return {
+      ...next,
+      candleSource: next.candleSource ?? 'synthetic',
+    };
+  }
+
+  try {
+    const ohlcv = await fetchTokenOhlcvCandles(next.mint, {
+      solUsd: next.solUsd,
+    });
+    if (ohlcv.candles.length >= 16) {
+      const last = ohlcv.candles[ohlcv.candles.length - 1]!;
+      return {
+        ...next,
+        candles: ohlcv.candles,
+        lastPriceSol: last.priceSol > 0 ? last.priceSol : next.lastPriceSol,
+        solUsd: ohlcv.solUsd ?? next.solUsd,
+        candleSource: 'real',
+      };
+    }
+  } catch (err) {
+    logger.warn('MarketData', 'enrichLaunchWithRealCandles failed', {
+      mint: next.mint,
+      ...errorToMeta(err),
+    });
+  }
+
+  return {
+    ...next,
+    candleSource: next.candleSource ?? 'synthetic',
+  };
 }

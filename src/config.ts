@@ -2017,6 +2017,18 @@ export interface BotConfig {
     /** Scanner-only entries must show a Fib/support/pattern/indicator setup */
     requireTaSetup: boolean;
     minPatternConfidence: number;
+    /** Prefer Birdeye/GeckoTerminal OHLCV over synthetic paths */
+    preferRealCandles: boolean;
+    /** Rank penalty when candles remain synthetic */
+    syntheticPenalty: number;
+    /** Min playbook confluence (0–100) for scanner quality */
+    minConfluenceScore: number;
+    /** Playbook classifier mode (auto only for now) */
+    playbookMode: 'auto';
+    /** Skip scanner-only entries in risk_off (hybrid still allowed) */
+    pauseScannerOnlyInRiskOff: boolean;
+    /** Momentum playbooks need SOL relative-strength hint */
+    requireRsForMomentum: boolean;
   };
 
   /** Paper trading simulation */
@@ -2368,6 +2380,12 @@ export const config: BotConfig = {
     minRankScore: 42,
     requireTaSetup: true,
     minPatternConfidence: 55,
+    preferRealCandles: true,
+    syntheticPenalty: 8,
+    minConfluenceScore: 55,
+    playbookMode: 'auto',
+    pauseScannerOnlyInRiskOff: true,
+    requireRsForMomentum: true,
   },
 
   paper: {

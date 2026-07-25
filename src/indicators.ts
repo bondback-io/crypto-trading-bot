@@ -8,6 +8,8 @@ export interface IndicatorCandle {
   priceSol?: number;
   price?: number;
   volume?: number;
+  high?: number;
+  low?: number;
 }
 
 export interface IndicatorInput {
@@ -24,6 +26,8 @@ export interface IndicatorReport {
   emaBullishCross: boolean;
   momentumPct: number | null;
   atrPct: number | null;
+  vwap: number | null;
+  vwapBias: 'above_vwap' | 'below_vwap' | null;
   setup: boolean;
   scoreDelta: number;
   flags: string[];
@@ -49,30 +53,94 @@ function ema(values: number[], period: number): number | null {
   return prev;
 }
 
-function rsi(values: number[], period = 14): number | null {
+/** Wilder's RSI (smoothed average gain/loss). */
+function rsiWilder(values: number[], period = 14): number | null {
   if (values.length < period + 1) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = values.length - period; i < values.length; i++) {
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 1; i <= period; i++) {
     const d = values[i]! - values[i - 1]!;
-    if (d >= 0) gains += d;
-    else losses -= d;
+    if (d >= 0) avgGain += d;
+    else avgLoss -= d;
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
+  avgGain /= period;
+  avgLoss /= period;
+  for (let i = period + 1; i < values.length; i++) {
+    const d = values[i]! - values[i - 1]!;
+    const gain = d > 0 ? d : 0;
+    const loss = d < 0 ? -d : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
   if (avgLoss <= 1e-12) return 100;
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
 }
 
-/** Simple ATR% from absolute closes over last N bars */
-function atrPct(values: number[], period = 10): number | null {
-  if (values.length < period + 1) return null;
+/**
+ * True ATR% when high/low present; else close-to-close range %.
+ */
+function atrPctFromCandles(
+  candles: IndicatorCandle[],
+  prices: number[],
+  period = 10
+): number | null {
+  if (prices.length < period + 1) return null;
+  const hasHl = candles.some(
+    (c) =>
+      c.high != null &&
+      c.low != null &&
+      Number(c.high) > 0 &&
+      Number(c.low) > 0
+  );
+  if (hasHl && candles.length >= period + 1) {
+    const trs: number[] = [];
+    for (let i = 1; i < candles.length; i++) {
+      const c = candles[i]!;
+      const prev = candles[i - 1]!;
+      const close = Number(c.priceSol ?? c.price ?? 0);
+      const prevClose = Number(prev.priceSol ?? prev.price ?? 0);
+      const high = Number(c.high ?? close);
+      const low = Number(c.low ?? close);
+      if (!(close > 0) || !(prevClose > 0)) continue;
+      const tr = Math.max(
+        high - low,
+        Math.abs(high - prevClose),
+        Math.abs(low - prevClose)
+      );
+      trs.push(tr / prevClose);
+    }
+    if (trs.length < period) return null;
+    const slice = trs.slice(-period);
+    return (slice.reduce((a, b) => a + b, 0) / slice.length) * 100;
+  }
   let sum = 0;
-  for (let i = values.length - period; i < values.length; i++) {
-    sum += Math.abs(values[i]! - values[i - 1]!) / values[i - 1]!;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    sum += Math.abs(prices[i]! - prices[i - 1]!) / prices[i - 1]!;
   }
   return (sum / period) * 100;
+}
+
+/** Session VWAP from candles that carry volume. */
+function computeVwap(
+  candles: IndicatorCandle[],
+  lastPrice: number
+): { vwap: number | null; bias: 'above_vwap' | 'below_vwap' | null } {
+  let pv = 0;
+  let vol = 0;
+  for (const c of candles) {
+    const p = Number(c.priceSol ?? c.price ?? 0);
+    const v = Number(c.volume ?? 0);
+    if (!(p > 0) || !(v > 0)) continue;
+    pv += p * v;
+    vol += v;
+  }
+  if (!(vol > 0)) return { vwap: null, bias: null };
+  const vwap = pv / vol;
+  if (!(vwap > 0) || !(lastPrice > 0)) return { vwap, bias: null };
+  const bias =
+    lastPrice >= vwap * 0.998 ? ('above_vwap' as const) : ('below_vwap' as const);
+  return { vwap, bias };
 }
 
 /**
@@ -88,6 +156,8 @@ export function evaluateIndicators(input: IndicatorInput): IndicatorReport {
     emaBullishCross: false,
     momentumPct: null,
     atrPct: null,
+    vwap: null,
+    vwapBias: null,
     setup: false,
     scoreDelta: 0,
     flags: [],
@@ -104,7 +174,7 @@ export function evaluateIndicators(input: IndicatorInput): IndicatorReport {
   }
   if (prices.length < 16) return empty;
 
-  const rsi14 = rsi(prices, 14);
+  const rsi14 = rsiWilder(prices, 14);
   const emaFast = ema(prices, 8);
   const emaSlow = ema(prices, 21);
   const look = Math.min(12, prices.length - 1);
@@ -114,7 +184,9 @@ export function evaluateIndicators(input: IndicatorInput): IndicatorReport {
           prices[prices.length - 1 - look]!) *
         100
       : null;
-  const atr = atrPct(prices, 10);
+  const atr = atrPctFromCandles(candles, prices, 10);
+  const lastPx = prices[prices.length - 1]!;
+  const { vwap, bias: vwapBias } = computeVwap(candles, lastPx);
 
   const flags: string[] = [];
   let scoreDelta = 0;
@@ -175,10 +247,24 @@ export function evaluateIndicators(input: IndicatorInput): IndicatorReport {
     }
   }
 
+  if (vwapBias === 'above_vwap') {
+    flags.push('above_vwap');
+    scoreDelta += 3;
+    setup = true;
+  } else if (vwapBias === 'below_vwap') {
+    flags.push('below_vwap');
+    scoreDelta -= 1;
+  }
+
   const summaryParts = [
     rsi14 != null ? `RSI ${rsi14.toFixed(0)}` : null,
-    emaBullishCross ? 'EMA↑' : emaFast != null && emaSlow != null && emaFast < emaSlow ? 'EMA↓' : null,
+    emaBullishCross
+      ? 'EMA↑'
+      : emaFast != null && emaSlow != null && emaFast < emaSlow
+        ? 'EMA↓'
+        : null,
     momentumPct != null ? `mom ${momentumPct.toFixed(0)}%` : null,
+    vwapBias,
   ].filter(Boolean);
 
   return {
@@ -189,6 +275,8 @@ export function evaluateIndicators(input: IndicatorInput): IndicatorReport {
     emaBullishCross,
     momentumPct,
     atrPct: atr,
+    vwap,
+    vwapBias,
     setup,
     scoreDelta: Math.max(-15, Math.min(20, scoreDelta)),
     flags,
