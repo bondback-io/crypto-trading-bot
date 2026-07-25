@@ -57,7 +57,7 @@ Edit `.env`:
 | `RPC_FALLBACKS` | Comma-separated fallback RPCs for auto-failover |
 | `PRIVATE_KEY` | Base58 private key — **only needed for live trading** |
 | `PORT` | Dashboard port (default `3000`) |
-| `TRADING_MODE` | Optional override: `paper` or `live` |
+| `TRADING_MODE` | Optional override: `paper`, `liveSimulation` (default), or `live` |
 | `GMGN_API_KEY` | Optional GMGN API key for wallet activity / top lists |
 | `BIRDEYE_API_KEY` | Optional Birdeye key for token / smart-money signals |
 | `SOLANA_TRACKER_API_KEY` | Optional Solana Tracker key for Axiom / Photon leaderboards |
@@ -221,7 +221,7 @@ fly volumes list
 
 ### Step 4 — Set secrets (env vars)
 
-Non-secret defaults are already in `fly.toml` (`NODE_ENV`, `HOST`, `PORT`, `DATA_DIR=/data`, `TRADING_MODE=paper`).
+Non-secret defaults are already in `fly.toml` (`NODE_ENV`, `HOST`, `PORT`, `DATA_DIR=/data`, `TRADING_MODE=liveSimulation`).
 
 **Set secrets** (never put these in git or `fly.toml`):
 
@@ -237,7 +237,8 @@ fly secrets set GMGN_API_KEY="your-gmgn-key"
 fly secrets set BIRDEYE_API_KEY="your-birdeye-key"
 fly secrets set SOLANA_TRACKER_API_KEY="your-solana-tracker-key"
 
-# Paper mode (default) — no wallet key needed
+# Live Sim (default) — virtual fills + live filters; no wallet key needed
+# fly secrets set TRADING_MODE="liveSimulation"
 # fly secrets set TRADING_MODE="paper"
 
 # Live trading only — pick ONE of these for the main key (base58 secret):
@@ -257,7 +258,7 @@ You can set several at once:
 fly secrets set \
   RPC_URL="https://..." \
   RPC_FALLBACKS="https://...,https://..." \
-  TRADING_MODE="paper"
+  TRADING_MODE="liveSimulation"
 ```
 
 #### Important environment variables
@@ -266,7 +267,7 @@ fly secrets set \
 |----------|-----------|-------------|
 | `RPC_URL` | **Yes** | Primary Solana HTTP RPC (paid endpoint) |
 | `RPC_FALLBACKS` | Recommended | Comma-separated backup RPCs |
-| `TRADING_MODE` | Recommended | `paper` (default) or `live` |
+| `TRADING_MODE` | Recommended | `liveSimulation` (default), `paper`, or `live` |
 | `TRADING_WALLET_1` | Live only | Preferred live wallet private key (base58) |
 | `PRIVATE_KEY` | Live only | Alias for main wallet key |
 | `WALLET_PRIVATE_KEY` | Live only | Alias for main wallet key |
@@ -489,7 +490,7 @@ Or use **New → Blueprint** with the included `render.yaml` (includes the disk)
 | `NODE_ENV` | Yes | `production` |
 | `HOST` | Yes | `0.0.0.0` |
 | `PORT` | Auto | Injected by Render — do not set manually |
-| `TRADING_MODE` | Recommended | `paper` (start here) or `live` |
+| `TRADING_MODE` | Recommended | `liveSimulation` (default), `paper`, or `live` |
 | `DATA_DIR` | Optional | Override data path (default `./data`; on Render with disk use `/opt/render/project/src/data`) |
 | `RPC_FALLBACKS` | Optional | Comma-separated backup RPCs |
 | `GMGN_API_KEY` | Optional | Better wallet discovery / activity |

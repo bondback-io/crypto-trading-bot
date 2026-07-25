@@ -18,7 +18,7 @@ services:
         value: 0.0.0.0
       # PORT is set automatically by Render — do not override unless needed
       - key: TRADING_MODE
-        value: paper
+        value: liveSimulation
       - key: DATA_DIR
         value: /opt/render/project/src/data
       - key: RPC_URL

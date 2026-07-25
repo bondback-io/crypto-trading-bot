@@ -919,7 +919,7 @@ export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
   minWalletsForTrade: 2,
-  minVolume24hUsd: 10_000,
+  minVolume24hUsd: 25_000,
   minHolderCount: 30,
   maxTradesPerHour: 16,
   minMsBetweenTrades: 25_000,
@@ -968,8 +968,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -22,
     },
     filters: {
-      minLiquidity: 12_000,
-      minMarketCapUsd: 8_000,
+      minLiquidity: 15_000,
+      minMarketCapUsd: 10_000,
       maxDevHoldPct: 12,
       maxDevPercent: 12,
       maxTopHolderPct: 35,
@@ -982,9 +982,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 3,
       maxConcurrentPositions: 6,
       dailyLossLimitSol: 1.0,
-      minVolume24hUsd: 12_000,
-      minRecentVolumeUsd: 1_500,
-      minRecentBuyVolumeUsd: 800,
+      minVolume24hUsd: 40_000,
+      minRecentVolumeUsd: 4_000,
+      minRecentBuyVolumeUsd: 2_500,
       minHolderCount: 55,
       minHolders: 55,
       minRecentActivity: 6,
@@ -1039,7 +1039,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 3,
-      minVolume24hUsd: 12_000,
+      minVolume24hUsd: 40_000,
       minHolderCount: 55,
       maxTradesPerHour: 5,
       minMsBetweenTrades: 120_000,
@@ -1087,8 +1087,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -30,
     },
     filters: {
-      minLiquidity: 5_000,
-      minMarketCapUsd: 5_000,
+      minLiquidity: 10_000,
+      minMarketCapUsd: 8_000,
       maxDevHoldPct: 14,
       maxDevPercent: 14,
       maxTopHolderPct: 70,
@@ -1101,9 +1101,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 2,
       maxConcurrentPositions: 12,
       dailyLossLimitSol: 2.5,
-      minVolume24hUsd: 10_000,
-      minRecentVolumeUsd: 800,
-      minRecentBuyVolumeUsd: 500,
+      minVolume24hUsd: 25_000,
+      minRecentVolumeUsd: 2_500,
+      minRecentBuyVolumeUsd: 1_500,
       minHolderCount: 30,
       minHolders: 30,
       minRecentActivity: 3,
@@ -1158,7 +1158,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 2,
-      minVolume24hUsd: 10_000,
+      minVolume24hUsd: 25_000,
       minHolderCount: 30,
       maxTradesPerHour: 16,
       minMsBetweenTrades: 25_000,
@@ -1208,8 +1208,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -42,
     },
     filters: {
-      minLiquidity: 5_000,
-      minMarketCapUsd: 5_000,
+      minLiquidity: 8_000,
+      minMarketCapUsd: 8_000,
       maxDevHoldPct: 22,
       maxDevPercent: 22,
       maxTopHolderPct: 85,
@@ -1222,9 +1222,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 1,
       maxConcurrentPositions: 20,
       dailyLossLimitSol: 4,
-      minVolume24hUsd: 10_000,
-      minRecentVolumeUsd: 800,
-      minRecentBuyVolumeUsd: 500,
+      minVolume24hUsd: 20_000,
+      minRecentVolumeUsd: 2_000,
+      minRecentBuyVolumeUsd: 1_000,
       minHolderCount: 30,
       minHolders: 30,
       minRecentActivity: 3,
@@ -1279,7 +1279,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
-      minVolume24hUsd: 10_000,
+      minVolume24hUsd: 20_000,
       minHolderCount: 30,
       maxTradesPerHour: 18,
       minMsBetweenTrades: 20_000,
@@ -1328,8 +1328,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       stopLossPercent: -55,
     },
     filters: {
-      minLiquidity: 5_000,
-      minMarketCapUsd: 5_000,
+      minLiquidity: 8_000,
+      minMarketCapUsd: 8_000,
       maxDevHoldPct: 40,
       maxDevPercent: 40,
       maxTopHolderPct: 95,
@@ -1342,9 +1342,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       convergenceRequired: 1,
       maxConcurrentPositions: 50,
       dailyLossLimitSol: 10,
-      minVolume24hUsd: 10_000,
-      minRecentVolumeUsd: 800,
-      minRecentBuyVolumeUsd: 500,
+      minVolume24hUsd: 15_000,
+      minRecentVolumeUsd: 1_500,
+      minRecentBuyVolumeUsd: 800,
       minHolderCount: 30,
       minHolders: 30,
       minRecentActivity: 3,
@@ -1399,7 +1399,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireConvergenceForNormal: false,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
-      minVolume24hUsd: 10_000,
+      minVolume24hUsd: 15_000,
       minHolderCount: 30,
       maxTradesPerHour: 40,
       minMsBetweenTrades: 8_000,
@@ -1441,20 +1441,20 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
 
 /**
  * Absolute non-bypassable floors for volume / liquidity / holders / activity.
- * Risk presets may be stricter; High cannot go below these.
+ * Risk presets may be stricter; High/Degen cannot go below these.
  *
- * Liquidity: floor $5,000 (recommended quality band $5k–$8k; Low stays higher).
- * 24h volume: floor $10,000.
- * Recent (DexScreener ~1h) volume / buys: reject near-zero activity.
+ * Liquidity: floor $8,000 (thin $5–6k pools are hard to exit cleanly).
+ * 24h volume: floor $15,000 for mature entries.
+ * Recent (DexScreener ~1h) volume / buys: reject dead / wash-thin activity.
  */
 export const HARD_FILTER_FLOORS = {
-  /** Absolute min pool liquidity USD — High cannot go below */
-  minLiquidityUsd: 5_000,
+  /** Absolute min pool liquidity USD — High/Degen cannot go below */
+  minLiquidityUsd: 8_000,
   /**
    * Absolute min entry / buy market-cap USD — non-bypassable across all
-   * risk levels (including Degen). Rejects post-dump ghosts at ~$2–3k MC.
+   * risk levels (including Degen). Rejects post-dump ghosts under ~$8k MC.
    */
-  minMarketCapUsd: 5_000,
+  minMarketCapUsd: 8_000,
   /**
    * MC below this + near-zero recent (h1) volume → hard reject combo
    * (catches thin post-selloff tokens that clear the $5k floor alone).
@@ -1463,11 +1463,11 @@ export const HARD_FILTER_FLOORS = {
   /** Dex h1 / m5 volume at/below this counts as near-zero for MC combo */
   nearZeroRecentVolumeUsd: 25,
   /** Absolute min 24h USD volume (mature / non-early entries) */
-  minVolume24hUsd: 10_000,
+  minVolume24hUsd: 15_000,
   /** Absolute min DexScreener h1 total volume USD (15–60m proxy) */
-  minRecentVolumeUsd: 800,
+  minRecentVolumeUsd: 1_500,
   /** Absolute min estimated recent buy-side volume USD */
-  minRecentBuyVolumeUsd: 500,
+  minRecentBuyVolumeUsd: 800,
   /** Absolute min holder count */
   minHolders: 30,
   /** Absolute min buys+sells in DexScreener h1 window */
@@ -1514,12 +1514,12 @@ export interface FilterConfig {
   minWinRate: number;
   /**
    * Minimum pool liquidity USD.
-   * Clamped to HARD_FILTER_FLOORS.minLiquidityUsd ($5k). Recommended band $5k–$8k.
+   * Clamped to HARD_FILTER_FLOORS.minLiquidityUsd ($8k). Recommended band $8k–$15k.
    */
   minLiquidity: number;
   /**
    * Minimum entry / buy market-cap USD.
-   * Clamped to HARD_FILTER_FLOORS.minMarketCapUsd ($5k). Non-bypassable.
+   * Clamped to HARD_FILTER_FLOORS.minMarketCapUsd ($8k). Non-bypassable.
    */
   minMarketCapUsd: number;
   /**
@@ -1650,7 +1650,7 @@ export interface FilterConfig {
   /** Auto-disable / prune wallets that fail activity checks */
   enableActivityFilter: boolean;
   /**
-   * Min 24h volume USD — clamped to HARD_FILTER_FLOORS ($10k+).
+   * Min 24h volume USD — clamped to HARD_FILTER_FLOORS ($15k+).
    */
   minVolume24hUsd: number;
   /**
@@ -2052,8 +2052,8 @@ export const config: BotConfig = {
 
   filters: {
     minWinRate: 0,
-    minLiquidity: 5_000,
-    minMarketCapUsd: 5_000,
+    minLiquidity: 10_000,
+    minMarketCapUsd: 8_000,
     maxEntryMarketCapUsd: 0,
     maxDevHoldPct: 14,
     maxDevPercent: 14,
@@ -2111,9 +2111,9 @@ export const config: BotConfig = {
     minActivityDays: 14,
     minTradesLast30d: 3,
     enableActivityFilter: true,
-    minVolume24hUsd: 10_000,
-    minRecentVolumeUsd: 800,
-    minRecentBuyVolumeUsd: 500,
+    minVolume24hUsd: 25_000,
+    minRecentVolumeUsd: 2_500,
+    minRecentBuyVolumeUsd: 1_500,
     minHolderCount: 30,
     minHolders: 30,
     minRecentActivity: 3,
@@ -2402,6 +2402,11 @@ const BUY_PUMP_FUN_ONLY_ON_V1131 = 'buyPumpFunOnly_on_v1131';
 const WALLET_QUALITY_ENTRY_V1133 = 'walletQualityEntry_v1133';
 /** One-shot: prefer live-parity simulation for persisted users still on plain paper. */
 const TRADING_MODE_LIVE_SIM_V1143 = 'tradingMode_liveSim_v1143';
+/**
+ * One-shot: raise absolute vol/liq/MC hard floors ($8k liq / $8k MC / $15k 24h / $1.5k recent).
+ * Prior v113 floors were $5k liq / $5k MC / $10k 24h / $800 recent.
+ */
+const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -3146,6 +3151,16 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyHardVolumeLiquidityFloorsV1144Migration()) {
+    settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V1144] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied hardVolumeLiquidityFloors_v1144 — liq≥$${HARD_FILTER_FLOORS.minLiquidityUsd} ` +
+        `mc≥$${HARD_FILTER_FLOORS.minMarketCapUsd} vol24h≥$${HARD_FILTER_FLOORS.minVolume24hUsd} ` +
+        `recent≥$${HARD_FILTER_FLOORS.minRecentVolumeUsd}`
+    );
+  }
+
   if (applyRiskLevelSyncMigration()) {
     settingsMigrations[RISK_LEVEL_SYNC_V1] = true;
     persistUserSettings();
@@ -3317,10 +3332,26 @@ function applyRequireHealthyCurveOffMigration(): boolean {
  */
 function applyHardVolumeLiquidityFloorsMigration(): boolean {
   if (settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V113]) return false;
+  return applyHardVolumeLiquidityFloorClamp();
+}
 
+/**
+ * Re-clamp persisted filters after hard floors were raised (v1144).
+ * Runtime effective floors already use HARD_FILTER_FLOORS; this keeps UI/saved knobs in sync.
+ */
+function applyHardVolumeLiquidityFloorsV1144Migration(): boolean {
+  if (settingsMigrations[HARD_VOLUME_LIQ_FLOORS_V1144]) return false;
+  return applyHardVolumeLiquidityFloorClamp();
+}
+
+function applyHardVolumeLiquidityFloorClamp(): boolean {
   config.filters.minLiquidity = Math.max(
     config.filters.minLiquidity ?? 0,
     HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minMarketCapUsd = Math.max(
+    config.filters.minMarketCapUsd ?? 0,
+    HARD_FILTER_FLOORS.minMarketCapUsd
   );
   config.filters.minVolume24hUsd = Math.max(
     config.filters.minVolume24hUsd ?? 0,
@@ -4278,6 +4309,14 @@ export function applyRiskLevel(
   config.filters.minVolume24hUsd = Math.max(
     config.filters.minVolume24hUsd ?? 0,
     HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.filters.minRecentVolumeUsd = Math.max(
+    config.filters.minRecentVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+  config.filters.minRecentBuyVolumeUsd = Math.max(
+    config.filters.minRecentBuyVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentBuyVolumeUsd
   );
   config.filters.minTop10HolderPct = Math.max(
     Number(config.filters.minTop10HolderPct) > 0

@@ -193,9 +193,9 @@ export function assessBondingCurveHealth(
   const requireActivity = bc.requireRecentCurveActivity !== false;
   const activityDead =
     requireActivity &&
-    ((vol != null && vol < (config.filters.minRecentVolumeUsd ?? 800)) ||
+    ((vol != null && vol < (config.filters.minRecentVolumeUsd ?? 1_500)) ||
       (txns != null && txns < (config.filters.minRecentActivity ?? 3)) ||
-      (buyVol != null && buyVol < (config.filters.minRecentBuyVolumeUsd ?? 500)) ||
+      (buyVol != null && buyVol < (config.filters.minRecentBuyVolumeUsd ?? 800)) ||
       (vol == null && txns == null && buyVol == null && progress <= deadMax && state.solRaised < 2));
 
   const preferMin = bc.preferNearMigrationMinPct ?? 70;

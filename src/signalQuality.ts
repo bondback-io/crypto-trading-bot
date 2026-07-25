@@ -319,7 +319,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   const recentVol = recentVolumeUsd(signal);
   const minVol = effectiveStrictMinVolume24hUsd();
   const ratio = buySellRatio(signal);
-  if (recentVol != null && recentVol >= (config.filters.minRecentVolumeUsd || 800)) {
+  if (recentVol != null && recentVol >= (config.filters.minRecentVolumeUsd || 1_500)) {
     breakdown.volume += 6;
   } else if (recentVol != null && recentVol > 0) {
     breakdown.volume += 3;
