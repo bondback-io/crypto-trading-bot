@@ -1328,6 +1328,30 @@ export function createServer(): express.Application {
         ms.minPatternConfidence = Math.max(0, Math.min(100, Math.round(n)));
       }
     }
+    if (body.preferRealCandles !== undefined) {
+      ms.preferRealCandles = Boolean(body.preferRealCandles);
+    }
+    if (body.syntheticPenalty !== undefined) {
+      const n = Number(body.syntheticPenalty);
+      if (Number.isFinite(n)) {
+        ms.syntheticPenalty = Math.max(0, Math.min(40, Math.round(n)));
+      }
+    }
+    if (body.minConfluenceScore !== undefined) {
+      const n = Number(body.minConfluenceScore);
+      if (Number.isFinite(n)) {
+        ms.minConfluenceScore = Math.max(0, Math.min(100, Math.round(n)));
+      }
+    }
+    if (body.playbookMode !== undefined) {
+      ms.playbookMode = 'auto';
+    }
+    if (body.pauseScannerOnlyInRiskOff !== undefined) {
+      ms.pauseScannerOnlyInRiskOff = Boolean(body.pauseScannerOnlyInRiskOff);
+    }
+    if (body.requireRsForMomentum !== undefined) {
+      ms.requireRsForMomentum = Boolean(body.requireRsForMomentum);
+    }
 
     // Strategy toggle is the live gate — keep soft preference + toggle in sync
     if (config.strategyToggles) {

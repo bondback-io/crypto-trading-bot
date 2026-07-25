@@ -369,6 +369,9 @@ export interface TradeSignal {
     breakout: boolean;
     bias?: string;
   }>;
+  scannerPlaybook?: string;
+  scannerConfluence?: number;
+  candleSource?: 'real' | 'synthetic';
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -1550,7 +1553,7 @@ async function handleScannerCandidate(
   }
 
   try {
-    const launch = candidate.launch;
+    let launch = candidate.launch;
     if (launch.candles?.length) {
       seedPriceHistoryFromCandles(candidate.mint, launch.candles);
     }
@@ -1568,12 +1571,99 @@ async function handleScannerCandidate(
       uniqueWallets.push(w);
     }
     const hybrid = uniqueWallets.length > 0;
+
+    // Regime: pause scanner-only in risk_off (hybrid still OK)
+    try {
+      const { shouldAllowScannerOnly, getMarketRegime } = await import(
+        './marketRegime'
+      );
+      await getMarketRegime({
+        tokenChangeH1Pct: launch.priceChangeH1Pct ?? launch.priceChangePct,
+      });
+      if (!hybrid && !shouldAllowScannerOnly()) {
+        finishBuy(candidate.mint, false);
+        annotateScannerCandidate(candidate.mint, {
+          status: 'skipped',
+          skipReason: 'risk_off pause scanner-only',
+        });
+        markScannerCooldown(candidate.mint, false);
+        return;
+      }
+    } catch {
+      /* fail-open */
+    }
+
+    const minConfluence =
+      config.marketScanner?.minConfluenceScore ?? 55;
+    if (!hybrid) {
+      if (!candidate.playbook) {
+        finishBuy(candidate.mint, false);
+        annotateScannerCandidate(candidate.mint, {
+          status: 'skipped',
+          skipReason: 'no playbook',
+        });
+        markScannerCooldown(candidate.mint, false);
+        return;
+      }
+      if (
+        candidate.confluence == null ||
+        candidate.confluence < minConfluence
+      ) {
+        finishBuy(candidate.mint, false);
+        annotateScannerCandidate(candidate.mint, {
+          status: 'skipped',
+          skipReason: `confluence ${candidate.confluence ?? 0}<${minConfluence}`,
+        });
+        markScannerCooldown(candidate.mint, false);
+        return;
+      }
+    }
+
     const wallets = hybrid
       ? [MARKET_SCANNER_WALLET, ...uniqueWallets.map((w) => w.addr)]
       : [MARKET_SCANNER_WALLET];
     const walletNames = hybrid
       ? [MARKET_SCANNER_NAME, ...uniqueWallets.map((w) => w.name)]
       : [MARKET_SCANNER_NAME];
+
+    // Best-effort metrics enrich (Dex pair fields + Birdeye holders)
+    let volumeH1Usd =
+      launch.volumeH1Usd ??
+      (candidate.volumeUsd != null
+        ? candidate.volumeUsd / 18
+        : launch.volumeUsd != null
+          ? launch.volumeUsd / 18
+          : null);
+    let volumeM5Usd = launch.volumeM5Usd ?? null;
+    let priceChangeH1Pct = launch.priceChangeH1Pct ?? null;
+    let holderCountEstimate = launch.holderCount ?? null;
+    try {
+      const snap = await Promise.race([
+        import('./marketData').then((m) =>
+          m.fetchLiveTokenSnapshot(candidate.mint)
+        ),
+        new Promise<null>((r) => setTimeout(() => r(null), 2500)),
+      ]);
+      if (snap) {
+        if (snap.volumeH1Usd != null) volumeH1Usd = snap.volumeH1Usd;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const { hasBirdeyeKey, getTokenOverview } = await import('./birdeye');
+      if (hasBirdeyeKey()) {
+        const ov = await Promise.race([
+          getTokenOverview(candidate.mint),
+          new Promise<null>((r) => setTimeout(() => r(null), 2500)),
+        ]);
+        if (ov && ov.holder != null && ov.holder > 0) {
+          holderCountEstimate = ov.holder;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
 
     const signal: TradeSignal = {
       mint: candidate.mint,
@@ -1591,26 +1681,24 @@ async function handleScannerCandidate(
       candles: launch.candles,
       priceSol: launch.lastPriceSol || launch.entryPriceSol,
       sourceEntryMcUsd: candidate.marketCapUsd ?? launch.marketCapUsd,
+      scannerPlaybook: candidate.playbook,
+      scannerConfluence: candidate.confluence,
+      candleSource: candidate.candleSource ?? launch.candleSource,
       metrics: {
         liquidityUsd: candidate.liquidityUsd ?? launch.liquidityUsd ?? null,
         marketCapUsd: candidate.marketCapUsd ?? launch.marketCapUsd ?? null,
         volume24hUsd: candidate.volumeUsd ?? launch.volumeUsd ?? null,
-        volumeH1Usd:
-          candidate.volumeUsd != null
-            ? candidate.volumeUsd / 18
-            : launch.volumeUsd != null
-              ? launch.volumeUsd / 18
-              : null,
-        volumeM5Usd: null,
+        volumeH1Usd,
+        volumeM5Usd,
         recentBuyVolumeUsd: null,
         txnsH1: null,
         buysH1: null,
         sellsH1: null,
         buySellRatio: null,
         priceUsd: null,
-        priceChangeH1Pct: null,
+        priceChangeH1Pct,
         priceChange24hPct: launch.priceChangePct ?? null,
-        holderCountEstimate: null,
+        holderCountEstimate,
         topHolderPct: null,
         top10HoldPct: null,
         devHoldPct: null,
@@ -1641,7 +1729,8 @@ async function handleScannerCandidate(
 
     console.log(
       `[monitor] 📡 SCANNER ${hybrid ? 'HYBRID' : 'TA'} — ${candidate.symbol} ` +
-        `score=${candidate.rankScore} [${candidate.reasons.slice(0, 4).join(', ')}]`
+        `score=${candidate.rankScore} pb=${candidate.playbook ?? '—'} ` +
+        `conf=${candidate.confluence ?? '—'} [${candidate.reasons.slice(0, 4).join(', ')}]`
     );
 
     if (!(await passesFilters(signal))) {
@@ -1713,6 +1802,9 @@ async function executeSignalBuy(
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     convictionScore: signal.convictionScore,
     entrySource: signal.entrySource,
+    scannerPlaybook: signal.scannerPlaybook,
+    scannerConfluence: signal.scannerConfluence,
+    candleSource: signal.candleSource,
     ...resolveScalpBuyFlag(signal),
     antiRug: signal.antiRug
       ? {

@@ -209,6 +209,9 @@ export interface BuyOptions {
   profileAggressiveDeadMarket?: boolean;
   /** wallet | scanner | migration | hybrid */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
+  scannerPlaybook?: string;
+  scannerConfluence?: number;
+  candleSource?: 'real' | 'synthetic';
 }
 
 /**
@@ -525,6 +528,9 @@ export async function executeBuy(
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
         entrySource: meta?.entrySource,
+        scannerPlaybook: meta?.scannerPlaybook,
+        scannerConfluence: meta?.scannerConfluence,
+        candleSource: meta?.candleSource,
       }
     );
     if (!position) {

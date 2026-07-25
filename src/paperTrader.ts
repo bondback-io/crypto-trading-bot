@@ -24,6 +24,7 @@ import {
   resolveExitMarketCapUsd,
   isSaneMarkMarketCapUsd,
 } from './marketData';
+import { recordScannerOutcome } from './scannerOutcomes';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
 import {
   effectiveDeadVolumeConsecutiveHours,
@@ -162,6 +163,10 @@ export interface Position {
   trailingActivationProfit?: number;
   /** How the entry was discovered */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
+  /** Scanner playbook stamp */
+  scannerPlaybook?: string;
+  scannerConfluence?: number;
+  candleSource?: 'real' | 'synthetic';
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -195,6 +200,31 @@ let logCounter = 0;
 function nextId(prefix: string): string {
   logCounter += 1;
   return `${prefix}-${Date.now()}-${logCounter}`;
+}
+
+/** Record playbook outcome when a scanner/hybrid position fully closes. */
+function maybeRecordScannerOutcome(
+  position: Position,
+  pnlPct: number
+): void {
+  const src = position.entrySource;
+  if (src !== 'scanner' && src !== 'hybrid') return;
+  const playbook = position.scannerPlaybook;
+  if (!playbook) return;
+  const holdSec =
+    position.closedAt != null && position.openedAt > 0
+      ? Math.max(0, Math.round((position.closedAt - position.openedAt) / 1000))
+      : 0;
+  try {
+    recordScannerOutcome({
+      playbook,
+      pnlPct,
+      win: pnlPct > 0,
+      holdSec,
+    });
+  } catch {
+    /* non-fatal */
+  }
 }
 
 /** Closed-history row for a partial take (not the final full exit). */
@@ -756,6 +786,9 @@ export class PaperTrader {
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
     entrySource?: Position['entrySource'];
+    scannerPlaybook?: string;
+    scannerConfluence?: number;
+    candleSource?: 'real' | 'synthetic';
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -826,6 +859,9 @@ export class PaperTrader {
       tradeProfileScore: input.tradeProfileScore,
       tradeProfileReason: input.tradeProfileReason,
       entrySource: input.entrySource,
+      scannerPlaybook: input.scannerPlaybook,
+      scannerConfluence: input.scannerConfluence,
+      candleSource: input.candleSource,
     };
 
     if (input.scalpMode) {
@@ -996,6 +1032,9 @@ export class PaperTrader {
       profileDeadVolumeMinHoldMinutes?: number;
       profileAggressiveDeadMarket?: boolean;
       entrySource?: Position['entrySource'];
+      scannerPlaybook?: string;
+      scannerConfluence?: number;
+      candleSource?: 'real' | 'synthetic';
     }
   ): Position | null {
     const spendSol =
@@ -1104,6 +1143,9 @@ export class PaperTrader {
       tradeProfileScore: meta?.tradeProfileScore,
       tradeProfileReason: meta?.tradeProfileReason,
       entrySource: meta?.entrySource,
+      scannerPlaybook: meta?.scannerPlaybook,
+      scannerConfluence: meta?.scannerConfluence,
+      candleSource: meta?.candleSource,
     };
 
     if (meta?.scalpMode) {
@@ -1368,6 +1410,8 @@ export class PaperTrader {
     if (this.closedPositions.length > 200) {
       this.closedPositions = this.closedPositions.slice(-200);
     }
+
+    maybeRecordScannerOutcome(position, totalPct);
 
     const perf = this.getStats();
     this.log(
@@ -2538,6 +2582,7 @@ export class PaperTrader {
             `Live trailing/exit ${formatTokenLabel(position.symbol, position.name, position.mint)} [${reason}]`,
             { mint: position.mint, symbol: position.symbol, pnlSol: position.pnlSol }
           );
+          maybeRecordScannerOutcome(position, pnlPct);
           registerExitForReentry({
             mint: position.mint,
             symbol: position.symbol,

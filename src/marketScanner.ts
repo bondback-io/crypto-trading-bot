@@ -1,23 +1,36 @@
 /**
  * Market Scanner — autonomous Pump.fun / Dex opportunity discovery.
  *
- * Polls recent launches + trending tokens, ranks by TA / volume / curve /
- * liquidity, and feeds candidates into the monitor as non-wallet signals.
+ * Polls recent launches + trending tokens, ranks by multi-TF TA / playbooks /
+ * regime / volume, and feeds candidates into the monitor as non-wallet signals.
  * Wallet copy stays independent; hybrid when tracked wallets also appear.
  */
 
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
 import {
-  fetchRecentLaunches,
+  enrichLaunchWithRealCandles,
   type LaunchEvent,
 } from './marketData';
+import { fetchRecentLaunches } from './marketData';
 import { fetchBondingCurve, summarizeBondingCurve } from './bondingCurve';
 import { isStrategyEnabled } from './strategies';
 import { seedPriceHistoryFromCandles } from './technicalLevels';
 import { analyzeChartPatterns } from './chartPatterns';
-import { analyzeTechnicals } from './technicalLevels';
+import {
+  getTechnicalLevelsForStrategy,
+} from './technicalLevels';
 import { evaluateIndicators } from './indicators';
+import { evaluatePostRunDip } from './postRunDip';
+import { classifyScannerPlaybook } from './scannerPlaybooks';
+import {
+  effectiveMinConfluence,
+  effectiveMinRankScore,
+  getCachedMarketRegime,
+  getMarketRegime,
+  isMomentumPlaybookDisabled,
+} from './marketRegime';
+import { getScannerOutcomeSummary } from './scannerOutcomes';
 
 export const MARKET_SCANNER_WALLET = 'market-scanner';
 export const MARKET_SCANNER_NAME = 'Market Scanner';
@@ -41,8 +54,14 @@ export interface ScannerCandidate {
   volumeUsd?: number;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
+  nearResistance?: boolean;
   chartPatternIds?: string[];
   indicatorSummary?: string;
+  candleSource?: 'real' | 'synthetic';
+  playbook?: string;
+  confluence?: number;
+  mtfAligned?: boolean;
+  veto?: string;
 }
 
 export interface ScannerStatus {
@@ -52,6 +71,13 @@ export interface ScannerStatus {
   candidatesInFeed: number;
   lastError: string | null;
   enabled: boolean;
+  regime?: {
+    regime: string;
+    solChangeH1: number;
+    solChangeH24: number;
+    rsHint?: string;
+  };
+  outcomes?: ReturnType<typeof getScannerOutcomeSummary>;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -79,6 +105,12 @@ function scannerCfg() {
       minRankScore: 42,
       requireTaSetup: true,
       minPatternConfidence: 55,
+      preferRealCandles: true,
+      syntheticPenalty: 8,
+      minConfluenceScore: 55,
+      playbookMode: 'auto' as const,
+      pauseScannerOnlyInRiskOff: true,
+      requireRsForMomentum: true,
     }
   );
 }
@@ -111,6 +143,7 @@ export function getScannerFeed(limit = 40): ScannerCandidate[] {
 }
 
 export function getScannerStatus(): ScannerStatus {
+  const regime = getCachedMarketRegime();
   return {
     running,
     lastPollAt,
@@ -118,6 +151,13 @@ export function getScannerStatus(): ScannerStatus {
     candidatesInFeed: feed.length,
     lastError,
     enabled: isStrategyEnabled('ta_market_scanner'),
+    regime: {
+      regime: regime.regime,
+      solChangeH1: regime.solChangeH1,
+      solChangeH24: regime.solChangeH24,
+      rsHint: regime.rsHint,
+    },
+    outcomes: getScannerOutcomeSummary(),
   };
 }
 
@@ -148,22 +188,94 @@ function hardFloorsOk(event: LaunchEvent): boolean {
   return true;
 }
 
-/** Rank a launch for scanner entry — higher is better. */
-export function rankLaunchForScanner(event: LaunchEvent): {
+function crudeLiqVolScore(event: LaunchEvent): number {
+  return (event.liquidityUsd ?? 0) / 1000 + (event.volumeUsd ?? 0) / 5000;
+}
+
+/** Multi-TF: entry = last ~32 bars; structure = every 3rd bar. */
+function analyzeMultiTf(closes: number[]): {
+  mtfAligned: boolean;
+  structureBearish: boolean;
+  structureHh: boolean;
+  entryEmaBull: boolean;
+} {
+  if (closes.length < 16) {
+    return {
+      mtfAligned: false,
+      structureBearish: false,
+      structureHh: false,
+      entryEmaBull: false,
+    };
+  }
+  const entry = closes.slice(-Math.min(32, closes.length));
+  const structure: number[] = [];
+  for (let i = closes.length - 1; i >= 0 && structure.length < 24; i -= 3) {
+    structure.unshift(closes[i]!);
+  }
+  const ema = (vals: number[], period: number): number | null => {
+    if (vals.length < period) return null;
+    const k = 2 / (period + 1);
+    let prev = vals.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < vals.length; i++) {
+      prev = vals[i]! * k + prev * (1 - k);
+    }
+    return prev;
+  };
+  const eFast = ema(entry, 8);
+  const eSlow = ema(entry, 21);
+  const entryEmaBull =
+    eFast != null && eSlow != null && eFast >= eSlow * 0.995;
+  const sFast = ema(structure, 5);
+  const sSlow = ema(structure, 12);
+  const structureEmaBull =
+    sFast != null && sSlow != null && sFast >= sSlow * 0.99;
+  let hh = 0;
+  for (let i = 1; i < structure.length; i++) {
+    if (structure[i]! > structure[i - 1]!) hh += 1;
+  }
+  const structureHh = structure.length >= 4 && hh >= Math.ceil(structure.length * 0.45);
+  const structureBearish = !structureEmaBull && !structureHh;
+  const mtfAligned = entryEmaBull && !structureBearish;
+  return { mtfAligned, structureBearish, structureHh, entryEmaBull };
+}
+
+export interface RankLaunchResult {
   score: number;
   reasons: string[];
   nearKeyFib: boolean;
   nearSupport: boolean;
+  nearResistance: boolean;
   chartPatternIds: string[];
   indicatorSummary?: string;
   taSetup: boolean;
-} {
+  candleSource: 'real' | 'synthetic';
+  playbook?: string;
+  confluence?: number;
+  mtfAligned?: boolean;
+  veto?: string;
+}
+
+/** Rank a launch for scanner entry — higher is better. */
+export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
+  const cfg = scannerCfg();
   const reasons: string[] = [];
   let score = 20;
+  let veto: string | undefined;
 
   const liq = event.liquidityUsd ?? 0;
   const vol = event.volumeUsd ?? 0;
   const mc = event.marketCapUsd ?? 0;
+  const candleSource: 'real' | 'synthetic' =
+    event.candleSource === 'real' ? 'real' : 'synthetic';
+
+  if (candleSource === 'synthetic') {
+    const pen = Number(cfg.syntheticPenalty) || 8;
+    score -= pen;
+    reasons.push(`synth−${pen}`);
+  } else {
+    score += 4;
+    reasons.push('real OHLCV');
+  }
 
   if (liq >= 25_000) {
     score += 12;
@@ -176,7 +288,25 @@ export function rankLaunchForScanner(event: LaunchEvent): {
     reasons.push('liq ok');
   }
 
-  if (vol >= 50_000) {
+  // Volume — prefer H1/M5 when available
+  const volH1 = event.volumeH1Usd;
+  const volM5 = event.volumeM5Usd;
+  if (volH1 != null && Number.isFinite(volH1)) {
+    if (volH1 >= 40_000) {
+      score += 14;
+      reasons.push('h1 vol spike');
+    } else if (volH1 >= 15_000) {
+      score += 9;
+      reasons.push('h1 vol ok');
+    } else if (volH1 < 800) {
+      score -= 8;
+      reasons.push('dead h1 vol');
+    }
+    if (volM5 != null && volH1 > 0 && volM5 / (volH1 / 12) >= 2.2) {
+      score += 6;
+      reasons.push('m5 spike');
+    }
+  } else if (vol >= 50_000) {
     score += 14;
     reasons.push('vol≥50k');
   } else if (vol >= 20_000) {
@@ -185,6 +315,9 @@ export function rankLaunchForScanner(event: LaunchEvent): {
   } else if (vol >= 10_000) {
     score += 5;
     reasons.push('vol ok');
+  } else if (vol > 0 && vol < 2_000) {
+    score -= 6;
+    reasons.push('dead vol');
   }
 
   if (mc > 0 && mc < 80_000) {
@@ -204,25 +337,38 @@ export function rankLaunchForScanner(event: LaunchEvent): {
     reasons.push('pump');
   }
 
-  // Seed TA history from candles
   if (event.candles?.length) {
     seedPriceHistoryFromCandles(event.mint, event.candles);
   }
 
   let nearKeyFib = false;
   let nearSupport = false;
+  let nearResistance = false;
   const chartPatternIds: string[] = [];
   let indicatorSummary: string | undefined;
   let taSetup = false;
+  let techSnap = null as ReturnType<typeof getTechnicalLevelsForStrategy> | null;
+  let patterns = null as ReturnType<typeof analyzeChartPatterns> | null;
+  let ind = null as ReturnType<typeof evaluateIndicators> | null;
+
+  const closes = (event.candles ?? [])
+    .map((c) => Number(c.priceSol ?? 0))
+    .filter((p) => p > 0);
+  const mtf = analyzeMultiTf(closes);
 
   try {
-    const tech = analyzeTechnicals({
+    techSnap = getTechnicalLevelsForStrategy({
       mint: event.mint,
       priceSol: event.lastPriceSol || event.entryPriceSol,
       candles: event.candles,
     });
-    nearKeyFib = Boolean(tech.nearKeyFib);
-    nearSupport = Boolean(tech.nearSupport);
+    nearKeyFib = Boolean(techSnap.nearFibZone);
+    nearSupport = Boolean(techSnap.nearSupportZone);
+    const res = techSnap.nearestResistance;
+    nearResistance =
+      res != null &&
+      res.distancePct != null &&
+      Math.abs(res.distancePct) <= 4;
     if (nearKeyFib) {
       score += 12;
       reasons.push('near Fib');
@@ -233,20 +379,29 @@ export function rankLaunchForScanner(event: LaunchEvent): {
       reasons.push('near support');
       taSetup = true;
     }
+    if (nearResistance) {
+      const dist = Math.abs(res?.distancePct ?? 99);
+      // Penalize sitting under resistance without breakout evidence later
+      score -= dist <= 2 ? 8 : 4;
+      reasons.push('near resist');
+    }
   } catch {
     /* thin history */
   }
 
   try {
-    const patterns = analyzeChartPatterns({
+    patterns = analyzeChartPatterns({
       mint: event.mint,
       priceSol: event.lastPriceSol || event.entryPriceSol,
       candles: event.candles,
-      volumeH1Usd: event.volumeUsd != null ? event.volumeUsd / 18 : null,
+      volumeH1Usd: event.volumeH1Usd ?? (event.volumeUsd != null ? event.volumeUsd / 18 : null),
+      volumeM5Usd: event.volumeM5Usd ?? null,
       priceChange24hPct: event.priceChangePct ?? null,
+      priceChangeH1Pct: event.priceChangeH1Pct ?? null,
       marketCapUsd: event.marketCapUsd ?? null,
+      ignoreStrategyGates: true,
     });
-    const minConf = scannerCfg().minPatternConfidence ?? 55;
+    const minConf = cfg.minPatternConfidence ?? 55;
     for (const hit of patterns.bullish ?? []) {
       if (hit.confidence >= minConf) {
         chartPatternIds.push(hit.id);
@@ -256,7 +411,21 @@ export function rankLaunchForScanner(event: LaunchEvent): {
         if (hit.breakout) {
           score += 4;
           reasons.push('breakout');
+          // Relieve resistance penalty on confirmed breakout
+          if (nearResistance) score += 6;
         }
+      }
+    }
+    const hardFloor = minConf + 10;
+    for (const hit of patterns.bearish ?? []) {
+      if (hit.confidence >= hardFloor) {
+        veto = `bearish:${hit.id}`;
+        score -= 18;
+        reasons.push(`veto:${hit.id}`);
+        break;
+      } else if (hit.confidence >= minConf) {
+        score -= 8;
+        reasons.push(`bear:${hit.id}`);
       }
     }
   } catch {
@@ -264,7 +433,7 @@ export function rankLaunchForScanner(event: LaunchEvent): {
   }
 
   try {
-    const ind = evaluateIndicators({
+    ind = evaluateIndicators({
       mint: event.mint,
       candles: event.candles,
       priceSol: event.lastPriceSol || event.entryPriceSol,
@@ -281,7 +450,39 @@ export function rankLaunchForScanner(event: LaunchEvent): {
     /* ignore */
   }
 
-  // Mild momentum from path
+  // Post-run dip boost (lightweight — does not require strategy ON)
+  let postRunDipQualifies = false;
+  try {
+    const prd = evaluatePostRunDip({
+      mint: event.mint,
+      symbol: event.symbol,
+      isMigration: event.migrated,
+      candles: event.candles,
+      metrics: {
+        priceChange24hPct: event.priceChangePct ?? null,
+        priceChangeH1Pct: event.priceChangeH1Pct ?? null,
+        volume24hUsd: event.volumeUsd ?? null,
+        volumeH1Usd: event.volumeH1Usd ?? null,
+        volumeM5Usd: event.volumeM5Usd ?? null,
+        liquidityUsd: event.liquidityUsd ?? null,
+        holderCountEstimate: event.holderCount ?? null,
+        pairCreatedAtMs: event.launchedAt ?? null,
+      },
+      tokenAgeHours:
+        event.launchedAt > 0
+          ? (Date.now() - event.launchedAt) / 3_600_000
+          : null,
+    });
+    if (prd.qualifies) {
+      postRunDipQualifies = true;
+      score += 10;
+      taSetup = true;
+      reasons.push('prd');
+    }
+  } catch {
+    /* ignore */
+  }
+
   const chg = event.priceChangePct ?? 0;
   if (chg >= 15 && chg <= 120) {
     score += 6;
@@ -292,32 +493,132 @@ export function rankLaunchForScanner(event: LaunchEvent): {
     taSetup = true;
   }
 
+  // Multi-TF structure gates for breakout/momentum
+  if (mtf.mtfAligned) {
+    score += 6;
+    reasons.push('mtf');
+  }
+
+  const rsiReset =
+    ind?.flags?.includes('rsi_reset') === true ||
+    ind?.flags?.includes('rsi_oversold') === true;
+
+  const pb = classifyScannerPlaybook({
+    migrated: event.migrated,
+    isPumpFun: event.isPumpFun,
+    priceChangePct: event.priceChangePct,
+    priceChangeH1Pct: event.priceChangeH1Pct,
+    nearKeyFib,
+    nearSupport,
+    nearResistance,
+    tech: techSnap?.snapshot ?? null,
+    patterns,
+    indicators: ind,
+    postRunDipQualifies,
+    mtfAligned: mtf.mtfAligned,
+    structureBearish: mtf.structureBearish,
+    rsiReset,
+    minConfluence: effectiveMinConfluence(cfg.minConfluenceScore ?? 55),
+  });
+
+  if (pb.playbook === 'momentum_continuation' && isMomentumPlaybookDisabled()) {
+    score -= 15;
+    reasons.push('mom blocked risk_off');
+    if (!veto) veto = 'momentum_disabled_risk_off';
+  }
+
+  if (
+    pb.playbook === 'momentum_continuation' &&
+    cfg.requireRsForMomentum !== false
+  ) {
+    const regime = getCachedMarketRegime();
+    const tokH1 = event.priceChangeH1Pct ?? event.priceChangePct ?? 0;
+    const rel = tokH1 - regime.solChangeH1;
+    if (rel < 2) {
+      score -= 10;
+      reasons.push('weak RS');
+    } else {
+      score += 5;
+      reasons.push('RS ok');
+    }
+  }
+
+  // Breakout / momentum need non-bearish structure; dip_reclaim allows soft-bear + RSI
+  if (
+    (pb.playbook === 'bull_flag_break' ||
+      pb.playbook === 'momentum_continuation') &&
+    mtf.structureBearish
+  ) {
+    score -= 12;
+    reasons.push('struct bear');
+    if (!veto) veto = 'structure_bearish';
+  }
+  if (pb.playbook === 'dip_reclaim' && mtf.structureBearish && !rsiReset) {
+    score -= 6;
+    reasons.push('dip needs rsi');
+  }
+
+  if (pb.playbook) {
+    reasons.push(...pb.reasons.filter((r) => !reasons.includes(r)).slice(0, 3));
+    score += Math.round((pb.confluence - 50) / 8);
+  }
+
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+  if (!pb.allowed || (pb.confluence ?? 0) < minConfluence) {
+    if (cfg.requireTaSetup !== false) {
+      // Quality gate — treat as weak / skip later
+      if (!veto) veto = veto ?? `confluence<${minConfluence}`;
+      score -= 8;
+    }
+  }
+
+  // Regime score adjust
+  const regime = getCachedMarketRegime().regime;
+  if (regime === 'risk_off') {
+    score -= 6;
+    reasons.push('risk_off');
+  } else if (regime === 'risk_on') {
+    score += 3;
+  }
+
   return {
     score: Math.max(0, Math.min(100, Math.round(score))),
     reasons,
     nearKeyFib,
     nearSupport,
+    nearResistance,
     chartPatternIds,
     indicatorSummary,
     taSetup,
+    candleSource,
+    playbook: pb.playbook ?? undefined,
+    confluence: pb.confluence,
+    mtfAligned: mtf.mtfAligned,
+    veto,
   };
 }
 
-async function enrichCurve(event: LaunchEvent): Promise<number> {
+async function enrichCurve(event: LaunchEvent): Promise<{
+  bonus: number;
+  nearMigration: boolean;
+  progressPct: number | null;
+}> {
   try {
     const curve = await fetchBondingCurve(event.mint);
-    if (!curve) return 0;
+    if (!curve) return { bonus: 0, nearMigration: false, progressPct: null };
     const sum = summarizeBondingCurve(curve);
     let bonus = 0;
-    if (sum.nearMigration) {
-      bonus += 10;
-    }
+    if (sum.nearMigration) bonus += 10;
     if ((sum.progressPct ?? 0) >= 70 && (sum.progressPct ?? 0) < 99) {
       bonus += 6;
     }
-    return bonus;
+    return {
+      bonus,
+      nearMigration: Boolean(sum.nearMigration),
+      progressPct: sum.progressPct ?? null,
+    };
   } catch {
-    return 0;
+    return { bonus: 0, nearMigration: false, progressPct: null };
   }
 }
 
@@ -344,19 +645,54 @@ export async function selectScannerCandidates(
   const now = Date.now();
   const out: Array<ScannerCandidate & { launch: LaunchEvent }> = [];
 
-  for (const event of events) {
-    if (!event.mint) continue;
-    const cd = cooldowns.get(event.mint) ?? 0;
+  // Prefetch regime (cached)
+  try {
+    await getMarketRegime();
+  } catch {
+    /* ignore */
+  }
+
+  const minRank = effectiveMinRankScore(cfg.minRankScore);
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+
+  // Crude pre-sort so enrich focuses on likelier names (cache makes full enrich cheap)
+  const sorted = [...events].sort(
+    (a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a)
+  );
+
+  for (const raw of sorted) {
+    if (!raw.mint) continue;
+    const cd = cooldowns.get(raw.mint) ?? 0;
     if (cd > now) continue;
-    if (!hardFloorsOk(event)) continue;
+    if (!hardFloorsOk(raw)) continue;
+
+    let event: LaunchEvent = raw;
+    try {
+      event = await enrichLaunchWithRealCandles(raw);
+    } catch {
+      event = { ...raw, candleSource: raw.candleSource ?? 'synthetic' };
+    }
 
     const ranked = rankLaunchForScanner(event);
-    const curveBonus = await enrichCurve(event);
-    const score = Math.min(100, ranked.score + curveBonus);
-    if (curveBonus > 0) ranked.reasons.push('curve');
+    const curve = await enrichCurve(event);
+    let score = Math.min(100, ranked.score + curve.bonus);
+    if (curve.bonus > 0) ranked.reasons.push('curve');
 
-    if (score < cfg.minRankScore) continue;
+    // Re-classify playbook with curve near-migration if useful
+    if (curve.nearMigration && ranked.playbook !== 'curve_migration_sniper') {
+      score = Math.min(100, score + 4);
+    }
+
+    if (ranked.veto?.startsWith('bearish:')) continue;
+    if (score < minRank) continue;
     if (cfg.requireTaSetup && !ranked.taSetup) continue;
+    if (
+      (ranked.confluence == null || ranked.confluence < minConfluence) &&
+      cfg.requireTaSetup !== false
+    ) {
+      continue;
+    }
+    if (!ranked.playbook && cfg.requireTaSetup !== false) continue;
 
     const id = `scan-${event.mint.slice(0, 8)}-${now}`;
     out.push({
@@ -375,8 +711,14 @@ export async function selectScannerCandidates(
       volumeUsd: event.volumeUsd,
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
+      nearResistance: ranked.nearResistance,
       chartPatternIds: ranked.chartPatternIds,
       indicatorSummary: ranked.indicatorSummary,
+      candleSource: ranked.candleSource,
+      playbook: ranked.playbook,
+      confluence: ranked.confluence,
+      mtfAligned: ranked.mtfAligned,
+      veto: ranked.veto,
       launch: event,
     });
   }
@@ -479,6 +821,9 @@ export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
   nearKeyFib: boolean;
   nearSupport: boolean;
   chartPatternIds: string[];
+  playbook?: string;
+  confluence?: number;
+  candleSource?: 'real' | 'synthetic';
 } {
   if (!hardFloorsOk(event)) {
     return {
@@ -490,11 +835,21 @@ export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
       chartPatternIds: [],
     };
   }
-  const ranked = rankLaunchForScanner(event);
+  // BT: skip network enrich; use candles already on the event
+  const ranked = rankLaunchForScanner({
+    ...event,
+    candleSource: event.candleSource ?? (event.source === 'synthetic' ? 'synthetic' : event.candleSource),
+  });
   const cfg = scannerCfg();
+  const minRank = effectiveMinRankScore(cfg.minRankScore);
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+  const confluenceOk =
+    ranked.confluence != null && ranked.confluence >= minConfluence;
   const ok =
-    ranked.score >= cfg.minRankScore &&
-    (!cfg.requireTaSetup || ranked.taSetup);
+    ranked.score >= minRank &&
+    (!cfg.requireTaSetup || ranked.taSetup) &&
+    (!cfg.requireTaSetup || confluenceOk) &&
+    !ranked.veto?.startsWith('bearish:');
   return {
     ok,
     score: ranked.score,
@@ -502,5 +857,8 @@ export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
     nearKeyFib: ranked.nearKeyFib,
     nearSupport: ranked.nearSupport,
     chartPatternIds: ranked.chartPatternIds,
+    playbook: ranked.playbook,
+    confluence: ranked.confluence,
+    candleSource: ranked.candleSource,
   };
 }

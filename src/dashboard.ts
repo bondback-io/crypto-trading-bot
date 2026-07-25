@@ -4084,6 +4084,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <span title="Scanner-only entries must show Fib/support/pattern/indicator setup">Require TA setup</span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
+        <div class="toggle-row">
+          <span title="Prefer Birdeye/GeckoTerminal OHLCV over synthetic candle paths">Prefer real candles</span>
+          <label class="switch"><input type="checkbox" id="ms-prefer-real" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span title="Skip scanner-only entries when SOL regime is risk_off (hybrid still allowed)">Pause scanner-only in risk-off</span>
+          <label class="switch"><input type="checkbox" id="ms-pause-risk" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span title="Momentum playbooks need token outperformance vs SOL">Require RS for momentum</span>
+          <label class="switch"><input type="checkbox" id="ms-require-rs" checked /><span class="slider"></span></label>
+        </div>
         <div class="filters-row mt-2">
           <label class="ctl ctl-md">
             <span>Poll interval (ms) <span class="tip" tabindex="0" data-tip="How often the scanner polls for new candidates. Min 15000."></span></span>
@@ -4108,6 +4120,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="ctl ctl-sm">
             <span>Min pattern conf <span class="tip" tabindex="0" data-tip="Minimum chart-pattern confidence when TA setup is required."></span></span>
             <input type="number" id="ms-min-pat-conf" value="55" min="0" max="100" step="1" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Synthetic penalty <span class="tip" tabindex="0" data-tip="Rank points deducted when candles are synthetic (not real OHLCV)."></span></span>
+            <input type="number" id="ms-synth-pen" value="8" min="0" max="40" step="1" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min confluence <span class="tip" tabindex="0" data-tip="Minimum playbook confluence (0–100) for scanner quality gate."></span></span>
+            <input type="number" id="ms-min-confl" value="55" min="0" max="100" step="1" />
           </label>
         </div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
@@ -10216,6 +10236,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (ss.running ? ' · polling' : '') +
           (ss.lastPollMs != null ? ' · last ' + ss.lastPollMs + 'ms' : '') +
           ' · ' + cands.length + ' recent' +
+          (ss.regime && ss.regime.regime
+            ? ' · regime ' + ss.regime.regime +
+              (ss.regime.solChangeH1 != null
+                ? ' (SOL h1 ' + Number(ss.regime.solChangeH1).toFixed(1) + '%)'
+                : '')
+            : '') +
           (ss.lastError ? ' · err: ' + ss.lastError : '');
         scanStEls.forEach(function (scanSt) {
           scanSt.textContent = statusText;
@@ -10227,12 +10253,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 c.status === 'taken' ? 'var(--green)' :
                 c.status === 'skipped' ? 'var(--red)' :
                 c.status === 'queued' ? '#60a5fa' : 'var(--muted)';
+              const pb = c.playbook
+                ? '<span class="mint text-xs">' + String(c.playbook).replace(/</g, '&lt;') +
+                  (c.confluence != null ? ' · conf ' + c.confluence : '') +
+                  (c.candleSource ? ' · ' + c.candleSource : '') +
+                  '</span> '
+                : '';
               return (
                 '<div class="flex justify-between gap-2 py-1 border-b border-slate-800/60">' +
                   '<div>' +
                     '<span class="badge" style="background:#0d9488;color:#fff;margin-right:0.35rem">Scanner</span>' +
                     '<strong>' + String(c.symbol || '?').replace(/</g, '&lt;') + '</strong> ' +
                     '<span class="mint text-xs">score ' + (c.rankScore ?? '—') + '</span> ' +
+                    pb +
                     '<span class="mint text-xs">' + (c.reasons || []).slice(0, 3).join(' · ') + '</span>' +
                   '</div>' +
                   '<span style="color:' + stColor + ';font-size:0.75rem">' +
@@ -12683,6 +12716,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const reqTa = document.getElementById('ms-require-ta');
       if (reqTa) reqTa.checked = cfg.requireTaSetup !== false;
+      const prefReal = document.getElementById('ms-prefer-real');
+      if (prefReal) prefReal.checked = cfg.preferRealCandles !== false;
+      const pauseRisk = document.getElementById('ms-pause-risk');
+      if (pauseRisk) pauseRisk.checked = cfg.pauseScannerOnlyInRiskOff !== false;
+      const reqRs = document.getElementById('ms-require-rs');
+      if (reqRs) reqRs.checked = cfg.requireRsForMomentum !== false;
       const setNum = (id, v) => {
         const el = document.getElementById(id);
         if (el && v != null && Number.isFinite(Number(v))) el.value = Number(v);
@@ -12693,6 +12732,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       setNum('ms-cooldown-ms', cfg.cooldownMs);
       setNum('ms-min-rank', cfg.minRankScore);
       setNum('ms-min-pat-conf', cfg.minPatternConfidence);
+      setNum('ms-synth-pen', cfg.syntheticPenalty);
+      setNum('ms-min-confl', cfg.minConfluenceScore);
+      const statusEl = document.getElementById('scanner-status-tab');
+      if (statusEl && status && status.regime) {
+        const r = status.regime;
+        const outN =
+          status.outcomes && status.outcomes.total != null
+            ? status.outcomes.total
+            : 0;
+        statusEl.dataset.regimeLine =
+          'Regime ' +
+          String(r.regime || '—') +
+          ' · SOL h1 ' +
+          (r.solChangeH1 != null ? Number(r.solChangeH1).toFixed(1) + '%' : '—') +
+          ' · h24 ' +
+          (r.solChangeH24 != null ? Number(r.solChangeH24).toFixed(1) + '%' : '—') +
+          (outN ? ' · outcomes ' + outN : '');
+      }
     }
 
     async function loadMarketScannerConfig() {
@@ -12717,12 +12774,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           requireTaSetup: document.getElementById('ms-require-ta')
             ? document.getElementById('ms-require-ta').checked
             : true,
+          preferRealCandles: document.getElementById('ms-prefer-real')
+            ? document.getElementById('ms-prefer-real').checked
+            : true,
+          pauseScannerOnlyInRiskOff: document.getElementById('ms-pause-risk')
+            ? document.getElementById('ms-pause-risk').checked
+            : true,
+          requireRsForMomentum: document.getElementById('ms-require-rs')
+            ? document.getElementById('ms-require-rs').checked
+            : true,
           pollIntervalMs: Number(document.getElementById('ms-poll-ms')?.value) || 45000,
           lookbackHours: Number(document.getElementById('ms-lookback-h')?.value) || 6,
           maxCandidatesPerPoll: Number(document.getElementById('ms-max-cands')?.value) || 15,
           cooldownMs: Number(document.getElementById('ms-cooldown-ms')?.value) || 2700000,
           minRankScore: Number(document.getElementById('ms-min-rank')?.value) || 42,
           minPatternConfidence: Number(document.getElementById('ms-min-pat-conf')?.value) || 55,
+          syntheticPenalty: Number(document.getElementById('ms-synth-pen')?.value) || 8,
+          minConfluenceScore: Number(document.getElementById('ms-min-confl')?.value) || 55,
+          playbookMode: 'auto',
         };
         const data = await fetchJSON('/api/config/market-scanner', {
           method: 'POST',

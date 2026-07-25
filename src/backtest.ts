@@ -42,6 +42,7 @@ import {
 import {
   scoreLaunchForBacktestScanner,
   MARKET_SCANNER_NAME,
+  markScannerCooldown,
 } from './marketScanner';
 import {
   atomicWriteJson,
@@ -2489,23 +2490,25 @@ function runSinglePass(
       considered
     );
 
-    // Market Scanner BT path — TA-ranked entries without synthetic wallet cluster
+    // Market Scanner BT path — prefer scanner when score ok; hybrid when wallets + score
     let sourceNames = resolved.names;
     let entrySource: 'wallet' | 'scanner' | 'hybrid' = 'wallet';
     const scanScore = isStrategyEnabled('ta_market_scanner')
       ? scoreLaunchForBacktestScanner(event)
       : null;
-    if (
-      isStrategyEnabled('ta_market_scanner') &&
-      scanScore?.ok &&
-      (!isStrategyEnabled('smart_money_copy') ||
-        resolved.skipReason ||
-        resolved.names.length === 0 ||
-        // Prefer scanner on strong TA when both enabled (~every 3rd event for mix)
-        considered % 3 === 0)
-    ) {
-      sourceNames = [MARKET_SCANNER_NAME];
-      entrySource = 'scanner';
+    const copyOn = isStrategyEnabled('smart_money_copy');
+    const walletsOk =
+      !resolved.skipReason && resolved.names.length > 0;
+
+    if (isStrategyEnabled('ta_market_scanner') && scanScore?.ok) {
+      if (copyOn && walletsOk) {
+        // Hybrid: wallets + scanner both qualify
+        sourceNames = [MARKET_SCANNER_NAME, ...resolved.names];
+        entrySource = 'hybrid';
+      } else if (!copyOn || !walletsOk) {
+        sourceNames = [MARKET_SCANNER_NAME];
+        entrySource = 'scanner';
+      }
     } else if (resolved.skipReason || resolved.names.length === 0) {
       // Fall back to scanner if wallet resolve failed and scanner qualifies
       if (scanScore?.ok) {
@@ -2521,13 +2524,24 @@ function runSinglePass(
     }
 
     const signal = buildBacktestSignal(event, sourceNames);
-    if (entrySource === 'scanner') {
-      signal.entrySource = 'scanner';
-      signal.wallets = ['market-scanner'];
-      signal.walletNames = [MARKET_SCANNER_NAME];
+    if (entrySource === 'scanner' || entrySource === 'hybrid') {
+      signal.entrySource = entrySource;
+      signal.wallets =
+        entrySource === 'hybrid'
+          ? ['market-scanner', ...(signal.wallets ?? [])]
+          : ['market-scanner'];
+      signal.walletNames = sourceNames;
       signal.nearKeyFib = scanScore?.nearKeyFib;
       signal.nearSupport = scanScore?.nearSupport;
       signal.chartPatternIds = scanScore?.chartPatternIds;
+      signal.scannerPlaybook = scanScore?.playbook;
+      signal.scannerConfluence = scanScore?.confluence;
+      signal.candleSource = scanScore?.candleSource;
+      try {
+        markScannerCooldown(event.mint, false);
+      } catch {
+        /* optional */
+      }
     } else {
       signal.entrySource = event.migrated ? 'migration' : 'wallet';
     }
