@@ -1213,8 +1213,10 @@ export const FRESH_MIGRATION_MAX_MC_USD = 450_000;
  * True only for freshly graduated migrations — not older PumpSwap venue trades,
  * not near-curve, not early-buy alone.
  *
- * PumpSwap buys set isMigration on the wire forever; without age/MC/fresh TTL
- * gates, mature ~$900K tokens were incorrectly stamped Migration Sniper.
+ * PumpSwap buys set isMigration on the wire forever. Age/MC alone is NOT enough
+ * (young PumpSwap copies were over-assigned to Migration Sniper). Require an
+ * explicit migrationFresh signal (listener TTL / backtest fresh-grad proxy),
+ * then apply age + MC caps as additional filters.
  */
 export function evaluateFreshMigrationEligibility(
   ctx: TradeProfileMatchContext,
@@ -1240,6 +1242,14 @@ export function evaluateFreshMigrationEligibility(
       };
     }
     return { ok: false, reason: 'not a graduated migration' };
+  }
+
+  // Hard gate: venue/isMigration alone never qualifies — need a fresh-grad stamp
+  if (ctx.migrationFresh !== true) {
+    return {
+      ok: false,
+      reason: 'PumpSwap / migrated venue without recent migration event',
+    };
   }
 
   const maxAgeH =
@@ -1270,24 +1280,6 @@ export function evaluateFreshMigrationEligibility(
     return {
       ok: false,
       reason: `MC $${Math.round(mc)} too mature for Migration Sniper (max $${maxMc})`,
-    };
-  }
-
-  // Fail closed when we cannot prove freshness (common on older PumpSwap copies)
-  if (ageH == null && mc == null && ctx.migrationFresh !== true) {
-    return {
-      ok: false,
-      reason: 'need age/MC or recent migration event for Migration Sniper',
-    };
-  }
-  if (
-    ageH == null &&
-    ctx.migrationFresh === false &&
-    (mc == null || mc > maxMc * 0.65)
-  ) {
-    return {
-      ok: false,
-      reason: 'PumpSwap buy is not a recent migration event',
     };
   }
 
@@ -1667,6 +1659,7 @@ function scoreProfile(
   }
 
   if (m.preferSmartMoneyMirror) {
+    if (isMig) return { score: 0, reason: 'defer to fresh migration' };
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };
     }
@@ -1708,6 +1701,7 @@ function scoreProfile(
   }
 
   if (m.preferHighWinRate) {
+    if (isMig) return { score: 0, reason: 'defer to fresh migration' };
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not high-win-rate selective' };
     }

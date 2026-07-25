@@ -3752,7 +3752,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
-          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Soft cap on simulated entries. Selective rate limits + risk level may take fewer."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
+          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Soft cap on simulated entries. Defaults from the selected Risk Level max positions (Live Sim parity). Editable override; selective rate limits may take fewer."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
           <label class="ctl ctl-md"><span>Start SOL <span class="tip" tabindex="0" data-tip="Starting paper bankroll for the simulation."></span></span><input type="number" id="bt-start-bal" value="10" min="0.5" max="100" step="0.5" /></label>
           <label class="ctl ctl-lg"><span>Strategy <span class="tip" tabindex="0" data-tip="Auto = bot defaults. Convergence = multi-wallet. Migration = grads only. Single = first wallet buy."></span></span>
             <select id="bt-strategy">
@@ -3763,7 +3763,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </select>
           </label>
           <label class="ctl ctl-lg"><span>Risk level <span class="tip" tabindex="0" data-tip="Current = your live saved Risk Level (parity default). Overrides apply for this run only then restore."></span></span>
-            <select id="bt-risk-level">
+            <select id="bt-risk-level" onchange="onBtRiskLevelChange()">
               <option value="current" selected>Current (parity)</option>
               <option value="low">Override → Low</option>
               <option value="medium">Override → Medium</option>
@@ -3778,8 +3778,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="on">Force ON</option>
             </select>
           </label>
-          <label class="ctl ctl-md" id="bt-strict-intensity-wrap"><span>Strict intensity <span class="tip" tabindex="0" data-tip="Used when Match live (if Strict ON) or Force ON. Low = most selective."></span></span>
+          <label class="ctl ctl-md" id="bt-strict-intensity-wrap"><span>Strict intensity <span class="tip" tabindex="0" data-tip="Off when Strict is inactive. Used when Match live (if Strict ON) or Force ON. Low = most selective."></span></span>
             <select id="bt-strict-intensity">
+              <option value="off">Off</option>
               <option value="low">Low</option>
               <option value="medium" selected>Medium</option>
               <option value="high">High</option>
@@ -6991,8 +6992,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<td>' + tokenCell + '</td>' +
           '<td>' + fmtTradeProfileBadge(opts.profileSource || p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
-          '<td class="mint" title="Market cap at your buy">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
-          '<td class="mint" title="Market cap at exit">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
+          '<td class="mint" title="Market cap at your buy fill (scaled to entry price)">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
+          '<td class="mint" title="Market cap at exit fill (tracks PnL price; not a separate Dex snapshot)">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
           '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
             fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd) +
           '</td>' +
@@ -9634,6 +9635,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (btStart && cfg.paper && cfg.paper.startingBalanceSol != null) {
           btStart.value = cfg.paper.startingBalanceSol;
         }
+        syncBtMaxTradesFromRisk(cfg);
         if (btBanner) {
           const rl = (cfg.riskLevel || 'medium').toUpperCase();
           const base = cfg.trade.baseTradeAmountSol ?? cfg.trade.tradeAmountSol;
@@ -10348,16 +10350,76 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    // Risk-level max positions (RISK_LEVEL_PRESETS.filters.maxConcurrentPositions)
+    const BT_RISK_MAX_TRADES = { low: 6, medium: 12, high: 20, degen: 50 };
+
+    function btMaxTradesForRiskLevel(level, cfg) {
+      const key = String(level || 'current').toLowerCase();
+      if (key === 'low' || key === 'medium' || key === 'high' || key === 'degen') {
+        return BT_RISK_MAX_TRADES[key];
+      }
+      const live =
+        (cfg && cfg.filters && cfg.filters.maxConcurrentPositions) ||
+        (cfg && cfg.riskLevelSummary && cfg.riskLevelSummary.active &&
+          cfg.riskLevelSummary.active.maxConcurrentPositions) ||
+        (_lastConfig && _lastConfig.filters && _lastConfig.filters.maxConcurrentPositions) ||
+        BT_RISK_MAX_TRADES[String((cfg && cfg.riskLevel) || (_lastConfig && _lastConfig.riskLevel) || 'medium')] ||
+        12;
+      return Math.max(1, Math.min(80, Number(live) || 12));
+    }
+
+    function syncBtMaxTradesFromRisk(cfg) {
+      const riskSel = document.getElementById('bt-risk-level');
+      const maxEl = document.getElementById('bt-max');
+      if (!maxEl) return;
+      const level = (riskSel && riskSel.value) || 'current';
+      maxEl.value = String(btMaxTradesForRiskLevel(level, cfg || _lastConfig));
+    }
+
+    function onBtRiskLevelChange() {
+      syncBtMaxTradesFromRisk(_lastConfig);
+    }
+
+    function btStrictIsActive(mode, cfg) {
+      if (mode === 'off') return false;
+      if (mode === 'on') return true;
+      return !!(cfg && cfg.strictMode);
+    }
+
     function onBtStrictModeChange() {
       const sel = document.getElementById('bt-strict-mode');
+      const intensityEl = document.getElementById('bt-strict-intensity');
       const wrap = document.getElementById('bt-strict-intensity-wrap');
       if (!sel || !wrap) return;
-      wrap.style.opacity = sel.value === 'off' ? '0.5' : '1';
+      const cfg = _lastConfig || window._lastConfig;
+      const mode = sel.value || 'match';
+      const active = btStrictIsActive(mode, cfg);
+      const liveIntensity =
+        (cfg && (cfg.strictModeIntensity === 'low' || cfg.strictModeIntensity === 'high' || cfg.strictModeIntensity === 'medium'))
+          ? cfg.strictModeIntensity
+          : 'medium';
+      wrap.style.opacity = active ? '1' : '0.5';
+      if (!intensityEl) return;
+      const offOpt = intensityEl.querySelector('option[value="off"]');
+      if (offOpt) offOpt.disabled = active;
+      if (!active) {
+        intensityEl.value = 'off';
+        intensityEl.disabled = true;
+        return;
+      }
+      // Match live: show live intensity (read-only). Force ON: editable override.
+      intensityEl.disabled = mode !== 'on';
+      if (intensityEl.value === 'off' || mode === 'match') {
+        intensityEl.value = liveIntensity;
+      }
     }
 
     function btStrictPayload() {
       const mode = (document.getElementById('bt-strict-mode') || {}).value || 'match';
-      const intensity = (document.getElementById('bt-strict-intensity') || {}).value || 'medium';
+      let intensity = (document.getElementById('bt-strict-intensity') || {}).value || 'medium';
+      if (intensity !== 'low' && intensity !== 'medium' && intensity !== 'high') {
+        intensity = 'medium';
+      }
       if (mode === 'match') return { matchLiveStrict: true };
       if (mode === 'off') return { strictMode: false };
       return { strictMode: true, strictModeIntensity: intensity };
@@ -10368,6 +10430,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (strictSel) strictSel.value = 'match';
       const riskSel = document.getElementById('bt-risk-level');
       if (riskSel) riskSel.value = 'current';
+      syncBtMaxTradesFromRisk(_lastConfig);
       onBtStrictModeChange();
       showTab('backtester');
       await runBacktest({ matchLiveStrict: true });
@@ -11779,6 +11842,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           strictModeIntensity: intensity,
         })
       );
+      onBtStrictModeChange();
     }
 
     function applyPresetConfigSnapshot(cfg, strictStatus) {

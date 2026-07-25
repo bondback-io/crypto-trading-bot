@@ -241,8 +241,9 @@ export function resolveExitMarketCapUsd(
       : undefined;
 
   // Live Dex MC may use a different supply/pool than entry. Only trust it when
-  // it tracks the price move tightly; otherwise display follows PnL.
-  const MAX_EXIT_MC_DISAGREE = 1.25;
+  // it tracks the fill-price move tightly; otherwise display follows PnL.
+  // 1.25 previously allowed ~+4% EXIT MC with ~−17% fill PnL (Jacob-style bug).
+  const MAX_EXIT_MC_DISAGREE = 1.06;
   if (
     liveMc != null &&
     Number.isFinite(liveMc) &&
@@ -269,6 +270,7 @@ export function resolveExitMarketCapUsd(
     }
   }
 
+  // Prefer scaled MC so BUY/EXIT MC always agree with fill PnL direction
   if (scaled != null && scaled > 0) return scaled;
 
   if (

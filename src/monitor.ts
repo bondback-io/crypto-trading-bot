@@ -44,7 +44,6 @@ import {
 } from './gmgn';
 import {
   isRecentlyMigrated,
-  markAsMigrated,
   getMigrationStatus,
   onMigrationPriority,
   MigrationEvent,
@@ -1650,12 +1649,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   await enrichBuyEvent(buy);
   const label = formatTokenLabel(buy.symbol, buy.name, buy.mint);
 
-  // Enrich with migration listener data
-  if (buy.isMigration) {
-    markAsMigrated(buy.mint, buy.signature, [
-      { address: buy.wallet, name: buy.walletName },
-    ]);
-  }
+  // Only the migration listener (or explicit grad events) may stamp freshness.
+  // PumpSwap venue buys set buy.isMigration for sizing/tags, but must NOT call
+  // markAsMigrated — that falsely made migrationFresh=true and forced Migration Sniper.
   const recentlyMigrated = isRecentlyMigrated(buy.mint);
   const isMigration = buy.isMigration || recentlyMigrated;
 

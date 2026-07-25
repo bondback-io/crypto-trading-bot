@@ -520,7 +520,7 @@ export function computeFactorAffinities(
 export function combineAutoScore(
   weights: AutoScoringWeights,
   factors: Record<keyof AutoScoringWeights, number>,
-  _matchRaw: number,
+  matchRaw: number,
   matchReason: string
 ): { score: number; reason: string; factors: Record<keyof AutoScoringWeights, number> } {
   const f = { ...factors };
@@ -533,8 +533,13 @@ export function combineAutoScore(
     wSum += w;
     acc += w * clamp01(f[key] ?? 0);
   }
-  const score =
-    wSum > 0 ? Math.round((acc / wSum) * 1000) / 10 : 0;
+  const affinity =
+    wSum > 0 ? clamp01(acc / wSum) : 0;
+  // Specialty match strength must matter — ignoring matchRaw made soft affinities
+  // dominate and over-favored Migration Sniper whenever migrationFresh was sticky.
+  const matchFit = clamp01(Number(matchRaw) / 110);
+  const blended = affinity * 0.55 + matchFit * 0.45;
+  const score = Math.round(blended * 1000) / 10;
 
   const topFactors = AUTO_SCORING_WEIGHT_KEYS
     .map((k) => [k, f[k] ?? 0] as const)
@@ -545,6 +550,7 @@ export function combineAutoScore(
 
   const reasonParts = [
     matchReason || 'match',
+    `matchFit ${(matchFit * 100).toFixed(0)}`,
     topFactors ? `factors: ${topFactors}` : null,
   ].filter(Boolean);
 

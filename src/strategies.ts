@@ -374,7 +374,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     name: 'Migration Sniper Mode',
     group: 'entry',
     description:
-      'Only take fresh pump.fun → DEX graduations (not older PumpSwap / mature tokens). Strong post-mig runners focus.',
+      'Legacy exclusive filter: only migration / near-migration entries when Multi-Profile is OFF. With Multi-Profile ON (default), the Migration Sniper trade profile owns fresh grads — this toggle does not block Mirror / Trend / Scalper / Dip.',
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',
@@ -1590,7 +1590,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   degen: {
     summary:
-      'Max entries — sniper + scalp suite with faster timers / wider SL; elite off (Strict-Low re-enables safety)',
+      'Max entries — scalp suite with faster timers / wider SL; elite off (Strict-Low re-enables safety). Multi-Profile routes fresh grads to Migration Sniper without blocking other profiles.',
     thresholds: DEGEN_RECIPE_THRESHOLDS,
     maxConcurrentPositions: 40,
     profitStrategy: {
@@ -1637,7 +1637,9 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
     toggles: buildRecipeToggles({
       rebuy_on_dip: true,
       elite_convergence: false,
-      migration_sniper: true,
+      // Keep OFF — exclusive migration filter blocked all other trade profiles.
+      // Fresh grads still route via Migration Sniper trade profile + post_migration_scalp.
+      migration_sniper: false,
       bonding_curve_health: false,
       hard_quality_gate: false,
       early_entry_only: false,
@@ -3112,6 +3114,9 @@ export function getQualityModeOverlays(): QualityModeOverlays {
     }
   }
 
+  // Multi-Profile ON: Migration Sniper trade profile owns fresh grads — do not
+  // hard-filter every entry to migration/near (that forced only 🚀 stamps).
+  const multiProfileOn = config.tradeProfiles?.enabled !== false;
   return {
     minClusterWallets: minCluster,
     minWalletQualityScore: minQuality && minQuality > 0 ? minQuality : null,
@@ -3119,7 +3124,7 @@ export function getQualityModeOverlays(): QualityModeOverlays {
       minConviction && minConviction > 0 ? minConviction : null,
     maxEntryAgeMinutes: maxAge,
     preferEntryWithinMinutes: preferWithin,
-    requireMigrationOrNear: migSniper,
+    requireMigrationOrNear: migSniper && !multiProfileOn,
     // Elite blocks single-wallet; 55–60 keeps convergence flexible (elite off)
     blockSingleWalletEntries: elite && !winRate55Profile,
     // Momentum mandatory only for strict 60%+ / elite / profit-protected

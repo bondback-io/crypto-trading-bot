@@ -75,6 +75,7 @@ import {
   stampFromAssignment,
   ensureTradeProfilesInitialized,
   FRESH_MIGRATION_MAX_AGE_HOURS,
+  FRESH_MIGRATION_MAX_MC_USD,
   type TradeProfileId,
 } from './tradeProfiles';
 
@@ -1730,8 +1731,13 @@ function replayLaunch(
       nearMigration: false,
       earlyBuy: !event.migrated && tokenAgeHours < 0.25,
       migrationFresh:
+        // Only stamp fresh when age + MC still look like a real post-grad snipe.
+        // Older "migrated" PumpSwap rows compete as Mirror / Trend / Dip / HWR.
         event.migrated === true &&
-        tokenAgeHours <= FRESH_MIGRATION_MAX_AGE_HOURS,
+        tokenAgeHours <= FRESH_MIGRATION_MAX_AGE_HOURS &&
+        (entryMc == null ||
+          !Number.isFinite(entryMc) ||
+          entryMc <= FRESH_MIGRATION_MAX_MC_USD),
       scalpMode: scalpResolved != null,
       shortTermStrategyId: scalpResolved?.id ?? null,
       convictionScore,
