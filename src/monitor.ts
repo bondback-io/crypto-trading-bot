@@ -9,7 +9,7 @@ import {
   PartiallyDecodedInstruction,
   PublicKey,
 } from '@solana/web3.js';
-import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
+import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel, healDegenLooseGates } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
@@ -45,6 +45,7 @@ import {
   markScannerCooldown,
   isMarketScannerSignal,
   isMarketScannerAddress,
+  setScannerBuyQueueDepthFn,
   MARKET_SCANNER_WALLET,
   MARKET_SCANNER_NAME,
   type ScannerCandidate,
@@ -481,6 +482,12 @@ export function startMonitor(): void {
   running = true;
   paused = false;
 
+  try {
+    healDegenLooseGates({ persist: true });
+  } catch {
+    /* ignore */
+  }
+
   console.log(
     `[monitor] Starting — poll every ${config.pollIntervalMs}ms, activity filter: ${config.filters.enableActivityFilter}`
   );
@@ -574,6 +581,7 @@ export function startMonitor(): void {
   });
 
   // Autonomous Market Scanner (TA) — hybrid with wallet copy when both ON
+  setScannerBuyQueueDepthFn(() => pendingBuyEvents.length);
   onScannerCandidate((candidate) => handleScannerCandidate(candidate));
   startMarketScanner();
 }
@@ -624,6 +632,11 @@ async function pollAllWallets(): Promise<void> {
   pollInFlight = true;
   const cycleStarted = Date.now();
   try {
+    // Drain any leftover buys first so copy path stays ahead of scanner/API load
+    if (pendingBuyEvents.length > 0) {
+      await drainBuyEventQueue();
+    }
+
     const wallets = getWalletsForPolling();
     const publicRpc = isPublicRpcUrl(getRpcUrl());
     // Keep concurrent RPC polls low on public RPCs; paid endpoints can go faster
@@ -1599,8 +1612,14 @@ async function handleScannerCandidate(
     }
 
     const minConfluence =
-      config.marketScanner?.minConfluenceScore ?? 55;
-    if (!hybrid) {
+      config.marketScanner?.minConfluenceScore ?? 40;
+    const requireTa =
+      config.riskLevel === 'degen'
+        ? false
+        : config.marketScanner?.requireTaSetup !== false;
+    // Playbook / confluence only hard-gate when Require TA setup is ON
+    // (Degen always skips these so scanner-only can still open).
+    if (!hybrid && requireTa) {
       if (!candidate.playbook) {
         finishBuy(candidate.mint, false);
         annotateScannerCandidate(candidate.mint, {
@@ -1743,7 +1762,7 @@ async function handleScannerCandidate(
       finishBuy(candidate.mint, false);
       annotateScannerCandidate(candidate.mint, {
         status: 'skipped',
-        skipReason: 'filters',
+        skipReason: lastFilterSkipReason || 'filters',
       });
       markScannerCooldown(candidate.mint, false);
       return;
@@ -2321,7 +2340,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       earlyBuyerCount: buy.earlyBuyerCount,
     };
     console.log(
-      `[monitor] 📈 STRONG BUY — near-migration curve ${buy.bondingCurve.progressPct.toFixed(1)}% ` +
+      `[monitor] 📈 STRONG BUY — near-migration curve ${Number(buy.bondingCurve.progressPct ?? 0).toFixed(1)}% ` +
         `+ smart wallet ${buy.walletName} on ${label}`
     );
     recordPumpSmartActivity({
@@ -2337,7 +2356,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       nearMigration: true,
       curveProgressPct: buy.bondingCurve.progressPct,
       birdeye: buy.birdeye,
-      notes: `near-mig ${buy.bondingCurve.progressPct.toFixed(0)}%`,
+      notes: `near-mig ${Number(buy.bondingCurve.progressPct ?? 0).toFixed(0)}%`,
     });
   } else if (
     isStrategyEnabled('early_curve_smart_money') &&
@@ -3107,8 +3126,12 @@ function recordSignalSizing(
   }
 }
 
+/** Last reason from passesFilters / recordRejectedSignal (for scanner annotate). */
+let lastFilterSkipReason: string | null = null;
+
 /** Record a filter reject on the sizing panel so Signals tab isn't blank. */
 function recordRejectedSignal(signal: TradeSignal, reason: string): void {
+  lastFilterSkipReason = reason;
   const kind: 'migration' | 'normal' =
     signal.isMigration || signal.nearMigration || signal.earlyBuy
       ? 'migration'
@@ -3269,6 +3292,7 @@ function isSoftPassableEarlyReason(reason: string): boolean {
 }
 
 async function passesFilters(signal: TradeSignal): Promise<boolean> {
+  lastFilterSkipReason = null;
   ensureStrategyToggles();
   const { filters, strategy } = config;
   const signalKind =
@@ -3764,20 +3788,22 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     logStrategyDecision(
       'multi_factor_conviction',
       'take',
-      `${signal.symbol} score=${conviction.score} size×${conviction.sizeMultiplier.toFixed(2)}`
+      `${signal.symbol} score=${conviction.score} size×${Number(conviction.sizeMultiplier ?? 1).toFixed(2)}`
     );
   }
   console.log(
     `[monitor] Conviction OK ${signal.symbol}: score=${conviction.score} ` +
-      `size×${conviction.sizeMultiplier.toFixed(2)} wallets=${signal.wallets.length} ` +
+      `size×${Number(conviction.sizeMultiplier ?? 1).toFixed(2)} wallets=${signal.wallets.length} ` +
       `· ${conviction.breakdownLine}`
   );
 
-  // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open)
+  // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
+  // Degen always skips this gate (Market TA must not veto max-entries mode).
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&
-    (config.marketScanner?.requireTaSetup !== false)
+    config.riskLevel !== 'degen' &&
+    config.marketScanner?.requireTaSetup !== false
   ) {
     const ind = evaluateIndicators({
       mint: signal.mint,

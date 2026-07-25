@@ -1213,31 +1213,42 @@ export const LOW_RISK_THRESHOLDS: StrategyPresetThresholds = {
   postStopReentryEnabled: false,
 };
 
-/** Degen recipe thresholds — looser than Aggressive (Risk knobs still set size/floors). */
+/** Degen recipe thresholds — aligned with RISK_LEVEL_PRESETS.degen (not Aggressive). */
 export const DEGEN_RECIPE_THRESHOLDS: StrategyPresetThresholds = {
-  ...AGGRESSIVE_THRESHOLDS,
   minWalletQualityScore: 40,
-  minConvictionScore: 25,
+  minConvictionScore: 20,
   convergenceRequired: 1,
   clusterMinWallets: 1,
   minWalletsForTrade: 1,
+  allowSingleWalletMigration: true,
+  allowSingleWalletTopPerformerMigration: true,
   requireConvergenceForNormal: false,
-  maxRiskScore: 85,
-  maxDevHoldPct: 22,
-  maxHolderConcentration: 75,
+  minLiquidity: 8_000,
+  minMarketCapUsd: 8_000,
+  minVolume24hUsd: 15_000,
+  minRecentVolumeUsd: 1_500,
+  minHolders: 120,
+  minHolderCount: 120,
+  minRecentActivity: 10,
+  maxRiskScore: 92,
+  maxDevHoldPct: 40,
+  maxHolderConcentration: 95,
   sniperSensitivity: 'low',
-  maxEntryAgeMinutes: 30,
+  maxEntryAgeMinutes: 25,
   preferEntryWithinMinutes: 18,
   requireMomentumConfirmation: false,
-  smartMoneyFlowWeight: 1.1,
+  smartMoneyFlowWeight: 1.0,
   confirmationThreshold: 1,
+  deadVolumeUsdPerHour: 80,
+  deadVolumeConsecutiveHours: 3,
+  deadVolumeMinHoldMinutes: 25,
   maxTradesPerHour: 40,
   minMsBetweenTrades: 8_000,
   requireHealthyCurve: false,
   requireRecentCurveActivity: false,
-  enableEarlyCurvePriority: true,
-  reBuyEnabled: true,
-  postStopReentryEnabled: true,
+  enableEarlyCurvePriority: false,
+  reBuyEnabled: false,
+  postStopReentryEnabled: false,
 };
 
 export type StrategyRecipeMode = 'synced' | 'custom';
@@ -1356,13 +1367,11 @@ function buildRecipeToggles(
       out[s.key] = false;
     }
   }
+  // Overrides win last — Degen (and others) can turn core modules OFF
   for (const [key, value] of Object.entries(overrides)) {
     if (isStrategyKey(key) && typeof value === 'boolean') {
       out[key] = value;
     }
-  }
-  for (const s of STRATEGY_REGISTRY) {
-    if (s.source === 'core') out[s.key] = true;
   }
   return out;
 }
@@ -1605,9 +1614,9 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   degen: {
     summary:
-      'Max entries — scalp suite with faster timers / wider SL; elite off (Strict-Low re-enables safety). Multi-Profile routes fresh grads to Migration Sniper without blocking other profiles.',
+      'Max entries — basic rug/honeypot + hard floors; optional quality cores OFF unless you enable them. Scalp engines ON for coverage; Strict-Low re-enables safety packs.',
     thresholds: DEGEN_RECIPE_THRESHOLDS,
-    maxConcurrentPositions: 40,
+    maxConcurrentPositions: 50,
     profitStrategy: {
       takeInitialPercent: 100,
       partialSellAt: 40,
@@ -1646,22 +1655,28 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
         minVolumeUsd: 6_500,
         minBuyPressureUsd: 350,
         minDropFromPeakPct: 28,
-        minConvictionScore: 42,
+        minConvictionScore: 20,
       },
     },
     toggles: buildRecipeToggles({
-      rebuy_on_dip: true,
+      rebuy_on_dip: false,
       elite_convergence: false,
-      // Keep OFF — exclusive migration filter blocked all other trade profiles.
-      // Fresh grads still route via Migration Sniper trade profile + post_migration_scalp.
       migration_sniper: false,
       ta_market_scanner: true,
+      // Degen "floors only" — optional cores stay OFF unless user enables
+      sniper_bundler_filters: false,
+      wallet_quality_scoring: false,
+      multi_factor_conviction: false,
+      volume_liquidity_filters: false,
+      min_holders_activity: false,
+      time_based_entry: false,
+      wallet_convergence: false,
       bonding_curve_health: false,
       hard_quality_gate: false,
       early_entry_only: false,
       momentum_confirmation: false,
       profit_protected: false,
-      mev_protection: true,
+      mev_protection: false,
       quick_scalper: false,
       micro_scalper: true,
       momentum_burst: true,

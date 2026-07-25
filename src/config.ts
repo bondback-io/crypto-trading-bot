@@ -2395,7 +2395,7 @@ export const config: BotConfig = {
 
   marketScanner: {
     enabled: true,
-    pollIntervalMs: 45_000,
+    pollIntervalMs: 15_000,
     lookbackHours: 6,
     maxCandidatesPerPoll: 15,
     cooldownMs: 45 * 60_000,
@@ -2404,7 +2404,7 @@ export const config: BotConfig = {
     minPatternConfidence: 55,
     preferRealCandles: true,
     syntheticPenalty: 8,
-    minConfluenceScore: 55,
+    minConfluenceScore: 40,
     playbookMode: 'auto',
     pauseScannerOnlyInRiskOff: true,
     requireRsForMomentum: true,
@@ -2415,12 +2415,12 @@ export const config: BotConfig = {
     jupiterTrendingEnabled: true,
     jupiterCategory: 'toptraded',
     jupiterPumpFunOnly: true,
-    jupiterLimit: 50,
+    jupiterLimit: 100,
     jupiterMergeIntervals: true,
-    minVolumeM5Usd: 500,
+    minVolumeM5Usd: 1000,
     minVolumeH1Usd: 5000,
-    minVolumeH6Usd: 0,
-    minVolumeH24Usd: 15000,
+    minVolumeH6Usd: 10000,
+    minVolumeH24Usd: 15_000,
   },
 
   paper: {
@@ -4481,11 +4481,82 @@ export function applyRiskLevel(
     } = require('./strategies') as typeof import('./strategies');
     if (config.strategyRecipeMode === 'synced') {
       applyRiskStrategyRecipe(level, { persist: false });
+      // Degen: recipe must not re-tighten floors / sniper above the risk preset
+      if (level === 'degen') {
+        Object.assign(config.filters, {
+          minVolume24hUsd: Math.max(
+            preset.filters.minVolume24hUsd ?? 15_000,
+            HARD_FILTER_FLOORS.minVolume24hUsd
+          ),
+          minRecentVolumeUsd: Math.max(
+            preset.filters.minRecentVolumeUsd ?? 1_500,
+            HARD_FILTER_FLOORS.minRecentVolumeUsd
+          ),
+          maxDevHoldPct: preset.filters.maxDevHoldPct ?? 40,
+          maxDevPercent: preset.filters.maxDevPercent ?? 40,
+          maxHolderConcentration: preset.filters.maxHolderConcentration ?? 95,
+          maxTopHolderPct: preset.filters.maxTopHolderPct ?? 95,
+          maxRiskScore: preset.filters.maxRiskScore ?? 92,
+          maxConcurrentPositions: preset.filters.maxConcurrentPositions ?? 50,
+          enableSniperFilter: false,
+          enableWalletQualityGate: false,
+          skipIfDevRecentSells: false,
+        });
+        Object.assign(config.selective, {
+          minConvictionScore: preset.selective.minConvictionScore ?? 20,
+          requireConvergenceForNormal: false,
+          minWalletsForTrade: 1,
+          minVolume24hUsd: Math.max(
+            preset.selective.minVolume24hUsd ?? 15_000,
+            HARD_FILTER_FLOORS.minVolume24hUsd
+          ),
+        });
+        if (config.tradeProfiles?.autoScoring) {
+          config.tradeProfiles.autoScoring.skipBelowMin = false;
+          config.tradeProfiles.autoScoring.minScore = Math.min(
+            config.tradeProfiles.autoScoring.minScore ?? 45,
+            25
+          );
+        }
+        if (config.marketScanner) {
+          config.marketScanner.requireTaSetup = false;
+          config.marketScanner.minVolumeH24Usd = Math.min(
+            config.marketScanner.minVolumeH24Usd ?? 30_000,
+            HARD_FILTER_FLOORS.minVolume24hUsd
+          );
+          config.marketScanner.minRankScore = Math.min(
+            config.marketScanner.minRankScore ?? 42,
+            35
+          );
+          config.marketScanner.minConfluenceScore = Math.min(
+            config.marketScanner.minConfluenceScore ?? 40,
+            25
+          );
+          config.marketScanner.pauseScannerOnlyInRiskOff = false;
+        }
+        syncConfigAliases();
+      }
     } else if (isNamedStrategyProfile(config.strategyProfile)) {
       applyStrategyPreset(config.strategyProfile, { persist: false });
     }
   } catch {
     // Ignore during early bootstrap if strategies is not ready
+  }
+
+  // Custom recipe + Degen: still relax auto-score / scanner so leftover synced
+  // knobs don't silently veto "max entries" testing.
+  if (level === 'degen') {
+    if (config.tradeProfiles?.autoScoring) {
+      config.tradeProfiles.autoScoring.skipBelowMin = false;
+    }
+    if (config.marketScanner) {
+      config.marketScanner.requireTaSetup = false;
+      config.marketScanner.pauseScannerOnlyInRiskOff = false;
+      config.marketScanner.minVolumeH24Usd = Math.min(
+        config.marketScanner.minVolumeH24Usd ?? 30_000,
+        HARD_FILTER_FLOORS.minVolume24hUsd
+      );
+    }
   }
 
   if (options.persist !== false) {
@@ -4502,6 +4573,81 @@ export function applyRiskLevel(
     warning: preset.warning ?? null,
     summary: getRiskLevelSummary(),
   };
+}
+
+/**
+ * Soft-heal leftover Aggressive/synced knobs when already on Degen.
+ * Call on boot / monitor start so max-entries mode isn't vetoed by stale floors.
+ */
+export function healDegenLooseGates(options?: { persist?: boolean }): boolean {
+  if (config.riskLevel !== 'degen') return false;
+  let changed = false;
+  const f = config.filters;
+  if ((f.minVolume24hUsd ?? 0) > 15_000) {
+    f.minVolume24hUsd = 15_000;
+    changed = true;
+  }
+  if ((f.minRecentVolumeUsd ?? 0) > 1_500) {
+    f.minRecentVolumeUsd = 1_500;
+    changed = true;
+  }
+  if ((f.maxDevHoldPct ?? 40) < 40) {
+    f.maxDevHoldPct = 40;
+    f.maxDevPercent = 40;
+    changed = true;
+  }
+  if ((f.maxHolderConcentration ?? 95) < 95) {
+    f.maxHolderConcentration = 95;
+    f.maxTopHolderPct = 95;
+    changed = true;
+  }
+  if ((f.maxRiskScore ?? 0) < 92) {
+    f.maxRiskScore = 92;
+    changed = true;
+  }
+  if ((f.maxConcurrentPositions ?? 0) < 50) {
+    f.maxConcurrentPositions = 50;
+    changed = true;
+  }
+  if (f.enableSniperFilter !== false) {
+    f.enableSniperFilter = false;
+    changed = true;
+  }
+  if (config.selective && (config.selective.minConvictionScore ?? 0) > 20) {
+    config.selective.minConvictionScore = 20;
+    changed = true;
+  }
+  if (config.tradeProfiles?.autoScoring) {
+    if (config.tradeProfiles.autoScoring.skipBelowMin !== false) {
+      config.tradeProfiles.autoScoring.skipBelowMin = false;
+      changed = true;
+    }
+  }
+  if (config.marketScanner) {
+    if (config.marketScanner.requireTaSetup !== false) {
+      config.marketScanner.requireTaSetup = false;
+      changed = true;
+    }
+    if (
+      (config.marketScanner.minVolumeH24Usd ?? 0) >
+      HARD_FILTER_FLOORS.minVolume24hUsd
+    ) {
+      config.marketScanner.minVolumeH24Usd = HARD_FILTER_FLOORS.minVolume24hUsd;
+      changed = true;
+    }
+    if (config.marketScanner.pauseScannerOnlyInRiskOff !== false) {
+      config.marketScanner.pauseScannerOnlyInRiskOff = false;
+      changed = true;
+    }
+  }
+  if (changed) {
+    syncConfigAliases();
+    console.log(
+      '[config] Healed Degen leftover gates (floors / scanner / auto-score)'
+    );
+    if (options?.persist !== false) persistUserSettings();
+  }
+  return changed;
 }
 
 /** Compact active settings for dashboard summary */

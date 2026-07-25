@@ -1267,7 +1267,7 @@ export function createServer(): express.Application {
     if (!config.marketScanner) {
       config.marketScanner = {
         enabled: true,
-        pollIntervalMs: 45_000,
+        pollIntervalMs: 15_000,
         lookbackHours: 6,
         maxCandidatesPerPoll: 15,
         cooldownMs: 45 * 60_000,
@@ -1276,7 +1276,7 @@ export function createServer(): express.Application {
         minPatternConfidence: 55,
         preferRealCandles: true,
         syntheticPenalty: 8,
-        minConfluenceScore: 55,
+        minConfluenceScore: 40,
         playbookMode: 'auto',
         pauseScannerOnlyInRiskOff: true,
         requireRsForMomentum: true,
@@ -1287,11 +1287,11 @@ export function createServer(): express.Application {
         jupiterTrendingEnabled: true,
         jupiterCategory: 'toptraded',
         jupiterPumpFunOnly: true,
-        jupiterLimit: 50,
+        jupiterLimit: 100,
         jupiterMergeIntervals: true,
-        minVolumeM5Usd: 500,
+        minVolumeM5Usd: 1000,
         minVolumeH1Usd: 5000,
-        minVolumeH6Usd: 0,
+        minVolumeH6Usd: 10000,
         minVolumeH24Usd: 15000,
       };
     }

@@ -4102,7 +4102,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="filters-row mt-2">
           <label class="ctl ctl-md">
             <span>Poll interval (ms) <span class="tip" tabindex="0" data-tip="How often the scanner polls for new candidates (min 15000). Lower = fresher entries, more API load on DexScreener / GMGN / Jupiter."></span></span>
-            <input type="number" id="ms-poll-ms" value="45000" min="15000" max="600000" step="1000" />
+            <input type="number" id="ms-poll-ms" value="15000" min="15000" max="600000" step="1000" />
           </label>
           <label class="ctl ctl-sm">
             <span>Lookback (h) <span class="tip" tabindex="0" data-tip="Hours of recent launches to consider each poll from DexScreener / GMGN / Birdeye. Jupiter trending is separate (category windows)."></span></span>
@@ -4130,7 +4130,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </label>
           <label class="ctl ctl-sm">
             <span>Min confluence <span class="tip" tabindex="0" data-tip="Minimum playbook confluence (0–100) for scanner quality gate. Higher = stricter TA agreement before entry."></span></span>
-            <input type="number" id="ms-min-confl" value="55" min="0" max="100" step="1" />
+            <input type="number" id="ms-min-confl" value="40" min="0" max="100" step="1" />
           </label>
         </div>
 
@@ -4182,11 +4182,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </label>
             <label class="ctl ctl-sm">
               <span>Limit <span class="tip" tabindex="0" data-tip="Tokens per Jupiter category/interval fetch (10–100). Higher = wider universe, more API usage."></span></span>
-              <input type="number" id="ms-jup-limit" value="50" min="10" max="100" step="1" />
+              <input type="number" id="ms-jup-limit" value="100" min="10" max="100" step="1" />
             </label>
             <label class="ctl ctl-sm">
               <span>Min vol 5m ($) <span class="tip" tabindex="0" data-tip="Minimum 5m volume USD to pass hard floor (0 = off). Uses Jupiter organic volume when Prefer organic volume is on."></span></span>
-              <input type="number" id="ms-vol-m5" value="500" min="0" max="10000000" step="100" />
+              <input type="number" id="ms-vol-m5" value="1000" min="0" max="10000000" step="100" />
             </label>
             <label class="ctl ctl-sm">
               <span>Min vol 1h ($) <span class="tip" tabindex="0" data-tip="Minimum 1h volume USD to pass hard floor (0 = off). DexScreener h1 or Jupiter stats1h."></span></span>
@@ -4194,7 +4194,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </label>
             <label class="ctl ctl-sm">
               <span>Min vol 6h ($) <span class="tip" tabindex="0" data-tip="Minimum 6h volume USD to pass hard floor (0 = off). Primarily Jupiter stats6h."></span></span>
-              <input type="number" id="ms-vol-h6" value="0" min="0" max="100000000" step="500" />
+              <input type="number" id="ms-vol-h6" value="10000" min="0" max="100000000" step="500" />
             </label>
             <label class="ctl ctl-sm">
               <span>Min vol 24h ($) <span class="tip" tabindex="0" data-tip="Minimum 24h volume USD to pass hard floor (0 = off). DexScreener h24 / Jupiter stats24h."></span></span>
@@ -10312,11 +10312,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (ss.running ? ' · polling' : '') +
           (ss.lastPollMs != null ? ' · last ' + ss.lastPollMs + 'ms' : '') +
           ' · ' + cands.length + ' recent' +
+          (ss.degenRelaxed ? ' · degen-relaxed' : '') +
           (ss.regime && ss.regime.regime
             ? ' · regime ' + ss.regime.regime +
               (ss.regime.solChangeH1 != null
                 ? ' (SOL h1 ' + Number(ss.regime.solChangeH1).toFixed(1) + '%)'
                 : '')
+            : '') +
+          (Array.isArray(ss.skipBuckets) && ss.skipBuckets.length
+            ? ' · skips: ' + ss.skipBuckets.slice(0, 3).map(function (b) {
+                return String(b.reason || '').slice(0, 28) + '×' + b.count;
+              }).join(', ')
             : '') +
           (ss.lastError ? ' · err: ' + ss.lastError : '');
         scanStEls.forEach(function (scanSt) {
@@ -12936,17 +12942,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ? document.getElementById('ms-jup-merge').checked
             : true,
           jupiterCategory: document.getElementById('ms-jup-category')?.value || 'toptraded',
-          pollIntervalMs: Number(document.getElementById('ms-poll-ms')?.value) || 45000,
+          pollIntervalMs: Number(document.getElementById('ms-poll-ms')?.value) || 15000,
           lookbackHours: Number(document.getElementById('ms-lookback-h')?.value) || 6,
           maxCandidatesPerPoll: Number(document.getElementById('ms-max-cands')?.value) || 15,
           cooldownMs: Number(document.getElementById('ms-cooldown-ms')?.value) || 2700000,
           minRankScore: Number(document.getElementById('ms-min-rank')?.value) || 42,
           minPatternConfidence: Number(document.getElementById('ms-min-pat-conf')?.value) || 55,
           syntheticPenalty: Number(document.getElementById('ms-synth-pen')?.value) || 8,
-          minConfluenceScore: Number(document.getElementById('ms-min-confl')?.value) || 55,
+          minConfluenceScore: Number(document.getElementById('ms-min-confl')?.value) || 40,
           minLiquidityUsd: Number(document.getElementById('ms-min-liq')?.value) || 0,
           minOrganicScore: Number(document.getElementById('ms-min-organic')?.value) || 0,
-          jupiterLimit: Number(document.getElementById('ms-jup-limit')?.value) || 50,
+          jupiterLimit: Number(document.getElementById('ms-jup-limit')?.value) || 100,
           minVolumeM5Usd: Number(document.getElementById('ms-vol-m5')?.value) || 0,
           minVolumeH1Usd: Number(document.getElementById('ms-vol-h1')?.value) || 0,
           minVolumeH6Usd: Number(document.getElementById('ms-vol-h6')?.value) || 0,

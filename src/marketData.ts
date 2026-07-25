@@ -670,7 +670,7 @@ async function fetchJson(
 }
 
 /** Run async work with limited concurrency */
-async function mapPool<T, R>(
+export async function mapPool<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<R | null>

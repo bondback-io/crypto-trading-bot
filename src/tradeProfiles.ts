@@ -2297,7 +2297,11 @@ export function assignTradeProfile(
     return a;
   }
 
-  if (auto.skipBelowMin && winner.score < auto.minScore) {
+  if (
+    auto.skipBelowMin &&
+    winner.score < auto.minScore &&
+    config.riskLevel !== 'degen'
+  ) {
     const skip: TradeProfileAssignment = {
       profileId: 'default',
       name: 'Skipped',
@@ -2339,7 +2343,7 @@ function logTopScores(
 ): void {
   if (!top.length) return;
   const line = top
-    .map((t) => `${t.name}=${t.score.toFixed(1)}`)
+    .map((t) => `${t.name}=${Number(t.score ?? 0).toFixed(1)}`)
     .join(' · ');
   console.log(
     `[trade-profiles] SCORES${auto ? ' (auto)' : ''} ${ctx.symbol || 'token'}: ${line}`

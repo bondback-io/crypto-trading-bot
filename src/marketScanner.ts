@@ -6,11 +6,12 @@
  * Wallet copy stays independent; hybrid when tracked wallets also appear.
  */
 
-import { config } from './config';
+import { config, HARD_FILTER_FLOORS } from './config';
 import { logger, errorToMeta } from './logger';
 import {
   enrichLaunchWithRealCandles,
   fetchSolUsdPrice,
+  mapPool,
   type LaunchEvent,
 } from './marketData';
 import { fetchRecentLaunches } from './marketData';
@@ -93,6 +94,8 @@ export interface ScannerStatus {
   };
   outcomes?: ReturnType<typeof getScannerOutcomeSummary>;
   jupiter?: ReturnType<typeof getJupiterTokensStatus>;
+  skipBuckets?: Array<{ reason: string; count: number }>;
+  degenRelaxed?: boolean;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -110,10 +113,10 @@ let lastPollMs: number | null = null;
 let lastError: string | null = null;
 let handler: ScannerHandler | null = null;
 
-function scannerCfg() {
+function baseScannerCfg() {
   return (
     config.marketScanner ?? {
-      pollIntervalMs: 45_000,
+      pollIntervalMs: 15_000,
       lookbackHours: 6,
       maxCandidatesPerPoll: 15,
       cooldownMs: 45 * 60_000,
@@ -122,7 +125,7 @@ function scannerCfg() {
       minPatternConfidence: 55,
       preferRealCandles: true,
       syntheticPenalty: 8,
-      minConfluenceScore: 55,
+      minConfluenceScore: 40,
       playbookMode: 'auto' as const,
       pauseScannerOnlyInRiskOff: true,
       requireRsForMomentum: true,
@@ -133,14 +136,40 @@ function scannerCfg() {
       jupiterTrendingEnabled: true,
       jupiterCategory: 'toptraded' as const,
       jupiterPumpFunOnly: true,
-      jupiterLimit: 50,
+      jupiterLimit: 100,
       jupiterMergeIntervals: true,
-      minVolumeM5Usd: 500,
+      minVolumeM5Usd: 1000,
       minVolumeH1Usd: 5000,
-      minVolumeH6Usd: 0,
-      minVolumeH24Usd: 15000,
+      minVolumeH6Usd: 10000,
+      minVolumeH24Usd: 15_000,
     }
   );
+}
+
+/**
+ * Effective scanner knobs. Degen auto-relaxes TA/vol gates so "max entries"
+ * is not silently vetoed by Market Scanner thresholds.
+ */
+function scannerCfg() {
+  const cfg = { ...baseScannerCfg() };
+  if (config.riskLevel === 'degen') {
+    cfg.requireTaSetup = false;
+    cfg.minRankScore = Math.min(cfg.minRankScore ?? 42, 35);
+    cfg.minConfluenceScore = Math.min(cfg.minConfluenceScore ?? 40, 25);
+    cfg.minVolumeH24Usd = Math.min(
+      cfg.minVolumeH24Usd ?? 30_000,
+      HARD_FILTER_FLOORS.minVolume24hUsd
+    );
+    cfg.pauseScannerOnlyInRiskOff = false;
+  }
+  return cfg;
+}
+
+/** Optional hook — monitor sets this so scanner yields while wallet buys drain. */
+let pendingBuyQueueDepth: () => number = () => 0;
+
+export function setScannerBuyQueueDepthFn(fn: () => number): void {
+  pendingBuyQueueDepth = fn;
 }
 
 export function isMarketScannerAddress(addr: string | undefined | null): boolean {
@@ -176,6 +205,25 @@ export function getScannerFeed(limit = 40): ScannerCandidate[] {
   });
 }
 
+export function getScannerSkipBuckets(limit = 8): Array<{ reason: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const row of feed) {
+    const key =
+      row.status === 'skipped'
+        ? String(row.skipReason || 'skipped').slice(0, 80)
+        : row.status === 'taken'
+          ? 'taken'
+          : row.status === 'queued'
+            ? 'queued'
+            : 'seen';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, Math.max(1, limit));
+}
+
 export function getScannerStatus(): ScannerStatus {
   const regime = getCachedMarketRegime();
   return {
@@ -193,6 +241,8 @@ export function getScannerStatus(): ScannerStatus {
     },
     outcomes: getScannerOutcomeSummary(),
     jupiter: getJupiterTokensStatus(),
+    skipBuckets: getScannerSkipBuckets(8),
+    degenRelaxed: config.riskLevel === 'degen',
   };
 }
 
@@ -600,7 +650,7 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     mtfAligned: mtf.mtfAligned,
     structureBearish: mtf.structureBearish,
     rsiReset,
-    minConfluence: effectiveMinConfluence(cfg.minConfluenceScore ?? 55),
+    minConfluence: effectiveMinConfluence(cfg.minConfluenceScore ?? 40),
   });
 
   if (pb.playbook === 'momentum_continuation' && isMomentumPlaybookDisabled()) {
@@ -645,7 +695,7 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     score += Math.round((pb.confluence - 50) / 8);
   }
 
-  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 40);
   if (!pb.allowed || (pb.confluence ?? 0) < minConfluence) {
     if (cfg.requireTaSetup !== false) {
       // Quality gate — treat as weak / skip later
@@ -753,13 +803,16 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
 
 /**
  * Score + filter universe; returns top candidates ready for monitor.
+ * Enriches only a crude top-N (early-cap) with bounded parallelism.
  */
 export async function selectScannerCandidates(
   events: LaunchEvent[]
 ): Promise<Array<ScannerCandidate & { launch: LaunchEvent }>> {
   const cfg = scannerCfg();
   const now = Date.now();
-  const out: Array<ScannerCandidate & { launch: LaunchEvent }> = [];
+  const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
+  // Enrich budget: 2× final cap, hard ceiling 40 to protect shared APIs
+  const enrichBudget = Math.min(40, Math.max(maxOut * 2, maxOut));
 
   // Prefetch regime (cached)
   try {
@@ -768,19 +821,33 @@ export async function selectScannerCandidates(
     /* ignore */
   }
 
+  // Yield to wallet buy drain if the queue is backed up
+  if (pendingBuyQueueDepth() > 0) {
+    console.log(
+      `[marketScanner] Deferring enrich — ${pendingBuyQueueDepth()} wallet buy(s) queued`
+    );
+    return [];
+  }
+
   const minRank = effectiveMinRankScore(cfg.minRankScore);
-  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 40);
+  const requireTa = cfg.requireTaSetup !== false;
 
-  // Crude pre-sort so enrich focuses on likelier names (cache makes full enrich cheap)
-  const sorted = [...events].sort(
-    (a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a)
-  );
+  // Crude pre-sort + hard floors before any enrich
+  const prefiltered = [...events]
+    .filter((raw) => {
+      if (!raw.mint) return false;
+      const cd = cooldowns.get(raw.mint) ?? 0;
+      if (cd > now) return false;
+      return hardFloorsOk(raw);
+    })
+    .sort((a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a))
+    .slice(0, enrichBudget);
 
-  for (const raw of sorted) {
-    if (!raw.mint) continue;
-    const cd = cooldowns.get(raw.mint) ?? 0;
-    if (cd > now) continue;
-    if (!hardFloorsOk(raw)) continue;
+  type Enriched = ScannerCandidate & { launch: LaunchEvent };
+  const enriched = await mapPool(prefiltered, 3, async (raw) => {
+    // Re-check queue mid-enrich so wallet path stays priority
+    if (pendingBuyQueueDepth() > 4) return null;
 
     let event: LaunchEvent = raw;
     try {
@@ -793,26 +860,24 @@ export async function selectScannerCandidates(
     const curve = await enrichCurve(event);
     let score = Math.min(100, ranked.score + curve.bonus);
     if (curve.bonus > 0) ranked.reasons.push('curve');
-
-    // Re-classify playbook with curve near-migration if useful
     if (curve.nearMigration && ranked.playbook !== 'curve_migration_sniper') {
       score = Math.min(100, score + 4);
     }
 
-    if (ranked.veto?.startsWith('bearish:')) continue;
-    if (score < minRank) continue;
-    if (cfg.requireTaSetup && !ranked.taSetup) continue;
-    if (cfg.requireMtfAligned === true && !ranked.mtfAligned) continue;
+    if (ranked.veto?.startsWith('bearish:')) return null;
+    if (score < minRank) return null;
+    if (requireTa && !ranked.taSetup) return null;
+    if (cfg.requireMtfAligned === true && !ranked.mtfAligned) return null;
     if (
-      (ranked.confluence == null || ranked.confluence < minConfluence) &&
-      cfg.requireTaSetup !== false
+      requireTa &&
+      (ranked.confluence == null || ranked.confluence < minConfluence)
     ) {
-      continue;
+      return null;
     }
-    if (!ranked.playbook && cfg.requireTaSetup !== false) continue;
+    if (requireTa && !ranked.playbook) return null;
 
     const id = `scan-${event.mint.slice(0, 8)}-${now}`;
-    out.push({
+    const row: Enriched = {
       id,
       mint: event.mint,
       symbol: event.symbol,
@@ -847,11 +912,18 @@ export async function selectScannerCandidates(
       mtfAligned: ranked.mtfAligned,
       veto: ranked.veto,
       launch: event,
-    });
-  }
+    };
+    return row;
+  });
 
-  out.sort((a, b) => b.rankScore - a.rankScore);
-  return out.slice(0, Math.max(1, cfg.maxCandidatesPerPoll));
+  enriched.sort((a, b) => b.rankScore - a.rankScore);
+  const out = enriched.slice(0, maxOut);
+  console.log(
+    `[marketScanner] enrich ${prefiltered.length}/${events.length} → ` +
+      `${enriched.length} ranked → ${out.length} capped` +
+      (config.riskLevel === 'degen' ? ' (degen-relaxed)' : '')
+  );
+  return out;
 }
 
 export function markScannerCooldown(mint: string, taken: boolean): void {
@@ -864,6 +936,12 @@ export function markScannerCooldown(mint: string, taken: boolean): void {
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabled('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
+  if (pendingBuyQueueDepth() > 0) {
+    console.log(
+      `[marketScanner] Skipping poll — ${pendingBuyQueueDepth()} wallet buy(s) pending`
+    );
+    return 0;
+  }
   pollInFlight = true;
   const t0 = Date.now();
   try {
@@ -871,25 +949,28 @@ export async function runScannerPollOnce(): Promise<number> {
     const universe = await collectScannerUniverse();
     const picked = await selectScannerCandidates(universe);
     let handed = 0;
+    // Non-blocking hand-off: fire handlers without serial await so the
+    // scanner poll lock releases quickly; mint locks still serialize buys.
     for (const c of picked) {
       pushFeed({ ...c });
       if (!handler) continue;
-      try {
-        c.status = 'queued';
-        annotateScannerCandidate(c.mint, { status: 'queued' });
-        await handler(c);
-        handed += 1;
-      } catch (err) {
-        annotateScannerCandidate(c.mint, {
-          status: 'skipped',
-          skipReason: err instanceof Error ? err.message : 'handler error',
+      c.status = 'queued';
+      annotateScannerCandidate(c.mint, { status: 'queued' });
+      handed += 1;
+      const h = handler;
+      void Promise.resolve()
+        .then(() => h(c))
+        .catch((err) => {
+          annotateScannerCandidate(c.mint, {
+            status: 'skipped',
+            skipReason: err instanceof Error ? err.message : 'handler error',
+          });
+          markScannerCooldown(c.mint, false);
+          logger.warn('MarketScanner', 'Candidate handler failed', {
+            mint: c.mint,
+            ...errorToMeta(err),
+          });
         });
-        markScannerCooldown(c.mint, false);
-        logger.warn('MarketScanner', 'Candidate handler failed', {
-          mint: c.mint,
-          ...errorToMeta(err),
-        });
-      }
     }
     lastPollAt = Date.now();
     lastPollMs = lastPollAt - t0;
@@ -969,7 +1050,7 @@ export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
   });
   const cfg = scannerCfg();
   const minRank = effectiveMinRankScore(cfg.minRankScore);
-  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 55);
+  const minConfluence = effectiveMinConfluence(cfg.minConfluenceScore ?? 40);
   const confluenceOk =
     ranked.confluence != null && ranked.confluence >= minConfluence;
   const ok =
