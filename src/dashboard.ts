@@ -242,15 +242,40 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-recipe-banner {
       display: flex;
       flex-wrap: wrap;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 0.5rem;
+      gap: 0.55rem 0.75rem;
       margin-top: 0.75rem;
       padding: 0.55rem 0.75rem;
       border-radius: 0.5rem;
       border: 1px solid #334155;
       background: #0b1220;
       font-size: 0.8rem;
+      line-height: 1.4;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    .strategy-recipe-banner-copy {
+      flex: 1 1 12rem;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .strategy-recipe-banner-title {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 0.15rem;
+    }
+    .strategy-recipe-banner-detail {
+      display: block;
+      opacity: 0.92;
+      font-size: 0.74rem;
+      line-height: 1.4;
+    }
+    .strategy-recipe-banner .btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
     }
     .strategy-recipe-banner.is-custom {
       border-color: #b45309;
@@ -261,6 +286,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-color: #0f766e;
       background: #042f2e;
       color: #99f6e4;
+    }
+    .strategy-control-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem 0.75rem;
+      min-width: 0;
+    }
+    .strategy-control-head-main {
+      flex: 1 1 14rem;
+      min-width: 0;
+    }
+    .strategy-control-head-main > p {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .strategy-control-head-meta {
+      flex: 0 1 auto;
+      text-align: right;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .strategy-control-head-meta #strategies-profile {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      max-width: 18rem;
+      margin-left: auto;
+    }
+    .strategy-control-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 0.5rem;
+      min-width: 0;
+    }
+    .strategy-control-actions .btn {
+      flex: 0 1 auto;
     }
     .active-profile-banner .strict-badge,
     .active-profile-banner .risk-badge {
@@ -647,6 +710,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: .75rem;
       line-height: 1.35;
       color: #94a3b8;
+      min-width: 0;
+    }
+    .strat-setup-guide .sg-step > span:last-child {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .strat-setup-guide .sg-num {
       width: 1.35rem;
@@ -706,8 +775,55 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     #scalper-suite-settings.is-hidden-suite { display: none !important; }
     @media (max-width: 639px) {
+      .strategy-control-card {
+        padding: 0.85rem 0.75rem;
+        overflow-x: clip;
+      }
       .strategy-control-card .tp-toggle-row {
         grid-template-columns: 1fr;
+      }
+      .strategy-control-head {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .strategy-control-head-meta {
+        text-align: left;
+        width: 100%;
+      }
+      .strategy-control-head-meta #strategies-profile {
+        margin-left: 0;
+        max-width: none;
+      }
+      .strategy-recipe-banner {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.55rem;
+        padding: 0.65rem 0.7rem;
+      }
+      .strategy-recipe-banner .btn {
+        width: 100%;
+        justify-content: center;
+        white-space: normal;
+      }
+      .strategy-control-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.45rem;
+      }
+      .strategy-control-actions .btn {
+        width: 100%;
+        min-width: 0;
+        justify-content: center;
+        white-space: normal;
+        line-height: 1.25;
+        padding: 0.45rem 0.5rem;
+      }
+      .strat-setup-guide {
+        padding: 0.55rem 0.65rem;
+      }
+      .strat-setup-guide .sg-step {
+        font-size: 0.72rem;
+        gap: 0.4rem 0.5rem;
       }
       .strategy-risk-card .btn {
         flex: 1 1 calc(50% - .35rem);
@@ -3861,9 +3977,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
           <div id="strict-intensity-row" class="mt-2">
-            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Stacks on top of the risk-level preset. Strict-Low = most selective/safest Strict. Strict-High = more active (looser) — NOT safer than Low. Medium matches the original Strict defaults."></span></div>
+            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Strict-Low forces Elite Convergence, hard quality gate, early entry, momentum, profit protection + tighter scalp volume/timers. Strict-Medium adds momentum/bonding/profit protection. Strict-High requires momentum only (more active). Stacks on Risk Level."></span></div>
             <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective / safest Strict — highest bars, fewest trades. NOT “low risk mode”.">Strict-Low</button>
+              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective Strict — forces elite + hard quality + early entry + momentum + profit protection. Also tightens scalp volume/timers.">Strict-Low</button>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
               <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
             </div>
@@ -3875,19 +3991,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card strategy-control-card">
-        <div class="flex flex-wrap items-start justify-between gap-2">
-          <div style="min-width:0;flex:1">
+        <div class="strategy-control-head">
+          <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
             <p class="text-sm text-slate-400 mb-0">Pick Risk Level → strategies and filters are chosen for you. Trade Profiles still control per-trade style.</p>
           </div>
-          <div class="text-right" style="flex-shrink:0">
+          <div class="strategy-control-head-meta">
             <div id="strategies-count" class="text-base font-semibold">—</div>
             <div id="strategies-profile" class="mint text-xs">Loading…</div>
           </div>
         </div>
 
         <div id="strategy-recipe-banner" class="strategy-recipe-banner is-synced" style="display:none">
-          <span id="strategy-recipe-banner-text">Synced to Risk</span>
+          <div class="strategy-recipe-banner-copy">
+            <span class="strategy-recipe-banner-title" id="strategy-recipe-banner-title">Synced to Risk</span>
+            <span class="strategy-recipe-banner-detail" id="strategy-recipe-banner-text"></span>
+          </div>
           <button type="button" class="btn btn-secondary text-xs" id="strategy-recipe-reset" onclick="applyStrategiesAction('reset_recipe')">Reset to risk defaults</button>
         </div>
 
@@ -3897,7 +4016,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="sg-step"><span class="sg-num">3</span><span><strong>Optional packs</strong> (below) — advanced override. Applying a pack leaves Risk sync (custom modules until you Reset).</span></div>
         </div>
 
-        <div class="flex flex-wrap gap-2 mt-2">
+        <div class="strategy-control-actions">
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('enable_all')">Enable All modules</button>
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('disable_all')">Disable All modules</button>
           <button class="btn btn-secondary text-xs" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous pack</button>
@@ -5026,26 +5145,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             : '');
       }
       const recipeBanner = document.getElementById('strategy-recipe-banner');
+      const recipeBannerTitle = document.getElementById('strategy-recipe-banner-title');
       const recipeBannerText = document.getElementById('strategy-recipe-banner-text');
       if (recipeBanner && recipeBannerText) {
         const recipe = data.recipe || {};
         recipeBanner.style.display = 'flex';
+        const riskLabel = String(data.riskLevel || 'medium').toUpperCase();
         if (recipe.mode === 'custom') {
           recipeBanner.classList.add('is-custom');
           recipeBanner.classList.remove('is-synced');
+          if (recipeBannerTitle) {
+            recipeBannerTitle.textContent = 'Strategies customized — not synced to Risk';
+          }
           recipeBannerText.textContent =
-            'Strategies customized — not synced to Risk' +
-            (recipe.divergedFromRecipe ? ' (' + recipe.divergedFromRecipe + ' differ from recipe)' : '') +
-            '. Reset to re-apply ' + String(data.riskLevel || 'medium').toUpperCase() + ' modules.';
+            (recipe.divergedFromRecipe
+              ? recipe.divergedFromRecipe + ' modules differ from recipe. '
+              : '') +
+            'Reset to re-apply ' + riskLabel + ' modules.';
         } else {
           recipeBanner.classList.add('is-synced');
           recipeBanner.classList.remove('is-custom');
-          recipeBannerText.textContent =
-            'Synced to Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
-            (recipe.summary ? ' — ' + recipe.summary : '') +
-            (recipe.enabledCore != null
-              ? ' · ' + recipe.enabledCore + ' core · ' + recipe.enabledRisk + ' risk-linked ON'
-              : '');
+          if (recipeBannerTitle) {
+            recipeBannerTitle.textContent = 'Synced to Risk ' + riskLabel;
+          }
+          const detailBits = [];
+          if (recipe.summary) detailBits.push(recipe.summary);
+          if (recipe.enabledCore != null) {
+            detailBits.push(recipe.enabledCore + ' core · ' + recipe.enabledRisk + ' risk-linked ON');
+          }
+          recipeBannerText.textContent = detailBits.join(' · ');
+          recipeBannerText.style.display = detailBits.length ? '' : 'none';
         }
       }
       if (restore) restore.disabled = !data.canRestorePrevious;
@@ -11034,9 +11163,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     const STRICT_INTENSITY_META = {
-      low: { label: 'Strict-Low', description: 'Most selective / safest Strict — highest bars, fewest trades (NOT “low risk mode”)' },
-      medium: { label: 'Strict-Medium', description: 'Balanced strict overlay (default intensity)' },
-      high: { label: 'Strict-High', description: 'More active Strict — looser bars than Low/Medium (NOT safer than Strict-Low)' },
+      low: { label: 'Strict-Low', description: 'Most selective — elite + hard quality + early entry + momentum + profit protection; tighter scalp filters (NOT “low risk mode”)' },
+      medium: { label: 'Strict-Medium', description: 'Balanced strict — momentum + bonding + profit protection on top of Risk' },
+      high: { label: 'Strict-High', description: 'More active Strict — momentum required; looser than Low/Medium (NOT safer than Strict-Low)' },
     };
 
     const ACTIVE_PROFILE_HINT =
@@ -11326,6 +11455,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         );
         await refresh();
         if (data.warning && enabled) alert(data.warning);
+        if (typeof loadStrategies === 'function') await loadStrategies();
       } catch (err) {
         alert(err.message || String(err));
         ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
@@ -11347,6 +11477,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           data.status
         );
         await refresh();
+        if (typeof loadStrategies === 'function') await loadStrategies();
       } catch (err) {
         alert(err.message || String(err));
       }

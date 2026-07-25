@@ -23,18 +23,19 @@ export const STRICT_INTENSITY_META: Record<
     label: 'Strict-Low',
     shortLabel: 'Low',
     description:
-      'Most selective / safest Strict — highest quality bars, fewest trades (NOT “low risk mode”)',
+      'Most selective / safest Strict — highest quality bars, fewest trades; forces Elite + hard quality + early entry + momentum + profit protection (NOT “low risk mode”)',
   },
   medium: {
     label: 'Strict-Medium',
     shortLabel: 'Medium',
-    description: 'Balanced strict overlay (default intensity)',
+    description:
+      'Balanced strict overlay — momentum + bonding + profit protection on top of Risk recipe',
   },
   high: {
     label: 'Strict-High',
     shortLabel: 'High',
     description:
-      'More active Strict — looser bars than Low/Medium (NOT safer than Strict-Low)',
+      'More active Strict — requires momentum confirmation; looser than Low/Medium (NOT safer than Strict-Low)',
   },
 };
 
@@ -74,25 +75,25 @@ export const STRICT_INTENSITY_DELTAS: Record<
     highMcClusterAdd: number;
   }
 > = {
-  // Most selective
+  // Most selective — max quality / win-rate bias
   low: {
-    walletQualityAdd: 15,
-    convictionAdd: 18,
+    walletQualityAdd: 18,
+    convictionAdd: 20,
     clusterMinAdd: 2,
-    entryAgeFactor: 0.55,
-    preferEntryFactor: 0.55,
-    volume24hAdd: 2_500,
-    recentVolumeAdd: 250,
-    recentBuyVolumeAdd: 200,
-    deadVolumeUsdFactor: 0.6,
+    entryAgeFactor: 0.5,
+    preferEntryFactor: 0.5,
+    volume24hAdd: 3_000,
+    recentVolumeAdd: 350,
+    recentBuyVolumeAdd: 250,
+    deadVolumeUsdFactor: 0.55,
     deadVolumeHoursSubtract: 1,
-    deadVolumeHoldFactor: 0.5,
-    drawdownTighten: 12,
-    lowConvictionTrailAdd: 12,
-    lowConvictionTightenAdd: 4,
-    momentumMinHoldAdd: 5,
-    highMcConvictionAdd: 15,
-    highMcClusterAdd: 1,
+    deadVolumeHoldFactor: 0.45,
+    drawdownTighten: 14,
+    lowConvictionTrailAdd: 14,
+    lowConvictionTightenAdd: 5,
+    momentumMinHoldAdd: 6,
+    highMcConvictionAdd: 18,
+    highMcClusterAdd: 2,
   },
   // Original v1.1.33 Strict deltas (default)
   medium: {

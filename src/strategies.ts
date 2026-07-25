@@ -363,7 +363,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     name: 'Elite Convergence Only',
     group: 'entry',
     description:
-      'Only enter when a strong multi-wallet cluster forms (raises cluster/conviction floors; blocks single-wallet). Fewer trades, higher quality.',
+      'Only enter when a strong multi-wallet cluster forms (raises cluster/conviction floors; blocks single-wallet). Fewer trades, higher quality. Off on High/Degen Risk recipes; Strict-Low turns this on automatically.',
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',
@@ -1163,6 +1163,44 @@ export const AGGRESSIVE_THRESHOLDS: StrategyPresetThresholds = {
   postStopReentryEnabled: true,
 };
 
+/** Low Risk recipe thresholds — quality-first, aligned with Low knobs (not raw HWR). */
+export const LOW_RISK_THRESHOLDS: StrategyPresetThresholds = {
+  minWalletQualityScore: 62,
+  minConvictionScore: 65,
+  convergenceRequired: 3,
+  clusterMinWallets: 3,
+  minWalletsForTrade: 3,
+  allowSingleWalletMigration: true,
+  allowSingleWalletTopPerformerMigration: false,
+  requireConvergenceForNormal: true,
+  minLiquidity: 10_000,
+  minMarketCapUsd: 6_000,
+  minVolume24hUsd: 12_000,
+  minRecentVolumeUsd: 1_500,
+  minHolders: 55,
+  minHolderCount: 55,
+  minRecentActivity: 6,
+  maxRiskScore: 50,
+  maxDevHoldPct: 12,
+  maxHolderConcentration: 40,
+  sniperSensitivity: 'high',
+  maxEntryAgeMinutes: 10,
+  preferEntryWithinMinutes: 7,
+  requireMomentumConfirmation: true,
+  smartMoneyFlowWeight: 1.45,
+  confirmationThreshold: 3,
+  deadVolumeUsdPerHour: 70,
+  deadVolumeConsecutiveHours: 1,
+  deadVolumeMinHoldMinutes: 10,
+  maxTradesPerHour: 5,
+  minMsBetweenTrades: 120_000,
+  requireHealthyCurve: true,
+  requireRecentCurveActivity: true,
+  enableEarlyCurvePriority: true,
+  reBuyEnabled: false,
+  postStopReentryEnabled: false,
+};
+
 /** Degen recipe thresholds — looser than Aggressive (Risk knobs still set size/floors). */
 export const DEGEN_RECIPE_THRESHOLDS: StrategyPresetThresholds = {
   ...AGGRESSIVE_THRESHOLDS,
@@ -1194,11 +1232,106 @@ export type StrategyRecipeMode = 'synced' | 'custom';
 
 export type RiskLevelId = 'low' | 'medium' | 'high' | 'degen';
 
+/** Per-engine scalp numerics applied with a Risk recipe (when those engines are ON). */
+export interface RiskRecipeScalpParams {
+  microScalper?: Partial<{
+    timeLimitSeconds: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minVolumeUsd: number;
+    minBuyPressureUsd: number;
+  }>;
+  momentumBurst?: Partial<{
+    timeLimitSeconds: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minVolumeUsd: number;
+    minBuyPressureUsd: number;
+    momentumFailDropPct: number;
+  }>;
+  postMigrationScalp?: Partial<{
+    timeLimitSeconds: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minVolumeUsd: number;
+    minBuyPressureUsd: number;
+  }>;
+  reversalScalp?: Partial<{
+    timeLimitSeconds: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minVolumeUsd: number;
+    minBuyPressureUsd: number;
+    minDropFromPeakPct: number;
+    minConvictionScore: number;
+  }>;
+  quickScalper?: Partial<{
+    timeLimitMinutes: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    minVolumeUsd: number;
+    minBuyPressureUsd: number;
+  }>;
+}
+
 export interface RiskStrategyRecipe {
   toggles: StrategyToggleMap;
   thresholds: StrategyPresetThresholds;
   summary: string;
+  maxConcurrentPositions?: number;
+  profitStrategy?: Partial<{
+    takeInitialPercent: number;
+    partialSellAt: number;
+    partialSellPercent: number;
+    trailingStopAfter: number;
+    trailingStopPct: number;
+    bagPercent: number;
+  }>;
+  scalp?: RiskRecipeScalpParams;
 }
+
+/** Quality modules Strict can force ON (never forces OFF something the recipe has ON). */
+const STRICT_QUALITY_MODULE_KEYS = [
+  'elite_convergence',
+  'hard_quality_gate',
+  'early_entry_only',
+  'momentum_confirmation',
+  'profit_protected',
+  'bonding_curve_health',
+] as const;
+
+type StrictQualityKey = (typeof STRICT_QUALITY_MODULE_KEYS)[number];
+
+const STRICT_QUALITY_PACKS: Record<
+  'low' | 'medium' | 'high',
+  Partial<Record<StrictQualityKey, true>>
+> = {
+  low: {
+    elite_convergence: true,
+    hard_quality_gate: true,
+    early_entry_only: true,
+    momentum_confirmation: true,
+    profit_protected: true,
+    bonding_curve_health: true,
+  },
+  medium: {
+    momentum_confirmation: true,
+    profit_protected: true,
+    bonding_curve_health: true,
+  },
+  high: {
+    momentum_confirmation: true,
+  },
+};
+
+const STRICT_SCALP_TIGHTEN: Record<
+  'low' | 'medium' | 'high',
+  { vol: number; buy: number; timer: number }
+> = {
+  low: { vol: 1.28, buy: 1.28, timer: 0.82 },
+  medium: { vol: 1.14, buy: 1.14, timer: 0.9 },
+  high: { vol: 1.06, buy: 1.06, timer: 0.95 },
+};
 
 function buildRecipeToggles(
   overrides: Partial<StrategyToggleMap>
@@ -1211,25 +1344,123 @@ function buildRecipeToggles(
       out[s.key] = false;
     }
   }
-  // MEV follows recipe override or stays off unless set
   for (const [key, value] of Object.entries(overrides)) {
     if (isStrategyKey(key) && typeof value === 'boolean') {
       out[key] = value;
     }
   }
-  // Core always forced on
   for (const s of STRATEGY_REGISTRY) {
     if (s.source === 'core') out[s.key] = true;
   }
   return out;
 }
 
-/** Risk Level → strategy module ON/OFF (+ quality thresholds). */
+function applyRiskRecipeScalpParams(scalp: RiskRecipeScalpParams | undefined): void {
+  if (!scalp) return;
+  if (scalp.microScalper) {
+    Object.assign(config.microScalper, scalp.microScalper);
+  }
+  if (scalp.momentumBurst) {
+    Object.assign(config.momentumBurst, scalp.momentumBurst);
+  }
+  if (scalp.postMigrationScalp) {
+    Object.assign(config.postMigrationScalp, scalp.postMigrationScalp);
+  }
+  if (scalp.reversalScalp) {
+    Object.assign(config.reversalScalp, scalp.reversalScalp);
+  }
+  if (scalp.quickScalper) {
+    Object.assign(config.quickScalper, scalp.quickScalper);
+  }
+}
+
+function applyRiskRecipeExtras(recipe: RiskStrategyRecipe): void {
+  if (recipe.maxConcurrentPositions != null) {
+    config.filters.maxConcurrentPositions = Math.max(
+      1,
+      Math.min(80, recipe.maxConcurrentPositions)
+    );
+  }
+  if (recipe.profitStrategy) {
+    Object.assign(config.profitStrategy, recipe.profitStrategy);
+    if (recipe.profitStrategy.trailingStopPct != null) {
+      config.risk.trailingStopPct = recipe.profitStrategy.trailingStopPct;
+      config.risk.trailingStopPercent = recipe.profitStrategy.trailingStopPct;
+    }
+  }
+  applyRiskRecipeScalpParams(recipe.scalp);
+}
+
+function tightenScalpParamsInPlace(intensity: 'low' | 'medium' | 'high'): void {
+  const f = STRICT_SCALP_TIGHTEN[intensity];
+  const bump = (
+    block: {
+      timeLimitSeconds?: number;
+      timeLimitMinutes?: number;
+      minVolumeUsd?: number;
+      minBuyPressureUsd?: number;
+    },
+    useSeconds: boolean
+  ) => {
+    if (block.minVolumeUsd != null) {
+      block.minVolumeUsd = Math.round(block.minVolumeUsd * f.vol);
+    }
+    if (block.minBuyPressureUsd != null) {
+      block.minBuyPressureUsd = Math.round(block.minBuyPressureUsd * f.buy);
+    }
+    if (useSeconds && block.timeLimitSeconds != null) {
+      block.timeLimitSeconds = Math.max(
+        30,
+        Math.round(block.timeLimitSeconds * f.timer)
+      );
+    }
+    if (!useSeconds && block.timeLimitMinutes != null) {
+      block.timeLimitMinutes = Math.max(
+        1,
+        Math.round(block.timeLimitMinutes * f.timer)
+      );
+    }
+  };
+  bump(config.microScalper, true);
+  bump(config.momentumBurst, true);
+  bump(config.postMigrationScalp, true);
+  bump(config.reversalScalp, true);
+  bump(config.quickScalper, false);
+}
+
+/** Risk Level → strategy module ON/OFF + thresholds + profit/scalp packs. */
 export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   low: {
     summary:
       'Fewer trades, higher selectivity — quality gates + profit protection; scalp engines off',
-    thresholds: HIGH_WIN_RATE_THRESHOLDS,
+    thresholds: LOW_RISK_THRESHOLDS,
+    maxConcurrentPositions: 5,
+    profitStrategy: {
+      takeInitialPercent: 80,
+      partialSellAt: 42,
+      partialSellPercent: 50,
+      trailingStopAfter: 85,
+      trailingStopPct: 15,
+      bagPercent: 20,
+    },
+    scalp: {
+      // Kept tuned even while OFF so enabling later is Risk-aligned
+      microScalper: {
+        timeLimitSeconds: 70,
+        takeProfitPct: 16,
+        stopLossPct: -7,
+        minVolumeUsd: 14_000,
+        minBuyPressureUsd: 1_000,
+      },
+      momentumBurst: {
+        timeLimitSeconds: 150,
+        takeProfitPct: 28,
+        stopLossPct: -10,
+        minVolumeUsd: 16_000,
+        minBuyPressureUsd: 1_400,
+        momentumFailDropPct: 7,
+      },
+    },
     toggles: buildRecipeToggles({
       rebuy_on_dip: false,
       elite_convergence: true,
@@ -1249,8 +1480,34 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   medium: {
     summary:
-      'Balanced modules — core safety on, light optional quality; scalp engines off (Trade Profiles own style)',
+      'Balanced modules — core safety + bonding health; scalp engines off (Trade Profiles own style)',
     thresholds: BALANCED_THRESHOLDS,
+    maxConcurrentPositions: 10,
+    profitStrategy: {
+      takeInitialPercent: 90,
+      partialSellAt: 50,
+      partialSellPercent: 42,
+      trailingStopAfter: 110,
+      trailingStopPct: 20,
+      bagPercent: 28,
+    },
+    scalp: {
+      microScalper: {
+        timeLimitSeconds: 75,
+        takeProfitPct: 18,
+        stopLossPct: -8,
+        minVolumeUsd: 12_000,
+        minBuyPressureUsd: 800,
+      },
+      momentumBurst: {
+        timeLimitSeconds: 180,
+        takeProfitPct: 32,
+        stopLossPct: -12,
+        minVolumeUsd: 15_000,
+        minBuyPressureUsd: 1_200,
+        momentumFailDropPct: 8,
+      },
+    },
     toggles: buildRecipeToggles({
       rebuy_on_dip: true,
       elite_convergence: false,
@@ -1270,11 +1527,53 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   high: {
     summary:
-      'More entries — looser quality gates; micro + momentum scalp engines on',
+      'More entries — micro + momentum scalp engines with Risk-tuned TP/SL/timers; elite off',
     thresholds: AGGRESSIVE_THRESHOLDS,
+    maxConcurrentPositions: 18,
+    profitStrategy: {
+      takeInitialPercent: 95,
+      partialSellAt: 55,
+      partialSellPercent: 38,
+      trailingStopAfter: 140,
+      trailingStopPct: 24,
+      bagPercent: 32,
+    },
+    scalp: {
+      microScalper: {
+        timeLimitSeconds: 70,
+        takeProfitPct: 18,
+        stopLossPct: -8,
+        minVolumeUsd: 11_000,
+        minBuyPressureUsd: 850,
+      },
+      momentumBurst: {
+        timeLimitSeconds: 165,
+        takeProfitPct: 30,
+        stopLossPct: -11,
+        minVolumeUsd: 13_000,
+        minBuyPressureUsd: 1_100,
+        momentumFailDropPct: 8,
+      },
+      postMigrationScalp: {
+        timeLimitSeconds: 110,
+        takeProfitPct: 28,
+        stopLossPct: -11,
+        minVolumeUsd: 10_000,
+        minBuyPressureUsd: 650,
+      },
+      reversalScalp: {
+        timeLimitSeconds: 85,
+        takeProfitPct: 20,
+        stopLossPct: -9,
+        minVolumeUsd: 8_000,
+        minBuyPressureUsd: 450,
+        minDropFromPeakPct: 30,
+        minConvictionScore: 48,
+      },
+    },
     toggles: buildRecipeToggles({
       rebuy_on_dip: true,
-      elite_convergence: true,
+      elite_convergence: false,
       migration_sniper: false,
       bonding_curve_health: false,
       hard_quality_gate: false,
@@ -1291,11 +1590,53 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   degen: {
     summary:
-      'Max entries — elite + migration sniper + scalp suite lean; quality gates off except core safety',
+      'Max entries — sniper + scalp suite with faster timers / wider SL; elite off (Strict-Low re-enables safety)',
     thresholds: DEGEN_RECIPE_THRESHOLDS,
+    maxConcurrentPositions: 40,
+    profitStrategy: {
+      takeInitialPercent: 100,
+      partialSellAt: 40,
+      partialSellPercent: 30,
+      trailingStopAfter: 180,
+      trailingStopPct: 30,
+      bagPercent: 40,
+    },
+    scalp: {
+      microScalper: {
+        timeLimitSeconds: 55,
+        takeProfitPct: 22,
+        stopLossPct: -10,
+        minVolumeUsd: 8_000,
+        minBuyPressureUsd: 550,
+      },
+      momentumBurst: {
+        timeLimitSeconds: 140,
+        takeProfitPct: 36,
+        stopLossPct: -14,
+        minVolumeUsd: 10_000,
+        minBuyPressureUsd: 800,
+        momentumFailDropPct: 10,
+      },
+      postMigrationScalp: {
+        timeLimitSeconds: 95,
+        takeProfitPct: 32,
+        stopLossPct: -12,
+        minVolumeUsd: 7_500,
+        minBuyPressureUsd: 450,
+      },
+      reversalScalp: {
+        timeLimitSeconds: 75,
+        takeProfitPct: 24,
+        stopLossPct: -11,
+        minVolumeUsd: 6_500,
+        minBuyPressureUsd: 350,
+        minDropFromPeakPct: 28,
+        minConvictionScore: 42,
+      },
+    },
     toggles: buildRecipeToggles({
       rebuy_on_dip: true,
-      elite_convergence: true,
+      elite_convergence: false,
       migration_sniper: true,
       bonding_curve_health: false,
       hard_quality_gate: false,
@@ -1334,8 +1675,8 @@ export function markStrategyRecipeCustom(options?: {
 }
 
 /**
- * Apply Risk Level strategy recipe (toggles + quality thresholds).
- * Sets recipe mode to synced. Does not change Risk knobs (size/SL/floors).
+ * Apply Risk Level strategy recipe (toggles + quality thresholds + profit/scalp packs).
+ * Sets recipe mode to synced. Does not change Risk knobs (size/SL/floors) — those come from applyRiskLevel.
  */
 export function applyRiskStrategyRecipe(
   level: RiskLevelId,
@@ -1356,11 +1697,14 @@ export function applyRiskStrategyRecipe(
     { persist: false, syncUnderlying: true, markCustom: false }
   );
   applyStrategyPresetThresholds(recipe.thresholds);
+  applyRiskRecipeExtras(recipe);
   syncUnderlyingFlagsFromToggles(config.strategyToggles as StrategyToggleMap);
   config.strategyRecipeMode = 'synced';
   config.strategyRecipeRiskLevel = level;
   config.strategyProfile = 'custom';
   config.highWinRatePresetActive = false;
+  // Re-apply Strict quality pack + scalp tighten on top of recipe base
+  syncQualityModulesForStrict({ persist: false });
   if (options?.persist !== false) persistUserSettings();
   const toggles = config.strategyToggles as StrategyToggleMap;
   let enabledCore = 0;
@@ -1390,6 +1734,85 @@ export function applyRiskStrategyRecipe(
 export function resetStrategyRecipeToRisk(options?: { persist?: boolean }) {
   const level = (config.riskLevel || 'medium') as RiskLevelId;
   return applyRiskStrategyRecipe(level, options);
+}
+
+/**
+ * Strict intensity forces extra safety/quality modules ON and tightens scalp
+ * volume/timers when recipe is synced. Leaving Strict restores recipe values.
+ */
+export function syncQualityModulesForStrict(options?: {
+  persist?: boolean;
+}): void {
+  ensureStrategyToggles();
+  const level = (config.riskLevel || 'medium') as RiskLevelId;
+  const recipe = getRiskStrategyRecipe(level);
+  const intensity =
+    config.strictModeIntensity === 'low' ||
+    config.strictModeIntensity === 'high'
+      ? config.strictModeIntensity
+      : 'medium';
+
+  if (config.strictMode !== true) {
+    if (config.strategyRecipeMode === 'synced') {
+      const restore = {} as Partial<StrategyToggleMap>;
+      for (const key of STRICT_QUALITY_MODULE_KEYS) {
+        restore[key] = recipe.toggles[key] === true;
+      }
+      updateStrategyToggles(restore, {
+        persist: false,
+        syncUnderlying: true,
+        markCustom: false,
+      });
+      applyRiskRecipeScalpParams(recipe.scalp);
+      console.log(
+        `[strategies] Strict OFF — restored ${level} recipe quality modules + scalp params`
+      );
+    }
+    if (options?.persist === true) persistUserSettings();
+    return;
+  }
+
+  const pack = STRICT_QUALITY_PACKS[intensity];
+  const forceOn = {} as Partial<StrategyToggleMap>;
+  for (const key of STRICT_QUALITY_MODULE_KEYS) {
+    if (pack[key] === true || recipe.toggles[key] === true) {
+      forceOn[key] = true;
+    } else if (config.strategyRecipeMode === 'synced') {
+      forceOn[key] = false;
+    }
+  }
+  // When not synced, only force ON (never turn OFF user's custom quality modules)
+  if (config.strategyRecipeMode !== 'synced') {
+    for (const key of STRICT_QUALITY_MODULE_KEYS) {
+      if (pack[key] !== true) delete forceOn[key];
+    }
+  }
+  if (Object.keys(forceOn).length > 0) {
+    updateStrategyToggles(forceOn, {
+      persist: false,
+      syncUnderlying: true,
+      markCustom: false,
+    });
+  }
+
+  if (config.strategyRecipeMode === 'synced') {
+    applyRiskRecipeScalpParams(recipe.scalp);
+    tightenScalpParamsInPlace(intensity);
+  }
+
+  console.log(
+    `[strategies] Strict-${intensity.toUpperCase()} — quality modules forced ON` +
+      (config.strategyRecipeMode === 'synced' ? ' · scalp params tightened' : '')
+  );
+  if (options?.persist === true) persistUserSettings();
+}
+
+/** @deprecated use syncQualityModulesForStrict */
+export function syncEliteConvergenceForStrict(options?: {
+  persist?: boolean;
+}): boolean {
+  syncQualityModulesForStrict(options);
+  return config.strategyToggles?.elite_convergence === true;
 }
 
 export function getStrategyRecipeStatus() {

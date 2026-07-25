@@ -983,11 +983,11 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       maxConcurrentPositions: 6,
       dailyLossLimitSol: 1.0,
       minVolume24hUsd: 12_000,
-      minRecentVolumeUsd: 2_000,
-      minRecentBuyVolumeUsd: 1_000,
-      minHolderCount: 65,
-      minHolders: 65,
-      minRecentActivity: 8,
+      minRecentVolumeUsd: 1_500,
+      minRecentBuyVolumeUsd: 800,
+      minHolderCount: 55,
+      minHolders: 55,
+      minRecentActivity: 6,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -995,8 +995,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       enableSniperFilter: true,
       clusterMinWallets: 3,
       enableWalletQualityGate: true,
-      minWalletQualityScore: 60,
-      maxEntryAgeMinutes: 12,
+      minWalletQualityScore: 62,
+      maxEntryAgeMinutes: 10,
       requireMomentumConfirmation: true,
     },
     risk: {
@@ -1008,7 +1008,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       trailingStopPct: 15,
       trailingStopPercent: 15,
       trailingActivationProfit: 18,
-      deadVolumeUsdPerHour: 50,
+      deadVolumeUsdPerHour: 55,
       deadVolumeConsecutiveHours: 1,
       deadVolumeMinHoldMinutes: 10,
       lowConvictionTrailThreshold: 55,
@@ -1018,8 +1018,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
         trailingStopPct: 15,
         hardStopLossPct: -22,
         tiers: [
-          { profitPct: 30, sellPct: 40 },
-          { profitPct: 60, sellPct: 30 },
+          { profitPct: 28, sellPct: 45 },
+          { profitPct: 55, sellPct: 30 },
         ],
       },
       migration: {
@@ -1028,33 +1028,33 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
         hardStopLossPct: -26,
         sizeMultiplier: 1.08,
         tiers: [
-          { profitPct: 30, sellPct: 40 },
-          { profitPct: 60, sellPct: 30 },
+          { profitPct: 28, sellPct: 45 },
+          { profitPct: 55, sellPct: 30 },
         ],
       },
     },
     selective: {
       enabled: true,
-      minConvictionScore: 58,
+      minConvictionScore: 62,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 3,
       minVolume24hUsd: 12_000,
-      minHolderCount: 65,
-      maxTradesPerHour: 4,
-      minMsBetweenTrades: 150_000,
+      minHolderCount: 55,
+      maxTradesPerHour: 5,
+      minMsBetweenTrades: 120_000,
       riskScoreSizeCutoff: 28,
       minRiskSizeMultiplier: 0.22,
       extraConvergenceAboveRisk: 1,
       highRiskConvergenceThreshold: 38,
     },
     profitStrategy: {
-      takeInitialPercent: 75,
-      partialSellAt: 48,
-      partialSellPercent: 48,
-      trailingStopAfter: 95,
-      trailingStopPct: 16,
-      bagPercent: 22,
+      takeInitialPercent: 80,
+      partialSellAt: 42,
+      partialSellPercent: 50,
+      trailingStopAfter: 85,
+      trailingStopPct: 15,
+      bagPercent: 20,
       riskBasedAdjustment: true,
       highRiskScoreThreshold: 45,
     },
@@ -4158,6 +4158,14 @@ export function setStrictMode(
   const warning = config.strictMode
     ? 'Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.'
     : null;
+  // Strict quality pack + scalp tighten (Strict-Low = max safety modules)
+  try {
+    const { syncQualityModulesForStrict } =
+      require('./strategies') as typeof import('./strategies');
+    syncQualityModulesForStrict({ persist: false });
+  } catch {
+    // Ignore during early bootstrap
+  }
   console.log(
     `[config] Strict Mode → ${config.strictMode ? 'ON' : 'OFF'}` +
       (config.strictMode ? ` · intensity=${intensity}` : '') +
@@ -4189,6 +4197,13 @@ export function setStrictModeIntensity(
   const warning = config.strictMode
     ? 'Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.'
     : null;
+  try {
+    const { syncQualityModulesForStrict } =
+      require('./strategies') as typeof import('./strategies');
+    syncQualityModulesForStrict({ persist: false });
+  } catch {
+    // Ignore during early bootstrap
+  }
   console.log(
     `[config] Strict Mode intensity → ${intensity}` +
       (config.strictMode ? ' (active)' : ' (saved; Strict Mode OFF)')
