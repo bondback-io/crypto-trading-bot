@@ -544,7 +544,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #f8fafc !important;
     }
     .strategy-preset-btn.active .preset-desc {
-      color: #cbd5e1 !important;
+      color: #dbe4f0 !important;
     }
     .strategy-preset-btn.active .preset-switch {
       background: var(--preset-accent) !important;
