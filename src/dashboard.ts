@@ -415,7 +415,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
-    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]) { background: #059669; color: white; border: 1px solid #059669; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab) {
+      background: #059669;
+      color: white;
+      border: 1px solid #059669;
+      border-radius: 0.5rem;
+      padding: 0.35rem 0.65rem;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
     .config-panel > .grid,
     #strategies-grid { align-items: start; gap: 1rem; }
@@ -435,66 +444,138 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-row { padding: .85rem 0; }
     .strategy-preset-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: .5rem;
-      margin-top: .5rem;
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+      margin-top: 0.55rem;
     }
-    @media (min-width: 640px) {
-      .strategy-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
-    }
-    @media (min-width: 900px) {
-      .strategy-preset-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    @media (min-width: 720px) {
+      .strategy-preset-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.45rem 0.65rem;
+      }
     }
     .strategy-preset-grid.short-term-presets {
-      margin-top: .5rem;
-      grid-template-columns: 1fr 1fr;
+      margin-top: 0.45rem;
+      grid-template-columns: 1fr;
     }
-    @media (min-width: 700px) {
+    @media (min-width: 720px) {
       .strategy-preset-grid.short-term-presets {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
     .strategy-preset-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
       text-align: left;
       width: 100%;
-      border-radius: .55rem;
+      border-radius: 0.55rem;
       border: 1px solid #334155;
       background: #0f172a;
       color: #e2e8f0;
-      padding: .55rem .65rem;
+      padding: 0.65rem 0.75rem;
       cursor: pointer;
       transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
       min-height: 0;
+      --preset-accent: #34d399;
     }
+    .strategy-preset-btn[data-accent="teal"] { --preset-accent: #2dd4bf; }
+    .strategy-preset-btn[data-accent="orange"] { --preset-accent: #fb923c; }
+    .strategy-preset-btn[data-accent="sky"] { --preset-accent: #38bdf8; }
     .strategy-preset-btn:hover {
-      border-color: #64748b;
+      border-color: #475569;
       background: #111827;
     }
     .strategy-preset-btn:disabled {
       opacity: 0.45;
       cursor: not-allowed;
     }
-    .strategy-preset-btn.active {
-      border-color: #10b981;
-      background: linear-gradient(160deg, rgba(16,185,129,.16), rgba(15,23,42,.95) 55%);
-      box-shadow: inset 0 0 0 1px rgba(16,185,129,.25);
+    .strategy-preset-btn .preset-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+      flex: 1 1 auto;
     }
     .strategy-preset-btn .preset-label {
       display: block;
-      font-size: .78rem;
-      font-weight: 700;
-      color: #f8fafc;
-      margin-bottom: .15rem;
-      line-height: 1.25;
+      font-size: 0.8rem;
+      font-weight: 650;
+      color: #f1f5f9;
+      line-height: 1.3;
     }
     .strategy-preset-btn .preset-desc {
       display: block;
-      font-size: .68rem;
-      line-height: 1.3;
-      color: #94a3b8;
+      font-size: 0.72rem;
+      line-height: 1.4;
+      color: #a8b4c4;
       font-weight: 500;
     }
-    .strategy-preset-btn.active .preset-desc { color: #cbd5e1; }
+    .strategy-preset-btn .preset-switch {
+      position: relative;
+      width: 2.5rem;
+      height: 1.35rem;
+      flex-shrink: 0;
+      border-radius: 999px;
+      background: #334155;
+      border: 1px solid #475569;
+      transition: background .15s ease, border-color .15s ease;
+    }
+    .strategy-preset-btn .preset-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 1rem;
+      height: 1rem;
+      border-radius: 50%;
+      background: #e2e8f0;
+      transition: transform .15s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,.35);
+    }
+    .strategy-preset-btn.active {
+      border-color: var(--preset-accent) !important;
+      background: #12202f !important;
+      box-shadow: inset 3px 0 0 var(--preset-accent) !important;
+      color: #f8fafc !important;
+    }
+    .strategy-preset-btn.active .preset-label {
+      color: #f8fafc !important;
+    }
+    .strategy-preset-btn.active .preset-desc {
+      color: #cbd5e1 !important;
+    }
+    .strategy-preset-btn.active .preset-switch {
+      background: var(--preset-accent) !important;
+      border-color: var(--preset-accent) !important;
+    }
+    .strategy-preset-btn.active .preset-switch::after {
+      transform: translateX(1.05rem);
+      background: #0f172a !important;
+    }
+    .strategy-preset-btn[data-accent="teal"].active {
+      background: #0f2a2a !important;
+    }
+    .strategy-preset-btn[data-accent="orange"].active {
+      background: #2a1810 !important;
+    }
+    .strategy-preset-btn[data-accent="sky"].active {
+      background: #0f2130 !important;
+    }
+    .strategy-preset-btn:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--preset-accent) 70%, #fff);
+      outline-offset: 2px;
+    }
+    .strat-pack-section-label {
+      margin-top: 0.75rem;
+      margin-bottom: 0.15rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
     .strat-setup-guide {
       display: grid;
       gap: .45rem;
@@ -560,10 +641,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-top: 1px solid #1e293b;
     }
     .strat-adv-pack .strat-adv-hint {
-      font-size: .7rem;
-      color: #64748b;
-      margin: .55rem 0 .45rem;
-      line-height: 1.35;
+      margin: 0 0 0.35rem;
+      font-size: 0.74rem;
+      line-height: 1.45;
+      color: #94a3b8;
+    }
+    .strat-adv-pack .strat-adv-hint strong {
+      color: #e2e8f0;
+      font-weight: 650;
     }
     #scalper-suite-settings.is-hidden-suite { display: none !important; }
     @media (max-width: 639px) {
@@ -1026,7 +1111,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       vertical-align: middle;
       /* Keep profile colour text readable on dark tables */
       -webkit-text-fill-color: currentColor;
-      text-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
     }
     .trade-profile-badge .tpb-icon {
       font-size: 0.85rem;
@@ -3833,21 +3917,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="strat-adv-body">
             <p class="strat-adv-hint">These bulk-enable filter modules + quality thresholds. They do <strong>not</strong> replace Trade Profiles. Prefer Balanced unless you want a specific win-rate style. Risk + Strict still stack on top.</p>
             <div class="strategy-preset-grid" id="strategy-presets">
-              <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" onclick="applyStrategiesAction('high_win_rate')">
-                <span class="preset-label">60%+ Win Rate pack</span>
-                <span class="preset-desc">Fewest trades · highest quality bars</span>
+              <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" role="switch" aria-checked="false" onclick="applyStrategiesAction('high_win_rate')">
+                <span class="preset-copy">
+                  <span class="preset-label">60%+ Win Rate pack</span>
+                  <span class="preset-desc">Fewest trades · highest quality bars</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" onclick="applyStrategiesAction('win_rate_55_60')">
-                <span class="preset-label">55–60% Win Rate pack</span>
-                <span class="preset-desc">Quality focus · more trades than 60%+</span>
+              <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" role="switch" aria-checked="false" onclick="applyStrategiesAction('win_rate_55_60')">
+                <span class="preset-copy">
+                  <span class="preset-label">55–60% Win Rate pack</span>
+                  <span class="preset-desc">Quality focus · more trades than 60%+</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="balanced" onclick="applyStrategiesAction('balanced')">
-                <span class="preset-label">Balanced pack</span>
-                <span class="preset-desc">Best overall risk/reward start</span>
+              <button type="button" class="strategy-preset-btn" data-preset="balanced" role="switch" aria-checked="false" onclick="applyStrategiesAction('balanced')">
+                <span class="preset-copy">
+                  <span class="preset-label">Balanced pack</span>
+                  <span class="preset-desc">Best overall risk/reward start</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="aggressive" onclick="applyStrategiesAction('aggressive')">
-                <span class="preset-label">Aggressive pack</span>
-                <span class="preset-desc">More opportunities · still protected</span>
+              <button type="button" class="strategy-preset-btn" data-preset="aggressive" role="switch" aria-checked="false" onclick="applyStrategiesAction('aggressive')">
+                <span class="preset-copy">
+                  <span class="preset-label">Aggressive pack</span>
+                  <span class="preset-desc">More opportunities · still protected</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
             </div>
           </div>
@@ -3864,42 +3960,66 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               Trade Profiles then override TP/SL/timer when assigned (Scalper → quick scalp, Momentum Burst profile → burst, etc.).
               Use a <strong>Suite</strong> only to turn Micro+Momentum+Post-Mig(+Reversal) all ON with shared timers.
             </p>
-            <div class="text-xs font-semibold text-slate-300 mt-1">Suite variants</div>
+            <div class="strat-pack-section-label">Suite variants</div>
             <div class="strategy-preset-grid short-term-presets" id="strategy-presets-suite">
-              <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" onclick="applyStrategiesAction('scalper_suite')" style="border-color:#0f766e">
-                <span class="preset-label">Scalper Suite · Standard</span>
-                <span class="preset-desc">Balanced timers · Micro+Mom+Mig+Rev</span>
+              <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" data-accent="teal" role="switch" aria-checked="false" onclick="applyStrategiesAction('scalper_suite')">
+                <span class="preset-copy">
+                  <span class="preset-label">Scalper Suite · Standard</span>
+                  <span class="preset-desc">Balanced timers · Micro + Momentum + Migration + Reversal</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" onclick="applyStrategiesAction('aggressive_scalper')" style="border-color:#ea580c">
-                <span class="preset-label">Suite · Aggressive</span>
-                <span class="preset-desc">Faster timers · higher TP · looser vol</span>
+              <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" data-accent="orange" role="switch" aria-checked="false" onclick="applyStrategiesAction('aggressive_scalper')">
+                <span class="preset-copy">
+                  <span class="preset-label">Suite · Aggressive</span>
+                  <span class="preset-desc">Faster timers · higher TP · looser volume filters</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" onclick="applyStrategiesAction('conservative_scalper')" style="border-color:#0369a1">
-                <span class="preset-label">Suite · Conservative</span>
-                <span class="preset-desc">Tighter SL · stricter vol · smaller size</span>
+              <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" data-accent="sky" role="switch" aria-checked="false" onclick="applyStrategiesAction('conservative_scalper')">
+                <span class="preset-copy">
+                  <span class="preset-label">Suite · Conservative</span>
+                  <span class="preset-desc">Tighter SL · stricter volume · smaller size</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
             </div>
-            <div class="text-xs font-semibold text-slate-300 mt-2">Single engines</div>
+            <div class="strat-pack-section-label">Single engines</div>
             <div class="strategy-preset-grid short-term-presets" id="strategy-presets-short">
-              <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" onclick="applyStrategiesAction('quick_scalper')">
-                <span class="preset-label">Quick Scalper</span>
-                <span class="preset-desc">Maps to Trade Profile · Scalper</span>
+              <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" role="switch" aria-checked="false" onclick="applyStrategiesAction('quick_scalper')">
+                <span class="preset-copy">
+                  <span class="preset-label">Quick Scalper</span>
+                  <span class="preset-desc">Maps to Trade Profile · Scalper</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" onclick="applyStrategiesAction('micro_scalper')">
-                <span class="preset-label">Micro-Scalper</span>
-                <span class="preset-desc">Ultra-fast · seconds holds</span>
+              <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" role="switch" aria-checked="false" onclick="applyStrategiesAction('micro_scalper')">
+                <span class="preset-copy">
+                  <span class="preset-label">Micro-Scalper</span>
+                  <span class="preset-desc">Ultra-fast · seconds holds</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" onclick="applyStrategiesAction('momentum_burst')">
-                <span class="preset-label">Momentum Burst</span>
-                <span class="preset-desc">Maps to Trade Profile · Momentum Burst</span>
+              <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" role="switch" aria-checked="false" onclick="applyStrategiesAction('momentum_burst')">
+                <span class="preset-copy">
+                  <span class="preset-label">Momentum Burst</span>
+                  <span class="preset-desc">Maps to Trade Profile · Momentum Burst</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" onclick="applyStrategiesAction('post_migration_scalp')">
-                <span class="preset-label">Post-Migration Scalp</span>
-                <span class="preset-desc">Maps to Trade Profile · Migration Sniper</span>
+              <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" role="switch" aria-checked="false" onclick="applyStrategiesAction('post_migration_scalp')">
+                <span class="preset-copy">
+                  <span class="preset-label">Post-Migration Scalp</span>
+                  <span class="preset-desc">Maps to Trade Profile · Migration Sniper</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
-              <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" onclick="applyStrategiesAction('reversal_scalp')">
-                <span class="preset-label">Reversal Scalp</span>
-                <span class="preset-desc">Maps to Trade Profile · Reversal Scalper</span>
+              <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" role="switch" aria-checked="false" onclick="applyStrategiesAction('reversal_scalp')">
+                <span class="preset-copy">
+                  <span class="preset-label">Reversal Scalp</span>
+                  <span class="preset-desc">Maps to Trade Profile · Reversal Scalper</span>
+                </span>
+                <span class="preset-switch" aria-hidden="true"></span>
               </button>
             </div>
             <div id="scalper-suite-settings" class="card mt-2 is-hidden-suite" style="border-color:#0f766e;padding:0.65rem">
@@ -4840,7 +4960,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       if (restore) restore.disabled = !data.canRestorePrevious;
       document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset], #strategy-presets-suite [data-preset]').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-preset') === preset);
+        const on = btn.getAttribute('data-preset') === preset;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-checked', on ? 'true' : 'false');
       });
       const suitePresets = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
       const qualityPacks = ['high_win_rate', 'win_rate_55_60', 'balanced', 'aggressive'];
