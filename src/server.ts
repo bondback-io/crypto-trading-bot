@@ -1262,6 +1262,90 @@ export function createServer(): express.Application {
     });
   });
 
+  app.post('/api/config/market-scanner', (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!config.marketScanner) {
+      config.marketScanner = {
+        enabled: true,
+        pollIntervalMs: 45_000,
+        lookbackHours: 6,
+        maxCandidatesPerPoll: 15,
+        cooldownMs: 45 * 60_000,
+        minRankScore: 42,
+        requireTaSetup: true,
+        minPatternConfidence: 55,
+      };
+    }
+    const ms = config.marketScanner;
+    let enabledChanged = false;
+    if (body.enabled !== undefined) {
+      const next = Boolean(body.enabled);
+      enabledChanged = next !== Boolean(ms.enabled);
+      ms.enabled = next;
+    }
+    if (body.pollIntervalMs !== undefined) {
+      const n = Number(body.pollIntervalMs);
+      if (Number.isFinite(n)) {
+        ms.pollIntervalMs = Math.max(15_000, Math.min(600_000, Math.round(n)));
+      }
+    }
+    if (body.lookbackHours !== undefined) {
+      const n = Number(body.lookbackHours);
+      if (Number.isFinite(n)) {
+        ms.lookbackHours = Math.max(0.5, Math.min(48, n));
+      }
+    }
+    if (body.maxCandidatesPerPoll !== undefined) {
+      const n = Number(body.maxCandidatesPerPoll);
+      if (Number.isFinite(n)) {
+        ms.maxCandidatesPerPoll = Math.max(1, Math.min(50, Math.round(n)));
+      }
+    }
+    if (body.cooldownMs !== undefined) {
+      const n = Number(body.cooldownMs);
+      if (Number.isFinite(n)) {
+        ms.cooldownMs = Math.max(60_000, Math.min(24 * 60 * 60_000, Math.round(n)));
+      }
+    }
+    if (body.minRankScore !== undefined) {
+      const n = Number(body.minRankScore);
+      if (Number.isFinite(n)) {
+        ms.minRankScore = Math.max(0, Math.min(100, Math.round(n)));
+      }
+    }
+    if (body.requireTaSetup !== undefined) {
+      ms.requireTaSetup = Boolean(body.requireTaSetup);
+    }
+    if (body.minPatternConfidence !== undefined) {
+      const n = Number(body.minPatternConfidence);
+      if (Number.isFinite(n)) {
+        ms.minPatternConfidence = Math.max(0, Math.min(100, Math.round(n)));
+      }
+    }
+
+    // Strategy toggle is the live gate — keep soft preference + toggle in sync
+    if (config.strategyToggles) {
+      config.strategyToggles.ta_market_scanner = ms.enabled !== false;
+    }
+    persistUserSettings();
+
+    // Restart so pollIntervalMs (set once at start) picks up new values
+    try {
+      const { restartMarketScanner } =
+        require('./marketScanner') as typeof import('./marketScanner');
+      restartMarketScanner();
+    } catch {
+      /* monitor may not have started yet */
+    }
+
+    res.json({
+      ok: true,
+      enabledChanged,
+      config: { ...ms },
+      status: getScannerStatus(),
+    });
+  });
+
   app.get('/api/post-run-dip/smart-wallet', (_req: Request, res: Response) => {
     const { getRecentDipSmartWalletActivity } =
       require('./postRunDip') as typeof import('./postRunDip');

@@ -462,6 +462,15 @@ export function stopMarketScanner(): void {
   }
 }
 
+/** Re-read pollIntervalMs / thresholds after config save. */
+export function restartMarketScanner(): void {
+  const wasRunning = running;
+  stopMarketScanner();
+  if (wasRunning) {
+    startMarketScanner();
+  }
+}
+
 /** Backtest helper: build a scanner-ranked view of a launch event. */
 export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
   ok: boolean;

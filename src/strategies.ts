@@ -3017,6 +3017,9 @@ export function syncUnderlyingFlagsFromToggles(
   config.momentumBurst.enabled = toggles.momentum_burst === true;
   config.postMigrationScalp.enabled = toggles.post_migration_scalp === true;
   config.reversalScalp.enabled = toggles.reversal_scalp === true;
+  if (config.marketScanner) {
+    config.marketScanner.enabled = toggles.ta_market_scanner !== false;
+  }
   const anyShortTermScalp =
     toggles.quick_scalper ||
     toggles.micro_scalper ||

@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Strategies; Config / Logs / Backtester via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Scanner / Strategies; Config / Logs / Backtester via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -3050,6 +3050,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
+      <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
       <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
     </nav>
 
@@ -3183,35 +3184,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card">
+        <div class="closed-trades-head">
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
+          <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
+            <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+          </div>
+        </div>
+        <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
+        <div class="overflow-x-auto max-h-56 overflow-y-auto">
+          <table id="closed-table">
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Recent Signals <span class="tip" tabindex="0" data-tip="Latest wallet buys and bot reactions (copy, skip, anti-rug block)."></span></div>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Toggle via Strategies → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
-          <div id="scanner-status" class="mint text-xs mb-2">—</div>
-          <div id="scanner-feed" class="max-h-72 overflow-y-auto text-sm"></div>
-        </div>
-      </div>
-
-      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
-        <div class="card" style="grid-column: 1 / -1">
-          <div class="closed-trades-head">
-            <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
-            <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
-              <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
-              <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
-              <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
-            </div>
-          </div>
-          <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
-          <div class="overflow-x-auto max-h-56 overflow-y-auto">
-            <table id="closed-table">
-              <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on the Scanner tab, or toggle via Strategies → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
+          <div id="scanner-status" data-scanner-status class="mint text-xs mb-2">—</div>
+          <div id="scanner-feed" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
       </div>
 
@@ -3696,6 +3695,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint mt-2" id="pump-hot-launches"></div>
       </div>
       <div class="card">
+        <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Same live scanner feed as Overview. Full settings live on the Scanner tab."></span></div>
+        <div id="scanner-status-signals" data-scanner-status class="mint text-xs mb-2">—</div>
+        <div id="scanner-feed-signals" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
+      </div>
+      <div class="card">
         <div class="section-title">Post-Run Dip · Smart Wallet Activity <span class="tip" tabindex="0" data-tip="Dip-phase confirmation: HQ buys, buybacks, Fib/support clusters, net SM flow. Soft conviction boost; optional hard-require in Conservative."></span></div>
         <div class="mint mb-2" id="prd-sm-status">—</div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
@@ -4052,6 +4056,67 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <summary class="mint cursor-pointer text-sm">Exit debug log (TP / SL / trail reasons)</summary>
           <pre id="bt-debug-log" class="mt-2 p-3 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto" style="background:#0f172a;border:1px solid #334155;color:#94a3b8;white-space:pre-wrap">Run a backtest to see step-by-step exit reasons (e.g. Sold at +45% due to trailing stop).</pre>
         </details>
+      </div>
+    </section>
+
+    </section>
+
+    <!-- ========== TAB: Market Scanner ========== -->
+    <section data-tab-panel="scanner" class="hidden space-y-4">
+      <div class="card">
+        <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview and Signals."></span></div>
+        <p class="text-sm text-slate-400 mb-2">
+          <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
+          Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on.
+          Strategy module also lives under
+          <button type="button" class="text-emerald-400 underline" onclick="showTab('strategies', document.querySelector('[data-tab=strategies]'))">Strategies</button>
+          → Market Scanner (TA).
+        </p>
+        <div id="scanner-status-tab" data-scanner-status class="mint text-xs mb-2">—</div>
+        <div id="scanner-feed-tab" data-scanner-feed class="max-h-80 overflow-y-auto text-sm"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Scanner Settings <span class="tip" tabindex="0" data-tip="Persisted in config.marketScanner. Enabling also toggles the ta_market_scanner strategy so the poll loop actually runs."></span></div>
+        <div class="toggle-row">
+          <span title="Soft preference + strategy gate (ta_market_scanner)">Enable Market Scanner</span>
+          <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span title="Scanner-only entries must show Fib/support/pattern/indicator setup">Require TA setup</span>
+          <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
+        </div>
+        <div class="filters-row mt-2">
+          <label class="ctl ctl-md">
+            <span>Poll interval (ms) <span class="tip" tabindex="0" data-tip="How often the scanner polls for new candidates. Min 15000."></span></span>
+            <input type="number" id="ms-poll-ms" value="45000" min="15000" max="600000" step="1000" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Lookback (h) <span class="tip" tabindex="0" data-tip="Hours of recent launches to consider each poll."></span></span>
+            <input type="number" id="ms-lookback-h" value="6" min="0.5" max="48" step="0.5" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Max / poll <span class="tip" tabindex="0" data-tip="Max candidates handed to the buy pipeline per poll."></span></span>
+            <input type="number" id="ms-max-cands" value="15" min="1" max="50" step="1" />
+          </label>
+          <label class="ctl ctl-md">
+            <span>Cooldown (ms) <span class="tip" tabindex="0" data-tip="Min time before re-considering the same mint after a skip/take."></span></span>
+            <input type="number" id="ms-cooldown-ms" value="2700000" min="60000" max="86400000" step="60000" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min rank score <span class="tip" tabindex="0" data-tip="Minimum composite rank score (0–100) to queue a candidate."></span></span>
+            <input type="number" id="ms-min-rank" value="42" min="0" max="100" step="1" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min pattern conf <span class="tip" tabindex="0" data-tip="Minimum chart-pattern confidence when TA setup is required."></span></span>
+            <input type="number" id="ms-min-pat-conf" value="55" min="0" max="100" step="1" />
+          </label>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2 items-center">
+          <button class="btn btn-primary" onclick="saveMarketScannerConfig()" title="Save scanner settings and restart the poll loop">Save Scanner Settings</button>
+          <button class="btn btn-secondary" onclick="loadMarketScannerConfig()" title="Reload current values from the server">Reload</button>
+          <span class="mint" id="ms-save-status">—</span>
+        </div>
       </div>
     </section>
 
@@ -6230,7 +6295,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       if (name === 'logs') loadSystemLogs();
       if (name === 'strategies') loadStrategies();
-      if (name === 'overview' || name === 'signals' || name === 'trades') {
+      if (name === 'scanner') loadMarketScannerConfig();
+      if (name === 'overview' || name === 'signals' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
       }
@@ -7301,22 +7367,79 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     /**
+     * Colour-coded entry-source badge: Scanner (teal), Scanner+ (hybrid),
+     * Copy (sky), Migration (purple). Used on positions, closed trades,
+     * activity feeds, and backtest rows.
+     */
+    function fmtEntrySourceBadge(p, opts) {
+      opts = opts || {};
+      if (!p) return '';
+      const entrySrc = p.entrySource;
+      const names = p.sourceNames || p.walletNames || [];
+      const walletName = String(p.walletName || '');
+      const reason = String(p.reason || p.skipReason || '');
+      const nameHit =
+        names.some(function (n) {
+          return /market\s*scanner/i.test(String(n));
+        }) || /market\s*scanner/i.test(walletName);
+      const reasonHit = /market\s*scanner|\bscanner\b/i.test(reason);
+      const isHybrid =
+        entrySrc === 'hybrid' ||
+        (nameHit && /\+?\s*wallets/i.test(walletName));
+      const isScanner =
+        entrySrc === 'scanner' ||
+        entrySrc === 'hybrid' ||
+        nameHit ||
+        (reasonHit && entrySrc !== 'wallet' && entrySrc !== 'migration');
+      const isMigration =
+        entrySrc === 'migration' ||
+        (!isScanner && /migration/i.test(String(p.source || '')) && opts.allowMigrationGuess);
+
+      if (isMigration || entrySrc === 'migration') {
+        return (
+          '<span class="badge entry-src-badge" style="background:#7c3aed;color:#fff" title="Migration entry">Migration</span>'
+        );
+      }
+      if (isScanner) {
+        return (
+          '<span class="badge entry-src-badge" style="background:#0d9488;color:#fff" title="Market Scanner' +
+          (isHybrid ? ' + smart wallets' : ' (TA)') +
+          '">' +
+          (isHybrid ? 'Scanner+' : 'Scanner') +
+          '</span>'
+        );
+      }
+      if (opts.omitCopy) return '';
+      // Wallet copy — sky badge (shown next to wallet name in cells)
+      if (
+        entrySrc === 'wallet' ||
+        names.length > 0 ||
+        walletName ||
+        opts.forceCopy
+      ) {
+        return (
+          '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="Smart-wallet copy trade">Copy</span>'
+        );
+      }
+      return '';
+    }
+
+    /**
      * Copied wallet + converging wallets.
      * Hover (desktop) / tap (mobile) shows smart-wallet entry MC when known.
+     * Prefixes a colour-coded entry-source badge (Scanner / Copy / Migration).
      */
     function fmtWalletConvergence(p) {
       const entrySrc = p && p.entrySource;
-      if (entrySrc === 'scanner' || (p.sourceNames || []).some(function (n) {
+      const namesHit = ((p && p.sourceNames) || []).some(function (n) {
         return /market\s*scanner/i.test(String(n));
-      })) {
-        const hybrid = entrySrc === 'hybrid';
-        return (
-          '<span class="badge" style="background:#0d9488;color:#fff" title="Market Scanner' +
-          (hybrid ? ' + smart wallets' : ' (TA)') +
-          '">' +
-          (hybrid ? 'Scanner+' : 'Scanner') +
-          '</span>'
-        );
+      });
+      if (
+        entrySrc === 'scanner' ||
+        entrySrc === 'hybrid' ||
+        namesHit
+      ) {
+        return fmtEntrySourceBadge(p);
       }
       if (entrySrc === 'migration') {
         const names = (p && p.sourceNames && p.sourceNames.length)
@@ -7324,7 +7447,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : null;
         const primary = names ? String(names[0]) : 'migration';
         return (
-          '<span class="badge" style="background:#7c3aed;color:#fff" title="Migration entry">' +
+          fmtEntrySourceBadge(p) +
+          ' <span class="mint" title="Migration entry">' +
           primary.replace(/</g, '&lt;').slice(0, 14) +
           '</span>'
         );
@@ -7336,7 +7460,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? p.sourceWallets
         : null;
       const total = names ? names.length : (addrs ? addrs.length : 0);
-      if (total <= 0) return '<span class="mint">—</span>';
+      if (total <= 0) {
+        const bare = fmtEntrySourceBadge(p);
+        return bare || '<span class="mint">—</span>';
+      }
       const primary = names
         ? String(names[0])
         : (addrs[0].slice(0, 4) + '…' + addrs[0].slice(-4));
@@ -7356,11 +7483,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const tipEsc = tipText.replace(/"/g, '&quot;').replace(/</g, '&lt;');
       const label = primary.replace(/</g, '&lt;') +
         (others > 0 ? ' <span class="mint">+' + others + '</span>' : '');
-      return '<span class="pos-hold wallet-mc-tip" title="' + tipEsc +
+      return (
+        fmtEntrySourceBadge(p, { forceCopy: true }) +
+        ' <span class="pos-hold wallet-mc-tip" style="color:#38bdf8" title="' + tipEsc +
         '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
         '<span class="pos-hold-dur">' + label + '</span>' +
         '<span class="pos-hold-entry">' + tipEsc + '</span>' +
-        '</span>';
+        '</span>'
+      );
     }
 
     /** Compact signed unrealized P&L: +0.12 SOL · $18.40 */
@@ -8170,7 +8300,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     : 'Liquidity at your entry') +
                 '">' + fmtUsdShort(liq) + '</td>' +
                 '<td class="mint">' + (t.riskScoreHint != null ? t.riskScoreHint : '—') + '</td>' +
-                '<td class="mint">' + (t.smartWalletCount != null ? t.smartWalletCount : (t.sourceNames || []).length) +
+                '<td class="mint">' + fmtEntrySourceBadge(t) + ' ' +
+                (t.smartWalletCount != null ? t.smartWalletCount : (t.sourceNames || []).length) +
                 ((t.sourceNames || []).length ? ' (' + t.sourceNames.slice(0, 2).join(', ') + ')' : '') + '</td>' +
                 '<td class="mint" title="' + reasonTip + '">' + reason.replace(/</g, '&lt;') +
                 ((t.debugLog || []).length ? ' <span style="opacity:.6">(' + t.debugLog.length + ' steps)</span>' : '') +
@@ -10052,9 +10183,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const ageNote = blockAge > 60 * 60 * 1000
               ? ' <span class="mint" title="On-chain buy time is older than 1h — shown for context">· on-chain \${fmtTimeAgoCell(a.timestamp)}</span>'
               : '';
+            const entryBadge = fmtEntrySourceBadge({
+              entrySource: a.entrySource,
+              walletName: a.walletName,
+              sourceNames: a.walletNames || a.sourceNames,
+              reason: a.skipReason || a.reason,
+            });
             return \`
           <div class="log-entry" style="\${staleStyle}">
-            <strong>\${a.walletName}</strong> bought
+            \${entryBadge ? entryBadge + ' ' : ''}<strong>\${escHtml(String(a.walletName || '—'))}</strong> bought
             \${fmtToken(a.symbol, a.name, a.mint)}
             \${a.name && a.name !== a.symbol ? '<span class="mint">(' + escHtml(a.name) + ')</span>' : ''}
             \${a.isMigration ? '🚀' : a.earlyBuy ? '🌱' : a.isPumpFun ? '🎯' : ''}
@@ -10071,42 +10208,45 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const actTrades = document.getElementById('trades-activity');
       if (actTrades) actTrades.innerHTML = activityHtml;
 
-      const scanSt = document.getElementById('scanner-status');
-      const scanFeed = document.getElementById('scanner-feed');
-      if (scanSt || scanFeed) {
+      const scanStEls = document.querySelectorAll('[data-scanner-status]');
+      const scanFeedEls = document.querySelectorAll('[data-scanner-feed]');
+      if (scanStEls.length || scanFeedEls.length) {
         const ss = (scanner && scanner.status) || {};
         const cands = (scanner && scanner.candidates) || [];
-        if (scanSt) {
-          scanSt.textContent =
-            (ss.enabled ? 'ON' : 'OFF') +
-            (ss.running ? ' · polling' : '') +
-            (ss.lastPollMs != null ? ' · last ' + ss.lastPollMs + 'ms' : '') +
-            ' · ' + cands.length + ' recent' +
-            (ss.lastError ? ' · err: ' + ss.lastError : '');
-        }
-        if (scanFeed) {
-          scanFeed.innerHTML = cands.length === 0
-            ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner (TA) in Strategies.</div>'
-            : cands.slice(0, 25).map(function (c) {
-                const stColor =
-                  c.status === 'taken' ? 'var(--green)' :
-                  c.status === 'skipped' ? 'var(--red)' :
-                  c.status === 'queued' ? '#60a5fa' : 'var(--muted)';
-                return (
-                  '<div class="flex justify-between gap-2 py-1 border-b border-slate-800/60">' +
-                    '<div>' +
-                      '<strong>' + String(c.symbol || '?').replace(/</g, '&lt;') + '</strong> ' +
-                      '<span class="mint text-xs">score ' + (c.rankScore ?? '—') + '</span> ' +
-                      '<span class="mint text-xs">' + (c.reasons || []).slice(0, 3).join(' · ') + '</span>' +
-                    '</div>' +
-                    '<span style="color:' + stColor + ';font-size:0.75rem">' +
-                      String(c.status || 'seen') +
-                      (c.skipReason ? ' · ' + String(c.skipReason).slice(0, 40) : '') +
-                    '</span>' +
-                  '</div>'
-                );
-              }).join('');
-        }
+        const statusText =
+          (ss.enabled ? 'ON' : 'OFF') +
+          (ss.running ? ' · polling' : '') +
+          (ss.lastPollMs != null ? ' · last ' + ss.lastPollMs + 'ms' : '') +
+          ' · ' + cands.length + ' recent' +
+          (ss.lastError ? ' · err: ' + ss.lastError : '');
+        scanStEls.forEach(function (scanSt) {
+          scanSt.textContent = statusText;
+        });
+        const feedHtml = cands.length === 0
+          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on the Scanner tab or Strategies → Market Scanner (TA).</div>'
+          : cands.slice(0, 25).map(function (c) {
+              const stColor =
+                c.status === 'taken' ? 'var(--green)' :
+                c.status === 'skipped' ? 'var(--red)' :
+                c.status === 'queued' ? '#60a5fa' : 'var(--muted)';
+              return (
+                '<div class="flex justify-between gap-2 py-1 border-b border-slate-800/60">' +
+                  '<div>' +
+                    '<span class="badge" style="background:#0d9488;color:#fff;margin-right:0.35rem">Scanner</span>' +
+                    '<strong>' + String(c.symbol || '?').replace(/</g, '&lt;') + '</strong> ' +
+                    '<span class="mint text-xs">score ' + (c.rankScore ?? '—') + '</span> ' +
+                    '<span class="mint text-xs">' + (c.reasons || []).slice(0, 3).join(' · ') + '</span>' +
+                  '</div>' +
+                  '<span style="color:' + stColor + ';font-size:0.75rem">' +
+                    String(c.status || 'seen') +
+                    (c.skipReason ? ' · ' + String(c.skipReason).slice(0, 40) : '') +
+                  '</span>' +
+                '</div>'
+              );
+            }).join('');
+        scanFeedEls.forEach(function (scanFeed) {
+          scanFeed.innerHTML = feedHtml;
+        });
       }
 
       const sizingTbody = document.querySelector('#sizing-signals-table tbody');
@@ -12533,6 +12673,84 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       refresh();
     }
 
+    function fillMarketScannerForm(cfg, status) {
+      if (!cfg) return;
+      const en = document.getElementById('ms-enabled');
+      if (en) {
+        // Prefer live strategy gate from status when present
+        en.checked =
+          status && status.enabled != null
+            ? Boolean(status.enabled)
+            : cfg.enabled !== false;
+      }
+      const reqTa = document.getElementById('ms-require-ta');
+      if (reqTa) reqTa.checked = cfg.requireTaSetup !== false;
+      const setNum = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && v != null && Number.isFinite(Number(v))) el.value = Number(v);
+      };
+      setNum('ms-poll-ms', cfg.pollIntervalMs);
+      setNum('ms-lookback-h', cfg.lookbackHours);
+      setNum('ms-max-cands', cfg.maxCandidatesPerPoll);
+      setNum('ms-cooldown-ms', cfg.cooldownMs);
+      setNum('ms-min-rank', cfg.minRankScore);
+      setNum('ms-min-pat-conf', cfg.minPatternConfidence);
+    }
+
+    async function loadMarketScannerConfig() {
+      const st = document.getElementById('ms-save-status');
+      try {
+        const data = await fetchJSON('/api/market-scanner');
+        fillMarketScannerForm(data.config || {}, data.status || {});
+        if (st) st.textContent = 'Loaded';
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    async function saveMarketScannerConfig(silent) {
+      const st = document.getElementById('ms-save-status');
+      if (st) st.textContent = 'Saving…';
+      try {
+        const body = {
+          enabled: document.getElementById('ms-enabled')
+            ? document.getElementById('ms-enabled').checked
+            : true,
+          requireTaSetup: document.getElementById('ms-require-ta')
+            ? document.getElementById('ms-require-ta').checked
+            : true,
+          pollIntervalMs: Number(document.getElementById('ms-poll-ms')?.value) || 45000,
+          lookbackHours: Number(document.getElementById('ms-lookback-h')?.value) || 6,
+          maxCandidatesPerPoll: Number(document.getElementById('ms-max-cands')?.value) || 15,
+          cooldownMs: Number(document.getElementById('ms-cooldown-ms')?.value) || 2700000,
+          minRankScore: Number(document.getElementById('ms-min-rank')?.value) || 42,
+          minPatternConfidence: Number(document.getElementById('ms-min-pat-conf')?.value) || 55,
+        };
+        const data = await fetchJSON('/api/config/market-scanner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        fillMarketScannerForm(data.config || body, data.status || {});
+        if (st) {
+          st.textContent =
+            'Saved' +
+            (data.status && data.status.enabled != null
+              ? (data.status.enabled ? ' · ON' : ' · OFF')
+              : '');
+        }
+        if (!silent) {
+          /* status line is enough */
+        }
+        // Refresh strategies list so the module toggle matches
+        try { if (typeof loadStrategies === 'function') loadStrategies(); } catch (_) {}
+        refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+        if (!silent) alert(err.message || String(err));
+      }
+    }
+
     async function saveTechnicalLevelsConfig(silent) {
       const fibRaw = document.getElementById('tl-priority-fibs')?.value || '0.5,0.618';
       const secRaw = document.getElementById('tl-secondary-fibs')?.value || '0.382,0.786';
@@ -12834,7 +13052,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'strategies', 'backtester', 'config', 'logs'];
+    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'scanner', 'strategies', 'backtester', 'config', 'logs'];
     const startTab = tabNames.includes(savedTab) ? savedTab : 'overview';
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
   </script>
