@@ -87,6 +87,7 @@ export interface PersistedBotSettings {
     };
   };
   paper?: Record<string, unknown>;
+  marketScanner?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;
   walletDiscovery?: {

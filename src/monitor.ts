@@ -36,6 +36,22 @@ import {
   isEarlyCurveBuy,
 } from './pumpSmartActivity';
 import {
+  startMarketScanner,
+  stopMarketScanner,
+  onScannerCandidate,
+  getScannerFeed,
+  getScannerStatus,
+  annotateScannerCandidate,
+  markScannerCooldown,
+  isMarketScannerSignal,
+  isMarketScannerAddress,
+  MARKET_SCANNER_WALLET,
+  MARKET_SCANNER_NAME,
+  type ScannerCandidate,
+} from './marketScanner';
+import { seedPriceHistoryFromCandles } from './technicalLevels';
+import { evaluateIndicators } from './indicators';
+import {
   getWalletActivity,
   formatActivityLabel,
   getTokenSniperActivity,
@@ -338,6 +354,21 @@ export interface TradeSignal {
   }>;
   /** Spot price in SOL when known (technicals / marks) */
   priceSol?: number | null;
+  /**
+   * How the entry was discovered:
+   * wallet copy | market scanner | migration | hybrid (scanner + wallets).
+   */
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  chartPatternIds?: string[];
+  chartPatternSummary?: string | null;
+  chartPatternHits?: Array<{
+    id: string;
+    confidence: number;
+    breakout: boolean;
+    bias?: string;
+  }>;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -533,6 +564,10 @@ export function startMonitor(): void {
     console.warn(`[monitor] Risk halt → pausing: ${reason}`);
     pauseMonitor();
   });
+
+  // Autonomous Market Scanner (TA) — hybrid with wallet copy when both ON
+  onScannerCandidate((candidate) => handleScannerCandidate(candidate));
+  startMarketScanner();
 }
 
 export function stopMonitor(): void {
@@ -546,6 +581,7 @@ export function stopMonitor(): void {
     clearInterval(activityTimer);
     activityTimer = null;
   }
+  stopMarketScanner();
   console.log('[monitor] Stopped');
 }
 
@@ -1469,6 +1505,304 @@ function getProgramId(
  * High-priority buy when migration WS detects a tracked smart wallet
  * or a volume spike on Pump.fun → PumpSwap/Raydium migrate.
  */
+async function handleScannerCandidate(
+  candidate: ScannerCandidate & { launch: import('./marketData').LaunchEvent }
+): Promise<void> {
+  if (paused) return;
+  if (!isStrategyEnabled('ta_market_scanner')) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: 'Market Scanner OFF',
+    });
+    return;
+  }
+  if (isDeniedCopyMint(candidate.mint, config.solMint)) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: 'denied mint',
+    });
+    markScannerCooldown(candidate.mint, false);
+    return;
+  }
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(candidate.mint);
+  if (pumpFunGate) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: pumpFunGate,
+    });
+    markScannerCooldown(candidate.mint, false);
+    return;
+  }
+  if (tradedMints.has(candidate.mint) || pendingBuys.has(candidate.mint)) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: 'already traded / pending',
+    });
+    markScannerCooldown(candidate.mint, false);
+    return;
+  }
+  if (!beginBuy(candidate.mint)) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: 'buy in progress',
+    });
+    return;
+  }
+
+  try {
+    const launch = candidate.launch;
+    if (launch.candles?.length) {
+      seedPriceHistoryFromCandles(candidate.mint, launch.candles);
+    }
+
+    // Hybrid boost — tracked wallets also active on this mint recently
+    const cluster = recentBuys.get(candidate.mint) ?? [];
+    const realWallets = cluster
+      .filter((b) => !isMarketScannerAddress(b.wallet) && b.wallet !== 'volume-spike')
+      .map((b) => ({ addr: b.wallet, name: b.walletName }));
+    const uniqueWallets: { addr: string; name: string }[] = [];
+    const seen = new Set<string>();
+    for (const w of realWallets) {
+      if (seen.has(w.addr)) continue;
+      seen.add(w.addr);
+      uniqueWallets.push(w);
+    }
+    const hybrid = uniqueWallets.length > 0;
+    const wallets = hybrid
+      ? [MARKET_SCANNER_WALLET, ...uniqueWallets.map((w) => w.addr)]
+      : [MARKET_SCANNER_WALLET];
+    const walletNames = hybrid
+      ? [MARKET_SCANNER_NAME, ...uniqueWallets.map((w) => w.name)]
+      : [MARKET_SCANNER_NAME];
+
+    const signal: TradeSignal = {
+      mint: candidate.mint,
+      symbol: candidate.symbol,
+      name: candidate.name,
+      wallets,
+      walletNames,
+      isMigration: Boolean(candidate.migrated || launch.migrated),
+      nearMigration: false,
+      timestamp: Date.now(),
+      entrySource: hybrid ? 'hybrid' : 'scanner',
+      nearKeyFib: candidate.nearKeyFib,
+      nearSupport: candidate.nearSupport,
+      chartPatternIds: candidate.chartPatternIds,
+      candles: launch.candles,
+      priceSol: launch.lastPriceSol || launch.entryPriceSol,
+      sourceEntryMcUsd: candidate.marketCapUsd ?? launch.marketCapUsd,
+      metrics: {
+        liquidityUsd: candidate.liquidityUsd ?? launch.liquidityUsd ?? null,
+        marketCapUsd: candidate.marketCapUsd ?? launch.marketCapUsd ?? null,
+        volume24hUsd: candidate.volumeUsd ?? launch.volumeUsd ?? null,
+        volumeH1Usd:
+          candidate.volumeUsd != null
+            ? candidate.volumeUsd / 18
+            : launch.volumeUsd != null
+              ? launch.volumeUsd / 18
+              : null,
+        volumeM5Usd: null,
+        recentBuyVolumeUsd: null,
+        txnsH1: null,
+        buysH1: null,
+        sellsH1: null,
+        buySellRatio: null,
+        priceUsd: null,
+        priceChangeH1Pct: null,
+        priceChange24hPct: launch.priceChangePct ?? null,
+        holderCountEstimate: null,
+        topHolderPct: null,
+        top10HoldPct: null,
+        devHoldPct: null,
+        devActiveRecently: false,
+        mintAuthority: null,
+        source: launch.source,
+      } as NonNullable<TradeSignal['metrics']>,
+    };
+
+    // Push into activity feed so dashboard shows scanner rows
+    const feedEvent: WalletBuyEvent = {
+      wallet: MARKET_SCANNER_WALLET,
+      walletName: hybrid ? `${MARKET_SCANNER_NAME}+wallets` : MARKET_SCANNER_NAME,
+      mint: candidate.mint,
+      symbol: candidate.symbol,
+      name: candidate.name,
+      signature: candidate.id,
+      timestamp: signal.timestamp,
+      detectedAt: signal.timestamp,
+      isPumpFun: Boolean(launch.isPumpFun),
+      isMigration: signal.isMigration,
+      tradeStatus: 'seen',
+      metrics: signal.metrics,
+    };
+    if (!recentBuys.has(candidate.mint)) recentBuys.set(candidate.mint, []);
+    recentBuys.get(candidate.mint)!.push(feedEvent);
+    pushActivityFeed(feedEvent);
+
+    console.log(
+      `[monitor] 📡 SCANNER ${hybrid ? 'HYBRID' : 'TA'} — ${candidate.symbol} ` +
+        `score=${candidate.rankScore} [${candidate.reasons.slice(0, 4).join(', ')}]`
+    );
+
+    if (!(await passesFilters(signal))) {
+      finishBuy(candidate.mint, false);
+      annotateScannerCandidate(candidate.mint, {
+        status: 'skipped',
+        skipReason: 'filters',
+      });
+      markScannerCooldown(candidate.mint, false);
+      return;
+    }
+
+    try {
+      signal.sourceEntryMcUsd =
+        signal.sourceEntryMcUsd ??
+        (await resolveSourceEntryMcUsd(candidate.mint));
+    } catch {
+      /* non-fatal */
+    }
+
+    onSignalHandler?.(signal);
+
+    const sizing = resolveTradeSize('normal', {
+      riskScore: signal.antiRug?.riskScore,
+      convictionScore: signal.convictionScore,
+      sizeMultiplier:
+        (signal.sizeMultiplier ?? 1) * (hybrid ? 1.15 : 0.9),
+    });
+    recordSignalSizing(signal, sizing, true);
+
+    // Reuse the shared buy path used by wallet convergence
+    const buyEvent: WalletBuyEvent = {
+      ...feedEvent,
+      tradeStatus: 'seen',
+    };
+    // Stamp profile + execute via existing helper path
+    await executeSignalBuy(signal, buyEvent, sizing, {
+      priority: hybrid || signal.isMigration,
+      strategyKind: signal.isMigration ? 'migration' : 'normal',
+    });
+  } catch (err) {
+    finishBuy(candidate.mint, false);
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: err instanceof Error ? err.message : 'scanner error',
+    });
+    markScannerCooldown(candidate.mint, false);
+    throw err;
+  }
+}
+
+/**
+ * Shared execute after passesFilters for scanner (and reusable later).
+ */
+async function executeSignalBuy(
+  signal: TradeSignal,
+  buy: WalletBuyEvent,
+  sizing: { sizeSol: number; reason: string },
+  opts: { priority?: boolean; strategyKind?: 'migration' | 'normal' }
+): Promise<void> {
+  const buyOpts: Parameters<typeof executeBuy>[2] = {
+    sourceWallets: signal.wallets,
+    sourceNames: signal.walletNames,
+    name: signal.name,
+    strategyKind: opts.strategyKind ?? 'normal',
+    solAmount: sizing.sizeSol,
+    sizeReason: sizing.reason,
+    sourceEntryMcUsd: signal.sourceEntryMcUsd,
+    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    convictionScore: signal.convictionScore,
+    entrySource: signal.entrySource,
+    ...resolveScalpBuyFlag(signal),
+    antiRug: signal.antiRug
+      ? {
+          riskScore: signal.antiRug.riskScore,
+          riskLevel: signal.antiRug.riskLevel,
+          flags: signal.antiRug.flags,
+          ok: signal.antiRug.ok,
+        }
+      : undefined,
+  };
+  if (opts.priority) {
+    buyOpts.priority = true;
+    buyOpts.slippageBps =
+      config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
+  }
+
+  const profileAssignment = assignTradeProfile({
+    isMigration: signal.isMigration,
+    nearMigration: signal.nearMigration,
+    earlyBuy: signal.earlyBuy,
+    migrationFresh: isRecentlyMigrated(signal.mint),
+    scalpMode: buyOpts.scalpMode,
+    shortTermStrategyId: buyOpts.shortTermStrategyId,
+    convictionScore: signal.convictionScore,
+    dropFromPeakPct: signal.dropFromPeakPct,
+    strategyKind: buyOpts.strategyKind,
+    symbol: signal.symbol,
+    marketCapUsd:
+      signal.sourceEntryMcUsd ?? signal.metrics?.marketCapUsd ?? null,
+    holderCount: signal.metrics?.holderCountEstimate ?? null,
+    volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+    volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+    recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+    tokenAgeHours: signal.tokenAgeHours ?? null,
+    priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
+    priceChangeH1Pct: signal.metrics?.priceChangeH1Pct ?? null,
+    smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,
+    liquidityUsd: signal.metrics?.liquidityUsd ?? null,
+    walletCount: signal.wallets.filter((w) => !isMarketScannerAddress(w)).length || null,
+    nearKeyFib: signal.nearKeyFib === true,
+    nearSupport: signal.nearSupport === true,
+    chartPatternIds: signal.chartPatternIds ?? null,
+    scannerOrigin: isMarketScannerSignal(signal),
+    entrySource: signal.entrySource,
+  });
+
+  if (profileAssignment.skipped) {
+    finishBuy(buy.mint, false);
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason:
+        profileAssignment.skipReason || 'No trade profile scored high enough',
+    });
+    annotateScannerCandidate(signal.mint, {
+      status: 'skipped',
+      skipReason: profileAssignment.skipReason || 'profile skip',
+    });
+    markScannerCooldown(signal.mint, false);
+    return;
+  }
+
+  Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+
+  const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
+  finishBuy(buy.mint, result.success);
+  if (result.success) {
+    recordTradeExecuted();
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'taken',
+      skipReason: undefined,
+    });
+    annotateScannerCandidate(signal.mint, { status: 'taken' });
+    markScannerCooldown(signal.mint, true);
+    console.log(
+      `[monitor] Scanner trade executed (${result.mode}): ${signal.symbol} ` +
+        `@ ${sizing.sizeSol.toFixed(3)} SOL · ${profileAssignment.name}`
+    );
+  } else {
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason: result.error || 'executeBuy failed',
+    });
+    annotateScannerCandidate(signal.mint, {
+      status: 'skipped',
+      skipReason: result.error || 'executeBuy failed',
+    });
+    markScannerCooldown(signal.mint, false);
+  }
+}
+
 async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void> {
   if (paused) return;
   if (isDeniedCopyMint(event.mint, config.solMint)) {
@@ -1536,6 +1870,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     walletNames,
     isMigration: true,
     timestamp: Date.now(),
+    entrySource: 'migration',
   };
 
   console.log(
@@ -1593,6 +1928,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     convictionScore: signal.convictionScore,
+    entrySource: signal.entrySource ?? 'migration',
     ...resolveScalpBuyFlag(signal),
     antiRug: signal.antiRug
       ? {
@@ -2196,6 +2532,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     profileMomentumFailDropPct?: number;
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
+    entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -2212,6 +2549,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     convictionScore: signal.convictionScore,
+    entrySource:
+      signal.entrySource ??
+      (signal.isMigration || signal.nearMigration ? 'migration' : 'wallet'),
     ...resolveScalpBuyFlag(signal),
     antiRug: signal.antiRug
       ? {
@@ -2290,6 +2630,8 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           }>;
         }
       ).chartPatternHits ?? null,
+    scannerOrigin: isMarketScannerSignal(signal),
+    entrySource: signal.entrySource,
     walletQualityAvg: (() => {
       const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
       if (!addrs.length) return null;
@@ -2804,6 +3146,8 @@ export function getRecentSignals() {
   return recentSignals.slice(0, 30);
 }
 
+export { getScannerFeed, getScannerStatus };
+
 /** Optional anti-rug reasons that early/migration soft-pass may ignore. */
 function isSoftPassableEarlyReason(reason: string): boolean {
   const r = reason.toLowerCase();
@@ -2838,7 +3182,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           : 'early'
       : 'normal';
 
-  if (!isStrategyEnabled('smart_money_copy')) {
+  if (isMarketScannerSignal(signal)) {
+    if (!isStrategyEnabled('ta_market_scanner')) {
+      logStrategyDecision(
+        'ta_market_scanner',
+        'skip',
+        `${signal.symbol} — Market Scanner OFF`
+      );
+      recordRejectedSignal(signal, 'strategy:ta_market_scanner OFF');
+      return false;
+    }
+  } else if (!isStrategyEnabled('smart_money_copy')) {
     logStrategyDecision(
       'smart_money_copy',
       'skip',
@@ -2890,7 +3244,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     config.filters.enableWalletQualityGate !== false
   ) {
     for (const addr of signal.wallets) {
-      if (addr === 'volume-spike') continue;
+      if (addr === 'volume-spike' || isMarketScannerAddress(addr)) continue;
       const w = config.smartWallets.find((sw) => sw.address === addr);
       if (!w) continue;
       const gate = passesWalletQualityGate(w);
@@ -2971,6 +3325,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // Cluster floor (unified with selective min wallets + Strict overlay)
+  // Market Scanner / hybrid: skip hard wallet-count floor (TA gated instead)
+  const scannerSignal = isMarketScannerSignal(signal);
   const qualityModes = getQualityModeOverlays();
   const clusterMin =
     isStrategyEnabled('wallet_convergence') ||
@@ -2980,15 +3336,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const priority =
     signal.isMigration || signal.nearMigration || signal.earlyBuy;
   const allowSingle =
-    !qualityModes.blockSingleWalletEntries &&
-    ((signal.allowSingleWalletException &&
-      signal.isMigration &&
-      signal.wallets.length >= 1) ||
-      (priority &&
-        config.selective?.allowSingleWalletMigration !== false &&
-        signal.wallets.length >= 1 &&
-        clusterMin <= 2));
+    scannerSignal ||
+    (!qualityModes.blockSingleWalletEntries &&
+      ((signal.allowSingleWalletException &&
+        signal.isMigration &&
+        signal.wallets.length >= 1) ||
+        (priority &&
+          config.selective?.allowSingleWalletMigration !== false &&
+          signal.wallets.length >= 1 &&
+          clusterMin <= 2)));
   if (
+    !scannerSignal &&
     (isStrategyEnabled('wallet_convergence') ||
       isStrategyEnabled('elite_convergence')) &&
     signal.wallets.length < clusterMin &&
@@ -3316,6 +3674,37 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `size×${conviction.sizeMultiplier.toFixed(2)} wallets=${signal.wallets.length} ` +
       `· ${conviction.breakdownLine}`
   );
+
+  // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open)
+  if (
+    scannerSignal &&
+    signal.entrySource !== 'hybrid' &&
+    (config.marketScanner?.requireTaSetup !== false)
+  ) {
+    const ind = evaluateIndicators({
+      mint: signal.mint,
+      candles: signal.candles,
+      priceSol: signal.priceSol,
+    });
+    const hasTa =
+      signal.nearKeyFib === true ||
+      signal.nearSupport === true ||
+      (Array.isArray(signal.chartPatternIds) &&
+        signal.chartPatternIds.length > 0) ||
+      ind.setup === true ||
+      /fib|support|pattern|dip|pullback/i.test(
+        signal.convictionBreakdown || ''
+      );
+    if (!hasTa) {
+      logStrategyDecision(
+        'ta_market_scanner',
+        'skip',
+        `${signal.symbol} — no TA setup (Fib/support/pattern/indicator)`
+      );
+      recordRejectedSignal(signal, 'scanner: no TA setup');
+      return false;
+    }
+  }
 
   return true;
 }

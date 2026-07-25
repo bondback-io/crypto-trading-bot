@@ -285,6 +285,42 @@ export function applySocialSentimentVerdict(
   };
 }
 
+/** Optional external social API provider (TweetScout / LunarCrush / etc.). */
+export type SocialApiProvider = (
+  signal: SignalLike
+) => Promise<SocialSentimentReport | null> | SocialSentimentReport | null;
+
+let socialApiProvider: SocialApiProvider | null = null;
+
+/** Register a real social API provider. Null clears (proxy fallback). */
+export function setSocialApiProvider(provider: SocialApiProvider | null): void {
+  socialApiProvider = provider;
+}
+
+export function getSocialApiProvider(): SocialApiProvider | null {
+  return socialApiProvider;
+}
+
+/**
+ * Resolve social report: try registered API provider first, then on-chain proxy.
+ */
+export async function resolveSocialReport(
+  signal: SignalLike
+): Promise<SocialSentimentReport> {
+  if (socialApiProvider) {
+    try {
+      const api = await socialApiProvider(signal);
+      if (api && api.source === 'api') return api;
+      if (api && api.source !== 'none') {
+        return { ...api, source: 'api' };
+      }
+    } catch {
+      /* fall through to proxy */
+    }
+  }
+  return evaluateSocialSentimentFromSignal(signal);
+}
+
 /** Convenience: evaluate + apply when strategy is enabled. */
 export function resolveSocialSentimentForSignal(
   signal: SignalLike
@@ -292,6 +328,7 @@ export function resolveSocialSentimentForSignal(
   if (!isStrategyEnabled('social_sentiment_filter')) return null;
   if (config.filters.enableSocialSentimentFilter === false) return null;
 
+  // Sync path uses proxy; async API is available via resolveSocialReport for scanner polls
   const report = evaluateSocialSentimentFromSignal(signal);
   const verdict = applySocialSentimentVerdict(report);
   return verdict;

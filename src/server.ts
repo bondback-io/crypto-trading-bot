@@ -57,6 +57,8 @@ import {
   getRecentActivity,
   getRecentSignals,
   getMonitorStatus,
+  getScannerFeed,
+  getScannerStatus,
   getWalletsWithActivity,
   pauseMonitor,
   resumeMonitor,
@@ -1249,6 +1251,14 @@ export function createServer(): express.Application {
         riskMultiplier: config.trade.riskMultiplier ?? 0.4,
         convictionMultiplier: config.trade.convictionMultiplier ?? 1.45,
       },
+    });
+  });
+
+  app.get('/api/market-scanner', (_req: Request, res: Response) => {
+    res.json({
+      status: getScannerStatus(),
+      candidates: getScannerFeed(40),
+      config: { ...(config.marketScanner || {}) },
     });
   });
 

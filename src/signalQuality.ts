@@ -60,12 +60,15 @@ import {
 } from './postRunDip';
 import { resolveTechnicalLevelsForSignal } from './technicalLevels';
 import { resolveChartPatternsForSignal } from './chartPatterns';
+import { resolveIndicatorsForSignal } from './indicators';
 import {
   evaluateHwrQualityFilter,
   logHwrQualityFilterReject,
   normalizeHwrQualityFilter,
 } from './hwrQualityFilter';
 import { resolveTradeProfileDefinition } from './tradeProfiles';
+import { seedPriceHistoryFromCandles } from './technicalLevels';
+import { isMarketScannerSignal } from './marketScanner';
 
 export interface ConvictionBreakdown {
   wallets: number;
@@ -92,6 +95,8 @@ export interface ConvictionBreakdown {
   technicals: number;
   /** Chart pattern boost / penalty (can be negative) */
   chartPatterns: number;
+  /** Classic indicators (RSI/EMA) soft boost */
+  indicators: number;
 }
 
 export interface ConvictionVerdict {
@@ -196,6 +201,10 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     b.chartPatterns !== 0
       ? ` patterns=${b.chartPatterns >= 0 ? '+' : ''}${b.chartPatterns}`
       : '';
+  const indicators =
+    b.indicators !== 0
+      ? ` ind=${b.indicators >= 0 ? '+' : ''}${b.indicators}`
+      : '';
   return (
     `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
     `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
@@ -207,7 +216,8 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     session +
     postRunDip +
     technicals +
-    chartPatterns
+    chartPatterns +
+    indicators
   );
 }
 
@@ -216,6 +226,15 @@ function formatBreakdown(b: ConvictionBreakdown): string {
  * Per-risk-level minConvictionScore lives on config.selective (set by presets).
  */
 export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict {
+  // Always seed OHLCV into TA history when candles are present (scanner + copy)
+  if (signal.candles?.length && signal.mint) {
+    try {
+      seedPriceHistoryFromCandles(signal.mint, signal.candles);
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   const sel: SelectiveTradingConfig = config.selective;
   const entryMcHint =
     signal.sourceEntryMcUsd ??
@@ -241,6 +260,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     postRunDip: 0,
     technicals: 0,
     chartPatterns: 0,
+    indicators: 0,
   };
 
   const walletCount = signal.wallets.length;
@@ -719,6 +739,33 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     }));
   }
 
+  // Classic indicators (RSI / EMA) — soft boost; fail-closed for scanner-only if enabled later
+  const indVerdict = resolveIndicatorsForSignal({
+    mint: signal.mint,
+    candles: signal.candles,
+    priceSol: signal.priceSol,
+  });
+  if (indVerdict.report.available) {
+    breakdown.indicators = indVerdict.convictionDelta;
+    if (indVerdict.convictionDelta !== 0) {
+      reasons.push(indVerdict.logLine);
+    }
+  }
+  // Scanner-only thin history: optional hard skip when requireTaSetup and no setup
+  if (
+    isMarketScannerSignal(signal) &&
+    signal.entrySource === 'scanner' &&
+    config.marketScanner?.requireTaSetup !== false &&
+    !indVerdict.report.available &&
+    !(signal.nearKeyFib || signal.nearSupport) &&
+    !(
+      Array.isArray((signal as { chartPatternIds?: string[] }).chartPatternIds) &&
+      ((signal as { chartPatternIds?: string[] }).chartPatternIds?.length ?? 0) > 0
+    )
+  ) {
+    // Do not hard-skip here — monitor gate already enforces TA; keep soft
+  }
+
   // High Win-Rate strategy preset / backtester: Quality Filter on technicals
   // Multi-profile assignment still applies the same filter inside HWR scoreProfile only.
   try {
@@ -797,7 +844,8 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.session +
     breakdown.postRunDip +
     breakdown.technicals +
-    breakdown.chartPatterns;
+    breakdown.chartPatterns +
+    breakdown.indicators;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
   const breakdownLine = formatBreakdown(breakdown);

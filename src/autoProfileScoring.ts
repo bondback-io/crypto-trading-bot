@@ -504,6 +504,26 @@ export function computeFactorAffinities(
   // Liquidity + Holders combined
   const liquidityHolders = clamp01((holdersFit + liquidity) / 2);
 
+  // Scanner-origin: boost TA profiles, crush pure mirror affinity
+  if (ctx.scannerOrigin) {
+    if (m.preferSmartMoneyMirror && ctx.entrySource === 'scanner') {
+      smartMoney = 0.15;
+    }
+    if (
+      m.preferDip ||
+      m.preferTrend ||
+      m.preferMomentumBurst ||
+      m.preferReversal ||
+      m.preferFibOrSupport
+    ) {
+      supportFib = clamp01(supportFib + 0.15);
+      chartPatterns = clamp01(chartPatterns + 0.12);
+    }
+    if (m.preferMigration && isMig) {
+      migration = 1;
+    }
+  }
+
   return {
     volume,
     smartMoney,

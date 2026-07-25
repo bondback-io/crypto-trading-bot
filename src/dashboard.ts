@@ -3189,6 +3189,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
+          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Toggle via Strategies → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
+          <div id="scanner-status" class="mint text-xs mb-2">—</div>
+          <div id="scanner-feed" class="max-h-72 overflow-y-auto text-sm"></div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
+        <div class="card" style="grid-column: 1 / -1">
           <div class="closed-trades-head">
             <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
             <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
@@ -7297,6 +7305,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
      * Hover (desktop) / tap (mobile) shows smart-wallet entry MC when known.
      */
     function fmtWalletConvergence(p) {
+      const entrySrc = p && p.entrySource;
+      if (entrySrc === 'scanner' || (p.sourceNames || []).some(function (n) {
+        return /market\s*scanner/i.test(String(n));
+      })) {
+        const hybrid = entrySrc === 'hybrid';
+        return (
+          '<span class="badge" style="background:#0d9488;color:#fff" title="Market Scanner' +
+          (hybrid ? ' + smart wallets' : ' (TA)') +
+          '">' +
+          (hybrid ? 'Scanner+' : 'Scanner') +
+          '</span>'
+        );
+      }
+      if (entrySrc === 'migration') {
+        const names = (p && p.sourceNames && p.sourceNames.length)
+          ? p.sourceNames
+          : null;
+        const primary = names ? String(names[0]) : 'migration';
+        return (
+          '<span class="badge" style="background:#7c3aed;color:#fff" title="Migration entry">' +
+          primary.replace(/</g, '&lt;').slice(0, 14) +
+          '</span>'
+        );
+      }
       const names = (p && p.sourceNames && p.sourceNames.length)
         ? p.sourceNames
         : null;
@@ -8972,7 +9004,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (window._refreshInFlight) return;
       window._refreshInFlight = true;
       try {
-      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm] = await Promise.all([
+      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner] = await Promise.all([
         fetchJSON('/api/status'),
         fetchJSON('/api/positions'),
         fetchJSON('/api/logs?limit=50'),
@@ -8983,6 +9015,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/paper-status'),
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
         fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
+        fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
       ]);
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
@@ -10037,6 +10070,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (actSig) actSig.innerHTML = activityHtml;
       const actTrades = document.getElementById('trades-activity');
       if (actTrades) actTrades.innerHTML = activityHtml;
+
+      const scanSt = document.getElementById('scanner-status');
+      const scanFeed = document.getElementById('scanner-feed');
+      if (scanSt || scanFeed) {
+        const ss = (scanner && scanner.status) || {};
+        const cands = (scanner && scanner.candidates) || [];
+        if (scanSt) {
+          scanSt.textContent =
+            (ss.enabled ? 'ON' : 'OFF') +
+            (ss.running ? ' · polling' : '') +
+            (ss.lastPollMs != null ? ' · last ' + ss.lastPollMs + 'ms' : '') +
+            ' · ' + cands.length + ' recent' +
+            (ss.lastError ? ' · err: ' + ss.lastError : '');
+        }
+        if (scanFeed) {
+          scanFeed.innerHTML = cands.length === 0
+            ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner (TA) in Strategies.</div>'
+            : cands.slice(0, 25).map(function (c) {
+                const stColor =
+                  c.status === 'taken' ? 'var(--green)' :
+                  c.status === 'skipped' ? 'var(--red)' :
+                  c.status === 'queued' ? '#60a5fa' : 'var(--muted)';
+                return (
+                  '<div class="flex justify-between gap-2 py-1 border-b border-slate-800/60">' +
+                    '<div>' +
+                      '<strong>' + String(c.symbol || '?').replace(/</g, '&lt;') + '</strong> ' +
+                      '<span class="mint text-xs">score ' + (c.rankScore ?? '—') + '</span> ' +
+                      '<span class="mint text-xs">' + (c.reasons || []).slice(0, 3).join(' · ') + '</span>' +
+                    '</div>' +
+                    '<span style="color:' + stColor + ';font-size:0.75rem">' +
+                      String(c.status || 'seen') +
+                      (c.skipReason ? ' · ' + String(c.skipReason).slice(0, 40) : '') +
+                    '</span>' +
+                  '</div>'
+                );
+              }).join('');
+        }
+      }
 
       const sizingTbody = document.querySelector('#sizing-signals-table tbody');
       const sizingStatus = document.getElementById('sizing-status');

@@ -36,6 +36,7 @@ export type StrategyGroup =
 
 export type StrategyKey =
   | 'smart_money_copy'
+  | 'ta_market_scanner'
   | 'wallet_convergence'
   | 'migration_priority'
   | 'near_migration_curve'
@@ -297,11 +298,22 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     name: 'Smart Money Copy',
     group: 'entry',
     description:
-      'Core copy-trading of tracked smart wallets. OFF skips all new copy entries.',
+      'Core copy-trading of tracked smart wallets. OFF skips all new copy entries (Market Scanner can still trade).',
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'more',
     source: 'core',
+  },
+  {
+    key: 'ta_market_scanner',
+    name: 'Market Scanner (TA)',
+    group: 'entry',
+    description:
+      'Autonomous Pump.fun / Dex opportunity scan using Fib, patterns, volume, and indicators — no wallet buy required. Hybrid with Smart Money Copy when both are ON.',
+    defaultEnabled: true,
+    criticalSafety: false,
+    frequencyWhenOn: 'more',
+    source: 'risk',
   },
   {
     key: 'wallet_convergence',
@@ -1465,6 +1477,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       rebuy_on_dip: false,
       elite_convergence: true,
       migration_sniper: false,
+      ta_market_scanner: false,
       bonding_curve_health: true,
       hard_quality_gate: true,
       early_entry_only: true,
@@ -1512,6 +1525,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       rebuy_on_dip: true,
       elite_convergence: false,
       migration_sniper: false,
+      ta_market_scanner: true,
       bonding_curve_health: true,
       hard_quality_gate: false,
       early_entry_only: false,
@@ -1575,6 +1589,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       rebuy_on_dip: true,
       elite_convergence: false,
       migration_sniper: false,
+      ta_market_scanner: true,
       bonding_curve_health: false,
       hard_quality_gate: false,
       early_entry_only: false,
@@ -1640,6 +1655,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       // Keep OFF — exclusive migration filter blocked all other trade profiles.
       // Fresh grads still route via Migration Sniper trade profile + post_migration_scalp.
       migration_sniper: false,
+      ta_market_scanner: true,
       bonding_curve_health: false,
       hard_quality_gate: false,
       early_entry_only: false,
@@ -1924,6 +1940,7 @@ export function deriveStrategyTogglesFromConfig(): StrategyToggleMap {
     config.filters.requireMomentumConfirmation === true;
   d.smart_money_flow_weighting =
     (config.filters.smartMoneyFlowWeight ?? 1) > 1;
+  d.ta_market_scanner = config.marketScanner?.enabled !== false;
   // New quality modes default OFF so upgrades stay non-breaking
   d.elite_convergence = false;
   d.migration_sniper = false;
@@ -1995,6 +2012,7 @@ export function frequencyImpactLabel(impact: TradeFrequencyImpact): string {
  */
 export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
+  ta_market_scanner: false,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,
@@ -2047,6 +2065,7 @@ export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
  */
 export const WIN_RATE_55_60_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
+  ta_market_scanner: true,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,
@@ -2094,6 +2113,7 @@ export const WIN_RATE_55_60_PRESET: StrategyToggleMap = {
 /** Balanced = quality + frequency mix (≈ Medium defaults). */
 export const BALANCED_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
+  ta_market_scanner: true,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,
@@ -2141,6 +2161,7 @@ export const BALANCED_PRESET: StrategyToggleMap = {
 /** Aggressive = more entries, core safety still ON. */
 export const AGGRESSIVE_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
+  ta_market_scanner: true,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,
@@ -2188,6 +2209,7 @@ export const AGGRESSIVE_PRESET: StrategyToggleMap = {
 /** Quick Scalper = timed TP/SL holds; looser entry gates for speed. */
 export const QUICK_SCALPER_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
+  ta_market_scanner: true,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,

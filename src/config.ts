@@ -2005,6 +2005,20 @@ export interface BotConfig {
   /** Time window (ms) for convergence detection */
   convergenceWindowMs: number;
 
+  /** Autonomous Market Scanner (TA / Pump.fun / Dex) */
+  marketScanner: {
+    /** Soft preference when seeding toggles (strategy toggle is source of truth) */
+    enabled: boolean;
+    pollIntervalMs: number;
+    lookbackHours: number;
+    maxCandidatesPerPoll: number;
+    cooldownMs: number;
+    minRankScore: number;
+    /** Scanner-only entries must show a Fib/support/pattern/indicator setup */
+    requireTaSetup: boolean;
+    minPatternConfidence: number;
+  };
+
   /** Paper trading simulation */
   paper: {
     startingBalanceSol: number;
@@ -2345,6 +2359,17 @@ export const config: BotConfig = {
 
   convergenceWindowMs: 5 * 60 * 1000,
 
+  marketScanner: {
+    enabled: true,
+    pollIntervalMs: 45_000,
+    lookbackHours: 6,
+    maxCandidatesPerPoll: 15,
+    cooldownMs: 45 * 60_000,
+    minRankScore: 42,
+    requireTaSetup: true,
+    minPatternConfidence: 55,
+  },
+
   paper: {
     startingBalanceSol: 10,
     feeBps: 30,
@@ -2491,6 +2516,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         }
       : undefined,
     paper: { ...config.paper },
+    marketScanner: { ...config.marketScanner },
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
     walletDiscovery: {
@@ -2949,6 +2975,12 @@ function applySettingsSnapshot(
       config.selective = deepMerge(config.selective, saved.selective);
     }
     if (saved.paper) config.paper = deepMerge(config.paper, saved.paper);
+    if (saved.marketScanner) {
+      config.marketScanner = deepMerge(
+        config.marketScanner,
+        saved.marketScanner as typeof config.marketScanner
+      );
+    }
     if (saved.mev) config.mev = deepMerge(config.mev, saved.mev);
     if (saved.gmgnDiscovery) {
       config.gmgn.discovery = deepMerge(
@@ -4559,6 +4591,7 @@ export function getConfigSnapshot() {
         }
       : undefined,
     paper: { ...config.paper },
+    marketScanner: { ...config.marketScanner },
     trading: {
       activeId: config.activeTradingWalletId,
       wallets: config.tradingWallets.map((w) => ({

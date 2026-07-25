@@ -410,6 +410,18 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
   const mirrorUltraShort = mirrorLosers.filter(
     (t) => holdMs(t) < ULTRA_SHORT_HOLD_MS
   );
+  const scannerLosers = losers.filter(
+    (t) =>
+      t.entrySource === 'scanner' ||
+      t.entrySource === 'hybrid' ||
+      (t.sourceNames || []).some((n) => /market\s*scanner/i.test(String(n)))
+  );
+  const walletLosers = losers.filter(
+    (t) =>
+      t.entrySource === 'wallet' ||
+      (!t.entrySource &&
+        !(t.sourceNames || []).some((n) => /market\s*scanner/i.test(String(n))))
+  );
   const migScalpSl = losers.filter(
     (t) =>
       t.shortTermStrategyId === 'post_migration_scalp' && isStopLossExit(t)
@@ -857,6 +869,58 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
       rationale: `${migProfileLosses} Migration Sniper profile losers — disable migration-only entry mode`,
       evidenceCount: migProfileLosses,
       overlay: { toggles: { migration_sniper: false } },
+    });
+  }
+
+  if (scannerLosers.length >= 3) {
+    push({
+      id: 'scanner-raise-rank-ta',
+      title: 'Tighten Market Scanner TA floors',
+      family: 'tighten',
+      priority: 720 + scannerLosers.length,
+      rationale: `${scannerLosers.length} Market Scanner losers — raise minRankScore / require stronger Fib·pattern setups`,
+      evidenceCount: scannerLosers.length,
+      detailTips: [
+        'Increase marketScanner.minRankScore (e.g. 42 → 55).',
+        'Keep requireTaSetup ON so scanner-only entries need Fib/support/pattern.',
+        'Compare scanner vs wallet win rate after next BT run.',
+      ],
+      overlay: {
+        minConvictionScore: convBase + 8,
+      },
+    });
+  }
+  if (
+    scannerLosers.length >= 2 &&
+    walletLosers.length >= 2 &&
+    scannerLosers.length > walletLosers.length * 1.4
+  ) {
+    push({
+      id: 'prefer-wallet-over-scanner',
+      title: 'Prefer wallet copy over scanner (temporarily)',
+      family: 'toggle_off',
+      priority: 680,
+      rationale: `Scanner losers (${scannerLosers.length}) outpace wallet losers (${walletLosers.length}) — pause TA Market Scanner while copy stays ON`,
+      evidenceCount: scannerLosers.length,
+      overlay: { toggles: { ta_market_scanner: false } },
+    });
+  }
+  if (
+    walletLosers.length >= 2 &&
+    scannerLosers.length >= 2 &&
+    walletLosers.length > scannerLosers.length * 1.4
+  ) {
+    push({
+      id: 'boost-scanner-vs-wallet',
+      title: 'Lean on Market Scanner (wallet cluster weaker)',
+      family: 'toggle_on',
+      priority: 660,
+      rationale: `Wallet losers (${walletLosers.length}) outpace scanner (${scannerLosers.length}) — keep Market Scanner ON and tighten wallet quality`,
+      evidenceCount: walletLosers.length,
+      overlay: {
+        toggles: { ta_market_scanner: true },
+        minWalletQualityScore: wqBase + 8,
+      },
     });
   }
 

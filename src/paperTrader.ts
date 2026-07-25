@@ -160,6 +160,8 @@ export interface Position {
    * risk.trailingActivationProfit / profitStrategy.trailingStopAfter for this position.
    */
   trailingActivationProfit?: number;
+  /** How the entry was discovered */
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -753,6 +755,7 @@ export class PaperTrader {
     profileMomentumFailDropPct?: number;
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
+    entrySource?: Position['entrySource'];
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -822,6 +825,7 @@ export class PaperTrader {
       tradeProfileColor: input.tradeProfileColor,
       tradeProfileScore: input.tradeProfileScore,
       tradeProfileReason: input.tradeProfileReason,
+      entrySource: input.entrySource,
     };
 
     if (input.scalpMode) {
@@ -991,6 +995,7 @@ export class PaperTrader {
       profileMomentumFailDropPct?: number;
       profileDeadVolumeMinHoldMinutes?: number;
       profileAggressiveDeadMarket?: boolean;
+      entrySource?: Position['entrySource'];
     }
   ): Position | null {
     const spendSol =
@@ -1098,6 +1103,7 @@ export class PaperTrader {
       tradeProfileColor: meta?.tradeProfileColor,
       tradeProfileScore: meta?.tradeProfileScore,
       tradeProfileReason: meta?.tradeProfileReason,
+      entrySource: meta?.entrySource,
     };
 
     if (meta?.scalpMode) {

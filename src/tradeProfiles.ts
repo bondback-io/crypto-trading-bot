@@ -808,6 +808,9 @@ export interface TradeProfileMatchContext {
   /** Average wallet quality score (0–100) for wallets in the signal */
   walletQualityAvg?: number | null;
   liquidityUsd?: number | null;
+  /** True when entry came from Market Scanner (not pure wallet copy) */
+  scannerOrigin?: boolean;
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -1676,6 +1679,9 @@ function scoreProfile(
   }
 
   if (m.preferSmartMoneyMirror) {
+    if (ctx.scannerOrigin && ctx.entrySource === 'scanner') {
+      return { score: 0, reason: 'scanner-only — prefer TA profiles' };
+    }
     if (isMig) return { score: 0, reason: 'defer to fresh migration' };
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };

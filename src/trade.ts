@@ -207,6 +207,8 @@ export interface BuyOptions {
   /** Aggressive dead-market min-hold (minutes) from profile */
   profileDeadVolumeMinHoldMinutes?: number;
   profileAggressiveDeadMarket?: boolean;
+  /** wallet | scanner | migration | hybrid */
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
 }
 
 /**
@@ -522,6 +524,7 @@ export async function executeBuy(
         profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
+        entrySource: meta?.entrySource,
       }
     );
     if (!position) {

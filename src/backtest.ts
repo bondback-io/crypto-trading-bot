@@ -40,6 +40,10 @@ import {
   seedPriceHistoryFromCandles,
 } from './technicalLevels';
 import {
+  scoreLaunchForBacktestScanner,
+  MARKET_SCANNER_NAME,
+} from './marketScanner';
+import {
   atomicWriteJson,
   dataFile,
   ensureDataDir,
@@ -262,6 +266,7 @@ export interface BacktestTradeResult {
   tradeProfileColor?: string;
   tradeProfileScore?: number;
   tradeProfileReason?: string;
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
   /** Armed short-term / scalp engine id when applicable */
   shortTermStrategyId?: string;
   scalpMode?: boolean;
@@ -1768,8 +1773,19 @@ function replayLaunch(
           : null,
       smartMoneyScore: null,
       liquidityUsd: entryLiq ?? null,
-      walletCount: sourceNames.length,
+      walletCount:
+        sourceNames.length === 1 && sourceNames[0] === MARKET_SCANNER_NAME
+          ? 0
+          : sourceNames.length,
       walletQualityAvg: avgWalletQualityForNames(sourceNames),
+      scannerOrigin:
+        sourceNames.length === 1 && sourceNames[0] === MARKET_SCANNER_NAME,
+      entrySource:
+        sourceNames.length === 1 && sourceNames[0] === MARKET_SCANNER_NAME
+          ? 'scanner'
+          : event.migrated
+            ? 'migration'
+            : 'wallet',
     });
 
     if (profileAssignment.skipped) {
@@ -1824,6 +1840,12 @@ function replayLaunch(
         profileMomentumFailDropPct: er.momentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: er.deadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: er.aggressiveDeadMarket === true,
+        entrySource:
+          sourceNames.length === 1 && sourceNames[0] === MARKET_SCANNER_NAME
+            ? 'scanner'
+            : event.migrated
+              ? 'migration'
+              : 'wallet',
         antiRug:
           event.riskScoreHint != null
             ? {
@@ -2257,6 +2279,12 @@ function replayLaunch(
       maxRunupPct: Number(maxRunupPct.toFixed(2)),
       sourceNames,
       smartWalletCount: sourceNames.length,
+      entrySource:
+        sourceNames.length === 1 && sourceNames[0] === MARKET_SCANNER_NAME
+          ? 'scanner'
+          : event.migrated
+            ? 'migration'
+            : 'wallet',
       liquidityUsd:
         liquidityUsd != null ? Math.round(liquidityUsd) : undefined,
       smartWalletLiquidityUsd:
@@ -2404,8 +2432,14 @@ function runSinglePass(
     considered += 1;
     options.onProgress?.(considered, Math.max(total, 1), event.symbol);
 
-    if (!isStrategyEnabled('smart_money_copy')) {
-      skipped.push({ mint: event.mint, reason: 'strategy: smart money copy OFF' });
+    if (
+      !isStrategyEnabled('smart_money_copy') &&
+      !isStrategyEnabled('ta_market_scanner')
+    ) {
+      skipped.push({
+        mint: event.mint,
+        reason: 'strategy: smart money copy OFF and market scanner OFF',
+      });
       continue;
     }
 
@@ -2454,16 +2488,49 @@ function runSinglePass(
       names,
       considered
     );
-    if (resolved.skipReason || resolved.names.length === 0) {
-      skipped.push({
-        mint: event.mint,
-        reason: resolved.skipReason || 'no wallets for strategy',
-      });
-      continue;
+
+    // Market Scanner BT path — TA-ranked entries without synthetic wallet cluster
+    let sourceNames = resolved.names;
+    let entrySource: 'wallet' | 'scanner' | 'hybrid' = 'wallet';
+    const scanScore = isStrategyEnabled('ta_market_scanner')
+      ? scoreLaunchForBacktestScanner(event)
+      : null;
+    if (
+      isStrategyEnabled('ta_market_scanner') &&
+      scanScore?.ok &&
+      (!isStrategyEnabled('smart_money_copy') ||
+        resolved.skipReason ||
+        resolved.names.length === 0 ||
+        // Prefer scanner on strong TA when both enabled (~every 3rd event for mix)
+        considered % 3 === 0)
+    ) {
+      sourceNames = [MARKET_SCANNER_NAME];
+      entrySource = 'scanner';
+    } else if (resolved.skipReason || resolved.names.length === 0) {
+      // Fall back to scanner if wallet resolve failed and scanner qualifies
+      if (scanScore?.ok) {
+        sourceNames = [MARKET_SCANNER_NAME];
+        entrySource = 'scanner';
+      } else {
+        skipped.push({
+          mint: event.mint,
+          reason: resolved.skipReason || 'no wallets for strategy',
+        });
+        continue;
+      }
     }
-    const sourceNames = resolved.names;
 
     const signal = buildBacktestSignal(event, sourceNames);
+    if (entrySource === 'scanner') {
+      signal.entrySource = 'scanner';
+      signal.wallets = ['market-scanner'];
+      signal.walletNames = [MARKET_SCANNER_NAME];
+      signal.nearKeyFib = scanScore?.nearKeyFib;
+      signal.nearSupport = scanScore?.nearSupport;
+      signal.chartPatternIds = scanScore?.chartPatternIds;
+    } else {
+      signal.entrySource = event.migrated ? 'migration' : 'wallet';
+    }
     // Deterministic Fib/S&R history from candle path (Paper / Live Sim / BT parity)
     if (event.candles?.length) {
       clearPriceHistory(event.mint);
