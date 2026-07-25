@@ -2178,7 +2178,13 @@ function runSinglePass(
         isStrategyEnabled('confirmation_layer') ||
         isStrategyEnabled('market_session_filter') ||
         isStrategyEnabled('post_run_dip') ||
-        isStrategyEnabled('technical_levels')) &&
+        isStrategyEnabled('technical_levels') ||
+        isStrategyEnabled('chart_patterns') ||
+        isStrategyEnabled('pattern_volume_dryup_return') ||
+        isStrategyEnabled('pattern_falling_wedge') ||
+        isStrategyEnabled('pattern_structured_pullback') ||
+        isStrategyEnabled('pattern_bull_flag') ||
+        isStrategyEnabled('pattern_trend_continuation')) &&
       !conviction.pass
     ) {
       skipped.push({

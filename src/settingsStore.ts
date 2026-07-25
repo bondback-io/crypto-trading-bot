@@ -45,6 +45,7 @@ export interface PersistedBotSettings {
   reversalScalp?: Record<string, unknown>;
   postRunDip?: Record<string, unknown>;
   technicalLevels?: Record<string, unknown>;
+  chartPatterns?: Record<string, unknown>;
   /** Strategies tab master toggles */
   strategyToggles?: Record<string, boolean>;
   strategyProfile?:
@@ -63,10 +64,24 @@ export interface PersistedBotSettings {
     | 'custom';
   highWinRatePresetActive?: boolean;
   strategyProfileSnapshot?: Record<string, unknown> | null;
-  /** Concurrent trade profile ON/OFF map */
+  /** Concurrent trade profile ON/OFF map + optional param overrides */
   tradeProfiles?: {
     enabled?: boolean;
     profiles?: Record<string, boolean>;
+    overrides?: Record<
+      string,
+      {
+        exitRules?: Record<string, unknown>;
+        match?: Record<string, unknown>;
+      }
+    >;
+    autoScoring?: {
+      enabled?: boolean;
+      minScore?: number;
+      skipBelowMin?: boolean;
+      forceProfileId?: string | null;
+      weights?: Record<string, number>;
+    };
   };
   paper?: Record<string, unknown>;
   mev?: Record<string, unknown>;

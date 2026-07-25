@@ -147,6 +147,11 @@ export interface Position {
   tradeProfileName?: string;
   tradeProfileIcon?: string;
   tradeProfileColor?: string;
+  /** Winning auto-score (0–100) when assigned */
+  tradeProfileScore?: number;
+  tradeProfileReason?: string;
+  /** Profile-frozen aggressive dead-market min hold (minutes) */
+  deadVolumeMinHoldMinutes?: number;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -728,12 +733,16 @@ export class PaperTrader {
     tradeProfileName?: string;
     tradeProfileIcon?: string;
     tradeProfileColor?: string;
+    tradeProfileScore?: number;
+    tradeProfileReason?: string;
     profileTakeProfitPct?: number;
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
+    profileDeadVolumeMinHoldMinutes?: number;
+    profileAggressiveDeadMarket?: boolean;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -801,6 +810,8 @@ export class PaperTrader {
       tradeProfileName: input.tradeProfileName,
       tradeProfileIcon: input.tradeProfileIcon,
       tradeProfileColor: input.tradeProfileColor,
+      tradeProfileScore: input.tradeProfileScore,
+      tradeProfileReason: input.tradeProfileReason,
     };
 
     if (input.scalpMode) {
@@ -825,6 +836,8 @@ export class PaperTrader {
         shortTermStrategyId: input.shortTermStrategyId,
         hardTimeLimitSec: input.profileHardTimeLimitSec,
         overrideScalpParams: input.profileOverrideScalpParams,
+        aggressiveDeadMarket: input.profileAggressiveDeadMarket,
+        deadVolumeMinHoldMinutes: input.profileDeadVolumeMinHoldMinutes,
       },
       seedShortTermPosition
     );
@@ -951,12 +964,16 @@ export class PaperTrader {
       tradeProfileName?: string;
       tradeProfileIcon?: string;
       tradeProfileColor?: string;
+      tradeProfileScore?: number;
+      tradeProfileReason?: string;
       profileTakeProfitPct?: number;
       profileStopLossPct?: number;
       profileTrailingStopPct?: number;
       profileForceScalp?: boolean;
       profileHardTimeLimitSec?: number;
       profileOverrideScalpParams?: boolean;
+      profileDeadVolumeMinHoldMinutes?: number;
+      profileAggressiveDeadMarket?: boolean;
     }
   ): Position | null {
     const spendSol =
@@ -1048,6 +1065,8 @@ export class PaperTrader {
       tradeProfileName: meta?.tradeProfileName,
       tradeProfileIcon: meta?.tradeProfileIcon,
       tradeProfileColor: meta?.tradeProfileColor,
+      tradeProfileScore: meta?.tradeProfileScore,
+      tradeProfileReason: meta?.tradeProfileReason,
     };
 
     if (meta?.scalpMode) {
@@ -1072,6 +1091,8 @@ export class PaperTrader {
         shortTermStrategyId: meta?.shortTermStrategyId,
         hardTimeLimitSec: meta?.profileHardTimeLimitSec,
         overrideScalpParams: meta?.profileOverrideScalpParams,
+        aggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
+        deadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
       },
       seedShortTermPosition
     );
@@ -1871,7 +1892,13 @@ export class PaperTrader {
     }
 
     const minHoldMs =
-      Math.max(0, effectiveDeadVolumeMinHoldMinutes()) * 60_000;
+      Math.max(
+        0,
+        position.deadVolumeMinHoldMinutes != null &&
+          Number.isFinite(position.deadVolumeMinHoldMinutes)
+          ? Number(position.deadVolumeMinHoldMinutes)
+          : effectiveDeadVolumeMinHoldMinutes()
+      ) * 60_000;
     const holdMs = nowMs - position.openedAt;
     if (holdMs < minHoldMs) return null;
 

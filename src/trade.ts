@@ -190,6 +190,8 @@ export interface BuyOptions {
   tradeProfileName?: string;
   tradeProfileIcon?: string;
   tradeProfileColor?: string;
+  tradeProfileScore?: number;
+  tradeProfileReason?: string;
   /** Optional exit overrides from assigned profile */
   profileTakeProfitPct?: number;
   profileStopLossPct?: number;
@@ -199,6 +201,9 @@ export interface BuyOptions {
   /** Scalper hard timer (seconds) frozen from profile */
   profileHardTimeLimitSec?: number;
   profileOverrideScalpParams?: boolean;
+  /** Aggressive dead-market min-hold (minutes) from profile */
+  profileDeadVolumeMinHoldMinutes?: number;
+  profileAggressiveDeadMarket?: boolean;
 }
 
 /**
@@ -491,12 +496,16 @@ export async function executeBuy(
         tradeProfileName: meta?.tradeProfileName,
         tradeProfileIcon: meta?.tradeProfileIcon,
         tradeProfileColor: meta?.tradeProfileColor,
+        tradeProfileScore: meta?.tradeProfileScore,
+        tradeProfileReason: meta?.tradeProfileReason,
         profileTakeProfitPct: meta?.profileTakeProfitPct,
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,
+        profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
+        profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
       }
     );
     if (!position) {
@@ -588,12 +597,16 @@ export async function executeBuy(
         tradeProfileName: meta?.tradeProfileName,
         tradeProfileIcon: meta?.tradeProfileIcon,
         tradeProfileColor: meta?.tradeProfileColor,
+        tradeProfileScore: meta?.tradeProfileScore,
+        tradeProfileReason: meta?.tradeProfileReason,
         profileTakeProfitPct: meta?.profileTakeProfitPct,
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,
+        profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
+        profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

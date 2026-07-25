@@ -2164,12 +2164,16 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     tradeProfileName?: string;
     tradeProfileIcon?: string;
     tradeProfileColor?: string;
+    tradeProfileScore?: number;
+    tradeProfileReason?: string;
     profileTakeProfitPct?: number;
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
+    profileDeadVolumeMinHoldMinutes?: number;
+    profileAggressiveDeadMarket?: boolean;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -2237,15 +2241,75 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       signal.metrics?.marketCapUsd ??
       null,
     holderCount: signal.metrics?.holderCountEstimate ?? null,
-    volumeH1Usd:
-      signal.metrics?.volumeH1Usd ??
-      signal.metrics?.recentBuyVolumeUsd ??
-      null,
+    volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+    volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+    recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
     tokenAgeHours: signal.tokenAgeHours ?? null,
     priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
+    priceChangeH1Pct: signal.metrics?.priceChangeH1Pct ?? null,
     smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,
+    liquidityUsd: signal.metrics?.liquidityUsd ?? null,
+    walletCount: Array.isArray(signal.wallets) ? signal.wallets.length : null,
+    nearKeyFib: (signal as { nearKeyFib?: boolean }).nearKeyFib === true,
+    nearSupport: (signal as { nearSupport?: boolean }).nearSupport === true,
+    chartPatternIds:
+      (signal as { chartPatternIds?: string[] }).chartPatternIds ?? null,
+    chartPatternSummary:
+      (signal as { chartPatternSummary?: string }).chartPatternSummary ?? null,
+    chartPatternHits:
+      (
+        signal as {
+          chartPatternHits?: Array<{
+            id: string;
+            confidence: number;
+            breakout: boolean;
+            bias?: string;
+          }>;
+        }
+      ).chartPatternHits ?? null,
+    walletQualityAvg: (() => {
+      const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
+      if (!addrs.length) return null;
+      let sum = 0;
+      let n = 0;
+      for (const addr of addrs) {
+        const w = config.smartWallets.find((sw) => sw.address === addr);
+        if (!w) continue;
+        if (w.qualityScore == null) applyQualityToWallet(w);
+        if (w.qualityScore != null && Number.isFinite(w.qualityScore)) {
+          sum += Number(w.qualityScore);
+          n += 1;
+        }
+      }
+      return n > 0 ? sum / n : null;
+    })(),
   });
+
+  if (profileAssignment.skipped) {
+    finishBuy(buy.mint, false);
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason:
+        profileAssignment.skipReason ||
+        'No trade profile scored high enough',
+    });
+    console.log(
+      `[monitor] Signal skipped — profile auto-score: ${profileAssignment.skipReason || profileAssignment.reason}`
+    );
+    if (profileAssignment.topScores?.length) {
+      console.log(
+        `[monitor] Top profile scores: ` +
+          profileAssignment.topScores
+            .map((t) => `${t.name}=${t.score.toFixed(1)}`)
+            .join(' · ')
+      );
+    }
+    return;
+  }
+
   Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+  buyOpts.tradeProfileScore = profileAssignment.score;
+  buyOpts.tradeProfileReason = profileAssignment.reason;
   const er = profileAssignment.exitRules;
   if (er.takeProfitPct != null) buyOpts.profileTakeProfitPct = er.takeProfitPct;
   if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
@@ -2256,6 +2320,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
   }
   if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
+  if (
+    er.deadVolumeMinHoldMinutes != null &&
+    Number.isFinite(er.deadVolumeMinHoldMinutes)
+  ) {
+    buyOpts.profileDeadVolumeMinHoldMinutes = er.deadVolumeMinHoldMinutes;
+  }
+  if (er.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
   if (er.forceScalp) {
     buyOpts.profileForceScalp = true;
     if (!buyOpts.scalpMode && er.shortTermStrategyId) {
@@ -2283,8 +2354,20 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   console.log(`[monitor] ${sizing.reason}`);
   console.log(
     `[monitor] Profile ${profileAssignment.icon} ${profileAssignment.name} → ${signal.symbol}` +
-      ` (${profileAssignment.reason})`
+      ` · score ${profileAssignment.score.toFixed(1)}` +
+      ` (${profileAssignment.reason})` +
+      (profileAssignment.forced ? ' · FORCED' : '') +
+      (profileAssignment.autoScored ? ' · auto' : '')
   );
+  if (profileAssignment.topScores && profileAssignment.topScores.length > 1) {
+    console.log(
+      `[monitor] Profile runners-up: ` +
+        profileAssignment.topScores
+          .slice(0, 4)
+          .map((t) => `${t.name}=${t.score.toFixed(1)}`)
+          .join(' · ')
+    );
+  }
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
@@ -3121,7 +3204,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       isStrategyEnabled('confirmation_layer') ||
       isStrategyEnabled('market_session_filter') ||
       isStrategyEnabled('post_run_dip') ||
-      isStrategyEnabled('technical_levels')) &&
+      isStrategyEnabled('technical_levels') ||
+      isStrategyEnabled('chart_patterns') ||
+      isStrategyEnabled('pattern_volume_dryup_return') ||
+      isStrategyEnabled('pattern_falling_wedge') ||
+      isStrategyEnabled('pattern_structured_pullback') ||
+      isStrategyEnabled('pattern_bull_flag') ||
+      isStrategyEnabled('pattern_trend_continuation')) &&
     !conviction.pass
   ) {
     const detail = conviction.reasons.join('; ') || 'below threshold';

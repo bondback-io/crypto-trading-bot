@@ -59,6 +59,13 @@ import {
   logPostRunDipDecision,
 } from './postRunDip';
 import { resolveTechnicalLevelsForSignal } from './technicalLevels';
+import { resolveChartPatternsForSignal } from './chartPatterns';
+import {
+  evaluateHwrQualityFilter,
+  logHwrQualityFilterReject,
+  normalizeHwrQualityFilter,
+} from './hwrQualityFilter';
+import { resolveTradeProfileDefinition } from './tradeProfiles';
 
 export interface ConvictionBreakdown {
   wallets: number;
@@ -83,6 +90,8 @@ export interface ConvictionBreakdown {
   postRunDip: number;
   /** Fib / S/R technical levels boost (≥ 0) */
   technicals: number;
+  /** Chart pattern boost / penalty (can be negative) */
+  chartPatterns: number;
 }
 
 export interface ConvictionVerdict {
@@ -183,6 +192,10 @@ function formatBreakdown(b: ConvictionBreakdown): string {
   const session = b.session !== 0 ? ` session=+${b.session}` : '';
   const postRunDip = b.postRunDip !== 0 ? ` postDip=+${b.postRunDip}` : '';
   const technicals = b.technicals !== 0 ? ` tech=+${b.technicals}` : '';
+  const chartPatterns =
+    b.chartPatterns !== 0
+      ? ` patterns=${b.chartPatterns >= 0 ? '+' : ''}${b.chartPatterns}`
+      : '';
   return (
     `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
     `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
@@ -193,7 +206,8 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     confirmation +
     session +
     postRunDip +
-    technicals
+    technicals +
+    chartPatterns
   );
 }
 
@@ -226,6 +240,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     session: 0,
     postRunDip: 0,
     technicals: 0,
+    chartPatterns: 0,
   };
 
   const walletCount = signal.wallets.length;
@@ -633,6 +648,137 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
       technicalSkipReason = technicalVerdict.skipReason;
       reasons.push(technicalVerdict.skipReason || 'technical levels skip');
     }
+    // Stash for multi-profile pattern quality gates (HWR Fib/support)
+    (signal as { nearKeyFib?: boolean }).nearKeyFib =
+      technicalVerdict.snapshot?.nearKeyFib === true;
+    (signal as { nearSupport?: boolean }).nearSupport =
+      technicalVerdict.snapshot?.nearSupport === true ||
+      technicalVerdict.snapshot?.nearStrongSupport === true;
+  }
+
+  // --- Chart Patterns ---
+  let patternSkip = false;
+  let patternSkipReason: string | undefined;
+  const patternVerdict = resolveChartPatternsForSignal({
+    mint: signal.mint,
+    symbol: signal.symbol,
+    priceUsd: (signal.metrics as { priceUsd?: number | null } | undefined)
+      ?.priceUsd,
+    priceSol: signal.priceSol ?? null,
+    priceChangeH1Pct: signal.metrics?.priceChangeH1Pct,
+    priceChange24hPct: signal.metrics?.priceChange24hPct,
+    dropFromPeakPct: (signal as { dropFromPeakPct?: number }).dropFromPeakPct,
+    candles: signal.candles,
+    nowMs: signal.timestamp,
+    holderCount: signal.metrics?.holderCountEstimate ?? null,
+    volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+    volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+    marketCapUsd:
+      signal.sourceEntryMcUsd ??
+      (signal.metrics as { marketCapUsd?: number | null } | undefined)
+        ?.marketCapUsd ??
+      null,
+    // Higher quality / larger MC gets cleaner pattern versions
+    preferClean:
+      (signal.sourceEntryMcUsd != null && signal.sourceEntryMcUsd >= 250_000) ||
+      ((signal.metrics as { marketCapUsd?: number | null } | undefined)
+        ?.marketCapUsd != null &&
+        Number(
+          (signal.metrics as { marketCapUsd?: number | null }).marketCapUsd
+        ) >= 250_000),
+  });
+  if (patternVerdict) {
+    if (patternVerdict.convictionDelta !== 0) {
+      breakdown.chartPatterns = patternVerdict.convictionDelta;
+      reasons.push(
+        `patterns ${patternVerdict.convictionDelta >= 0 ? '+' : ''}${patternVerdict.convictionDelta} (${patternVerdict.report.summary})`
+      );
+    }
+    if (patternVerdict.skip) {
+      patternSkip = true;
+      patternSkipReason = patternVerdict.skipReason;
+      reasons.push(patternVerdict.skipReason || 'chart patterns skip');
+    }
+    // Stash for multi-profile assignment (primary/secondary + quality gates)
+    (signal as { chartPatternIds?: string[] }).chartPatternIds =
+      patternVerdict.activePatternIds;
+    (signal as { chartPatternSummary?: string }).chartPatternSummary =
+      patternVerdict.report.summary;
+    (signal as {
+      chartPatternHits?: Array<{
+        id: string;
+        confidence: number;
+        breakout: boolean;
+        bias?: string;
+      }>;
+    }).chartPatternHits = (patternVerdict.report.patterns || []).map((p) => ({
+      id: p.id,
+      confidence: p.confidence,
+      breakout: p.breakout,
+      bias: p.bias,
+    }));
+  }
+
+  // High Win-Rate strategy preset / backtester: Quality Filter on technicals
+  // Multi-profile assignment still applies the same filter inside HWR scoreProfile only.
+  try {
+    const hwrPreset =
+      config.strategyProfile === 'high_win_rate' ||
+      config.highWinRatePresetActive === true;
+    if (hwrPreset) {
+      const hwrDef = resolveTradeProfileDefinition('high_win_rate');
+      const qf = normalizeHwrQualityFilter(hwrDef.match.qualityFilter);
+      const qCtx = {
+        symbol: signal.symbol,
+        marketCapUsd:
+          signal.sourceEntryMcUsd ??
+          (signal.metrics as { marketCapUsd?: number | null } | undefined)
+            ?.marketCapUsd ??
+          null,
+        liquidityUsd: signal.metrics?.liquidityUsd ?? null,
+        volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+        holderCount: signal.metrics?.holderCountEstimate ?? null,
+        nearKeyFib: (signal as { nearKeyFib?: boolean }).nearKeyFib === true,
+        nearSupport: (signal as { nearSupport?: boolean }).nearSupport === true,
+        chartPatternIds:
+          (signal as { chartPatternIds?: string[] }).chartPatternIds ?? null,
+        chartPatternHits:
+          (
+            signal as {
+              chartPatternHits?: Array<{
+                id: string;
+                confidence: number;
+                breakout: boolean;
+              }>;
+            }
+          ).chartPatternHits ?? null,
+      };
+      const verdict = evaluateHwrQualityFilter(qCtx, qf);
+      // Only hard-gate when the global strategy profile is HWR (not multi-profile mix)
+      const hardGate = config.strategyProfile === 'high_win_rate';
+      if (verdict.applicable && !verdict.pass && qf.mode === 'reject' && hardGate) {
+        logHwrQualityFilterReject(qCtx, verdict, 'high_win_rate preset');
+        patternSkip = true;
+        patternSkipReason = `HWR Quality Filter: ${verdict.summary}`;
+        reasons.push(patternSkipReason);
+      } else if (verdict.applicable && !verdict.pass) {
+        logHwrQualityFilterReject(
+          qCtx,
+          verdict,
+          hardGate ? 'penalize' : 'multi-profile log'
+        );
+        if (hardGate) {
+          breakdown.chartPatterns = Math.max(
+            -15,
+            (breakdown.chartPatterns || 0) -
+              Math.min(20, qf.weakSetupPenalty / 2)
+          );
+          reasons.push(`HWR Quality Filter soft: ${verdict.summary}`);
+        }
+      }
+    }
+  } catch {
+    // fail-open — never block on quality filter load errors
   }
 
   let score =
@@ -650,7 +796,8 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.confirmation +
     breakdown.session +
     breakdown.postRunDip +
-    breakdown.technicals;
+    breakdown.technicals +
+    breakdown.chartPatterns;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
   const breakdownLine = formatBreakdown(breakdown);
@@ -663,7 +810,8 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
         !confirmationSkip &&
         !sessionSkip &&
         !postRunDipSkip &&
-        !technicalSkip,
+        !technicalSkip &&
+        !patternSkip,
       score,
       minRequired: 0,
       reasons,
@@ -702,6 +850,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     sessionSkip ||
     postRunDipSkip ||
     technicalSkip ||
+    patternSkip ||
     (requireHealthyCurve &&
       (curveHealth === 'dead' || curveHealth === 'stalled'));
 
@@ -721,6 +870,9 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     // already in reasons
   }
   if (technicalSkip && technicalSkipReason) {
+    // already in reasons
+  }
+  if (patternSkip && patternSkipReason) {
     // already in reasons
   }
 

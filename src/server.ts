@@ -1199,6 +1199,9 @@ export function createServer(): express.Application {
     const {
       updateTradeProfilesConfig,
       setTradeProfileEnabled,
+      updateTradeProfileParams,
+      resetTradeProfileParams,
+      updateAutoScoringConfig,
       getTradeProfilesStatus,
       ensureTradeProfilesInitialized,
     } = require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -1208,8 +1211,36 @@ export function createServer(): express.Application {
       profiles?: Record<string, boolean>;
       id?: string;
       profileEnabled?: boolean;
+      params?: {
+        exitRules?: Record<string, unknown>;
+        match?: Record<string, unknown>;
+      };
+      resetParams?: boolean | 'all';
+      autoScoring?: Record<string, unknown>;
     };
-    if (body.id != null && typeof body.profileEnabled === 'boolean') {
+    if (body.autoScoring && typeof body.autoScoring === 'object') {
+      updateAutoScoringConfig(
+        body.autoScoring as unknown as import('./tradeProfiles').AutoScoringConfig
+      );
+    } else if (body.resetParams === 'all') {
+      resetTradeProfileParams('all');
+    } else if (body.id != null && body.resetParams === true) {
+      resetTradeProfileParams(
+        body.id as import('./tradeProfiles').TradeProfileId
+      );
+    } else if (body.id != null && body.params && typeof body.params === 'object') {
+      updateTradeProfileParams(
+        body.id as import('./tradeProfiles').TradeProfileId,
+        {
+          exitRules: body.params.exitRules as
+            | import('./tradeProfiles').TradeProfileExitRules
+            | undefined,
+          match: body.params.match as
+            | import('./tradeProfiles').TradeProfileMatchRules
+            | undefined,
+        }
+      );
+    } else if (body.id != null && typeof body.profileEnabled === 'boolean') {
       setTradeProfileEnabled(
         body.id as import('./tradeProfiles').TradeProfileId,
         body.profileEnabled
@@ -1885,6 +1916,120 @@ export function createServer(): express.Application {
 
   app.get('/api/config/technical-levels', (_req: Request, res: Response) => {
     res.json({ technicalLevels: { ...config.technicalLevels } });
+  });
+
+  app.post('/api/config/chart-patterns', (req: Request, res: Response) => {
+    const { DEFAULT_CHART_PATTERNS } = require('./config') as typeof import('./config');
+    if (!config.chartPatterns) {
+      config.chartPatterns = {
+        ...DEFAULT_CHART_PATTERNS,
+        patterns: { ...DEFAULT_CHART_PATTERNS.patterns },
+      };
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.enabled !== undefined) {
+      config.chartPatterns.enabled = Boolean(body.enabled);
+      if (config.strategyToggles) {
+        config.strategyToggles.chart_patterns = config.chartPatterns.enabled;
+      }
+    }
+    if (
+      body.sensitivity === 'low' ||
+      body.sensitivity === 'medium' ||
+      body.sensitivity === 'high'
+    ) {
+      config.chartPatterns.sensitivity = body.sensitivity;
+    }
+    if (body.mode === 'confirm' || body.mode === 'entry' || body.mode === 'both') {
+      config.chartPatterns.mode = body.mode;
+    }
+    if (body.lookbackBars !== undefined) {
+      const n = Number(body.lookbackBars);
+      if (Number.isFinite(n)) {
+        config.chartPatterns.lookbackBars = Math.max(12, Math.min(240, Math.round(n)));
+      }
+    }
+    if (body.minConfidence !== undefined) {
+      const n = Number(body.minConfidence);
+      if (Number.isFinite(n)) config.chartPatterns.minConfidence = Math.max(30, Math.min(90, n));
+    }
+    if (body.breakoutPct !== undefined) {
+      const n = Number(body.breakoutPct);
+      if (Number.isFinite(n)) config.chartPatterns.breakoutPct = Math.max(0.3, Math.min(8, n));
+    }
+    if (body.pullbackNearPct !== undefined) {
+      const n = Number(body.pullbackNearPct);
+      if (Number.isFinite(n)) config.chartPatterns.pullbackNearPct = Math.max(0.5, Math.min(12, n));
+    }
+    if (body.minPoleRunPct !== undefined) {
+      const n = Number(body.minPoleRunPct);
+      if (Number.isFinite(n)) config.chartPatterns.minPoleRunPct = Math.max(10, Math.min(200, n));
+    }
+    if (body.maxFlagRangePct !== undefined) {
+      const n = Number(body.maxFlagRangePct);
+      if (Number.isFinite(n)) config.chartPatterns.maxFlagRangePct = Math.max(4, Math.min(40, n));
+    }
+    if (body.minStructuredDropPct !== undefined) {
+      const n = Number(body.minStructuredDropPct);
+      if (Number.isFinite(n)) config.chartPatterns.minStructuredDropPct = Math.max(3, Math.min(40, n));
+    }
+    if (body.maxStructuredDropPct !== undefined) {
+      const n = Number(body.maxStructuredDropPct);
+      if (Number.isFinite(n)) config.chartPatterns.maxStructuredDropPct = Math.max(10, Math.min(60, n));
+    }
+    if (body.volumeDryupRatio !== undefined) {
+      const n = Number(body.volumeDryupRatio);
+      if (Number.isFinite(n)) config.chartPatterns.volumeDryupRatio = Math.max(0.2, Math.min(0.9, n));
+    }
+    if (body.volumeReturnRatio !== undefined) {
+      const n = Number(body.volumeReturnRatio);
+      if (Number.isFinite(n)) config.chartPatterns.volumeReturnRatio = Math.max(1.05, Math.min(4, n));
+    }
+    if (body.holderDropPct !== undefined) {
+      const n = Number(body.holderDropPct);
+      if (Number.isFinite(n)) config.chartPatterns.holderDropPct = Math.max(2, Math.min(40, n));
+    }
+    if (body.capitulationDropPct !== undefined) {
+      const n = Number(body.capitulationDropPct);
+      if (Number.isFinite(n)) config.chartPatterns.capitulationDropPct = Math.max(12, Math.min(70, n));
+    }
+    if (body.bearishPenalty !== undefined) {
+      const n = Number(body.bearishPenalty);
+      if (Number.isFinite(n)) config.chartPatterns.bearishPenalty = Math.max(0, Math.min(20, n));
+    }
+    if (body.hardFilter !== undefined) {
+      config.chartPatterns.hardFilter = Boolean(body.hardFilter);
+    }
+    if (body.blockOnBearish !== undefined) {
+      config.chartPatterns.blockOnBearish = Boolean(body.blockOnBearish);
+    }
+    if (body.patterns && typeof body.patterns === 'object') {
+      const incoming = body.patterns as Record<string, { enabled?: boolean }>;
+      const next = { ...config.chartPatterns.patterns };
+      for (const id of Object.keys(DEFAULT_CHART_PATTERNS.patterns)) {
+        if (incoming[id] && typeof incoming[id].enabled === 'boolean') {
+          next[id as keyof typeof next] = { enabled: incoming[id].enabled };
+        }
+      }
+      config.chartPatterns.patterns = next;
+    }
+    persistUserSettings();
+    res.json({
+      ok: true,
+      chartPatterns: {
+        ...config.chartPatterns,
+        patterns: { ...config.chartPatterns.patterns },
+      },
+    });
+  });
+
+  app.get('/api/config/chart-patterns', (_req: Request, res: Response) => {
+    res.json({
+      chartPatterns: {
+        ...(config.chartPatterns || {}),
+        patterns: { ...(config.chartPatterns?.patterns || {}) },
+      },
+    });
   });
 
   app.post('/api/config/filters', (req: Request, res: Response) => {

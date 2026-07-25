@@ -23,6 +23,7 @@ import {
   DEFAULT_POST_MIGRATION_SCALP,
   DEFAULT_REVERSAL_SCALP,
   DEFAULT_POST_RUN_DIP,
+  DEFAULT_CHART_PATTERNS,
 } from './config';
 import { SHORT_TERM_STRATEGIES } from './shortTermStrategies';
 
@@ -66,6 +67,12 @@ export type StrategyKey =
   | 'market_session_filter'
   | 'post_run_dip'
   | 'technical_levels'
+  | 'chart_patterns'
+  | 'pattern_volume_dryup_return'
+  | 'pattern_falling_wedge'
+  | 'pattern_structured_pullback'
+  | 'pattern_bull_flag'
+  | 'pattern_trend_continuation'
   | 'quick_scalper'
   | 'micro_scalper'
   | 'momentum_burst'
@@ -557,6 +564,66 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     group: 'filters',
     description:
       'Pump.fun defaults — Fib: 2–6h, recent ≥50% impulse, 0.5/0.618 (+0.382/0.786) as ±2% zones. S&R: 1–4h (max 6), medium swings, ≥2 touches, zone ±2%, recent strong supports, volume reaction, break+close invalidation. Soft boost; optional hard filter. Paper / Live Sim / Backtester. Fail-open with thin history.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'chart_patterns',
+    name: 'Chart Patterns (extras)',
+    group: 'filters',
+    description:
+      'Optional secondary patterns (triangles, trendline break, holder distribution, capitulation). Core Pump.fun patterns have their own toggles below. Soft boost; configurable sensitivity. Paper / Live Sim / Backtester.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'pattern_volume_dryup_return',
+    name: 'Volume Dry-up + Return',
+    group: 'filters',
+    description:
+      'Highest-value Pump.fun setup: volume dries up then returns with price. Entry + confirmation. Best for Dip Buyer, High Win-Rate, Steady Compounder.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'pattern_falling_wedge',
+    name: 'Falling Wedge Breakout',
+    group: 'filters',
+    description:
+      'Converging lower highs/lows then bullish breakout. Entry + confirmation. Best for Dip Buyer, Reversal Scalper, High Win-Rate.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'pattern_structured_pullback',
+    name: 'Structured Pullback',
+    group: 'filters',
+    description:
+      'Orderly pullback after a strong run (not a crash). Entry + confirmation. Best for Dip Buyer, Trend Rider, High Win-Rate.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'pattern_bull_flag',
+    name: 'Bull Flag / Pennant',
+    group: 'filters',
+    description:
+      'Sharp pole + tight consolidation then continuation breakout. Entry + confirmation. Best for Momentum Burst, Trend Rider, Migration Sniper.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+  },
+  {
+    key: 'pattern_trend_continuation',
+    name: 'Trend Continuation',
+    group: 'filters',
+    description:
+      'Buy pullbacks in an established HH/HL uptrend. Entry + confirmation. Best for Trend Rider, Steady Compounder, Smart Money Mirror.',
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
@@ -1101,6 +1168,22 @@ export function deriveStrategyTogglesFromConfig(): StrategyToggleMap {
     config.filters.enableMarketSessionFilter === true;
   d.post_run_dip = config.postRunDip?.enabled === true;
   d.technical_levels = config.technicalLevels?.enabled === true;
+  d.chart_patterns = config.chartPatterns?.enabled === true &&
+    (config.chartPatterns?.patterns?.ascending_triangle?.enabled === true ||
+      config.chartPatterns?.patterns?.descending_triangle?.enabled === true ||
+      config.chartPatterns?.patterns?.trendline_break?.enabled === true ||
+      config.chartPatterns?.patterns?.holder_distribution?.enabled === true ||
+      config.chartPatterns?.patterns?.capitulation?.enabled === true);
+  d.pattern_volume_dryup_return =
+    config.chartPatterns?.patterns?.volume_dryup_return?.enabled === true;
+  d.pattern_falling_wedge =
+    config.chartPatterns?.patterns?.falling_wedge?.enabled === true;
+  d.pattern_structured_pullback =
+    config.chartPatterns?.patterns?.structured_pullback?.enabled === true;
+  d.pattern_bull_flag =
+    config.chartPatterns?.patterns?.bull_flag?.enabled === true;
+  d.pattern_trend_continuation =
+    config.chartPatterns?.patterns?.trend_continuation?.enabled === true;
   d.mev_protection = config.mev.enableMEVProtection === true;
   d.momentum_confirmation =
     config.filters.requireMomentumConfirmation === true;
@@ -1208,6 +1291,12 @@ export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
   market_session_filter: false,
   post_run_dip: false,
   technical_levels: false,
+  chart_patterns: false,
+  pattern_volume_dryup_return: false,
+  pattern_falling_wedge: false,
+  pattern_structured_pullback: false,
+  pattern_bull_flag: false,
+  pattern_trend_continuation: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1254,6 +1343,12 @@ export const WIN_RATE_55_60_PRESET: StrategyToggleMap = {
   market_session_filter: false,
   post_run_dip: false,
   technical_levels: false,
+  chart_patterns: false,
+  pattern_volume_dryup_return: false,
+  pattern_falling_wedge: false,
+  pattern_structured_pullback: false,
+  pattern_bull_flag: false,
+  pattern_trend_continuation: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1295,6 +1390,12 @@ export const BALANCED_PRESET: StrategyToggleMap = {
   market_session_filter: false,
   post_run_dip: false,
   technical_levels: false,
+  chart_patterns: false,
+  pattern_volume_dryup_return: false,
+  pattern_falling_wedge: false,
+  pattern_structured_pullback: false,
+  pattern_bull_flag: false,
+  pattern_trend_continuation: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1336,6 +1437,12 @@ export const AGGRESSIVE_PRESET: StrategyToggleMap = {
   market_session_filter: false,
   post_run_dip: false,
   technical_levels: false,
+  chart_patterns: false,
+  pattern_volume_dryup_return: false,
+  pattern_falling_wedge: false,
+  pattern_structured_pullback: false,
+  pattern_bull_flag: false,
+  pattern_trend_continuation: false,
   quick_scalper: false,
   micro_scalper: false,
   momentum_burst: false,
@@ -1377,6 +1484,12 @@ export const QUICK_SCALPER_PRESET: StrategyToggleMap = {
   market_session_filter: false,
   post_run_dip: false,
   technical_levels: false,
+  chart_patterns: false,
+  pattern_volume_dryup_return: false,
+  pattern_falling_wedge: false,
+  pattern_structured_pullback: false,
+  pattern_bull_flag: false,
+  pattern_trend_continuation: false,
   quick_scalper: true,
   micro_scalper: false,
   momentum_burst: false,
@@ -2095,6 +2208,41 @@ export function syncUnderlyingFlagsFromToggles(
   config.postRunDip.enabled = toggles.post_run_dip === true;
   config.filters.enablePostRunDip = toggles.post_run_dip === true;
   config.technicalLevels.enabled = toggles.technical_levels === true;
+  if (!config.chartPatterns) {
+    config.chartPatterns = {
+      ...DEFAULT_CHART_PATTERNS,
+      patterns: { ...DEFAULT_CHART_PATTERNS.patterns },
+    };
+  }
+  const corePatternMap: Array<[keyof typeof config.chartPatterns.patterns, StrategyKey]> = [
+    ['volume_dryup_return', 'pattern_volume_dryup_return'],
+    ['falling_wedge', 'pattern_falling_wedge'],
+    ['structured_pullback', 'pattern_structured_pullback'],
+    ['bull_flag', 'pattern_bull_flag'],
+    ['trend_continuation', 'pattern_trend_continuation'],
+  ];
+  for (const [id, key] of corePatternMap) {
+    if (!config.chartPatterns.patterns[id]) {
+      config.chartPatterns.patterns[id] = { enabled: false };
+    }
+    config.chartPatterns.patterns[id].enabled = toggles[key] === true;
+  }
+  // Extras umbrella (triangles, TL break, distribution, capitulation)
+  const extrasOn = toggles.chart_patterns === true;
+  for (const id of [
+    'ascending_triangle',
+    'descending_triangle',
+    'trendline_break',
+    'holder_distribution',
+    'capitulation',
+  ] as const) {
+    if (!config.chartPatterns.patterns[id]) {
+      config.chartPatterns.patterns[id] = { enabled: false };
+    }
+    config.chartPatterns.patterns[id].enabled = extrasOn;
+  }
+  const anyCore = corePatternMap.some(([, key]) => toggles[key] === true);
+  config.chartPatterns.enabled = anyCore || extrasOn;
   config.mev.enableMEVProtection = toggles.mev_protection;
   config.filters.requireMomentumConfirmation =
     toggles.momentum_confirmation ||
@@ -3047,6 +3195,10 @@ export function getStrategiesStatus() {
     reversalScalp: { ...config.reversalScalp },
     postRunDip: { ...config.postRunDip },
     technicalLevels: { ...config.technicalLevels },
+    chartPatterns: {
+      ...config.chartPatterns,
+      patterns: { ...(config.chartPatterns?.patterns || {}) },
+    },
     shortTermStrategies: SHORT_TERM_STRATEGIES.map((s) => ({
       id: s.id,
       label: s.label,

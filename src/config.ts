@@ -660,6 +660,81 @@ export const DEFAULT_TECHNICAL_LEVELS: TechnicalLevelsConfig = {
   fibTreatAsZones: true,
 };
 
+/** Chart pattern recognition (entry + confirmation). Default OFF. */
+export type ChartPatternId =
+  | 'falling_wedge'
+  | 'ascending_triangle'
+  | 'descending_triangle'
+  | 'trend_continuation'
+  | 'structured_pullback'
+  | 'trendline_break'
+  | 'volume_dryup_return'
+  | 'holder_distribution'
+  | 'capitulation'
+  | 'bull_flag';
+
+export interface ChartPatternToggle {
+  enabled: boolean;
+}
+
+export interface ChartPatternsConfig {
+  enabled: boolean;
+  sensitivity: 'low' | 'medium' | 'high';
+  /** How patterns affect entries: confirmation only, entry signal, or both */
+  mode: 'confirm' | 'entry' | 'both';
+  lookbackBars: number;
+  minConfidence: number;
+  breakoutPct: number;
+  pullbackNearPct: number;
+  minPoleRunPct: number;
+  maxFlagRangePct: number;
+  minStructuredDropPct: number;
+  maxStructuredDropPct: number;
+  volumeDryupRatio: number;
+  volumeReturnRatio: number;
+  holderDropPct: number;
+  capitulationDropPct: number;
+  bearishPenalty: number;
+  /** Require at least one bullish pattern when strategy ON */
+  hardFilter: boolean;
+  /** Skip when strong bearish pattern fires */
+  blockOnBearish: boolean;
+  patterns: Record<ChartPatternId, ChartPatternToggle>;
+}
+
+export const DEFAULT_CHART_PATTERNS: ChartPatternsConfig = {
+  enabled: false,
+  sensitivity: 'medium',
+  mode: 'both',
+  lookbackBars: 64,
+  minConfidence: 55,
+  breakoutPct: 1.2,
+  pullbackNearPct: 3,
+  minPoleRunPct: 25,
+  maxFlagRangePct: 18,
+  minStructuredDropPct: 8,
+  maxStructuredDropPct: 35,
+  volumeDryupRatio: 0.55,
+  volumeReturnRatio: 1.35,
+  holderDropPct: 8,
+  capitulationDropPct: 28,
+  bearishPenalty: 6,
+  hardFilter: false,
+  blockOnBearish: false,
+  patterns: {
+    falling_wedge: { enabled: true },
+    ascending_triangle: { enabled: false },
+    descending_triangle: { enabled: false },
+    trend_continuation: { enabled: true },
+    structured_pullback: { enabled: true },
+    trendline_break: { enabled: false },
+    volume_dryup_return: { enabled: true },
+    holder_distribution: { enabled: false },
+    capitulation: { enabled: false },
+    bull_flag: { enabled: true },
+  },
+};
+
 /** Recommended param band (Strategies UI + clamp on save). */
 export type ScalpParamBand = { min: number; max: number; default: number };
 
@@ -1744,6 +1819,7 @@ export interface BotConfig {
   postRunDip: PostRunDipConfig;
   /** Fib + Support/Resistance analysis */
   technicalLevels: TechnicalLevelsConfig;
+  chartPatterns: ChartPatternsConfig;
   /** High-conviction entry gating and trade-rate limits */
   selective: SelectiveTradingConfig;
 
@@ -1796,6 +1872,17 @@ export interface BotConfig {
   tradeProfiles: {
     enabled: boolean;
     profiles: Record<string, boolean>;
+    overrides?: Record<string, {
+      exitRules?: Record<string, unknown>;
+      match?: Record<string, unknown>;
+    }>;
+    autoScoring?: {
+      enabled?: boolean;
+      minScore?: number;
+      skipBelowMin?: boolean;
+      forceProfileId?: string | null;
+      weights?: Record<string, number>;
+    };
   };
 
   /** GMGN API settings */
@@ -2089,8 +2176,12 @@ export const config: BotConfig = {
       scalper: true,
       dip_buyer: true,
       trend_rider: true,
-      migration: true,
+      migration_sniper: true,
       high_win_rate: true,
+      momentum_burst: true,
+      steady_compounder: true,
+      reversal_scalper: true,
+      smart_money_mirror: true,
     },
   },
 
@@ -2128,6 +2219,10 @@ export const config: BotConfig = {
   reversalScalp: { ...DEFAULT_REVERSAL_SCALP },
   postRunDip: { ...DEFAULT_POST_RUN_DIP },
   technicalLevels: { ...DEFAULT_TECHNICAL_LEVELS },
+  chartPatterns: {
+    ...DEFAULT_CHART_PATTERNS,
+    patterns: { ...DEFAULT_CHART_PATTERNS.patterns },
+  },
 
   gmgn: {
     apiKey: process.env.GMGN_API_KEY?.trim() || '',
@@ -2336,6 +2431,10 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     reversalScalp: { ...config.reversalScalp },
     postRunDip: { ...config.postRunDip },
     technicalLevels: { ...config.technicalLevels },
+    chartPatterns: {
+      ...config.chartPatterns,
+      patterns: { ...(config.chartPatterns?.patterns || {}) },
+    },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile:
@@ -2361,6 +2460,12 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       ? {
           enabled: config.tradeProfiles.enabled !== false,
           profiles: { ...(config.tradeProfiles.profiles || {}) },
+          overrides: config.tradeProfiles.overrides
+            ? { ...config.tradeProfiles.overrides }
+            : undefined,
+          autoScoring: config.tradeProfiles.autoScoring
+            ? JSON.parse(JSON.stringify(config.tradeProfiles.autoScoring))
+            : undefined,
         }
       : undefined,
     paper: { ...config.paper },
@@ -2731,6 +2836,15 @@ function applySettingsSnapshot(
         saved.technicalLevels
       ) as unknown as typeof config.technicalLevels;
     }
+    if (saved.chartPatterns) {
+      config.chartPatterns = deepMerge(
+        {
+          ...DEFAULT_CHART_PATTERNS,
+          patterns: { ...DEFAULT_CHART_PATTERNS.patterns },
+        },
+        saved.chartPatterns
+      ) as unknown as typeof config.chartPatterns;
+    }
     if (saved.selective) {
       config.selective = cloneJson(
         saved.selective
@@ -2801,6 +2915,12 @@ function applySettingsSnapshot(
       config.technicalLevels = deepMerge(
         config.technicalLevels,
         saved.technicalLevels
+      );
+    }
+    if (saved.chartPatterns) {
+      config.chartPatterns = deepMerge(
+        config.chartPatterns,
+        saved.chartPatterns
       );
     }
     if (saved.selective) {
@@ -2876,8 +2996,12 @@ function applySettingsSnapshot(
           scalper: true,
           dip_buyer: true,
           trend_rider: true,
-          migration: true,
+          migration_sniper: true,
           high_win_rate: true,
+          momentum_burst: true,
+          steady_compounder: true,
+          reversal_scalper: true,
+          smart_money_mirror: true,
         },
       };
     }
@@ -2889,6 +3013,18 @@ function applySettingsSnapshot(
         ...config.tradeProfiles.profiles,
         ...tp.profiles,
         default: true,
+      };
+    }
+    if (tp.overrides && typeof tp.overrides === 'object') {
+      config.tradeProfiles.overrides = {
+        ...(config.tradeProfiles.overrides || {}),
+        ...tp.overrides,
+      };
+    }
+    if (tp.autoScoring && typeof tp.autoScoring === 'object') {
+      config.tradeProfiles.autoScoring = {
+        ...(config.tradeProfiles.autoScoring || {}),
+        ...tp.autoScoring,
       };
     }
   }
@@ -4257,6 +4393,10 @@ export function getConfigSnapshot() {
     reversalScalp: { ...config.reversalScalp },
     postRunDip: { ...config.postRunDip },
     technicalLevels: { ...config.technicalLevels },
+    chartPatterns: {
+      ...config.chartPatterns,
+      patterns: { ...(config.chartPatterns?.patterns || {}) },
+    },
     selective: { ...config.selective },
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile: config.strategyProfile || 'custom',
@@ -4265,6 +4405,12 @@ export function getConfigSnapshot() {
       ? {
           enabled: config.tradeProfiles.enabled !== false,
           profiles: { ...(config.tradeProfiles.profiles || {}) },
+          overrides: config.tradeProfiles.overrides
+            ? { ...config.tradeProfiles.overrides }
+            : undefined,
+          autoScoring: config.tradeProfiles.autoScoring
+            ? JSON.parse(JSON.stringify(config.tradeProfiles.autoScoring))
+            : undefined,
         }
       : undefined,
     paper: { ...config.paper },

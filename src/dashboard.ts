@@ -405,33 +405,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-row { padding: .85rem 0; }
     .strategy-preset-grid {
       display: grid;
-      grid-template-columns: 1fr;
-      gap: .75rem;
-      margin-top: 1rem;
+      grid-template-columns: 1fr 1fr;
+      gap: .5rem;
+      margin-top: .5rem;
     }
     @media (min-width: 640px) {
-      .strategy-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .strategy-preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
     }
     @media (min-width: 900px) {
-      .strategy-preset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .strategy-preset-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
     .strategy-preset-grid.short-term-presets {
-      margin-top: .75rem;
+      margin-top: .5rem;
+      grid-template-columns: 1fr 1fr;
+    }
+    @media (min-width: 700px) {
+      .strategy-preset-grid.short-term-presets {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
     }
     .strategy-preset-btn {
       text-align: left;
       width: 100%;
-      border-radius: .75rem;
+      border-radius: .55rem;
       border: 1px solid #334155;
       background: #0f172a;
       color: #e2e8f0;
-      padding: .85rem 1rem;
+      padding: .55rem .65rem;
       cursor: pointer;
       transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+      min-height: 0;
     }
     .strategy-preset-btn:hover {
       border-color: #64748b;
       background: #111827;
+    }
+    .strategy-preset-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
     .strategy-preset-btn.active {
       border-color: #10b981;
@@ -440,19 +451,101 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .strategy-preset-btn .preset-label {
       display: block;
-      font-size: .92rem;
+      font-size: .78rem;
       font-weight: 700;
       color: #f8fafc;
-      margin-bottom: .35rem;
+      margin-bottom: .15rem;
+      line-height: 1.25;
     }
     .strategy-preset-btn .preset-desc {
       display: block;
-      font-size: .78rem;
-      line-height: 1.35;
+      font-size: .68rem;
+      line-height: 1.3;
       color: #94a3b8;
       font-weight: 500;
     }
     .strategy-preset-btn.active .preset-desc { color: #cbd5e1; }
+    .strat-setup-guide {
+      display: grid;
+      gap: .45rem;
+      margin-bottom: .85rem;
+      padding: .65rem .75rem;
+      border-radius: .65rem;
+      border: 1px solid #1e293b;
+      background: #0b1220;
+    }
+    .strat-setup-guide .sg-step {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: .45rem .65rem;
+      align-items: start;
+      font-size: .75rem;
+      line-height: 1.35;
+      color: #94a3b8;
+    }
+    .strat-setup-guide .sg-num {
+      width: 1.35rem;
+      height: 1.35rem;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .68rem;
+      font-weight: 800;
+      color: #0f172a;
+      background: #34d399;
+      flex-shrink: 0;
+    }
+    .strat-setup-guide strong { color: #e2e8f0; font-weight: 650; }
+    .strat-adv-pack {
+      margin-top: .85rem;
+      border: 1px solid #1e293b;
+      border-radius: .65rem;
+      background: #0b1220;
+      padding: 0;
+    }
+    .strat-adv-pack > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: .65rem .75rem;
+      font-size: .82rem;
+      font-weight: 650;
+      color: #cbd5e1;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: .35rem;
+    }
+    .strat-adv-pack > summary::-webkit-details-marker { display: none; }
+    .strat-adv-pack > summary::after {
+      content: 'Show';
+      font-size: .68rem;
+      font-weight: 600;
+      color: #64748b;
+    }
+    .strat-adv-pack[open] > summary::after { content: 'Hide'; }
+    .strat-adv-pack .strat-adv-body {
+      padding: 0 .75rem .75rem;
+      border-top: 1px solid #1e293b;
+    }
+    .strat-adv-pack .strat-adv-hint {
+      font-size: .7rem;
+      color: #64748b;
+      margin: .55rem 0 .45rem;
+      line-height: 1.35;
+    }
+    #scalper-suite-settings.is-hidden-suite { display: none !important; }
+    @media (max-width: 639px) {
+      .strategy-control-card .tp-toggle-row {
+        grid-template-columns: 1fr;
+      }
+      .strategy-risk-card .btn {
+        flex: 1 1 calc(50% - .35rem);
+        min-width: 0;
+        justify-content: center;
+      }
+    }
     .active-profile-banner {
       border-radius: .75rem;
       border: 1px solid #334155;
@@ -884,17 +977,141 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .trade-profile-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: 0.3rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 0.4rem;
+      border: 1.5px solid;
+      white-space: nowrap;
+      line-height: 1.25;
+      letter-spacing: 0.01em;
+      max-width: none;
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.45);
+      vertical-align: middle;
+    }
+    .trade-profile-badge .tpb-icon {
+      font-size: 0.85rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .trade-profile-badge .tpb-name {
+      font-weight: 700;
+    }
+    @media (max-width: 640px) {
+      .trade-profile-badge {
+        font-size: 0.7rem;
+        padding: 0.22rem 0.45rem;
+        gap: 0.25rem;
+      }
+      .trade-profile-badge .tpb-icon { font-size: 0.8rem; }
+    }
+    .pos-token-main .trade-profile-badge,
+    .trade-group-summary .trade-profile-badge {
+      margin-top: 0.25rem;
+      display: inline-flex;
+    }
+    .tp-chip,
+    .tp-overview-name,
+    .tp-name {
+      font-weight: 600;
+    }
+    #positions-table th:nth-child(2),
+    #trades-positions-table th:nth-child(2),
+    #closed-table th:nth-child(2),
+    #trades-closed-table th:nth-child(2),
+    #positions-table td:nth-child(2),
+    #trades-positions-table td:nth-child(2),
+    #closed-table td:nth-child(2),
+    #trades-closed-table td:nth-child(2) {
+      min-width: 7.5rem;
+      white-space: nowrap;
+    }
+    .profile-colour-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%);
+    }
+    .profile-colour-legend-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .profile-colour-legend-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #cbd5e1;
+    }
+    .profile-colour-legend-hint {
+      font-size: 0.65rem;
+      color: #64748b;
+    }
+    .profile-colour-legend-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.45rem;
+    }
+    .profile-colour-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.45rem 0.2rem 0.3rem;
+      border-radius: 999px;
+      border: 1px solid;
+      background: #020617aa;
       font-size: 0.68rem;
       font-weight: 600;
-      padding: 0.12rem 0.4rem;
-      border-radius: 0.35rem;
-      border: 1px solid;
-      white-space: nowrap;
       line-height: 1.2;
-      max-width: 9rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+    .profile-colour-legend-swatch {
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 0.2rem;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.65);
+    }
+    .profile-colour-legend-icon {
+      font-size: 0.75rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .profile-colour-legend-name {
+      color: #e2e8f0;
+    }
+    @media (max-width: 640px) {
+      .profile-colour-legend {
+        padding: 0.5rem 0.55rem;
+      }
+      .profile-colour-legend-items {
+        gap: 0.3rem;
+      }
+      .profile-colour-legend-item {
+        font-size: 0.64rem;
+        padding: 0.18rem 0.4rem 0.18rem 0.28rem;
+        gap: 0.28rem;
+      }
+      .profile-colour-legend-swatch {
+        width: 0.62rem;
+        height: 0.62rem;
+      }
+      .profile-colour-legend-hint {
+        display: none;
+      }
+    }
+    .closed-filter-btn[data-closed-profile-filter].is-active,
+    .closed-filter-btn[data-open-profile-filter].is-active {
+      color: #0f172a;
+      font-weight: 700;
     }
     .trade-profiles-active {
       display: flex;
@@ -920,9 +1137,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       align-items: stretch;
     }
     .tp-toggle-card {
-      flex: 1 1 9rem;
-      min-width: 8.5rem;
-      max-width: 14rem;
+      flex: 1 1 16rem;
+      min-width: 14rem;
+      max-width: 22rem;
       padding: 0.55rem 0.65rem;
       border: 1px solid #334155;
       border-radius: 0.5rem;
@@ -936,7 +1153,223 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       margin-bottom: 0.25rem;
     }
     .tp-toggle-card .tp-name { font-weight: 600; font-size: 0.8rem; }
+    .tp-toggle-card .tp-blurb {
+      margin: 0.35rem 0 0.25rem;
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      line-height: 1.35;
+    }
+    .tp-toggle-card .tp-risk {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      margin: 0.15rem 0 0.35rem;
+      font-size: 0.65rem;
+      color: #94a3b8;
+      line-height: 1.3;
+      flex-wrap: wrap;
+    }
+    .tp-toggle-card .tp-risk-label {
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+      font-size: 0.58rem;
+    }
+    .tp-toggle-card .tp-risk-value {
+      color: #e2e8f0;
+      font-weight: 600;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.3rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
     .tp-toggle-card .tp-desc { font-size: 0.65rem; color: #94a3b8; line-height: 1.3; }
+    .tp-toggle-card details.tp-rules {
+      margin-top: 0.2rem;
+    }
+    .tp-toggle-card details.tp-rules > summary {
+      cursor: pointer;
+      font-size: 0.62rem;
+      color: #64748b;
+      list-style: none;
+      user-select: none;
+    }
+    .tp-toggle-card details.tp-rules > summary::-webkit-details-marker { display: none; }
+    .tp-toggle-card details.tp-rules[open] > summary { color: #94a3b8; margin-bottom: 0.2rem; }
+    @media (max-width: 640px) {
+      .tp-toggle-card {
+        flex: 1 1 100%;
+        min-width: 0;
+        max-width: none;
+      }
+    }
+    .tp-toggle-card.tp-card-flash {
+      outline: 2px solid #38bdf8;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15);
+    }
+    .tp-decisions {
+      max-height: 11rem;
+      overflow-y: auto;
+      border: 1px solid #1e293b;
+      border-radius: 0.45rem;
+      background: #020617;
+      padding: 0.4rem 0.5rem;
+      font-size: 0.7rem;
+      line-height: 1.35;
+    }
+    .tp-decision-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.35rem 0.55rem;
+      padding: 0.3rem 0;
+      border-bottom: 1px solid #1e293b;
+      align-items: start;
+    }
+    .tp-decision-row:last-child { border-bottom: none; }
+    .tp-decision-row.is-skip { opacity: 0.75; }
+    .tp-decision-score {
+      font-weight: 700;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+    }
+    .tp-decision-meta { color: #94a3b8; }
+    .tp-decision-why { color: #cbd5e1; grid-column: 1 / -1; }
+    .tp-params {
+      margin-top: 0.45rem;
+      padding-top: 0.4rem;
+      border-top: 1px solid #1e293b;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.3rem 0.45rem;
+    }
+    .tp-params label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      font-size: 0.62rem;
+      color: #94a3b8;
+    }
+    .tp-params input {
+      width: 100%;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 0.3rem;
+      color: #e2e8f0;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.35rem;
+    }
+    .tp-params-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.25rem;
+    }
+    .tp-params-actions button {
+      font-size: 0.65rem;
+      padding: 0.2rem 0.45rem;
+    }
+    .tp-override-badge {
+      font-size: 0.58rem;
+      color: #fbbf24;
+      margin-left: 0.25rem;
+    }
+    .tp-overview-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+    }
+    .tp-overview-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      min-width: 36rem;
+    }
+    .tp-overview-table th,
+    .tp-overview-table td {
+      padding: 0.55rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid #1e293b;
+    }
+    .tp-overview-table th {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #94a3b8;
+      background: #0b1220;
+      position: sticky;
+      top: 0;
+      white-space: nowrap;
+    }
+    .tp-overview-table tbody tr {
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .tp-overview-table tbody tr:hover {
+      background: #111827;
+    }
+    .tp-overview-table tbody tr.is-active {
+      background: #0f1f17;
+    }
+    .tp-overview-table tbody tr.is-active td:first-child {
+      box-shadow: inset 3px 0 0 #34d399;
+    }
+    .tp-overview-table tbody tr.is-off {
+      opacity: 0.55;
+    }
+    .tp-overview-name {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      white-space: nowrap;
+    }
+    .tp-overview-desc {
+      color: #cbd5e1;
+      line-height: 1.35;
+      max-width: 22rem;
+    }
+    .tp-overview-style {
+      color: #94a3b8;
+      white-space: nowrap;
+    }
+    .tp-overview-risk {
+      display: inline-block;
+      font-weight: 600;
+      color: #e2e8f0;
+      padding: 0.12rem 0.45rem;
+      border-radius: 0.3rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      white-space: nowrap;
+    }
+    .tp-overview-active-tag {
+      font-size: 0.58rem;
+      font-weight: 600;
+      color: #34d399;
+      margin-left: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    @media (max-width: 640px) {
+      .tp-overview-table {
+        min-width: 28rem;
+        font-size: 0.72rem;
+      }
+      .tp-overview-table th,
+      .tp-overview-table td {
+        padding: 0.45rem 0.5rem;
+      }
+      .tp-overview-desc {
+        max-width: 14rem;
+      }
+    }
     @media (max-width: 640px) {
       .closed-filter {
         width: 100%;
@@ -2298,13 +2731,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL on the remaining size, trailing stop, take-profit, and stop-loss. Use Sell to force-close the full position."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL on the remaining size, trailing stop, take-profit, and stop-loss. Coloured profile badges show which strategy owns each trade. Use Sell to force-close the full position."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
             <button type="button" class="danger sell-all-btn" id="sell-all-open" hidden disabled onclick="forceSellAllPositions()" title="Force sell all open positions">Sell All</button>
           </div>
         </div>
+        <div class="closed-filter mb-2 open-profile-filter" role="group" aria-label="Filter open positions by profile" style="margin-top:0.35rem"></div>
         <div class="positions-scroll">
           <table id="positions-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
@@ -2382,17 +2816,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Trades (open / closed / signals / migrations) ========== -->
     <section data-tab-panel="trades" class="hidden space-y-4">
+      <div class="profile-colour-legend" data-profile-legend role="region" aria-label="Profile colour legend">
+        <div class="profile-colour-legend-head">
+          <span class="profile-colour-legend-title">Profile colours</span>
+          <span class="profile-colour-legend-hint">Same colours on badges &amp; filters</span>
+        </div>
+        <div class="profile-colour-legend-items" data-profile-legend-items></div>
+      </div>
       <div class="card card-open-positions" id="trades-open-positions-panel">
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Trades</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size, partial take-profit progress, converging wallets, 1h volume, unrealized PnL on remaining size, trailing stop, take-profit, and stop-loss. Same data as Overview Open Positions."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size, partial take-profit progress, converging wallets, 1h volume, unrealized PnL on remaining size, trailing stop, take-profit, and stop-loss. Coloured profile badges show which strategy owns each trade. Filter by profile below. Same data as Overview Open Positions."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
             <button type="button" class="danger sell-all-btn" id="trades-sell-all-open" hidden disabled onclick="forceSellAllPositions()" title="Force sell all open positions">Sell All</button>
           </div>
         </div>
+        <div class="closed-filter mb-2 open-profile-filter" id="open-profile-filter" role="group" aria-label="Filter open trades by profile" style="margin-top:0.35rem"></div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
@@ -2403,7 +2845,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable or losing."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
@@ -3159,108 +3601,205 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card strategy-control-card">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div class="section-title">Strategy Control Center <span class="tip" tabindex="0" data-tip="Master switches apply to paper, Live Simulation, backtests, and live trading. Risk Level and Strict Mode still control thresholds."></span></div>
-            <p class="text-sm text-slate-400">Choose which entry, filter, exit, risk, and advanced modules may run. Hard safety floors remain enforced.</p>
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Strategy Control Center</div>
+            <p class="text-sm text-slate-400 mb-0">Follow the steps below. Risk + Trade Profiles are what you normally set; packs below are optional.</p>
           </div>
-          <div class="text-right">
-            <div id="strategies-count" class="text-lg font-semibold">—</div>
-            <div id="strategies-profile" class="mint">Loading…</div>
+          <div class="text-right" style="flex-shrink:0">
+            <div id="strategies-count" class="text-base font-semibold">—</div>
+            <div id="strategies-profile" class="mint text-xs">Loading…</div>
           </div>
         </div>
-        <div class="flex flex-wrap gap-2 mt-4">
-          <button class="btn btn-primary" onclick="applyStrategiesAction('enable_all')">Enable All</button>
-          <button class="btn btn-secondary" onclick="applyStrategiesAction('disable_all')">Disable All</button>
-          <button class="btn btn-secondary" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous</button>
+
+        <div class="strat-setup-guide mt-3" id="strat-setup-guide">
+          <div class="sg-step"><span class="sg-num">1</span><span><strong>Risk Level</strong> (+ optional Strict) — global size &amp; safety floors for every trade.</span></div>
+          <div class="sg-step"><span class="sg-num">2</span><span><strong>Trade Profiles</strong> — turn ON the styles you want. The bot auto-picks the best match per trade and freezes that profile’s TP/SL/timer.</span></div>
+          <div class="sg-step"><span class="sg-num">3</span><span><strong>Optional packs</strong> (below) — bulk-toggle filter modules or scalp engines. Not required when Multi-profile is ON; profiles already map Scalper / Momentum / etc. to the right timed exit.</span></div>
         </div>
-        <div class="mt-4 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.85rem">
+
+        <div class="flex flex-wrap gap-2 mt-2">
+          <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('enable_all')">Enable All modules</button>
+          <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('disable_all')">Disable All modules</button>
+          <button class="btn btn-secondary text-xs" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous pack</button>
+        </div>
+
+        <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <div>
-              <div class="text-sm font-semibold text-slate-200">Trade Profiles (multi)</div>
-              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile and follows only that profile’s exit rules. Risk Level + Strict Mode still apply globally.</p>
+            <div style="min-width:0;flex:1">
+              <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
+              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
             </div>
             <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
               <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" /> Multi-profile ON
             </label>
           </div>
-          <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
-        </div>
-        <div class="mt-4">
-          <div class="text-sm font-semibold text-slate-200 mb-1">Strategy Presets</div>
-          <p class="text-xs text-slate-400 mb-2">Sets module toggles + quality thresholds. Risk Level and Strict Mode still stack on top. Switching presets keeps your last custom overrides for Restore Previous.</p>
-          <div class="strategy-preset-grid" id="strategy-presets">
-            <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" onclick="applyStrategiesAction('high_win_rate')">
-              <span class="preset-label">60%+ Win Rate Profile</span>
-              <span class="preset-desc">Fewer trades expected – prioritises high win rate</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" onclick="applyStrategiesAction('win_rate_55_60')">
-              <span class="preset-label">55–60% Win Rate Profile</span>
-              <span class="preset-desc">Balanced high-quality profile – more trades than 60%+ version</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="balanced" onclick="applyStrategiesAction('balanced')">
-              <span class="preset-label">Balanced</span>
-              <span class="preset-desc">Best overall risk/reward balance</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="aggressive" onclick="applyStrategiesAction('aggressive')">
-              <span class="preset-label">Aggressive</span>
-              <span class="preset-desc">More opportunities, still protected</span>
-            </button>
-          </div>
-          <div class="text-sm font-semibold text-slate-200 mt-4 mb-1">Short-Term Presets</div>
-          <p class="text-xs text-slate-400 mb-2">Timed scalps with fixed TP / SL / timer. Can run as a profile or as toggles alongside other strategies.</p>
-          <div class="strategy-preset-grid short-term-presets" id="strategy-presets-short">
-            <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" onclick="applyStrategiesAction('scalper_suite')" style="border-color:#0f766e">
-              <span class="preset-label">Scalper Suite (Standard)</span>
-              <span class="preset-desc">Balanced timers · Micro + Momentum + Post-Mig (+ Reversal)</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" onclick="applyStrategiesAction('aggressive_scalper')" style="border-color:#ea580c">
-              <span class="preset-label">Aggressive Scalper</span>
-              <span class="preset-desc">Faster timers · higher TP · looser volume · larger size</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" onclick="applyStrategiesAction('conservative_scalper')" style="border-color:#0369a1">
-              <span class="preset-label">Conservative Scalper</span>
-              <span class="preset-desc">Tighter SL · stricter volume · smaller size · aggressive dead-market</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" onclick="applyStrategiesAction('quick_scalper')">
-              <span class="preset-label">Quick Scalper</span>
-              <span class="preset-desc">1–3 min holds · fixed TP · tight SL · hard timer</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" onclick="applyStrategiesAction('micro_scalper')">
-              <span class="preset-label">Micro-Scalper</span>
-              <span class="preset-desc">60–90s (def 75) · TP 15–22% · SL 6–10%</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" onclick="applyStrategiesAction('momentum_burst')">
-              <span class="preset-label">Momentum Burst</span>
-              <span class="preset-desc">2–4 min (def 3) · TP 28–40% · SL 10–14% · fade exit</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" onclick="applyStrategiesAction('post_migration_scalp')">
-              <span class="preset-label">Post-Migration Scalp</span>
-              <span class="preset-desc">Fresh migrations + volume · 90s–3m · TP 25–38%</span>
-            </button>
-            <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" onclick="applyStrategiesAction('reversal_scalp')">
-              <span class="preset-label">Reversal Scalp</span>
-              <span class="preset-desc">Selective wick snap-back · 60–150s · TP 18–28%</span>
-            </button>
-          </div>
-          <div id="scalper-suite-settings" class="card mt-3" style="border-color:#0f766e">
-            <div class="section-title !text-sm">Scalper Suite Settings</div>
-            <p class="mint text-xs mb-2">Pick <strong>Standard</strong>, <strong>Aggressive</strong>, or <strong>Conservative</strong> above to load that variant’s timers / TP / SL. Fine-tune anytime — Paper, Live Sim, and Backtester all honor these. Anti-Rug + Volume stay ON for every variant.</p>
-            <div class="grid sm:grid-cols-2 gap-3 text-xs">
-              <label class="ctl"><span>Suite max concurrent positions (2–3)</span><input type="number" id="suite-max-pos" min="2" max="3" step="1" value="3" /></label>
-              <label class="ctl"><span>Dead-market min hold (min) · aggressive</span><input type="number" id="suite-dead-hold" min="1" max="30" step="1" value="4" /></label>
+          <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
+            <div class="profile-colour-legend-head">
+              <span class="profile-colour-legend-title">Profile colours</span>
+              <span class="profile-colour-legend-hint">Matches trade badges</span>
             </div>
-            <p class="text-xs text-slate-400 mt-2 mb-1">When suite is active: Dead Market Exit ON · Anti-Rug + Volume ON · Risk Medium/High recommended · Strict Off or Low · logs show which scalper fired.</p>
-            <button type="button" class="btn btn-primary mt-2" onclick="saveScalperSuiteSettings()">Save suite + member settings</button>
-            <div class="mint text-xs mt-2" id="suite-settings-status"></div>
+            <div class="profile-colour-legend-items" data-profile-legend-items></div>
+          </div>
+          <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
+          <div class="mt-3 pt-3 border-t border-slate-700/80" id="auto-scoring-panel">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</div>
+                <p class="text-xs text-slate-400 mb-0">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
+              </div>
+              <label class="ctl-check" title="Enable weighted auto-scoring">
+                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" /> Auto-score ON
+              </label>
+            </div>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs mb-2">
+              <label class="ctl"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
+              <label class="ctl ctl-check" style="align-items:flex-end;padding-bottom:0.35rem"><input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" /> Skip below min</label>
+              <label class="ctl"><span>Force profile</span>
+                <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
+                  <option value="">— none (auto pick) —</option>
+                </select>
+              </label>
+            </div>
+            <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
+              <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
+              <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
+                  <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
+                  <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                </div>
+                <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
+                <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
+              </div>
+            </details>
           </div>
         </div>
-        <div id="strategies-warning" class="hidden mt-3 p-3 rounded-lg text-amber-200" style="background:#422006;border:1px solid #92400e"></div>
+
+        <details class="strat-adv-pack" id="module-packs-panel">
+          <summary>
+            <span>Optional · Quality module packs <span class="mint font-normal" id="module-packs-active-label"></span></span>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="strat-adv-hint">These bulk-enable filter modules + quality thresholds. They do <strong>not</strong> replace Trade Profiles. Prefer Balanced unless you want a specific win-rate style. Risk + Strict still stack on top.</p>
+            <div class="strategy-preset-grid" id="strategy-presets">
+              <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" onclick="applyStrategiesAction('high_win_rate')">
+                <span class="preset-label">60%+ Win Rate pack</span>
+                <span class="preset-desc">Fewest trades · highest quality bars</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" onclick="applyStrategiesAction('win_rate_55_60')">
+                <span class="preset-label">55–60% Win Rate pack</span>
+                <span class="preset-desc">Quality focus · more trades than 60%+</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="balanced" onclick="applyStrategiesAction('balanced')">
+                <span class="preset-label">Balanced pack</span>
+                <span class="preset-desc">Best overall risk/reward start</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="aggressive" onclick="applyStrategiesAction('aggressive')">
+                <span class="preset-label">Aggressive pack</span>
+                <span class="preset-desc">More opportunities · still protected</span>
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <details class="strat-adv-pack" id="scalp-packs-panel">
+          <summary>
+            <span>Optional · Scalp engines <span class="mint font-normal" id="scalp-packs-active-label"></span></span>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="strat-adv-hint">
+              With <strong>Multi-profile ON</strong>, leave this alone unless you want timed-scalp modules enabled globally.
+              The bot <strong>auto-picks</strong> which scalp engine fits (migration → micro → momentum → reversal among enabled ones).
+              Trade Profiles then override TP/SL/timer when assigned (Scalper → quick scalp, Momentum Burst profile → burst, etc.).
+              Use a <strong>Suite</strong> only to turn Micro+Momentum+Post-Mig(+Reversal) all ON with shared timers.
+            </p>
+            <div class="text-xs font-semibold text-slate-300 mt-1">Suite variants</div>
+            <div class="strategy-preset-grid short-term-presets" id="strategy-presets-suite">
+              <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" onclick="applyStrategiesAction('scalper_suite')" style="border-color:#0f766e">
+                <span class="preset-label">Scalper Suite · Standard</span>
+                <span class="preset-desc">Balanced timers · Micro+Mom+Mig+Rev</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" onclick="applyStrategiesAction('aggressive_scalper')" style="border-color:#ea580c">
+                <span class="preset-label">Suite · Aggressive</span>
+                <span class="preset-desc">Faster timers · higher TP · looser vol</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" onclick="applyStrategiesAction('conservative_scalper')" style="border-color:#0369a1">
+                <span class="preset-label">Suite · Conservative</span>
+                <span class="preset-desc">Tighter SL · stricter vol · smaller size</span>
+              </button>
+            </div>
+            <div class="text-xs font-semibold text-slate-300 mt-2">Single engines</div>
+            <div class="strategy-preset-grid short-term-presets" id="strategy-presets-short">
+              <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" onclick="applyStrategiesAction('quick_scalper')">
+                <span class="preset-label">Quick Scalper</span>
+                <span class="preset-desc">Maps to Trade Profile · Scalper</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" onclick="applyStrategiesAction('micro_scalper')">
+                <span class="preset-label">Micro-Scalper</span>
+                <span class="preset-desc">Ultra-fast · seconds holds</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" onclick="applyStrategiesAction('momentum_burst')">
+                <span class="preset-label">Momentum Burst</span>
+                <span class="preset-desc">Maps to Trade Profile · Momentum Burst</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" onclick="applyStrategiesAction('post_migration_scalp')">
+                <span class="preset-label">Post-Migration Scalp</span>
+                <span class="preset-desc">Maps to Trade Profile · Migration Sniper</span>
+              </button>
+              <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" onclick="applyStrategiesAction('reversal_scalp')">
+                <span class="preset-label">Reversal Scalp</span>
+                <span class="preset-desc">Maps to Trade Profile · Reversal Scalper</span>
+              </button>
+            </div>
+            <div id="scalper-suite-settings" class="card mt-2 is-hidden-suite" style="border-color:#0f766e;padding:0.65rem">
+              <div class="section-title !text-sm">Suite fine-tune</div>
+              <p class="mint text-xs mb-2">Only for Suite variants. Tweaks concurrent positions + dead-market hold. Member timers live under each strategy module card below.</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <label class="ctl"><span>Max concurrent (2–3)</span><input type="number" id="suite-max-pos" min="2" max="3" step="1" value="3" /></label>
+                <label class="ctl"><span>Dead-market min hold (min)</span><input type="number" id="suite-dead-hold" min="1" max="30" step="1" value="4" /></label>
+              </div>
+              <button type="button" class="btn btn-primary mt-2 text-xs" onclick="saveScalperSuiteSettings()">Save suite settings</button>
+              <div class="mint text-xs mt-1" id="suite-settings-status"></div>
+            </div>
+          </div>
+        </details>
+
+        <div id="strategies-warning" class="hidden mt-3 p-2 rounded-lg text-amber-200 text-xs" style="background:#422006;border:1px solid #92400e"></div>
       </div>
       <div id="strategies-grid" class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card"><span class="mint">Loading strategies…</span></div>
       </div>
       <div id="strategy-settings-stash" class="hidden" aria-hidden="true"></div>
+      <div class="card mt-4" id="trade-profiles-overview-card">
+        <div class="section-title">Trade Profiles Overview</div>
+        <p class="text-xs text-slate-400 mb-3">Quick reference for every profile — what it’s for, style, and recommended Risk Level. Active profiles are highlighted. Tap a row to jump to its controls.</p>
+        <div class="tp-overview-wrap">
+          <table class="tp-overview-table" id="trade-profiles-overview">
+            <thead>
+              <tr>
+                <th scope="col">Profile</th>
+                <th scope="col">Description</th>
+                <th scope="col">Style</th>
+                <th scope="col">Recommended Risk</th>
+              </tr>
+            </thead>
+            <tbody id="trade-profiles-overview-body">
+              <tr><td colspan="4" class="mint">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- ========== TAB: Config ========== -->
@@ -3583,6 +4122,77 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let _strategiesStatus = null;
     let _lastConfig = null;
 
+    /** Canonical profile colours — keep in sync with TRADE_PROFILE_COLORS in tradeProfiles.ts */
+    const PROFILE_VISUALS = {
+      default: { name: 'Default', icon: '◆', color: '#94a3b8' },
+      scalper: { name: 'Scalper', icon: '⚡', color: '#f97316' },
+      dip_buyer: { name: 'Dip Buyer', icon: '↘', color: '#60a5fa' },
+      trend_rider: { name: 'Trend Rider', icon: '▲', color: '#34d399' },
+      migration_sniper: { name: 'Migration Sniper', icon: '🚀', color: '#c084fc' },
+      migration: { name: 'Migration Sniper', icon: '🚀', color: '#c084fc' },
+      high_win_rate: { name: 'High Win-Rate', icon: '◎', color: '#4ade80' },
+      momentum_burst: { name: 'Momentum Burst', icon: '💥', color: '#22d3ee' },
+      steady_compounder: { name: 'Steady Compounder', icon: '◇', color: '#8ba3c7' },
+      reversal_scalper: { name: 'Reversal Scalper', icon: '↺', color: '#ff6b3d' },
+      smart_money_mirror: { name: 'Smart Money Mirror', icon: '⧉', color: '#fbbf24' },
+      legacy: { name: 'Legacy', icon: '·', color: '#64748b' },
+      skipped: { name: 'Skipped', icon: '⊘', color: '#64748b' },
+    };
+
+    function profileColorFor(id) {
+      const known = id && PROFILE_VISUALS[id];
+      return (known && known.color) || '#64748b';
+    }
+
+    function resolveProfileVisual(p) {
+      const stamped = p && (p.tradeProfileId || p.profileId);
+      const candidate = stamped || (p && p.id) || 'legacy';
+      const known = PROFILE_VISUALS[candidate] || null;
+      const resolvedId = known ? candidate : (stamped || 'legacy');
+      const vis = PROFILE_VISUALS[resolvedId] || PROFILE_VISUALS.legacy;
+      const name = (p && p.tradeProfileName) || vis.name || 'Legacy';
+      const icon = (p && p.tradeProfileIcon) || vis.icon || '·';
+      // Prefer canonical palette so badges stay consistent even with old stamps
+      const color = vis.color || '#64748b';
+      return { id: resolvedId, name, icon, color };
+    }
+
+    /** Official legend order (matches Strategies overview). */
+    const PROFILE_LEGEND_IDS = [
+      'scalper',
+      'dip_buyer',
+      'migration_sniper',
+      'high_win_rate',
+      'momentum_burst',
+      'steady_compounder',
+      'reversal_scalper',
+      'smart_money_mirror',
+    ];
+
+    function buildProfileColourLegendHtml() {
+      return PROFILE_LEGEND_IDS.map(function (id) {
+        const v = PROFILE_VISUALS[id];
+        if (!v) return '';
+        return (
+          '<span class="profile-colour-legend-item" style="color:' + v.color +
+          ';border-color:' + v.color + '99;background:' + v.color + '1f" title="' +
+          escHtml(v.name) + '">' +
+            '<span class="profile-colour-legend-swatch" style="background:' + v.color + '" aria-hidden="true"></span>' +
+            '<span class="profile-colour-legend-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
+            '<span class="profile-colour-legend-name">' + escHtml(v.name) + '</span>' +
+          '</span>'
+        );
+      }).join('');
+    }
+
+    function paintProfileColourLegends() {
+      const html = buildProfileColourLegendHtml();
+      document.querySelectorAll('[data-profile-legend-items]').forEach(function (el) {
+        el.innerHTML = html;
+      });
+    }
+    paintProfileColourLegends();
+
     const STRATEGY_SETTING_IDS = {
       wallet_convergence: ['sel-require-convergence', 'sel-min-wallets', 'convergenceRequired'],
       migration_priority: ['enableMigrationOnly', 'migrationSizeMultiplier', 'migrationSlippageBps'],
@@ -3682,6 +4292,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         'tl-hard-filter',
         'tl-priority-fibs',
         'tl-secondary-fibs',
+      ],
+      chart_patterns: [
+        'cp-sensitivity',
+        'cp-mode',
+        'cp-lookback',
+        'cp-min-conf',
+        'cp-breakout',
+        'cp-pullback-near',
+        'cp-min-pole',
+        'cp-max-flag',
+        'cp-min-struct-drop',
+        'cp-max-struct-drop',
+        'cp-vol-dry',
+        'cp-vol-return',
+        'cp-holder-drop',
+        'cp-capitulation',
+        'cp-bear-penalty',
+        'cp-hard-filter',
+        'cp-block-bearish',
+        'cp-pat-ascending_triangle',
+        'cp-pat-descending_triangle',
+        'cp-pat-trendline_break',
+        'cp-pat-holder_distribution',
+        'cp-pat-capitulation',
       ],
       mev_protection: ['useJitoBundles', 'sandwichProtection', 'abortOnSandwichRisk', 'jitoTipLamports', 'tipMultiplier', 'priorityFeeMultiplier', 'sandwichMaxRecentBuys'],
     };
@@ -3861,6 +4495,51 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           c('tl-favour-volume', 'Favour volume / bounce reaction') +
           c('tl-break-close', 'Break + close invalidation') +
           c('tl-hard-filter', 'Hard filter (block if not near Fib/S)'),
+        chart_patterns:
+          '<p class="mint text-xs mb-2">Optional <strong>extra</strong> patterns (triangles, trendline break, holder distribution, capitulation). The top-5 Pump.fun patterns are separate strategy toggles: Volume Dry-up+Return, Falling Wedge, Structured Pullback, Bull Flag, Trend Continuation. Soft boost; configurable sensitivity. Paper / Live Sim / Backtester.</p>' +
+          '<label class="ctl strat-field" data-strategy-control="cp-sensitivity"><span>Sensitivity (shared)</span>' +
+            '<select id="cp-sensitivity">' +
+              '<option value="low">Low (looser)</option>' +
+              '<option value="medium" selected>Medium</option>' +
+              '<option value="high">High (stricter)</option>' +
+            '</select></label>' +
+          '<label class="ctl strat-field" data-strategy-control="cp-mode"><span>Use as</span>' +
+            '<select id="cp-mode">' +
+              '<option value="confirm">Confirmation only</option>' +
+              '<option value="entry">Entry signal only</option>' +
+              '<option value="both" selected>Entry + confirmation</option>' +
+            '</select></label>' +
+          n('cp-lookback', 'Lookback bars', 64, 12, 240, 1) +
+          n('cp-min-conf', 'Min confidence', 55, 30, 90, 1) +
+          n('cp-breakout', 'Breakout %', 1.2, 0.3, 8, 0.1) +
+          n('cp-pullback-near', 'Pullback near %', 3, 0.5, 12, 0.1) +
+          n('cp-min-pole', 'Min pole / impulse %', 25, 10, 200, 1) +
+          n('cp-max-flag', 'Max flag range %', 18, 4, 40, 1) +
+          n('cp-min-struct-drop', 'Structured pullback min %', 8, 3, 40, 1) +
+          n('cp-max-struct-drop', 'Structured pullback max %', 35, 10, 60, 1) +
+          n('cp-vol-dry', 'Volume dry-up ratio', 0.55, 0.2, 0.9, 0.05) +
+          n('cp-vol-return', 'Volume return ratio', 1.35, 1.05, 4, 0.05) +
+          n('cp-holder-drop', 'Holder drop warn %', 8, 2, 40, 0.5) +
+          n('cp-capitulation', 'Capitulation drop %', 28, 12, 70, 1) +
+          n('cp-bear-penalty', 'Bearish conviction penalty', 6, 0, 20, 1) +
+          c('cp-hard-filter', 'Hard filter (require bullish pattern)') +
+          c('cp-block-bearish', 'Block on strong bearish pattern') +
+          '<p class="text-xs text-slate-400 mt-2 mb-1">Extra patterns (this toggle)</p>' +
+          c('cp-pat-ascending_triangle', 'Ascending Triangle Breakout') +
+          c('cp-pat-descending_triangle', 'Descending Triangle (bearish warn)') +
+          c('cp-pat-trendline_break', 'Trendline Break (S/R)') +
+          c('cp-pat-holder_distribution', 'Holder Drop / Distribution') +
+          c('cp-pat-capitulation', 'Big Sell-off / Capitulation'),
+        pattern_volume_dryup_return:
+          '<p class="mint text-xs mb-2">Top Pump.fun setup — volume dries then returns with price. Shared sensitivity under Chart Patterns (extras). <strong>Primary:</strong> Dip Buyer, High Win-Rate, Steady Compounder · <strong>Secondary:</strong> Trend Rider. HWR prefers cleaner, higher-volume versions.</p>',
+        pattern_falling_wedge:
+          '<p class="mint text-xs mb-2">Converging lower highs/lows then breakout. <strong>Primary:</strong> Dip Buyer, High Win-Rate, Reversal Scalper · <strong>Secondary:</strong> Smart Money Mirror. HWR: well-formed wedges on higher liquidity only.</p>',
+        pattern_structured_pullback:
+          '<p class="mint text-xs mb-2">Orderly pullback after a strong run. <strong>Primary:</strong> Dip Buyer, High Win-Rate, Trend Rider · <strong>Secondary:</strong> Steady Compounder. HWR prefers pullbacks on Fib or strong support.</p>',
+        pattern_bull_flag:
+          '<p class="mint text-xs mb-2">Pole + tight flag/pennant continuation. <strong>Primary:</strong> Momentum Burst, Trend Rider, Migration Sniper · <strong>Secondary:</strong> High Win-Rate (stronger / higher MC only).</p>',
+        pattern_trend_continuation:
+          '<p class="mint text-xs mb-2">Buy pullbacks in HH/HL uptrends. <strong>Primary:</strong> Trend Rider, Steady Compounder, Smart Money Mirror · <strong>Secondary:</strong> High Win-Rate (higher holders, volume, structure).</p>',
         early_entry_only:
           '<p class="mint text-xs mb-2">Tightens max entry age (≤8m) and prefer-within window. Stacks with Time-Based Entry.</p>',
         hard_quality_gate:
@@ -4010,9 +4689,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '');
       }
       if (restore) restore.disabled = !data.canRestorePrevious;
-      document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset]').forEach(btn => {
+      document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset], #strategy-presets-suite [data-preset]').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-preset') === preset);
       });
+      const suitePresets = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
+      const qualityPacks = ['high_win_rate', 'win_rate_55_60', 'balanced', 'aggressive'];
+      const shortPacks = suitePresets.concat(['quick_scalper','micro_scalper','momentum_burst','post_migration_scalp','reversal_scalp']);
+      const suiteEl = document.getElementById('scalper-suite-settings');
+      if (suiteEl) {
+        suiteEl.classList.toggle('is-hidden-suite', suitePresets.indexOf(preset) < 0);
+      }
+      const modLabel = document.getElementById('module-packs-active-label');
+      if (modLabel) {
+        modLabel.textContent = qualityPacks.indexOf(preset) >= 0 ? '· active: ' + preset.replace(/_/g, ' ') : '';
+      }
+      const scalpLabel = document.getElementById('scalp-packs-active-label');
+      if (scalpLabel) {
+        scalpLabel.textContent = shortPacks.indexOf(preset) >= 0 ? '· active: ' + preset.replace(/_/g, ' ') : '';
+      }
+      // Auto-open the relevant optional panel when a pack is active
+      const modPanel = document.getElementById('module-packs-panel');
+      const scalpPanel = document.getElementById('scalp-packs-panel');
+      if (modPanel && qualityPacks.indexOf(preset) >= 0) modPanel.open = true;
+      if (scalpPanel && shortPacks.indexOf(preset) >= 0) scalpPanel.open = true;
+      const shortTermPresets = shortPacks;
       if (warning) {
         const activePreset = (data.presets || []).find(p => p.active);
         const warnText = data.highWinRatePresetActive
@@ -4020,7 +4720,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : (activePreset && activePreset.description);
         warning.textContent = warnText ? ('⚠ ' + warnText) : '';
         warning.classList.toggle('hidden', !(data.highWinRatePresetActive || (preset !== 'custom' && warnText)));
-        const shortTermPresets = ['scalper_suite','aggressive_scalper','conservative_scalper','quick_scalper','micro_scalper','momentum_burst','post_migration_scalp','reversal_scalp'];
         if (preset === 'high_win_rate' || data.highWinRatePresetActive) {
           warning.style.background = '#422006';
           warning.style.borderColor = '#92400e';
@@ -4069,6 +4768,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           warning.style.background = '#422006';
           warning.style.borderColor = '#92400e';
           warning.style.color = '#fde68a';
+          if (!warnText) warning.classList.toggle('hidden', true);
         }
       }
       const btBanner = document.getElementById('bt-config-banner');
@@ -4307,6 +5007,42 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (tlBreak) tlBreak.checked = data.technicalLevels?.requireBreakCloseInvalidation !== false;
       const tlHard = document.getElementById('tl-hard-filter');
       if (tlHard) tlHard.checked = data.technicalLevels?.hardFilter === true;
+      const cp = data.chartPatterns || {};
+      const cpSens = document.getElementById('cp-sensitivity');
+      if (cpSens && cp.sensitivity) cpSens.value = cp.sensitivity;
+      const cpMode = document.getElementById('cp-mode');
+      if (cpMode && cp.mode) cpMode.value = cp.mode;
+      const setCpNum = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+      };
+      setCpNum('cp-lookback', cp.lookbackBars);
+      setCpNum('cp-min-conf', cp.minConfidence);
+      setCpNum('cp-breakout', cp.breakoutPct);
+      setCpNum('cp-pullback-near', cp.pullbackNearPct);
+      setCpNum('cp-min-pole', cp.minPoleRunPct);
+      setCpNum('cp-max-flag', cp.maxFlagRangePct);
+      setCpNum('cp-min-struct-drop', cp.minStructuredDropPct);
+      setCpNum('cp-max-struct-drop', cp.maxStructuredDropPct);
+      setCpNum('cp-vol-dry', cp.volumeDryupRatio);
+      setCpNum('cp-vol-return', cp.volumeReturnRatio);
+      setCpNum('cp-holder-drop', cp.holderDropPct);
+      setCpNum('cp-capitulation', cp.capitulationDropPct);
+      setCpNum('cp-bear-penalty', cp.bearishPenalty);
+      const cpHard = document.getElementById('cp-hard-filter');
+      if (cpHard) cpHard.checked = cp.hardFilter === true;
+      const cpBlock = document.getElementById('cp-block-bearish');
+      if (cpBlock) cpBlock.checked = cp.blockOnBearish === true;
+      const patIds = [
+        'ascending_triangle', 'descending_triangle', 'trendline_break',
+        'holder_distribution', 'capitulation',
+      ];
+      patIds.forEach(function (id) {
+        const el = document.getElementById('cp-pat-' + id);
+        if (!el) return;
+        const on = cp.patterns && cp.patterns[id] ? cp.patterns[id].enabled !== false : false;
+        el.checked = on;
+      });
       const suiteProfiles = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
       const suiteMax = document.getElementById('suite-max-pos');
       if (suiteMax) {
@@ -4357,9 +5093,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         chips.innerHTML = list.length
           ? list.map(function (p) {
               const on = p.active;
+              const color = profileColorFor(p.id) || p.color || '#94a3b8';
               return (
-                '<span class="tp-chip' + (on ? '' : ' is-off') + '" style="color:' + (p.color || '#94a3b8') +
-                ';border-color:' + (p.color || '#94a3b8') + '66" title="' + escHtml(p.description || p.name) + '">' +
+                '<span class="tp-chip' + (on ? '' : ' is-off') + '" style="color:' + color +
+                ';border-color:' + color + '99;background:' + color + '22" title="' + escHtml(p.description || p.name) + '">' +
                 escHtml(p.icon || '') + ' ' + escHtml(p.name) + (on ? '' : ' (off)') +
                 '</span>'
               );
@@ -4370,28 +5107,313 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         toggles.innerHTML = (tp.profiles || []).map(function (p) {
           const checked = p.enabled !== false ? ' checked' : '';
           const disabled = p.id === 'default' ? ' disabled' : '';
+          const er = p.exitRules || {};
+          const match = p.match || {};
+          const off = p.officialExitRules || {};
+          const om = p.officialMatch || {};
+          const num = function (v, fallback) {
+            if (v == null || v === '') return fallback != null ? fallback : '';
+            return v;
+          };
+          const blurb =
+            '<p class="tp-blurb">' + escHtml(p.description || '') + '</p>';
+          const prim = Array.isArray(match.primaryPatternIds)
+            ? match.primaryPatternIds
+            : Array.isArray(om.primaryPatternIds)
+              ? om.primaryPatternIds
+              : [];
+          const sec = Array.isArray(match.secondaryPatternIds)
+            ? match.secondaryPatternIds
+            : Array.isArray(om.secondaryPatternIds)
+              ? om.secondaryPatternIds
+              : [];
+          const patternLine =
+            prim.length || sec.length
+              ? '<p class="mint text-xs tp-patterns" style="margin:0.25rem 0 0.4rem">' +
+                (prim.length
+                  ? '<span title="Primary patterns">★ ' +
+                    escHtml(prim.join(', ')) +
+                    '</span>'
+                  : '') +
+                (prim.length && sec.length ? ' · ' : '') +
+                (sec.length
+                  ? '<span title="Secondary patterns">☆ ' +
+                    escHtml(sec.join(', ')) +
+                    '</span>'
+                  : '') +
+                '</p>'
+              : '';
+          const risk =
+            p.recommendedRisk
+              ? '<div class="tp-risk"><span class="tp-risk-label">Risk</span><span class="tp-risk-value">' +
+                escHtml(p.recommendedRisk) +
+                '</span></div>'
+              : '';
           const rules = Array.isArray(p.rulesSummary) && p.rulesSummary.length
-            ? '<ul class="tp-desc" style="margin:0.35rem 0 0;padding-left:1rem;list-style:disc">' +
+            ? '<details class="tp-rules"><summary>Params &amp; rules</summary>' +
+              '<ul class="tp-desc" style="margin:0;padding-left:1rem;list-style:disc">' +
               p.rulesSummary.slice(0, 6).map(function (r) {
                 return '<li>' + escHtml(r) + '</li>';
               }).join('') +
-              '</ul>'
-            : '<div class="tp-desc">' + escHtml(p.description || '') + '</div>';
+              '</ul></details>'
+            : '';
+          const editable = p.id !== 'default';
+          const params = editable
+            ? (
+              '<div class="tp-params" data-tp-id="' + escHtml(p.id) + '">' +
+                '<label>TP min %<input type="number" data-k="takeProfitPctMin" step="0.5" value="' + escHtml(String(num(er.takeProfitPctMin, off.takeProfitPctMin))) + '" /></label>' +
+                '<label>TP max %<input type="number" data-k="takeProfitPctMax" step="0.5" value="' + escHtml(String(num(er.takeProfitPctMax != null ? er.takeProfitPctMax : er.takeProfitPct, off.takeProfitPctMax != null ? off.takeProfitPctMax : off.takeProfitPct))) + '" /></label>' +
+                '<label>SL min %<input type="number" data-k="stopLossPctMin" step="0.5" value="' + escHtml(String(num(er.stopLossPctMin != null ? er.stopLossPctMin : er.stopLossPct, off.stopLossPctMin != null ? off.stopLossPctMin : off.stopLossPct))) + '" /></label>' +
+                '<label>SL max %<input type="number" data-k="stopLossPctMax" step="0.5" value="' + escHtml(String(num(er.stopLossPctMax != null ? er.stopLossPctMax : er.stopLossPct, off.stopLossPctMax != null ? off.stopLossPctMax : off.stopLossPct))) + '" /></label>' +
+                '<label>Hold min (s)<input type="number" data-k="hardTimeLimitSecMin" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMin, off.hardTimeLimitSecMin))) + '" /></label>' +
+                '<label>Hold max (s)<input type="number" data-k="hardTimeLimitSecMax" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMax, off.hardTimeLimitSecMax))) + '" /></label>' +
+                '<label>Size ×<input type="number" data-k="sizeMultiplier" step="0.05" min="0.2" max="2" value="' + escHtml(String(num(er.sizeMultiplier, off.sizeMultiplier != null ? off.sizeMultiplier : 1))) + '" /></label>' +
+                '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
+                (p.id === 'high_win_rate'
+                  ? (function () {
+                      const qf = Object.assign(
+                        {
+                          enabled: true,
+                          mode: 'reject',
+                          minMarketCapUsd: 200000,
+                          preferMarketCapUsd: 400000,
+                          minLiquidityUsd: 12000,
+                          minVolumeH1Usd: 6000,
+                          minHolders: 80,
+                          weakSetupPenalty: 40,
+                          minPatternConfidence: 68,
+                          cleanSetupBonus: 10,
+                          applyToFibSupport: true,
+                          preferFibOrSupport: true,
+                        },
+                        om.qualityFilter || {},
+                        match.qualityFilter || {}
+                      );
+                      return (
+                        '<div class="tp-qf" style="grid-column:1/-1;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid #334155">' +
+                          '<p class="mint text-xs" style="margin:0 0 0.4rem"><strong style="color:#4ade80">Quality Filter</strong> — stricter MC / liq / volume / holders on technical patterns (HWR only)</p>' +
+                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                            '<input type="checkbox" data-qf="enabled"' + (qf.enabled !== false ? ' checked' : '') + ' />' +
+                            '<span>Enable Quality Filter</span></label>' +
+                          '<label>Mode<select data-qf="mode">' +
+                            '<option value="reject"' + (qf.mode !== 'penalize' ? ' selected' : '') + '>Reject weak setups</option>' +
+                            '<option value="penalize"' + (qf.mode === 'penalize' ? ' selected' : '') + '>Penalize only</option>' +
+                          '</select></label>' +
+                          '<label>Min MC $<input type="number" data-qf="minMarketCapUsd" step="1000" value="' + escHtml(String(qf.minMarketCapUsd)) + '" /></label>' +
+                          '<label>Prefer MC $<input type="number" data-qf="preferMarketCapUsd" step="1000" value="' + escHtml(String(qf.preferMarketCapUsd)) + '" /></label>' +
+                          '<label>Min liquidity $<input type="number" data-qf="minLiquidityUsd" step="500" value="' + escHtml(String(qf.minLiquidityUsd)) + '" /></label>' +
+                          '<label>Min vol 1h $<input type="number" data-qf="minVolumeH1Usd" step="500" value="' + escHtml(String(qf.minVolumeH1Usd)) + '" /></label>' +
+                          '<label>Min holders<input type="number" data-qf="minHolders" step="1" value="' + escHtml(String(qf.minHolders)) + '" /></label>' +
+                          '<label>Min pattern conf<input type="number" data-qf="minPatternConfidence" step="1" min="30" max="95" value="' + escHtml(String(qf.minPatternConfidence)) + '" /></label>' +
+                          '<label>Weak penalty<input type="number" data-qf="weakSetupPenalty" step="1" value="' + escHtml(String(qf.weakSetupPenalty)) + '" /></label>' +
+                          '<label>Clean bonus<input type="number" data-qf="cleanSetupBonus" step="1" value="' + escHtml(String(qf.cleanSetupBonus)) + '" /></label>' +
+                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                            '<input type="checkbox" data-qf="applyToFibSupport"' + (qf.applyToFibSupport !== false ? ' checked' : '') + ' />' +
+                            '<span>Apply to Fib / Support</span></label>' +
+                          '<label class="ctl" style="flex-direction:row;align-items:center;gap:0.4rem">' +
+                            '<input type="checkbox" data-qf="preferFibOrSupport"' + (qf.preferFibOrSupport !== false ? ' checked' : '') + ' />' +
+                            '<span>Pullbacks need Fib/Support</span></label>' +
+                        '</div>'
+                      );
+                    })()
+                  : '') +
+                '<div class="tp-params-actions">' +
+                  '<button type="button" class="btn btn-primary" onclick="saveTradeProfileParams(\\'' + p.id + '\\')">Save</button>' +
+                  '<button type="button" class="btn btn-secondary" onclick="resetTradeProfileParams(\\'' + p.id + '\\')">Reset defaults</button>' +
+                  (p.hasOverrides ? '<span class="tp-override-badge">customised</span>' : '<span class="mint text-xs">official defaults</span>') +
+                '</div>' +
+              '</div>'
+            )
+            : '';
+          const color = profileColorFor(p.id) || p.color || '#94a3b8';
           return (
-            '<div class="tp-toggle-card" style="border-color:' + (p.color || '#334155') + '55;max-width:18rem">' +
+            '<div class="tp-toggle-card" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="border-color:' + color + '88;box-shadow:inset 3px 0 0 ' + color + '">' +
               '<div class="tp-head">' +
-                '<span class="tp-name" style="color:' + (p.color || '#e2e8f0') + '">' +
+                '<span class="tp-name" style="color:' + color + '">' +
                   escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                  (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
                 '</span>' +
                 '<input type="checkbox"' + checked + disabled +
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="Enable ' + escHtml(p.name) + '" />' +
               '</div>' +
+              blurb +
+              patternLine +
+              risk +
               rules +
+              params +
             '</div>'
           );
         }).join('');
       }
+      const overviewBody = document.getElementById('trade-profiles-overview-body');
+      if (overviewBody) {
+        const overviewIds = [
+          'scalper',
+          'dip_buyer',
+          'migration_sniper',
+          'high_win_rate',
+          'momentum_burst',
+          'steady_compounder',
+          'reversal_scalper',
+          'smart_money_mirror',
+        ];
+        const byId = {};
+        (tp.profiles || []).forEach(function (p) { byId[p.id] = p; });
+        const rows = overviewIds.map(function (id) { return byId[id]; }).filter(Boolean);
+        overviewBody.innerHTML = rows.length
+          ? rows.map(function (p) {
+              const on = p.active;
+              const color = profileColorFor(p.id) || p.color || '#e2e8f0';
+              return (
+                '<tr class="' + (on ? 'is-active' : 'is-off') + '" tabindex="0" role="button" ' +
+                  'onclick="focusTradeProfileCard(\\'' + p.id + '\\')" ' +
+                  'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();focusTradeProfileCard(\\'' + p.id + '\\')}" ' +
+                  'title="' + (on ? 'Active — jump to controls' : 'Off — jump to controls') + '">' +
+                  '<td><span class="tp-overview-name" style="color:' + color + '">' +
+                    escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                    (on ? '<span class="tp-overview-active-tag">on</span>' : '') +
+                  '</span></td>' +
+                  '<td class="tp-overview-desc">' + escHtml(p.description || '') + '</td>' +
+                  '<td class="tp-overview-style">' + escHtml(p.style || '—') + '</td>' +
+                  '<td><span class="tp-overview-risk">' + escHtml(p.recommendedRisk || '—') + '</span></td>' +
+                '</tr>'
+              );
+            }).join('')
+          : '<tr><td colspan="4" class="mint">No profiles</td></tr>';
+      }
+      renderAutoScoringUi(tp);
     }
+
+    function renderAutoScoringUi(tp) {
+      const auto = tp && tp.autoScoring ? tp.autoScoring : null;
+      const en = document.getElementById('auto-scoring-enabled');
+      const minEl = document.getElementById('auto-scoring-min');
+      const skipEl = document.getElementById('auto-scoring-skip');
+      const forceEl = document.getElementById('auto-scoring-force');
+      if (en) en.checked = !auto || auto.enabled !== false;
+      if (minEl && auto && auto.minScore != null) minEl.value = auto.minScore;
+      if (skipEl) skipEl.checked = !auto || auto.skipBelowMin !== false;
+      if (forceEl) {
+        const opts = ['<option value="">— none (auto pick) —</option>'];
+        (tp.profiles || []).forEach(function (p) {
+          if (p.id === 'default') return;
+          const sel = auto && auto.forceProfileId === p.id ? ' selected' : '';
+          opts.push(
+            '<option value="' + escHtml(p.id) + '"' + sel + '>' +
+              escHtml((p.icon || '') + ' ' + p.name) +
+              (p.enabled === false ? ' (off)' : '') +
+            '</option>'
+          );
+        });
+        forceEl.innerHTML = opts.join('');
+      }
+      const w = (auto && auto.weights) || {};
+      document.querySelectorAll('#auto-scoring-weights input[data-w]').forEach(function (inp) {
+        const k = inp.getAttribute('data-w');
+        if (k && w[k] != null) inp.value = w[k];
+      });
+      updateAutoWeightTotal();
+      const decEl = document.getElementById('auto-scoring-decisions');
+      if (decEl) {
+        const list = tp.recentDecisions || [];
+        if (!list.length) {
+          decEl.innerHTML = '<span class="mint">No decisions yet — scores appear when setups are evaluated</span>';
+        } else {
+          decEl.innerHTML = list.slice(0, 20).map(function (d) {
+            const when = d.at ? new Date(d.at).toLocaleTimeString() : '';
+            const color = profileColorFor(d.profileId) || '#e2e8f0';
+            const top = (d.topScores || []).slice(0, 3).map(function (t) {
+              const tc = profileColorFor(t.id);
+              return '<span style="color:' + tc + '">' + escHtml(t.name) + '</span>=' + Number(t.score).toFixed(0);
+            }).join(' · ');
+            return (
+              '<div class="tp-decision-row' + (d.skipped ? ' is-skip' : '') + '" style="border-left:3px solid ' + color + '">' +
+                '<span>' + escHtml(d.icon || '') + ' <strong style="color:' + color + '">' + escHtml(d.profileName || '') + '</strong></span>' +
+                '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + (d.forced ? ' · forced' : '') + (d.autoScored ? ' · auto' : '') + ' · ' + escHtml(when) + '</span>' +
+                '<span class="tp-decision-score" style="color:' + color + '">' + (d.score != null ? Number(d.score).toFixed(1) : '—') + '</span>' +
+                '<div class="tp-decision-why">' + escHtml(d.reason || '') + (top ? ' · top: ' + top : '') + '</div>' +
+              '</div>'
+            );
+          }).join('');
+        }
+      }
+    }
+
+    function updateAutoWeightTotal() {
+      let sum = 0;
+      document.querySelectorAll('#auto-scoring-weights input[data-w]').forEach(function (inp) {
+        const n = Number(inp.value);
+        if (Number.isFinite(n)) sum += n;
+      });
+      const el = document.getElementById('auto-scoring-weight-total');
+      if (el) {
+        el.textContent = '(' + sum + '%)';
+        el.style.color = sum === 100 ? '#94a3b8' : '#fbbf24';
+      }
+    }
+    window.updateAutoWeightTotal = updateAutoWeightTotal;
+
+    async function saveAutoScoringFromUi() {
+      const weights = {};
+      document.querySelectorAll('#auto-scoring-weights input[data-w]').forEach(function (inp) {
+        const k = inp.getAttribute('data-w');
+        const n = Number(inp.value);
+        if (k && Number.isFinite(n)) weights[k] = n;
+      });
+      updateAutoWeightTotal();
+      const forceEl = document.getElementById('auto-scoring-force');
+      const forceVal = forceEl ? forceEl.value : '';
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            autoScoring: {
+              enabled: !!(document.getElementById('auto-scoring-enabled') || {}).checked,
+              minScore: Number((document.getElementById('auto-scoring-min') || {}).value) || 0,
+              skipBelowMin: !!(document.getElementById('auto-scoring-skip') || {}).checked,
+              forceProfileId: forceVal || null,
+              weights: weights,
+            },
+          }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.saveAutoScoringFromUi = saveAutoScoringFromUi;
+
+    async function resetAutoScoringWeights() {
+      const defaults = {
+        volume: 20,
+        smartMoney: 16,
+        tokenAge: 12,
+        volatility: 11,
+        supportFib: 10,
+        chartPatterns: 10,
+        migration: 9,
+        liquidityHolders: 7,
+        session: 5,
+      };
+      document.querySelectorAll('#auto-scoring-weights input[data-w]').forEach(function (inp) {
+        const k = inp.getAttribute('data-w');
+        if (k && defaults[k] != null) inp.value = defaults[k];
+      });
+      updateAutoWeightTotal();
+      await saveAutoScoringFromUi();
+    }
+    window.resetAutoScoringWeights = resetAutoScoringWeights;
+
+    function focusTradeProfileCard(id) {
+      const card = document.getElementById('tp-card-' + id);
+      if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('tp-card-flash');
+      setTimeout(function () { card.classList.remove('tp-card-flash'); }, 1200);
+    }
+    window.focusTradeProfileCard = focusTradeProfileCard;
 
     async function toggleMultiProfiles(enabled) {
       try {
@@ -4422,6 +5444,68 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.toggleTradeProfile = toggleTradeProfile;
+
+    async function saveTradeProfileParams(id) {
+      const root = document.querySelector('.tp-params[data-tp-id="' + id + '"]');
+      if (!root) return;
+      const exitRules = {};
+      const match = {};
+      root.querySelectorAll('input[data-k]').forEach(function (inp) {
+        const k = inp.getAttribute('data-k');
+        const raw = inp.value;
+        if (raw === '' || raw == null) return;
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return;
+        if (inp.getAttribute('data-match') === '1') match[k] = n;
+        else exitRules[k] = n;
+      });
+      // High Win-Rate Quality Filter (nested)
+      const qfRoot = root.querySelector('.tp-qf');
+      if (qfRoot) {
+        const qf = {};
+        qfRoot.querySelectorAll('[data-qf]').forEach(function (el) {
+          const k = el.getAttribute('data-qf');
+          if (!k) return;
+          if (el.type === 'checkbox') {
+            qf[k] = !!el.checked;
+          } else if (el.tagName === 'SELECT') {
+            qf[k] = el.value;
+          } else {
+            const n = Number(el.value);
+            if (Number.isFinite(n)) qf[k] = n;
+          }
+        });
+        match.qualityFilter = qf;
+      }
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id, params: { exitRules: exitRules, match: match } }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.saveTradeProfileParams = saveTradeProfileParams;
+
+    async function resetTradeProfileParams(id) {
+      if (!confirm('Reset ' + id + ' to official defaults?')) return;
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id, resetParams: true }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.resetTradeProfileParams = resetTradeProfileParams;
 
     async function toggleStrategy(key, enabled) {
       const def = _strategiesStatus && (_strategiesStatus.registry || []).find(s => s.key === key);
@@ -4460,8 +5544,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (action === 'scalper_suite' && !confirm('Apply Scalper Suite (Standard)?\\n\\nBalanced timers/TP/SL for Micro + Momentum + Post-Migration (+ Reversal). Anti-Rug + Volume stay ON. Fine-tune after apply. Current settings kept for Restore Previous.')) return;
       if (action === 'aggressive_scalper' && !confirm('Apply Aggressive Scalper?\\n\\nFaster timers, higher TP targets, looser volume filters, slightly larger size. Anti-Rug + Volume stay ON. Fine-tune after apply.')) return;
       if (action === 'conservative_scalper' && !confirm('Apply Conservative Scalper?\\n\\nTighter stops, stricter volume/liquidity, smaller size, more aggressive dead-market exit. Anti-Rug + Volume stay ON. Fine-tune after apply.')) return;
-      if (action === 'balanced' && !confirm('Apply Balanced Preset?\\n\\nBest overall risk/reward balance. Your current custom settings are kept for Restore Previous.')) return;
-      if (action === 'aggressive' && !confirm('Apply Aggressive Preset?\\n\\nMore opportunities, still protected. Your current custom settings are kept for Restore Previous.')) return;
+      if (action === 'balanced' && !confirm('Apply Balanced pack?\\n\\nBest overall risk/reward start for module toggles. Does not replace Trade Profiles. Current settings kept for Restore Previous.')) return;
+      if (action === 'aggressive' && !confirm('Apply Aggressive pack?\\n\\nMore opportunities, still protected. Does not replace Trade Profiles.')) return;
+      if (action === 'quick_scalper' && !confirm('Apply Quick Scalper engine?\\n\\nEnables timed quick-scalp module. With Multi-profile ON, the Scalper trade profile usually owns exits — this mainly turns the engine on.\\n\\nPrefer enabling the Scalper Trade Profile instead unless you want the legacy single-engine pack.')) return;
+      if (action === 'micro_scalper' && !confirm('Apply Micro-Scalper engine?\\n\\nUltra-fast holds. With Multi-profile ON, prefer Trade Profiles; this turns the micro engine on as a pack.')) return;
+      if (action === 'momentum_burst' && !confirm('Apply Momentum Burst engine?\\n\\nMaps to the Momentum Burst Trade Profile when multi-profile assigns that style.')) return;
+      if (action === 'post_migration_scalp' && !confirm('Apply Post-Migration Scalp engine?\\n\\nMaps to Migration Sniper Trade Profile when multi-profile assigns that style.')) return;
+      if (action === 'reversal_scalp' && !confirm('Apply Reversal Scalp engine?\\n\\nMaps to Reversal Scalper Trade Profile when multi-profile assigns that style.')) return;
       if (action === 'restore' && !confirm('Restore the strategy settings saved before the preset?')) return;
       try {
         const data = await fetchJSON('/api/strategies', {
@@ -4987,6 +6076,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '</span>' +
           '<div class="pos-token-main">' +
             fmtToken(p.symbol, p.name, p.mint) +
+            fmtTradeProfileBadge(p) +
             (riskBit || '') +
             fmtOpenStatusBadges(p, prog) +
           '</div>' +
@@ -5153,7 +6243,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '<span class="trade-pnl-badge is-' + pnlTone + '" title="' + badgeTitle + '" aria-label="' + badgeTitle + '">' +
           badgeLabel +
         '</span>' +
-        '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>',
+        '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>' +
+        fmtTradeProfileBadge(p),
         '<span class="trade-group-summary-exits">' + partialBit + '</span>',
       ];
       if (entryBit) {
@@ -5233,15 +6324,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return groups;
     }
 
-    function fmtTradeProfileBadge(p) {
-      const name = (p && (p.tradeProfileName || p.tradeProfileId)) || 'Legacy';
-      const icon = (p && p.tradeProfileIcon) || '·';
-      const color = (p && p.tradeProfileColor) || '#64748b';
-      const title = name + (p && p.tradeProfileId ? ' (' + p.tradeProfileId + ')' : '');
+    function fmtTradeProfileBadge(p, opts) {
+      opts = opts || {};
+      const v = resolveProfileVisual(p);
+      const scoreBit =
+        !opts.hideScore &&
+        p &&
+        p.tradeProfileScore != null &&
+        Number.isFinite(Number(p.tradeProfileScore))
+          ? ' · ' + Number(p.tradeProfileScore).toFixed(0)
+          : '';
+      const title =
+        v.name +
+        (v.id ? ' (' + v.id + ')' : '') +
+        scoreBit +
+        (p && p.tradeProfileReason ? ' — ' + String(p.tradeProfileReason) : '');
+      const compact = opts.compact === true;
       return (
-        '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + color +
-        ';border-color:' + color + '33;background:' + color + '18">' +
-        escHtml(icon) + ' ' + escHtml(name) +
+        '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + v.color +
+        ';border-color:' + v.color + '99;background:' + v.color + '28">' +
+        '<span class="tpb-icon">' + escHtml(v.icon) + '</span>' +
+        (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         '</span>'
       );
     }
@@ -5279,7 +6382,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (opts.hidden ? ' hidden' : '') +
         '>' +
           '<td>' + tokenCell + '</td>' +
-          '<td>' + fmtTradeProfileBadge(p) + '</td>' +
+          '<td>' + fmtTradeProfileBadge(opts.profileSource || p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="Market cap at exit">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
@@ -5318,7 +6421,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     window._closedTradesFilter = window._closedTradesFilter || 'all';
     window._closedProfileFilter = window._closedProfileFilter || 'all';
+    window._openProfileFilter = window._openProfileFilter || 'all';
     window._closedTradeGroups = window._closedTradeGroups || [];
+    window._lastOpenPositions = window._lastOpenPositions || [];
 
     function syncClosedTradesFilterButtons(filter) {
       document.querySelectorAll('[data-closed-filter]').forEach((btn) => {
@@ -5330,7 +6435,46 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const active = btn.getAttribute('data-closed-profile-filter') === (window._closedProfileFilter || 'all');
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (active && btn.getAttribute('data-closed-profile-filter') !== 'all') {
+          const c = btn.style.borderColor || '#94a3b8';
+          btn.style.background = (c.length === 7 ? c + '33' : c);
+        } else if (!active) {
+          btn.style.background = '';
+        }
       });
+      document.querySelectorAll('[data-open-profile-filter]').forEach((btn) => {
+        const active = btn.getAttribute('data-open-profile-filter') === (window._openProfileFilter || 'all');
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        if (active && btn.getAttribute('data-open-profile-filter') !== 'all') {
+          const c = btn.style.borderColor || '#94a3b8';
+          btn.style.background = (c.length === 7 ? c + '33' : c);
+        } else if (!active) {
+          btn.style.background = '';
+        }
+      });
+    }
+
+    function buildProfileFilterHtml(attrName, clickFn, activeId, idsMap) {
+      let html =
+        '<button type="button" class="closed-filter-btn' +
+        ((activeId || 'all') === 'all' ? ' is-active' : '') +
+        '" ' + attrName + '="all" onclick="' + clickFn + '(\\'all\\')" aria-pressed="' +
+        ((activeId || 'all') === 'all' ? 'true' : 'false') +
+        '">All</button>';
+      idsMap.forEach((info) => {
+        const active = (activeId || 'all') === info.id;
+        html +=
+          '<button type="button" class="closed-filter-btn' + (active ? ' is-active' : '') +
+          '" ' + attrName + '="' + info.id +
+          '" onclick="' + clickFn + '(\\'' + info.id + '\\')" aria-pressed="' +
+          (active ? 'true' : 'false') +
+          '" style="color:' + info.color + ';border-color:' + info.color +
+          (active ? ';background:' + info.color + '33' : '') + '">' +
+          escHtml(info.icon) + ' ' + escHtml(info.name) +
+          '</button>';
+      });
+      return html;
     }
 
     function rebuildClosedProfileFilterButtons(groups) {
@@ -5340,29 +6484,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       (groups || []).forEach((g) => {
         const p = g && g.parent;
         if (!p) return;
-        const id = p.tradeProfileId || 'legacy';
-        const name = p.tradeProfileName || (id === 'legacy' ? 'Legacy' : id);
-        const icon = p.tradeProfileIcon || '·';
-        const color = p.tradeProfileColor || '#64748b';
-        if (!ids.has(id)) ids.set(id, { id, name, icon, color });
+        const v = resolveProfileVisual(p);
+        if (!ids.has(v.id)) ids.set(v.id, v);
       });
-      let html =
-        '<button type="button" class="closed-filter-btn' +
-        ((window._closedProfileFilter || 'all') === 'all' ? ' is-active' : '') +
-        '" data-closed-profile-filter="all" onclick="setClosedProfileFilter(\\'all\\')" aria-pressed="' +
-        ((window._closedProfileFilter || 'all') === 'all' ? 'true' : 'false') +
-        '">All profiles</button>';
-      ids.forEach((info) => {
-        const active = (window._closedProfileFilter || 'all') === info.id;
-        html +=
-          '<button type="button" class="closed-filter-btn' + (active ? ' is-active' : '') +
-          '" data-closed-profile-filter="' + info.id +
-          '" onclick="setClosedProfileFilter(\\'' + info.id + '\\')" aria-pressed="' +
-          (active ? 'true' : 'false') +
-          '" style="border-color:' + info.color + '66">' +
-          escHtml(info.icon) + ' ' + escHtml(info.name) +
-          '</button>';
+      const html = buildProfileFilterHtml(
+        'data-closed-profile-filter',
+        'setClosedProfileFilter',
+        window._closedProfileFilter || 'all',
+        ids
+      );
+      els.forEach((el) => { el.innerHTML = html; });
+    }
+
+    function rebuildOpenProfileFilterButtons(positions) {
+      const els = document.querySelectorAll('.open-profile-filter');
+      if (!els.length) return;
+      const ids = new Map();
+      (positions || []).forEach((p) => {
+        const v = resolveProfileVisual(p);
+        if (!ids.has(v.id)) ids.set(v.id, v);
       });
+      const html = buildProfileFilterHtml(
+        'data-open-profile-filter',
+        'setOpenProfileFilter',
+        window._openProfileFilter || 'all',
+        ids
+      );
       els.forEach((el) => { el.innerHTML = html; });
     }
 
@@ -5375,10 +6522,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const pf = window._closedProfileFilter || 'all';
       if (pf && pf !== 'all') {
-        list = list.filter((g) => {
-          const id = (g.parent && g.parent.tradeProfileId) || 'legacy';
-          return id === pf;
-        });
+        list = list.filter((g) => resolveProfileVisual(g.parent).id === pf);
       }
       return list;
     }
@@ -5464,6 +6608,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             rowClass: 'trade-group-child' + (isLast ? ' trade-group-child-last' : ''),
             groupAttr: ' data-group="' + g.gid + '"',
             hidden: true,
+            profileSource: p,
             exitLabel: labelClosedExit(c, partialIdx, g.initialCost) + '<br/>',
             reasonOverride: isFinal
               ? fmtExitStyleHtml(c.reason)
@@ -5501,6 +6646,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       paintClosedTradesTables();
     }
     window.setClosedProfileFilter = setClosedProfileFilter;
+
+    function setOpenProfileFilter(profileId) {
+      window._openProfileFilter = profileId || 'all';
+      paintOpenPositionsTables();
+    }
+    window.setOpenProfileFilter = setOpenProfileFilter;
+
+    function paintOpenPositionsTables() {
+      const all = window._lastOpenPositions || [];
+      rebuildOpenProfileFilterButtons(all);
+      const pf = window._openProfileFilter || 'all';
+      const list =
+        pf && pf !== 'all'
+          ? all.filter((p) => resolveProfileVisual(p).id === pf)
+          : all;
+      if (typeof window._renderOpenPositionsHtml === 'function') {
+        const html = window._renderOpenPositionsHtml(list);
+        document.querySelectorAll('#positions-table tbody, #trades-positions-table tbody').forEach((ptbody) => {
+          ptbody.innerHTML = html;
+        });
+        ensurePosHoldTicker();
+        tickOpenPositionHolds();
+      }
+      const count = list.length;
+      const total = all.length;
+      const empty = total === 0;
+      const label =
+        pf && pf !== 'all' && total > 0
+          ? count + ' / ' + total + ' open'
+          : total + ' open';
+      ['open-positions-badge', 'trades-open-positions-badge'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = label;
+        el.setAttribute('data-empty', empty ? '1' : '0');
+      });
+      syncClosedTradesFilterButtons(window._closedTradesFilter || 'all');
+    }
 
     /**
      * Copied wallet + converging wallets.
@@ -7762,28 +8945,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const trailArmAt = (cfg && cfg.risk && cfg.risk.trailingActivationProfit != null)
         ? cfg.risk.trailingActivationProfit
         : 30;
-      const posOpenN = positions.open.length;
-      ['open-positions-badge', 'trades-open-positions-badge'].forEach((id) => {
-        const posBadge = document.getElementById(id);
-        if (posBadge) {
-          posBadge.textContent = posOpenN + ' open';
-          posBadge.setAttribute('data-empty', posOpenN === 0 ? '1' : '0');
+      window._trailArmAt = trailArmAt;
+      window._lastOpenPositions = positions.open || [];
+      window._renderOpenPositionsHtml = function renderOpenPositionsHtml(list) {
+        const armAt = window._trailArmAt != null ? window._trailArmAt : 30;
+        if (!list || list.length === 0) {
+          const pf = window._openProfileFilter || 'all';
+          if (pf && pf !== 'all') {
+            return '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions for this profile</strong><span>Clear the profile filter or wait for a matching fill.</span></div></td></tr>';
+          }
+          return '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>';
         }
-      });
-      ['sell-all-open', 'trades-sell-all-open'].forEach((id) => {
-        const btn = document.getElementById(id);
-        if (!btn) return;
-        if (posOpenN === 0) {
-          btn.hidden = true;
-          btn.disabled = true;
-        } else {
-          btn.hidden = false;
-          btn.disabled = false;
-        }
-      });
-      const positionsHtml = posOpenN === 0
-        ? '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
-        : positions.open.map(p => {
+        return list.map(p => {
           const prog = openPositionProgress(p);
           const pnlCell = fmtOpenPnlCell(p);
           let trailCell;
@@ -7799,7 +8972,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '<div class="mint">stop ' + stop + ' · peak ' + peak + '</div>';
           } else {
             trailCell =
-              '<span class="mint">off until +' + trailArmAt + '%</span>' +
+              '<span class="mint">off until +' + armAt + '%</span>' +
               '<div class="mint">then ' + (p.trailingStopPct ?? '—') + '% from peak</div>';
           }
           const ar = p.antiRug;
@@ -7873,11 +9046,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td><button class="danger" onclick="forceSellPosition('\${p.id}', '\${sellLabel}')" title="Force sell entire position">Sell</button></td>
           </tr>\`;
         }).join('');
-      document.querySelectorAll('#positions-table tbody, #trades-positions-table tbody').forEach((ptbody) => {
-        ptbody.innerHTML = positionsHtml;
+      };
+      const posOpenN = (positions.open || []).length;
+      ['sell-all-open', 'trades-sell-all-open'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (posOpenN === 0) {
+          btn.hidden = true;
+          btn.disabled = true;
+        } else {
+          btn.hidden = false;
+          btn.disabled = false;
+        }
       });
-      ensurePosHoldTicker();
-      tickOpenPositionHolds();
+      paintOpenPositionsTables();
 
       window._closedTradeGroups = buildClosedTradeGroups(
         positions.closed || [],
@@ -10324,6 +11506,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       refresh();
     }
 
+    async function saveChartPatternsConfig(silent) {
+      const patIds = [
+        'ascending_triangle', 'descending_triangle', 'trendline_break',
+        'holder_distribution', 'capitulation',
+      ];
+      const patterns = {};
+      patIds.forEach(function (id) {
+        const el = document.getElementById('cp-pat-' + id);
+        patterns[id] = { enabled: el ? el.checked : false };
+      });
+      await fetchJSON('/api/config/chart-patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sensitivity: document.getElementById('cp-sensitivity')?.value || 'medium',
+          mode: document.getElementById('cp-mode')?.value || 'both',
+          lookbackBars: Number(document.getElementById('cp-lookback')?.value) || 64,
+          minConfidence: Number(document.getElementById('cp-min-conf')?.value) || 55,
+          breakoutPct: Number(document.getElementById('cp-breakout')?.value) || 1.2,
+          pullbackNearPct: Number(document.getElementById('cp-pullback-near')?.value) || 3,
+          minPoleRunPct: Number(document.getElementById('cp-min-pole')?.value) || 25,
+          maxFlagRangePct: Number(document.getElementById('cp-max-flag')?.value) || 18,
+          minStructuredDropPct: Number(document.getElementById('cp-min-struct-drop')?.value) || 8,
+          maxStructuredDropPct: Number(document.getElementById('cp-max-struct-drop')?.value) || 35,
+          volumeDryupRatio: Number(document.getElementById('cp-vol-dry')?.value) || 0.55,
+          volumeReturnRatio: Number(document.getElementById('cp-vol-return')?.value) || 1.35,
+          holderDropPct: Number(document.getElementById('cp-holder-drop')?.value) || 8,
+          capitulationDropPct: Number(document.getElementById('cp-capitulation')?.value) || 28,
+          bearishPenalty: Number(document.getElementById('cp-bear-penalty')?.value) || 6,
+          hardFilter: document.getElementById('cp-hard-filter')
+            ? document.getElementById('cp-hard-filter').checked
+            : false,
+          blockOnBearish: document.getElementById('cp-block-bearish')
+            ? document.getElementById('cp-block-bearish').checked
+            : false,
+          patterns: patterns,
+        }),
+      });
+      if (!silent) alert('Chart Patterns settings saved');
+      refresh();
+    }
+
     async function saveScalperSuiteSettings() {
       const status = document.getElementById('suite-settings-status');
       try {
@@ -10410,6 +11634,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           await savePostRunDipConfig(true);
         } else if (key === 'technical_levels') {
           await saveTechnicalLevelsConfig(true);
+        } else if (key === 'chart_patterns') {
+          await saveChartPatternsConfig(true);
         } else {
           await saveFilterConfig(true);
         }
