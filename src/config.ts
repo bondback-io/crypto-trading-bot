@@ -920,7 +920,7 @@ export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   allowSingleWalletMigration: true,
   minWalletsForTrade: 2,
   minVolume24hUsd: 25_000,
-  minHolderCount: 30,
+  minHolderCount: 120,
   maxTradesPerHour: 16,
   minMsBetweenTrades: 25_000,
   riskScoreSizeCutoff: 50,
@@ -985,9 +985,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minVolume24hUsd: 40_000,
       minRecentVolumeUsd: 4_000,
       minRecentBuyVolumeUsd: 2_500,
-      minHolderCount: 55,
-      minHolders: 55,
-      minRecentActivity: 6,
+      minHolderCount: 150,
+      minHolders: 150,
+      minRecentActivity: 12,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -1040,8 +1040,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       allowSingleWalletMigration: true,
       minWalletsForTrade: 3,
       minVolume24hUsd: 40_000,
-      minHolderCount: 55,
-      maxTradesPerHour: 5,
+      minHolderCount: 150,
       minMsBetweenTrades: 120_000,
       riskScoreSizeCutoff: 28,
       minRiskSizeMultiplier: 0.22,
@@ -1104,17 +1103,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minVolume24hUsd: 25_000,
       minRecentVolumeUsd: 2_500,
       minRecentBuyVolumeUsd: 1_500,
-      minHolderCount: 30,
-      minHolders: 30,
-      minRecentActivity: 3,
-      requireLiquidityLocked: false,
-      checkHoneypot: true,
-      skipIfDevRecentSells: true,
-      enableAntiRug: true,
-      enableSniperFilter: true,
-      clusterMinWallets: 3,
-      enableWalletQualityGate: true,
-      minWalletQualityScore: 55,
+      minHolderCount: 120,
+      minHolders: 120,
+      minRecentActivity: 10,
       maxEntryAgeMinutes: 15,
       requireMomentumConfirmation: false,
     },
@@ -1159,7 +1150,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       allowSingleWalletMigration: true,
       minWalletsForTrade: 2,
       minVolume24hUsd: 25_000,
-      minHolderCount: 30,
+      minHolderCount: 120,
       maxTradesPerHour: 16,
       minMsBetweenTrades: 25_000,
       riskScoreSizeCutoff: 50,
@@ -1225,9 +1216,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minVolume24hUsd: 20_000,
       minRecentVolumeUsd: 2_000,
       minRecentBuyVolumeUsd: 1_000,
-      minHolderCount: 30,
-      minHolders: 30,
-      minRecentActivity: 3,
+      minHolderCount: 120,
+      minHolders: 120,
+      minRecentActivity: 10,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: true,
@@ -1280,7 +1271,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
       minVolume24hUsd: 20_000,
-      minHolderCount: 30,
+      minHolderCount: 120,
       maxTradesPerHour: 18,
       minMsBetweenTrades: 20_000,
       riskScoreSizeCutoff: 55,
@@ -1345,9 +1336,9 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minVolume24hUsd: 15_000,
       minRecentVolumeUsd: 1_500,
       minRecentBuyVolumeUsd: 800,
-      minHolderCount: 30,
-      minHolders: 30,
-      minRecentActivity: 3,
+      minHolderCount: 120,
+      minHolders: 120,
+      minRecentActivity: 10,
       requireLiquidityLocked: false,
       checkHoneypot: true,
       skipIfDevRecentSells: false,
@@ -1400,7 +1391,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       allowSingleWalletMigration: true,
       minWalletsForTrade: 1,
       minVolume24hUsd: 15_000,
-      minHolderCount: 30,
+      minHolderCount: 120,
       maxTradesPerHour: 40,
       minMsBetweenTrades: 8_000,
       riskScoreSizeCutoff: 85,
@@ -2114,9 +2105,9 @@ export const config: BotConfig = {
     minVolume24hUsd: 25_000,
     minRecentVolumeUsd: 2_500,
     minRecentBuyVolumeUsd: 1_500,
-    minHolderCount: 30,
-    minHolders: 30,
-    minRecentActivity: 3,
+    minHolderCount: 120,
+    minHolders: 120,
+    minRecentActivity: 10,
     buyPumpFunOnly: true,
     enableWalletQualityGate: true,
     minWalletQualityScore: 55,
@@ -2402,6 +2393,12 @@ const BUY_PUMP_FUN_ONLY_ON_V1131 = 'buyPumpFunOnly_on_v1131';
 const WALLET_QUALITY_ENTRY_V1133 = 'walletQualityEntry_v1133';
 /** One-shot: prefer live-parity simulation for persisted users still on plain paper. */
 const TRADING_MODE_LIVE_SIM_V1143 = 'tradingMode_liveSim_v1143';
+/**
+ * One-shot: re-assert Live Sim as default over stale plain Paper after deploy.
+ * v1143 could already be marked while mode later reverted to paper (or never
+ * changed because migration ran when already non-paper). Does not touch live.
+ */
+const TRADING_MODE_LIVE_SIM_DEFAULT_V2 = 'tradingMode_liveSimDefault_v2';
 /**
  * One-shot: raise absolute vol/liq/MC hard floors ($8k liq / $8k MC / $15k 24h / $1.5k recent).
  * Prior v113 floors were $5k liq / $5k MC / $10k 24h / $800 recent.
@@ -3119,6 +3116,14 @@ export function applyPersistedSettings(): boolean {
     );
   }
 
+  if (applyTradingModeLiveSimDefaultV2()) {
+    settingsMigrations[TRADING_MODE_LIVE_SIM_DEFAULT_V2] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied tradingMode_liveSimDefault_v2 — mode=${config.mode}`
+    );
+  }
+
   if (applyPaperSignalRelaxMigration()) {
     settingsMigrations[PAPER_SIGNAL_RELAX_MIGRATION] = true;
     persistUserSettings();
@@ -3245,6 +3250,19 @@ export function applyPersistedSettings(): boolean {
 function applyTradingModeLiveSimMigration(): boolean {
   if (settingsMigrations[TRADING_MODE_LIVE_SIM_V1143]) return false;
   if (config.mode === 'paper') config.mode = 'liveSimulation';
+  return true;
+}
+
+/**
+ * Re-assert Live Sim over stale Paper (deploy / wiped-disk default).
+ * Skips real `live`. Safe to run even if v1143 already fired.
+ */
+function applyTradingModeLiveSimDefaultV2(): boolean {
+  if (settingsMigrations[TRADING_MODE_LIVE_SIM_DEFAULT_V2]) return false;
+  if (config.mode === 'paper') {
+    config.mode = 'liveSimulation';
+    config.paper.useLiveData = true;
+  }
   return true;
 }
 

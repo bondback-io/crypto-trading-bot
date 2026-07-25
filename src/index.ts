@@ -14,6 +14,31 @@ import { startServer } from './server';
 
 dotenv.config();
 
+/**
+ * Resolve trading mode after settings load.
+ * - Fresh / wiped disk → Live Sim (unless TRADING_MODE=live for real funds)
+ * - Saved settings win (migrations may have already upgraded stale paper → Live Sim)
+ * - A stale TRADING_MODE=paper secret must not defeat Live Sim on empty disk
+ */
+function resolveBootTradingMode(): void {
+  if (!hasPersistedSettings()) {
+    // Prefer Live Sim on empty DATA_DIR; only honor env when requesting real live.
+    const mode = env.tradingMode === 'live' ? 'live' : 'liveSimulation';
+    setMode(mode, { persist: true });
+    console.log(
+      `[boot] No saved settings — mode=${config.mode}` +
+        ` (env TRADING_MODE=${env.tradingMode})`
+    );
+    return;
+  }
+
+  if (config.mode !== env.tradingMode) {
+    console.log(
+      `[boot] Keeping saved mode=${config.mode} (env TRADING_MODE=${env.tradingMode})`
+    );
+  }
+}
+
 async function main(): Promise<void> {
   logEnvSummary();
   for (const w of validateDeploymentEnv()) {
@@ -23,6 +48,7 @@ async function main(): Promise<void> {
 
   initWallets();
   paperTrader.loadPersistedState();
+  resolveBootTradingMode();
 
   console.log('═══════════════════════════════════════════════════');
   console.log('  Solana Smart Money Copy Trading Bot');
@@ -48,17 +74,6 @@ async function main(): Promise<void> {
   console.log(`  Trading wallets: ${config.tradingWallets.length} (active=${config.activeTradingWalletId ?? 'none'})`);
   console.log(`  Wallets loaded: ${config.smartWallets.length}`);
   console.log('═══════════════════════════════════════════════════\n');
-
-  // TRADING_MODE env only applies when no saved settings yet (don't override dashboard saves)
-  if (env.tradingMode) {
-    if (!hasPersistedSettings()) {
-      setMode(env.tradingMode, { persist: false });
-    } else if (config.mode !== env.tradingMode) {
-      console.log(
-        `[boot] Keeping saved mode=${config.mode} (ignoring TRADING_MODE=${env.tradingMode})`
-      );
-    }
-  }
 
   // Bind /health FIRST so Render/Fly health checks never see 502 while RPC/GMGN boot.
   // Public Solana RPC 429 retries can hang getSlot for minutes otherwise.
@@ -119,7 +134,6 @@ async function main(): Promise<void> {
     paperTrader.stopAutoCheck();
     process.exit(0);
   };
-
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

@@ -94,7 +94,11 @@ export interface BacktestOptions {
   hours?: number;
   /** Starting paper SOL */
   startingBalanceSol?: number;
-  /** Max launches to simulate per run */
+  /**
+   * Max concurrent open positions for this run (Live Sim parity).
+   * Not a total-trade or per-day budget — after exits, new entries are allowed
+   * up to this many open at once for the rest of the lookback.
+   */
   maxTrades?: number;
   /** Independent simulation runs (Monte Carlo / reshuffle) */
   simulations?: number;
@@ -1455,22 +1459,12 @@ function buildBacktestSignal(
   };
 }
 
-/** Cap max fills by selective hourly rate × lookback (prevents always-filling UI max). */
-function effectiveMaxTrades(requested: number, hours: number): number {
-  const sel = config.selective;
-  if (!sel?.enabled) return requested;
-  const perHour = sel.maxTradesPerHour ?? 0;
-  if (perHour <= 0) return requested;
-  // Day-normalized selective budget — not theoretical max fills.
-  // Low (3/hr) → ~2–3/day; medium (12/hr) → ~8–9; high (14/hr) → ~10.
-  const dayBudget = Math.ceil(perHour * (hours / 24) * 0.7);
-  const gapMs = sel.minMsBetweenTrades ?? 0;
-  const gapBudget =
-    gapMs > 0
-      ? Math.ceil(((hours * 3_600_000) / gapMs) * 0.25)
-      : dayBudget;
-  const rateCap = Math.max(2, Math.min(dayBudget, gapBudget));
-  return Math.min(requested, rateCap);
+/**
+ * How many launch candidates to load/simulate for a lookback.
+ * Scaled by hours — NOT by concurrent position slots (those only gate opens).
+ */
+function eventSampleBudget(hours: number): number {
+  return Math.min(400, Math.max(150, Math.ceil(Math.max(1, hours) * 12)));
 }
 
 interface SimTradeWindow {
@@ -2343,11 +2337,14 @@ function runSinglePass(
   const names =
     walletPool.length >= 1 ? walletPool : ['Cented', 'Theo', 'Decu', 'Megga'];
 
-  const maxTrades = effectiveMaxTrades(
-    options.maxTrades,
-    options.hours ?? 24
+  // Concurrent slots only (Live Sim parity). options.maxTrades is the BT UI /
+  // API override for max open positions — never a total-run fill budget.
+  const maxConcurrent = Math.max(
+    1,
+    options.maxTrades > 0
+      ? Math.min(80, options.maxTrades)
+      : config.filters.maxConcurrentPositions || 1
   );
-  const maxConcurrent = Math.max(1, config.filters.maxConcurrentPositions || 1);
 
   // Chronological walk — rate limits / concurrent windows need time order.
   // Filters + conviction cull junk; quality score is used only as a soft tie-break
@@ -2358,9 +2355,8 @@ function runSinglePass(
   });
 
   let considered = 0;
-  const total = Math.min(ordered.length, maxTrades * 6);
+  const total = ordered.length;
   for (const event of ordered) {
-    if (trades.length >= maxTrades) break;
     considered += 1;
     options.onProgress?.(considered, Math.max(total, 1), event.symbol);
 
@@ -2502,7 +2498,6 @@ function runSinglePass(
       continue;
     }
     for (const t of batch.trades) {
-      if (trades.length >= maxTrades) break;
       trades.push(t);
       const openedAt = t.openedAt || openAt;
       const closedAt =
@@ -2705,6 +2700,13 @@ export async function runBacktest(
       ? options.allowSynthetic === true
       : options.allowSynthetic !== false;
     const maxTrades = options.maxTrades ?? 20;
+    // UI / API maxTrades = concurrent slots (same as Live Max Positions)
+    if (maxTrades > 0) {
+      config.filters.maxConcurrentPositions = Math.max(
+        1,
+        Math.min(80, maxTrades)
+      );
+    }
     const simulations = Math.min(Math.max(options.simulations ?? 1, 1), 20);
     const migrationsOnly =
       options.migrationsOnly ?? config.strategy.enableMigrationOnly;
@@ -2766,21 +2768,18 @@ export async function runBacktest(
     let events: LaunchEvent[] = [];
     let dataSource = 'synthetic';
 
+    const sampleBudget = eventSampleBudget(hours);
     if (useLiveData) {
       const fetched = await fetchRecentLaunches({
         fromMs,
         toMs,
         allowSynthetic,
-        maxResults: Math.max(maxTrades * 5, 80),
+        maxResults: sampleBudget,
       });
       events = fetched.events;
       dataSource = fetched.source;
     } else {
-      events = generateSyntheticLaunches(
-        fromMs,
-        toMs,
-        Math.min(Math.max(maxTrades * 4, 36), 80)
-      );
+      events = generateSyntheticLaunches(fromMs, toMs, sampleBudget);
       dataSource = 'synthetic';
     }
 
@@ -2843,11 +2842,7 @@ export async function runBacktest(
       for (let sim = 1; sim <= simulations; sim++) {
         let simEvents = passEvents;
         if (sim > 1 && dataSource === 'synthetic') {
-          simEvents = generateSyntheticLaunches(
-            fromMs,
-            toMs,
-            Math.min(maxTrades * 4, 60)
-          );
+          simEvents = generateSyntheticLaunches(fromMs, toMs, sampleBudget);
           if (migrationsOnly || strategyType === 'migration') {
             simEvents = simEvents.filter((e) => e.migrated);
           }
@@ -2975,14 +2970,15 @@ export async function runBacktest(
 
     const configUsedFinal = buildConfigUsedSnapshot();
     const skipSummary = summarizeSkipReasons(primary.allSkipped);
-    const effectiveCap = effectiveMaxTrades(maxTrades, hours);
+    const maxConcurrent = configUsedFinal.maxConcurrentPositions;
     const message =
       primary.lastTrades.length === 0
         ? `No trades simulated (source=${dataSource}, events=${events.length}, risk=${configUsedFinal.riskLevel}` +
           `, skipped ${primary.allSkipped.length}` +
           (skipSummary ? `: ${skipSummary}` : '') +
           `). Widen window or loosen risk/filters.`
-        : `Backtest (${configUsedFinal.riskLevel} risk · ${configUsedFinal.strictLabel}): ${primary.lastTrades.length}/${effectiveCap} trades` +
+        : `Backtest (${configUsedFinal.riskLevel} risk · ${configUsedFinal.strictLabel}): ${primary.lastTrades.length} trades` +
+          ` · max concurrent ${maxConcurrent}` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
           `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${stats.winRatePct.toFixed(0)}%` +
           ` · PF ${summary.profitFactor}` +

@@ -296,8 +296,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       min-width: 0;
     }
     .strategy-control-head-main {
-      flex: 1 1 14rem;
-      min-width: 0;
+      /* Grow horizontally on desktop; never use a large flex-basis — in
+         column layout (mobile) a 14rem basis became ~224px empty vertical gap. */
+      flex: 1 1 auto;
+      min-width: min(100%, 12rem);
     }
     .strategy-control-head-main > p {
       overflow-wrap: anywhere;
@@ -785,8 +787,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .strategy-control-head {
         flex-direction: column;
         align-items: stretch;
+        gap: 0.35rem;
+      }
+      .strategy-control-head-main {
+        flex: 0 0 auto;
+        min-width: 0;
+        width: 100%;
       }
       .strategy-control-head-meta {
+        flex: 0 0 auto;
         text-align: left;
         width: 100%;
       }
@@ -3753,7 +3762,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-md"><span>Lookback hours <span class="tip" tabindex="0" data-tip="How far back to pull launch data (1–168 hours)."></span></span><input type="number" id="bt-hours" value="24" min="1" max="168" /></label>
-          <label class="ctl ctl-md"><span>Max trades <span class="tip" tabindex="0" data-tip="Soft cap on simulated entries. Defaults from the selected Risk Level max positions (Live Sim parity). Editable override; selective rate limits may take fewer."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
+          <label class="ctl ctl-md"><span>Max concurrent <span class="tip" tabindex="0" data-tip="Max open positions at once (same as Live Max Positions). Not a total-trade or per-day cap — after a position closes, new entries are allowed up to this many open for the rest of the lookback. Defaults from Risk Level. Selective rate limits (trades/hour, cooldown) still apply."></span></span><input type="number" id="bt-max" value="12" min="1" max="80" /></label>
           <label class="ctl ctl-md"><span>Start SOL <span class="tip" tabindex="0" data-tip="Starting paper bankroll for the simulation."></span></span><input type="number" id="bt-start-bal" value="10" min="0.5" max="100" step="0.5" /></label>
           <label class="ctl ctl-lg"><span>Strategy <span class="tip" tabindex="0" data-tip="Auto = bot defaults. Convergence = multi-wallet. Migration = grads only. Single = first wallet buy."></span></span>
             <select id="bt-strategy">
@@ -4445,8 +4454,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Minimum 24h volume USD. Floor $15,000 for mature entries; early pump/migration may pass via recent (1h) volume + liquidity instead.">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">25000</span></label><input type="range" id="minVolume24hUsd" min="15000" max="200000" step="500" value="25000" /></div>
             <div class="field"><label title="Min DexScreener ~1h volume USD (recent activity). Floor $1,500.">Min Recent Vol USD — <span class="val" id="v-minRecentVolumeUsd">2500</span></label><input type="range" id="minRecentVolumeUsd" min="1500" max="50000" step="100" value="2500" /></div>
             <div class="field"><label title="Min estimated recent buy-side volume USD. Floor $800.">Min Recent Buy Vol — <span class="val" id="v-minRecentBuyVolumeUsd">1500</span></label><input type="range" id="minRecentBuyVolumeUsd" min="800" max="25000" step="100" value="1500" /></div>
-            <div class="field"><label title="Minimum holder count. Floor 30 — non-bypassable.">Min Holders — <span class="val" id="v-minHolders">30</span></label><input type="range" id="minHolders" min="30" max="500" step="5" value="30" /></div>
-            <div class="field"><label title="Min DexScreener h1 buys+sells. Floor 3.">Min Recent Activity — <span class="val" id="v-minRecentActivity">3</span></label><input type="range" id="minRecentActivity" min="3" max="100" step="1" value="3" /></div>
+            <div class="field"><label title="Minimum holder count. Absolute floor 30 (non-bypassable); default 120.">Min Holders — <span class="val" id="v-minHolders">120</span></label><input type="range" id="minHolders" min="30" max="500" step="5" value="120" /></div>
+            <div class="field"><label title="Min DexScreener h1 buys+sells. Absolute floor 3; default 10.">Min Recent Activity — <span class="val" id="v-minRecentActivity">10</span></label><input type="range" id="minRecentActivity" min="3" max="100" step="1" value="10" /></div>
           </div>
           <div class="mt-2 space-y-0">
             <p class="mint mb-2">Master safety switches moved to Strategies. Configure their thresholds here.</p>
@@ -10351,7 +10360,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
-    // Risk-level max positions (RISK_LEVEL_PRESETS.filters.maxConcurrentPositions)
+    // Risk-level max concurrent positions (RISK_LEVEL_PRESETS.filters.maxConcurrentPositions)
+    // Synced into BT "Max concurrent" — NOT a total-trade budget for the lookback.
     const BT_RISK_MAX_TRADES = { low: 6, medium: 12, high: 20, degen: 50 };
 
     function btMaxTradesForRiskLevel(level, cfg) {

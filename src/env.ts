@@ -17,7 +17,8 @@ export interface EnvConfig {
   host: string;
   /** Comma-separated allowed origins; empty = same-origin only (no CORS headers) */
   corsOrigins: string[];
-  tradingMode?: 'paper' | 'liveSimulation' | 'live';
+  /** Always resolved — defaults to liveSimulation when TRADING_MODE unset. */
+  tradingMode: 'paper' | 'liveSimulation' | 'live';
   rpcUrl: string;
 }
 
@@ -52,16 +53,21 @@ export const env: EnvConfig = {
     process.env.HOST?.trim() ||
     (isProduction ? '0.0.0.0' : '0.0.0.0'),
   corsOrigins: parseCorsOrigins(process.env.CORS_ORIGIN ?? process.env.CORS_ORIGINS),
-  tradingMode:
-    process.env.TRADING_MODE?.toLowerCase() === 'live'
-      ? 'live'
-      : process.env.TRADING_MODE?.toLowerCase() === 'livesimulation' ||
-          process.env.TRADING_MODE?.toLowerCase() === 'live_simulation' ||
-          process.env.TRADING_MODE?.toLowerCase() === 'live-sim'
-        ? 'liveSimulation'
-        : process.env.TRADING_MODE?.toLowerCase() === 'paper'
-          ? 'paper'
-          : undefined,
+  tradingMode: (() => {
+    const raw = (process.env.TRADING_MODE || '').trim().toLowerCase();
+    if (raw === 'live') return 'live' as const;
+    if (raw === 'paper') return 'paper' as const;
+    if (
+      raw === 'livesimulation' ||
+      raw === 'live_simulation' ||
+      raw === 'live-sim' ||
+      raw === 'livesim'
+    ) {
+      return 'liveSimulation' as const;
+    }
+    // Unset / unknown → Live Sim (fresh installs & wiped disks)
+    return 'liveSimulation' as const;
+  })(),
   rpcUrl: (() => {
     const raw = process.env.RPC_URL?.trim() || '';
     // Defer to rpcUrl helper without circular import weight — inline check
@@ -82,7 +88,7 @@ export function logEnvSummary(): void {
       (env.corsOrigins.length
         ? ` cors=${env.corsOrigins.length} origin(s)`
         : ' cors=off') +
-      (env.tradingMode ? ` TRADING_MODE=${env.tradingMode}` : '')
+      ` TRADING_MODE=${env.tradingMode}`
   );
 }
 
