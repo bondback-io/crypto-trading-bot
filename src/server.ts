@@ -1179,7 +1179,50 @@ export function createServer(): express.Application {
   app.get('/api/strategies', (_req: Request, res: Response) => {
     const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
     ensureStrategyToggles();
-    res.json(getStrategiesStatus());
+    const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    ensureTradeProfilesInitialized();
+    res.json({
+      ...getStrategiesStatus(),
+      tradeProfiles: getTradeProfilesStatus(),
+    });
+  });
+
+  app.get('/api/trade-profiles', (_req: Request, res: Response) => {
+    const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    ensureTradeProfilesInitialized();
+    res.json(getTradeProfilesStatus());
+  });
+
+  app.post('/api/trade-profiles', (req: Request, res: Response) => {
+    const {
+      updateTradeProfilesConfig,
+      setTradeProfileEnabled,
+      getTradeProfilesStatus,
+      ensureTradeProfilesInitialized,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+    ensureTradeProfilesInitialized();
+    const body = (req.body ?? {}) as {
+      enabled?: boolean;
+      profiles?: Record<string, boolean>;
+      id?: string;
+      profileEnabled?: boolean;
+    };
+    if (body.id != null && typeof body.profileEnabled === 'boolean') {
+      setTradeProfileEnabled(
+        body.id as import('./tradeProfiles').TradeProfileId,
+        body.profileEnabled
+      );
+    } else {
+      updateTradeProfilesConfig({
+        enabled: body.enabled,
+        profiles: body.profiles as
+          | Partial<Record<import('./tradeProfiles').TradeProfileId, boolean>>
+          | undefined,
+      });
+    }
+    res.json({ ok: true, ...getTradeProfilesStatus() });
   });
 
   app.post('/api/strategies', (req: Request, res: Response) => {

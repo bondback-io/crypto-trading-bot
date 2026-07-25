@@ -185,6 +185,17 @@ export interface BuyOptions {
     | 'post_migration_scalp'
     | 'reversal_scalp'
     | 'post_run_dip';
+  /** Multi-profile assignment stamp */
+  tradeProfileId?: string;
+  tradeProfileName?: string;
+  tradeProfileIcon?: string;
+  tradeProfileColor?: string;
+  /** Optional exit overrides from assigned profile */
+  profileTakeProfitPct?: number;
+  profileStopLossPct?: number;
+  profileTrailingStopPct?: number;
+  profileForceScalp?: boolean;
+  profileSizeMultiplier?: number;
 }
 
 /**
@@ -473,6 +484,14 @@ export async function executeBuy(
         convictionScore: meta?.convictionScore,
         scalpMode: meta?.scalpMode === true,
         shortTermStrategyId: meta?.shortTermStrategyId,
+        tradeProfileId: meta?.tradeProfileId,
+        tradeProfileName: meta?.tradeProfileName,
+        tradeProfileIcon: meta?.tradeProfileIcon,
+        tradeProfileColor: meta?.tradeProfileColor,
+        profileTakeProfitPct: meta?.profileTakeProfitPct,
+        profileStopLossPct: meta?.profileStopLossPct,
+        profileTrailingStopPct: meta?.profileTrailingStopPct,
+        profileForceScalp: meta?.profileForceScalp,
       }
     );
     if (!position) {
@@ -560,6 +579,14 @@ export async function executeBuy(
         convictionScore: meta?.convictionScore,
         scalpMode: meta?.scalpMode === true,
         shortTermStrategyId: meta?.shortTermStrategyId,
+        tradeProfileId: meta?.tradeProfileId,
+        tradeProfileName: meta?.tradeProfileName,
+        tradeProfileIcon: meta?.tradeProfileIcon,
+        tradeProfileColor: meta?.tradeProfileColor,
+        profileTakeProfitPct: meta?.profileTakeProfitPct,
+        profileStopLossPct: meta?.profileStopLossPct,
+        profileTrailingStopPct: meta?.profileTrailingStopPct,
+        profileForceScalp: meta?.profileForceScalp,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

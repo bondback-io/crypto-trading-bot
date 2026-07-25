@@ -41,6 +41,7 @@ import {
 } from './shortTermStrategies';
 import { shouldInvalidatePostRunDipPosition } from './postRunDip';
 import { recordPriceTick } from './technicalLevels';
+import { applyTradeProfileExitRules } from './tradeProfiles';
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -138,6 +139,14 @@ export interface Position {
   scalpTpPct?: number;
   scalpSlPct?: number;
   scalpMomentumFailDropPct?: number;
+  /**
+   * Multi-profile stamp — which named trade profile owns this position.
+   * Exit rules were frozen from that profile at open. Optional for legacy rows.
+   */
+  tradeProfileId?: string;
+  tradeProfileName?: string;
+  tradeProfileIcon?: string;
+  tradeProfileColor?: string;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -715,6 +724,14 @@ export class PaperTrader {
     convictionScore?: number;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
+    tradeProfileId?: string;
+    tradeProfileName?: string;
+    tradeProfileIcon?: string;
+    tradeProfileColor?: string;
+    profileTakeProfitPct?: number;
+    profileStopLossPct?: number;
+    profileTrailingStopPct?: number;
+    profileForceScalp?: boolean;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -778,6 +795,10 @@ export class PaperTrader {
           ? input.sourceEntryMcUsd
           : undefined,
       convictionScore: input.convictionScore,
+      tradeProfileId: input.tradeProfileId,
+      tradeProfileName: input.tradeProfileName,
+      tradeProfileIcon: input.tradeProfileIcon,
+      tradeProfileColor: input.tradeProfileColor,
     };
 
     if (input.scalpMode) {
@@ -791,6 +812,18 @@ export class PaperTrader {
         `${id}${suiteTag} armed on ${position.symbol} — TP +${position.scalpTpPct}% / SL ${position.scalpSlPct}% / timer ${Math.round(((position.scalpDeadlineMs ?? 0) - position.openedAt) / 1000)}s`
       );
     }
+
+    applyTradeProfileExitRules(
+      position,
+      {
+        takeProfitPct: input.profileTakeProfitPct,
+        stopLossPct: input.profileStopLossPct,
+        trailingStopPct: input.profileTrailingStopPct,
+        forceScalp: input.profileForceScalp,
+        shortTermStrategyId: input.shortTermStrategyId,
+      },
+      seedShortTermPosition
+    );
 
     if (
       !position.scalpMode &&
@@ -813,10 +846,13 @@ export class PaperTrader {
       config.profitStrategy?.enabled
       ? config.profitStrategy.trailingStopAfter
       : config.risk.trailingActivationProfit;
+    const profileBit = position.tradeProfileName
+      ? ` · profile ${position.tradeProfileIcon || ''} ${position.tradeProfileName}`
+      : '';
     this.log(
       'info',
       `Live position tracked ${formatTokenLabel(position.symbol, position.name, position.mint)} ` +
-        `@ ${input.entryPriceSol.toExponential(4)} — trail arms at +${trailArm}%`
+        `@ ${input.entryPriceSol.toExponential(4)} — trail arms at +${trailArm}%${profileBit}`
     );
     return position;
   }
@@ -907,6 +943,14 @@ export class PaperTrader {
       convictionScore?: number;
       scalpMode?: boolean;
       shortTermStrategyId?: ShortTermStrategyId;
+      tradeProfileId?: string;
+      tradeProfileName?: string;
+      tradeProfileIcon?: string;
+      tradeProfileColor?: string;
+      profileTakeProfitPct?: number;
+      profileStopLossPct?: number;
+      profileTrailingStopPct?: number;
+      profileForceScalp?: boolean;
     }
   ): Position | null {
     const spendSol =
@@ -994,6 +1038,10 @@ export class PaperTrader {
           ? meta.sourceEntryMcUsd
           : undefined,
       convictionScore: meta?.convictionScore,
+      tradeProfileId: meta?.tradeProfileId,
+      tradeProfileName: meta?.tradeProfileName,
+      tradeProfileIcon: meta?.tradeProfileIcon,
+      tradeProfileColor: meta?.tradeProfileColor,
     };
 
     if (meta?.scalpMode) {
@@ -1007,6 +1055,18 @@ export class PaperTrader {
         `${id}${suiteTag} armed on ${label} — TP +${position.scalpTpPct}% / SL ${position.scalpSlPct}% / timer ${Math.round(((position.scalpDeadlineMs ?? 0) - position.openedAt) / 1000)}s`
       );
     }
+
+    applyTradeProfileExitRules(
+      position,
+      {
+        takeProfitPct: meta?.profileTakeProfitPct,
+        stopLossPct: meta?.profileStopLossPct,
+        trailingStopPct: meta?.profileTrailingStopPct,
+        forceScalp: meta?.profileForceScalp,
+        shortTermStrategyId: meta?.shortTermStrategyId,
+      },
+      seedShortTermPosition
+    );
 
     // Low-conviction: tighten trail at open
     if (
@@ -1028,10 +1088,13 @@ export class PaperTrader {
       position.entryMarketCapUsd != null
         ? ` MC~$${Math.round(position.entryMarketCapUsd).toLocaleString()}`
         : '';
+    const profileBit = position.tradeProfileName
+      ? ` · ${position.tradeProfileIcon || ''} ${position.tradeProfileName}`
+      : '';
     this.log(
       'buy',
       `Bought ${label} (${mint.slice(0, 8)}…) — ${amountTokens.toFixed(2)} tokens @ ${entryPrice.toExponential(4)} SOL ` +
-        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit})`,
+        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit}${profileBit})`,
       { mint, symbol: tokenSymbol, name: tokenName, solAmount: spendSol }
     );
     this.persistState();

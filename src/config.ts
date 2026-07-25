@@ -1789,6 +1789,15 @@ export interface BotConfig {
     knobs: Record<string, unknown>;
   } | null;
 
+  /**
+   * Multi-profile trade assignment (concurrent named profiles).
+   * When enabled=false, all trades stamp Default (legacy single-stack behaviour).
+   */
+  tradeProfiles: {
+    enabled: boolean;
+    profiles: Record<string, boolean>;
+  };
+
   /** GMGN API settings */
   gmgn: {
     apiKey: string;
@@ -2073,6 +2082,17 @@ export const config: BotConfig = {
   strategyProfile: 'custom',
   highWinRatePresetActive: false,
   strategyProfileSnapshot: null,
+  tradeProfiles: {
+    enabled: true,
+    profiles: {
+      default: true,
+      scalper: true,
+      dip_buyer: true,
+      trend_rider: true,
+      migration: true,
+      high_win_rate: true,
+    },
+  },
 
   profitStrategy: {
     ...DEFAULT_PROFIT_STRATEGY,
@@ -2337,6 +2357,12 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     strategyProfileSnapshot: config.strategyProfileSnapshot
       ? (cloneJson(config.strategyProfileSnapshot) as PersistedBotSettings['strategyProfileSnapshot'])
       : null,
+    tradeProfiles: config.tradeProfiles
+      ? {
+          enabled: config.tradeProfiles.enabled !== false,
+          profiles: { ...(config.tradeProfiles.profiles || {}) },
+        }
+      : undefined,
     paper: { ...config.paper },
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
@@ -2839,6 +2865,32 @@ function applySettingsSnapshot(
   }
   if (typeof saved.highWinRatePresetActive === 'boolean') {
     config.highWinRatePresetActive = saved.highWinRatePresetActive;
+  }
+  if (saved.tradeProfiles && typeof saved.tradeProfiles === 'object') {
+    const tp = saved.tradeProfiles;
+    if (!config.tradeProfiles) {
+      config.tradeProfiles = {
+        enabled: true,
+        profiles: {
+          default: true,
+          scalper: true,
+          dip_buyer: true,
+          trend_rider: true,
+          migration: true,
+          high_win_rate: true,
+        },
+      };
+    }
+    if (typeof tp.enabled === 'boolean') {
+      config.tradeProfiles.enabled = tp.enabled;
+    }
+    if (tp.profiles && typeof tp.profiles === 'object') {
+      config.tradeProfiles.profiles = {
+        ...config.tradeProfiles.profiles,
+        ...tp.profiles,
+        default: true,
+      };
+    }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
   {
@@ -4209,6 +4261,12 @@ export function getConfigSnapshot() {
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile: config.strategyProfile || 'custom',
     highWinRatePresetActive: config.highWinRatePresetActive === true,
+    tradeProfiles: config.tradeProfiles
+      ? {
+          enabled: config.tradeProfiles.enabled !== false,
+          profiles: { ...(config.tradeProfiles.profiles || {}) },
+        }
+      : undefined,
     paper: { ...config.paper },
     trading: {
       activeId: config.activeTradingWalletId,

@@ -63,6 +63,11 @@ export interface PersistedBotSettings {
     | 'custom';
   highWinRatePresetActive?: boolean;
   strategyProfileSnapshot?: Record<string, unknown> | null;
+  /** Concurrent trade profile ON/OFF map */
+  tradeProfiles?: {
+    enabled?: boolean;
+    profiles?: Record<string, boolean>;
+  };
   paper?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;

@@ -881,6 +881,62 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       background: #f87171;
       border-color: #fca5a5;
     }
+    .trade-profile-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 0.12rem 0.4rem;
+      border-radius: 0.35rem;
+      border: 1px solid;
+      white-space: nowrap;
+      line-height: 1.2;
+      max-width: 9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .trade-profiles-active {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+    }
+    .trade-profiles-active .tp-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid;
+      opacity: 0.95;
+    }
+    .trade-profiles-active .tp-chip.is-off { opacity: 0.35; }
+    .tp-toggle-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+    .tp-toggle-card {
+      flex: 1 1 9rem;
+      min-width: 8.5rem;
+      max-width: 14rem;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      background: #0f172a;
+    }
+    .tp-toggle-card .tp-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      margin-bottom: 0.25rem;
+    }
+    .tp-toggle-card .tp-name { font-weight: 600; font-size: 0.8rem; }
+    .tp-toggle-card .tp-desc { font-size: 0.65rem; color: #94a3b8; line-height: 1.3; }
     @media (max-width: 640px) {
       .closed-filter {
         width: 100%;
@@ -2160,6 +2216,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
       </div>
+      <div class="card" style="padding:0.65rem 0.85rem">
+        <div class="flex flex-wrap gap-2 items-center justify-between mb-1">
+          <div class="mint text-xs uppercase tracking-wide" style="color:#94a3b8">Active trade profiles</div>
+          <span class="mint text-xs" id="trade-profiles-master-status">—</span>
+        </div>
+        <div class="trade-profiles-active" id="trade-profiles-active-chips">Loading…</div>
+      </div>
       <div class="ov-equity-panel" id="ov-equity-panel" title="Available moves into Positions when you open a trade; marks update Unrealized continuously; closes credit Available and Realized.">
         <div class="ov-equity-main">
           <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
@@ -2244,7 +2307,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -2257,16 +2320,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="card">
           <div class="closed-trades-head">
-            <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable or losing."></span></div>
+            <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
             <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
               <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
               <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
               <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
             </div>
           </div>
+          <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
             <table id="closed-table">
-              <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+              <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2331,7 +2395,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -2346,9 +2410,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
           </div>
         </div>
+        <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
-            <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3108,6 +3173,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-primary" onclick="applyStrategiesAction('enable_all')">Enable All</button>
           <button class="btn btn-secondary" onclick="applyStrategiesAction('disable_all')">Disable All</button>
           <button class="btn btn-secondary" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous</button>
+        </div>
+        <div class="mt-4 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.85rem">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div>
+              <div class="text-sm font-semibold text-slate-200">Trade Profiles (multi)</div>
+              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile and follows only that profile’s exit rules. Risk Level + Strict Mode still apply globally.</p>
+            </div>
+            <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
+              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" /> Multi-profile ON
+            </label>
+          </div>
+          <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
         </div>
         <div class="mt-4">
           <div class="text-sm font-semibold text-slate-200 mb-1">Strategy Presets</div>
@@ -4252,11 +4329,92 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function loadStrategies() {
       const grid = document.getElementById('strategies-grid');
       try {
-        renderStrategies(await fetchJSON('/api/strategies'));
+        const data = await fetchJSON('/api/strategies');
+        renderStrategies(data);
+        renderTradeProfilesUi(data.tradeProfiles || null);
       } catch (err) {
         if (grid) grid.innerHTML = '<div class="card text-red-300">Failed to load strategies: ' + (err.message || err) + '</div>';
       }
     }
+
+    function renderTradeProfilesUi(tp) {
+      const master = document.getElementById('trade-profiles-master');
+      const toggles = document.getElementById('trade-profiles-toggles');
+      const chips = document.getElementById('trade-profiles-active-chips');
+      const statusEl = document.getElementById('trade-profiles-master-status');
+      if (!tp) {
+        if (chips) chips.textContent = '—';
+        return;
+      }
+      if (master) master.checked = tp.enabled !== false;
+      if (statusEl) {
+        statusEl.textContent = tp.enabled === false
+          ? 'Multi-profile OFF (Default only)'
+          : ((tp.active || []).length + ' active');
+      }
+      if (chips) {
+        const list = tp.profiles || [];
+        chips.innerHTML = list.length
+          ? list.map(function (p) {
+              const on = p.active;
+              return (
+                '<span class="tp-chip' + (on ? '' : ' is-off') + '" style="color:' + (p.color || '#94a3b8') +
+                ';border-color:' + (p.color || '#94a3b8') + '66" title="' + escHtml(p.description || p.name) + '">' +
+                escHtml(p.icon || '') + ' ' + escHtml(p.name) + (on ? '' : ' (off)') +
+                '</span>'
+              );
+            }).join('')
+          : '—';
+      }
+      if (toggles) {
+        toggles.innerHTML = (tp.profiles || []).map(function (p) {
+          const checked = p.enabled !== false ? ' checked' : '';
+          const disabled = p.id === 'default' ? ' disabled' : '';
+          return (
+            '<div class="tp-toggle-card" style="border-color:' + (p.color || '#334155') + '55">' +
+              '<div class="tp-head">' +
+                '<span class="tp-name" style="color:' + (p.color || '#e2e8f0') + '">' +
+                  escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                '</span>' +
+                '<input type="checkbox"' + checked + disabled +
+                  ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="Enable ' + escHtml(p.name) + '" />' +
+              '</div>' +
+              '<div class="tp-desc">' + escHtml(p.description || '') + '</div>' +
+            '</div>'
+          );
+        }).join('');
+      }
+    }
+
+    async function toggleMultiProfiles(enabled) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !!enabled }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.toggleMultiProfiles = toggleMultiProfiles;
+
+    async function toggleTradeProfile(id, enabled) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id, profileEnabled: !!enabled }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.toggleTradeProfile = toggleTradeProfile;
 
     async function toggleStrategy(key, enabled) {
       const def = _strategiesStatus && (_strategiesStatus.registry || []).find(s => s.key === key);
@@ -5068,6 +5226,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return groups;
     }
 
+    function fmtTradeProfileBadge(p) {
+      const name = (p && (p.tradeProfileName || p.tradeProfileId)) || 'Legacy';
+      const icon = (p && p.tradeProfileIcon) || '·';
+      const color = (p && p.tradeProfileColor) || '#64748b';
+      const title = name + (p && p.tradeProfileId ? ' (' + p.tradeProfileId + ')' : '');
+      return (
+        '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + color +
+        ';border-color:' + color + '33;background:' + color + '18">' +
+        escHtml(icon) + ' ' + escHtml(name) +
+        '</span>'
+      );
+    }
+
     function renderClosedTradeRow(p, opts) {
       opts = opts || {};
       const exitLabel = opts.exitLabel || '';
@@ -5101,6 +5272,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (opts.hidden ? ' hidden' : '') +
         '>' +
           '<td>' + tokenCell + '</td>' +
+          '<td>' + fmtTradeProfileBadge(p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="Market cap at exit">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
@@ -5138,6 +5310,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.toggleClosedTradeGroup = toggleClosedTradeGroup;
 
     window._closedTradesFilter = window._closedTradesFilter || 'all';
+    window._closedProfileFilter = window._closedProfileFilter || 'all';
     window._closedTradeGroups = window._closedTradeGroups || [];
 
     function syncClosedTradesFilterButtons(filter) {
@@ -5146,23 +5319,68 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
       });
+      document.querySelectorAll('[data-closed-profile-filter]').forEach((btn) => {
+        const active = btn.getAttribute('data-closed-profile-filter') === (window._closedProfileFilter || 'all');
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+
+    function rebuildClosedProfileFilterButtons(groups) {
+      const els = document.querySelectorAll('.closed-profile-filter');
+      if (!els.length) return;
+      const ids = new Map();
+      (groups || []).forEach((g) => {
+        const p = g && g.parent;
+        if (!p) return;
+        const id = p.tradeProfileId || 'legacy';
+        const name = p.tradeProfileName || (id === 'legacy' ? 'Legacy' : id);
+        const icon = p.tradeProfileIcon || '·';
+        const color = p.tradeProfileColor || '#64748b';
+        if (!ids.has(id)) ids.set(id, { id, name, icon, color });
+      });
+      let html =
+        '<button type="button" class="closed-filter-btn' +
+        ((window._closedProfileFilter || 'all') === 'all' ? ' is-active' : '') +
+        '" data-closed-profile-filter="all" onclick="setClosedProfileFilter(\\'all\\')" aria-pressed="' +
+        ((window._closedProfileFilter || 'all') === 'all' ? 'true' : 'false') +
+        '">All profiles</button>';
+      ids.forEach((info) => {
+        const active = (window._closedProfileFilter || 'all') === info.id;
+        html +=
+          '<button type="button" class="closed-filter-btn' + (active ? ' is-active' : '') +
+          '" data-closed-profile-filter="' + info.id +
+          '" onclick="setClosedProfileFilter(\\'' + info.id + '\\')" aria-pressed="' +
+          (active ? 'true' : 'false') +
+          '" style="border-color:' + info.color + '66">' +
+          escHtml(info.icon) + ' ' + escHtml(info.name) +
+          '</button>';
+      });
+      els.forEach((el) => { el.innerHTML = html; });
     }
 
     function filterClosedTradeGroups(groups, filter) {
-      const list = groups || [];
+      let list = groups || [];
       if (filter === 'profit') {
-        return list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) > 0);
+        list = list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) > 0);
+      } else if (filter === 'loss') {
+        list = list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) < 0);
       }
-      if (filter === 'loss') {
-        return list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) < 0);
+      const pf = window._closedProfileFilter || 'all';
+      if (pf && pf !== 'all') {
+        list = list.filter((g) => {
+          const id = (g.parent && g.parent.tradeProfileId) || 'legacy';
+          return id === pf;
+        });
       }
       return list;
     }
 
     function renderClosedTradesHtml(groups) {
+      rebuildClosedProfileFilterButtons(groups);
       const filtered = filterClosedTradeGroups(groups, window._closedTradesFilter || 'all');
       if (!groups || groups.length === 0) {
-        return '<tr><td colspan="9" style="color:var(--muted)">No closed trades yet</td></tr>';
+        return '<tr><td colspan="10" style="color:var(--muted)">No closed trades yet</td></tr>';
       }
       if (filtered.length === 0) {
         const label =
@@ -5170,8 +5388,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ? 'No profitable closed trades'
             : window._closedTradesFilter === 'loss'
               ? 'No losing closed trades'
-              : 'No closed trades yet';
-        return '<tr><td colspan="9" style="color:var(--muted)">' + label + '</td></tr>';
+              : (window._closedProfileFilter && window._closedProfileFilter !== 'all')
+                ? 'No closed trades for this profile'
+                : 'No closed trades yet';
+        return '<tr><td colspan="10" style="color:var(--muted)">' + label + '</td></tr>';
       }
       return filtered.map((g) => {
         const p = g.parent;
@@ -5268,6 +5488,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       paintClosedTradesTables();
     }
     window.setClosedTradesFilter = setClosedTradesFilter;
+
+    function setClosedProfileFilter(profileId) {
+      window._closedProfileFilter = profileId || 'all';
+      paintClosedTradesTables();
+    }
+    window.setClosedProfileFilter = setClosedProfileFilter;
 
     /**
      * Copied wallet + converging wallets.
@@ -7549,7 +7775,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       });
       const positionsHtml = posOpenN === 0
-        ? '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
+        ? '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
           const prog = openPositionProgress(p);
           const pnlCell = fmtOpenPnlCell(p);
@@ -7624,6 +7850,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           return \`
           <tr class="\${rowClass}">
             <td>\${tokenCell}</td>
+            <td>\${fmtTradeProfileBadge(p)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at your buy">\${buyMc}</td>

@@ -15,6 +15,10 @@ import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
+import {
+  assignTradeProfile,
+  stampFromAssignment,
+} from './tradeProfiles';
 import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
 import {
@@ -2156,6 +2160,14 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     convictionScore?: number;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
+    tradeProfileId?: string;
+    tradeProfileName?: string;
+    tradeProfileIcon?: string;
+    tradeProfileColor?: string;
+    profileTakeProfitPct?: number;
+    profileStopLossPct?: number;
+    profileTrailingStopPct?: number;
+    profileForceScalp?: boolean;
     antiRug?: {
       riskScore: number;
       riskLevel: string;
@@ -2207,8 +2219,52 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     buyOpts.strategyKind = 'migration';
   }
 
+  // Multi-profile assignment — stamp + freeze profile exit rules on this trade
+  const profileAssignment = assignTradeProfile({
+    isMigration: signal.isMigration,
+    nearMigration: signal.nearMigration,
+    earlyBuy: signal.earlyBuy,
+    scalpMode: buyOpts.scalpMode,
+    shortTermStrategyId: buyOpts.shortTermStrategyId,
+    convictionScore: signal.convictionScore,
+    dropFromPeakPct: signal.dropFromPeakPct,
+    strategyKind: buyOpts.strategyKind,
+    symbol: signal.symbol,
+  });
+  Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+  const er = profileAssignment.exitRules;
+  if (er.takeProfitPct != null) buyOpts.profileTakeProfitPct = er.takeProfitPct;
+  if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
+  if (er.trailingStopPct != null) {
+    buyOpts.profileTrailingStopPct = er.trailingStopPct;
+  }
+  if (er.forceScalp) {
+    buyOpts.profileForceScalp = true;
+    if (!buyOpts.scalpMode && er.shortTermStrategyId) {
+      buyOpts.scalpMode = true;
+      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
+    }
+  }
+  if (
+    er.sizeMultiplier != null &&
+    Number.isFinite(er.sizeMultiplier) &&
+    er.sizeMultiplier > 0 &&
+    buyOpts.solAmount != null
+  ) {
+    buyOpts.solAmount = Number(
+      (buyOpts.solAmount * er.sizeMultiplier).toFixed(6)
+    );
+    buyOpts.sizeReason =
+      (buyOpts.sizeReason || 'Dynamic size') +
+      ` · profile ${profileAssignment.name} ×${er.sizeMultiplier}`;
+  }
+
   recordSignalSizing(signal, sizing, true);
   console.log(`[monitor] ${sizing.reason}`);
+  console.log(
+    `[monitor] Profile ${profileAssignment.icon} ${profileAssignment.name} → ${signal.symbol}` +
+      ` (${profileAssignment.reason})`
+  );
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
