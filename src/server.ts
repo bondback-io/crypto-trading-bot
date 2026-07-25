@@ -572,6 +572,152 @@ export function createServer(): express.Application {
     res.json(getBacktestProgress());
   });
 
+  /** Analyze last backtest losers and score one-knob counterfactuals */
+  app.post('/backtest/advise', async (req: Request, res: Response) => {
+    try {
+      const { getLastBacktest } = await import('./backtest');
+      const {
+        analyzeBacktest,
+        scoreRecommendations,
+        getLastAdvisor,
+      } = await import('./backtestAdvisor');
+      const last = getLastBacktest();
+      if (!last || !(last.trades || []).length) {
+        res.status(404).json({
+          ok: false,
+          error: 'Run a backtest first (need closed trades to analyze)',
+        });
+        return;
+      }
+      const body = (req.body ?? {}) as {
+        score?: boolean;
+        maxScore?: number;
+      };
+      analyzeBacktest(last);
+      const score = body.score !== false;
+      const report = score
+        ? await scoreRecommendations(last, undefined, {
+            maxScore: body.maxScore != null ? Number(body.maxScore) : 6,
+          })
+        : getLastAdvisor();
+      res.json({ ok: true, advisor: report, baselineId: last.id });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[backtest/advise]', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get('/backtest/advise', async (_req: Request, res: Response) => {
+    const { getLastAdvisor } = await import('./backtestAdvisor');
+    const advisor = getLastAdvisor();
+    if (!advisor) {
+      res.status(404).json({ ok: false, error: 'No advisor report yet' });
+      return;
+    }
+    res.json({ ok: true, advisor });
+  });
+
+  /** Re-run last window with selected recommendation overlays merged */
+  app.post('/backtest/advise/rerun', async (req: Request, res: Response) => {
+    try {
+      const { getLastBacktest, runBacktest } = await import('./backtest');
+      const {
+        getRecommendationsByIds,
+        buildRerunOptionsFromRecommendations,
+        analyzeBacktest,
+      } = await import('./backtestAdvisor');
+      const last = getLastBacktest();
+      if (!last) {
+        res.status(404).json({ ok: false, error: 'No backtest to re-run from' });
+        return;
+      }
+      const body = (req.body ?? {}) as { recommendationIds?: string[] };
+      const ids = Array.isArray(body.recommendationIds)
+        ? body.recommendationIds.map(String)
+        : [];
+      if (!ids.length) {
+        res.status(400).json({ ok: false, error: 'Select at least one recommendation' });
+        return;
+      }
+      const recs = getRecommendationsByIds(ids);
+      if (!recs.length) {
+        res.status(400).json({
+          ok: false,
+          error: 'Unknown recommendation ids — run Analyze first',
+        });
+        return;
+      }
+      const opts = buildRerunOptionsFromRecommendations(last, ids);
+      const result = await runBacktest(opts);
+      const baseline = {
+        winRatePct: last.summary?.winRatePct ?? 0,
+        profitFactor: last.summary?.profitFactor ?? 0,
+        totalPnlSol: last.summary?.totalPnlSol ?? 0,
+        trades: last.tradesExecuted ?? last.trades?.length ?? 0,
+      };
+      const candidate = {
+        winRatePct: result.summary?.winRatePct ?? 0,
+        profitFactor: result.summary?.profitFactor ?? 0,
+        totalPnlSol: result.summary?.totalPnlSol ?? 0,
+        trades: result.tradesExecuted ?? result.trades?.length ?? 0,
+      };
+      // Refresh advisor clusters on the new result (unscored tips for next pass)
+      const advisor = analyzeBacktest(result);
+      res.json({
+        ok: true,
+        result,
+        advisor,
+        comparison: {
+          baseline,
+          candidate,
+          delta: {
+            winRatePct: candidate.winRatePct - baseline.winRatePct,
+            profitFactor: candidate.profitFactor - baseline.profitFactor,
+            totalPnlSol: candidate.totalPnlSol - baseline.totalPnlSol,
+            trades: candidate.trades - baseline.trades,
+          },
+          appliedIds: ids,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[backtest/advise/rerun]', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  /** Persist selected recommendations to live Strategies / filters / profiles */
+  app.post('/backtest/advise/apply', async (req: Request, res: Response) => {
+    try {
+      const { applyRecommendationsToLive } = await import('./backtestAdvisor');
+      const { getStrategiesStatus } = await import('./strategies');
+      const { getTradeProfilesStatus } = await import('./tradeProfiles');
+      const body = (req.body ?? {}) as { recommendationIds?: string[] };
+      const ids = Array.isArray(body.recommendationIds)
+        ? body.recommendationIds.map(String)
+        : [];
+      if (!ids.length) {
+        res.status(400).json({ ok: false, error: 'Select at least one recommendation' });
+        return;
+      }
+      const applied = applyRecommendationsToLive(ids);
+      if (!applied.ok) {
+        res.status(400).json(applied);
+        return;
+      }
+      res.json({
+        ...applied,
+        strategies: getStrategiesStatus(),
+        tradeProfiles: getTradeProfilesStatus(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[backtest/advise/apply]', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
   app.get('/backtest/export.csv', async (_req: Request, res: Response) => {
     const { exportLastBacktestCsv, getLastBacktest } = await import('./backtest');
     const csv = exportLastBacktestCsv();

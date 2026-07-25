@@ -2844,21 +2844,41 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         width: auto;
         justify-self: stretch;
         justify-content: flex-end;
-        flex-wrap: wrap;
-        gap: 0.35rem 0.5rem;
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: 0.4rem 0.55rem;
+        padding: 0.3rem 0.55rem !important;
+        overflow-x: auto;
+        scrollbar-width: thin;
       }
       .header-actions .status-meta {
-        flex: 1 1 auto;
+        flex: 0 1 auto;
+        flex-wrap: nowrap;
         justify-content: flex-end;
+        align-items: center;
+        gap: 0.28rem 0.4rem;
+        min-width: 0;
       }
       .header-actions .status-controls {
-        flex: 0 1 auto;
-        flex-wrap: wrap;
-        margin-left: 0;
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+        align-items: center;
+        margin-left: 0.15rem;
+        gap: 0.3rem;
       }
       .header-actions .btn {
-        flex: 0 1 auto;
+        flex: 0 0 auto;
+        white-space: nowrap;
+        min-height: 1.75rem;
+        padding: 0.18rem 0.45rem;
+        font-size: 11px;
       }
+      .header-actions .status-stat {
+        font-size: 0.68rem;
+      }
+      /* Compact button labels until wide desktop so the bar stays one row */
+      .header-actions .btn-label-short { display: inline; }
+      .header-actions .btn-label-full { display: none; }
       .card { padding: 1.15rem; }
       .filters-row { gap: 0.65rem 0.75rem; }
       .chart-wrap { height: 240px; }
@@ -2871,6 +2891,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         max-width: 96rem;
         padding: 1.75rem 2.5rem 3rem;
       }
+      .header-actions .btn-label-short { display: none; }
+      .header-actions .btn-label-full { display: inline; }
     }
 
     /* Prefer reduced motion */
@@ -3925,6 +3947,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="section-title">PnL % Distribution <span class="tip" tabindex="0" data-tip="Histogram of realized trade PnL % after fees."></span></div>
           <div class="chart-wrap" style="height:240px"><canvas id="bt-chart-dist"></canvas></div>
           <div class="chart-empty mint" id="bt-chart-dist-empty">No histogram yet</div>
+        </div>
+      </div>
+
+      <div class="card" id="bt-advisor-card">
+        <div class="section-title">Smart Advisor <span class="tip" tabindex="0" data-tip="Clusters losing trades and skip reasons, proposes one-knob filter/toggle/profile changes, then shadow re-scores them on the same window. Never auto-applies to live."></span></div>
+        <p class="mint text-xs mb-2" id="bt-advisor-disclaimer">Counterfactual on this backtest window only — not a live forward guarantee.</p>
+        <div class="flex flex-wrap gap-2 items-center mb-2">
+          <button class="btn btn-primary" id="bt-advisor-analyze-btn" onclick="analyzeBacktestAdvisor()" title="Analyze losers and score recommendations">Analyze losers</button>
+          <button class="btn btn-secondary" id="bt-advisor-rerun-btn" onclick="rerunBacktestWithAdvisor()" title="Re-run last window with checked tips">Re-run with selected</button>
+          <button class="btn btn-secondary" id="bt-advisor-apply-btn" onclick="applyAdvisorToLive()" title="Persist checked tips to live Strategies">Apply selected to Strategies</button>
+          <span class="mint text-xs" id="bt-advisor-status">Run a backtest, then Analyze</span>
+        </div>
+        <div id="bt-advisor-evidence" class="mint text-xs mb-2 hidden"></div>
+        <div id="bt-advisor-compare" class="mint text-xs mb-2 hidden"></div>
+        <div class="overflow-x-auto max-h-80 overflow-y-auto">
+          <table id="bt-advisor-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Recommendation</th>
+                <th>Evidence</th>
+                <th>Δ WR</th>
+                <th>Δ PF</th>
+                <th>Δ PnL</th>
+                <th>Keep?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colspan="7" class="text-slate-500">No advisor results yet</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -8321,6 +8374,201 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       window.location.href = '/backtest/export.json';
+    }
+
+    function selectedAdvisorIds() {
+      return Array.from(document.querySelectorAll('#bt-advisor-table input.bt-advisor-check:checked'))
+        .map(function (el) { return el.getAttribute('data-id'); })
+        .filter(Boolean);
+    }
+
+    function fmtAdvisorDelta(n, suffix) {
+      if (n == null || !Number.isFinite(Number(n))) return '—';
+      const v = Number(n);
+      const sign = v > 0 ? '+' : '';
+      return sign + v.toFixed(suffix === 'SOL' ? 4 : 2) + (suffix === '%' ? '%' : suffix === 'SOL' ? '' : '');
+    }
+
+    function renderAdvisorReport(advisor, compare) {
+      const status = document.getElementById('bt-advisor-status');
+      const evidence = document.getElementById('bt-advisor-evidence');
+      const compareEl = document.getElementById('bt-advisor-compare');
+      const tbody = document.querySelector('#bt-advisor-table tbody');
+      const disc = document.getElementById('bt-advisor-disclaimer');
+      if (disc && advisor && advisor.disclaimer) disc.textContent = advisor.disclaimer;
+      if (!advisor) {
+        if (status) status.textContent = 'No advisor report';
+        return;
+      }
+      window._lastAdvisor = advisor;
+      if (status) {
+        status.textContent =
+          advisor.loserCount + ' losers · ' + advisor.skipCount + ' skips · ' +
+          (advisor.recommendations || []).length + ' tips' +
+          (advisor.eowCount ? ' · ' + advisor.eowCount + ' EOW' : '');
+      }
+      if (evidence) {
+        const loseBits = (advisor.loserClusters || []).slice(0, 4).map(function (c) {
+          return c.label + '×' + c.count;
+        }).join(', ');
+        const skipBits = (advisor.skipClusters || []).slice(0, 3).map(function (c) {
+          return c.label + '×' + c.count;
+        }).join(', ');
+        evidence.classList.remove('hidden');
+        evidence.innerHTML =
+          (loseBits ? '<strong style="color:#e2e8f0">Loser clusters:</strong> ' + loseBits : '') +
+          (skipBits ? (loseBits ? ' · ' : '') + '<strong style="color:#e2e8f0">Skips:</strong> ' + skipBits : '') ||
+          'No clusters';
+      }
+      if (compareEl) {
+        if (compare && compare.delta) {
+          compareEl.classList.remove('hidden');
+          const d = compare.delta;
+          compareEl.innerHTML =
+            '<strong style="color:#e2e8f0">Re-run vs baseline:</strong> ΔWR ' +
+            fmtAdvisorDelta(d.winRatePct, '%') +
+            ' · ΔPF ' + fmtAdvisorDelta(d.profitFactor, '') +
+            ' · ΔPnL ' + fmtAdvisorDelta(d.totalPnlSol, 'SOL') + ' SOL' +
+            ' · Δtrades ' + fmtAdvisorDelta(d.trades, '');
+        } else {
+          compareEl.classList.add('hidden');
+          compareEl.textContent = '';
+        }
+      }
+      if (tbody) {
+        const rows = advisor.recommendations || [];
+        tbody.innerHTML = rows.length === 0
+          ? '<tr><td colspan="7" class="text-slate-500">No recommendations for this run</td></tr>'
+          : rows.map(function (r) {
+              const keep = r.keep === true;
+              const scored = r.scored === true;
+              const deltaColor = function (v) {
+                if (v == null) return 'var(--muted)';
+                return Number(v) >= 0 ? 'var(--green)' : 'var(--red)';
+              };
+              return '<tr>' +
+                '<td><input type="checkbox" class="bt-advisor-check" data-id="' + escAttr(r.id) + '"' +
+                  (keep ? ' checked' : '') + ' /></td>' +
+                '<td><strong style="color:#e2e8f0">' + escHtml(r.title) + '</strong>' +
+                  '<div class="mint text-xs mt-0.5">' + escHtml(r.rationale || '') +
+                  (r.scoreNote ? ' · ' + escHtml(r.scoreNote) : '') + '</div></td>' +
+                '<td class="mint">' + (r.evidenceCount || 0) + '</td>' +
+                '<td style="color:' + deltaColor(r.deltaWinRatePct) + '">' +
+                  (scored ? fmtAdvisorDelta(r.deltaWinRatePct, '%') : '—') + '</td>' +
+                '<td style="color:' + deltaColor(r.deltaProfitFactor) + '">' +
+                  (scored ? fmtAdvisorDelta(r.deltaProfitFactor, '') : '—') + '</td>' +
+                '<td style="color:' + deltaColor(r.deltaPnlSol) + '">' +
+                  (scored ? fmtAdvisorDelta(r.deltaPnlSol, 'SOL') : '—') + '</td>' +
+                '<td class="mint">' + (scored ? (keep ? 'Yes' : 'No') : 'pending') + '</td>' +
+                '</tr>';
+            }).join('');
+      }
+    }
+
+    async function analyzeBacktestAdvisor() {
+      const status = document.getElementById('bt-advisor-status');
+      const btn = document.getElementById('bt-advisor-analyze-btn');
+      if (!window._lastBacktest || !(window._lastBacktest.trades || []).length) {
+        alert('Run a backtest first');
+        return;
+      }
+      if (status) status.textContent = 'Analyzing & scoring (shadow re-runs)…';
+      if (btn) btn.disabled = true;
+      setBtProgress(5, 'Advisor scoring…');
+      clearInterval(_btProgressTimer);
+      _btProgressTimer = setInterval(pollBacktestProgress, 400);
+      try {
+        const data = await fetchJSON('/backtest/advise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ score: true, maxScore: 6 }),
+          timeoutMs: 300000,
+        });
+        renderAdvisorReport(data.advisor);
+        setBtProgress(100, 'Advisor complete');
+        setTimeout(hideBtProgress, 1200);
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Advisor failed';
+        hideBtProgress();
+      } finally {
+        clearInterval(_btProgressTimer);
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function rerunBacktestWithAdvisor() {
+      const ids = selectedAdvisorIds();
+      if (!ids.length) {
+        alert('Check at least one recommendation');
+        return;
+      }
+      const status = document.getElementById('bt-advisor-status');
+      const btn = document.getElementById('bt-advisor-rerun-btn');
+      if (status) status.textContent = 'Re-running with selected tips…';
+      if (btn) btn.disabled = true;
+      setBtProgress(5, 'Advisor re-run…');
+      clearInterval(_btProgressTimer);
+      _btProgressTimer = setInterval(pollBacktestProgress, 400);
+      try {
+        const data = await fetchJSON('/backtest/advise/rerun', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recommendationIds: ids }),
+          timeoutMs: 180000,
+        });
+        if (data.result) {
+          renderBacktestResult(data.result);
+        }
+        renderAdvisorReport(data.advisor || window._lastAdvisor || { recommendations: [] }, data.comparison);
+        if (data.comparison) {
+          const st = document.getElementById('bt-advisor-status');
+          if (st) {
+            st.textContent =
+              'Re-run applied ' + ids.length + ' tip(s) · ΔPnL ' +
+              fmtAdvisorDelta(data.comparison.delta && data.comparison.delta.totalPnlSol, 'SOL') + ' SOL';
+          }
+        }
+        setBtProgress(100, 'Re-run complete');
+        setTimeout(hideBtProgress, 1200);
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Re-run failed';
+        hideBtProgress();
+      } finally {
+        clearInterval(_btProgressTimer);
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function applyAdvisorToLive() {
+      const ids = selectedAdvisorIds();
+      if (!ids.length) {
+        alert('Check at least one recommendation');
+        return;
+      }
+      if (!confirm(
+        'Apply ' + ids.length + ' recommendation(s) to live Strategies / filters / Trade Profiles?\n\n' +
+        'This persists settings. You can undo by toggling modules back on the Strategies tab.'
+      )) {
+        return;
+      }
+      const status = document.getElementById('bt-advisor-status');
+      try {
+        const data = await fetchJSON('/backtest/advise/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recommendationIds: ids }),
+        });
+        if (status) status.textContent = data.message || 'Applied to live';
+        if (typeof loadStrategies === 'function') {
+          try { loadStrategies(); } catch (_) {}
+        }
+        if (typeof refreshAll === 'function') {
+          try { refreshAll(); } catch (_) {}
+        }
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Apply failed';
+        alert(err.message || 'Apply failed');
+      }
     }
 
     async function togglePaperLiveData() {

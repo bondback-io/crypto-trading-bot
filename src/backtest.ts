@@ -152,6 +152,16 @@ export interface BacktestOptions {
    * allowSynthetic explicitly true, simulations capped at 1 unless Advanced.
    */
   parityMode?: boolean;
+  /**
+   * Temporary one-knob advisor overlay (toggles / floors / profiles).
+   * Applied after Risk/Strict overrides; restored in finally via snapshot.
+   */
+  advisorOverlay?: import('./backtestAdvisor').AdvisorOverlay;
+  /**
+   * When false, do not overwrite lastResult / history (used for advisor shadow runs).
+   * Default true.
+   */
+  persistResult?: boolean;
 }
 
 export type BacktestExitTakeStage =
@@ -2670,6 +2680,12 @@ export async function runBacktest(
       config.filters.enableWalletQualityGate = true;
     }
 
+    // Advisor one-knob overlay (run-only; restored in finally)
+    if (options.advisorOverlay) {
+      const { applyAdvisorOverlay } = await import('./backtestAdvisor');
+      applyAdvisorOverlay(options.advisorOverlay, { persist: false });
+    }
+
     const toMs = options.toMs ?? Date.now();
     const hours = options.hours ?? 24;
     const fromMs = options.fromMs ?? toMs - hours * 60 * 60 * 1000;
@@ -3031,7 +3047,9 @@ export async function runBacktest(
       performanceScore,
     };
 
-    storeResult(result);
+    if (options.persistResult !== false) {
+      storeResult(result);
+    }
     setProgress({
       running: false,
       phase: 'done',
