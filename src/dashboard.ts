@@ -3414,6 +3414,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-primary" onclick="discoverWallets(false)" title="Run discovery (may use cache)">Discover</button>
           <button class="btn btn-secondary" onclick="discoverWallets(true)" title="Bypass cache and re-fetch all sources">Force refresh</button>
           <button class="btn btn-secondary" onclick="importDiscoveredAll()" title="Add every new (untracked) candidate to Tracked Smart Wallets">Import all new</button>
+          <button class="btn btn-primary" onclick="importFavourites()" title="One-click: discover favourites presets (30D / 100 / min win 35% / min 15 trades 7d / scalpers / exclude HF) from All + Kolscan + Axiom + Photon + Nansen seed JSON, then track new wallets">Import Favourites</button>
           <span class="mint self-center" id="discover-status"></span>
           <span class="mint self-center" id="discover-key-status"></span>
         </div>
@@ -11016,6 +11017,75 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById('discover-status').textContent = 'Imported ' + n + ' wallet(s)';
       await discoverWallets(true);
       refresh();
+    }
+
+    function applyFavouritesDiscoverForm() {
+      const setVal = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+      };
+      const setCheck = (id, on) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!on;
+      };
+      setVal('discover-source', 'all');
+      setVal('discover-period', '30d');
+      setVal('discover-limit', '100');
+      setVal('discover-min-wr', '35');
+      setVal('discover-min-trades', '15');
+      setCheck('discover-scalpers', true);
+      setCheck('discover-exclude-hf', true);
+      setCheck('discover-pump', false);
+    }
+
+    async function importFavourites() {
+      applyFavouritesDiscoverForm();
+      const status = document.getElementById('discover-status');
+      if (status) {
+        status.textContent =
+          'Importing favourites (All + Kolscan + Axiom + Photon + Nansen)…';
+      }
+      try {
+        const data = await fetchJSON('/api/discover-wallets/import-favourites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: true }),
+          timeoutMs: 120000,
+        });
+        const bySrc = (data.bySource || [])
+          .map(function (s) {
+            return (
+              s.source +
+              ':' +
+              (s.imported || 0) +
+              'added/' +
+              (s.discovered || 0) +
+              'found' +
+              (s.error ? '!' : '')
+            );
+          })
+          .join(' · ');
+        const msg =
+          (data.message ||
+            ('Added ' +
+              (data.imported || 0) +
+              ' · skipped ' +
+              (data.skipped || 0) +
+              ' · errors ' +
+              (data.errors || 0))) +
+          (data.monitoring
+            ? ' · watching ' +
+              data.monitoring.watching +
+              '/' +
+              data.monitoring.tracked
+            : '') +
+          (bySrc ? ' · ' + bySrc : '');
+        if (status) status.textContent = msg;
+        await discoverWallets(true);
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = 'Favourites import failed: ' + (err.message || err);
+      }
     }
 
     async function loadTopWallets() {

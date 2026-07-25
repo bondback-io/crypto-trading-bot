@@ -3,7 +3,9 @@
  * Sources: GMGN | Birdeye | DexScreener | Kolscan | Axiom | Photon | BullX | manual.
  */
 
-import { config } from './config';
+import fs from 'fs';
+import path from 'path';
+import { addSmartWallet, config } from './config';
 import {
   getTopSmartWallets,
   getCuratedSmartWallets,
@@ -11,7 +13,17 @@ import {
   type GmgnPeriod,
 } from './gmgn';
 import { logger, errorToMeta, loggedFetch } from './logger';
-import { isValidSolanaAddress } from './walletStore';
+import { dataFile } from './dataDir';
+import {
+  importNansenToTracked,
+  importNansenWalletList,
+  parseNansenJson,
+} from './nansen';
+import {
+  inferWalletCategory,
+  isValidSolanaAddress,
+  type SmartWallet,
+} from './walletStore';
 import {
   hasBirdeyeKey,
   birdeyeRequest,
@@ -21,6 +33,23 @@ import {
   hasSolanaTrackerKey,
   type SolanaTrackerPlatform,
 } from './solanaTracker';
+
+/** One-click favourites re-import presets (Discover Smart Wallets). */
+export const FAVOURITES_DISCOVER_PRESET = {
+  period: '30d' as const,
+  limit: 100,
+  /** Min win rate % when the source reports it (UI field label is Min win %) */
+  minWinRate: 35,
+  minTrades7d: 15,
+  preferScalpers: true,
+  excludeHighFreq: true,
+  highFreqTradeLimit: 1000,
+  /** Explicit sources plus Nansen seed file — "all" already merges some of these. */
+  sources: ['all', 'kolscan', 'axiom', 'photon'] as const,
+};
+
+export const NANSEN_FAVOURITES_FILENAME =
+  'nansen-smart-wallets-best-overall.json';
 
 export type DiscoverySource =
   | 'gmgn'
@@ -1467,3 +1496,312 @@ export function getDiscoveryStatus() {
       : null,
   };
 }
+
+export interface FavouritesImportSourceStats {
+  source: string;
+  discovered: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+  error?: string;
+}
+
+export interface FavouritesImportResult {
+  ok: boolean;
+  preset: typeof FAVOURITES_DISCOVER_PRESET;
+  imported: number;
+  skipped: number;
+  errors: number;
+  candidates: number;
+  sourcesUsed: string[];
+  bySource: FavouritesImportSourceStats[];
+  nansenFile?: string | null;
+  message: string;
+  addedAddresses: string[];
+}
+
+function resolveNansenFavouritesPath(): string | null {
+  const name = NANSEN_FAVOURITES_FILENAME;
+  const candidates = [
+    dataFile(name),
+    path.join(process.cwd(), 'data', name),
+    path.join(__dirname, '..', 'data', name),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function isHighFrequencyDiscovered(
+  w: DiscoveredWallet,
+  limit = FAVOURITES_DISCOVER_PRESET.highFreqTradeLimit
+): boolean {
+  const t7 =
+    w.tradesLast7d ??
+    (typeof w.metrics?.trades7d === 'number' ? w.metrics.trades7d : null);
+  const t30 =
+    w.tradesLast30d ??
+    (typeof w.metrics?.trades30d === 'number' ? w.metrics.trades30d : null);
+  return (
+    (t7 != null && Number(t7) > limit) || (t30 != null && Number(t30) > limit)
+  );
+}
+
+function passesFavouritesFilters(w: DiscoveredWallet): boolean {
+  const { minWinRate, minTrades7d, excludeHighFreq } = FAVOURITES_DISCOVER_PRESET;
+  if (w.winRate != null && Number.isFinite(w.winRate) && w.winRate < minWinRate) {
+    return false;
+  }
+  if (
+    minTrades7d > 0 &&
+    w.tradesLast7d != null &&
+    Number.isFinite(w.tradesLast7d) &&
+    w.tradesLast7d < minTrades7d
+  ) {
+    return false;
+  }
+  if (excludeHighFreq && isHighFrequencyDiscovered(w)) return false;
+  return true;
+}
+
+function sortPreferScalpers(rows: DiscoveredWallet[]): DiscoveredWallet[] {
+  if (!FAVOURITES_DISCOVER_PRESET.preferScalpers) return rows;
+  return rows.slice().sort((a, b) => {
+    const aS = (a.tradesLast7d || a.tradeCount || 0) >= 20 ? 1 : 0;
+    const bS = (b.tradesLast7d || b.tradeCount || 0) >= 20 ? 1 : 0;
+    if (bS !== aS) return bS - aS;
+    return (b.tradesLast7d || 0) - (a.tradesLast7d || 0);
+  });
+}
+
+function walletSourceForTrack(
+  source: string
+): NonNullable<SmartWallet['source']> {
+  if (
+    source === 'gmgn' ||
+    source === 'birdeye' ||
+    source === 'dexscreener' ||
+    source === 'curated' ||
+    source === 'manual' ||
+    source === 'bulk' ||
+    source === 'nansen' ||
+    source === 'kolscan' ||
+    source === 'axiom' ||
+    source === 'photon'
+  ) {
+    return source;
+  }
+  return 'manual';
+}
+
+/**
+ * Discover from favourites sources + Nansen seed JSON, then merge into tracked wallets.
+ * Dedupes by address; skips already-tracked; does not wipe existing wallets.
+ */
+export async function importFavouritesSmartWallets(
+  options: { force?: boolean } = {}
+): Promise<FavouritesImportResult> {
+  const force = options.force !== false;
+  const preset = FAVOURITES_DISCOVER_PRESET;
+  const bySource: FavouritesImportSourceStats[] = [];
+  /** First-seen discover candidate per address (later duplicate sources skipped). */
+  const candidates = new Map<
+    string,
+    { wallet: DiscoveredWallet; source: string }
+  >();
+  let totalErrors = 0;
+
+  const sourceTasks = preset.sources.map(async (source) => {
+    try {
+      const result = await findSmartWallets({
+        source,
+        limit: preset.limit,
+        period: preset.period,
+        minWinRate: preset.minWinRate,
+        force,
+        pumpFunFocus: false,
+      });
+      return {
+        source,
+        wallets: sortPreferScalpers(
+          (result.wallets || []).filter(passesFavouritesFilters)
+        ),
+        discovered: result.wallets?.length ?? 0,
+        error: result.error,
+      };
+    } catch (err) {
+      return {
+        source,
+        wallets: [] as DiscoveredWallet[],
+        discovered: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  const settled = await Promise.all(sourceTasks);
+  for (const part of settled) {
+    const hardFail = Boolean(part.error) && part.discovered === 0;
+    const stats: FavouritesImportSourceStats = {
+      source: part.source,
+      discovered: part.discovered,
+      imported: 0,
+      skipped: 0,
+      errors: hardFail ? 1 : 0,
+      error: part.error,
+    };
+    if (hardFail) totalErrors += 1;
+
+    for (const w of part.wallets) {
+      const addr = String(w.address || '').trim();
+      if (!isValidSolanaAddress(addr)) {
+        stats.skipped += 1;
+        continue;
+      }
+      if (candidates.has(addr)) {
+        stats.skipped += 1;
+        continue;
+      }
+      candidates.set(addr, {
+        wallet: { ...w, address: addr },
+        source: part.source,
+      });
+    }
+    bySource.push(stats);
+  }
+
+  const discoverUnique = candidates.size;
+  const addedAddresses: string[] = [];
+  let skipped = 0;
+
+  // Nansen seed file — import all valid addresses (no win%/trades filter)
+  let nansenFile: string | null = null;
+  const nansenStats: FavouritesImportSourceStats = {
+    source: 'nansen-file',
+    discovered: 0,
+    imported: 0,
+    skipped: 0,
+    errors: 0,
+  };
+  try {
+    nansenFile = resolveNansenFavouritesPath();
+    if (!nansenFile) {
+      nansenStats.errors = 1;
+      nansenStats.error = `Missing ${NANSEN_FAVOURITES_FILENAME}`;
+      totalErrors += 1;
+    } else {
+      const parsed = parseNansenJson(fs.readFileSync(nansenFile, 'utf8'));
+      importNansenWalletList(parsed);
+      nansenStats.discovered = parsed.length;
+      const nansenResult = importNansenToTracked(
+        parsed.map((w) => w.address),
+        { onlyNew: true }
+      );
+      nansenStats.imported = nansenResult.added.length;
+      nansenStats.skipped =
+        nansenResult.skipped.length + nansenResult.updated.length;
+      skipped += nansenStats.skipped;
+      addedAddresses.push(...nansenResult.added);
+      for (const addr of [
+        ...nansenResult.added,
+        ...nansenResult.skipped,
+        ...nansenResult.updated,
+      ]) {
+        candidates.delete(addr);
+      }
+    }
+  } catch (err) {
+    nansenStats.errors = 1;
+    nansenStats.error = err instanceof Error ? err.message : String(err);
+    totalErrors += 1;
+  }
+  bySource.push(nansenStats);
+
+  const tracked = trackedSet();
+  const sourceStat = (name: string): FavouritesImportSourceStats => {
+    let row = bySource.find((s) => s.source === name);
+    if (!row) {
+      row = { source: name, discovered: 0, imported: 0, skipped: 0, errors: 0 };
+      bySource.push(row);
+    }
+    return row;
+  };
+
+  for (const { wallet: w, source } of candidates.values()) {
+    const stats = sourceStat(source);
+    if (tracked.has(w.address)) {
+      stats.skipped += 1;
+      skipped += 1;
+      continue;
+    }
+    try {
+      const tags = Array.from(
+        new Set([...(w.tags ?? []), 'favourites', String(w.source || source)])
+      );
+      const ok = addSmartWallet({
+        name: w.name || `${w.address.slice(0, 4)}…${w.address.slice(-4)}`,
+        address: w.address,
+        enabled: true,
+        winRate: w.winRate,
+        lastActive: w.lastActiveAt,
+        lastTradedAt: w.lastActiveAt,
+        tradesLast7d: w.tradesLast7d,
+        tradesLast30d: w.tradesLast30d,
+        pumpFunTradeCount: w.pumpFunTradeCount,
+        notes: w.notes ?? `Favourites import · ${w.source}`,
+        tags,
+        category: inferWalletCategory(tags, w.tradesLast7d),
+        source: walletSourceForTrack(String(w.source || source)),
+        discoveredAt: Date.now(),
+      });
+      if (ok) {
+        stats.imported += 1;
+        addedAddresses.push(w.address);
+        tracked.add(w.address);
+      } else {
+        stats.skipped += 1;
+        skipped += 1;
+      }
+    } catch (err) {
+      stats.errors += 1;
+      totalErrors += 1;
+      stats.error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  const imported = addedAddresses.length;
+  const sourcesUsed = bySource
+    .filter((s) => s.discovered > 0 || s.imported > 0)
+    .map((s) => s.source);
+
+  const message =
+    `Favourites import · added ${imported}` +
+    ` · skipped ${skipped}` +
+    ` · errors ${totalErrors}` +
+    ` · sources: ${sourcesUsed.join(', ') || 'none'}`;
+
+  logger.info('System', message, {
+    discoverUnique,
+    nansenFile,
+  });
+
+  return {
+    ok: totalErrors === 0 || imported > 0,
+    preset,
+    imported,
+    skipped,
+    errors: totalErrors,
+    candidates: discoverUnique + nansenStats.discovered,
+    sourcesUsed,
+    bySource,
+    nansenFile,
+    message,
+    addedAddresses,
+  };
+}
+

@@ -1,7 +1,9 @@
 node_modules/
 dist/
 .env
-data/
+# Runtime state under data/ — keep seed favourites list in git for deploys
+data/*
+!data/nansen-smart-wallets-best-overall.json
 logs/
 !logs/.gitkeep
 *.log

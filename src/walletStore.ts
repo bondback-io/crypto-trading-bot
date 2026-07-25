@@ -48,7 +48,9 @@ export interface SmartWallet {
     | 'manual'
     | 'bulk'
     | 'nansen'
-    | 'kolscan';
+    | 'kolscan'
+    | 'axiom'
+    | 'photon';
   /** When first discovered / imported */
   discoveredAt?: number;
   /** When activity was last checked */

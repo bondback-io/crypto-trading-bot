@@ -116,6 +116,8 @@ import {
   findSmartWallets,
   getDiscoveryStatus,
   clearDiscoveryCache,
+  importFavouritesSmartWallets,
+  FAVOURITES_DISCOVER_PRESET,
   type DiscoverySource,
 } from './walletDiscovery';
 import { getSolanaTrackerStatus } from './solanaTracker';
@@ -3093,6 +3095,43 @@ export function createServer(): express.Application {
     clearDiscoveryCache();
     res.json({ ok: true, discovery: getDiscoveryStatus() });
   });
+
+  /** One-click favourites: discover preset sources + Nansen seed, merge into tracked. */
+  app.post(
+    '/api/discover-wallets/import-favourites',
+    async (req: Request, res: Response) => {
+      try {
+        const force = req.body?.force !== false;
+        const result = await importFavouritesSmartWallets({ force });
+        const monitoring = syncWalletsToMonitoring(
+          result.addedAddresses,
+          'import-favourites'
+        );
+        console.log(
+          `[discover] Favourites import · added ${result.imported}` +
+            ` · skipped ${result.skipped} · errors ${result.errors}` +
+            ` · watching ${monitoring.watching}/${monitoring.tracked}`
+        );
+        res.json({
+          ...result,
+          preset: FAVOURITES_DISCOVER_PRESET,
+          monitoring,
+          wallets: getWalletsWithActivity(),
+          discovery: getDiscoveryStatus(),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.status(500).json({
+          ok: false,
+          error: message,
+          imported: 0,
+          skipped: 0,
+          errors: 1,
+          message,
+        });
+      }
+    }
+  );
 
   app.get('/api/gmgn/sniper/:mint', async (req: Request, res: Response) => {
     try {
