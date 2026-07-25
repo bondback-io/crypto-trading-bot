@@ -208,6 +208,60 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #fca5a5;
       border-color: #c084fc;
     }
+    .strat-src-badge {
+      display: inline-block;
+      margin-left: 0.4rem;
+      padding: 1px 7px;
+      border-radius: 9999px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      vertical-align: middle;
+      border: 1px solid transparent;
+    }
+    .strat-src-core {
+      background: #0f172a;
+      color: #93c5fd;
+      border-color: #1d4ed8;
+    }
+    .strat-src-risk {
+      background: #042f2e;
+      color: #5eead4;
+      border-color: #0f766e;
+    }
+    .strat-src-optional {
+      background: #1e293b;
+      color: #94a3b8;
+      border-color: #475569;
+    }
+    .strat-src-custom {
+      background: #422006;
+      color: #fde68a;
+      border-color: #b45309;
+    }
+    .strategy-recipe-banner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.5rem;
+      border: 1px solid #334155;
+      background: #0b1220;
+      font-size: 0.8rem;
+    }
+    .strategy-recipe-banner.is-custom {
+      border-color: #b45309;
+      background: #1c1410;
+      color: #fde68a;
+    }
+    .strategy-recipe-banner.is-synced {
+      border-color: #0f766e;
+      background: #042f2e;
+      color: #99f6e4;
+    }
     .active-profile-banner .strict-badge,
     .active-profile-banner .risk-badge {
       font-size: 12px;
@@ -3791,14 +3845,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
         <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Tight filters, smaller size, stricter stops">Low</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced recommended default">Medium</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="Aggressive — larger size, looser filters">High</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — basic rug/honeypot only, hard floors kept" style="border-color:#a855f7">Degen</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Fewer trades, higher selectivity — quality-first modules">Low</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced (recommended) — coherent strategy modules">Medium</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="More entries, looser filters — higher variance">High</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — safety floors only, highest variance" style="border-color:#a855f7">Degen</button>
           <span class="mint self-center" id="risk-level-label">—</span>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
         <div class="mint text-sm" id="risk-level-summary">—</div>
+        <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mt-3 pt-3 border-t border-slate-700/80">
           <div class="toggle-row">
             <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
@@ -3823,7 +3878,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div style="min-width:0;flex:1">
             <div class="section-title">Strategy Control Center</div>
-            <p class="text-sm text-slate-400 mb-0">Follow the steps below. Risk + Trade Profiles are what you normally set; packs below are optional.</p>
+            <p class="text-sm text-slate-400 mb-0">Pick Risk Level → strategies and filters are chosen for you. Trade Profiles still control per-trade style.</p>
           </div>
           <div class="text-right" style="flex-shrink:0">
             <div id="strategies-count" class="text-base font-semibold">—</div>
@@ -3831,16 +3886,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
 
+        <div id="strategy-recipe-banner" class="strategy-recipe-banner is-synced" style="display:none">
+          <span id="strategy-recipe-banner-text">Synced to Risk</span>
+          <button type="button" class="btn btn-secondary text-xs" id="strategy-recipe-reset" onclick="applyStrategiesAction('reset_recipe')">Reset to risk defaults</button>
+        </div>
+
         <div class="strat-setup-guide mt-3" id="strat-setup-guide">
-          <div class="sg-step"><span class="sg-num">1</span><span><strong>Risk Level</strong> (+ optional Strict) — global size &amp; safety floors for every trade.</span></div>
+          <div class="sg-step"><span class="sg-num">1</span><span><strong>Risk Level</strong> (+ optional Strict) — size, safety floors, and which strategy modules turn on.</span></div>
           <div class="sg-step"><span class="sg-num">2</span><span><strong>Trade Profiles</strong> — turn ON the styles you want. The bot auto-picks the best match per trade and freezes that profile’s TP/SL/timer.</span></div>
-          <div class="sg-step"><span class="sg-num">3</span><span><strong>Optional packs</strong> (below) — bulk-toggle filter modules or scalp engines. Not required when Multi-profile is ON; profiles already map Scalper / Momentum / etc. to the right timed exit.</span></div>
+          <div class="sg-step"><span class="sg-num">3</span><span><strong>Optional packs</strong> (below) — advanced override. Applying a pack leaves Risk sync (custom modules until you Reset).</span></div>
         </div>
 
         <div class="flex flex-wrap gap-2 mt-2">
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('enable_all')">Enable All modules</button>
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('disable_all')">Disable All modules</button>
           <button class="btn btn-secondary text-xs" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous pack</button>
+          <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('reset_recipe')" title="Re-apply modules for the current Risk Level">Reset to risk defaults</button>
         </div>
 
         <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
@@ -3915,7 +3976,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span>Optional · Quality module packs <span class="mint font-normal" id="module-packs-active-label"></span></span>
           </summary>
           <div class="strat-adv-body">
-            <p class="strat-adv-hint">These bulk-enable filter modules + quality thresholds. They do <strong>not</strong> replace Trade Profiles. Prefer Balanced unless you want a specific win-rate style. Risk + Strict still stack on top.</p>
+            <p class="strat-adv-hint">Advanced override — leaves Risk sync. Bulk-enables filter modules + quality thresholds. Does <strong>not</strong> replace Trade Profiles. Prefer Balanced unless you want a specific win-rate style.</p>
             <div class="strategy-preset-grid" id="strategy-presets">
               <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" role="switch" aria-checked="false" onclick="applyStrategiesAction('high_win_rate')">
                 <span class="preset-copy">
@@ -3955,10 +4016,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </summary>
           <div class="strat-adv-body">
             <p class="strat-adv-hint">
-              With <strong>Multi-profile ON</strong>, leave this alone unless you want timed-scalp modules enabled globally.
+              Advanced override — leaves Risk sync. With <strong>Multi-profile ON</strong>, leave this alone unless you want timed-scalp modules enabled globally.
               The bot <strong>auto-picks</strong> which scalp engine fits (migration → micro → momentum → reversal among enabled ones).
               Trade Profiles then override TP/SL/timer when assigned (Scalper → quick scalp, Momentum Burst profile → burst, etc.).
               Use a <strong>Suite</strong> only to turn Micro+Momentum+Post-Mig(+Reversal) all ON with shared timers.
+              Risk Level High/Degen already enables some scalp engines when synced.
             </p>
             <div class="strat-pack-section-label">Suite variants</div>
             <div class="strategy-preset-grid short-term-presets" id="strategy-presets-suite">
@@ -4953,10 +5015,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const preset = String(data.strategyProfile || 'custom');
       if (count) count.textContent = data.enabledCount + ' / ' + data.totalCount + ' ON';
       if (profile) {
+        const recipe = data.recipe || {};
+        const modeLabel = recipe.mode === 'custom' ? 'Custom modules' : 'Synced to Risk';
         profile.textContent =
-          'Profile: ' + preset.replace(/_/g, ' ') +
+          modeLabel +
           ' · Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
-          (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '');
+          (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '') +
+          (recipe.enabledCore != null
+            ? ' · ' + recipe.enabledCore + ' core · ' + recipe.enabledRisk + ' risk'
+            : '');
+      }
+      const recipeBanner = document.getElementById('strategy-recipe-banner');
+      const recipeBannerText = document.getElementById('strategy-recipe-banner-text');
+      if (recipeBanner && recipeBannerText) {
+        const recipe = data.recipe || {};
+        recipeBanner.style.display = 'flex';
+        if (recipe.mode === 'custom') {
+          recipeBanner.classList.add('is-custom');
+          recipeBanner.classList.remove('is-synced');
+          recipeBannerText.textContent =
+            'Strategies customized — not synced to Risk' +
+            (recipe.divergedFromRecipe ? ' (' + recipe.divergedFromRecipe + ' differ from recipe)' : '') +
+            '. Reset to re-apply ' + String(data.riskLevel || 'medium').toUpperCase() + ' modules.';
+        } else {
+          recipeBanner.classList.add('is-synced');
+          recipeBanner.classList.remove('is-custom');
+          recipeBannerText.textContent =
+            'Synced to Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
+            (recipe.summary ? ' — ' + recipe.summary : '') +
+            (recipe.enabledCore != null
+              ? ' · ' + recipe.enabledCore + ' core · ' + recipe.enabledRisk + ' risk-linked ON'
+              : '');
+        }
       }
       if (restore) restore.disabled = !data.canRestorePrevious;
       document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset], #strategy-presets-suite [data-preset]').forEach(btn => {
@@ -5063,10 +5153,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const safety = s.criticalSafety
               ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
               : '';
+            const badgeKey = s.badge || s.source || 'optional';
+            const badgeLabel =
+              badgeKey === 'core' ? 'Core' :
+              badgeKey === 'risk' ? 'Risk' :
+              badgeKey === 'custom' ? 'Custom' : 'Optional';
+            const badge =
+              '<span class="strat-src-badge strat-src-' + badgeKey + '" title="' +
+              (badgeKey === 'core'
+                ? 'Core default — recommended always on'
+                : badgeKey === 'risk'
+                  ? 'Driven by Risk Level recipe when synced'
+                  : badgeKey === 'custom'
+                    ? 'Differs from current Risk recipe'
+                    : 'Optional / advanced — not set by Risk') +
+              '">' + badgeLabel + '</span>';
             const hasSettings = (STRATEGY_SETTING_IDS[s.key] || []).length > 0 || !!extraStrategySettingsHtml(s.key);
             return '<div class="strategy-row border-t border-slate-700/70 first:border-t-0">' +
               '<div class="flex items-center justify-between gap-3">' +
-                '<div class="font-medium text-slate-100">' + s.name + safety + '</div>' +
+                '<div class="font-medium text-slate-100">' + s.name + badge + safety + '</div>' +
                 '<label class="switch"><input type="checkbox" ' + (s.enabled ? 'checked ' : '') +
                   'onchange="toggleStrategy(\\'' + s.key + '\\', this.checked)" /><span class="slider"></span></label>' +
               '</div>' +
@@ -5781,8 +5886,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function toggleStrategy(key, enabled) {
       const def = _strategiesStatus && (_strategiesStatus.registry || []).find(s => s.key === key);
-      if (!enabled && def && def.criticalSafety) {
-        const ok = confirm('⚠ Disable ' + def.name + '?\\n\\nThis removes a safety or quality gate and may increase losses.');
+      if (!enabled && def && (def.criticalSafety || def.source === 'core')) {
+        const ok = confirm(
+          '⚠ Disable ' + def.name + '?\\n\\n' +
+          (def.source === 'core'
+            ? 'This is a core default module. Turning it off leaves Risk sync and may reduce trade quality or safety.'
+            : 'This removes a safety or quality gate and may increase losses.')
+        );
         if (!ok) {
           renderStrategies(_strategiesStatus);
           return;
@@ -5824,6 +5934,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (action === 'post_migration_scalp' && !confirm('Apply Post-Migration Scalp engine?\\n\\nMaps to Migration Sniper Trade Profile when multi-profile assigns that style.')) return;
       if (action === 'reversal_scalp' && !confirm('Apply Reversal Scalp engine?\\n\\nMaps to Reversal Scalper Trade Profile when multi-profile assigns that style.')) return;
       if (action === 'restore' && !confirm('Restore the strategy settings saved before the preset?')) return;
+      if (action === 'reset_recipe' && !confirm('Reset strategy modules to the current Risk Level recipe?\\n\\nThis turns modules on/off to match Risk and re-syncs. Manual pack overrides will be cleared.')) return;
       try {
         const data = await fetchJSON('/api/strategies', {
           method: 'POST',
@@ -11397,6 +11508,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const cfgSum = document.getElementById('cfg-risk-level-summary');
       if (cfgSum) cfgSum.textContent = summaryHtml;
 
+      const recipeBlurb = document.getElementById('risk-recipe-blurb');
+      if (recipeBlurb) {
+        const counts = sum.recipeCounts;
+        const mode = sum.recipeMode === 'custom' ? 'Custom modules' : 'Synced';
+        const bits = [];
+        if (sum.recipeSummary) bits.push(sum.recipeSummary);
+        if (counts) bits.push(counts.enabledCore + ' core · ' + counts.enabledRisk + ' risk-linked ON');
+        bits.push(mode);
+        recipeBlurb.textContent = bits.length ? bits.join(' · ') : '—';
+      }
+
       const btBanner = document.getElementById('bt-config-banner');
       if (btBanner && cfg && cfg.trade) {
         const base = cfg.trade.baseTradeAmountSol ?? cfg.trade.tradeAmountSol;
@@ -11436,9 +11558,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           updateStrictModeUI(data.config, strictStatus);
         }
         await refresh();
+        if (typeof loadStrategies === 'function') await loadStrategies();
+        const recipeNote =
+          data.summary && data.summary.recipeMode === 'synced'
+            ? '\\nStrategy modules re-synced to this Risk Level.'
+            : data.summary && data.summary.recipeMode === 'custom'
+              ? '\\nStrategy modules left custom (Reset to risk defaults to re-sync).'
+              : '';
         alert(
           'Risk level set to ' + String(level).toUpperCase() +
           (data.warning ? '\\n' + data.warning : '') +
+          recipeNote +
           '\\nRecommended settings applied.'
         );
       } catch (err) {

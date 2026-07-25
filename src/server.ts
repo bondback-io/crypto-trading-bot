@@ -1288,11 +1288,22 @@ export function createServer(): express.Application {
         | 'scalper_suite'
         | 'aggressive_scalper'
         | 'conservative_scalper'
-        | 'restore';
+        | 'restore'
+        | 'reset_recipe';
       profile?: string;
     };
 
     const action = body.action || 'set';
+
+    if (action === 'reset_recipe') {
+      const {
+        resetStrategyRecipeToRisk,
+        getStrategiesStatus,
+      } = require('./strategies') as typeof import('./strategies');
+      const applied = resetStrategyRecipeToRisk();
+      res.json({ ok: true, applied, ...getStrategiesStatus() });
+      return;
+    }
 
     if (action === 'enable_all') {
       setAllStrategyToggles(true);
@@ -1360,7 +1371,7 @@ export function createServer(): express.Application {
     if (Object.keys(partial).length === 0) {
       res.status(400).json({
         error:
-          'Provide action (enable_all|disable_all|high_win_rate|win_rate_55_60|balanced|aggressive|quick_scalper|micro_scalper|momentum_burst|post_migration_scalp|reversal_scalp|scalper_suite|aggressive_scalper|conservative_scalper|restore) or key/enabled or toggles',
+          'Provide action (enable_all|disable_all|reset_recipe|high_win_rate|win_rate_55_60|balanced|aggressive|quick_scalper|micro_scalper|momentum_burst|post_migration_scalp|reversal_scalp|scalper_suite|aggressive_scalper|conservative_scalper|restore) or key/enabled or toggles',
       });
       return;
     }

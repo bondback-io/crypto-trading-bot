@@ -63,6 +63,9 @@ export interface PersistedBotSettings {
     | 'conservative_scalper'
     | 'custom';
   highWinRatePresetActive?: boolean;
+  /** synced = Risk owns modules; custom = manual/pack override */
+  strategyRecipeMode?: 'synced' | 'custom';
+  strategyRecipeRiskLevel?: 'low' | 'medium' | 'high' | 'degen' | null;
   strategyProfileSnapshot?: Record<string, unknown> | null;
   /** Concurrent trade profile ON/OFF map + optional param overrides */
   tradeProfiles?: {

@@ -67,10 +67,10 @@ export const DEGEN_RISK_WARNING =
 
 /** Human labels for dashboard */
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
-  low: 'Low — tight filters, smaller size, stricter stops',
-  medium: 'Medium — balanced (recommended default)',
-  high: 'High — aggressive entries, larger size, wider stops',
-  degen: 'Degen — max entries, basic rug/honeypot only, hard floors kept',
+  low: 'Low — fewer trades, higher selectivity',
+  medium: 'Medium — balanced (recommended)',
+  high: 'High — more entries, looser filters',
+  degen: 'Degen — max entries, safety floors only',
 };
 
 export interface SellTier {
@@ -957,7 +957,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
   low: {
     label: 'Low',
     description:
-      'Tight filters, smaller positions, stricter stops — fewer trades, capital preservation.',
+      'Fewer trades, higher selectivity — smaller size, tighter stops, quality-first modules.',
     trade: {
       baseTradeAmountSol: 0.07,
       tradeAmountSol: 0.07,
@@ -1075,7 +1075,8 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
   },
   medium: {
     label: 'Medium',
-    description: 'Balanced filters and sizing — recommended default.',
+    description:
+      'Balanced filters, sizing, and strategy modules — recommended default.',
     trade: {
       baseTradeAmountSol: 0.14,
       tradeAmountSol: 0.14,
@@ -1195,7 +1196,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
   high: {
     label: 'High',
     description:
-      'Aggressive entries, larger positions, wider stops — higher variance.',
+      'More entries and looser module gates — larger size, wider stops, higher variance.',
     warning: HIGH_RISK_WARNING,
     trade: {
       baseTradeAmountSol: 0.25,
@@ -1315,7 +1316,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
   degen: {
     label: 'Degen',
     description:
-      'Maximum entries — only basic rug/honeypot safety; hard volume/liquidity/holder floors still apply. Extremely high variance.',
+      'Max entries and scalp engines — basic rug/honeypot + hard floors only. Extremely high variance.',
     warning: DEGEN_RISK_WARNING,
     trade: {
       baseTradeAmountSol: 0.25,
@@ -1845,6 +1846,13 @@ export interface BotConfig {
     | 'custom';
   /** True when High Win-Rate Preset thresholds + toggles are active */
   highWinRatePresetActive: boolean;
+  /**
+   * Risk→strategy recipe sync. synced = Risk Level owns module toggles;
+   * custom = user/pack overrode modules (Risk knobs still apply).
+   */
+  strategyRecipeMode: 'synced' | 'custom';
+  /** Last Risk Level whose strategy recipe was applied (UI) */
+  strategyRecipeRiskLevel: 'low' | 'medium' | 'high' | 'degen' | null;
   /** Snapshot taken before applying a named preset (preserves custom overrides) */
   strategyProfileSnapshot: {
     savedAt: number;
@@ -2168,6 +2176,8 @@ export const config: BotConfig = {
   strategyToggles: {},
   strategyProfile: 'custom',
   highWinRatePresetActive: false,
+  strategyRecipeMode: 'synced',
+  strategyRecipeRiskLevel: 'medium',
   strategyProfileSnapshot: null,
   tradeProfiles: {
     enabled: true,
@@ -2453,6 +2463,15 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         ? config.strategyProfile
         : 'custom',
     highWinRatePresetActive: config.highWinRatePresetActive === true,
+    strategyRecipeMode:
+      config.strategyRecipeMode === 'custom' ? 'custom' : 'synced',
+    strategyRecipeRiskLevel:
+      config.strategyRecipeRiskLevel === 'low' ||
+      config.strategyRecipeRiskLevel === 'medium' ||
+      config.strategyRecipeRiskLevel === 'high' ||
+      config.strategyRecipeRiskLevel === 'degen'
+        ? config.strategyRecipeRiskLevel
+        : config.riskLevel || 'medium',
     strategyProfileSnapshot: config.strategyProfileSnapshot
       ? (cloneJson(config.strategyProfileSnapshot) as PersistedBotSettings['strategyProfileSnapshot'])
       : null,
@@ -2985,6 +3004,27 @@ function applySettingsSnapshot(
   }
   if (typeof saved.highWinRatePresetActive === 'boolean') {
     config.highWinRatePresetActive = saved.highWinRatePresetActive;
+  }
+  // Missing field = existing install → custom (don't silently rewrite toggles).
+  // Fresh installs keep code default 'synced'.
+  if (saved.strategyRecipeMode === 'synced' || saved.strategyRecipeMode === 'custom') {
+    config.strategyRecipeMode = saved.strategyRecipeMode;
+  } else if (
+    saved.strategyToggles &&
+    typeof saved.strategyToggles === 'object' &&
+    Object.keys(saved.strategyToggles).length > 0
+  ) {
+    config.strategyRecipeMode = 'custom';
+  }
+  if (
+    saved.strategyRecipeRiskLevel === 'low' ||
+    saved.strategyRecipeRiskLevel === 'medium' ||
+    saved.strategyRecipeRiskLevel === 'high' ||
+    saved.strategyRecipeRiskLevel === 'degen'
+  ) {
+    config.strategyRecipeRiskLevel = saved.strategyRecipeRiskLevel;
+  } else if (saved.strategyRecipeRiskLevel === null) {
+    config.strategyRecipeRiskLevel = null;
   }
   if (saved.tradeProfiles && typeof saved.tradeProfiles === 'object') {
     const tp = saved.tradeProfiles;
@@ -4273,14 +4313,17 @@ export function applyRiskLevel(
 
   syncConfigAliases();
 
-  // Re-assert active strategy preset thresholds/toggles on top of risk knobs
-  // so Risk Level + Strategy Preset stack (Strict Mode still overlays after).
+  // Synced: Risk Level owns strategy modules. Custom: leave toggles alone
+  // (named packs still re-stack on risk knobs for pack users).
   try {
     const {
       isNamedStrategyProfile,
       applyStrategyPreset,
+      applyRiskStrategyRecipe,
     } = require('./strategies') as typeof import('./strategies');
-    if (isNamedStrategyProfile(config.strategyProfile)) {
+    if (config.strategyRecipeMode === 'synced') {
+      applyRiskStrategyRecipe(level, { persist: false });
+    } else if (isNamedStrategyProfile(config.strategyProfile)) {
       applyStrategyPreset(config.strategyProfile, { persist: false });
     }
   } catch {
@@ -4307,10 +4350,36 @@ export function applyRiskLevel(
 export function getRiskLevelSummary() {
   const level = config.riskLevel ?? 'medium';
   const preset = RISK_LEVEL_PRESETS[level];
+  let recipeSummary: string | null = null;
+  let recipeMode: 'synced' | 'custom' =
+    config.strategyRecipeMode === 'custom' ? 'custom' : 'synced';
+  let recipeCounts: {
+    enabledCore: number;
+    enabledRisk: number;
+    enabledOptional: number;
+  } | null = null;
+  try {
+    const { getRiskStrategyRecipe, getStrategyRecipeStatus } =
+      require('./strategies') as typeof import('./strategies');
+    const recipe = getRiskStrategyRecipe(level);
+    recipeSummary = recipe.summary;
+    const st = getStrategyRecipeStatus();
+    recipeMode = st.mode;
+    recipeCounts = {
+      enabledCore: st.enabledCore,
+      enabledRisk: st.enabledRisk,
+      enabledOptional: st.enabledOptional,
+    };
+  } catch {
+    // strategies may not be ready during early bootstrap
+  }
   return {
     riskLevel: level,
     label: preset.label,
     description: preset.description,
+    recipeSummary,
+    recipeMode,
+    recipeCounts,
     warning:
       level === 'high'
         ? HIGH_RISK_WARNING
@@ -4401,6 +4470,9 @@ export function getConfigSnapshot() {
     strategyToggles: { ...(config.strategyToggles || {}) },
     strategyProfile: config.strategyProfile || 'custom',
     highWinRatePresetActive: config.highWinRatePresetActive === true,
+    strategyRecipeMode:
+      config.strategyRecipeMode === 'custom' ? 'custom' : 'synced',
+    strategyRecipeRiskLevel: config.strategyRecipeRiskLevel ?? config.riskLevel,
     tradeProfiles: config.tradeProfiles
       ? {
           enabled: config.tradeProfiles.enabled !== false,

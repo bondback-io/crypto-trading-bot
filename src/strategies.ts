@@ -8,9 +8,9 @@
  * Profiles: high_win_rate | win_rate_55_60 | balanced | aggressive | quick_scalper |
  * micro_scalper | momentum_burst | post_migration_scalp | reversal_scalp |
  * scalper_suite | aggressive_scalper | conservative_scalper | custom.
- * Named presets set strategy toggles + quality thresholds; Risk Level and
- * Strict Mode still stack on top. Switching presets keeps a custom snapshot
- * for Restore Previous so manual overrides are not lost.
+ * Named presets set strategy toggles + quality thresholds and leave Risk recipe
+ * sync (custom). When strategyRecipeMode is synced, Risk Level applies
+ * RISK_STRATEGY_RECIPES (core + risk-linked modules). Strict Mode still stacks.
  */
 
 import {
@@ -144,6 +144,8 @@ export function isStrategyProfileId(
   return value === 'custom' || isNamedStrategyProfile(value);
 }
 
+export type StrategySource = 'core' | 'risk' | 'optional';
+
 export interface StrategyDefinition {
   key: StrategyKey;
   name: string;
@@ -157,6 +159,8 @@ export interface StrategyDefinition {
   frequencyWhenOn: TradeFrequencyImpact;
   /** Soft/optional advanced feature */
   placeholder?: boolean;
+  /** core = always-on must-have; risk = driven by Risk Level recipe; optional = manual/advanced */
+  source: StrategySource;
 }
 
 export const STRATEGY_GROUP_LABELS: Record<StrategyGroup, string> = {
@@ -297,6 +301,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'more',
+    source: 'core',
   },
   {
     key: 'wallet_convergence',
@@ -307,6 +312,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'migration_priority',
@@ -317,6 +323,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_more',
+    source: 'core',
   },
   {
     key: 'near_migration_curve',
@@ -327,6 +334,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_more',
+    source: 'core',
   },
   {
     key: 'early_curve_smart_money',
@@ -337,6 +345,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_more',
+    source: 'core',
   },
   {
     key: 'rebuy_on_dip',
@@ -347,6 +356,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_more',
+    source: 'risk',
   },
   {
     key: 'elite_convergence',
@@ -357,6 +367,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',
+    source: 'risk',
   },
   {
     key: 'migration_sniper',
@@ -367,6 +378,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',
+    source: 'risk',
   },
   {
     key: 'anti_rug_honeypot',
@@ -377,6 +389,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'bonding_curve_health',
@@ -387,6 +400,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'risk',
   },
   {
     key: 'min_holders_activity',
@@ -397,6 +411,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'volume_liquidity_filters',
@@ -407,6 +422,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'dead_market_exit',
@@ -417,6 +433,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'none',
+    source: 'core',
   },
   {
     key: 'dynamic_position_sizing',
@@ -427,6 +444,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'none',
+    source: 'core',
   },
   {
     key: 'tiered_profit_taking',
@@ -437,6 +455,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'none',
+    source: 'core',
   },
   {
     key: 'wallet_quality_scoring',
@@ -447,6 +466,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'multi_factor_conviction',
@@ -457,6 +477,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'much_fewer',
+    source: 'core',
   },
   {
     key: 'time_based_entry',
@@ -467,6 +488,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'hard_quality_gate',
@@ -477,6 +499,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'fewer',
+    source: 'risk',
   },
   {
     key: 'early_entry_only',
@@ -487,6 +510,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'much_fewer',
+    source: 'risk',
   },
   {
     key: 'sniper_bundler_filters',
@@ -497,6 +521,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
+    source: 'core',
   },
   {
     key: 'social_sentiment_filter',
@@ -507,6 +532,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'trending_narrative_boost',
@@ -517,6 +543,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_more',
+    source: 'optional',
   },
   {
     key: 'volume_spike_filter',
@@ -527,6 +554,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'confirmation_layer',
@@ -537,6 +565,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'market_session_filter',
@@ -547,6 +576,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'post_run_dip',
@@ -557,6 +587,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'technical_levels',
@@ -567,6 +598,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'chart_patterns',
@@ -577,6 +609,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'pattern_volume_dryup_return',
@@ -587,6 +620,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'pattern_falling_wedge',
@@ -597,6 +631,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'pattern_structured_pullback',
@@ -607,6 +642,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'pattern_bull_flag',
@@ -617,6 +653,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'pattern_trend_continuation',
@@ -627,6 +664,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
   },
   {
     key: 'mev_protection',
@@ -637,6 +675,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'risk',
   },
   {
     key: 'momentum_confirmation',
@@ -647,6 +686,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'fewer',
+    source: 'risk',
   },
   {
     key: 'smart_money_flow_weighting',
@@ -657,6 +697,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: true,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'core',
   },
   {
     key: 'profit_protected',
@@ -667,6 +708,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'fewer',
+    source: 'risk',
   },
   {
     key: 'quick_scalper',
@@ -677,6 +719,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'more',
+    source: 'risk',
   },
   {
     key: 'micro_scalper',
@@ -687,6 +730,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'more',
+    source: 'risk',
   },
   {
     key: 'momentum_burst',
@@ -697,6 +741,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'more',
+    source: 'risk',
   },
   {
     key: 'post_migration_scalp',
@@ -707,6 +752,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'more',
+    source: 'risk',
   },
   {
     key: 'reversal_scalp',
@@ -717,6 +763,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
+    source: 'risk',
   },
 ] as const;
 
@@ -1115,6 +1162,269 @@ export const AGGRESSIVE_THRESHOLDS: StrategyPresetThresholds = {
   reBuyEnabled: true,
   postStopReentryEnabled: true,
 };
+
+/** Degen recipe thresholds — looser than Aggressive (Risk knobs still set size/floors). */
+export const DEGEN_RECIPE_THRESHOLDS: StrategyPresetThresholds = {
+  ...AGGRESSIVE_THRESHOLDS,
+  minWalletQualityScore: 40,
+  minConvictionScore: 25,
+  convergenceRequired: 1,
+  clusterMinWallets: 1,
+  minWalletsForTrade: 1,
+  requireConvergenceForNormal: false,
+  maxRiskScore: 85,
+  maxDevHoldPct: 22,
+  maxHolderConcentration: 75,
+  sniperSensitivity: 'low',
+  maxEntryAgeMinutes: 30,
+  preferEntryWithinMinutes: 18,
+  requireMomentumConfirmation: false,
+  smartMoneyFlowWeight: 1.1,
+  confirmationThreshold: 1,
+  maxTradesPerHour: 40,
+  minMsBetweenTrades: 8_000,
+  requireHealthyCurve: false,
+  requireRecentCurveActivity: false,
+  enableEarlyCurvePriority: true,
+  reBuyEnabled: true,
+  postStopReentryEnabled: true,
+};
+
+export type StrategyRecipeMode = 'synced' | 'custom';
+
+export type RiskLevelId = 'low' | 'medium' | 'high' | 'degen';
+
+export interface RiskStrategyRecipe {
+  toggles: StrategyToggleMap;
+  thresholds: StrategyPresetThresholds;
+  summary: string;
+}
+
+function buildRecipeToggles(
+  overrides: Partial<StrategyToggleMap>
+): StrategyToggleMap {
+  const out = {} as StrategyToggleMap;
+  for (const s of STRATEGY_REGISTRY) {
+    if (s.source === 'core') {
+      out[s.key] = true;
+    } else {
+      out[s.key] = false;
+    }
+  }
+  // MEV follows recipe override or stays off unless set
+  for (const [key, value] of Object.entries(overrides)) {
+    if (isStrategyKey(key) && typeof value === 'boolean') {
+      out[key] = value;
+    }
+  }
+  // Core always forced on
+  for (const s of STRATEGY_REGISTRY) {
+    if (s.source === 'core') out[s.key] = true;
+  }
+  return out;
+}
+
+/** Risk Level → strategy module ON/OFF (+ quality thresholds). */
+export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
+  low: {
+    summary:
+      'Fewer trades, higher selectivity — quality gates + profit protection; scalp engines off',
+    thresholds: HIGH_WIN_RATE_THRESHOLDS,
+    toggles: buildRecipeToggles({
+      rebuy_on_dip: false,
+      elite_convergence: true,
+      migration_sniper: false,
+      bonding_curve_health: true,
+      hard_quality_gate: true,
+      early_entry_only: true,
+      momentum_confirmation: true,
+      profit_protected: true,
+      mev_protection: true,
+      quick_scalper: false,
+      micro_scalper: false,
+      momentum_burst: false,
+      post_migration_scalp: false,
+      reversal_scalp: false,
+    }),
+  },
+  medium: {
+    summary:
+      'Balanced modules — core safety on, light optional quality; scalp engines off (Trade Profiles own style)',
+    thresholds: BALANCED_THRESHOLDS,
+    toggles: buildRecipeToggles({
+      rebuy_on_dip: true,
+      elite_convergence: false,
+      migration_sniper: false,
+      bonding_curve_health: true,
+      hard_quality_gate: false,
+      early_entry_only: false,
+      momentum_confirmation: false,
+      profit_protected: false,
+      mev_protection: true,
+      quick_scalper: false,
+      micro_scalper: false,
+      momentum_burst: false,
+      post_migration_scalp: false,
+      reversal_scalp: false,
+    }),
+  },
+  high: {
+    summary:
+      'More entries — looser quality gates; micro + momentum scalp engines on',
+    thresholds: AGGRESSIVE_THRESHOLDS,
+    toggles: buildRecipeToggles({
+      rebuy_on_dip: true,
+      elite_convergence: true,
+      migration_sniper: false,
+      bonding_curve_health: false,
+      hard_quality_gate: false,
+      early_entry_only: false,
+      momentum_confirmation: false,
+      profit_protected: false,
+      mev_protection: true,
+      quick_scalper: false,
+      micro_scalper: true,
+      momentum_burst: true,
+      post_migration_scalp: false,
+      reversal_scalp: false,
+    }),
+  },
+  degen: {
+    summary:
+      'Max entries — elite + migration sniper + scalp suite lean; quality gates off except core safety',
+    thresholds: DEGEN_RECIPE_THRESHOLDS,
+    toggles: buildRecipeToggles({
+      rebuy_on_dip: true,
+      elite_convergence: true,
+      migration_sniper: true,
+      bonding_curve_health: false,
+      hard_quality_gate: false,
+      early_entry_only: false,
+      momentum_confirmation: false,
+      profit_protected: false,
+      mev_protection: true,
+      quick_scalper: false,
+      micro_scalper: true,
+      momentum_burst: true,
+      post_migration_scalp: true,
+      reversal_scalp: true,
+    }),
+  },
+};
+
+export function getRiskStrategyRecipe(level: RiskLevelId): RiskStrategyRecipe {
+  return RISK_STRATEGY_RECIPES[level] ?? RISK_STRATEGY_RECIPES.medium;
+}
+
+export function ensureStrategyRecipeMode(): StrategyRecipeMode {
+  if (
+    config.strategyRecipeMode !== 'synced' &&
+    config.strategyRecipeMode !== 'custom'
+  ) {
+    config.strategyRecipeMode = 'synced';
+  }
+  return config.strategyRecipeMode;
+}
+
+export function markStrategyRecipeCustom(options?: {
+  persist?: boolean;
+}): void {
+  config.strategyRecipeMode = 'custom';
+  if (options?.persist !== false) persistUserSettings();
+}
+
+/**
+ * Apply Risk Level strategy recipe (toggles + quality thresholds).
+ * Sets recipe mode to synced. Does not change Risk knobs (size/SL/floors).
+ */
+export function applyRiskStrategyRecipe(
+  level: RiskLevelId,
+  options?: { persist?: boolean }
+): {
+  toggles: StrategyToggleMap;
+  mode: StrategyRecipeMode;
+  riskLevel: RiskLevelId;
+  summary: string;
+  enabledCore: number;
+  enabledRisk: number;
+  enabledOptional: number;
+} {
+  const recipe = getRiskStrategyRecipe(level);
+  ensureStrategyToggles();
+  updateStrategyToggles(
+    { ...recipe.toggles },
+    { persist: false, syncUnderlying: true, markCustom: false }
+  );
+  applyStrategyPresetThresholds(recipe.thresholds);
+  syncUnderlyingFlagsFromToggles(config.strategyToggles as StrategyToggleMap);
+  config.strategyRecipeMode = 'synced';
+  config.strategyRecipeRiskLevel = level;
+  config.strategyProfile = 'custom';
+  config.highWinRatePresetActive = false;
+  if (options?.persist !== false) persistUserSettings();
+  const toggles = config.strategyToggles as StrategyToggleMap;
+  let enabledCore = 0;
+  let enabledRisk = 0;
+  let enabledOptional = 0;
+  for (const s of STRATEGY_REGISTRY) {
+    if (toggles[s.key] !== true) continue;
+    if (s.source === 'core') enabledCore += 1;
+    else if (s.source === 'risk') enabledRisk += 1;
+    else enabledOptional += 1;
+  }
+  console.log(
+    `[strategies] Risk recipe → ${level.toUpperCase()} (synced) — ${recipe.summary}`
+  );
+  return {
+    toggles: { ...toggles },
+    mode: 'synced',
+    riskLevel: level,
+    summary: recipe.summary,
+    enabledCore,
+    enabledRisk,
+    enabledOptional,
+  };
+}
+
+/** Re-sync modules to the current Risk Level recipe. */
+export function resetStrategyRecipeToRisk(options?: { persist?: boolean }) {
+  const level = (config.riskLevel || 'medium') as RiskLevelId;
+  return applyRiskStrategyRecipe(level, options);
+}
+
+export function getStrategyRecipeStatus() {
+  const mode = ensureStrategyRecipeMode();
+  const level = (config.riskLevel || 'medium') as RiskLevelId;
+  const recipe = getRiskStrategyRecipe(level);
+  const toggles = ensureStrategyToggles();
+  let enabledCore = 0;
+  let enabledRisk = 0;
+  let enabledOptional = 0;
+  let divergedRisk = 0;
+  for (const s of STRATEGY_REGISTRY) {
+    const on = toggles[s.key] === true;
+    if (on) {
+      if (s.source === 'core') enabledCore += 1;
+      else if (s.source === 'risk') enabledRisk += 1;
+      else enabledOptional += 1;
+    }
+    if (s.source === 'risk' || s.source === 'optional') {
+      const expected = recipe.toggles[s.key] === true;
+      if (on !== expected) divergedRisk += 1;
+    }
+  }
+  return {
+    mode,
+    riskLevel: level,
+    recipeRiskLevel: config.strategyRecipeRiskLevel || level,
+    summary: recipe.summary,
+    enabledCore,
+    enabledRisk,
+    enabledOptional,
+    divergedFromRecipe: mode === 'custom' ? divergedRisk : 0,
+    recipeToggles: { ...recipe.toggles },
+  };
+}
 
 export function isStrategyKey(value: string): value is StrategyKey {
   return (STRATEGY_KEYS as string[]).includes(value);
@@ -2510,11 +2820,14 @@ function applyNamedStrategyPreset(
   syncUnderlyingFlagsFromToggles(config.strategyToggles as StrategyToggleMap);
   config.strategyProfile = profile;
   config.highWinRatePresetActive = profile === 'high_win_rate';
+  // Packs are advanced overrides — leave Risk recipe sync
+  config.strategyRecipeMode = 'custom';
   if (options?.persist !== false) persistUserSettings();
   const meta = STRATEGY_PRESET_META[profile];
   console.log(
     `[strategies] ${meta.label} preset ON — conviction≥${thresholds.minConvictionScore} ` +
       `wallets≥${thresholds.clusterMinWallets} quality≥${thresholds.minWalletQualityScore}` +
+      ` · recipe mode → custom` +
       (meta.warning ? ` · ${meta.warning}` : '')
   );
   return {
@@ -2543,6 +2856,7 @@ export function updateStrategyToggles(
   if (options?.markCustom !== false) {
     config.strategyProfile = 'custom';
     config.highWinRatePresetActive = false;
+    config.strategyRecipeMode = 'custom';
   }
   if (options?.persist !== false) {
     persistUserSettings();
@@ -2740,6 +3054,7 @@ export function restorePreviousStrategyProfile(options?: {
     : 'custom';
   config.strategyProfile = restored;
   config.highWinRatePresetActive = restored === 'high_win_rate';
+  config.strategyRecipeMode = 'custom';
   config.strategyProfileSnapshot = null;
   if (options?.persist !== false) persistUserSettings();
   console.log(
@@ -3135,14 +3450,39 @@ export function getStrategiesStatus() {
   const toggles = ensureStrategyToggles();
   const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
   const profile = (config.strategyProfile || 'custom') as StrategyProfileId;
+  const recipeStatus = getStrategyRecipeStatus();
+  const recipe = getRiskStrategyRecipe(
+    (config.riskLevel || 'medium') as RiskLevelId
+  );
   return {
     toggles: { ...toggles },
-    registry: STRATEGY_REGISTRY.map((s) => ({
-      ...s,
-      enabled: toggles[s.key] !== false,
-      frequencyLabel: frequencyImpactLabel(s.frequencyWhenOn),
-      status: toggles[s.key] !== false ? 'ON' : 'OFF',
-    })),
+    recipe: recipeStatus,
+    registry: STRATEGY_REGISTRY.map((s) => {
+      const enabled = toggles[s.key] !== false;
+      const recipeExpected = recipe.toggles[s.key] === true;
+      let badge: 'core' | 'risk' | 'optional' | 'custom' = s.source;
+      if (
+        recipeStatus.mode === 'custom' &&
+        s.source !== 'core' &&
+        enabled !== recipeExpected
+      ) {
+        badge = 'custom';
+      } else if (
+        recipeStatus.mode === 'synced' &&
+        s.source === 'risk' &&
+        enabled
+      ) {
+        badge = 'risk';
+      }
+      return {
+        ...s,
+        enabled,
+        frequencyLabel: frequencyImpactLabel(s.frequencyWhenOn),
+        status: enabled ? 'ON' : 'OFF',
+        badge,
+        recipeExpected,
+      };
+    }),
     groups: STRATEGY_GROUP_ORDER.map((g) => ({
       id: g,
       label: STRATEGY_GROUP_LABELS[g],
