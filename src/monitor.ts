@@ -283,6 +283,11 @@ export interface WalletBuyEvent {
   earlyBuy?: boolean;
   /** Early buyer count on this mint */
   earlyBuyerCount?: number;
+  /**
+   * How the entry was discovered:
+   * wallet copy | market scanner | migration | hybrid (scanner + wallets).
+   */
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
 }
 
 export interface WalletLastActivity {
@@ -1722,6 +1727,7 @@ async function handleScannerCandidate(
       isMigration: signal.isMigration,
       tradeStatus: 'seen',
       metrics: signal.metrics,
+      entrySource: hybrid ? 'hybrid' : 'scanner',
     };
     if (!recentBuys.has(candidate.mint)) recentBuys.set(candidate.mint, []);
     recentBuys.get(candidate.mint)!.push(feedEvent);

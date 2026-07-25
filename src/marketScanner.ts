@@ -52,6 +52,12 @@ export interface ScannerCandidate {
   liquidityUsd?: number;
   marketCapUsd?: number;
   volumeUsd?: number;
+  volumeH1Usd?: number;
+  volumeM5Usd?: number;
+  priceChangeH1Pct?: number;
+  priceChangePct?: number;
+  holderCount?: number;
+  isPumpFun?: boolean;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -139,7 +145,13 @@ export function onScannerCandidate(cb: ScannerHandler): void {
 
 export function getScannerFeed(limit = 40): ScannerCandidate[] {
   const n = Math.max(1, Math.min(MAX_FEED, limit));
-  return feed.slice(0, n);
+  // Strip nested launch (candles payload) — pushFeed may store the full object
+  return feed.slice(0, n).map((row) => {
+    const { launch: _launch, ...plain } = row as ScannerCandidate & {
+      launch?: unknown;
+    };
+    return plain;
+  });
 }
 
 export function getScannerStatus(): ScannerStatus {
@@ -271,7 +283,7 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   if (candleSource === 'synthetic') {
     const pen = Number(cfg.syntheticPenalty) || 8;
     score -= pen;
-    reasons.push(`synth−${pen}`);
+    reasons.push(`synth-${pen}`);
   } else {
     score += 4;
     reasons.push('real OHLCV');
@@ -279,10 +291,10 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
 
   if (liq >= 25_000) {
     score += 12;
-    reasons.push('liq≥25k');
+    reasons.push('liq>=25k');
   } else if (liq >= 10_000) {
     score += 8;
-    reasons.push('liq≥10k');
+    reasons.push('liq>=10k');
   } else if (liq >= 8_000) {
     score += 4;
     reasons.push('liq ok');
@@ -308,10 +320,10 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     }
   } else if (vol >= 50_000) {
     score += 14;
-    reasons.push('vol≥50k');
+    reasons.push('vol>=50k');
   } else if (vol >= 20_000) {
     score += 9;
-    reasons.push('vol≥20k');
+    reasons.push('vol>=20k');
   } else if (vol >= 10_000) {
     score += 5;
     reasons.push('vol ok');
@@ -709,6 +721,12 @@ export async function selectScannerCandidates(
       liquidityUsd: event.liquidityUsd,
       marketCapUsd: event.marketCapUsd,
       volumeUsd: event.volumeUsd,
+      volumeH1Usd: event.volumeH1Usd,
+      volumeM5Usd: event.volumeM5Usd,
+      priceChangeH1Pct: event.priceChangeH1Pct,
+      priceChangePct: event.priceChangePct,
+      holderCount: event.holderCount,
+      isPumpFun: event.isPumpFun,
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,

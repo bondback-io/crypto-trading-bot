@@ -702,17 +702,15 @@ export function evaluateHolderConcentrationHardFloors(
       );
     }
   } else {
-    // Fail closed — never allow dispersed honeypots via missing top-10 data.
-    scorePenalty += 35;
+    // Soft penalty when top-10 is missing (RPC/Birdeye often unavailable).
+    // Still hard-skip when we *know* concentration is too low above.
+    scorePenalty += 18;
     flags.push({
-      id: 'hard_unknown_top10',
-      severity: 'critical',
+      id: 'soft_unknown_top10',
+      severity: 'medium',
       label: 'Top-10 holders unknown',
-      detail: `need ≥ ${minTop10}%`,
+      detail: `need ≥ ${minTop10}% when data available`,
     });
-    skipReasons.push(
-      `Skipped — top 10 holders unknown (min ${minTop10}%)`
-    );
   }
 
   if (snap.insiderPct != null && Number.isFinite(snap.insiderPct)) {

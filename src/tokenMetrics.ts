@@ -646,9 +646,9 @@ export function evaluateTokenMetricsFilters(
         `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
       );
     }
-  } else {
-    reasons.push(`top 10 holders unknown (min ${minTop10}%)`);
   }
+  // Unknown top-10: do not fail-closed here (RPC/Birdeye gaps). Hard floors
+  // still reject known-too-low via evaluateHolderConcentrationHardFloors.
 
   if (filters.skipIfMintAuthority && metrics.mintAuthority) {
     reasons.push(`mint authority still set (${metrics.mintAuthority.slice(0, 8)}…)`);

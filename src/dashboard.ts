@@ -2662,7 +2662,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     #positions-table,
     #trades-positions-table { min-width: 62rem; }
     #closed-table,
-    #trades-closed-table { min-width: 52rem; }
+    #trades-closed-table { min-width: 58rem; }
     #pump-activity-table,
     #sizing-signals-table,
     #rebuy-table { min-width: 32rem; }
@@ -3196,7 +3196,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
         <div class="overflow-x-auto max-h-56 overflow-y-auto">
           <table id="closed-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3298,7 +3298,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -7095,6 +7095,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<td>' + tokenCell + '</td>' +
           '<td>' + fmtTradeProfileBadge(opts.profileSource || p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
+          '<td>' + fmtMintCa(p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy fill (scaled to entry price)">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="Market cap at exit fill (tracks PnL price; not a separate Dex snapshot)">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
           '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
@@ -7230,7 +7231,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       rebuildClosedProfileFilterButtons(groups);
       const filtered = filterClosedTradeGroups(groups, window._closedTradesFilter || 'all');
       if (!groups || groups.length === 0) {
-        return '<tr><td colspan="10" style="color:var(--muted)">No closed trades yet</td></tr>';
+        return '<tr><td colspan="11" style="color:var(--muted)">No closed trades yet</td></tr>';
       }
       if (filtered.length === 0) {
         const label =
@@ -7241,7 +7242,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               : (window._closedProfileFilter && window._closedProfileFilter !== 'all')
                 ? 'No closed trades for this profile'
                 : 'No closed trades yet';
-        return '<tr><td colspan="10" style="color:var(--muted)">' + label + '</td></tr>';
+        return '<tr><td colspan="11" style="color:var(--muted)">' + label + '</td></tr>';
       }
       return filtered.map((g) => {
         const p = g.parent;
@@ -7606,10 +7607,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const overview = document.querySelector('[data-tab-panel="overview"]');
       const signals = document.querySelector('[data-tab-panel="signals"]');
       const trades = document.querySelector('[data-tab-panel="trades"]');
+      const scanner = document.querySelector('[data-tab-panel="scanner"]');
       const overviewVisible = overview && !overview.classList.contains('hidden');
       const signalsVisible = signals && !signals.classList.contains('hidden');
       const tradesVisible = trades && !trades.classList.contains('hidden');
-      if (!overviewVisible && !signalsVisible && !tradesVisible) return;
+      const scannerVisible = scanner && !scanner.classList.contains('hidden');
+      if (!overviewVisible && !signalsVisible && !tradesVisible && !scannerVisible) return;
       const now = Date.now();
       if (overviewVisible || tradesVisible) {
         document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
@@ -10249,29 +10252,57 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const feedHtml = cands.length === 0
           ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on the Scanner tab or Strategies → Market Scanner (TA).</div>'
           : cands.slice(0, 25).map(function (c) {
-              const stColor =
-                c.status === 'taken' ? 'var(--green)' :
-                c.status === 'skipped' ? 'var(--red)' :
-                c.status === 'queued' ? '#60a5fa' : 'var(--muted)';
-              const pb = c.playbook
-                ? '<span class="mint text-xs">' + String(c.playbook).replace(/</g, '&lt;') +
-                  (c.confluence != null ? ' · conf ' + c.confluence : '') +
-                  (c.candleSource ? ' · ' + c.candleSource : '') +
-                  '</span> '
+              const migBadge = c.migrated
+                ? '<span class="badge" style="background:#7c3aed;color:#fff;margin-right:0.35rem" title="Migration entry">Migration</span>'
                 : '';
+              const nameBit = c.name && c.name !== c.symbol
+                ? ' <span class="mint">(' + escHtml(String(c.name)) + ')</span>'
+                : '';
+              const fmtChg = function (v) {
+                if (v == null || !Number.isFinite(Number(v))) return null;
+                const n = Number(v);
+                return (n >= 0 ? '+' : '') + n.toFixed(0) + '%';
+              };
+              const chgH1 = fmtChg(c.priceChangeH1Pct);
+              const chg24 = fmtChg(c.priceChangePct);
+              const metricBits = [];
+              if (c.liquidityUsd != null) metricBits.push('liq ' + fmtUsdShort(c.liquidityUsd));
+              if (c.marketCapUsd != null) metricBits.push('MC ' + fmtUsdShort(c.marketCapUsd));
+              if (c.volumeUsd != null) metricBits.push('vol24h ' + fmtUsdShort(c.volumeUsd));
+              if (c.volumeH1Usd != null) metricBits.push('vol1h ' + fmtUsdShort(c.volumeH1Usd));
+              if (c.holderCount != null) metricBits.push('holders ' + c.holderCount);
+              if (chgH1 != null) metricBits.push('chg h1 ' + chgH1);
+              if (chg24 != null) metricBits.push('chg 24h ' + chg24);
+              if (c.playbook) metricBits.push(escHtml(String(c.playbook)));
+              if (c.confluence != null) metricBits.push('conf ' + c.confluence);
+              if (c.candleSource) metricBits.push(c.candleSource === 'real' ? 'real' : 'synthetic');
+              metricBits.push('score ' + (c.rankScore != null ? c.rankScore : '—'));
+              const reasonBits = (c.reasons || []).slice(0, 3).map(function (r) {
+                return escHtml(String(r));
+              }).join(' · ');
+              if (reasonBits) metricBits.push(reasonBits);
+              const metricsLine = metricBits.length
+                ? ' <span class="mint">' + metricBits.join(' · ') + '</span>'
+                : '';
+              const skipBadge = c.skipReason
+                ? ' <span style="color:var(--muted)">· skip: ' + escHtml(String(c.skipReason).slice(0, 80)) + '</span>'
+                : (c.status === 'taken'
+                  ? ' <span style="color:var(--green);font-weight:600">· taken</span>'
+                  : (c.status === 'queued'
+                    ? ' <span style="color:#60a5fa">· queued</span>'
+                    : (c.status === 'skipped'
+                      ? ' <span style="color:var(--muted)">· skipped</span>'
+                      : '')));
               return (
-                '<div class="flex justify-between gap-2 py-1 border-b border-slate-800/60">' +
-                  '<div>' +
-                    '<span class="badge" style="background:#0d9488;color:#fff;margin-right:0.35rem">Scanner</span>' +
-                    '<strong>' + String(c.symbol || '?').replace(/</g, '&lt;') + '</strong> ' +
-                    '<span class="mint text-xs">score ' + (c.rankScore ?? '—') + '</span> ' +
-                    pb +
-                    '<span class="mint text-xs">' + (c.reasons || []).slice(0, 3).join(' · ') + '</span>' +
-                  '</div>' +
-                  '<span style="color:' + stColor + ';font-size:0.75rem">' +
-                    String(c.status || 'seen') +
-                    (c.skipReason ? ' · ' + String(c.skipReason).slice(0, 40) : '') +
-                  '</span>' +
+                '<div class="log-entry">' +
+                  '<span class="badge" style="background:#0d9488;color:#fff;margin-right:0.35rem" title="Market Scanner (TA)">Scanner</span>' +
+                  migBadge +
+                  fmtToken(c.symbol, c.name, c.mint) +
+                  nameBit +
+                  metricsLine +
+                  skipBadge +
+                  ' <span class="mint">' + (c.mint ? fmtMintCa(c.mint) : '') +
+                  ' · seen ' + fmtTimeAgoCell(c.timestamp) + '</span>' +
                 '</div>'
               );
             }).join('');
