@@ -2189,6 +2189,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     profileTakeProfitPct?: number;
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
+    profileTrailingActivationProfit?: number;
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
@@ -2336,6 +2337,12 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
   if (er.trailingStopPct != null) {
     buyOpts.profileTrailingStopPct = er.trailingStopPct;
+  }
+  if (
+    er.trailingActivationProfit != null &&
+    Number.isFinite(er.trailingActivationProfit)
+  ) {
+    buyOpts.profileTrailingActivationProfit = er.trailingActivationProfit;
   }
   if (er.hardTimeLimitSec != null) {
     buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;

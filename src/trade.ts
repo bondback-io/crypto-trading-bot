@@ -196,6 +196,7 @@ export interface BuyOptions {
   profileTakeProfitPct?: number;
   profileStopLossPct?: number;
   profileTrailingStopPct?: number;
+  profileTrailingActivationProfit?: number;
   profileForceScalp?: boolean;
   profileSizeMultiplier?: number;
   /** Scalper hard timer (seconds) frozen from profile */
@@ -512,6 +513,7 @@ export async function executeBuy(
         profileTakeProfitPct: meta?.profileTakeProfitPct,
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
+        profileTrailingActivationProfit: meta?.profileTrailingActivationProfit,
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,
@@ -613,6 +615,7 @@ export async function executeBuy(
         profileTakeProfitPct: meta?.profileTakeProfitPct,
         profileStopLossPct: meta?.profileStopLossPct,
         profileTrailingStopPct: meta?.profileTrailingStopPct,
+        profileTrailingActivationProfit: meta?.profileTrailingActivationProfit,
         profileForceScalp: meta?.profileForceScalp,
         profileHardTimeLimitSec: meta?.profileHardTimeLimitSec,
         profileOverrideScalpParams: meta?.profileOverrideScalpParams,

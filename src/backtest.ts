@@ -1533,6 +1533,23 @@ function launchQualityScore(event: LaunchEvent): number {
   return score;
 }
 
+/** Average qualityScore of tracked wallets matching BT source names (Mirror confirm). */
+function avgWalletQualityForNames(names: string[]): number | null {
+  if (!names.length) return null;
+  const byName = new Map(
+    config.smartWallets.map((w) => [w.name.toLowerCase(), w])
+  );
+  const scores: number[] = [];
+  for (const n of names) {
+    const w = byName.get(String(n || '').toLowerCase());
+    if (w?.qualityScore != null && Number.isFinite(w.qualityScore)) {
+      scores.push(Number(w.qualityScore));
+    }
+  }
+  if (!scores.length) return null;
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
 function formatBacktestExitLog(
   symbol: string,
   markPnlPct: number,
@@ -1752,7 +1769,7 @@ function replayLaunch(
       smartMoneyScore: null,
       liquidityUsd: entryLiq ?? null,
       walletCount: sourceNames.length,
-      walletQualityAvg: null,
+      walletQualityAvg: avgWalletQualityForNames(sourceNames),
     });
 
     if (profileAssignment.skipped) {
@@ -1800,6 +1817,7 @@ function replayLaunch(
         profileTakeProfitPct: er.takeProfitPct,
         profileStopLossPct: er.stopLossPct,
         profileTrailingStopPct: er.trailingStopPct,
+        profileTrailingActivationProfit: er.trailingActivationProfit,
         profileForceScalp: er.forceScalp === true,
         profileHardTimeLimitSec: er.hardTimeLimitSec,
         profileOverrideScalpParams: er.overrideScalpParams === true,

@@ -50,6 +50,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: var(--muted);
       line-height: 1.4;
     }
+    .mint.bt-your-mc { color: var(--green); }
     /* Never let .mint shrink form controls */
     .mint input, .mint select, .mint textarea,
     label.mint input, label.mint select, label.mint textarea {
@@ -8126,7 +8127,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<td>' + fmtPnlSolUsd(t) + '</td>' +
                 '<td>' + fmtExitTakes(t) + '</td>' +
                 '<td class="mint" title="Smart wallet entry MC">' + fmtUsdShort(walletMc) + '</td>' +
-                '<td class="mint" title="Your copy fill MC">' + fmtUsdShort(yourMc) + '</td>' +
+                '<td class="mint bt-your-mc" title="Your copy fill MC">' + fmtUsdShort(yourMc) + '</td>' +
                 '<td class="mint" title="Exit MC scaled from Dex snapshot (path multiple capped)">' + fmtUsdShort(exitMc) + '</td>' +
                 '<td class="mint" title="Copy delay after smart wallet">' + fmtCopyDelay(t.copyDelayMs) + '</td>' +
                 '<td class="mint">' + fmtHold(t.holdingTimeMs) + '</td>' +

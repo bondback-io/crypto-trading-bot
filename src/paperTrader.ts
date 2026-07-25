@@ -152,6 +152,11 @@ export interface Position {
   tradeProfileReason?: string;
   /** Profile-frozen aggressive dead-market min hold (minutes) */
   deadVolumeMinHoldMinutes?: number;
+  /**
+   * Profile-frozen trail arm threshold (% profit). When set, overrides global
+   * risk.trailingActivationProfit / profitStrategy.trailingStopAfter for this position.
+   */
+  trailingActivationProfit?: number;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -738,6 +743,7 @@ export class PaperTrader {
     profileTakeProfitPct?: number;
     profileStopLossPct?: number;
     profileTrailingStopPct?: number;
+    profileTrailingActivationProfit?: number;
     profileForceScalp?: boolean;
     profileHardTimeLimitSec?: number;
     profileOverrideScalpParams?: boolean;
@@ -832,6 +838,7 @@ export class PaperTrader {
         takeProfitPct: input.profileTakeProfitPct,
         stopLossPct: input.profileStopLossPct,
         trailingStopPct: input.profileTrailingStopPct,
+        trailingActivationProfit: input.profileTrailingActivationProfit,
         forceScalp: input.profileForceScalp,
         shortTermStrategyId: input.shortTermStrategyId,
         hardTimeLimitSec: input.profileHardTimeLimitSec,
@@ -859,10 +866,13 @@ export class PaperTrader {
       this.marketCapCache.set(input.mint, position.entryMarketCapUsd);
     }
     const trailArm =
-      isStrategyEnabled('tiered_profit_taking') &&
-      config.profitStrategy?.enabled
-      ? config.profitStrategy.trailingStopAfter
-      : config.risk.trailingActivationProfit;
+      position.trailingActivationProfit != null &&
+      Number.isFinite(position.trailingActivationProfit)
+        ? position.trailingActivationProfit
+        : isStrategyEnabled('tiered_profit_taking') &&
+            config.profitStrategy?.enabled
+          ? config.profitStrategy.trailingStopAfter
+          : config.risk.trailingActivationProfit;
     const profileBit = position.tradeProfileName
       ? ` · profile ${position.tradeProfileIcon || ''} ${position.tradeProfileName}`
       : '';
@@ -969,6 +979,7 @@ export class PaperTrader {
       profileTakeProfitPct?: number;
       profileStopLossPct?: number;
       profileTrailingStopPct?: number;
+      profileTrailingActivationProfit?: number;
       profileForceScalp?: boolean;
       profileHardTimeLimitSec?: number;
       profileOverrideScalpParams?: boolean;
@@ -1101,6 +1112,7 @@ export class PaperTrader {
         takeProfitPct: meta?.profileTakeProfitPct,
         stopLossPct: meta?.profileStopLossPct,
         trailingStopPct: meta?.profileTrailingStopPct,
+        trailingActivationProfit: meta?.profileTrailingActivationProfit,
         forceScalp: meta?.profileForceScalp,
         shortTermStrategyId: meta?.shortTermStrategyId,
         hardTimeLimitSec: meta?.profileHardTimeLimitSec,
@@ -1806,7 +1818,11 @@ export class PaperTrader {
       risk.trailingStopPercent ||
       risk.trailingStopPct ||
       20;
-    const activation = risk.trailingActivationProfit ?? 30;
+    const activation =
+      stillOpen.trailingActivationProfit != null &&
+      Number.isFinite(stillOpen.trailingActivationProfit)
+        ? stillOpen.trailingActivationProfit
+        : (risk.trailingActivationProfit ?? 30);
 
     if (!stillOpen.trailingActive && markPnlPct >= activation) {
       stillOpen.trailingActive = true;
@@ -2156,7 +2172,11 @@ export class PaperTrader {
         risk.trailingStopPercent ||
         risk.trailingStopPct ||
         20;
-      const activation = risk.trailingActivationProfit ?? 30;
+      const activation =
+        stillOpen.trailingActivationProfit != null &&
+        Number.isFinite(stillOpen.trailingActivationProfit)
+          ? stillOpen.trailingActivationProfit
+          : (risk.trailingActivationProfit ?? 30);
 
       if (!stillOpen.trailingActive && pnlPct >= activation) {
         stillOpen.trailingActive = true;

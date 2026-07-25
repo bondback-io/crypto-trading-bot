@@ -324,8 +324,9 @@ export type PriceChangePick = {
 };
 
 /**
- * Prefer the shortest non-zero Dex change window so reconstructed entry
- * and path duration stay aligned (avoid h24 % compressed into ~1h).
+ * Prefer the shortest non-zero Dex change window so reconstructed *entry price*
+ * stays aligned with the move that just happened (avoid h24 % as entry basis).
+ * Path *duration* is handled separately in resolveLaunchPathWindow (floors m5).
  */
 export function pickPriceChangeForPath(
   pair: Record<string, unknown>
@@ -450,14 +451,22 @@ export function liquidityAtPrice(
 }
 
 /**
- * Memecoin copy trades usually resolve in minutes–~2h.
- * Don't stretch synthetic candles from pairCreated → now (that inflates hold times
- * to many hours for older launches in the lookback window).
+ * Backtest / paper replay path length after launch.
+ *
+ * IMPORTANT: DexScreener m5 (5m) % is great for reconstructing entry price, but
+ * must NOT shrink the sim path — that caused Smart Money Mirror holds of ~15m50s
+ * with universal "Forced Lookback ended" exits (path stub ran out before TP/SL/trail).
+ *
+ * Floor path duration at ≥1h when the token is old enough; cap at a few hours so
+ * we don't stretch pairCreated→now into multi-day holds for mature launches.
  */
 export function resolveLaunchPathWindow(opts: {
   launchedAt: number;
   nowMs?: number;
-  /** DexScreener change window used for entry reconstruction (h1/h6/h24) */
+  /**
+   * Dex change window used for entry reconstruction (m5/h1/h6/h24).
+   * Short windows (m5) are floored for path *duration* only — see pathHintMs.
+   */
   changeWindowMs?: number;
   maxPathMs?: number;
   minPathMs?: number;
@@ -466,23 +475,37 @@ export function resolveLaunchPathWindow(opts: {
   const startMs = opts.launchedAt > 0 ? opts.launchedAt : now - 30 * 60_000;
   const ageMs = Math.max(0, now - startMs);
   const changeWin = opts.changeWindowMs ?? 6 * 60 * 60 * 1000;
-  const maxPath = opts.maxPathMs ?? 90 * 60_000; // 90 minutes
-  const minPath = opts.minPathMs ?? 10 * 60_000; // 10 minutes
+  // Never let m5 (5m) reconstruction window truncate replay — swing profiles
+  // (Mirror, Trend, HWR) need hours of post-entry candles for TP/SL/trail.
+  const pathHintMs = Math.max(changeWin, 60 * 60_000); // ≥1h
+  const maxPath = opts.maxPathMs ?? 4 * 60 * 60 * 1000; // 4 hours
+  const minPath = opts.minPathMs ?? 45 * 60_000; // 45 minutes
 
   let durationMs = Math.min(
-    ageMs > 0 ? ageMs : changeWin,
-    changeWin,
+    ageMs > 0 ? ageMs : pathHintMs,
+    pathHintMs,
     maxPath
   );
   if (ageMs > 0 && ageMs < minPath) {
+    // Truly young / near end of lookback — use remaining age (real EOW)
     durationMs = Math.max(3 * 60_000, ageMs);
   } else {
     durationMs = Math.max(minPath, durationMs);
   }
-  // Never simulate past "now"
+  // Never simulate past "now" / lookback end
   if (ageMs > 0) durationMs = Math.min(durationMs, ageMs);
 
   return { startMs, endMs: startMs + durationMs, durationMs };
+}
+
+/** Candle count so multi-hour paths keep ~1–2m resolution (cap for perf). */
+export function pathStepsForDuration(
+  durationMs: number,
+  minSteps = 36
+): number {
+  const raw = Math.max(0, durationMs);
+  const targetStepMs = raw <= 90 * 60_000 ? 45_000 : 90_000;
+  return Math.max(minSteps, Math.min(240, Math.round(raw / targetStepMs) || minSteps));
 }
 
 /** Which change % window we used → duration hint for path compression */
@@ -502,8 +525,10 @@ export function buildPricePath(
 ): MarketCandle[] {
   const candles: MarketCandle[] = [];
   const raw = Math.max(0, endMs - startMs);
-  // Prefer ≥30s/step so hold times stay realistic; pad short windows lightly
-  const duration = Math.max(raw, steps * 30_000);
+  // Keep caller window length — do NOT inflate short ages up to steps*30s
+  // (that previously stamped every thin path at ~12–18m and forced identical EOW holds).
+  // Only pad empty/degenerate windows so we still get a usable series.
+  const duration = raw > 0 ? raw : Math.max(steps * 30_000, 3 * 60_000);
   const hi = Math.max(entryPriceSol, lastPriceSol);
   const lo = Math.min(entryPriceSol, lastPriceSol);
   // Path magnitude drives local volatility (bigger moves → choppier mid-path)
@@ -756,7 +781,7 @@ async function fetchFromDexScreener(
           priceNative,
           pathWin.startMs,
           pathWin.endMs,
-          24
+          pathStepsForDuration(pathWin.durationMs, 36)
         ),
         source: 'dexscreener',
         url: String(pair.url ?? ''),
@@ -847,7 +872,7 @@ async function fetchFromDexScreener(
             priceNative,
             pathWin.startMs,
             pathWin.endMs,
-            36
+            pathStepsForDuration(pathWin.durationMs, 48)
           ),
           source: 'dexscreener',
           url: String(pair.url ?? ''),
@@ -937,7 +962,7 @@ async function fetchFromGmgn(
           price,
           pathWin.startMs,
           pathWin.endMs,
-          24
+          pathStepsForDuration(pathWin.durationMs, 36)
         ),
         source: 'gmgn',
         solUsd: 150,
@@ -1009,7 +1034,8 @@ export function generateSyntheticLaunches(
       0,
       44
     );
-    const holdMs = (20 + Math.random() * 100) * 60_000;
+    // 45m–4h so non-scalp profiles (Mirror etc.) can hit TP/SL/trail before EOW
+    const holdMs = (45 + Math.random() * 195) * 60_000;
 
     events.push({
       mint,
@@ -1025,7 +1051,13 @@ export function generateSyntheticLaunches(
       marketCapUsd: 20_000 + Math.random() * 500_000,
       riskScoreHint,
       isPumpFun: !migrated || Math.random() > 0.4,
-      candles: buildPricePath(entry, last, launchedAt, launchedAt + holdMs, 28),
+      candles: buildPricePath(
+        entry,
+        last,
+        launchedAt,
+        launchedAt + holdMs,
+        pathStepsForDuration(holdMs, 48)
+      ),
       source: 'synthetic',
       solUsd: 150,
     });
@@ -1153,7 +1185,7 @@ export async function fetchRecentLaunches(
               priceNative,
               pathWin.startMs,
               pathWin.endMs,
-              36
+              pathStepsForDuration(pathWin.durationMs, 48)
             ),
             source: 'birdeye',
             url: String(sol.url ?? ''),

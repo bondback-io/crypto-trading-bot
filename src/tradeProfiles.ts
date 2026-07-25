@@ -680,10 +680,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'Medium',
     style: 'Copy / Smart Money',
     rulesSummary: [
-      'TP 30–50% (or follow quality wallet behaviour via trail)',
+      'TP 30–50% · trail arms after modest profit (~10%)',
       'SL 9–14%',
-      'Main filter: high wallet quality + convergence',
-      'Clean copy style with protection',
+      'Need 3+ wallets or strong quality + conviction',
+      'Skip late copies after wallet peak dump',
+      'Clean copy style — no scalp timer / no forced 16m exit',
     ],
     priority: 65,
     defaultEnabled: true,
@@ -694,11 +695,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferBullishPatterns: true,
       patternSensitivity: 'medium',
       patternMinConfidence: 55,
-      minWalletCount: 2,
+      minWalletCount: 3,
       requireCluster: true,
       preferSmartMoney: true,
-      minWalletQuality: 55,
-      minConviction: 48,
+      minWalletQuality: 58,
+      minConviction: 52,
     },
     exitRules: {
       forceScalp: false,
@@ -707,7 +708,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       stopLossPctMin: 9,
       stopLossPctMax: 14,
       trailingStopPct: 11,
-      trailingActivationProfit: 18,
+      /** Arm trail after modest green — don't wait for full TP or EOW */
+      trailingActivationProfit: 10,
       sizeMultiplier: 1.0,
     },
   },
@@ -1663,12 +1665,31 @@ function scoreProfile(
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };
     }
-    if (conv == null || conv < (m.minConviction ?? 48)) {
+    if (conv == null || conv < (m.minConviction ?? 52)) {
       return { score: 0, reason: 'conviction too low for mirror' };
     }
-    const clusterOk = wallets != null && wallets >= (m.minWalletCount ?? 2);
+    // Late fill after peak — copy already chasing; Mirror wants fresher entries
+    if (drop != null && drop > 22) {
+      return {
+        score: 0,
+        reason: `too late after peak (−${drop.toFixed(0)}%)`,
+      };
+    }
+    const clusterFloor = m.minWalletCount ?? 3;
+    const clusterOk = wallets != null && wallets >= clusterFloor;
     if (m.requireCluster && wallets != null && !clusterOk) {
-      return { score: 0, reason: 'need wallet convergence' };
+      // Allow 2-wallet mirrors only when quality is known and strong
+      const wqEarly =
+        ctx.walletQualityAvg != null && Number.isFinite(ctx.walletQualityAvg)
+          ? Number(ctx.walletQualityAvg)
+          : null;
+      if (
+        wallets < 2 ||
+        wqEarly == null ||
+        (m.minWalletQuality != null && wqEarly < m.minWalletQuality)
+      ) {
+        return { score: 0, reason: 'need wallet convergence' };
+      }
     }
     const wq =
       ctx.walletQualityAvg != null && Number.isFinite(ctx.walletQualityAvg)
@@ -1680,11 +1701,21 @@ function scoreProfile(
         reason: `wallet quality ${wq.toFixed(0)} < ${m.minWalletQuality}`,
       };
     }
-    score += 58 + Math.min(25, (conv - 48) * 0.6);
+    // Unknown WQ in BT: demand higher conviction + cluster
+    if (wq == null && (conv < 58 || (wallets != null && wallets < 3))) {
+      return {
+        score: 0,
+        reason: 'mirror needs WQ or 3+ wallets + conviction 58+',
+      };
+    }
+    score += 58 + Math.min(25, (conv - 52) * 0.6);
     bits.push(`mirror conviction ${conv}`);
     if (clusterOk) {
       score += 18;
       bits.push(`${wallets} wallets`);
+    } else if (wallets != null && wallets >= 2) {
+      score += 8;
+      bits.push(`${wallets} wallets (quality OK)`);
     }
     if (wq != null && (m.minWalletQuality == null || wq >= m.minWalletQuality)) {
       score += 12;
@@ -1697,6 +1728,10 @@ function scoreProfile(
     ) {
       score += 14;
       bits.push(`SM ${ctx.smartMoneyScore}`);
+    }
+    if (drop != null && drop > 0 && drop <= 12) {
+      score += 6;
+      bits.push(`fresh −${drop.toFixed(0)}% from peak`);
     }
   }
 
@@ -2377,6 +2412,7 @@ export function applyTradeProfileExitRules(
     takeProfitPct: number;
     stopLossPct: number;
     trailingStopPct: number;
+    trailingActivationProfit?: number;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
     scalpDeadlineMs?: number;
@@ -2432,6 +2468,13 @@ export function applyTradeProfileExitRules(
   }
   if (rules.trailingStopPct != null && Number.isFinite(rules.trailingStopPct)) {
     position.trailingStopPct = rules.trailingStopPct;
+  }
+  if (
+    rules.trailingActivationProfit != null &&
+    Number.isFinite(rules.trailingActivationProfit) &&
+    rules.trailingActivationProfit > 0
+  ) {
+    position.trailingActivationProfit = rules.trailingActivationProfit;
   }
   if (
     rules.hardTimeLimitSec != null &&
