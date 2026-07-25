@@ -8546,7 +8546,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       if (!confirm(
-        'Apply ' + ids.length + ' recommendation(s) to live Strategies / filters / Trade Profiles?\n\n' +
+        'Apply ' + ids.length + ' recommendation(s) to live Strategies / filters / Trade Profiles?\\n\\n' +
         'This persists settings. You can undo by toggling modules back on the Strategies tab.'
       )) {
         return;
