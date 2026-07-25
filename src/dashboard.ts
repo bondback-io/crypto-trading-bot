@@ -962,36 +962,42 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .closed-filter {
       display: inline-flex;
       flex-wrap: wrap;
-      gap: 0.3rem;
-      padding: 0.2rem;
-      border-radius: 0.55rem;
-      background: rgba(15, 23, 42, 0.75);
-      border: 1px solid rgba(51, 65, 85, 0.8);
+      gap: 0.35rem;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      border: none;
     }
     .closed-filter-btn {
       appearance: none;
-      border: 1px solid transparent;
-      background: transparent;
-      color: #94a3b8;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
       font-size: 11px;
       font-weight: 600;
-      line-height: 1;
+      line-height: 1.2;
       padding: 0.45rem 0.7rem;
       min-height: 2rem;
-      border-radius: 0.4rem;
+      border-radius: 0.45rem;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
     }
     .closed-filter-btn:hover,
     .closed-filter-btn:focus-visible {
-      color: #e2e8f0;
-      background: rgba(51, 65, 85, 0.55);
+      color: #f8fafc;
+      background: #334155;
+      border-color: #64748b;
       outline: none;
     }
     .closed-filter-btn.is-active {
       color: #ecfdf5;
-      background: rgba(16, 185, 129, 0.22);
-      border-color: rgba(52, 211, 153, 0.45);
+      background: rgba(16, 185, 129, 0.28);
+      border-color: rgba(52, 211, 153, 0.65);
       font-weight: 700;
     }
     .closed-filter-btn.is-active[data-closed-filter="profit"] {
@@ -1017,8 +1023,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       line-height: 1.25;
       letter-spacing: 0.01em;
       max-width: none;
-      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.45);
       vertical-align: middle;
+      /* Keep profile colour text readable on dark tables */
+      -webkit-text-fill-color: currentColor;
+      text-shadow: 0 0 1px rgba(0, 0, 0, 0.35);
     }
     .trade-profile-badge .tpb-icon {
       font-size: 0.85rem;
@@ -1138,10 +1146,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         display: none;
       }
     }
-    .closed-filter-btn[data-closed-profile-filter].is-active,
-    .closed-filter-btn[data-open-profile-filter].is-active {
-      color: #0f172a;
+    /* Profile filter chips — colour from --profile-color; white text when active */
+    .closed-filter-btn[data-closed-profile-filter]:not([data-closed-profile-filter="all"]),
+    .closed-filter-btn[data-open-profile-filter]:not([data-open-profile-filter="all"]) {
+      color: var(--profile-color, #cbd5e1) !important;
+      border-color: var(--profile-color, #64748b) !important;
+      background: #1e293b !important;
+      background: color-mix(in srgb, var(--profile-color, #64748b) 16%, #1e293b) !important;
+    }
+    .closed-filter-btn[data-closed-profile-filter]:not([data-closed-profile-filter="all"]):hover,
+    .closed-filter-btn[data-closed-profile-filter]:not([data-closed-profile-filter="all"]):focus-visible,
+    .closed-filter-btn[data-open-profile-filter]:not([data-open-profile-filter="all"]):hover,
+    .closed-filter-btn[data-open-profile-filter]:not([data-open-profile-filter="all"]):focus-visible {
+      color: #f8fafc !important;
+      background: color-mix(in srgb, var(--profile-color, #64748b) 30%, #1e293b) !important;
+      border-color: var(--profile-color, #94a3b8) !important;
+    }
+    .closed-filter-btn[data-closed-profile-filter].is-active:not([data-closed-profile-filter="all"]),
+    .closed-filter-btn[data-open-profile-filter].is-active:not([data-open-profile-filter="all"]) {
+      color: #ffffff !important;
       font-weight: 700;
+      background: var(--profile-color, #10b981) !important;
+      border-color: var(--profile-color, #34d399) !important;
+      box-shadow: none;
+    }
+    .closed-filter-btn[data-closed-profile-filter="all"].is-active,
+    .closed-filter-btn[data-open-profile-filter="all"].is-active {
+      color: #ecfdf5 !important;
+      background: rgba(16, 185, 129, 0.28) !important;
+      border-color: rgba(52, 211, 153, 0.65) !important;
+      box-shadow: none;
     }
     .trade-profiles-active {
       display: flex;
@@ -6458,7 +6492,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const compact = opts.compact === true;
       return (
         '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + v.color +
-        ';border-color:' + v.color + '99;background:' + v.color + '28">' +
+        ';border-color:' + v.color + ';background:color-mix(in srgb,' + v.color + ' 22%, #0f172a)">' +
         '<span class="tpb-icon">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         '</span>'
@@ -6551,23 +6585,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const active = btn.getAttribute('data-closed-profile-filter') === (window._closedProfileFilter || 'all');
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        if (active && btn.getAttribute('data-closed-profile-filter') !== 'all') {
-          const c = btn.style.borderColor || '#94a3b8';
-          btn.style.background = (c.length === 7 ? c + '33' : c);
-        } else if (!active) {
-          btn.style.background = '';
-        }
       });
       document.querySelectorAll('[data-open-profile-filter]').forEach((btn) => {
         const active = btn.getAttribute('data-open-profile-filter') === (window._openProfileFilter || 'all');
         btn.classList.toggle('is-active', active);
         btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-        if (active && btn.getAttribute('data-open-profile-filter') !== 'all') {
-          const c = btn.style.borderColor || '#94a3b8';
-          btn.style.background = (c.length === 7 ? c + '33' : c);
-        } else if (!active) {
-          btn.style.background = '';
-        }
       });
     }
 
@@ -6580,13 +6602,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '">All</button>';
       idsMap.forEach((info) => {
         const active = (activeId || 'all') === info.id;
+        const color = info.color || '#94a3b8';
         html +=
           '<button type="button" class="closed-filter-btn' + (active ? ' is-active' : '') +
           '" ' + attrName + '="' + info.id +
           '" onclick="' + clickFn + '(\\'' + info.id + '\\')" aria-pressed="' +
           (active ? 'true' : 'false') +
-          '" style="color:' + info.color + ';border-color:' + info.color +
-          (active ? ';background:' + info.color + '33' : '') + '">' +
+          '" style="--profile-color:' + color + '">' +
           escHtml(info.icon) + ' ' + escHtml(info.name) +
           '</button>';
       });
