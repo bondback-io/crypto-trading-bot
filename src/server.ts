@@ -722,6 +722,168 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Risk Recipe Optimizer — bounded search per Low/Med/High/Degen */
+  app.post('/backtest/optimize', async (req: Request, res: Response) => {
+    try {
+      const {
+        runRiskRecipeOptimizer,
+        getOptimizerProgress,
+      } = await import('./backtestOptimizer');
+      const prog = getOptimizerProgress();
+      if (prog.running) {
+        res.status(409).json({
+          ok: false,
+          error: 'Optimizer already running',
+          progress: prog,
+        });
+        return;
+      }
+      const body = (req.body ?? {}) as {
+        hours?: number;
+        fromMs?: number;
+        toMs?: number;
+        risks?: string[];
+        maxCandidatesPerRisk?: number;
+        /** Alias used by dashboard UI */
+        maxCandidates?: number;
+        useLastBacktestWindow?: boolean;
+      };
+      const risks = Array.isArray(body.risks)
+        ? body.risks.filter(
+            (r): r is 'low' | 'medium' | 'high' | 'degen' =>
+              r === 'low' || r === 'medium' || r === 'high' || r === 'degen'
+          )
+        : undefined;
+      const maxCandidatesPerRisk =
+        body.maxCandidatesPerRisk != null
+          ? Number(body.maxCandidatesPerRisk)
+          : body.maxCandidates != null
+            ? Number(body.maxCandidates)
+            : 16;
+      // Async kick so UI can poll progress (long-running)
+      void runRiskRecipeOptimizer({
+        hours: body.hours != null ? Number(body.hours) : undefined,
+        fromMs: body.fromMs != null ? Number(body.fromMs) : undefined,
+        toMs: body.toMs != null ? Number(body.toMs) : undefined,
+        risks,
+        maxCandidatesPerRisk,
+        useLastBacktestWindow: body.useLastBacktestWindow !== false,
+      }).catch((err) => {
+        console.error(
+          '[backtest/optimize]',
+          err instanceof Error ? err.message : err
+        );
+      });
+      res.json({
+        ok: true,
+        started: true,
+        progress: getOptimizerProgress(),
+        message:
+          'Optimizer started — poll GET /backtest/optimize/progress then /last',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[backtest/optimize]', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get('/backtest/optimize/progress', async (_req: Request, res: Response) => {
+    const { getOptimizerProgress } = await import('./backtestOptimizer');
+    res.json(getOptimizerProgress());
+  });
+
+  app.get('/backtest/optimize/last', async (_req: Request, res: Response) => {
+    const {
+      getLastOptimizer,
+      loadOptimizerFromDisk,
+    } = await import('./backtestOptimizer');
+    const report = getLastOptimizer() || loadOptimizerFromDisk();
+    if (!report) {
+      res.status(404).json({ ok: false, error: 'No optimizer report yet' });
+      return;
+    }
+    res.json({ ok: true, optimizer: report });
+  });
+
+  app.post('/backtest/optimize/apply', async (req: Request, res: Response) => {
+    try {
+      const { applyOptimizerWinnersToRecipes } = await import(
+        './backtestOptimizer'
+      );
+      const { getStrategiesStatus } = await import('./strategies');
+      const body = (req.body ?? {}) as {
+        selections?: Array<{ riskLevel?: string; candidateId?: string }>;
+        /** When true, apply each risk's winnerId automatically */
+        applyWinners?: boolean;
+      };
+      let selections: Array<{
+        riskLevel: 'low' | 'medium' | 'high' | 'degen';
+        candidateId: string;
+      }> = [];
+
+      if (body.applyWinners) {
+        const {
+          getLastOptimizer,
+          loadOptimizerFromDisk,
+        } = await import('./backtestOptimizer');
+        const report = getLastOptimizer() || loadOptimizerFromDisk();
+        if (!report) {
+          res.status(404).json({ ok: false, error: 'No optimizer report' });
+          return;
+        }
+        for (const r of report.risks) {
+          if (r.winnerId) {
+            selections.push({
+              riskLevel: r.riskLevel,
+              candidateId: r.winnerId,
+            });
+          }
+        }
+      } else if (Array.isArray(body.selections)) {
+        for (const s of body.selections) {
+          const level = s.riskLevel;
+          if (
+            (level === 'low' ||
+              level === 'medium' ||
+              level === 'high' ||
+              level === 'degen') &&
+            s.candidateId
+          ) {
+            selections.push({
+              riskLevel: level,
+              candidateId: String(s.candidateId),
+            });
+          }
+        }
+      }
+
+      if (!selections.length) {
+        res.status(400).json({
+          ok: false,
+          error: 'Provide selections[] or applyWinners: true',
+        });
+        return;
+      }
+      const applied = applyOptimizerWinnersToRecipes(selections);
+      if (!applied.ok) {
+        res.status(400).json(applied);
+        return;
+      }
+      res.json({
+        ...applied,
+        strategies: getStrategiesStatus(),
+        riskRecipeOptimizations: (
+          await import('./config')
+        ).config.riskRecipeOptimizations,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[backtest/optimize/apply]', message);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
   app.get('/backtest/export.csv', async (_req: Request, res: Response) => {
     const { exportLastBacktestCsv, getLastBacktest } = await import('./backtest');
     const csv = exportLastBacktestCsv();

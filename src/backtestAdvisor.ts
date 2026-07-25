@@ -37,6 +37,8 @@ export interface AdvisorOverlay {
   minLiquidityUsd?: number;
   /** Absolute max risk score (filters.maxRiskScore) — lower = tighter */
   maxRiskScore?: number;
+  /** Market Scanner min rank score (when scanner ON) */
+  minRankScore?: number;
   /** Trade Profile ids to disable */
   disableProfileIds?: TradeProfileId[];
   /** Per-profile exit/match param patches (widen SL, raise min wallets, …) */
@@ -140,6 +142,9 @@ export function mergeOverlays(overlays: AdvisorOverlay[]): AdvisorOverlay {
     if (o.maxRiskScore != null) {
       out.maxRiskScore = o.maxRiskScore;
     }
+    if (o.minRankScore != null) {
+      out.minRankScore = o.minRankScore;
+    }
     if (o.disableProfileIds?.length) {
       for (const id of o.disableProfileIds) profiles.add(id);
     }
@@ -203,6 +208,13 @@ export function applyAdvisorOverlay(
   }
   if (overlay.maxRiskScore != null && overlay.maxRiskScore > 0) {
     config.filters.maxRiskScore = Number(overlay.maxRiskScore);
+  }
+  if (
+    overlay.minRankScore != null &&
+    overlay.minRankScore > 0 &&
+    config.marketScanner
+  ) {
+    config.marketScanner.minRankScore = Number(overlay.minRankScore);
   }
 
   if (overlay.disableProfileIds?.length) {
@@ -340,6 +352,7 @@ function overlayHasEffect(o: AdvisorOverlay): boolean {
       o.minMarketCapUsd != null ||
       o.minLiquidityUsd != null ||
       o.maxRiskScore != null ||
+      o.minRankScore != null ||
       (o.disableProfileIds && o.disableProfileIds.length > 0) ||
       (o.profileParamPatches && o.profileParamPatches.length > 0)
   );

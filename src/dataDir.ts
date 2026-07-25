@@ -47,6 +47,7 @@ export const PERSIST_FILES = {
   wallets: 'wallets.json',
   paperBalance: 'paperBalance.json',
   backtestHistory: 'backtestHistory.json',
+  optimizerLast: 'optimizerLast.json',
   tradingWallets: 'trading-wallets.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
@@ -180,6 +181,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.paperBalance,
     PERSIST_FILES.backtestHistory,
     PERSIST_FILES.legacyBacktest,
+    PERSIST_FILES.optimizerLast,
     PERSIST_FILES.tradingWallets,
   ];
   const deleted: string[] = [];

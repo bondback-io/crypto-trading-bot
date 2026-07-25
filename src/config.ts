@@ -1847,6 +1847,30 @@ export interface BotConfig {
   strategyRecipeMode: 'synced' | 'custom';
   /** Last Risk Level whose strategy recipe was applied (UI) */
   strategyRecipeRiskLevel: 'low' | 'medium' | 'high' | 'degen' | null;
+  /**
+   * Per-risk overlays from Risk Recipe Optimizer (applied after synced recipe).
+   * Strict Mode is independent and not stored here.
+   */
+  riskRecipeOptimizations?: Partial<
+    Record<
+      'low' | 'medium' | 'high' | 'degen',
+      {
+        overlay: import('./backtestAdvisor').AdvisorOverlay;
+        label: string;
+        candidateId: string;
+        appliedAt: number;
+        metrics?: {
+          trades: number;
+          winRatePct: number;
+          expectancySol: number;
+          profitFactor: number;
+          maxDrawdownPct: number;
+          totalPnlSol: number;
+          performanceScore: number;
+        };
+      }
+    >
+  >;
   /** Snapshot taken before applying a named preset (preserves custom overrides) */
   strategyProfileSnapshot: {
     savedAt: number;
@@ -2220,6 +2244,7 @@ export const config: BotConfig = {
   highWinRatePresetActive: false,
   strategyRecipeMode: 'synced',
   strategyRecipeRiskLevel: 'medium',
+  riskRecipeOptimizations: {},
   strategyProfileSnapshot: null,
   tradeProfiles: {
     enabled: true,
@@ -2555,6 +2580,9 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.strategyRecipeRiskLevel === 'degen'
         ? config.strategyRecipeRiskLevel
         : config.riskLevel || 'medium',
+    riskRecipeOptimizations: config.riskRecipeOptimizations
+      ? (JSON.parse(JSON.stringify(config.riskRecipeOptimizations)) as PersistedBotSettings['riskRecipeOptimizations'])
+      : {},
     strategyProfileSnapshot: config.strategyProfileSnapshot
       ? (cloneJson(config.strategyProfileSnapshot) as PersistedBotSettings['strategyProfileSnapshot'])
       : null,
@@ -3115,6 +3143,14 @@ function applySettingsSnapshot(
     config.strategyRecipeRiskLevel = saved.strategyRecipeRiskLevel;
   } else if (saved.strategyRecipeRiskLevel === null) {
     config.strategyRecipeRiskLevel = null;
+  }
+  if (
+    saved.riskRecipeOptimizations &&
+    typeof saved.riskRecipeOptimizations === 'object'
+  ) {
+    config.riskRecipeOptimizations = JSON.parse(
+      JSON.stringify(saved.riskRecipeOptimizations)
+    ) as typeof config.riskRecipeOptimizations;
   }
   if (saved.tradeProfiles && typeof saved.tradeProfiles === 'object') {
     const tp = saved.tradeProfiles;
@@ -4361,7 +4397,7 @@ export function setStrictModeIntensity(
  */
 export function applyRiskLevel(
   level: RiskLevel,
-  options: { persist?: boolean } = {}
+  options: { persist?: boolean; skipOptimizerOverlay?: boolean } = {}
 ): {
   riskLevel: RiskLevel;
   warning: string | null;
@@ -4558,6 +4594,18 @@ export function applyRiskLevel(
         config.marketScanner.minVolumeH24Usd ?? 30_000,
         HARD_FILTER_FLOORS.minVolume24hUsd
       );
+    }
+  }
+
+  // Risk Recipe Optimizer overlays (post-recipe; Strict untouched).
+  // Skip during optimizer shadow search so candidates score against clean recipes.
+  if (options.skipOptimizerOverlay !== true) {
+    try {
+      const { applyStoredRiskRecipeOptimization } =
+        require('./backtestOptimizer') as typeof import('./backtestOptimizer');
+      applyStoredRiskRecipeOptimization(level);
+    } catch {
+      /* ignore during bootstrap */
     }
   }
 

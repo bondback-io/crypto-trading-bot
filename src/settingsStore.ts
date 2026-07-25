@@ -66,6 +66,8 @@ export interface PersistedBotSettings {
   /** synced = Risk owns modules; custom = manual/pack override */
   strategyRecipeMode?: 'synced' | 'custom';
   strategyRecipeRiskLevel?: 'low' | 'medium' | 'high' | 'degen' | null;
+  /** Per-risk overlays from Risk Recipe Optimizer */
+  riskRecipeOptimizations?: Record<string, unknown>;
   strategyProfileSnapshot?: Record<string, unknown> | null;
   /** Concurrent trade profile ON/OFF map + optional param overrides */
   tradeProfiles?: {

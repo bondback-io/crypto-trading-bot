@@ -172,6 +172,11 @@ export interface BacktestOptions {
    * Default true.
    */
   persistResult?: boolean;
+  /**
+   * When true, applyRiskLevel skips stored riskRecipeOptimizations overlays.
+   * Used by Risk Recipe Optimizer so search scores clean recipes.
+   */
+  skipOptimizerOverlay?: boolean;
 }
 
 export type BacktestExitTakeStage =
@@ -2781,7 +2786,10 @@ export async function runBacktest(
   try {
     // Optionally apply a risk-level preset for this run only (not persisted)
     if (isRiskLevel(requestedLevel)) {
-      applyRiskLevel(requestedLevel, { persist: false });
+      applyRiskLevel(requestedLevel, {
+        persist: false,
+        skipOptimizerOverlay: options.skipOptimizerOverlay === true,
+      });
     }
 
     // Optional run-only overrides for conviction / wallet quality / strict

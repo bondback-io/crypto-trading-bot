@@ -4023,6 +4023,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card" id="bt-optimizer-card">
+        <div class="section-title">Risk Recipe Optimizer <span class="tip" tabindex="0" data-tip="Searches bounded module/setting combos per Low/Medium/High/Degen on the same BT window. Ranks by constrained win rate (min trades + expectancy + PF floors). Strict Mode is excluded from the search."></span></div>
+        <p class="mint text-xs mb-2" id="bt-optimizer-disclaimer">Same-window counterfactual — re-run on a second lookback before trusting. Apply writes per-risk overlays (Strict unchanged).</p>
+        <div class="flex flex-wrap gap-2 items-center mb-2">
+          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-low" checked /> Low</label>
+          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-medium" checked /> Medium</label>
+          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-high" checked /> High</label>
+          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-degen" checked /> Degen</label>
+          <label class="mint text-xs flex items-center gap-1">Max/risk <input type="number" id="bt-opt-max" value="16" min="4" max="24" step="1" style="width:3.5rem" /></label>
+          <button class="btn btn-primary" id="bt-optimizer-run-btn" onclick="runRiskRecipeOptimizer()" title="Run optimizer on last backtest window">Run optimizer</button>
+          <button class="btn btn-secondary" id="bt-optimizer-apply-btn" onclick="applyOptimizerWinners()" title="Apply selected (or winners) to synced risk recipes">Apply selected</button>
+          <button class="btn btn-secondary" type="button" onclick="applyOptimizerWinners(true)" title="Apply each risk's top passer">Apply winners</button>
+          <span class="mint text-xs" id="bt-optimizer-status">Run a backtest, then optimize</span>
+        </div>
+        <div id="bt-optimizer-progress" class="mint text-xs mb-2 hidden"></div>
+        <div id="bt-optimizer-results" class="space-y-3"></div>
+      </div>
+
       <div class="card">
         <div class="section-title">Trade Results (PnL SOL/USD · staged takes · wallet MC · delay) <span class="tip" tabindex="0" data-tip="PnL shows SOL and USD. Takes chips show whether partial / recovered initial happened before the remainder. Green/red row tint = win/loss. Hover Reason for full exit explanation."></span></div>
         <div class="overflow-x-auto max-h-[28rem] overflow-y-auto">
@@ -8642,6 +8660,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const data = await fetchJSON('/backtest/last');
         renderBacktestResult(data);
         if (status) status.textContent = 'Loaded last run · ' + (data.dataSource || '');
+        try { loadLastOptimizerResult(); } catch (_) {}
       } catch (err) {
         if (status) status.textContent = err.message || 'No saved backtest';
       }
@@ -8864,6 +8883,227 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (status) status.textContent = err.message || 'Apply failed';
         alert(err.message || 'Apply failed');
       }
+    }
+
+    let _optProgressTimer = null;
+    window._lastOptimizer = null;
+
+    function selectedOptimizerRisks() {
+      const risks = [];
+      if (document.getElementById('bt-opt-low')?.checked) risks.push('low');
+      if (document.getElementById('bt-opt-medium')?.checked) risks.push('medium');
+      if (document.getElementById('bt-opt-high')?.checked) risks.push('high');
+      if (document.getElementById('bt-opt-degen')?.checked) risks.push('degen');
+      return risks;
+    }
+
+    function selectedOptimizerCandidateIds() {
+      return Array.from(document.querySelectorAll('.bt-opt-pick:checked')).map(function (el) {
+        return { riskLevel: el.getAttribute('data-risk'), candidateId: el.value };
+      });
+    }
+
+    async function pollOptimizerProgress() {
+      try {
+        const p = await fetchJSON('/backtest/optimize/progress');
+        const el = document.getElementById('bt-optimizer-progress');
+        const status = document.getElementById('bt-optimizer-status');
+        const cur = p.current != null ? p.current : (p.done || 0);
+        if (el) {
+          el.classList.remove('hidden');
+          const pct = p.total > 0 ? Math.round((cur / p.total) * 100) : 0;
+          el.textContent = (p.running ? 'Running' : 'Idle') +
+            (p.phase ? ' · ' + p.phase : '') +
+            (p.riskLevel ? ' · ' + p.riskLevel : '') +
+            (p.candidateId ? ' · ' + p.candidateId : '') +
+            ' · ' + cur + '/' + (p.total || 0) +
+            (p.message ? ' — ' + p.message : '') +
+            (p.error ? ' · ERR: ' + p.error : '');
+          setBtProgress(Math.max(5, Math.min(99, pct || 5)), p.message || 'Optimizing…');
+        }
+        if (status && p.running) status.textContent = p.message || 'Optimizing…';
+        if (status && p.error && !p.running) status.textContent = p.error;
+      } catch (_) {}
+    }
+
+    function renderOptimizerResult(report) {
+      window._lastOptimizer = report;
+      const host = document.getElementById('bt-optimizer-results');
+      const status = document.getElementById('bt-optimizer-status');
+      if (!host) return;
+      const riskBlocks = report && Array.isArray(report.risks) ? report.risks : null;
+      if (!riskBlocks || !riskBlocks.length) {
+        host.innerHTML = '<p class="mint text-xs text-slate-500">No optimizer results yet</p>';
+        return;
+      }
+      const hours = report.period && report.period.hours != null ? report.period.hours + 'h' : '';
+      if (status) {
+        status.textContent = 'Optimized ' + riskBlocks.length + ' risk level(s)' +
+          (hours ? ' · ' + hours : '') +
+          (report.disclaimer ? ' · ' + report.disclaimer.slice(0, 48) + '…' : '');
+      }
+      host.innerHTML = riskBlocks.map(function (block) {
+        const risk = block.riskLevel || 'medium';
+        const baseline = block.baseline || {};
+        const bm = baseline.metrics || {};
+        const winnerId = block.winnerId || null;
+        const ranked = block.ranked || [];
+        const winner = ranked.find(function (c) { return c.id === winnerId; }) || null;
+        const rows = ranked.slice(0, 12).map(function (c, idx) {
+          const m = c.metrics || {};
+          const pass = !!c.passedFloors;
+          const isWinner = winnerId && c.id === winnerId;
+          const id = c.id || ('cand-' + idx);
+          const wr = m.winRatePct != null ? Number(m.winRatePct).toFixed(1) + '%' : '—';
+          const trades = m.trades != null ? m.trades : '—';
+          const exp = m.expectancySol != null ? Number(m.expectancySol).toFixed(4) : '—';
+          const pf = m.profitFactor != null ? Number(m.profitFactor).toFixed(2) : '—';
+          const dd = m.maxDrawdownPct != null ? Number(m.maxDrawdownPct).toFixed(1) + '%' : '—';
+          const score = m.performanceScore != null ? Number(m.performanceScore).toFixed(1) : '—';
+          const floorTip = (c.floorNotes && c.floorNotes.length)
+            ? String(c.floorNotes.join('; ')).replace(/"/g, '&quot;')
+            : '';
+          const label = c.label || id;
+          return '<tr style="' + (isWinner ? 'background:rgba(34,197,94,0.08)' : '') + '">' +
+            '<td><input type="radio" class="bt-opt-pick" name="bt-opt-' + risk + '" value="' + id +
+              '" data-risk="' + risk + '"' + (isWinner ? ' checked' : '') + ' /></td>' +
+            '<td class="mint text-xs" title="' + (c.scoreNote || '').replace(/"/g, '&quot;') + '">' +
+              label + (c.isBaseline ? ' (base)' : '') + (isWinner ? ' ★' : '') + '</td>' +
+            '<td style="color:' + (pass ? '#4ade80' : '#f87171') + '" title="' + floorTip + '">' +
+              (pass ? 'pass' : 'fail') + '</td>' +
+            '<td>' + wr + '</td>' +
+            '<td>' + trades + '</td>' +
+            '<td>' + exp + '</td>' +
+            '<td>' + pf + '</td>' +
+            '<td>' + dd + '</td>' +
+            '<td>' + score + '</td>' +
+            '</tr>';
+        }).join('');
+        const baseLine =
+          'Baseline WR ' + (bm.winRatePct != null ? Number(bm.winRatePct).toFixed(1) + '%' : '—') +
+          ' · trades ' + (bm.trades != null ? bm.trades : '—') +
+          ' · exp ' + (bm.expectancySol != null ? Number(bm.expectancySol).toFixed(4) : '—') +
+          ' · PF ' + (bm.profitFactor != null ? Number(bm.profitFactor).toFixed(2) : '—');
+        return '<div class="border border-slate-700/60 rounded p-2">' +
+          '<div class="section-title text-sm mb-1">' + String(risk).toUpperCase() +
+            (winner ? ' → ' + (winner.label || winner.id) : ' (no passer)') + '</div>' +
+          '<p class="mint text-xs mb-2">' + baseLine + '</p>' +
+          '<div class="overflow-x-auto max-h-64 overflow-y-auto">' +
+          '<table><thead><tr>' +
+          '<th></th><th>Candidate</th><th>Floors</th><th>WR</th><th>Trades</th><th>Exp</th><th>PF</th><th>Max DD</th><th>Score</th>' +
+          '</tr></thead><tbody>' +
+          (rows || '<tr><td colspan="9" class="text-slate-500">No candidates</td></tr>') +
+          '</tbody></table></div></div>';
+      }).join('');
+    }
+
+    async function runRiskRecipeOptimizer() {
+      const risks = selectedOptimizerRisks();
+      if (!risks.length) {
+        alert('Select at least one risk level');
+        return;
+      }
+      if (!window._lastBacktest) {
+        alert('Run a backtest first so the optimizer can reuse that window');
+        return;
+      }
+      const maxEl = document.getElementById('bt-opt-max');
+      const maxCandidatesPerRisk = maxEl ? Math.max(4, Math.min(24, Number(maxEl.value) || 16)) : 16;
+      const status = document.getElementById('bt-optimizer-status');
+      const btn = document.getElementById('bt-optimizer-run-btn');
+      const prog = document.getElementById('bt-optimizer-progress');
+      if (status) status.textContent = 'Starting optimizer…';
+      if (btn) btn.disabled = true;
+      if (prog) { prog.classList.remove('hidden'); prog.textContent = 'Starting…'; }
+      setBtProgress(5, 'Optimizer…');
+      clearInterval(_optProgressTimer);
+      _optProgressTimer = setInterval(pollOptimizerProgress, 500);
+      try {
+        const start = await fetchJSON('/backtest/optimize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            risks: risks,
+            maxCandidatesPerRisk: maxCandidatesPerRisk,
+            useLastBacktestWindow: true,
+          }),
+          timeoutMs: 60000,
+        });
+        if (!start.ok && !start.started) {
+          throw new Error(start.error || 'Failed to start');
+        }
+        let attempts = 0;
+        while (attempts < 900) {
+          await new Promise(function (r) { setTimeout(r, 1000); });
+          attempts++;
+          const p = await fetchJSON('/backtest/optimize/progress');
+          if (!p.running) {
+            if (p.error) throw new Error(p.error);
+            break;
+          }
+        }
+        const last = await fetchJSON('/backtest/optimize/last');
+        renderOptimizerResult(last.optimizer || last);
+        setBtProgress(100, 'Optimizer complete');
+        setTimeout(hideBtProgress, 1200);
+        if (status) status.textContent = 'Optimizer complete';
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Optimizer failed';
+        hideBtProgress();
+      } finally {
+        clearInterval(_optProgressTimer);
+        _optProgressTimer = null;
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function applyOptimizerWinners(applyAllWinners) {
+      const status = document.getElementById('bt-optimizer-status');
+      let body;
+      if (applyAllWinners) {
+        if (!confirm(
+          'Apply each risk level\\'s constrained-WR winner to synced Low/Med/High/Degen recipes?\\n\\n' +
+          'Strict Mode is left untouched. Settings persist for the next applyRiskLevel.'
+        )) return;
+        body = { applyWinners: true };
+      } else {
+        const selections = selectedOptimizerCandidateIds();
+        if (!selections.length) {
+          alert('Select a candidate per risk (radio), or use Apply winners');
+          return;
+        }
+        if (!confirm(
+          'Apply ' + selections.length + ' selected candidate(s) to synced risk recipes?\\n\\n' +
+          'Strict Mode is left untouched.'
+        )) return;
+        body = { selections: selections };
+      }
+      try {
+        const data = await fetchJSON('/backtest/optimize/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (status) status.textContent = data.message || 'Applied to risk recipes';
+        if (typeof loadStrategies === 'function') {
+          try { loadStrategies(); } catch (_) {}
+        }
+        if (typeof refreshAll === 'function') {
+          try { refreshAll(); } catch (_) {}
+        }
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Apply failed';
+        alert(err.message || 'Apply failed');
+      }
+    }
+
+    async function loadLastOptimizerResult() {
+      try {
+        const last = await fetchJSON('/backtest/optimize/last');
+        if (last && last.optimizer) {
+          renderOptimizerResult(last.optimizer);
+        }
+      } catch (_) {}
     }
 
     async function togglePaperLiveData() {
@@ -13282,6 +13522,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refreshDiscoveryStatus();
     try { onNansenPresetChange(); loadNansenCached(); } catch (_) {}
     loadStrategies();
+    try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
