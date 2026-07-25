@@ -793,6 +793,20 @@ export function createServer(): express.Application {
     res.json(getOptimizerProgress());
   });
 
+  app.post('/backtest/optimize/stop', async (_req: Request, res: Response) => {
+    const {
+      requestOptimizerStop,
+      getOptimizerProgress,
+    } = await import('./backtestOptimizer');
+    const result = requestOptimizerStop();
+    res.json({
+      ok: result.ok,
+      message: result.message,
+      ...(result.ok ? {} : { error: result.message }),
+      progress: getOptimizerProgress(),
+    });
+  });
+
   app.get('/backtest/optimize/last', async (_req: Request, res: Response) => {
     const {
       getLastOptimizer,

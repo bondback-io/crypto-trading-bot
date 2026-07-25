@@ -115,6 +115,7 @@ export interface RiskRecipeOptimizationEntry {
 }
 
 let lastOptimizer: OptimizerReport | null = null;
+let abortRequested = false;
 let progress: OptimizerProgress = {
   running: false,
   phase: 'idle',
@@ -135,6 +136,18 @@ function optimizerFile(): string {
 
 export function getOptimizerProgress(): OptimizerProgress {
   return { ...progress, done: progress.current };
+}
+
+/** Request graceful stop of the in-flight optimizer search. */
+export function requestOptimizerStop(): { ok: boolean; message: string } {
+  if (!progress.running) {
+    return { ok: false, message: 'No optimizer running' };
+  }
+  abortRequested = true;
+  setProgress({
+    message: 'Stopping optimizer…',
+  });
+  return { ok: true, message: 'Stop requested' };
 }
 
 export function getLastOptimizer(): OptimizerReport | null {
@@ -499,6 +512,44 @@ function resolvePeriod(
   return { fromMs, toMs, hours };
 }
 
+function finalizeRiskBlock(
+  level: RiskLevel,
+  scored: OptimizerCandidate[],
+  baselineMetrics: OptimizerCandidateMetrics | null
+): OptimizerRiskResult {
+  const baseTrades = baselineMetrics?.trades ?? 0;
+  const baseline =
+    scored.find((c) => c.isBaseline) ||
+    scored[0] ||
+    ({
+      id: `${level}-missing`,
+      riskLevel: level,
+      label: 'Missing baseline',
+      overlay: {},
+      isBaseline: true,
+      passedFloors: false,
+    } as OptimizerCandidate);
+
+  const ranked = [...scored].sort((a, b) =>
+    compareOptimizerCandidates(a, b, baseTrades)
+  );
+  ranked.forEach((c, i) => {
+    c.rank = i + 1;
+  });
+
+  const winner =
+    ranked.find((c) => c.passedFloors && !c.isBaseline) ||
+    ranked.find((c) => c.passedFloors) ||
+    null;
+
+  return {
+    riskLevel: level,
+    baseline,
+    ranked,
+    winnerId: winner?.id ?? null,
+  };
+}
+
 /**
  * Run bounded optimizer across selected risk levels on one event window.
  */
@@ -508,6 +559,8 @@ export async function runRiskRecipeOptimizer(
   if (progress.running) {
     throw new Error('Optimizer already running');
   }
+
+  abortRequested = false;
 
   // Claim the run immediately so POST /optimize + progress polls see running=true
   // before await points (last BT load, candidate gen, shadow runs).
@@ -556,6 +609,29 @@ export async function runRiskRecipeOptimizer(
       /* non-fatal */
     }
 
+    if (abortRequested) {
+      setProgress({
+        running: false,
+        phase: 'cancelled',
+        message: 'Optimizer stopped by user',
+        error: null,
+        finishedAt: Date.now(),
+        candidateId: null,
+      });
+      abortRequested = false;
+      return (
+        lastOptimizer || {
+          id: `opt-${Date.now().toString(36)}`,
+          generatedAt: Date.now(),
+          period,
+          baselineBacktestId: last.id,
+          risks: [],
+          disclaimer: DISCLAIMER,
+          options: { maxCandidatesPerRisk: maxPer, risks },
+        }
+      );
+    }
+
     const specsByRisk = new Map<
       RiskLevel,
       Array<{ id: string; label: string; overlay: AdvisorOverlay }>
@@ -584,8 +660,14 @@ export async function runRiskRecipeOptimizer(
 
     const riskResults: OptimizerRiskResult[] = [];
     let done = 0;
+    let cancelled = false;
 
     for (const level of risks) {
+      if (abortRequested) {
+        cancelled = true;
+        break;
+      }
+
       setProgress({
         riskLevel: level,
         message: `Scoring ${level.toUpperCase()} candidates…`,
@@ -596,6 +678,11 @@ export async function runRiskRecipeOptimizer(
       let baselineMetrics: OptimizerCandidateMetrics | null = null;
 
       for (const spec of specs) {
+        if (abortRequested) {
+          cancelled = true;
+          break;
+        }
+
         setProgress({
           current: done,
           done,
@@ -651,37 +738,13 @@ export async function runRiskRecipeOptimizer(
         setProgress({ current: done, done });
       }
 
-      const baseTrades = baselineMetrics?.trades ?? 0;
-      const baseline =
-        scored.find((c) => c.isBaseline) ||
-        scored[0] ||
-        ({
-          id: `${level}-missing`,
-          riskLevel: level,
-          label: 'Missing baseline',
-          overlay: {},
-          isBaseline: true,
-          passedFloors: false,
-        } as OptimizerCandidate);
+      if (scored.length) {
+        riskResults.push(
+          finalizeRiskBlock(level, scored, baselineMetrics)
+        );
+      }
 
-      const ranked = [...scored].sort((a, b) =>
-        compareOptimizerCandidates(a, b, baseTrades)
-      );
-      ranked.forEach((c, i) => {
-        c.rank = i + 1;
-      });
-
-      const winner =
-        ranked.find((c) => c.passedFloors && !c.isBaseline) ||
-        ranked.find((c) => c.passedFloors) ||
-        null;
-
-      riskResults.push({
-        riskLevel: level,
-        baseline,
-        ranked,
-        winnerId: winner?.id ?? null,
-      });
+      if (cancelled) break;
     }
 
     const report: OptimizerReport = {
@@ -696,6 +759,24 @@ export async function runRiskRecipeOptimizer(
         risks,
       },
     };
+
+    if (cancelled || abortRequested) {
+      abortRequested = false;
+      if (riskResults.length) {
+        lastOptimizer = report;
+        saveOptimizerToDisk(report);
+      }
+      setProgress({
+        running: false,
+        phase: 'cancelled',
+        message: 'Optimizer stopped by user',
+        error: null,
+        finishedAt: Date.now(),
+        candidateId: null,
+      });
+      return report;
+    }
+
     lastOptimizer = report;
     saveOptimizerToDisk(report);
     setProgress({
@@ -709,6 +790,7 @@ export async function runRiskRecipeOptimizer(
     });
     return report;
   } catch (err) {
+    abortRequested = false;
     const message = err instanceof Error ? err.message : String(err);
     setProgress({
       running: false,

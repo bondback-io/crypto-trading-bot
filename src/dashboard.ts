@@ -4033,6 +4033,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-degen" checked /> Degen</label>
           <label class="mint text-xs flex items-center gap-1">Max/risk <input type="number" id="bt-opt-max" value="16" min="4" max="24" step="1" style="width:3.5rem" /></label>
           <button class="btn btn-primary" id="bt-optimizer-run-btn" onclick="runRiskRecipeOptimizer()" title="Run optimizer on last backtest window">Run optimizer</button>
+          <button class="btn btn-danger" id="bt-optimizer-stop-btn" onclick="stopRiskRecipeOptimizer()" title="Stop the running optimizer" disabled>Stop</button>
           <button class="btn btn-secondary" id="bt-optimizer-apply-btn" onclick="applyOptimizerWinners()" title="Apply selected (or winners) to synced risk recipes">Apply selected</button>
           <button class="btn btn-secondary" type="button" onclick="applyOptimizerWinners(true)" title="Apply each risk's top passer">Apply winners</button>
           <span class="mint text-xs" id="bt-optimizer-status">Run a backtest, then optimize</span>
@@ -8997,6 +8998,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }).join('');
     }
 
+    async function stopRiskRecipeOptimizer() {
+      const status = document.getElementById('bt-optimizer-status');
+      const stopBtn = document.getElementById('bt-optimizer-stop-btn');
+      if (stopBtn) stopBtn.disabled = true;
+      try {
+        const data = await fetchJSON('/backtest/optimize/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (status) status.textContent = data.message || 'Stop requested';
+        clearInterval(_optProgressTimer);
+        _optProgressTimer = null;
+        try {
+          const last = await fetchJSON('/backtest/optimize/last');
+          if (last && (last.optimizer || last.risks)) {
+            renderOptimizerResult(last.optimizer || last);
+            if (status) status.textContent = 'Optimizer stopped (partial results)';
+          } else if (status) {
+            status.textContent = 'Stopped';
+          }
+        } catch (_) {
+          if (status) status.textContent = data.message || 'Stopped';
+        }
+        hideBtProgress();
+      } catch (err) {
+        if (status) status.textContent = err.message || 'Stop failed';
+      }
+    }
+
     async function runRiskRecipeOptimizer() {
       const risks = selectedOptimizerRisks();
       if (!risks.length) {
@@ -9011,13 +9042,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const maxCandidatesPerRisk = maxEl ? Math.max(4, Math.min(24, Number(maxEl.value) || 16)) : 16;
       const status = document.getElementById('bt-optimizer-status');
       const btn = document.getElementById('bt-optimizer-run-btn');
+      const stopBtn = document.getElementById('bt-optimizer-stop-btn');
       const prog = document.getElementById('bt-optimizer-progress');
       if (status) status.textContent = 'Starting optimizer…';
       if (btn) btn.disabled = true;
+      if (stopBtn) stopBtn.disabled = false;
       if (prog) { prog.classList.remove('hidden'); prog.textContent = 'Starting…'; }
       setBtProgress(5, 'Optimizer…');
       clearInterval(_optProgressTimer);
       _optProgressTimer = setInterval(pollOptimizerProgress, 500);
+      let wasCancelled = false;
       try {
         const start = await fetchJSON('/backtest/optimize', {
           method: 'POST',
@@ -9037,16 +9071,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           await new Promise(function (r) { setTimeout(r, 1000); });
           attempts++;
           const p = await fetchJSON('/backtest/optimize/progress');
+          if (p.phase === 'cancelled' || p.phase === 'stopped') {
+            wasCancelled = true;
+            break;
+          }
           if (!p.running) {
             if (p.error) throw new Error(p.error);
             break;
           }
         }
-        const last = await fetchJSON('/backtest/optimize/last');
-        renderOptimizerResult(last.optimizer || last);
-        setBtProgress(100, 'Optimizer complete');
-        setTimeout(hideBtProgress, 1200);
-        if (status) status.textContent = 'Optimizer complete';
+        try {
+          const last = await fetchJSON('/backtest/optimize/last');
+          if (last && (last.optimizer || last.risks)) {
+            renderOptimizerResult(last.optimizer || last);
+          }
+        } catch (_) {
+          if (wasCancelled && status) status.textContent = 'Stopped';
+        }
+        if (wasCancelled) {
+          setBtProgress(100, 'Optimizer stopped');
+          setTimeout(hideBtProgress, 1200);
+          if (status) status.textContent = status.textContent || 'Optimizer stopped';
+        } else {
+          setBtProgress(100, 'Optimizer complete');
+          setTimeout(hideBtProgress, 1200);
+          if (status) status.textContent = 'Optimizer complete';
+        }
       } catch (err) {
         if (status) status.textContent = err.message || 'Optimizer failed';
         hideBtProgress();
@@ -9054,6 +9104,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         clearInterval(_optProgressTimer);
         _optProgressTimer = null;
         if (btn) btn.disabled = false;
+        if (stopBtn) stopBtn.disabled = true;
       }
     }
 
