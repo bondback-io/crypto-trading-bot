@@ -40,7 +40,15 @@ export interface SmartWallet {
   /** Discovery category for dashboard grouping */
   category?: WalletCategory;
   /** Where this wallet came from */
-  source?: 'gmgn' | 'birdeye' | 'dexscreener' | 'curated' | 'manual' | 'bulk';
+  source?:
+    | 'gmgn'
+    | 'birdeye'
+    | 'dexscreener'
+    | 'curated'
+    | 'manual'
+    | 'bulk'
+    | 'nansen'
+    | 'kolscan';
   /** When first discovered / imported */
   discoveredAt?: number;
   /** When activity was last checked */

@@ -715,12 +715,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .card-open-positions #positions-table tbody td,
     .card-open-positions #trades-positions-table tbody td {
-      padding: 0.65rem 0.55rem;
+      padding: 0.75rem 0.55rem;
       border-bottom-color: rgba(51, 65, 85, 0.55);
+      vertical-align: top;
     }
     .card-open-positions #positions-table tbody tr:hover,
     .card-open-positions #trades-positions-table tbody tr:hover {
       background: rgba(56, 189, 248, 0.06);
+    }
+    .card-open-positions tr.pos-row-partial td {
+      background: rgba(16, 185, 129, 0.07);
+      border-top: 1px solid rgba(52, 211, 153, 0.22);
+    }
+    .card-open-positions tr.pos-row-partial:hover td {
+      background: rgba(16, 185, 129, 0.11);
+    }
+    .card-open-positions tr.pos-row-trail td {
+      box-shadow: inset 3px 0 0 rgba(167, 139, 250, 0.65);
     }
     .positions-empty {
       text-align: center;
@@ -738,21 +749,196 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 12px;
       color: #64748b;
     }
+    .pos-token-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 0.3rem 0.4rem;
+    }
+    .pos-token-main {
+      min-width: 0;
+      flex: 1 1 7rem;
+    }
+    .pos-status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin-top: 0.35rem;
+    }
+    .pos-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.18rem 0.45rem;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .pos-status-badge.is-full {
+      color: #cbd5e1;
+      background: rgba(51, 65, 85, 0.55);
+      border-color: rgba(100, 116, 139, 0.45);
+    }
+    .pos-status-badge.is-partial {
+      color: #052e1c;
+      background: #34d399;
+      border-color: #6ee7b7;
+    }
+    .pos-status-badge.is-trail {
+      color: #1e1b4b;
+      background: #c4b5fd;
+      border-color: #a78bfa;
+    }
+    .pos-status-badge.is-live {
+      color: #0c4a6e;
+      background: #7dd3fc;
+      border-color: #38bdf8;
+    }
+    .exit-ico {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 0.95rem;
+      height: 0.95rem;
+      margin-right: 0.2rem;
+      vertical-align: -0.12em;
+      flex-shrink: 0;
+    }
+    .pos-status-badge .exit-ico {
+      margin-right: 0;
+      width: 0.85rem;
+      height: 0.85rem;
+    }
+    .exit-ico svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .exit-ico.is-tp { color: #34d399; }
+    .exit-ico.is-sl { color: #f87171; }
+    .exit-ico.is-trail { color: #c4b5fd; }
+    .exit-ico.is-timer { color: #7dd3fc; }
+    .exit-ico.is-manual { color: #fbbf24; }
+    .exit-ico.is-partial { color: #67e8f9; }
+    .exit-ico.is-other { color: #94a3b8; }
+    .closed-trades-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem 0.75rem;
+      margin-bottom: 0.65rem;
+    }
+    .closed-trades-head .section-title {
+      margin-bottom: 0;
+    }
+    .closed-filter {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      padding: 0.2rem;
+      border-radius: 0.55rem;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+    }
+    .closed-filter-btn {
+      appearance: none;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 0.45rem 0.7rem;
+      min-height: 2rem;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .closed-filter-btn:hover,
+    .closed-filter-btn:focus-visible {
+      color: #e2e8f0;
+      background: rgba(51, 65, 85, 0.55);
+      outline: none;
+    }
+    .closed-filter-btn.is-active {
+      color: #ecfdf5;
+      background: rgba(16, 185, 129, 0.22);
+      border-color: rgba(52, 211, 153, 0.45);
+      font-weight: 700;
+    }
+    .closed-filter-btn.is-active[data-closed-filter="profit"] {
+      color: #052e1c;
+      background: #34d399;
+      border-color: #6ee7b7;
+    }
+    .closed-filter-btn.is-active[data-closed-filter="loss"] {
+      color: #450a0a;
+      background: #f87171;
+      border-color: #fca5a5;
+    }
+    @media (max-width: 640px) {
+      .closed-filter {
+        width: 100%;
+      }
+      .closed-filter-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        text-align: center;
+        min-height: 2.35rem;
+      }
+    }
+    .pos-size-card {
+      min-width: 9.5rem;
+      max-width: 15rem;
+    }
+    .pos-size-label {
+      font-size: 10px;
+      color: #64748b;
+      margin-bottom: 0.1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .pos-size-main {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+    }
     .pos-partial-line {
+      margin-top: 0.3rem;
+      font-size: 11px;
+      line-height: 1.35;
+      color: #cbd5e1;
+      font-weight: 600;
+      white-space: normal;
+    }
+    .pos-partial-line .pos-taken {
+      color: #67e8f9;
+      font-weight: 700;
+    }
+    .pos-partial-line .pos-remain {
+      color: #e2e8f0;
+      font-weight: 700;
+    }
+    .pos-remain-usd {
       margin-top: 0.2rem;
       font-size: 10px;
-      line-height: 1.35;
       color: #94a3b8;
-      white-space: normal;
-      max-width: 16rem;
+      font-weight: 600;
     }
     .pos-partial-bar {
-      margin-top: 0.35rem;
-      height: 4px;
+      margin-top: 0.4rem;
+      height: 5px;
       border-radius: 999px;
-      background: rgba(51, 65, 85, 0.85);
+      background: rgba(51, 65, 85, 0.9);
       overflow: hidden;
-      max-width: 11rem;
+      max-width: 12rem;
     }
     .pos-partial-bar > span {
       display: block;
@@ -760,42 +946,142 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-radius: inherit;
       background: linear-gradient(90deg, #34d399, #22d3ee);
     }
-    .pos-size-label {
+    .pos-pnl-cell {
+      min-width: 5.5rem;
+    }
+    .pos-pnl-main {
+      font-size: 13px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .pos-pnl-sub {
+      margin-top: 0.2rem;
       font-size: 10px;
-      color: #64748b;
-      margin-bottom: 0.1rem;
+      color: #94a3b8;
+      line-height: 1.35;
+    }
+    @media (max-width: 640px) {
+      .pos-size-card { max-width: 12rem; }
+      .pos-status-badge { font-size: 8.5px; padding: 0.2rem 0.4rem; }
     }
     .trade-group-toggle {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 1.35rem;
-      height: 1.35rem;
-      margin-right: 0.25rem;
-      padding: 0;
-      border-radius: 0.35rem;
-      border: 1px solid rgba(100, 116, 139, 0.45);
-      background: rgba(30, 41, 59, 0.9);
+      gap: 0.28rem;
+      min-width: 2.5rem;
+      min-height: 2rem;
+      margin-right: 0.4rem;
+      padding: 0.2rem 0.4rem;
+      border-radius: 0.4rem;
+      border: 1px solid rgba(100, 116, 139, 0.55);
+      background: rgba(30, 41, 59, 0.95);
       color: #cbd5e1;
       font-size: 10px;
+      font-weight: 600;
       line-height: 1;
       cursor: pointer;
-      vertical-align: middle;
+      vertical-align: top;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
     }
-    .trade-group-toggle:hover {
-      border-color: rgba(52, 211, 153, 0.45);
+    .trade-group-toggle:hover,
+    .trade-group-toggle:focus-visible {
+      border-color: rgba(56, 189, 248, 0.65);
       color: #e2e8f0;
+      outline: none;
     }
-    .trade-group-parent td {
-      background: rgba(15, 23, 42, 0.35);
+    .trade-group-toggle[aria-expanded="true"] {
+      border-color: rgba(52, 211, 153, 0.45);
+      background: rgba(16, 185, 129, 0.12);
     }
-    .trade-group-child td {
-      background: rgba(15, 23, 42, 0.18);
+    .trade-group-chevron {
+      display: inline-block;
+      width: 0.7rem;
+      font-size: 9px;
+      transition: transform 0.15s ease;
+    }
+    .trade-group-toggle[aria-expanded="true"] .trade-group-chevron {
+      transform: rotate(90deg);
+    }
+    .trade-group-expand-hint {
+      font-size: 9px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .trade-group-toggle[aria-expanded="true"] .trade-group-expand-hint {
+      color: #86efac;
+    }
+    .trade-group-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.35rem;
+    }
+    .trade-pnl-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      min-width: 1.35rem;
+      height: 1.15rem;
+      padding: 0 0.3rem;
+      margin-right: 0.2rem;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      line-height: 1;
+      vertical-align: middle;
+      border: 1px solid transparent;
+    }
+    .trade-pnl-badge.is-pos {
+      color: #052e1c;
+      background: #34d399;
+      border-color: #6ee7b7;
+    }
+    .trade-pnl-badge.is-neg {
+      color: #450a0a;
+      background: #f87171;
+      border-color: #fca5a5;
+    }
+    .trade-pnl-badge.is-flat {
+      color: #0f172a;
+      background: #94a3b8;
+      border-color: #cbd5e1;
+    }
+    tr.trade-group-parent td {
+      background: rgba(15, 23, 42, 0.55);
+      vertical-align: top;
+      border-top: 2px solid rgba(71, 85, 105, 0.75);
+      padding-top: 0.85rem;
+      padding-bottom: 0.8rem;
+    }
+    tr.trade-group-parent:first-child td {
+      border-top-color: rgba(52, 211, 153, 0.28);
+    }
+    tr.trade-group-parent.is-expanded td {
+      background: rgba(15, 23, 42, 0.72);
+      box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.55);
+    }
+    .trade-group-parent td:first-child {
+      min-width: 12rem;
+      max-width: 24rem;
+    }
+    tr.trade-group-child td {
+      background: rgba(15, 23, 42, 0.28);
       font-size: 12px;
       color: #cbd5e1;
+      border-left: 3px solid rgba(56, 189, 248, 0.28);
+      padding-top: 0.55rem;
+      padding-bottom: 0.55rem;
     }
-    .trade-group-child td:first-child {
-      padding-left: 1.65rem;
+    tr.trade-group-child td:first-child {
+      padding-left: 1.85rem;
+    }
+    tr.trade-group-child.trade-group-child-last td {
+      border-bottom: 2px solid rgba(71, 85, 105, 0.55);
+      padding-bottom: 0.85rem;
     }
     .trade-exit-label {
       display: inline-block;
@@ -808,10 +1094,84 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .trade-exit-label.is-final {
       color: #86efac;
     }
+    .trade-group-summary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.2rem 0.35rem;
+      font-size: 12.5px;
+      line-height: 1.35;
+      color: #e2e8f0;
+      font-weight: 700;
+      max-width: 22rem;
+    }
+    .trade-group-summary-token {
+      color: #f8fafc;
+      font-weight: 800;
+    }
+    .trade-group-summary-sep {
+      color: #64748b;
+      font-weight: 600;
+    }
+    .trade-group-summary-exits {
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+    .trade-group-summary-entry {
+      color: #e2e8f0;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .trade-group-summary-pnl {
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .trade-group-summary-pnl.is-pos {
+      color: var(--green) !important;
+    }
+    .trade-group-summary-pnl.is-neg {
+      color: var(--red) !important;
+    }
+    .trade-group-summary-pnl.is-flat {
+      color: var(--muted) !important;
+    }
+    .trade-group-summary-exit {
+      color: #7dd3fc;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .trade-group-summary-sub {
+      margin-top: 0.35rem;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+      line-height: 1.35;
+      white-space: normal;
+    }
+    .trade-group-summary-hold {
+      color: #cbd5e1;
+      font-variant-numeric: tabular-nums;
+    }
     .trade-group-meta {
       font-size: 10px;
       color: #64748b;
       margin-top: 0.15rem;
+    }
+    @media (max-width: 640px) {
+      .trade-group-summary {
+        font-size: 12px;
+        max-width: 16rem;
+      }
+      .trade-group-parent td:first-child {
+        max-width: 16rem;
+      }
+      .trade-group-toggle {
+        min-width: 2.75rem;
+        min-height: 2.25rem;
+      }
+      .trade-group-expand-hint {
+        display: none;
+      }
     }
     .stat { font-size: 1.5rem; font-weight: 700; color: #34d399; }
     .ov-equity-panel {
@@ -1189,7 +1549,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       flex-wrap: wrap;
       align-items: center;
       gap: 0.3rem 0.4rem;
+      min-width: 0;
       max-width: 100%;
+      width: 100%;
+      box-sizing: border-box;
       padding: 0.35rem 0.5rem !important;
     }
     .header-actions .status-meta {
@@ -1198,14 +1561,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       align-items: center;
       gap: 0.25rem 0.45rem;
       min-width: 0;
-      flex: 1 1 auto;
+      flex: 1 1 12rem;
     }
     .header-actions .status-controls {
       display: inline-flex;
       flex-wrap: wrap;
       align-items: center;
+      justify-content: flex-end;
       gap: 0.25rem;
       margin-left: auto;
+      min-width: 0;
+      max-width: 100%;
     }
     .header-actions .status-stat {
       font-size: 0.7rem;
@@ -1415,8 +1781,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .pos-cost-cell { white-space: nowrap; font-size: 0.8rem; }
     .pos-vol-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
-    #wallets-table, #search-wallets-table, #discover-wallets-table { min-width: 48rem; }
+    #wallets-table, #search-wallets-table, #discover-wallets-table, #nansen-wallets-table { min-width: 48rem; }
     #discover-wallets-table th, #discover-wallets-table td,
+    #nansen-wallets-table th, #nansen-wallets-table td,
     #wallets-table th, #wallets-table td,
     #search-wallets-table th, #search-wallets-table td {
       padding-left: 0.4rem;
@@ -1424,7 +1791,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       white-space: nowrap;
       font-size: 0.8rem;
     }
-    #discover-wallets-table th, #wallets-table th, #search-wallets-table th {
+    #discover-wallets-table th, #wallets-table th, #search-wallets-table th, #nansen-wallets-table th {
       font-size: 0.72rem;
       letter-spacing: 0.01em;
     }
@@ -1595,12 +1962,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         margin-bottom: 0.75rem;
       }
       .header-actions {
-        max-width: none;
-        justify-self: end;
-        flex-wrap: nowrap;
+        max-width: 100%;
+        width: auto;
+        justify-self: stretch;
+        justify-content: flex-end;
+        flex-wrap: wrap;
         gap: 0.35rem 0.5rem;
       }
-      .header-actions .status-controls { flex-wrap: nowrap; }
+      .header-actions .status-meta {
+        flex: 1 1 auto;
+        justify-content: flex-end;
+      }
+      .header-actions .status-controls {
+        flex: 0 1 auto;
+        flex-wrap: wrap;
+        margin-left: 0;
+      }
+      .header-actions .btn {
+        flex: 0 1 auto;
+      }
       .card { padding: 1.15rem; }
       .filters-row { gap: 0.65rem 0.75rem; }
       .chart-wrap { height: 240px; }
@@ -1876,7 +2256,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade."></span></div>
+          <div class="closed-trades-head">
+            <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable or losing."></span></div>
+            <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
+              <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
+              <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
+              <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+            </div>
+          </div>
           <div class="overflow-x-auto max-h-56 overflow-y-auto">
             <table id="closed-table">
               <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -1951,7 +2338,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade."></span></div>
+        <div class="closed-trades-head">
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable or losing."></span></div>
+          <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
+            <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+          </div>
+        </div>
         <div class="overflow-x-auto max-h-72 overflow-y-auto">
           <table id="trades-closed-table">
             <thead><tr><th>Token</th><th>Name</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -2129,6 +2523,83 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <button class="btn btn-primary" onclick="addManualDiscovered()" title="Parse the box and add wallets to tracking">Add manual</button>
             <button class="btn btn-secondary" onclick="document.getElementById('discover-source').value='manual';discoverWallets(true)" title="Show the offline curated candidate list">Load curated list</button>
           </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex flex-wrap gap-2 items-center justify-between mb-2">
+          <div class="section-title !mb-0">Nansen.ai Smart Money <span class="tip" tabindex="0" data-tip="Fetch labeled Smart Money wallets on Solana via Nansen (Smart Trader / 30D / 90D / Fund). Each Discover costs ~5 credits. Export to CSV/JSON so you can re-import without spending credits while testing."></span></div>
+          <span class="mint" id="nansen-key-status">—</span>
+        </div>
+        <div class="mint text-sm mb-2" id="nansen-credit-hint">Presets use Smart Trader + 30D/90D labels for higher win-rate / PnL wallets. Enrich PnL is optional (~1 credit per wallet).</div>
+        <div class="filters-row mb-3">
+          <label class="ctl ctl-lg">
+            <span>Filter preset <span class="tip" tabindex="0" data-tip="Recommended: Best overall. High win-rate recent uses 30D+90D Smart Trader labels."></span></span>
+            <select id="nansen-preset" onchange="onNansenPresetChange()" title="Suggested Smart Money filter presets">
+              <option value="best_overall">Best overall (recommended)</option>
+              <option value="high_win_recent">High win-rate recent (30D/90D)</option>
+              <option value="proven_long_term">Proven long-term</option>
+              <option value="funds">Funds only</option>
+              <option value="active_traders">Most active (24h)</option>
+              <option value="custom">Custom labels</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min trade $ <span class="tip" tabindex="0" data-tip="Ignore dust trades below this USD size."></span></span>
+            <input type="number" id="nansen-min-usd" value="500" min="0" step="100" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Limit <span class="tip" tabindex="0" data-tip="Max unique wallets after aggregating 24h trades."></span></span>
+            <select id="nansen-limit">
+              <option value="20">20</option>
+              <option value="30">30</option>
+              <option value="40">40</option>
+              <option value="50" selected>50</option>
+              <option value="75">75</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+        </div>
+        <div class="filters-row mb-3" id="nansen-label-row">
+          <span class="mint self-center text-xs">Labels:</span>
+          <label class="ctl-check" title="Historically profitable traders"><input type="checkbox" class="nansen-label" value="Smart Trader" checked /> Smart Trader</label>
+          <label class="ctl-check" title="Top performers over 30 days"><input type="checkbox" class="nansen-label" value="30D Smart Trader" checked /> 30D</label>
+          <label class="ctl-check" title="Top performers over 90 days"><input type="checkbox" class="nansen-label" value="90D Smart Trader" checked /> 90D</label>
+          <label class="ctl-check" title="Top performers over 180 days"><input type="checkbox" class="nansen-label" value="180D Smart Trader" /> 180D</label>
+          <label class="ctl-check" title="Institutional funds"><input type="checkbox" class="nansen-label" value="Fund" /> Fund</label>
+        </div>
+        <div class="filters-row mb-3">
+          <button class="btn btn-primary" onclick="discoverNansen(false)" title="Use cache if fresh (~0 credits), else fetch (~5 credits)">Discover</button>
+          <button class="btn btn-secondary" onclick="discoverNansen(true)" title="Bypass cache and call Nansen API (~5 credits)">Force refresh (~5 cr)</button>
+          <button class="btn btn-secondary" onclick="enrichNansenSelected()" title="Fetch win rate / PnL for checked rows (~1 credit each, max 10)">Enrich PnL selected</button>
+          <button class="btn btn-secondary" onclick="importNansenSelected()" title="Add checked wallets to Tracked Smart Wallets">Import selected</button>
+          <button class="btn btn-secondary" onclick="importNansenAllNew()" title="Import every new (untracked) wallet in the table">Import all new</button>
+          <button class="btn btn-secondary" onclick="exportNansen('csv')" title="Download current list as CSV (no credits)">Export CSV</button>
+          <button class="btn btn-secondary" onclick="exportNansen('json')" title="Download current list as JSON (no credits)">Export JSON</button>
+          <span class="mint self-center" id="nansen-status"></span>
+        </div>
+        <div class="filters-row mb-3">
+          <input type="file" id="nansen-import-file" accept=".csv,.json,text/csv,application/json" class="text-xs" title="Import a previously exported Nansen wallet list" />
+          <button class="btn btn-secondary" onclick="importNansenFile()" title="Load CSV/JSON into the table without calling the API">Import CSV/JSON</button>
+          <button class="btn btn-secondary" onclick="loadNansenCached()" title="Show last cached / imported list">Load cached</button>
+          <span class="mint self-center text-xs" id="nansen-preset-desc">Smart Trader + 30D/90D, min $500</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="nansen-wallets-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="nansen-select-all" onchange="toggleNansenSelectAll(this.checked)" title="Select all" /></th>
+                <th>Address</th>
+                <th title="Nansen Smart Money label">Label</th>
+                <th title="24h trade count / volume from Smart Money dex-trades">Activity</th>
+                <th title="Win rate % (after Enrich PnL)">Win%</th>
+                <th title="Realized PnL USD (after Enrich PnL)">PnL</th>
+                <th title="Recent token symbols traded">Tokens</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="8" class="text-slate-500">Choose a preset and click Discover, or import a saved CSV/JSON</td></tr></tbody>
+          </table>
         </div>
       </div>
 
@@ -4066,8 +4537,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ' · Photon: ' + (data.sources.photon || '—') +
             ' · BullX: ' + (data.sources.bullx || 'offline') +
             ' · DexScreener: ' + data.sources.dexscreener +
+            ' · Nansen: ' + (data.sources.nansen || '—') +
             ' · Curated: ' + data.sources.curated;
         }
+        if (data.nansen) updateNansenStatusUi(data.nansen);
       } catch (err) {
         const el = document.getElementById('discovery-status');
         if (el) el.textContent = err.message;
@@ -4186,8 +4659,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return 'id:' + ((p && p.id) || 'unknown');
     }
 
-    /** Open position size + partial take-profit progress. */
-    function fmtOpenSizeCell(p) {
+    /** Shared open-position size / partial progress snapshot. */
+    function openPositionProgress(p) {
       const initial = Number(
         p.initialCostSol != null && p.initialCostSol > 0
           ? p.initialCostSol
@@ -4202,53 +4675,169 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         p.status === 'partial' ||
         p.partialSellDone === true ||
         (Number(p.solReturned) || 0) > 0;
-      if (!hasPartial) {
-        return fmtCostSolUsd(remain || initial, p.costUsd, p.solUsd);
+      const solUsd = p.solUsd != null ? Number(p.solUsd) : null;
+      let remainUsd = p.costUsd != null ? Number(p.costUsd) : null;
+      if ((remainUsd == null || !Number.isFinite(remainUsd)) && solUsd > 0) {
+        remainUsd = remain * solUsd;
       }
-      const origUsd =
-        p.initialCostUsd != null
-          ? p.initialCostUsd
-          : (p.solUsd != null && initial > 0 ? initial * Number(p.solUsd) : null);
+      let initialUsd = p.initialCostUsd != null ? Number(p.initialCostUsd) : null;
+      if ((initialUsd == null || !Number.isFinite(initialUsd)) && solUsd > 0 && initial > 0) {
+        initialUsd = initial * solUsd;
+      }
+      return {
+        initial,
+        remain,
+        taken,
+        takenPct,
+        remainPct,
+        hasPartial,
+        remainUsd,
+        initialUsd,
+        solUsd,
+      };
+    }
+
+    function fmtOpenStatusBadges(p, prog) {
+      const badges = [];
+      if (prog && prog.hasPartial) {
+        badges.push(
+          '<span class="pos-status-badge is-partial" title="Partial take-profits already taken">' +
+            exitStyleIconHtml('partial') +
+            'Partial TP Active</span>'
+        );
+      } else {
+        badges.push(
+          '<span class="pos-status-badge is-full" title="No partial exits yet — full size still open">Full Position</span>'
+        );
+      }
+      if (p.trailingActive) {
+        badges.push(
+          '<span class="pos-status-badge is-trail" title="Trailing stop is armed">' +
+            exitStyleIconHtml('trail') +
+            'Trailing</span>'
+        );
+      }
+      if (p.tradeMode === 'live') {
+        badges.push(
+          '<span class="pos-status-badge is-live" title="Live tracked position">Live</span>'
+        );
+      }
+      return badges.length
+        ? '<div class="pos-status-row">' + badges.join('') + '</div>'
+        : '';
+    }
+
+    /** Open position size + partial take-profit progress. */
+    function fmtOpenSizeCell(p) {
+      const prog = openPositionProgress(p);
+      if (!prog.hasPartial) {
+        return (
+          '<div class="pos-size-card">' +
+            '<div class="pos-size-label">Size</div>' +
+            '<div class="pos-size-main">' +
+              fmtCostSolUsd(prog.remain || prog.initial, prog.remainUsd, prog.solUsd) +
+            '</div>' +
+          '</div>'
+        );
+      }
+      const remainUsdBit =
+        prog.remainUsd != null && Number.isFinite(prog.remainUsd)
+          ? (' · $' + Number(prog.remainUsd).toFixed(2))
+          : '';
       return (
-        '<div class="pos-size-label">Original</div>' +
-        '<div>' + fmtCostSolUsd(initial, origUsd, p.solUsd) + '</div>' +
-        '<div class="pos-partial-line" title="Share of original size already exited vs still held">' +
-          'Taken: ' + takenPct.toFixed(0) + '% (' + fmtSolShort(taken) + ' SOL)' +
-          ' | Remaining: ' + remainPct.toFixed(0) + '% (' + fmtSolShort(remain) + ' SOL)' +
-        '</div>' +
-        '<div class="pos-partial-bar" title="' + takenPct.toFixed(0) + '% taken">' +
-          '<span style="width:' + Math.min(100, Math.max(0, takenPct)).toFixed(1) + '%"></span>' +
+        '<div class="pos-size-card">' +
+          '<div class="pos-size-label">Original</div>' +
+          '<div class="pos-size-main">' +
+            fmtCostSolUsd(prog.initial, prog.initialUsd, prog.solUsd) +
+          '</div>' +
+          '<div class="pos-partial-line" title="Share of original size already exited vs still held">' +
+            '<span class="pos-taken">Taken ' + prog.takenPct.toFixed(0) + '%</span>' +
+            '<span class="mint"> • </span>' +
+            '<span class="pos-remain">Remaining ' + prog.remainPct.toFixed(0) + '%</span>' +
+          '</div>' +
+          '<div class="pos-remain-usd" title="Remaining cost basis">' +
+            'Left ' + fmtSolShort(prog.remain) + ' SOL' + remainUsdBit +
+            ' <span class="mint">(' + fmtSolShort(prog.taken) + ' SOL taken)</span>' +
+          '</div>' +
+          '<div class="pos-partial-bar" title="' + prog.takenPct.toFixed(0) + '% taken">' +
+            '<span style="width:' + Math.min(100, Math.max(0, prog.takenPct)).toFixed(1) + '%"></span>' +
+          '</div>' +
         '</div>'
       );
     }
 
     function fmtOpenPnlCell(p) {
-      const pnl = p.pnlPct;
-      const initial = Number(p.initialCostSol) || 0;
-      const remain = Number(p.costSol) || 0;
-      const hasPartial =
-        (initial > 0 && remain + 1e-12 < initial) ||
-        p.status === 'partial' ||
-        p.partialSellDone === true;
-      const main = pnl == null
-        ? '—'
-        : '<span style="color:' + (pnl >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
-          (pnl >= 0 ? '+' : '') + Number(pnl).toFixed(1) + '%</span>';
-      if (!hasPartial) return main;
-      const realized = Number(p.realizedPnlSol);
-      const realizedBit =
-        Number.isFinite(realized) && Math.abs(realized) > 1e-8
-          ? '<div class="mint">realized ' +
-            (realized >= 0 ? '+' : '') + realized.toFixed(4) + ' SOL</div>'
-          : '';
-      return main +
-        '<div class="mint">unrealized on remaining</div>' +
-        realizedBit;
+      const prog = openPositionProgress(p);
+      const pnl = p.pnlPct != null ? Number(p.pnlPct) : null;
+      const tone = pnl == null ? 'flat' : pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
+      const color =
+        tone === 'pos' ? 'var(--green)' : tone === 'neg' ? 'var(--red)' : 'var(--muted)';
+      if (pnl == null) {
+        return '<div class="pos-pnl-cell"><span class="mint">—</span></div>';
+      }
+      const unrealSol =
+        prog.remain > 0 && Number.isFinite(pnl)
+          ? prog.remain * (pnl / 100)
+          : null;
+      const main =
+        '<div class="pos-pnl-main" style="color:' + color + '">' +
+          (pnl > 0 ? '+' : '') + pnl.toFixed(1) + '%' +
+        '</div>';
+      const subParts = [];
+      if (unrealSol != null && Number.isFinite(unrealSol)) {
+        subParts.push(
+          'unreal ' + (unrealSol >= 0 ? '+' : '') + fmtSolShort(unrealSol) + ' SOL'
+        );
+      }
+      if (prog.hasPartial) {
+        subParts.push('on remaining');
+        const realized = Number(p.realizedPnlSol);
+        if (Number.isFinite(realized) && Math.abs(realized) > 1e-8) {
+          subParts.push(
+            'realized ' + (realized >= 0 ? '+' : '') + realized.toFixed(4) + ' SOL'
+          );
+        }
+      }
+      return (
+        '<div class="pos-pnl-cell">' +
+          main +
+          (subParts.length
+            ? '<div class="pos-pnl-sub">' + subParts.join(' · ') + '</div>'
+            : '') +
+        '</div>'
+      );
+    }
+
+    function fmtOpenTokenCell(p, riskBit) {
+      const prog = openPositionProgress(p);
+      const pnl = p.pnlPct != null ? Number(p.pnlPct) : null;
+      const tone = pnl == null ? 'flat' : pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
+      const badgeLabel = tone === 'pos' ? '+' : tone === 'neg' ? '−' : '·';
+      const badgeTitle =
+        tone === 'pos' ? 'Unrealized profit' : tone === 'neg' ? 'Unrealized loss' : 'Flat / unmarked';
+      return (
+        '<div class="pos-token-head">' +
+          '<span class="trade-pnl-badge is-' + tone + '" title="' + badgeTitle + '" aria-label="' + badgeTitle + '">' +
+            badgeLabel +
+          '</span>' +
+          '<div class="pos-token-main">' +
+            fmtToken(p.symbol, p.name, p.mint) +
+            (riskBit || '') +
+            fmtOpenStatusBadges(p, prog) +
+          '</div>' +
+        '</div>'
+      );
     }
 
     function labelClosedExit(slice, partialIndex, initialCostSol) {
       if (!isPartialCloseSlice(slice)) {
-        return '<span class="trade-exit-label is-final">Final Exit</span>';
+        const style = classifyExitStyle(slice && slice.reason);
+        return (
+          '<span class="trade-exit-label is-final">' +
+            exitStyleIconHtml(style.key) +
+            'Final Exit' +
+          '</span>'
+        );
       }
       const cost = Number(slice.costSol || 0);
       const pct =
@@ -4257,10 +4846,175 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : null;
       const pctBit = pct != null && Number.isFinite(pct) ? ' – ' + pct + '%' : '';
       return (
-        '<span class="trade-exit-label">Partial TP ' +
-        (partialIndex + 1) +
-        pctBit +
+        '<span class="trade-exit-label">' +
+          exitStyleIconHtml('partial') +
+          'Partial TP ' +
+          (partialIndex + 1) +
+          pctBit +
         '</span>'
+      );
+    }
+
+    /** Classify raw exit reason → { key, label } for icons + summary text. */
+    function classifyExitStyle(reason) {
+      const r = String(reason || '').replace(/^partial:\\s*/i, '').trim();
+      if (!r) return { key: 'other', label: 'Unknown' };
+      const low = r.toLowerCase();
+      if (/manual\\s*force\\s*sell|force\\s*sell|^manual$/i.test(r)) {
+        return { key: 'manual', label: 'Manual' };
+      }
+      if (/trailing\\s*stop|trail\\s*exit|bag exit/i.test(r)) {
+        return { key: 'trail', label: 'Trailing Stop' };
+      }
+      if (/hard\\s*stop|stop-?loss|stop loss/i.test(r)) {
+        return { key: 'sl', label: 'Hard Stop-Loss' };
+      }
+      if (/max\\s*profit/i.test(r)) {
+        return { key: 'tp', label: 'Max Profit' };
+      }
+      if (/take-?profit|full\\s*tp|\\btp\\b/i.test(low) && !/partial/i.test(low)) {
+        return { key: 'tp', label: 'Full TP' };
+      }
+      if (/timer|time\\s*exit|deadline|scalp.*time|hold\\s*limit/i.test(r)) {
+        return { key: 'timer', label: 'Timer' };
+      }
+      if (/dead\\s*market|dead.?vol|inactive\\s*market|volume\\s*dead/i.test(r)) {
+        return { key: 'other', label: 'Dead Market' };
+      }
+      if (/migrat/i.test(r)) return { key: 'other', label: 'Migration' };
+      if (/momentum|signal\\s*fail|invalidate|post.?run.?dip/i.test(r)) {
+        return { key: 'other', label: 'Signal Fail' };
+      }
+      if (/bag\\s*to|bag\\s*trim/i.test(r)) return { key: 'partial', label: 'Bag Trim' };
+      if (/recover|initial recovered/i.test(r)) {
+        return { key: 'partial', label: 'Initial Recover' };
+      }
+      if (/partial\\s*sell|partial\\s*tp/i.test(r)) {
+        return { key: 'partial', label: 'Partial TP' };
+      }
+      if (/tier\\s*\\d/i.test(r)) return { key: 'partial', label: 'Tiered TP' };
+      const short = r.replace(/\\s+/g, ' ').slice(0, 28);
+      return {
+        key: 'other',
+        label: short + (r.length > 28 ? '…' : ''),
+      };
+    }
+
+    function fmtExitStyleLabel(reason) {
+      return classifyExitStyle(reason).label;
+    }
+
+    function exitStyleIconHtml(key) {
+      const k = String(key || 'other');
+      const cls = 'exit-ico is-' + (k === 'tp' || k === 'sl' || k === 'trail' || k === 'timer' || k === 'manual' || k === 'partial' ? k : 'other');
+      const title =
+        k === 'tp' ? 'Take profit' :
+        k === 'sl' ? 'Stop-loss' :
+        k === 'trail' ? 'Trailing stop' :
+        k === 'timer' ? 'Timer exit' :
+        k === 'manual' ? 'Manual exit' :
+        k === 'partial' ? 'Partial take-profit' :
+        'Exit';
+      // Compact inline SVGs (decorative; label provides accessible text)
+      let svg = '';
+      if (k === 'tp') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>';
+      } else if (k === 'sl') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>';
+      } else if (k === 'trail') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>';
+      } else if (k === 'timer') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 1.5"/><path d="M9 2h6"/></svg>';
+      } else if (k === 'manual') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13v-2a2 2 0 1 1 4 0v2"/><path d="M12 11V8a2 2 0 1 1 4 0v5"/><path d="M16 10a2 2 0 1 1 4 0v5a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6v-1a2 2 0 1 1 4 0"/></svg>';
+      } else if (k === 'partial') {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9h9"/></svg>';
+      } else {
+        svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>';
+      }
+      return '<span class="' + cls + '" title="' + title + '" aria-hidden="true">' + svg + '</span>';
+    }
+
+    function fmtExitStyleHtml(reason) {
+      const style = classifyExitStyle(reason);
+      return exitStyleIconHtml(style.key) + escHtml(style.label);
+    }
+
+    /**
+     * Bold parent summary for a grouped closed trade:
+     * "Cooper • 3 partial exits • Entry 0.25 SOL • Total +0.084 SOL (+31%) • Exit: Trailing Stop"
+     * Hold time sits on a quieter line underneath to keep the main summary scannable.
+     */
+    function fmtClosedGroupSummary(g) {
+      const p = g.parent || {};
+      const final = g.final || p;
+      const symbol = String(p.symbol || (p.mint ? String(p.mint).slice(0, 6) : 'Trade'));
+      const n = (g.partials && g.partials.length) || 0;
+      const partialBit = n + ' partial exit' + (n === 1 ? '' : 's');
+      const size = Number(g.initialCost || p.initialCostSol || p.costSol || 0);
+      const entryBit = size > 0 ? ('Entry ' + fmtSolShort(size) + ' SOL') : null;
+      const pnl = Number(p.pnlSol || 0);
+      const pct = Number(p.pnlPct || 0);
+      const pnlTone = pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
+      const pnlColor =
+        pnlTone === 'pos'
+          ? 'var(--green)'
+          : pnlTone === 'neg'
+            ? 'var(--red)'
+            : 'var(--muted)';
+      const badgeLabel = pnlTone === 'pos' ? '+' : pnlTone === 'neg' ? '−' : '·';
+      const badgeTitle = pnlTone === 'pos' ? 'Profitable trade' : pnlTone === 'neg' ? 'Losing trade' : 'Flat trade';
+      const pnlBit =
+        'Total ' +
+        (pnl > 0 ? '+' : '') +
+        fmtSolShort(pnl) +
+        ' SOL (' +
+        (pct > 0 ? '+' : '') +
+        pct.toFixed(0) +
+        '%)';
+      const exitStyle = classifyExitStyle(final && final.reason);
+      const exitBit = 'Exit: ' + exitStyleIconHtml(exitStyle.key) + escHtml(exitStyle.label);
+      const openedAt = Number(p.openedAt || final.openedAt || 0);
+      const closedAt = Number(
+        (final && final.closedAt) || p.closedAt || g.latestAt || 0
+      );
+      const holdMs =
+        openedAt > 0 && closedAt > openedAt ? closedAt - openedAt : null;
+      const holdBit =
+        holdMs != null
+          ? ('Held <span class="trade-group-summary-hold">' + fmtHold(holdMs) + '</span>')
+          : null;
+      const parts = [
+        '<span class="trade-pnl-badge is-' + pnlTone + '" title="' + badgeTitle + '" aria-label="' + badgeTitle + '">' +
+          badgeLabel +
+        '</span>' +
+        '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>',
+        '<span class="trade-group-summary-exits">' + partialBit + '</span>',
+      ];
+      if (entryBit) {
+        parts.push('<span class="trade-group-summary-entry">' + entryBit + '</span>');
+      }
+      parts.push(
+        '<span class="trade-group-summary-pnl is-' + pnlTone + '" style="color:' + pnlColor + '">' +
+          pnlBit +
+        '</span>'
+      );
+      parts.push(
+        '<span class="trade-group-summary-exit" title="' +
+          escHtml(String((final && final.reason) || '')) +
+        '">' + exitBit + '</span>'
+      );
+      const sep = '<span class="trade-group-summary-sep" aria-hidden="true">•</span>';
+      return (
+        '<div class="trade-group-summary-wrap">' +
+          '<div class="trade-group-summary" title="Grouped trade summary — expand for each partial exit">' +
+            parts.join(sep) +
+          '</div>' +
+          (holdBit
+            ? '<div class="trade-group-summary-sub">' + holdBit +
+              ' · tap Details to see each exit</div>'
+            : '<div class="trade-group-summary-sub">Tap Details to see each exit</div>') +
+        '</div>'
       );
     }
 
@@ -4319,16 +5073,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const exitLabel = opts.exitLabel || '';
       const toggle = opts.toggleHtml || '';
       const meta = opts.metaHtml || '';
+      const summary = opts.summaryHtml || '';
+      const tokenInner = summary
+        ? summary
+        : (fmtToken(p.symbol, p.name, p.mint) + meta);
+      const tokenCell = summary
+        ? ('<div class="trade-group-head">' + toggle + tokenInner + '</div>')
+        : (toggle + tokenInner);
       const reason =
         opts.reasonOverride != null
           ? opts.reasonOverride
           : (p.reason || '—');
+      const pnlSol = Number(p.pnlSol || 0);
+      const pnlPct = Number(p.pnlPct || 0);
+      const pnlHtml = opts.pnlHtml != null
+        ? opts.pnlHtml
+        : (
+            ((pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL') +
+            '<span class="mint">(' + pnlPct.toFixed(0) + '%)</span>'
+          );
+      const closedCell = opts.closedHtml != null
+        ? opts.closedHtml
+        : (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—');
       return (
         '<tr class="' + (opts.rowClass || '') + '"' +
           (opts.groupAttr || '') +
           (opts.hidden ? ' hidden' : '') +
         '>' +
-          '<td>' + toggle + fmtToken(p.symbol, p.name, p.mint) + meta + '</td>' +
+          '<td>' + tokenCell + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="Market cap at exit">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
@@ -4338,12 +5110,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<td class="mint" title="Copied wallet — hover/tap for their entry MC">' +
             fmtWalletConvergence(p) +
           '</td>' +
-          '<td style="color:' + ((p.pnlSol || 0) >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
-            ((p.pnlSol || 0) >= 0 ? '+' : '') + (p.pnlSol || 0).toFixed(4) + ' SOL' +
-            '<span class="mint">(' + (p.pnlPct || 0).toFixed(0) + '%)</span>' +
+          '<td style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+            pnlHtml +
           '</td>' +
           '<td class="mint">' + reason + '</td>' +
-          '<td>' + (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') + '</td>' +
+          '<td>' + closedCell + '</td>' +
         '</tr>'
       );
     }
@@ -4355,12 +5126,148 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const expanded = btn.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       btn.setAttribute('aria-expanded', next ? 'true' : 'false');
-      btn.textContent = next ? '▼' : '▶';
+      btn.setAttribute('title', next ? 'Hide partial exits' : 'Show partial exits');
+      const hint = btn.querySelector('.trade-group-expand-hint');
+      if (hint) hint.textContent = next ? 'Hide' : 'Details';
+      const parent = btn.closest('tr.trade-group-parent');
+      if (parent) parent.classList.toggle('is-expanded', next);
       document.querySelectorAll('tr.trade-group-child[data-group="' + gid + '"]').forEach((row) => {
         row.hidden = !next;
       });
     }
     window.toggleClosedTradeGroup = toggleClosedTradeGroup;
+
+    window._closedTradesFilter = window._closedTradesFilter || 'all';
+    window._closedTradeGroups = window._closedTradeGroups || [];
+
+    function syncClosedTradesFilterButtons(filter) {
+      document.querySelectorAll('[data-closed-filter]').forEach((btn) => {
+        const active = btn.getAttribute('data-closed-filter') === filter;
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    }
+
+    function filterClosedTradeGroups(groups, filter) {
+      const list = groups || [];
+      if (filter === 'profit') {
+        return list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) > 0);
+      }
+      if (filter === 'loss') {
+        return list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) < 0);
+      }
+      return list;
+    }
+
+    function renderClosedTradesHtml(groups) {
+      const filtered = filterClosedTradeGroups(groups, window._closedTradesFilter || 'all');
+      if (!groups || groups.length === 0) {
+        return '<tr><td colspan="9" style="color:var(--muted)">No closed trades yet</td></tr>';
+      }
+      if (filtered.length === 0) {
+        const label =
+          window._closedTradesFilter === 'profit'
+            ? 'No profitable closed trades'
+            : window._closedTradesFilter === 'loss'
+              ? 'No losing closed trades'
+              : 'No closed trades yet';
+        return '<tr><td colspan="9" style="color:var(--muted)">' + label + '</td></tr>';
+      }
+      return filtered.map((g) => {
+        const p = g.parent;
+        const hasKids = g.children && g.children.length > 0;
+        const partialN = (g.partials && g.partials.length) || 0;
+        const openedAt = Number(p.openedAt || 0);
+        const closedAt = Number((g.final && g.final.closedAt) || p.closedAt || 0);
+        const holdMs = openedAt > 0 && closedAt > openedAt ? closedAt - openedAt : null;
+        const pnlSol = Number(p.pnlSol || 0);
+        const pnlPct = Number(p.pnlPct || 0);
+
+        if (!hasKids) {
+          return renderClosedTradeRow(p, {
+            reasonOverride: fmtExitStyleHtml(p.reason),
+            closedHtml:
+              (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
+              (holdMs != null
+                ? '<div class="mint" title="Hold from entry to exit">held ' + fmtHold(holdMs) + '</div>'
+                : ''),
+          });
+        }
+
+        const toggleHtml =
+          '<button type="button" class="trade-group-toggle" data-group="' +
+          g.gid +
+          '" aria-expanded="false" onclick="toggleClosedTradeGroup(this)" title="Show partial exits">' +
+          '<span class="trade-group-chevron" aria-hidden="true">▶</span>' +
+          '<span class="trade-group-expand-hint">Details</span>' +
+          '</button>';
+        const reasonOverride = g.final
+          ? (partialN + ' partial' + (partialN === 1 ? '' : 's') +
+            ' + ' + fmtExitStyleHtml(g.final.reason))
+          : fmtExitStyleHtml(p.reason);
+        const parentRow = renderClosedTradeRow(p, {
+          rowClass: 'trade-group-parent',
+          toggleHtml,
+          summaryHtml: fmtClosedGroupSummary(g),
+          reasonOverride,
+          exitLabel:
+            '<span class="trade-exit-label is-final">' +
+            exitStyleIconHtml(classifyExitStyle((g.final && g.final.reason) || p.reason).key) +
+            'Full trade</span><br/>',
+          pnlHtml:
+            '<strong style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+            (pnlSol >= 0 ? '+' : '') + fmtSolShort(pnlSol) + ' SOL</strong>' +
+            '<div class="mint">(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)</div>',
+          closedHtml:
+            (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
+            (holdMs != null
+              ? '<div class="mint" title="Total hold from entry to final exit">held ' + fmtHold(holdMs) + '</div>'
+              : ''),
+        });
+        const childList = g.children.slice();
+        if (g.final) childList.push(g.final);
+        const childRows = childList.map((c, idx) => {
+          const isFinal = g.final && c === g.final;
+          const partialIdx = isFinal ? 0 : idx;
+          const isLast = idx === childList.length - 1;
+          const cOpen = Number(c.openedAt || openedAt || 0);
+          const cClose = Number(c.closedAt || 0);
+          const cHold = cOpen > 0 && cClose > cOpen ? cClose - cOpen : null;
+          return renderClosedTradeRow(c, {
+            rowClass: 'trade-group-child' + (isLast ? ' trade-group-child-last' : ''),
+            groupAttr: ' data-group="' + g.gid + '"',
+            hidden: true,
+            exitLabel: labelClosedExit(c, partialIdx, g.initialCost) + '<br/>',
+            reasonOverride: isFinal
+              ? fmtExitStyleHtml(c.reason)
+              : (exitStyleIconHtml('partial') +
+                escHtml(String(c.reason || '').replace(/^partial:\\s*/i, '') || '—')),
+            closedHtml:
+              (c.closedAt ? fmtTimeAgoCell(c.closedAt) : '—') +
+              (cHold != null
+                ? '<div class="mint" title="Time from entry to this exit">held ' + fmtHold(cHold) + '</div>'
+                : ''),
+          });
+        }).join('');
+        return parentRow + childRows;
+      }).join('');
+    }
+
+    function paintClosedTradesTables() {
+      const html = renderClosedTradesHtml(window._closedTradeGroups || []);
+      document.querySelectorAll('#closed-table tbody, #trades-closed-table tbody').forEach((ctbody) => {
+        ctbody.innerHTML = html;
+      });
+      syncClosedTradesFilterButtons(window._closedTradesFilter || 'all');
+    }
+
+    function setClosedTradesFilter(filter) {
+      const next =
+        filter === 'profit' || filter === 'loss' || filter === 'all' ? filter : 'all';
+      window._closedTradesFilter = next;
+      paintClosedTradesTables();
+    }
+    window.setClosedTradesFilter = setClosedTradesFilter;
 
     /**
      * Copied wallet + converging wallets.
@@ -6644,6 +7551,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const positionsHtml = posOpenN === 0
         ? '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>'
         : positions.open.map(p => {
+          const prog = openPositionProgress(p);
           const pnlCell = fmtOpenPnlCell(p);
           let trailCell;
           if (p.trailingActive) {
@@ -6661,7 +7569,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '<span class="mint">off until +' + trailArmAt + '%</span>' +
               '<div class="mint">then ' + (p.trailingStopPct ?? '—') + '% from peak</div>';
           }
-          const mode = p.tradeMode === 'live' ? ' <span class="mint">[live]</span>' : '';
           const ar = p.antiRug;
           const be = ar?.birdeye;
           const riskBit = ar
@@ -6709,9 +7616,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const walletsCell = fmtWalletConvergence(p);
           const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
+          const tokenCell = fmtOpenTokenCell(p, riskBit);
+          const rowClass = [
+            prog.hasPartial ? 'pos-row-partial' : '',
+            p.trailingActive ? 'pos-row-trail' : '',
+          ].filter(Boolean).join(' ');
           return \`
-          <tr>
-            <td>\${fmtToken(p.symbol, p.name, p.mint)}\${mode}\${riskBit}</td>
+          <tr class="\${rowClass}">
+            <td>\${tokenCell}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtMintCa(p.mint)}</td>
             <td class="mint" title="Market cap at your buy">\${buyMc}</td>
@@ -6733,64 +7645,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       ensurePosHoldTicker();
       tickOpenPositionHolds();
 
-      const closedGroups = buildClosedTradeGroups(
+      window._closedTradeGroups = buildClosedTradeGroups(
         positions.closed || [],
         positions.open || []
-      ).slice(0, 25);
-      const closedHtml = closedGroups.length === 0
-        ? '<tr><td colspan="9" style="color:var(--muted)">No closed trades yet</td></tr>'
-        : closedGroups.map((g) => {
-            const p = g.parent;
-            const hasKids = g.children && g.children.length > 0;
-            const toggleHtml = hasKids
-              ? '<button type="button" class="trade-group-toggle" data-group="' +
-                g.gid +
-                '" aria-expanded="false" onclick="toggleClosedTradeGroup(this)" title="Show partial exits">▶</button>'
-              : '';
-            const metaHtml = hasKids
-              ? '<div class="trade-group-meta">' +
-                (g.children.length + (g.final ? 1 : 0)) +
-                ' exits · expand for partials</div>'
-              : '';
-            const reasonOverride = hasKids
-              ? (g.final
-                  ? (g.children.length + ' partial' + (g.children.length === 1 ? '' : 's') +
-                    ' + ' + (g.final.reason || 'final'))
-                  : (p.reason || '—'))
-              : undefined;
-            const parentRow = renderClosedTradeRow(p, {
-              rowClass: hasKids ? 'trade-group-parent' : '',
-              toggleHtml,
-              metaHtml,
-              reasonOverride,
-              exitLabel: hasKids
-                ? '<span class="trade-exit-label is-final">Full trade</span><br/>'
-                : '',
-            });
-            if (!hasKids) return parentRow;
-            const childRows = g.children.map((c, idx) =>
-              renderClosedTradeRow(c, {
-                rowClass: 'trade-group-child',
-                groupAttr: ' data-group="' + g.gid + '"',
-                hidden: true,
-                exitLabel: labelClosedExit(c, idx, g.initialCost) + '<br/>',
-                reasonOverride: String(c.reason || '').replace(/^partial:\s*/i, '') || '—',
-              })
-            ).join('');
-            const finalChild = g.final
-              ? renderClosedTradeRow(g.final, {
-                  rowClass: 'trade-group-child',
-                  groupAttr: ' data-group="' + g.gid + '"',
-                  hidden: true,
-                  exitLabel: labelClosedExit(g.final, 0, g.initialCost) + '<br/>',
-                  reasonOverride: g.final.reason || '—',
-                })
-              : '';
-            return parentRow + childRows + finalChild;
-          }).join('');
-      document.querySelectorAll('#closed-table tbody, #trades-closed-table tbody').forEach((ctbody) => {
-        ctbody.innerHTML = closedHtml;
-      });
+      ).slice(0, 40);
+      paintClosedTradesTables();
 
       const rb = positions.rebuy || {};
       const rbStatus = rb.status || status.monitor?.rebuy || {};
@@ -8061,6 +8920,266 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    /* ---------- Nansen.ai Smart Money ---------- */
+    window._nansenWallets = [];
+    const NANSEN_PRESET_META = {
+      best_overall: { labels: ['Smart Trader', '30D Smart Trader', '90D Smart Trader'], minUsd: 500, desc: 'Smart Trader + 30D/90D, min $500 — best balance for profitable labeled wallets' },
+      high_win_recent: { labels: ['30D Smart Trader', '90D Smart Trader'], minUsd: 1000, desc: '30D + 90D Smart Traders, min $1k — shorter-window top performers' },
+      proven_long_term: { labels: ['Smart Trader', '90D Smart Trader', '180D Smart Trader'], minUsd: 500, desc: 'All-time + 90D/180D — historically profitable across cycles' },
+      funds: { labels: ['Fund'], minUsd: 5000, desc: 'Institutional Fund wallets, min $5k trades' },
+      active_traders: { labels: ['Smart Trader', '30D Smart Trader'], minUsd: 100, desc: 'Most active 24h Smart Traders (lower min size)' },
+      custom: { labels: null, minUsd: null, desc: 'Use the label checkboxes below' },
+    };
+
+    function updateNansenStatusUi(nansen) {
+      const keyEl = document.getElementById('nansen-key-status');
+      if (!keyEl || !nansen) return;
+      let credits = '';
+      if (nansen.lastCreditsRemaining != null) credits = ' · credits left: ' + nansen.lastCreditsRemaining;
+      else if (nansen.lastCreditsUsed != null) credits = ' · last used: ' + nansen.lastCreditsUsed;
+      keyEl.textContent = nansen.hasApiKey
+        ? ('API key ✓' + (nansen.cachedCount ? ' · cached ' + nansen.cachedCount : '') + credits)
+        : 'No NANSEN_API_KEY';
+      if (nansen.lastError) keyEl.textContent += ' · err: ' + nansen.lastError;
+    }
+
+    function onNansenPresetChange() {
+      const id = document.getElementById('nansen-preset').value;
+      const meta = NANSEN_PRESET_META[id] || NANSEN_PRESET_META.custom;
+      const desc = document.getElementById('nansen-preset-desc');
+      if (desc) desc.textContent = meta.desc;
+      if (meta.minUsd != null) {
+        const minEl = document.getElementById('nansen-min-usd');
+        if (minEl) minEl.value = String(meta.minUsd);
+      }
+      if (meta.labels) {
+        document.querySelectorAll('.nansen-label').forEach(function (cb) {
+          cb.checked = meta.labels.indexOf(cb.value) >= 0;
+        });
+      }
+    }
+
+    function getNansenSelectedLabels() {
+      return Array.from(document.querySelectorAll('.nansen-label:checked')).map(function (cb) {
+        return cb.value;
+      });
+    }
+
+    function getNansenCheckedAddresses() {
+      return Array.from(document.querySelectorAll('.nansen-row-check:checked')).map(function (cb) {
+        return cb.value;
+      });
+    }
+
+    function toggleNansenSelectAll(on) {
+      document.querySelectorAll('.nansen-row-check').forEach(function (cb) {
+        cb.checked = !!on;
+      });
+    }
+
+    function fmtUsdCompact(n) {
+      if (n == null || !Number.isFinite(n)) return '—';
+      if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+      if (Math.abs(n) >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'k';
+      return '$' + Math.round(n);
+    }
+
+    function renderNansenTable(wallets) {
+      window._nansenWallets = wallets || [];
+      const tbody = document.querySelector('#nansen-wallets-table tbody');
+      if (!tbody) return;
+      if (!wallets || !wallets.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">No wallets — Discover or import CSV/JSON</td></tr>';
+        return;
+      }
+      tbody.innerHTML = wallets.map(function (w) {
+        const addr = w.address || '';
+        const short = addr.length > 12 ? addr.slice(0, 4) + '…' + addr.slice(-4) : addr;
+        const label = (w.label || (w.labels && w.labels[0]) || 'Smart Money').replace(/</g, '&lt;');
+        const activity =
+          (w.tradeCount24h || 0) + ' tx · ' + fmtUsdCompact(w.volumeUsd24h) +
+          (w.lastTradeAt ? ' · ' + fmtAgo(w.lastTradeAt) : '');
+        const wr = w.winRate != null ? (Number(w.winRate).toFixed(1) + '%') : '—';
+        const pnl = w.realizedPnlUsd != null ? fmtUsdCompact(w.realizedPnlUsd) : '—';
+        const tokens = (w.recentTokens || []).slice(0, 3).join(', ') || '—';
+        const tracked = w.alreadyTracked
+          ? '<span class="mint text-xs">tracked</span>'
+          : '<button class="btn btn-secondary" onclick="importNansenOne(\\'' + addr + '\\')">Add</button>';
+        return '<tr>' +
+          '<td><input type="checkbox" class="nansen-row-check" value="' + addr + '"' +
+            (w.alreadyTracked ? '' : ' checked') + ' /></td>' +
+          '<td class="font-mono text-xs" title="' + addr + '">' + short + '</td>' +
+          '<td>' + label + '</td>' +
+          '<td class="text-xs">' + activity + '</td>' +
+          '<td>' + wr + '</td>' +
+          '<td>' + pnl + '</td>' +
+          '<td class="text-xs">' + tokens.replace(/</g, '&lt;') + '</td>' +
+          '<td>' + tracked + '</td>' +
+          '</tr>';
+      }).join('');
+      const selAll = document.getElementById('nansen-select-all');
+      if (selAll) selAll.checked = false;
+    }
+
+    async function discoverNansen(force) {
+      const status = document.getElementById('nansen-status');
+      const presetId = document.getElementById('nansen-preset').value;
+      const labels = getNansenSelectedLabels();
+      if (!labels.length) {
+        alert('Select at least one Smart Money label');
+        return;
+      }
+      if (force && !confirm('Force refresh calls Nansen API (~5 credits). Continue?')) return;
+      status.textContent = force ? 'Fetching from Nansen (~5 credits)…' : 'Loading (cache if fresh)…';
+      try {
+        const data = await fetchJSON('/api/nansen/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            presetId: presetId === 'custom' ? undefined : presetId,
+            labels: labels,
+            minTradeUsd: Number(document.getElementById('nansen-min-usd').value) || 0,
+            limit: Number(document.getElementById('nansen-limit').value) || 50,
+            force: !!force,
+          }),
+          timeoutMs: 45000,
+        });
+        renderNansenTable(data.wallets || []);
+        if (data.nansen) updateNansenStatusUi(data.nansen);
+        const parts = [];
+        if (data.message) parts.push(data.message);
+        if (data.cached) parts.push('cached');
+        if (data.creditsUsed != null) parts.push('credits used: ' + data.creditsUsed);
+        if (data.creditsRemaining != null) parts.push('remaining: ' + data.creditsRemaining);
+        if (data.error && !data.ok) parts.push('⚠ ' + data.error);
+        status.textContent = parts.join(' · ') || (data.ok ? 'OK' : 'Failed');
+      } catch (err) {
+        status.textContent = 'Failed: ' + (err.message || String(err));
+      }
+    }
+
+    async function loadNansenCached() {
+      const status = document.getElementById('nansen-status');
+      status.textContent = 'Loading cache…';
+      try {
+        const data = await fetchJSON('/api/nansen/status');
+        if (data.nansen) updateNansenStatusUi(data.nansen);
+        renderNansenTable(data.wallets || []);
+        status.textContent = (data.wallets && data.wallets.length)
+          ? ('Cached ' + data.wallets.length + ' wallets')
+          : 'No cache yet — Discover or import a file';
+      } catch (err) {
+        status.textContent = err.message || String(err);
+      }
+    }
+
+    async function enrichNansenSelected() {
+      const addrs = getNansenCheckedAddresses();
+      if (!addrs.length) {
+        alert('Check at least one wallet to enrich');
+        return;
+      }
+      if (addrs.length > 10) {
+        alert('Max 10 wallets per enrich (protects your free credits)');
+        return;
+      }
+      if (!confirm('Enrich ' + addrs.length + ' wallet(s) with PnL/win rate? (~' + addrs.length + ' credits)')) return;
+      const status = document.getElementById('nansen-status');
+      status.textContent = 'Enriching ' + addrs.length + ' (~' + addrs.length + ' credits)…';
+      try {
+        const data = await fetchJSON('/api/nansen/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addrs, days: 30 }),
+          timeoutMs: 90000,
+        });
+        renderNansenTable(data.wallets || []);
+        if (data.nansen) updateNansenStatusUi(data.nansen);
+        status.textContent = data.message || ('Enriched ' + (data.enriched || 0));
+      } catch (err) {
+        status.textContent = 'Enrich failed: ' + (err.message || String(err));
+      }
+    }
+
+    async function importNansenOne(address) {
+      await importNansenAddresses([address]);
+    }
+
+    async function importNansenSelected() {
+      const addrs = getNansenCheckedAddresses();
+      if (!addrs.length) {
+        alert('Check wallets to import');
+        return;
+      }
+      await importNansenAddresses(addrs);
+    }
+
+    async function importNansenAllNew() {
+      const addrs = (window._nansenWallets || [])
+        .filter(function (w) { return w && w.address && !w.alreadyTracked; })
+        .map(function (w) { return w.address; });
+      if (!addrs.length) {
+        alert('No new wallets to import');
+        return;
+      }
+      if (!confirm('Import ' + addrs.length + ' new Nansen wallet(s) to tracked list?')) return;
+      await importNansenAddresses(addrs);
+    }
+
+    async function importNansenAddresses(addresses) {
+      const status = document.getElementById('nansen-status');
+      status.textContent = 'Importing ' + addresses.length + '…';
+      try {
+        const data = await fetchJSON('/api/nansen/import-tracked', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addresses, onlyNew: true }),
+        });
+        status.textContent =
+          'Added ' + (data.added || []).length +
+          ' · updated ' + (data.updated || []).length +
+          ' · skipped ' + (data.skipped || []).length;
+        await loadNansenCached();
+        refresh();
+      } catch (err) {
+        status.textContent = err.message || String(err);
+      }
+    }
+
+    function exportNansen(format) {
+      window.open('/api/nansen/export?format=' + encodeURIComponent(format || 'json'), '_blank');
+      const status = document.getElementById('nansen-status');
+      if (status) status.textContent = 'Exporting ' + (format || 'json') + '…';
+    }
+
+    async function importNansenFile() {
+      const input = document.getElementById('nansen-import-file');
+      const status = document.getElementById('nansen-status');
+      if (!input || !input.files || !input.files[0]) {
+        alert('Choose a CSV or JSON file first');
+        return;
+      }
+      const file = input.files[0];
+      const text = await file.text();
+      const isCsv = /\\.csv$/i.test(file.name) || (!text.trim().startsWith('{') && !text.trim().startsWith('['));
+      status.textContent = 'Importing file (0 credits)…';
+      try {
+        const data = await fetchJSON('/api/nansen/import-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            format: isCsv ? 'csv' : 'json',
+            content: text,
+          }),
+        });
+        renderNansenTable(data.wallets || []);
+        if (data.nansen) updateNansenStatusUi(data.nansen);
+        status.textContent = data.message || ('Loaded ' + ((data.wallets || []).length) + ' wallets');
+      } catch (err) {
+        status.textContent = 'Import failed: ' + (err.message || String(err));
+      }
+    }
+
     async function refreshActivity() {
       const status = document.getElementById('gmgn-status');
       status.textContent = 'Refreshing wallet activity (GMGN + on-chain)…';
@@ -9165,6 +10284,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     loadTradingWallets();
     refreshDiscoveryStatus();
+    try { onNansenPresetChange(); loadNansenCached(); } catch (_) {}
     loadStrategies();
     refresh();
     setInterval(refresh, 5000);

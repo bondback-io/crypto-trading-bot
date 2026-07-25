@@ -95,6 +95,20 @@ import {
   GmgnPeriod,
 } from './gmgn';
 import {
+  getNansenStatus,
+  discoverNansenSmartWallets,
+  enrichNansenWalletsWithPnl,
+  importNansenWalletList,
+  getCachedNansenWallets,
+  clearNansenCache,
+  nansenWalletsToCsv,
+  parseNansenCsv,
+  parseNansenJson,
+  importNansenToTracked,
+  NANSEN_FILTER_PRESETS,
+  type NansenSmartMoneyLabel,
+} from './nansen';
+import {
   getMigrationStatus,
   getRecentMigrations,
 } from './migrationListener';
@@ -2704,11 +2718,13 @@ export function createServer(): express.Application {
 
   app.get('/api/discover-wallets/status', (_req: Request, res: Response) => {
     const st = getSolanaTrackerStatus();
+    const nansen = getNansenStatus();
     res.json({
       ...getDiscoveryStatus(),
       gmgn: getGmgnStatus(),
       birdeye: getBirdeyeStatus(),
       solanaTracker: st,
+      nansen,
       sources: {
         gmgn: getGmgnStatus().ok ? 'ok' : getGmgnStatus().hasApiKey ? 'degraded' : 'missing_key',
         birdeye: getBirdeyeStatus().ok ? 'ok' : 'missing_key',
@@ -2718,6 +2734,7 @@ export function createServer(): express.Application {
         photon: st.hasApiKey ? 'ok' : 'missing_key',
         bullx: 'offline',
         curated: 'ok',
+        nansen: nansen.hasApiKey ? (nansen.lastError ? 'degraded' : 'ok') : 'missing_key',
       },
     });
   });
@@ -2805,6 +2822,181 @@ export function createServer(): express.Application {
       const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: message });
     }
+  });
+
+  // --- Nansen.ai Smart Money discovery ---
+
+  app.get('/api/nansen/status', (_req: Request, res: Response) => {
+    res.json({
+      nansen: getNansenStatus(),
+      presets: NANSEN_FILTER_PRESETS,
+      wallets: getCachedNansenWallets(),
+    });
+  });
+
+  app.post('/api/nansen/discover', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as {
+        presetId?: string;
+        labels?: NansenSmartMoneyLabel[];
+        minTradeUsd?: number;
+        limit?: number;
+        maxPages?: number;
+        force?: boolean;
+      };
+      const result = await discoverNansenSmartWallets({
+        presetId: body.presetId,
+        labels: body.labels,
+        minTradeUsd: body.minTradeUsd,
+        limit: body.limit,
+        maxPages: body.maxPages,
+        force: Boolean(body.force),
+      });
+      const status = result.ok ? 200 : result.error?.includes('API key') ? 401 : 200;
+      res.status(status).json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({
+        ok: false,
+        error: message,
+        wallets: getCachedNansenWallets(),
+        nansen: getNansenStatus(),
+      });
+    }
+  });
+
+  app.post('/api/nansen/enrich', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as {
+        addresses?: string[];
+        days?: number;
+      };
+      const addresses = Array.isArray(body.addresses) ? body.addresses : [];
+      if (addresses.length === 0) {
+        res.status(400).json({
+          ok: false,
+          error: 'Select at least one wallet address to enrich (costs ~1 credit each)',
+          nansen: getNansenStatus(),
+        });
+        return;
+      }
+      if (addresses.length > 10) {
+        res.status(400).json({
+          ok: false,
+          error: 'Max 10 wallets per enrich call to protect credits',
+          nansen: getNansenStatus(),
+        });
+        return;
+      }
+      const result = await enrichNansenWalletsWithPnl(addresses, {
+        days: body.days,
+      });
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({
+        ok: false,
+        error: message,
+        nansen: getNansenStatus(),
+      });
+    }
+  });
+
+  app.post('/api/nansen/import-tracked', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as {
+        addresses?: string[];
+        onlyNew?: boolean;
+      };
+      const addresses = Array.isArray(body.addresses) ? body.addresses : [];
+      if (addresses.length === 0) {
+        res.status(400).json({ error: 'No addresses provided' });
+        return;
+      }
+      const result = importNansenToTracked(addresses, {
+        onlyNew: body.onlyNew !== false,
+      });
+      const monitoring = syncWalletsToMonitoring(
+        [...result.added, ...result.updated],
+        'nansen-import'
+      );
+      console.log(
+        `[nansen] Imported ${result.added.length} wallet(s)` +
+          ` · now watching ${monitoring.watching}/${monitoring.tracked}`
+      );
+      res.json({
+        ...result,
+        monitoring,
+        wallets: getWalletsWithActivity(),
+        nansen: getNansenStatus(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.get('/api/nansen/export', (req: Request, res: Response) => {
+    const format = String(req.query.format ?? 'json').toLowerCase();
+    const wallets = getCachedNansenWallets();
+    if (format === 'csv') {
+      const csv = nansenWalletsToCsv(wallets);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="nansen-smart-wallets.csv"'
+      );
+      res.send(csv);
+      return;
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="nansen-smart-wallets.json"'
+    );
+    res.json({
+      exportedAt: new Date().toISOString(),
+      count: wallets.length,
+      wallets,
+    });
+  });
+
+  app.post('/api/nansen/import-file', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as {
+        format?: string;
+        content?: string;
+        wallets?: unknown[];
+      };
+      let parsed: ReturnType<typeof parseNansenCsv> = [];
+      if (Array.isArray(body.wallets) && body.wallets.length) {
+        parsed = parseNansenJson(JSON.stringify({ wallets: body.wallets }));
+      } else if (typeof body.content === 'string' && body.content.trim()) {
+        const fmt = String(body.format ?? 'auto').toLowerCase();
+        const text = body.content.trim();
+        if (fmt === 'csv' || (fmt === 'auto' && !text.startsWith('{') && !text.startsWith('['))) {
+          parsed = parseNansenCsv(text);
+        } else {
+          parsed = parseNansenJson(text);
+        }
+      } else {
+        res.status(400).json({
+          ok: false,
+          error: 'Provide content (CSV/JSON string) or wallets array',
+        });
+        return;
+      }
+      const result = importNansenWalletList(parsed);
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ ok: false, error: message, nansen: getNansenStatus() });
+    }
+  });
+
+  app.post('/api/nansen/clear-cache', (_req: Request, res: Response) => {
+    clearNansenCache();
+    res.json({ ok: true, nansen: getNansenStatus() });
   });
 
   /** Primary GMGN top-wallets endpoint — candidates with Add support */
