@@ -1101,8 +1101,8 @@ export const WIN_RATE_55_60_DEFAULTS = {
 
 /** Best overall risk/reward balance (Medium-like quality gates). */
 export const BALANCED_THRESHOLDS: StrategyPresetThresholds = {
-  minWalletQualityScore: 55,
-  minConvictionScore: 45,
+  minWalletQualityScore: 60,
+  minConvictionScore: 48,
   convergenceRequired: 2,
   clusterMinWallets: 2,
   minWalletsForTrade: 2,
@@ -1502,7 +1502,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   medium: {
     summary:
-      'Balanced modules — core safety + bonding health; scalp engines off (Trade Profiles own style)',
+      'Balanced modules — core safety + bonding health + Elite Convergence; Volume/Liquidity ON; post-migration scalp off',
     thresholds: BALANCED_THRESHOLDS,
     maxConcurrentPositions: 10,
     profitStrategy: {
@@ -1532,7 +1532,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
     },
     toggles: buildRecipeToggles({
       rebuy_on_dip: true,
-      elite_convergence: false,
+      elite_convergence: true,
       migration_sniper: false,
       ta_market_scanner: true,
       bonding_curve_health: true,
@@ -1680,7 +1680,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       quick_scalper: false,
       micro_scalper: true,
       momentum_burst: true,
-      post_migration_scalp: true,
+      post_migration_scalp: false,
       reversal_scalp: true,
     }),
   },

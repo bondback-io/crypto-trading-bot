@@ -696,7 +696,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Copy / Smart Money',
     rulesSummary: [
       'TP 30–50% · trail arms after modest profit (~10%)',
-      'SL 9–14%',
+      'SL 14–20% (wider for late-copy / short-hold resilience)',
       'Need 3+ wallets or strong quality + conviction',
       'Skip late copies after wallet peak dump',
       'Clean copy style — no scalp timer / no forced 16m exit',
@@ -713,15 +713,15 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 3,
       requireCluster: true,
       preferSmartMoney: true,
-      minWalletQuality: 58,
+      minWalletQuality: 60,
       minConviction: 52,
     },
     exitRules: {
       forceScalp: false,
       takeProfitPctMin: 30,
       takeProfitPctMax: 50,
-      stopLossPctMin: 9,
-      stopLossPctMax: 14,
+      stopLossPctMin: 14,
+      stopLossPctMax: 20,
       trailingStopPct: 11,
       /** Arm trail after modest green — don't wait for full TP or EOW */
       trailingActivationProfit: 10,

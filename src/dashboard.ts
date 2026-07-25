@@ -4118,7 +4118,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </label>
           <label class="ctl ctl-sm">
             <span>Min rank score <span class="tip" tabindex="0" data-tip="Minimum composite rank score (0–100) to queue a candidate. Higher = fewer, stronger entries from TA + volume + playbook scoring."></span></span>
-            <input type="number" id="ms-min-rank" value="42" min="0" max="100" step="1" />
+            <input type="number" id="ms-min-rank" value="55" min="0" max="100" step="1" />
           </label>
           <label class="ctl ctl-sm">
             <span>Min pattern conf <span class="tip" tabindex="0" data-tip="Minimum chart-pattern confidence when TA setup is required. Patterns from real/synthetic candles (Birdeye/GeckoTerminal preferred)."></span></span>
@@ -5052,7 +5052,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         wallet_quality_scoring:
           c('enableWalletQualityGate', 'Quality gate') +
           c('enableWalletQualityAutoPrune', 'Auto-prune low quality') +
-          n('minWalletQualityScore', 'Min quality', 55, 0, 100, 1) +
+          n('minWalletQualityScore', 'Min quality', 60, 0, 100, 1) +
           n('walletQualityInactiveDays', 'Inactive days', 5, 1, 90, 1),
         time_based_entry:
           c('enableEntryTimingGate', 'Entry timing gate') +
@@ -12946,7 +12946,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           lookbackHours: Number(document.getElementById('ms-lookback-h')?.value) || 6,
           maxCandidatesPerPoll: Number(document.getElementById('ms-max-cands')?.value) || 15,
           cooldownMs: Number(document.getElementById('ms-cooldown-ms')?.value) || 2700000,
-          minRankScore: Number(document.getElementById('ms-min-rank')?.value) || 42,
+          minRankScore: Number(document.getElementById('ms-min-rank')?.value) || 55,
           minPatternConfidence: Number(document.getElementById('ms-min-pat-conf')?.value) || 55,
           syntheticPenalty: Number(document.getElementById('ms-synth-pen')?.value) || 8,
           minConfluenceScore: Number(document.getElementById('ms-min-confl')?.value) || 40,

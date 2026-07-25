@@ -1271,7 +1271,7 @@ export function createServer(): express.Application {
         lookbackHours: 6,
         maxCandidatesPerPoll: 15,
         cooldownMs: 45 * 60_000,
-        minRankScore: 42,
+        minRankScore: 55,
         requireTaSetup: true,
         minPatternConfidence: 55,
         preferRealCandles: true,
