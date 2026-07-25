@@ -4076,60 +4076,133 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card">
         <div class="section-title">Scanner Settings <span class="tip" tabindex="0" data-tip="Persisted in config.marketScanner. Enabling also toggles the ta_market_scanner strategy so the poll loop actually runs."></span></div>
+        <p class="mint text-xs mb-3" style="color:#94a3b8;line-height:1.45">
+          Universe: DexScreener + GMGN (+ Birdeye when keyed) recent launches, optional Jupiter Tokens API trending (Pump.fun), then TA enrich via Birdeye/GeckoTerminal OHLCV. Regime uses SOL Dex pairs.
+        </p>
         <div class="toggle-row">
-          <span title="Soft preference + strategy gate (ta_market_scanner)">Enable Market Scanner</span>
+          <span>Enable Market Scanner <span class="tip" tabindex="0" data-tip="Turns scanner-only entries on. Soft preference + strategy gate (ta_market_scanner). Without this, the poll loop will not queue buys. Data: DexScreener / GMGN / Birdeye / Jupiter Tokens API."></span></span>
           <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span title="Scanner-only entries must show Fib/support/pattern/indicator setup">Require TA setup</span>
+          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue. Improves entry quality; skips raw momentum without structure. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span title="Prefer Birdeye/GeckoTerminal OHLCV over synthetic candle paths">Prefer real candles</span>
+          <span>Prefer real candles <span class="tip" tabindex="0" data-tip="Prefer Birdeye/GeckoTerminal OHLCV over synthetic candle paths for ranking and TA. Synthetic paths get a rank penalty. Sources: Birdeye + GeckoTerminal."></span></span>
           <label class="switch"><input type="checkbox" id="ms-prefer-real" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span title="Skip scanner-only entries when SOL regime is risk_off (hybrid still allowed)">Pause scanner-only in risk-off</span>
+          <span>Pause scanner-only in risk-off <span class="tip" tabindex="0" data-tip="Skip scanner-only entries when SOL regime is risk_off (hybrid wallet+scanner still allowed). Regime from SOL Dex pairs (DexScreener)."></span></span>
           <label class="switch"><input type="checkbox" id="ms-pause-risk" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span title="Momentum playbooks need token outperformance vs SOL">Require RS for momentum</span>
+          <span>Require RS for momentum <span class="tip" tabindex="0" data-tip="Momentum playbooks need token outperformance vs SOL (relative strength). Reduces weak beta-chasing entries. RS vs SOL Dex pairs."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-rs" checked /><span class="slider"></span></label>
         </div>
         <div class="filters-row mt-2">
           <label class="ctl ctl-md">
-            <span>Poll interval (ms) <span class="tip" tabindex="0" data-tip="How often the scanner polls for new candidates. Min 15000."></span></span>
+            <span>Poll interval (ms) <span class="tip" tabindex="0" data-tip="How often the scanner polls for new candidates (min 15000). Lower = fresher entries, more API load on DexScreener / GMGN / Jupiter."></span></span>
             <input type="number" id="ms-poll-ms" value="45000" min="15000" max="600000" step="1000" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Lookback (h) <span class="tip" tabindex="0" data-tip="Hours of recent launches to consider each poll."></span></span>
+            <span>Lookback (h) <span class="tip" tabindex="0" data-tip="Hours of recent launches to consider each poll from DexScreener / GMGN / Birdeye. Jupiter trending is separate (category windows)."></span></span>
             <input type="number" id="ms-lookback-h" value="6" min="0.5" max="48" step="0.5" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Max / poll <span class="tip" tabindex="0" data-tip="Max candidates handed to the buy pipeline per poll."></span></span>
+            <span>Max / poll <span class="tip" tabindex="0" data-tip="Max candidates handed to the buy pipeline per poll after ranking. Caps how many scanner entries can fire each cycle."></span></span>
             <input type="number" id="ms-max-cands" value="15" min="1" max="50" step="1" />
           </label>
           <label class="ctl ctl-md">
-            <span>Cooldown (ms) <span class="tip" tabindex="0" data-tip="Min time before re-considering the same mint after a skip/take."></span></span>
+            <span>Cooldown (ms) <span class="tip" tabindex="0" data-tip="Min time before re-considering the same mint after a skip/take. Prevents re-entry spam on the same CA."></span></span>
             <input type="number" id="ms-cooldown-ms" value="2700000" min="60000" max="86400000" step="60000" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Min rank score <span class="tip" tabindex="0" data-tip="Minimum composite rank score (0–100) to queue a candidate."></span></span>
+            <span>Min rank score <span class="tip" tabindex="0" data-tip="Minimum composite rank score (0–100) to queue a candidate. Higher = fewer, stronger entries from TA + volume + playbook scoring."></span></span>
             <input type="number" id="ms-min-rank" value="42" min="0" max="100" step="1" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Min pattern conf <span class="tip" tabindex="0" data-tip="Minimum chart-pattern confidence when TA setup is required."></span></span>
+            <span>Min pattern conf <span class="tip" tabindex="0" data-tip="Minimum chart-pattern confidence when TA setup is required. Patterns from real/synthetic candles (Birdeye/GeckoTerminal preferred)."></span></span>
             <input type="number" id="ms-min-pat-conf" value="55" min="0" max="100" step="1" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Synthetic penalty <span class="tip" tabindex="0" data-tip="Rank points deducted when candles are synthetic (not real OHLCV)."></span></span>
+            <span>Synthetic penalty <span class="tip" tabindex="0" data-tip="Rank points deducted when candles are synthetic (not real OHLCV from Birdeye/GeckoTerminal). Encourages Prefer real candles."></span></span>
             <input type="number" id="ms-synth-pen" value="8" min="0" max="40" step="1" />
           </label>
           <label class="ctl ctl-sm">
-            <span>Min confluence <span class="tip" tabindex="0" data-tip="Minimum playbook confluence (0–100) for scanner quality gate."></span></span>
+            <span>Min confluence <span class="tip" tabindex="0" data-tip="Minimum playbook confluence (0–100) for scanner quality gate. Higher = stricter TA agreement before entry."></span></span>
             <input type="number" id="ms-min-confl" value="55" min="0" max="100" step="1" />
           </label>
         </div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b">
+          <div class="section-title !mb-2 text-sm">Accuracy <span class="tip" tabindex="0" data-tip="Extra quality floors for scanner-only entries: MTF alignment, local liquidity, Jupiter organic score, and organic volume preference."></span></div>
+          <div class="toggle-row">
+            <span>Require MTF aligned <span class="tip" tabindex="0" data-tip="When on, scanner-only candidates must have multi-timeframe alignment (mtfAligned). Stricter entries; fewer false breakouts. From candle TA (Birdeye/GeckoTerminal)."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-require-mtf" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Prefer organic volume <span class="tip" tabindex="0" data-tip="When Jupiter organic buy/sell volumes are present, use them for volume floors instead of raw volume (reduces wash-trade noise). Source: Jupiter Tokens API."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-prefer-organic" checked /><span class="slider"></span></label>
+          </div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md">
+              <span>Min liquidity ($) <span class="tip" tabindex="0" data-tip="Scanner-local liquidity floor in USD. 0 = use global filters only. Applied with DexScreener / GMGN / Jupiter liquidity fields."></span></span>
+              <input type="number" id="ms-min-liq" value="8000" min="0" max="5000000" step="500" />
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Min organic score <span class="tip" tabindex="0" data-tip="Jupiter organicScore floor (0–100). 0 = disabled. Skips Jupiter tokens below this when score is known. Source: Jupiter Tokens API."></span></span>
+              <input type="number" id="ms-min-organic" value="0" min="0" max="100" step="1" />
+            </label>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b">
+          <div class="section-title !mb-2 text-sm">Jupiter trending (Pump.fun) <span class="tip" tabindex="0" data-tip="Merges Jupiter Tokens API category lists into the scanner universe. Needs JUPITER_API_KEY from https://developers.jup.ag/portal. Filter to pump.fun mints and set per-window volume floors."></span></div>
+          <div class="mint text-xs mb-2" id="ms-jupiter-status" style="color:#94a3b8">Jupiter: —</div>
+          <div class="toggle-row">
+            <span>Enable Jupiter trending <span class="tip" tabindex="0" data-tip="After Dex/GMGN launches, merge Jupiter top lists (dedupe by mint). Source: Jupiter Tokens API v2 category endpoint."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-jup-enabled" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Pump.fun only <span class="tip" tabindex="0" data-tip="Keep tokens whose mint ends with pump, or tags/launchpad/name hint Pump.fun. Focuses entries on that launchpad."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-jup-pump" checked /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span>Merge intervals <span class="tip" tabindex="0" data-tip="Fetch 5m + 1h + 6h + 24h top lists and union by mint (fresher + broader universe). Off = 1h only. Source: Jupiter Tokens API."></span></span>
+            <label class="switch"><input type="checkbox" id="ms-jup-merge" checked /><span class="slider"></span></label>
+          </div>
+          <div class="filters-row mt-2">
+            <label class="ctl ctl-md">
+              <span>Category <span class="tip" tabindex="0" data-tip="Jupiter list type: toptraded (volume), toptrending (price move), toporganicscore (organic activity). Source: Jupiter Tokens API."></span></span>
+              <select id="ms-jup-category">
+                <option value="toptraded">toptraded</option>
+                <option value="toptrending">toptrending</option>
+                <option value="toporganicscore">toporganicscore</option>
+              </select>
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Limit <span class="tip" tabindex="0" data-tip="Tokens per Jupiter category/interval fetch (10–100). Higher = wider universe, more API usage."></span></span>
+              <input type="number" id="ms-jup-limit" value="50" min="10" max="100" step="1" />
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Min vol 5m ($) <span class="tip" tabindex="0" data-tip="Minimum 5m volume USD to pass hard floor (0 = off). Uses Jupiter organic volume when Prefer organic volume is on."></span></span>
+              <input type="number" id="ms-vol-m5" value="500" min="0" max="10000000" step="100" />
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Min vol 1h ($) <span class="tip" tabindex="0" data-tip="Minimum 1h volume USD to pass hard floor (0 = off). DexScreener h1 or Jupiter stats1h."></span></span>
+              <input type="number" id="ms-vol-h1" value="5000" min="0" max="50000000" step="500" />
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Min vol 6h ($) <span class="tip" tabindex="0" data-tip="Minimum 6h volume USD to pass hard floor (0 = off). Primarily Jupiter stats6h."></span></span>
+              <input type="number" id="ms-vol-h6" value="0" min="0" max="100000000" step="500" />
+            </label>
+            <label class="ctl ctl-sm">
+              <span>Min vol 24h ($) <span class="tip" tabindex="0" data-tip="Minimum 24h volume USD to pass hard floor (0 = off). DexScreener h24 / Jupiter stats24h."></span></span>
+              <input type="number" id="ms-vol-h24" value="15000" min="0" max="200000000" step="1000" />
+            </label>
+          </div>
+        </div>
+
         <div class="mt-3 flex flex-wrap gap-2 items-center">
           <button class="btn btn-primary" onclick="saveMarketScannerConfig()" title="Save scanner settings and restart the poll loop">Save Scanner Settings</button>
           <button class="btn btn-secondary" onclick="loadMarketScannerConfig()" title="Reload current values from the server">Reload</button>
@@ -12753,6 +12826,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (pauseRisk) pauseRisk.checked = cfg.pauseScannerOnlyInRiskOff !== false;
       const reqRs = document.getElementById('ms-require-rs');
       if (reqRs) reqRs.checked = cfg.requireRsForMomentum !== false;
+      const reqMtf = document.getElementById('ms-require-mtf');
+      if (reqMtf) reqMtf.checked = cfg.requireMtfAligned === true;
+      const prefOrg = document.getElementById('ms-prefer-organic');
+      if (prefOrg) prefOrg.checked = cfg.preferOrganicVolume !== false;
+      const jupEn = document.getElementById('ms-jup-enabled');
+      if (jupEn) jupEn.checked = cfg.jupiterTrendingEnabled !== false;
+      const jupPump = document.getElementById('ms-jup-pump');
+      if (jupPump) jupPump.checked = cfg.jupiterPumpFunOnly !== false;
+      const jupMerge = document.getElementById('ms-jup-merge');
+      if (jupMerge) jupMerge.checked = cfg.jupiterMergeIntervals !== false;
+      const jupCat = document.getElementById('ms-jup-category');
+      if (jupCat && cfg.jupiterCategory) {
+        jupCat.value = String(cfg.jupiterCategory);
+      }
       const setNum = (id, v) => {
         const el = document.getElementById(id);
         if (el && v != null && Number.isFinite(Number(v))) el.value = Number(v);
@@ -12765,6 +12852,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       setNum('ms-min-pat-conf', cfg.minPatternConfidence);
       setNum('ms-synth-pen', cfg.syntheticPenalty);
       setNum('ms-min-confl', cfg.minConfluenceScore);
+      setNum('ms-min-liq', cfg.minLiquidityUsd);
+      setNum('ms-min-organic', cfg.minOrganicScore);
+      setNum('ms-jup-limit', cfg.jupiterLimit);
+      setNum('ms-vol-m5', cfg.minVolumeM5Usd);
+      setNum('ms-vol-h1', cfg.minVolumeH1Usd);
+      setNum('ms-vol-h6', cfg.minVolumeH6Usd);
+      setNum('ms-vol-h24', cfg.minVolumeH24Usd);
+      const jupSt = document.getElementById('ms-jupiter-status');
+      if (jupSt) {
+        const j = status && status.jupiter ? status.jupiter : null;
+        if (!j) {
+          jupSt.textContent = 'Jupiter: —';
+        } else {
+          const key = j.hasApiKey ? 'key OK' : 'no JUPITER_API_KEY';
+          const cnt = j.lastCount != null ? ' · last ' + j.lastCount : '';
+          const err = j.lastError ? ' · ' + String(j.lastError).slice(0, 80) : '';
+          jupSt.textContent = 'Jupiter: ' + key + cnt + err;
+        }
+      }
       const statusEl = document.getElementById('scanner-status-tab');
       if (statusEl && status && status.regime) {
         const r = status.regime;
@@ -12814,6 +12920,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           requireRsForMomentum: document.getElementById('ms-require-rs')
             ? document.getElementById('ms-require-rs').checked
             : true,
+          requireMtfAligned: document.getElementById('ms-require-mtf')
+            ? document.getElementById('ms-require-mtf').checked
+            : false,
+          preferOrganicVolume: document.getElementById('ms-prefer-organic')
+            ? document.getElementById('ms-prefer-organic').checked
+            : true,
+          jupiterTrendingEnabled: document.getElementById('ms-jup-enabled')
+            ? document.getElementById('ms-jup-enabled').checked
+            : true,
+          jupiterPumpFunOnly: document.getElementById('ms-jup-pump')
+            ? document.getElementById('ms-jup-pump').checked
+            : true,
+          jupiterMergeIntervals: document.getElementById('ms-jup-merge')
+            ? document.getElementById('ms-jup-merge').checked
+            : true,
+          jupiterCategory: document.getElementById('ms-jup-category')?.value || 'toptraded',
           pollIntervalMs: Number(document.getElementById('ms-poll-ms')?.value) || 45000,
           lookbackHours: Number(document.getElementById('ms-lookback-h')?.value) || 6,
           maxCandidatesPerPoll: Number(document.getElementById('ms-max-cands')?.value) || 15,
@@ -12822,6 +12944,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           minPatternConfidence: Number(document.getElementById('ms-min-pat-conf')?.value) || 55,
           syntheticPenalty: Number(document.getElementById('ms-synth-pen')?.value) || 8,
           minConfluenceScore: Number(document.getElementById('ms-min-confl')?.value) || 55,
+          minLiquidityUsd: Number(document.getElementById('ms-min-liq')?.value) || 0,
+          minOrganicScore: Number(document.getElementById('ms-min-organic')?.value) || 0,
+          jupiterLimit: Number(document.getElementById('ms-jup-limit')?.value) || 50,
+          minVolumeM5Usd: Number(document.getElementById('ms-vol-m5')?.value) || 0,
+          minVolumeH1Usd: Number(document.getElementById('ms-vol-h1')?.value) || 0,
+          minVolumeH6Usd: Number(document.getElementById('ms-vol-h6')?.value) || 0,
+          minVolumeH24Usd: Number(document.getElementById('ms-vol-h24')?.value) || 0,
           playbookMode: 'auto',
         };
         const data = await fetchJSON('/api/config/market-scanner', {

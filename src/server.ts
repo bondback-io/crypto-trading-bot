@@ -1280,6 +1280,19 @@ export function createServer(): express.Application {
         playbookMode: 'auto',
         pauseScannerOnlyInRiskOff: true,
         requireRsForMomentum: true,
+        requireMtfAligned: false,
+        minLiquidityUsd: 8000,
+        minOrganicScore: 0,
+        preferOrganicVolume: true,
+        jupiterTrendingEnabled: true,
+        jupiterCategory: 'toptraded',
+        jupiterPumpFunOnly: true,
+        jupiterLimit: 50,
+        jupiterMergeIntervals: true,
+        minVolumeM5Usd: 500,
+        minVolumeH1Usd: 5000,
+        minVolumeH6Usd: 0,
+        minVolumeH24Usd: 15000,
       };
     }
     const ms = config.marketScanner;
@@ -1351,6 +1364,73 @@ export function createServer(): express.Application {
     }
     if (body.requireRsForMomentum !== undefined) {
       ms.requireRsForMomentum = Boolean(body.requireRsForMomentum);
+    }
+    if (body.requireMtfAligned !== undefined) {
+      ms.requireMtfAligned = Boolean(body.requireMtfAligned);
+    }
+    if (body.minLiquidityUsd !== undefined) {
+      const n = Number(body.minLiquidityUsd);
+      if (Number.isFinite(n)) {
+        ms.minLiquidityUsd = Math.max(0, Math.min(5_000_000, Math.round(n)));
+      }
+    }
+    if (body.minOrganicScore !== undefined) {
+      const n = Number(body.minOrganicScore);
+      if (Number.isFinite(n)) {
+        ms.minOrganicScore = Math.max(0, Math.min(100, Math.round(n)));
+      }
+    }
+    if (body.preferOrganicVolume !== undefined) {
+      ms.preferOrganicVolume = Boolean(body.preferOrganicVolume);
+    }
+    if (body.jupiterTrendingEnabled !== undefined) {
+      ms.jupiterTrendingEnabled = Boolean(body.jupiterTrendingEnabled);
+    }
+    if (body.jupiterCategory !== undefined) {
+      const cat = String(body.jupiterCategory);
+      if (
+        cat === 'toptraded' ||
+        cat === 'toptrending' ||
+        cat === 'toporganicscore'
+      ) {
+        ms.jupiterCategory = cat;
+      }
+    }
+    if (body.jupiterPumpFunOnly !== undefined) {
+      ms.jupiterPumpFunOnly = Boolean(body.jupiterPumpFunOnly);
+    }
+    if (body.jupiterLimit !== undefined) {
+      const n = Number(body.jupiterLimit);
+      if (Number.isFinite(n)) {
+        ms.jupiterLimit = Math.max(10, Math.min(100, Math.round(n)));
+      }
+    }
+    if (body.jupiterMergeIntervals !== undefined) {
+      ms.jupiterMergeIntervals = Boolean(body.jupiterMergeIntervals);
+    }
+    if (body.minVolumeM5Usd !== undefined) {
+      const n = Number(body.minVolumeM5Usd);
+      if (Number.isFinite(n)) {
+        ms.minVolumeM5Usd = Math.max(0, Math.min(10_000_000, Math.round(n)));
+      }
+    }
+    if (body.minVolumeH1Usd !== undefined) {
+      const n = Number(body.minVolumeH1Usd);
+      if (Number.isFinite(n)) {
+        ms.minVolumeH1Usd = Math.max(0, Math.min(50_000_000, Math.round(n)));
+      }
+    }
+    if (body.minVolumeH6Usd !== undefined) {
+      const n = Number(body.minVolumeH6Usd);
+      if (Number.isFinite(n)) {
+        ms.minVolumeH6Usd = Math.max(0, Math.min(100_000_000, Math.round(n)));
+      }
+    }
+    if (body.minVolumeH24Usd !== undefined) {
+      const n = Number(body.minVolumeH24Usd);
+      if (Number.isFinite(n)) {
+        ms.minVolumeH24Usd = Math.max(0, Math.min(200_000_000, Math.round(n)));
+      }
     }
 
     // Strategy toggle is the live gate — keep soft preference + toggle in sync

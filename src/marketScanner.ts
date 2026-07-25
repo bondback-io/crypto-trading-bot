@@ -10,6 +10,7 @@ import { config } from './config';
 import { logger, errorToMeta } from './logger';
 import {
   enrichLaunchWithRealCandles,
+  fetchSolUsdPrice,
   type LaunchEvent,
 } from './marketData';
 import { fetchRecentLaunches } from './marketData';
@@ -31,6 +32,10 @@ import {
   isMomentumPlaybookDisabled,
 } from './marketRegime';
 import { getScannerOutcomeSummary } from './scannerOutcomes';
+import {
+  fetchJupiterPumpTrending,
+  getJupiterTokensStatus,
+} from './jupiterTokens';
 
 export const MARKET_SCANNER_WALLET = 'market-scanner';
 export const MARKET_SCANNER_NAME = 'Market Scanner';
@@ -54,10 +59,13 @@ export interface ScannerCandidate {
   volumeUsd?: number;
   volumeH1Usd?: number;
   volumeM5Usd?: number;
+  volumeH6Usd?: number;
   priceChangeH1Pct?: number;
   priceChangePct?: number;
   holderCount?: number;
   isPumpFun?: boolean;
+  organicScore?: number;
+  jupiterCategory?: string;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -84,6 +92,7 @@ export interface ScannerStatus {
     rsHint?: string;
   };
   outcomes?: ReturnType<typeof getScannerOutcomeSummary>;
+  jupiter?: ReturnType<typeof getJupiterTokensStatus>;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -117,6 +126,19 @@ function scannerCfg() {
       playbookMode: 'auto' as const,
       pauseScannerOnlyInRiskOff: true,
       requireRsForMomentum: true,
+      requireMtfAligned: false,
+      minLiquidityUsd: 8000,
+      minOrganicScore: 0,
+      preferOrganicVolume: true,
+      jupiterTrendingEnabled: true,
+      jupiterCategory: 'toptraded' as const,
+      jupiterPumpFunOnly: true,
+      jupiterLimit: 50,
+      jupiterMergeIntervals: true,
+      minVolumeM5Usd: 500,
+      minVolumeH1Usd: 5000,
+      minVolumeH6Usd: 0,
+      minVolumeH24Usd: 15000,
     }
   );
 }
@@ -170,6 +192,7 @@ export function getScannerStatus(): ScannerStatus {
       rsHint: regime.rsHint,
     },
     outcomes: getScannerOutcomeSummary(),
+    jupiter: getJupiterTokensStatus(),
   };
 }
 
@@ -191,12 +214,59 @@ function pushFeed(row: ScannerCandidate): void {
 }
 
 function hardFloorsOk(event: LaunchEvent): boolean {
-  const minLiq = config.filters.minLiquidity ?? 0;
+  const cfg = scannerCfg();
+  const minLiqGlobal = config.filters.minLiquidity ?? 0;
+  const minLiqLocal =
+    cfg.minLiquidityUsd != null && cfg.minLiquidityUsd > 0
+      ? cfg.minLiquidityUsd
+      : 0;
+  const minLiq = Math.max(minLiqGlobal, minLiqLocal);
   const minMc = config.filters.minMarketCapUsd ?? 0;
   const liq = event.liquidityUsd ?? 0;
   const mc = event.marketCapUsd ?? 0;
   if (minLiq > 0 && liq > 0 && liq < minLiq) return false;
   if (minMc > 0 && mc > 0 && mc < minMc) return false;
+
+  const preferOrg = cfg.preferOrganicVolume !== false;
+  const volM5 =
+    preferOrg && event.volumeOrganicM5Usd != null && event.volumeOrganicM5Usd > 0
+      ? event.volumeOrganicM5Usd
+      : (event.volumeM5Usd ?? 0);
+  const volH1 =
+    preferOrg && event.volumeOrganicH1Usd != null && event.volumeOrganicH1Usd > 0
+      ? event.volumeOrganicH1Usd
+      : (event.volumeH1Usd ?? 0);
+  const volH6 =
+    preferOrg && event.volumeOrganicH6Usd != null && event.volumeOrganicH6Usd > 0
+      ? event.volumeOrganicH6Usd
+      : (event.volumeH6Usd ?? 0);
+  const volH24 =
+    preferOrg && event.volumeOrganicUsd != null && event.volumeOrganicUsd > 0
+      ? event.volumeOrganicUsd
+      : (event.volumeUsd ?? 0);
+
+  const floorM5 = cfg.minVolumeM5Usd ?? 0;
+  const floorH1 = cfg.minVolumeH1Usd ?? 0;
+  const floorH6 = cfg.minVolumeH6Usd ?? 0;
+  const floorH24 = cfg.minVolumeH24Usd ?? 0;
+  // Only enforce a window floor when we have a reading for that window
+  // (or a 24h proxy). Missing data does not hard-fail Dex-only launches.
+  if (floorM5 > 0 && volM5 > 0 && volM5 < floorM5) return false;
+  if (floorH1 > 0 && volH1 > 0 && volH1 < floorH1) return false;
+  if (floorH6 > 0 && volH6 > 0 && volH6 < floorH6) return false;
+  if (floorH24 > 0 && volH24 > 0 && volH24 < floorH24) return false;
+
+  // Jupiter-sourced tokens with known organicScore must clear the floor
+  const minOrg = cfg.minOrganicScore ?? 0;
+  if (
+    minOrg > 0 &&
+    event.organicScore != null &&
+    Number.isFinite(event.organicScore) &&
+    event.organicScore < minOrg
+  ) {
+    return false;
+  }
+
   return true;
 }
 
@@ -644,7 +714,41 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     maxResults: 80,
     allowSynthetic: false,
   });
-  return events;
+
+  const byMint = new Map<string, LaunchEvent>();
+  for (const e of events) {
+    if (e?.mint) byMint.set(e.mint, e);
+  }
+  const dexCount = byMint.size;
+
+  if (cfg.jupiterTrendingEnabled !== false) {
+    try {
+      const solUsd = await fetchSolUsdPrice();
+      const jup = await fetchJupiterPumpTrending({
+        category: cfg.jupiterCategory ?? 'toptraded',
+        limit: cfg.jupiterLimit ?? 50,
+        pumpFunOnly: cfg.jupiterPumpFunOnly !== false,
+        mergeIntervals: cfg.jupiterMergeIntervals !== false,
+        preferOrganicVolume: cfg.preferOrganicVolume !== false,
+        solUsd,
+      });
+      let added = 0;
+      for (const e of jup) {
+        if (!e?.mint) continue;
+        if (!byMint.has(e.mint)) {
+          byMint.set(e.mint, e);
+          added += 1;
+        }
+      }
+      console.log(
+        `[marketScanner] universe dex/gmgn=${dexCount} + jupiter=${jup.length} (new ${added}) → ${byMint.size}`
+      );
+    } catch (err) {
+      logger.warn('MarketScanner', 'Jupiter trending merge failed', errorToMeta(err));
+    }
+  }
+
+  return [...byMint.values()];
 }
 
 /**
@@ -698,6 +802,7 @@ export async function selectScannerCandidates(
     if (ranked.veto?.startsWith('bearish:')) continue;
     if (score < minRank) continue;
     if (cfg.requireTaSetup && !ranked.taSetup) continue;
+    if (cfg.requireMtfAligned === true && !ranked.mtfAligned) continue;
     if (
       (ranked.confluence == null || ranked.confluence < minConfluence) &&
       cfg.requireTaSetup !== false
@@ -723,10 +828,14 @@ export async function selectScannerCandidates(
       volumeUsd: event.volumeUsd,
       volumeH1Usd: event.volumeH1Usd,
       volumeM5Usd: event.volumeM5Usd,
+      volumeH6Usd: event.volumeH6Usd,
       priceChangeH1Pct: event.priceChangeH1Pct,
       priceChangePct: event.priceChangePct,
       holderCount: event.holderCount,
       isPumpFun: event.isPumpFun,
+      organicScore: event.organicScore,
+      jupiterCategory:
+        event.source === 'jupiter' ? cfg.jupiterCategory : undefined,
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,

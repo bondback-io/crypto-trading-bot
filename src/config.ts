@@ -2029,6 +2029,28 @@ export interface BotConfig {
     pauseScannerOnlyInRiskOff: boolean;
     /** Momentum playbooks need SOL relative-strength hint */
     requireRsForMomentum: boolean;
+    /** When true, require mtfAligned for scanner-only quality gate */
+    requireMtfAligned: boolean;
+    /** Scanner-local liquidity floor USD (0 = use global filters only) */
+    minLiquidityUsd: number;
+    /** Jupiter organicScore floor when available (0 = disabled) */
+    minOrganicScore: number;
+    /** Prefer buyOrganicVolume+sellOrganicVolume for vol gates when present */
+    preferOrganicVolume: boolean;
+    /** Merge Jupiter Tokens API trending into scanner universe */
+    jupiterTrendingEnabled: boolean;
+    jupiterCategory: 'toptraded' | 'toptrending' | 'toporganicscore';
+    /** Filter to pump.fun mints (suffix / tags / launchpad) */
+    jupiterPumpFunOnly: boolean;
+    /** Jupiter category list size (10–100) */
+    jupiterLimit: number;
+    /** Fetch 5m+1h+6h+24h top lists and union by mint */
+    jupiterMergeIntervals: boolean;
+    /** Volume window floors USD (0 = disabled for that window) */
+    minVolumeM5Usd: number;
+    minVolumeH1Usd: number;
+    minVolumeH6Usd: number;
+    minVolumeH24Usd: number;
   };
 
   /** Paper trading simulation */
@@ -2386,6 +2408,19 @@ export const config: BotConfig = {
     playbookMode: 'auto',
     pauseScannerOnlyInRiskOff: true,
     requireRsForMomentum: true,
+    requireMtfAligned: false,
+    minLiquidityUsd: 8000,
+    minOrganicScore: 0,
+    preferOrganicVolume: true,
+    jupiterTrendingEnabled: true,
+    jupiterCategory: 'toptraded',
+    jupiterPumpFunOnly: true,
+    jupiterLimit: 50,
+    jupiterMergeIntervals: true,
+    minVolumeM5Usd: 500,
+    minVolumeH1Usd: 5000,
+    minVolumeH6Usd: 0,
+    minVolumeH24Usd: 15000,
   },
 
   paper: {

@@ -45,7 +45,7 @@ export interface LaunchEvent {
   isPumpFun?: boolean;
   /** Price path for replay (oldest → newest) */
   candles: MarketCandle[];
-  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'synthetic';
+  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'jupiter' | 'synthetic';
   url?: string;
   /** SOL/USD used when this event was built (for PnL $ display) */
   solUsd?: number;
@@ -53,6 +53,14 @@ export interface LaunchEvent {
   candleSource?: 'real' | 'synthetic';
   volumeM5Usd?: number;
   volumeH1Usd?: number;
+  volumeH6Usd?: number;
+  /** Jupiter organic volume windows (when preferOrganicVolume) */
+  volumeOrganicM5Usd?: number;
+  volumeOrganicH1Usd?: number;
+  volumeOrganicH6Usd?: number;
+  volumeOrganicUsd?: number;
+  /** Jupiter organicScore 0–100 when available */
+  organicScore?: number;
   priceChangeH1Pct?: number;
   holderCount?: number;
 }
