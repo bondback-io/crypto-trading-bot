@@ -71,9 +71,15 @@ export interface TradeProfileExitRules {
   /** Randomize TP in [min, max] at assignment (inclusive) */
   takeProfitPctMin?: number;
   takeProfitPctMax?: number;
+  /**
+   * Concrete hard stop-loss % after materialize — always negative (e.g. -12).
+   * Catalog / UI min–max are positive loss magnitudes; materializeExitRules
+   * and applyTradeProfileExitRules normalize to negative for exit engines.
+   */
   stopLossPct?: number;
-  /** Randomize SL in [min, max] at assignment when stopLossPct unset */
+  /** Positive loss magnitude min when stopLossPct unset (e.g. 9 → −9) */
   stopLossPctMin?: number;
+  /** Positive loss magnitude max when stopLossPct unset (e.g. 14 → −14) */
   stopLossPctMax?: number;
   trailingStopPct?: number;
   /** When trail arms (% profit) — informational / future use on position */
@@ -795,6 +801,16 @@ function randBetween(min: number, max: number): number {
   return a + Math.random() * (b - a);
 }
 
+/**
+ * Exit engines compare `pnlPct <= stopLossPct` and expect a negative threshold.
+ * Catalog / UI store loss magnitude as positive (e.g. 12); convert to −12.
+ * Already-negative values and zero are left unchanged.
+ */
+export function normalizeStopLossPct(value: number): number {
+  if (!Number.isFinite(value)) return value;
+  return value > 0 ? -Math.abs(value) : value;
+}
+
 /** Turn range fields into concrete frozen values for one trade */
 export function materializeExitRules(
   rules: TradeProfileExitRules
@@ -816,6 +832,10 @@ export function materializeExitRules(
   ) {
     out.stopLossPct =
       Math.round(randBetween(out.stopLossPctMin, out.stopLossPctMax) * 10) / 10;
+  }
+  // Always stamp concrete SL as negative for exit engines (TP stays positive)
+  if (out.stopLossPct != null && Number.isFinite(out.stopLossPct)) {
+    out.stopLossPct = normalizeStopLossPct(out.stopLossPct);
   }
   if (
     out.hardTimeLimitSec == null &&
@@ -2410,9 +2430,10 @@ export function applyTradeProfileExitRules(
     }
   }
   if (rules.stopLossPct != null && Number.isFinite(rules.stopLossPct)) {
-    position.stopLossPct = rules.stopLossPct;
+    const sl = normalizeStopLossPct(rules.stopLossPct);
+    position.stopLossPct = sl;
     if (position.scalpMode || rules.overrideScalpParams) {
-      position.scalpSlPct = rules.stopLossPct;
+      position.scalpSlPct = sl;
     }
   }
   if (rules.trailingStopPct != null && Number.isFinite(rules.trailingStopPct)) {

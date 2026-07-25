@@ -1839,8 +1839,11 @@ function replayLaunch(
         position.scalpTpPct = er.takeProfitPct;
       }
       if (er.stopLossPct != null) {
-        position.stopLossPct = er.stopLossPct;
-        position.scalpSlPct = er.stopLossPct;
+        // er.stopLossPct is normalized negative in materializeExitRules; clamp defensively
+        const sl =
+          er.stopLossPct > 0 ? -Math.abs(er.stopLossPct) : er.stopLossPct;
+        position.stopLossPct = sl;
+        position.scalpSlPct = sl;
       }
       if (
         er.hardTimeLimitSec != null &&

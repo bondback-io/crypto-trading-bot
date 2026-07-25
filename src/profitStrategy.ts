@@ -131,13 +131,16 @@ export function evaluateProfitAction(pos: ProfitPositionView): ProfitAction {
   if (!(entry > 0) || !(pos.currentPriceSol > 0)) return { type: 'none' };
 
   const pnlPct = ((pos.currentPriceSol - entry) / entry) * 100;
+  // Profiles may stamp positive "loss amount" (e.g. 12); engines need negative.
+  const baseSl =
+    pos.stopLossPct > 0 ? -Math.abs(pos.stopLossPct) : pos.stopLossPct;
   const hardSl = adjustedStopLossPct(
-    pos.stopLossPct,
+    baseSl,
     pos.riskScore,
     pos.convictionScore
   );
 
-  // 1) Hard stop-loss
+  // 1) Hard stop-loss (hardSl is negative; e.g. pnl -12 <= -12)
   if (pnlPct <= hardSl) {
     return {
       type: 'hard_sl',

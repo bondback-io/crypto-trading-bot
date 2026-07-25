@@ -8469,7 +8469,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   (keep ? ' checked' : '') + ' /></td>' +
                 '<td><strong style="color:#e2e8f0">' + escHtml(r.title) + '</strong>' +
                   '<div class="mint text-xs mt-0.5">' + escHtml(r.rationale || '') +
-                  (r.scoreNote ? ' · ' + escHtml(r.scoreNote) : '') + '</div></td>' +
+                  (r.scoreNote ? ' · ' + escHtml(r.scoreNote) : '') + '</div>' +
+                  (r.detailTips && r.detailTips.length
+                    ? '<ul class="mint text-xs mt-1" style="margin:0;padding-left:1.1rem;opacity:0.9">' +
+                      r.detailTips.map(function (tip) {
+                        return '<li>' + escHtml(tip) + '</li>';
+                      }).join('') +
+                      '</ul>'
+                    : '') +
+                  '</td>' +
                 '<td class="mint">' + (r.evidenceCount || 0) + '</td>' +
                 '<td style="color:' + deltaColor(r.deltaWinRatePct) + '">' +
                   (scored ? fmtAdvisorDelta(r.deltaWinRatePct, '%') : '—') + '</td>' +

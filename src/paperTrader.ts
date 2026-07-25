@@ -1743,7 +1743,8 @@ export class PaperTrader {
     // —— Legacy path (profit strategy off) — same as checkPositions ——
     const rules = getStrategyRiskRules(position.strategyKind);
     const risk = config.risk;
-    const hardSl = rules.hardStopLossPct ?? position.stopLossPct;
+    let hardSl = rules.hardStopLossPct ?? position.stopLossPct;
+    if (hardSl > 0) hardSl = -Math.abs(hardSl);
 
     if (markPnlPct <= hardSl) {
       const reason = `hard stop-loss ${hardSl}%`;
@@ -2091,7 +2092,9 @@ export class PaperTrader {
       const rules = getStrategyRiskRules(position.strategyKind);
       const risk = config.risk;
 
-      const hardSl = rules.hardStopLossPct ?? position.stopLossPct;
+      const hardSlRaw = rules.hardStopLossPct ?? position.stopLossPct;
+      const hardSl =
+        hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
       if (pnlPct <= hardSl) {
         await this.closePositionByRules(
           position,

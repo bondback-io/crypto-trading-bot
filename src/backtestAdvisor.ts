@@ -1,10 +1,14 @@
 /**
- * Backtester Smart Advisor — cluster losers / skips, propose one-knob
- * counterfactuals, shadow re-score on the same window, apply to live.
+ * Backtester Smart Advisor — cluster losers / skips, propose one-knob and
+ * multi-knob counterfactuals, shadow re-score on the same window, apply to live.
  */
 
 import { config, effectiveMinMarketCapUsd, persistUserSettings } from './config';
-import type { BacktestResult, BacktestOptions } from './backtest';
+import type {
+  BacktestResult,
+  BacktestOptions,
+  BacktestTradeResult,
+} from './backtest';
 import {
   ensureStrategyToggles,
   isStrategyEnabled,
@@ -16,7 +20,9 @@ import {
 import {
   ensureTradeProfilesInitialized,
   setTradeProfileEnabled,
+  updateTradeProfileParams,
   type TradeProfileId,
+  type TradeProfileParamOverride,
 } from './tradeProfiles';
 
 export interface AdvisorOverlay {
@@ -27,8 +33,17 @@ export interface AdvisorOverlay {
   minWalletQualityScore?: number;
   /** Absolute min market-cap USD override */
   minMarketCapUsd?: number;
+  /** Absolute min liquidity USD (filters.minLiquidity) */
+  minLiquidityUsd?: number;
+  /** Absolute max risk score (filters.maxRiskScore) — lower = tighter */
+  maxRiskScore?: number;
   /** Trade Profile ids to disable */
   disableProfileIds?: TradeProfileId[];
+  /** Per-profile exit/match param patches (widen SL, raise min wallets, …) */
+  profileParamPatches?: Array<{
+    id: TradeProfileId;
+    params: TradeProfileParamOverride;
+  }>;
 }
 
 export type AdvisorFamily =
@@ -36,7 +51,8 @@ export type AdvisorFamily =
   | 'loosen'
   | 'toggle_off'
   | 'toggle_on'
-  | 'profile';
+  | 'profile'
+  | 'multi';
 
 export interface AdvisorRecommendation {
   id: string;
@@ -45,6 +61,10 @@ export interface AdvisorRecommendation {
   rationale: string;
   evidenceCount: number;
   overlay: AdvisorOverlay;
+  /** Extra actionable bullets for richer UI */
+  detailTips?: string[];
+  /** Sort weight (higher first); defaults from evidenceCount */
+  priority?: number;
   scored?: boolean;
   keep?: boolean;
   deltaWinRatePct?: number;
@@ -81,6 +101,11 @@ export interface AdvisorReport {
 const DISCLAIMER =
   'Counterfactual on this backtest window only — not a live forward guarantee. Review before applying to Strategies.';
 
+/** Holds under this are treated as ultra-short (first candle / SL-sign cluster). */
+const ULTRA_SHORT_HOLD_MS = 45_000;
+/** Mild adverse mark that should NOT trip a true −9…−14% hard SL */
+const MILD_ADVERSE_PNL = -5;
+
 let lastAdvisor: AdvisorReport | null = null;
 
 export function getLastAdvisor(): AdvisorReport | null {
@@ -95,6 +120,7 @@ export function setLastAdvisor(report: AdvisorReport | null): void {
 export function mergeOverlays(overlays: AdvisorOverlay[]): AdvisorOverlay {
   const out: AdvisorOverlay = { toggles: {} };
   const profiles = new Set<TradeProfileId>();
+  const patches: NonNullable<AdvisorOverlay['profileParamPatches']> = [];
   for (const o of overlays) {
     if (o.toggles) {
       out.toggles = { ...(out.toggles || {}), ...o.toggles };
@@ -108,11 +134,21 @@ export function mergeOverlays(overlays: AdvisorOverlay[]): AdvisorOverlay {
     if (o.minMarketCapUsd != null) {
       out.minMarketCapUsd = o.minMarketCapUsd;
     }
+    if (o.minLiquidityUsd != null) {
+      out.minLiquidityUsd = o.minLiquidityUsd;
+    }
+    if (o.maxRiskScore != null) {
+      out.maxRiskScore = o.maxRiskScore;
+    }
     if (o.disableProfileIds?.length) {
       for (const id of o.disableProfileIds) profiles.add(id);
     }
+    if (o.profileParamPatches?.length) {
+      patches.push(...o.profileParamPatches);
+    }
   }
   if (profiles.size) out.disableProfileIds = [...profiles];
+  if (patches.length) out.profileParamPatches = patches;
   if (out.toggles && Object.keys(out.toggles).length === 0) {
     delete out.toggles;
   }
@@ -162,6 +198,12 @@ export function applyAdvisorOverlay(
   if (overlay.minMarketCapUsd != null && overlay.minMarketCapUsd > 0) {
     config.filters.minMarketCapUsd = Number(overlay.minMarketCapUsd);
   }
+  if (overlay.minLiquidityUsd != null && overlay.minLiquidityUsd > 0) {
+    config.filters.minLiquidity = Number(overlay.minLiquidityUsd);
+  }
+  if (overlay.maxRiskScore != null && overlay.maxRiskScore > 0) {
+    config.filters.maxRiskScore = Number(overlay.maxRiskScore);
+  }
 
   if (overlay.disableProfileIds?.length) {
     for (const id of overlay.disableProfileIds) {
@@ -169,6 +211,27 @@ export function applyAdvisorOverlay(
         setTradeProfileEnabled(id, false);
       } else if (config.tradeProfiles?.profiles) {
         config.tradeProfiles.profiles[id] = false;
+      }
+    }
+  }
+
+  if (overlay.profileParamPatches?.length) {
+    for (const patch of overlay.profileParamPatches) {
+      if (persist) {
+        updateTradeProfileParams(patch.id, patch.params);
+      } else if (config.tradeProfiles) {
+        if (!config.tradeProfiles.overrides) config.tradeProfiles.overrides = {};
+        const prev = config.tradeProfiles.overrides[patch.id] || {};
+        config.tradeProfiles.overrides[patch.id] = {
+          exitRules: {
+            ...(prev.exitRules || {}),
+            ...(patch.params.exitRules || {}),
+          },
+          match: {
+            ...(prev.match || {}),
+            ...(patch.params.match || {}),
+          },
+        };
       }
     }
   }
@@ -225,7 +288,64 @@ function normalizeSkipReason(reason: string): string {
   return key.replace(/\s*\(.*$/, '').slice(0, 36);
 }
 
-/** Propose one-knob recipes from loser / skip clusters (not yet scored). */
+function isStopLossExit(t: BacktestTradeResult): boolean {
+  return normalizeExitReason(t.reason) === 'stop-loss';
+}
+
+function holdMs(t: BacktestTradeResult): number {
+  if (t.holdingTimeMs != null && Number.isFinite(t.holdingTimeMs)) {
+    return Math.max(0, t.holdingTimeMs);
+  }
+  if (t.closedAt != null && t.openedAt != null) {
+    return Math.max(0, t.closedAt - t.openedAt);
+  }
+  return 0;
+}
+
+/** Positive SL magnitude wrongly stamped → fires when mark ≤ +SL% (near-instant). */
+function looksLikeSlSignBug(t: BacktestTradeResult): boolean {
+  if (!isStopLossExit(t)) return false;
+  const hold = holdMs(t);
+  if (hold > ULTRA_SHORT_HOLD_MS) return false;
+  const m = String(t.reason || '').match(
+    /(?:stop-loss|SL)\s+([+-]?\d+(?:\.\d+)?)/i
+  );
+  const slShown = m ? Number(m[1]) : NaN;
+  const mildMark =
+    t.pnlPct > MILD_ADVERSE_PNL ||
+    (t.maxDrawdownPct != null && t.maxDrawdownPct > MILD_ADVERSE_PNL);
+  if (Number.isFinite(slShown) && slShown > 0 && mildMark) return true;
+  return mildMark && hold < ULTRA_SHORT_HOLD_MS;
+}
+
+function avg(nums: number[]): number {
+  if (!nums.length) return 0;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function mcGapPct(t: BacktestTradeResult): number | null {
+  const wallet = t.smartWalletEntryMarketCapUsd;
+  const ours = t.entryMarketCapUsd ?? t.marketCapUsd;
+  if (wallet == null || ours == null || !(wallet > 0) || !(ours > 0)) {
+    return null;
+  }
+  return ((ours - wallet) / wallet) * 100;
+}
+
+function overlayHasEffect(o: AdvisorOverlay): boolean {
+  return Boolean(
+    (o.toggles && Object.keys(o.toggles).length > 0) ||
+      o.minConvictionScore != null ||
+      o.minWalletQualityScore != null ||
+      o.minMarketCapUsd != null ||
+      o.minLiquidityUsd != null ||
+      o.maxRiskScore != null ||
+      (o.disableProfileIds && o.disableProfileIds.length > 0) ||
+      (o.profileParamPatches && o.profileParamPatches.length > 0)
+  );
+}
+
+/** Propose recipes from loser / skip clusters (not yet scored). */
 export function analyzeBacktest(result: BacktestResult): AdvisorReport {
   const trades = result.trades || [];
   const losers = trades.filter((t) => t.pnlSol <= 0 && !t.forcedEndOfWindow);
@@ -234,28 +354,29 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
   const skips = result.skipped || [];
 
   const exitMap = new Map<string, number>();
-  const profileMap = new Map<string, number>();
   const scalpMap = new Map<string, number>();
   const skipMap = new Map<string, number>();
 
   for (const t of losers) {
     bumpCount(exitMap, normalizeExitReason(t.reason));
-    bumpCount(
-      profileMap,
-      t.tradeProfileId || t.tradeProfileName || 'unassigned'
-    );
     if (t.shortTermStrategyId) {
       bumpCount(scalpMap, t.shortTermStrategyId);
     }
     if ((t.smartWalletCount ?? t.sourceNames?.length ?? 0) <= 1) {
       bumpCount(exitMap, 'single-wallet entry');
     }
+    if (holdMs(t) < ULTRA_SHORT_HOLD_MS && isStopLossExit(t)) {
+      bumpCount(exitMap, 'ultra-short SL exit');
+    }
+    if (looksLikeSlSignBug(t)) {
+      bumpCount(exitMap, 'SL polarity / early exit');
+    }
   }
   for (const s of skips) {
     bumpCount(skipMap, normalizeSkipReason(s.reason));
   }
 
-  const loserClusters = topClusters(exitMap, 6);
+  const loserClusters = topClusters(exitMap, 10);
   const skipClusters = topClusters(skipMap, 6);
   const recommendations: AdvisorRecommendation[] = [];
   const seen = new Set<string>();
@@ -268,10 +389,204 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
 
   const convBase = Number(config.selective.minConvictionScore ?? 50);
   const wqBase = Number(config.filters.minWalletQualityScore ?? 50);
+  const liqBase = Number(config.filters.minLiquidity ?? 0);
+  const riskBase = Number(
+    result.configUsed?.maxRiskScore ?? config.filters.maxRiskScore ?? 80
+  );
   const mcBase = Math.max(
     Number(result.configUsed?.minMarketCapUsd ?? 0),
     effectiveMinMarketCapUsd() || 0
   );
+
+  const ultraShortSl = losers.filter(
+    (t) => holdMs(t) < ULTRA_SHORT_HOLD_MS && isStopLossExit(t)
+  );
+  const slSignCluster = losers.filter(looksLikeSlSignBug);
+  const mirrorLosers = losers.filter(
+    (t) =>
+      t.tradeProfileId === 'smart_money_mirror' ||
+      /smart money mirror/i.test(String(t.tradeProfileName || ''))
+  );
+  const mirrorUltraShort = mirrorLosers.filter(
+    (t) => holdMs(t) < ULTRA_SHORT_HOLD_MS
+  );
+  const migScalpSl = losers.filter(
+    (t) =>
+      t.shortTermStrategyId === 'post_migration_scalp' && isStopLossExit(t)
+  );
+  const highDelayLosers = losers.filter((t) => (t.copyDelayMs ?? 0) >= 8_000);
+  const thinLiqLosers = losers.filter(
+    (t) =>
+      t.liquidityUsd != null && t.liquidityUsd > 0 && t.liquidityUsd < 12_000
+  );
+  const highRiskLosers = losers.filter(
+    (t) => t.riskScoreHint != null && t.riskScoreHint >= 55
+  );
+  const bigMcGapLosers = losers.filter((t) => {
+    const g = mcGapPct(t);
+    return g != null && g >= 25;
+  });
+  const singleN = exitMap.get('single-wallet entry') || 0;
+
+  // ── SL polarity / ultra-short early exits ──
+  if (slSignCluster.length >= 2 || ultraShortSl.length >= 3) {
+    const n = Math.max(slSignCluster.length, ultraShortSl.length);
+    const sample = slSignCluster.length ? slSignCluster : ultraShortSl;
+    const avgHoldSec = avg(sample.map((t) => holdMs(t) / 1000));
+    const avgPnl = avg(sample.map((t) => t.pnlPct));
+    push({
+      id: 'fix-sl-polarity-verify',
+      title: 'Verify SL polarity (profile SL must be negative)',
+      family: 'tighten',
+      priority: 1000 + n,
+      rationale: `${n} ultra-short SL exits (~${avgHoldSec.toFixed(0)}s holds, avg mark ${avgPnl.toFixed(1)}%) — catalog SL is a positive loss amount but exit engines need −SL%. After the polarity fix, re-run BT; residual losers need wider SL or stricter entries.`,
+      evidenceCount: n,
+      detailTips: [
+        'All profiles share materializeExitRules + applyTradeProfileExitRules normalizeStopLossPct — not Mirror-only.',
+        'UI min/max stay positive (e.g. 9–14); runtime stamps −9…−14.',
+        'If reasons still show "Hard stop-loss 12%" with mark −2%, polarity is still wrong somewhere.',
+      ],
+      overlay: {},
+    });
+  }
+
+  if (
+    mirrorUltraShort.length >= 2 ||
+    (mirrorLosers.length >= 3 && ultraShortSl.length >= 2)
+  ) {
+    const n = Math.max(mirrorUltraShort.length, mirrorLosers.length);
+    push({
+      id: 'profile-widen-sl-smart_money_mirror',
+      title: 'Widen Smart Money Mirror SL to 14–20%',
+      family: 'profile',
+      priority: 900 + n,
+      rationale: `${mirrorLosers.length} Mirror losers (${mirrorUltraShort.length} ultra-short) — give copy trades room past first-candle noise; widen profile SL magnitude and keep trail ~11%.`,
+      evidenceCount: n,
+      detailTips: [
+        'Tweak: Trade Profiles → Smart Money Mirror → SL min 14 / SL max 20 (positive magnitudes).',
+        'Expected: fewer 20–30s stop-outs; holds until true adverse move, trail, or TP.',
+      ],
+      overlay: {
+        profileParamPatches: [
+          {
+            id: 'smart_money_mirror',
+            params: {
+              exitRules: {
+                stopLossPctMin: 14,
+                stopLossPctMax: 20,
+                trailingStopPct: 11,
+              },
+              match: { minWalletCount: 2, minConviction: 52 },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  if (
+    mirrorLosers.length >= 3 &&
+    mirrorLosers.filter(
+      (t) => (t.smartWalletCount ?? t.sourceNames?.length ?? 0) <= 1
+    ).length >= 2
+  ) {
+    push({
+      id: 'profile-mirror-min-wallets-3',
+      title: 'Smart Money Mirror: require 3+ wallets',
+      family: 'profile',
+      priority: 850,
+      rationale: `Mirror losers include weak single/dual-wallet copies — raise cluster floor to cut low-conviction mirrors.`,
+      evidenceCount: mirrorLosers.length,
+      detailTips: [
+        'Tweak: match.minWalletCount = 3, requireCluster = true.',
+        'Pairs well with Elite Convergence ON.',
+      ],
+      overlay: {
+        profileParamPatches: [
+          {
+            id: 'smart_money_mirror',
+            params: {
+              match: {
+                minWalletCount: 3,
+                requireCluster: true,
+                minWalletQuality: 60,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  if (migScalpSl.length >= 2) {
+    push({
+      id: 'profile-widen-sl-migration-scalp',
+      title: 'Widen Post-Migration Scalp / Migration Sniper SL',
+      family: 'profile',
+      priority: 880 + migScalpSl.length,
+      rationale: `${migScalpSl.length} Post-Migration Scalp SL losers — early marks often −2–4% while stamped SL looked like +13%. Widen SL magnitude and/or disable migration scalp if churn continues after polarity fix.`,
+      evidenceCount: migScalpSl.length,
+      detailTips: [
+        'Tweak Migration Sniper: stopLossPctMin 16 / stopLossPctMax 22 (positive magnitudes → −16…−22 at runtime).',
+        'Or turn OFF post_migration_scalp if most migration entries are noise.',
+      ],
+      overlay: {
+        profileParamPatches: [
+          {
+            id: 'migration_sniper',
+            params: {
+              exitRules: {
+                stopLossPctMin: 16,
+                stopLossPctMax: 22,
+              },
+            },
+          },
+        ],
+        toggles: isStrategyEnabled('post_migration_scalp')
+          ? { post_migration_scalp: false }
+          : undefined,
+      },
+    });
+  }
+
+  // Any profile with many ultra-short SL losers → widen that profile's SL
+  const profileUltraShort = new Map<string, BacktestTradeResult[]>();
+  for (const t of ultraShortSl) {
+    const id = t.tradeProfileId || 'unassigned';
+    if (id === 'unassigned' || id === 'default') continue;
+    const arr = profileUltraShort.get(id) || [];
+    arr.push(t);
+    profileUltraShort.set(id, arr);
+  }
+  for (const [pid, arr] of profileUltraShort.entries()) {
+    if (arr.length < 2) continue;
+    if (pid === 'smart_money_mirror' || pid === 'migration_sniper') continue;
+    push({
+      id: `profile-widen-sl-${pid}`,
+      title: `Widen ${arr[0].tradeProfileName || pid} SL (+4%)`,
+      family: 'profile',
+      priority: 820 + arr.length,
+      rationale: `${arr.length} ultra-short SL exits on ${arr[0].tradeProfileName || pid} — after polarity fix, residual noise may still need a wider magnitude.`,
+      evidenceCount: arr.length,
+      detailTips: [
+        'Raises stopLossPctMin/Max by ~4 (still stored as positive magnitudes).',
+        'Runtime normalizeStopLossPct stamps them negative for all profiles.',
+      ],
+      overlay: {
+        profileParamPatches: [
+          {
+            id: pid as TradeProfileId,
+            params: {
+              exitRules: {
+                stopLossPctMin: 12,
+                stopLossPctMax: 18,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
 
   // Profile underperformers
   for (const p of result.summary?.profileBreakdown || []) {
@@ -287,8 +602,12 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
         id: `profile-off-${p.profileId}`,
         title: `Disable Trade Profile: ${p.name}`,
         family: 'profile',
+        priority: 500 + p.losses,
         rationale: `${p.icon || ''} ${p.name} went ${p.wins}W/${p.losses}L (WR ${p.winRatePct.toFixed(0)}%, PnL ${p.totalPnlSol.toFixed(3)} SOL) on this window`.trim(),
         evidenceCount: p.losses,
+        detailTips: [
+          `Consider disabling ${p.name} for this regime, or tighten its match filters instead of a blanket off.`,
+        ],
         overlay: { disableProfileIds: [p.profileId as TradeProfileId] },
       });
     }
@@ -309,15 +628,19 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
           id: `toggle-off-${engine}`,
           title: `Turn OFF ${engine.replace(/_/g, ' ')}`,
           family: 'toggle_off',
+          priority: 400 + n,
           rationale: `${n} losing trade(s) used short-term engine ${engine}`,
           evidenceCount: n,
+          detailTips: [
+            `Evidence cluster: ${n} losers tagged ${engine}.`,
+            'If only early SL remains after polarity fix, prefer widening that engine SL over disabling.',
+          ],
           overlay: { toggles: { [engine as StrategyKey]: false } },
         });
       }
     }
   }
 
-  // Timer exits → often scalp packs too aggressive
   const timerN = exitMap.get('scalp timer') || 0;
   if (timerN >= 3) {
     if (isStrategyEnabled('micro_scalper')) {
@@ -325,6 +648,7 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
         id: 'toggle-off-micro_scalper-timer',
         title: 'Turn OFF micro scalper (timer losses)',
         family: 'toggle_off',
+        priority: 420,
         rationale: `${timerN} losers closed on scalp timer — micro scalper often over-trades`,
         evidenceCount: timerN,
         overlay: { toggles: { micro_scalper: false } },
@@ -335,6 +659,7 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
         id: 'toggle-off-momentum_burst-timer',
         title: 'Turn OFF momentum burst (timer losses)',
         family: 'toggle_off',
+        priority: 410,
         rationale: `${timerN} losers closed on scalp timer — consider disabling momentum burst`,
         evidenceCount: timerN,
         overlay: { toggles: { momentum_burst: false } },
@@ -342,23 +667,31 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
     }
   }
 
-  // Stop-loss cluster → tighten conviction / quality
   const slN = exitMap.get('stop-loss') || 0;
   if (slN >= 2 || losers.length >= 3) {
     push({
       id: 'tighten-conviction-5',
       title: 'Raise min conviction +5',
       family: 'tighten',
+      priority: 350 + slN,
       rationale: `${losers.length} strategy losers (${slN} via stop-loss) — raise selective floor to ${convBase + 5}`,
       evidenceCount: Math.max(slN, losers.length),
+      detailTips: [
+        `Setting: selective.minConvictionScore → ${convBase + 5}`,
+        'Expected: fewer weak entries; sample size may drop — check shadow score.',
+      ],
       overlay: { minConvictionScore: convBase + 5 },
     });
     push({
       id: 'tighten-wallet-q-5',
       title: 'Raise min wallet quality +5',
       family: 'tighten',
+      priority: 340 + losers.length,
       rationale: `Lift wallet quality floor to ${wqBase + 5} to skip weaker copy sources`,
       evidenceCount: losers.length,
+      detailTips: [
+        `Setting: filters.minWalletQualityScore → ${wqBase + 5} (gate ON)`,
+      ],
       overlay: { minWalletQualityScore: wqBase + 5 },
     });
   }
@@ -369,19 +702,102 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
       id: 'tighten-min-mc',
       title: `Raise min market cap to $${raised.toLocaleString()}`,
       family: 'tighten',
+      priority: 330,
       rationale: `Many losers entered; raise MC floor ~25% above current effective $${Math.round(mcBase).toLocaleString()}`,
       evidenceCount: losers.length,
       overlay: { minMarketCapUsd: raised },
     });
   }
 
-  // Single-wallet losers → elite convergence
-  const singleN = exitMap.get('single-wallet entry') || 0;
+  if (highDelayLosers.length >= 3) {
+    const avgDelay = avg(highDelayLosers.map((t) => t.copyDelayMs || 0));
+    push({
+      id: 'tighten-conviction-delay-cluster',
+      title: 'Tighten entries for late copy fills',
+      family: 'multi',
+      priority: 700 + highDelayLosers.length,
+      rationale: `${highDelayLosers.length} losers had copy delay ≥8s (avg ${(avgDelay / 1000).toFixed(1)}s) — late fills often buy worse marks vs wallet entry.`,
+      evidenceCount: highDelayLosers.length,
+      detailTips: [
+        'Raise conviction +8 and wallet quality +5 so only strong signals survive delay.',
+        'Prefer multi-wallet clusters (Elite Convergence) when delay is unavoidable.',
+      ],
+      overlay: {
+        minConvictionScore: convBase + 8,
+        minWalletQualityScore: wqBase + 5,
+        toggles: !isStrategyEnabled('elite_convergence')
+          ? { elite_convergence: true }
+          : undefined,
+      },
+    });
+  }
+
+  if (bigMcGapLosers.length >= 2) {
+    push({
+      id: 'tighten-mc-gap-chase',
+      title: 'Filter chase entries (wallet→you MC gap)',
+      family: 'multi',
+      priority: 720 + bigMcGapLosers.length,
+      rationale: `${bigMcGapLosers.length} losers entered ≥25% higher MC than the smart-wallet fill — classic chase after pump.`,
+      evidenceCount: bigMcGapLosers.length,
+      detailTips: [
+        'Raise min conviction and MC floor so you skip extended marks.',
+        'Widen SL only helps if you still enter; better to skip the chase.',
+      ],
+      overlay: {
+        minConvictionScore: convBase + 10,
+        minMarketCapUsd: mcBase > 0 ? Math.round(mcBase * 1.15) : undefined,
+      },
+    });
+  }
+
+  if (thinLiqLosers.length >= 2) {
+    const raisedLiq = Math.max(
+      liqBase > 0 ? Math.round(liqBase * 1.4) : 15_000,
+      15_000
+    );
+    push({
+      id: 'tighten-min-liquidity',
+      title: `Raise min liquidity to $${raisedLiq.toLocaleString()}`,
+      family: 'tighten',
+      priority: 680 + thinLiqLosers.length,
+      rationale: `${thinLiqLosers.length} losers had liquidity under ~$12k — thin books stop out on noise.`,
+      evidenceCount: thinLiqLosers.length,
+      detailTips: [
+        `Setting: filters.minLiquidity → $${raisedLiq.toLocaleString()}`,
+        'Enable volume/liquidity filters if off.',
+      ],
+      overlay: {
+        minLiquidityUsd: raisedLiq,
+        toggles: !isStrategyEnabled('volume_liquidity_filters')
+          ? { volume_liquidity_filters: true }
+          : undefined,
+      },
+    });
+  }
+
+  if (highRiskLosers.length >= 2 && riskBase > 40) {
+    const tighter = Math.max(35, Math.min(riskBase - 10, 55));
+    push({
+      id: 'tighten-max-risk-score',
+      title: `Lower max risk score to ${tighter}`,
+      family: 'tighten',
+      priority: 660 + highRiskLosers.length,
+      rationale: `${highRiskLosers.length} losers had riskScoreHint ≥55 — cut the riskiest rugs earlier.`,
+      evidenceCount: highRiskLosers.length,
+      detailTips: [
+        `Setting: filters.maxRiskScore → ${tighter} (was ~${riskBase})`,
+      ],
+      overlay: { maxRiskScore: tighter },
+    });
+  }
+
   if (singleN >= 3 && !isStrategyEnabled('elite_convergence')) {
     push({
       id: 'toggle-on-elite_convergence',
       title: 'Turn ON Elite Convergence',
       family: 'toggle_on',
+      priority: 640,
       rationale: `${singleN} losers were single-wallet entries — require multi-wallet clusters`,
       evidenceCount: singleN,
       overlay: { toggles: { elite_convergence: true } },
@@ -393,26 +809,26 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
       id: 'toggle-on-hard_quality_gate',
       title: 'Turn ON Hard Quality Gate',
       family: 'toggle_on',
+      priority: 630,
       rationale: `${singleN} weak-wallet losers — raise quality floor via Hard Quality Gate`,
       evidenceCount: singleN,
       overlay: { toggles: { hard_quality_gate: true } },
     });
   }
 
-  // Dead market exits → ensure module on
   const deadN = exitMap.get('dead market') || 0;
   if (deadN >= 2 && !isStrategyEnabled('dead_market_exit')) {
     push({
       id: 'toggle-on-dead_market_exit',
       title: 'Turn ON Dead Market Exit',
       family: 'toggle_on',
+      priority: 500,
       rationale: `${deadN} losers look like stalled books — enable dead-market exit`,
       evidenceCount: deadN,
       overlay: { toggles: { dead_market_exit: true } },
     });
   }
 
-  // Thin volume skips / losers
   const volSkips = skipMap.get('volume') || 0;
   if (
     (volSkips >= 3 || losers.length >= 3) &&
@@ -422,31 +838,71 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
       id: 'toggle-on-volume_liquidity_filters',
       title: 'Turn ON Volume / Liquidity Filters',
       family: 'toggle_on',
+      priority: 520,
       rationale: `${volSkips} volume skips and ${losers.length} losers — enforce vol/liq floors`,
       evidenceCount: Math.max(volSkips, losers.length),
       overlay: { toggles: { volume_liquidity_filters: true } },
     });
   }
 
-  // Migration sniper module when migration profile loses heavily
   const migProfileLosses = losers.filter(
     (t) => t.tradeProfileId === 'migration_sniper'
   ).length;
-  if (
-    migProfileLosses >= 2 &&
-    isStrategyEnabled('migration_sniper')
-  ) {
+  if (migProfileLosses >= 2 && isStrategyEnabled('migration_sniper')) {
     push({
       id: 'toggle-off-migration_sniper-module',
       title: 'Turn OFF Migration Sniper Mode',
       family: 'toggle_off',
+      priority: 550 + migProfileLosses,
       rationale: `${migProfileLosses} Migration Sniper profile losers — disable migration-only entry mode`,
       evidenceCount: migProfileLosses,
       overlay: { toggles: { migration_sniper: false } },
     });
   }
 
-  // Loosen when skips dominate (starved sample)
+  const shortHoldLosers = losers.filter((t) => holdMs(t) < 120_000);
+  if (
+    losers.length >= 5 &&
+    shortHoldLosers.length >= Math.ceil(losers.length * 0.6)
+  ) {
+    push({
+      id: 'multi-short-hold-loser-pack',
+      title: 'Multi-knob: cut short-hold loser pack',
+      family: 'multi',
+      priority: 950,
+      rationale: `${shortHoldLosers.length}/${losers.length} losers held <2m — combine stricter entries + (if Mirror) wider SL so remaining copies can breathe.`,
+      evidenceCount: shortHoldLosers.length,
+      detailTips: [
+        '1) Confirm SL polarity fix is live, then re-run BT before trusting scores.',
+        '2) Raise conviction +5 and wallet quality +5.',
+        '3) Widen Mirror SL to 14–20% if Mirror is in the short-hold cluster.',
+        '4) Turn on Elite Convergence if single-wallet entries dominate.',
+      ],
+      overlay: mergeOverlays([
+        { minConvictionScore: convBase + 5 },
+        { minWalletQualityScore: wqBase + 5 },
+        mirrorLosers.length >= 2
+          ? {
+              profileParamPatches: [
+                {
+                  id: 'smart_money_mirror',
+                  params: {
+                    exitRules: {
+                      stopLossPctMin: 14,
+                      stopLossPctMax: 20,
+                    },
+                  },
+                },
+              ],
+            }
+          : {},
+        !isStrategyEnabled('elite_convergence') && singleN >= 2
+          ? { toggles: { elite_convergence: true } }
+          : {},
+      ]),
+    });
+  }
+
   if (skips.length >= 8 && skips.length > losers.length * 2) {
     const topSkip = skipClusters[0]?.key || 'filters';
     if (topSkip === 'conviction' || convBase > 40) {
@@ -454,6 +910,7 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
         id: 'loosen-conviction-5',
         title: 'Lower min conviction −5',
         family: 'loosen',
+        priority: 200,
         rationale: `${skips.length} skips (top: ${topSkip}) vs ${losers.length} losers — sample may be over-filtered`,
         evidenceCount: skips.length,
         overlay: { minConvictionScore: Math.max(20, convBase - 5) },
@@ -464,6 +921,7 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
         id: 'loosen-wallet-q-5',
         title: 'Lower min wallet quality −5',
         family: 'loosen',
+        priority: 190,
         rationale: `High skip rate (${skips.length}) — ease wallet quality to ${Math.max(20, wqBase - 5)}`,
         evidenceCount: skips.length,
         overlay: { minWalletQualityScore: Math.max(20, wqBase - 5) },
@@ -471,9 +929,13 @@ export function analyzeBacktest(result: BacktestResult): AdvisorReport {
     }
   }
 
-  // Cap candidate list; prefer higher evidence
-  recommendations.sort((a, b) => b.evidenceCount - a.evidenceCount);
-  const capped = recommendations.slice(0, 12);
+  recommendations.sort((a, b) => {
+    const pa = a.priority ?? a.evidenceCount;
+    const pb = b.priority ?? b.evidenceCount;
+    if (pb !== pa) return pb - pa;
+    return b.evidenceCount - a.evidenceCount;
+  });
+  const capped = recommendations.slice(0, 18);
 
   const report: AdvisorReport = {
     generatedAt: Date.now(),
@@ -567,6 +1029,17 @@ export async function scoreRecommendations(
 
   for (let i = 0; i < pool.length; i++) {
     const rec = pool[i];
+    if (!overlayHasEffect(rec.overlay || {})) {
+      scored.push({
+        ...rec,
+        scored: true,
+        keep: false,
+        scoreNote:
+          'Informational tip — re-run BT after verifying SL polarity; no shadow overlay',
+      });
+      continue;
+    }
+
     try {
       const shadow = await runBacktest({
         fromMs: period?.fromMs,
@@ -579,10 +1052,11 @@ export async function scoreRecommendations(
         reBuyEnabled: baseOpts.reBuyEnabled,
         minVolumeUsd: baseOpts.minVolumeUsd,
         strategyType: baseOpts.strategyType,
-        minLiquidityUsd: baseOpts.minLiquidityUsd,
+        minLiquidityUsd:
+          rec.overlay.minLiquidityUsd ?? baseOpts.minLiquidityUsd,
         minMarketCapUsd:
           rec.overlay.minMarketCapUsd ?? baseOpts.minMarketCapUsd,
-        maxRiskScore: baseOpts.maxRiskScore,
+        maxRiskScore: rec.overlay.maxRiskScore ?? baseOpts.maxRiskScore,
         useLiveData: baseOpts.useLiveData,
         allowSynthetic: false,
         startingBalanceSol: baseOpts.startingBalanceSol,
@@ -592,7 +1066,6 @@ export async function scoreRecommendations(
         parityMode: true,
         persistResult: false,
         advisorOverlay: rec.overlay,
-        // Absolute floors from overlay also via advisorOverlay apply
         minConvictionScore: rec.overlay.minConvictionScore,
         minWalletQualityScore: rec.overlay.minWalletQualityScore,
       } as BacktestOptions);
@@ -625,7 +1098,6 @@ export async function scoreRecommendations(
     }
   }
 
-  // Keep unscored remainder for UI transparency
   const scoredIds = new Set(scored.map((r) => r.id));
   const rest = report.recommendations.filter((r) => !scoredIds.has(r.id));
   const merged = [...scored, ...rest].sort((a, b) => {
@@ -693,9 +1165,9 @@ export function buildRerunOptionsFromRecommendations(
     reBuyEnabled: baseOpts.reBuyEnabled,
     minVolumeUsd: baseOpts.minVolumeUsd,
     strategyType: baseOpts.strategyType,
-    minLiquidityUsd: baseOpts.minLiquidityUsd,
+    minLiquidityUsd: overlay.minLiquidityUsd ?? baseOpts.minLiquidityUsd,
     minMarketCapUsd: overlay.minMarketCapUsd ?? baseOpts.minMarketCapUsd,
-    maxRiskScore: baseOpts.maxRiskScore,
+    maxRiskScore: overlay.maxRiskScore ?? baseOpts.maxRiskScore,
     useLiveData: baseOpts.useLiveData,
     allowSynthetic: false,
     startingBalanceSol: baseOpts.startingBalanceSol,

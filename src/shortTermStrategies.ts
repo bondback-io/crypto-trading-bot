@@ -622,14 +622,16 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
   /** Ignore modest SL marks until feeds settle; still honour violent rugs. */
   const SL_GRACE_MS = 15_000;
   const SL_GRACE_RUG_PCT = -35;
+  // Profiles may stamp positive loss magnitude; exit compare needs negative %.
+  const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
 
-  if (pnlPct <= view.slPct) {
+  if (pnlPct <= slPct) {
     const inGrace = ageMs < SL_GRACE_MS && pnlPct > SL_GRACE_RUG_PCT;
     if (!inGrace) {
       return {
         type: 'full',
         exitKind: 'scalp_sl',
-        reason: `${label} SL ${view.slPct}% (mark ${pnlPct.toFixed(1)}%)`,
+        reason: `${label} SL ${slPct}% (mark ${pnlPct.toFixed(1)}%)`,
       };
     }
   }
