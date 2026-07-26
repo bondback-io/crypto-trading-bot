@@ -95,3 +95,22 @@ export function getAppVersion(): AppVersionInfo {
   cached = { version, updatedAt, label, gitSha };
   return cached;
 }
+
+/**
+ * Stable identity for the running build. Used to auto-start the Overview
+ * reset timer when a new commit/deploy ships (not on every process restart
+ * of the same build). Prefers BUILD_ID, then git commit, then version stamp.
+ */
+export function getBuildId(): string {
+  const envBuild = process.env.BUILD_ID?.trim();
+  if (envBuild) return envBuild;
+
+  const commit =
+    process.env.RENDER_GIT_COMMIT?.trim() ||
+    process.env.SOURCE_VERSION?.trim() || // Heroku
+    gitValue('rev-parse HEAD');
+  if (commit) return commit;
+
+  const app = getAppVersion();
+  return `v${app.version}@${app.updatedAt}`;
+}

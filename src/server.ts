@@ -49,6 +49,7 @@ import { getJitoStatus } from './jito';
 import { getMevStatus, updateMevConfig } from './mev';
 import { getPersistenceStatus } from './dataDir';
 import {
+  ensureDashboardResetTimerForBuild,
   getLastDashboardResetAt,
   markDashboardReset,
 } from './dashboardState';
@@ -4370,6 +4371,15 @@ export function startServer(port?: number, host?: string): void {
   } catch (err) {
     console.warn(
       '[server] Discovery auto-refresh failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    // New deploy / first run: start Overview elapsed timer without wiping trades
+    ensureDashboardResetTimerForBuild();
+  } catch (err) {
+    console.warn(
+      '[server] Dashboard reset timer ensure failed:',
       err instanceof Error ? err.message : err
     );
   }
