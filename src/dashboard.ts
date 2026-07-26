@@ -1711,12 +1711,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border: 1px solid;
       opacity: 0.95;
     }
-    .trade-profiles-active .tp-chip.is-off { opacity: 0.35; }
+    .trade-profiles-active .tp-chip.is-off {
+      /* Avoid opacity — it greys the modules popover too */
+      filter: grayscale(0.55);
+      opacity: 1;
+      color: #94a3b8 !important;
+      border-color: #475569 !important;
+      background: #1e293b !important;
+    }
     .tp-toggle-row {
       display: flex;
       flex-wrap: wrap;
       gap: 0.5rem;
       align-items: stretch;
+      overflow: visible;
     }
     .tp-toggle-card {
       flex: 1 1 16rem;
@@ -1726,6 +1734,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border: 1px solid #334155;
       border-radius: 0.5rem;
       background: #0f172a;
+      overflow: visible;
     }
     .tp-toggle-card .tp-head {
       display: flex;
@@ -1733,6 +1742,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       justify-content: space-between;
       gap: 0.4rem;
       margin-bottom: 0.25rem;
+      overflow: visible;
     }
     .tp-toggle-card .tp-head input[type="checkbox"] {
       width: 1rem;
@@ -1742,6 +1752,114 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       accent-color: #10b981;
     }
     .tp-toggle-card .tp-name { font-weight: 600; font-size: 0.8rem; }
+    /* Profile module allowlist popover (chip / card name hover) */
+    .tp-mod-tip {
+      position: relative;
+      cursor: help;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tp-mod-tip:focus,
+    .tp-mod-tip:focus-visible {
+      outline: none;
+      z-index: 230;
+    }
+    .tp-mod-pop {
+      position: absolute;
+      left: 0;
+      top: calc(100% + 8px);
+      z-index: 220;
+      box-sizing: border-box;
+      width: max-content;
+      min-width: 11.5rem;
+      max-width: min(16.5rem, calc(100vw - 1.5rem));
+      max-height: min(18rem, 55vh);
+      overflow: auto;
+      padding: 0.55rem 0.65rem;
+      border-radius: 0.5rem;
+      background: #0b1220;
+      border: 1px solid #334155;
+      box-shadow: 0 12px 28px rgba(2, 6, 23, 0.55);
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.35;
+      text-align: left;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.12s ease;
+    }
+    .tp-mod-tip:hover .tp-mod-pop,
+    .tp-mod-tip:focus .tp-mod-pop,
+    .tp-mod-tip:focus-within .tp-mod-pop,
+    .tp-mod-tip:focus-visible .tp-mod-pop {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+    .tp-mod-pop .tp-mod-title {
+      font-weight: 650;
+      color: #e2e8f0;
+      font-size: 11px;
+      margin-bottom: 0.3rem;
+    }
+    .tp-mod-pop .tp-mod-note {
+      color: #94a3b8;
+      font-size: 10px;
+      margin-bottom: 0.35rem;
+      line-height: 1.3;
+    }
+    .tp-mod-pop .tp-mod-inherit,
+    .tp-mod-pop .tp-mod-empty {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+    .tp-mod-pop .tp-mod-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.22rem;
+    }
+    .tp-mod-pop .tp-mod-list li {
+      display: flex;
+      align-items: baseline;
+      gap: 0.35rem;
+      color: #e2e8f0;
+    }
+    .tp-mod-pop .tp-mod-list li.is-off {
+      color: #64748b;
+    }
+    .tp-mod-pop .tp-mod-dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      margin-top: 0.28rem;
+      background: #34d399;
+    }
+    .tp-mod-pop .tp-mod-list li.is-off .tp-mod-dot {
+      background: #475569;
+    }
+    .tp-mod-pop .tp-mod-name {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow-wrap: break-word;
+    }
+    .tp-mod-pop .tp-mod-off {
+      flex: 0 0 auto;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      font-weight: 700;
+    }
+    .trade-profiles-active {
+      overflow: visible;
+    }
+    .trade-profiles-active .tp-chip.tp-mod-tip {
+      position: relative;
+    }
     .tp-toggle-card .tp-blurb {
       margin: 0.35rem 0 0.25rem;
       font-size: 0.72rem;
@@ -5191,6 +5309,55 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     paintProfileColourLegends();
 
+    /** Rich modules popover HTML for a trade profile (designed allowlist + global ON/OFF). */
+    function fmtProfileModulesPopover(p) {
+      const eff = p && p.effectiveModules;
+      const smartOn =
+        (window.__tradeProfilesStatus &&
+          window.__tradeProfilesStatus.smartBotProfiles === true) ||
+        (eff && eff.smartBotProfiles === true);
+      const note = smartOn
+        ? ''
+        : '<div class="tp-mod-note">Smart Bot Profiles off — shared master modules apply</div>';
+      let body = '';
+      if (!eff || eff.mode === 'inherit_all' || (p && p.id === 'default')) {
+        body =
+          '<div class="tp-mod-inherit">All enabled master modules (inherit)</div>';
+      } else {
+        const mods = eff.modules || [];
+        if (!mods.length) {
+          body = '<div class="tp-mod-empty">No modules in allowlist</div>';
+        } else {
+          body =
+            '<ul class="tp-mod-list">' +
+            mods
+              .map(function (m) {
+                const on = m.enabled !== false;
+                return (
+                  '<li class="' +
+                  (on ? 'is-on' : 'is-off') +
+                  '">' +
+                  '<span class="tp-mod-dot" aria-hidden="true"></span>' +
+                  '<span class="tp-mod-name">' +
+                  escHtml(m.name || m.key) +
+                  '</span>' +
+                  (on ? '' : '<span class="tp-mod-off">off</span>') +
+                  '</li>'
+                );
+              })
+              .join('') +
+            '</ul>';
+        }
+      }
+      return (
+        '<span class="tp-mod-pop" role="tooltip">' +
+        '<div class="tp-mod-title">Modules</div>' +
+        note +
+        body +
+        '</span>'
+      );
+    }
+
     const STRATEGY_SETTING_IDS = {
       wallet_convergence: ['sel-require-convergence', 'sel-min-wallets', 'convergenceRequired'],
       migration_priority: ['enableMigrationOnly', 'migrationSizeMultiplier', 'migrationSlippageBps'],
@@ -6180,9 +6347,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               const on = p.active;
               const color = profileColorFor(p.id) || p.color || '#94a3b8';
               return (
-                '<span class="tp-chip' + (on ? '' : ' is-off') + '" style="color:' + color +
-                ';border-color:' + color + '99;background:' + color + '22" title="' + escHtml(p.description || p.name) + '">' +
+                '<span class="tp-chip tp-mod-tip' + (on ? '' : ' is-off') +
+                '" tabindex="0" style="color:' + color +
+                ';border-color:' + color + '99;background:' + color + '22" aria-label="' +
+                escHtml(p.name || '') + ' modules">' +
                 escHtml(p.icon || '') + ' ' + escHtml(p.name) + (on ? '' : ' (off)') +
+                fmtProfileModulesPopover(p) +
                 '</span>'
               );
             }).join('')
@@ -6314,9 +6484,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           return (
             '<div class="tp-toggle-card" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="border-color:' + color + '88;box-shadow:inset 3px 0 0 ' + color + '">' +
               '<div class="tp-head">' +
-                '<span class="tp-name" style="color:' + color + '">' +
+                '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
+                  escHtml(p.name || '') + ' modules">' +
                   escHtml(p.icon || '') + ' ' + escHtml(p.name) +
                   (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
+                  fmtProfileModulesPopover(p) +
                 '</span>' +
                 '<input type="checkbox"' + checked + disabled +
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="Enable ' + escHtml(p.name) + '" />' +
@@ -7537,27 +7709,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const tpStatus = window.__tradeProfilesStatus;
       let modulesLine = '';
       if (tpStatus) {
-        if (tpStatus.smartBotProfiles !== true) {
+        const smartOn = tpStatus.smartBotProfiles === true;
+        const prof = (tpStatus.profiles || []).find(function (x) {
+          return x && x.id === v.id;
+        });
+        const eff = prof && prof.effectiveModules;
+        if (!eff || eff.mode === 'inherit_all' || v.id === 'default') {
+          modulesLine =
+            '\\nModules: All enabled master modules (inherit)' +
+            (smartOn ? '' : ' · Smart Bot Profiles off');
+        } else if (eff.mode === 'allowlist') {
+          const names = (eff.modules || []).map(function (m) {
+            return (
+              (m.name || m.key) + (m.enabled === false ? ' (off)' : '')
+            );
+          });
+          modulesLine =
+            '\\nModules: ' +
+            (names.length ? names.join(', ') : '(none in allowlist)') +
+            (smartOn
+              ? ''
+              : '\\nSmart Bot Profiles off — shared master modules apply');
+        } else {
           modulesLine =
             '\\nModules: Shared master modules (Smart Bot Profiles off)';
-        } else {
-          const prof = (tpStatus.profiles || []).find(function (x) {
-            return x && x.id === v.id;
-          });
-          const eff = prof && prof.effectiveModules;
-          if (!eff || eff.mode === 'inherit_all' || v.id === 'default') {
-            modulesLine = '\\nModules: All enabled (master)';
-          } else if (eff.mode === 'allowlist') {
-            const names = (eff.modules || []).map(function (m) {
-              return m.name || m.key;
-            });
-            modulesLine =
-              '\\nModules: ' +
-              (names.length ? names.join(', ') : '(none in allowlist ∩ master ON)');
-          } else {
-            modulesLine =
-              '\\nModules: Shared master modules (Smart Bot Profiles off)';
-          }
         }
       }
       const title =

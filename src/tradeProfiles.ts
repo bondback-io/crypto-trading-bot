@@ -1233,15 +1233,16 @@ export function profileAllowsModule(
 }
 
 /**
- * Effective modules for UI/tooltip: profile allowlist ∩ globally ON.
- * When Smart Bot OFF → shared master note. When inherit → all enabled master.
+ * Designed modules for UI/tooltip (profile allowlist), with global ON/OFF per row.
+ * Always returns the profile's curated set so chips can show micro-bot intent
+ * even when Smart Bot Profiles is OFF. Inherit-all (Default) → empty list + mode.
  */
 export function listEffectiveModulesForProfile(
   profileId: string | null | undefined
 ): {
   smartBotProfiles: boolean;
-  mode: 'shared_master' | 'inherit_all' | 'allowlist';
-  modules: Array<{ key: StrategyKey; name: string }>;
+  mode: 'inherit_all' | 'allowlist';
+  modules: Array<{ key: StrategyKey; name: string; enabled: boolean }>;
 } {
   const smartBotProfiles = isSmartBotProfilesEnabled();
   let isEnabled: (key: StrategyKey) => boolean = () => true;
@@ -1254,21 +1255,21 @@ export function listEffectiveModulesForProfile(
     /* bootstrap */
   }
 
-  if (!smartBotProfiles) {
-    return { smartBotProfiles, mode: 'shared_master', modules: [] };
-  }
-
   const mask = resolveProfileModules(profileId);
   if (!mask || Object.keys(mask).length === 0) {
     return { smartBotProfiles, mode: 'inherit_all', modules: [] };
   }
 
-  const modules: Array<{ key: StrategyKey; name: string }> = [];
+  const modules: Array<{ key: StrategyKey; name: string; enabled: boolean }> =
+    [];
   for (const [rawKey, on] of Object.entries(mask)) {
     if (on !== true) continue;
     const key = rawKey as StrategyKey;
-    if (!isEnabled(key)) continue;
-    modules.push({ key, name: nameFor(key) });
+    modules.push({
+      key,
+      name: nameFor(key),
+      enabled: isEnabled(key),
+    });
   }
   modules.sort((a, b) => a.name.localeCompare(b.name));
   return { smartBotProfiles, mode: 'allowlist', modules };
