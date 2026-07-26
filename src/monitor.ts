@@ -19,6 +19,9 @@ import { paperTrader } from './paperTrader';
 import {
   assignTradeProfile,
   stampFromAssignment,
+  isSmartBotProfilesEnabled,
+  withStrategyProfileGateAsync,
+  type TradeProfileMatchContext,
 } from './tradeProfiles';
 import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
@@ -151,6 +154,67 @@ import {
 import { registerDipBuyHistoryProvider } from './dipSmartWallet';
 
 export { pruneLowQualityWallets, refreshAllWalletQualityScores };
+
+/** Build match context for early Soft Bot / final profile assignment. */
+function buildTradeProfileMatchContext(
+  signal: TradeSignal,
+  extras?: {
+    scalpMode?: boolean;
+    shortTermStrategyId?: string | null;
+    strategyKind?: 'migration' | 'normal';
+  }
+): TradeProfileMatchContext {
+  return {
+    isMigration: signal.isMigration,
+    nearMigration: signal.nearMigration,
+    earlyBuy: signal.earlyBuy,
+    migrationFresh: isRecentlyMigrated(signal.mint),
+    scalpMode: extras?.scalpMode,
+    shortTermStrategyId: extras?.shortTermStrategyId,
+    convictionScore: signal.convictionScore,
+    dropFromPeakPct: signal.dropFromPeakPct,
+    strategyKind: extras?.strategyKind,
+    symbol: signal.symbol,
+    marketCapUsd:
+      signal.sourceEntryMcUsd ?? signal.metrics?.marketCapUsd ?? null,
+    holderCount: signal.metrics?.holderCountEstimate ?? null,
+    volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+    volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+    recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+    tokenAgeHours: signal.tokenAgeHours ?? null,
+    priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
+    priceChangeH1Pct: signal.metrics?.priceChangeH1Pct ?? null,
+    smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,
+    liquidityUsd: signal.metrics?.liquidityUsd ?? null,
+    walletCount: Array.isArray(signal.wallets)
+      ? signal.wallets.filter((w) => !isMarketScannerAddress(w)).length ||
+        signal.wallets.length
+      : null,
+    nearKeyFib: signal.nearKeyFib === true,
+    nearSupport: signal.nearSupport === true,
+    chartPatternIds: signal.chartPatternIds ?? null,
+    chartPatternSummary: signal.chartPatternSummary ?? null,
+    chartPatternHits: signal.chartPatternHits ?? null,
+    scannerOrigin: isMarketScannerSignal(signal),
+    entrySource: signal.entrySource,
+    walletQualityAvg: (() => {
+      const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
+      if (!addrs.length) return null;
+      let sum = 0;
+      let n = 0;
+      for (const addr of addrs) {
+        const w = config.smartWallets.find((sw) => sw.address === addr);
+        if (!w) continue;
+        if (w.qualityScore == null) applyQualityToWallet(w);
+        if (w.qualityScore != null && Number.isFinite(w.qualityScore)) {
+          sum += Number(w.qualityScore);
+          n += 1;
+        }
+      }
+      return n > 0 ? sum / n : null;
+    })(),
+  };
+}
 
 /** Attach short-term scalp / post-run dip seed when an active strategy qualifies. */
 /**
@@ -353,6 +417,8 @@ export interface TradeSignal {
   dropFromPeakPct?: number | null;
   /** Estimated token age in hours when known */
   tokenAgeHours?: number | null;
+  /** Soft-scored profile id when Smart Bot Profiles is ON (entry gating) */
+  candidateTradeProfileId?: string;
   /** Optional candle path for Fib/S&R (backtester / Post-Run Dip) */
   candles?: Array<{
     time: number;
@@ -3405,6 +3471,33 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
+  // Smart Bot Profiles ON: soft-score early, then gate module filters with winner mask.
+  // Smart Bot OFF: skip — exact legacy path (isStrategyEnabled = global only).
+  let gateProfileId: string | null | undefined = undefined;
+  if (isSmartBotProfilesEnabled()) {
+    const early = assignTradeProfile(buildTradeProfileMatchContext(signal), {
+      silent: true,
+    });
+    if (early.skipped) {
+      recordRejectedSignal(
+        signal,
+        early.skipReason || 'No trade profile scored high enough'
+      );
+      console.log(
+        `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+          `reason=smart-bot early profile: ${early.skipReason || early.reason}`
+      );
+      return false;
+    }
+    gateProfileId = early.profileId;
+    signal.candidateTradeProfileId = early.profileId;
+    console.log(
+      `[monitor] Smart Bot early profile=${early.name} (${early.profileId}) ` +
+        `score=${early.score} · ${signal.symbol}`
+    );
+  }
+
+  return withStrategyProfileGateAsync(gateProfileId, async () => {
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
   if (
     (isStrategyEnabled('wallet_quality_scoring') ||
@@ -3884,6 +3977,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   return true;
+  }); // withStrategyProfileGateAsync
 }
 
 function checkConvergence(mint: string): TradeSignal | null {

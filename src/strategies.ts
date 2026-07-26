@@ -1731,9 +1731,53 @@ export function ensureStrategyToggles(): StrategyToggleMap {
   return config.strategyToggles as StrategyToggleMap;
 }
 
-export function isStrategyEnabled(key: StrategyKey): boolean {
+export function isStrategyEnabledGlobal(key: StrategyKey): boolean {
   const toggles = ensureStrategyToggles();
   return toggles[key] !== false;
+}
+
+/**
+ * Global master toggle only — unless Smart Bot Profiles is ON and a profile
+ * gate is active on the stack (entry filter evaluation), in which case the
+ * profile allowlist is also applied. When Smart Bot is OFF this is always
+ * the legacy global check.
+ */
+export function isStrategyEnabled(key: StrategyKey): boolean {
+  if (!isStrategyEnabledGlobal(key)) return false;
+  try {
+    const {
+      isSmartBotProfilesEnabled,
+      profileAllowsModule,
+      getActiveStrategyProfileGate,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (!isSmartBotProfilesEnabled()) return true;
+    const gated = getActiveStrategyProfileGate();
+    // undefined = no gate active → global only (legacy short-circuit for callers
+    // outside profile-scoped evaluation)
+    if (gated === undefined) return true;
+    return profileAllowsModule(gated, key);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Explicit profile-aware gate.
+ * OFF Smart Bot → identical to global. ON → global ∩ profile allowlist.
+ */
+export function isStrategyEnabledForProfile(
+  key: StrategyKey,
+  profileId?: string | null
+): boolean {
+  if (!isStrategyEnabledGlobal(key)) return false;
+  try {
+    const { isSmartBotProfilesEnabled, profileAllowsModule } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (!isSmartBotProfilesEnabled()) return true;
+    return profileAllowsModule(profileId, key);
+  } catch {
+    return true;
+  }
 }
 
 export function getStrategyDefinition(

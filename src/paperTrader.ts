@@ -39,7 +39,7 @@ import {
   type ExitMixKey,
   type SoakMetrics,
 } from './soakMetrics';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledForProfile } from './strategies';
 import {
   evaluateScalpProtectiveTrail,
   evaluateShortTermExit,
@@ -819,14 +819,14 @@ export class PaperTrader {
       initialAmountTokens: input.amountTokens,
       initialCostSol: input.costSol,
       takeProfitPct:
-        isStrategyEnabled('tiered_profit_taking') &&
+        isStrategyEnabledForProfile('tiered_profit_taking', input.tradeProfileId) &&
         config.profitStrategy?.enabled
         ? config.trade.maxProfitPercent
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: input.entryPriceSol,
       trailingStopPct:
-        isStrategyEnabled('tiered_profit_taking') &&
+        isStrategyEnabledForProfile('tiered_profit_taking', input.tradeProfileId) &&
         config.profitStrategy?.enabled
         ? config.profitStrategy.trailingStopPct
         : trailPct,
@@ -920,7 +920,10 @@ export class PaperTrader {
       position.trailingActivationProfit != null &&
       Number.isFinite(position.trailingActivationProfit)
         ? position.trailingActivationProfit
-        : isStrategyEnabled('tiered_profit_taking') &&
+        : isStrategyEnabledForProfile(
+              'tiered_profit_taking',
+              position.tradeProfileId
+            ) &&
             config.profitStrategy?.enabled
           ? config.profitStrategy.trailingStopAfter
           : config.risk.trailingActivationProfit;
@@ -1106,14 +1109,14 @@ export class PaperTrader {
       initialAmountTokens: amountTokens,
       initialCostSol: spendSol,
       takeProfitPct:
-        isStrategyEnabled('tiered_profit_taking') &&
+        isStrategyEnabledForProfile('tiered_profit_taking', meta?.tradeProfileId) &&
         config.profitStrategy?.enabled
         ? config.trade.maxProfitPercent
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: entryPrice,
       trailingStopPct:
-        isStrategyEnabled('tiered_profit_taking') &&
+        isStrategyEnabledForProfile('tiered_profit_taking', meta?.tradeProfileId) &&
         config.profitStrategy?.enabled
         ? config.profitStrategy.trailingStopPct
         : rules.trailingStopPct ??
@@ -1722,7 +1725,7 @@ export class PaperTrader {
 
     // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
     if (
-      isStrategyEnabled('tiered_profit_taking') &&
+      isStrategyEnabledForProfile('tiered_profit_taking', position.tradeProfileId) &&
       config.profitStrategy?.enabled
     ) {
       const view: ProfitPositionView = {
@@ -2011,7 +2014,7 @@ export class PaperTrader {
   ): string | null {
     const risk = config.risk;
     if (
-      !isStrategyEnabled('dead_market_exit') ||
+      !isStrategyEnabledForProfile('dead_market_exit', position.tradeProfileId) ||
       !risk.enableDeadVolumeExit
     ) {
       return null;
@@ -2218,7 +2221,7 @@ export class PaperTrader {
 
       // Advanced profit strategy (paper + live)
       if (
-        isStrategyEnabled('tiered_profit_taking') &&
+        isStrategyEnabledForProfile('tiered_profit_taking', position.tradeProfileId) &&
         config.profitStrategy?.enabled
       ) {
         await this.applyProfitStrategyTick(position, currentPrice, label);

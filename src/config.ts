@@ -1658,10 +1658,13 @@ export interface BotConfig {
    */
   tradeProfiles: {
     enabled: boolean;
+    /** When true, profiles use curated module allowlists ∩ global master. Default false. */
+    smartBotProfiles?: boolean;
     profiles: Record<string, boolean>;
     overrides?: Record<string, {
       exitRules?: Record<string, unknown>;
       match?: Record<string, unknown>;
+      modules?: Record<string, boolean>;
     }>;
     autoScoring?: {
       enabled?: boolean;
@@ -2007,6 +2010,7 @@ export const config: BotConfig = {
   strategyProfileSnapshot: null,
   tradeProfiles: {
     enabled: true,
+    smartBotProfiles: false,
     profiles: {
       default: true,
       scalper: true,
@@ -2339,6 +2343,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     tradeProfiles: config.tradeProfiles
       ? {
           enabled: config.tradeProfiles.enabled !== false,
+          smartBotProfiles: config.tradeProfiles.smartBotProfiles === true,
           profiles: { ...(config.tradeProfiles.profiles || {}) },
           overrides: config.tradeProfiles.overrides
             ? { ...config.tradeProfiles.overrides }
@@ -2902,6 +2907,7 @@ function applySettingsSnapshot(
     if (!config.tradeProfiles) {
       config.tradeProfiles = {
         enabled: true,
+        smartBotProfiles: false,
         profiles: {
           default: true,
           scalper: true,
@@ -2918,6 +2924,11 @@ function applySettingsSnapshot(
     }
     if (typeof tp.enabled === 'boolean') {
       config.tradeProfiles.enabled = tp.enabled;
+    }
+    if (typeof (tp as { smartBotProfiles?: boolean }).smartBotProfiles === 'boolean') {
+      config.tradeProfiles.smartBotProfiles = (
+        tp as { smartBotProfiles: boolean }
+      ).smartBotProfiles;
     }
     if (tp.profiles && typeof tp.profiles === 'object') {
       config.tradeProfiles.profiles = {
@@ -4395,6 +4406,7 @@ export function getConfigSnapshot() {
     tradeProfiles: config.tradeProfiles
       ? {
           enabled: config.tradeProfiles.enabled !== false,
+          smartBotProfiles: config.tradeProfiles.smartBotProfiles === true,
           profiles: { ...(config.tradeProfiles.profiles || {}) },
           overrides: config.tradeProfiles.overrides
             ? { ...config.tradeProfiles.overrides }

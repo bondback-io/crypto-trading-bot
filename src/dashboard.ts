@@ -4571,6 +4571,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
+            <div style="min-width:0;flex:1">
+              <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
+              <p class="text-xs text-slate-400 mb-0">ON = each profile uses its own module set (micro-bots). OFF = current shared modules for all profiles.</p>
+            </div>
+            <label class="ctl-check" title="Default OFF keeps legacy shared-module behaviour">
+              <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
+              <span>Smart Bot Profiles</span>
+            </label>
+          </div>
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div style="min-width:0;flex:1">
               <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
@@ -6146,6 +6156,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function renderTradeProfilesUi(tp) {
       const master = document.getElementById('trade-profiles-master');
+      const smartBot = document.getElementById('smart-bot-profiles');
       const toggles = document.getElementById('trade-profiles-toggles');
       const chips = document.getElementById('trade-profiles-active-chips');
       const statusEl = document.getElementById('trade-profiles-master-status');
@@ -6153,11 +6164,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (chips) chips.textContent = '—';
         return;
       }
+      window.__tradeProfilesStatus = tp;
       if (master) master.checked = tp.enabled !== false;
+      if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
         statusEl.textContent = tp.enabled === false
           ? 'Multi-profile OFF (Default only)'
-          : ((tp.active || []).length + ' active');
+          : ((tp.active || []).length + ' active') +
+            (tp.smartBotProfiles ? ' · Smart Bot ON' : '');
       }
       if (chips) {
         const list = tp.profiles || [];
@@ -6500,6 +6514,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.toggleMultiProfiles = toggleMultiProfiles;
+
+    async function toggleSmartBotProfiles(enabled) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ smartBotProfiles: !!enabled }),
+        });
+        renderTradeProfilesUi(data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.toggleSmartBotProfiles = toggleSmartBotProfiles;
 
     async function toggleTradeProfile(id, enabled) {
       try {
@@ -7505,11 +7534,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         Number.isFinite(Number(p.tradeProfileScore))
           ? ' · ' + Number(p.tradeProfileScore).toFixed(0)
           : '';
+      const tpStatus = window.__tradeProfilesStatus;
+      let modulesLine = '';
+      if (tpStatus) {
+        if (tpStatus.smartBotProfiles !== true) {
+          modulesLine =
+            '\\nModules: Shared master modules (Smart Bot Profiles off)';
+        } else {
+          const prof = (tpStatus.profiles || []).find(function (x) {
+            return x && x.id === v.id;
+          });
+          const eff = prof && prof.effectiveModules;
+          if (!eff || eff.mode === 'inherit_all' || v.id === 'default') {
+            modulesLine = '\\nModules: All enabled (master)';
+          } else if (eff.mode === 'allowlist') {
+            const names = (eff.modules || []).map(function (m) {
+              return m.name || m.key;
+            });
+            modulesLine =
+              '\\nModules: ' +
+              (names.length ? names.join(', ') : '(none in allowlist ∩ master ON)');
+          } else {
+            modulesLine =
+              '\\nModules: Shared master modules (Smart Bot Profiles off)';
+          }
+        }
+      }
       const title =
         v.name +
         (v.id ? ' (' + v.id + ')' : '') +
         scoreBit +
-        (p && p.tradeProfileReason ? ' — ' + String(p.tradeProfileReason) : '');
+        (p && p.tradeProfileReason ? ' — ' + String(p.tradeProfileReason) : '') +
+        modulesLine;
       const compact = opts.compact === true;
       return (
         '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + v.color +

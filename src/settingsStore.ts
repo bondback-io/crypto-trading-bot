@@ -69,12 +69,14 @@ export interface PersistedBotSettings {
   /** Concurrent trade profile ON/OFF map + optional param overrides */
   tradeProfiles?: {
     enabled?: boolean;
+    smartBotProfiles?: boolean;
     profiles?: Record<string, boolean>;
     overrides?: Record<
       string,
       {
         exitRules?: Record<string, unknown>;
         match?: Record<string, unknown>;
+        modules?: Record<string, boolean>;
       }
     >;
     autoScoring?: {

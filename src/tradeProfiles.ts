@@ -16,6 +16,7 @@
 
 import { config, persistUserSettings } from './config';
 import type { ShortTermStrategyId } from './shortTermStrategies';
+import type { StrategyKey } from './strategies';
 import {
   combineAutoScore,
   computeFactorAffinities,
@@ -33,6 +34,59 @@ import {
   normalizeHwrQualityFilter,
   type HighWinRateQualityFilter,
 } from './hwrQualityFilter';
+
+/** Per-profile strategy-module allowlist (Smart Bot Profiles ON). */
+export type TradeProfileModules = Partial<Record<StrategyKey, boolean>>;
+
+/** Shared safety / sizing modules most micro-bots keep when selectively enabled. */
+const CORE_SAFETY_MODULES: TradeProfileModules = {
+  anti_rug_honeypot: true,
+  sniper_bundler_filters: true,
+  volume_liquidity_filters: true,
+  dynamic_position_sizing: true,
+  mev_protection: true,
+  min_holders_activity: true,
+  bonding_curve_health: true,
+};
+
+/** Fast scalp stack — skip heavy conviction / trend pattern modules. */
+const SCALPER_STYLE_MODULES: TradeProfileModules = {
+  ...CORE_SAFETY_MODULES,
+  smart_money_copy: true,
+  dead_market_exit: true,
+  tiered_profit_taking: true,
+  volume_spike_filter: true,
+  momentum_confirmation: true,
+  time_based_entry: true,
+  early_entry_only: true,
+  quick_scalper: true,
+  micro_scalper: true,
+  wallet_quality_scoring: true,
+};
+
+/** Trend / hold stack — patterns + conviction; no short scalp engines. */
+const TREND_STYLE_MODULES: TradeProfileModules = {
+  ...CORE_SAFETY_MODULES,
+  smart_money_copy: true,
+  ta_market_scanner: true,
+  wallet_convergence: true,
+  wallet_quality_scoring: true,
+  multi_factor_conviction: true,
+  hard_quality_gate: true,
+  confirmation_layer: true,
+  technical_levels: true,
+  chart_patterns: true,
+  pattern_structured_pullback: true,
+  pattern_bull_flag: true,
+  pattern_trend_continuation: true,
+  pattern_volume_dryup_return: true,
+  tiered_profit_taking: true,
+  dead_market_exit: true,
+  rebuy_on_dip: true,
+  smart_money_flow_weighting: true,
+  market_session_filter: true,
+  time_based_entry: true,
+};
 
 export type {
   AutoScoringConfig,
@@ -191,6 +245,12 @@ export interface TradeProfileMatchRules {
 export type TradeProfileParamOverride = {
   exitRules?: Partial<TradeProfileExitRules>;
   match?: Partial<TradeProfileMatchRules>;
+  /**
+   * Per-profile module mask (Smart Bot Profiles).
+   * Merged onto catalog defaults. `true` = use when globally ON;
+   * `false` = never for this profile. Empty/missing on Default = inherit all.
+   */
+  modules?: TradeProfileModules;
 };
 
 export interface TradeProfileDefinition {
@@ -210,6 +270,12 @@ export interface TradeProfileDefinition {
   defaultEnabled: boolean;
   match: TradeProfileMatchRules;
   exitRules: TradeProfileExitRules;
+  /**
+   * Curated module allowlist for Smart Bot Profiles mode.
+   * Empty/missing = inherit all globally ON modules (Default).
+   * When set: only keys with `true` participate (∩ global master ON).
+   */
+  modules?: TradeProfileModules;
 }
 
 /**
@@ -307,6 +373,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     defaultEnabled: true,
     match: { always: true },
     exitRules: {},
+    // Empty = inherit all globally ON modules (even when Smart Bot Profiles is ON)
   },
 
   // ── 1. Scalper ───────────────────────────────────────────────────────────
@@ -352,6 +419,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       aggressiveDeadMarket: true,
       deadVolumeMinHoldMinutes: 3,
     },
+    modules: { ...SCALPER_STYLE_MODULES },
   },
 
   // ── 2. Dip Buyer ─────────────────────────────────────────────────────────
@@ -398,6 +466,24 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingStopPct: 14,
       trailingActivationProfit: 35,
       sizeMultiplier: 1.1,
+    },
+    modules: {
+      ...CORE_SAFETY_MODULES,
+      smart_money_copy: true,
+      ta_market_scanner: true,
+      wallet_quality_scoring: true,
+      multi_factor_conviction: true,
+      post_run_dip: true,
+      technical_levels: true,
+      chart_patterns: true,
+      pattern_volume_dryup_return: true,
+      pattern_falling_wedge: true,
+      pattern_structured_pullback: true,
+      confirmation_layer: true,
+      smart_money_flow_weighting: true,
+      tiered_profit_taking: true,
+      dead_market_exit: true,
+      rebuy_on_dip: true,
     },
   },
 
@@ -446,6 +532,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingActivationProfit: 5,
       sizeMultiplier: 1.0,
     },
+    modules: { ...TREND_STYLE_MODULES },
   },
 
   // ── 3. Migration Sniper ──────────────────────────────────────────────────
@@ -494,6 +581,26 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       shortTermStrategyId: 'post_migration_scalp',
       overrideScalpParams: true,
       sizeMultiplier: 1.15,
+    },
+    modules: {
+      ...CORE_SAFETY_MODULES,
+      smart_money_copy: true,
+      migration_priority: true,
+      near_migration_curve: true,
+      early_curve_smart_money: true,
+      migration_sniper: true,
+      post_migration_scalp: true,
+      volume_spike_filter: true,
+      momentum_confirmation: true,
+      time_based_entry: true,
+      early_entry_only: true,
+      wallet_quality_scoring: true,
+      smart_money_flow_weighting: true,
+      chart_patterns: true,
+      pattern_bull_flag: true,
+      tiered_profit_taking: true,
+      dead_market_exit: true,
+      quick_scalper: true,
     },
   },
 
@@ -552,6 +659,29 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingActivationProfit: 22,
       sizeMultiplier: 0.7,
     },
+    modules: {
+      ...CORE_SAFETY_MODULES,
+      smart_money_copy: true,
+      ta_market_scanner: true,
+      wallet_convergence: true,
+      wallet_quality_scoring: true,
+      multi_factor_conviction: true,
+      hard_quality_gate: true,
+      elite_convergence: true,
+      profit_protected: true,
+      confirmation_layer: true,
+      technical_levels: true,
+      chart_patterns: true,
+      pattern_volume_dryup_return: true,
+      pattern_falling_wedge: true,
+      pattern_structured_pullback: true,
+      pattern_bull_flag: true,
+      pattern_trend_continuation: true,
+      smart_money_flow_weighting: true,
+      market_session_filter: true,
+      tiered_profit_taking: true,
+      dead_market_exit: true,
+    },
   },
 
   // ── 5. Momentum Burst ────────────────────────────────────────────────────
@@ -596,6 +726,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       momentumFailDropPct: 6,
       sizeMultiplier: 0.9,
     },
+    modules: {
+      ...SCALPER_STYLE_MODULES,
+      momentum_burst: true,
+      volume_spike_filter: true,
+      chart_patterns: true,
+      pattern_bull_flag: true,
+    },
   },
 
   // ── 6. Steady Compounder ─────────────────────────────────────────────────
@@ -639,6 +776,12 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingActivationProfit: 4,
       sizeMultiplier: 1.0,
     },
+    modules: {
+      ...TREND_STYLE_MODULES,
+      hard_quality_gate: true,
+      profit_protected: true,
+      social_sentiment_filter: true,
+    },
   },
 
   // ── 7. Reversal Scalper ──────────────────────────────────────────────────
@@ -681,6 +824,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       hardTimeLimitSecMax: 160,
       momentumFailDropPct: 8,
       sizeMultiplier: 0.7,
+    },
+    modules: {
+      ...SCALPER_STYLE_MODULES,
+      reversal_scalp: true,
+      chart_patterns: true,
+      pattern_falling_wedge: true,
+      technical_levels: true,
     },
   },
 
@@ -727,11 +877,31 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingActivationProfit: 10,
       sizeMultiplier: 1.0,
     },
+    modules: {
+      ...CORE_SAFETY_MODULES,
+      smart_money_copy: true,
+      wallet_convergence: true,
+      wallet_quality_scoring: true,
+      multi_factor_conviction: true,
+      smart_money_flow_weighting: true,
+      confirmation_layer: true,
+      chart_patterns: true,
+      pattern_trend_continuation: true,
+      pattern_falling_wedge: true,
+      tiered_profit_taking: true,
+      dead_market_exit: true,
+      time_based_entry: true,
+    },
   },
 ] as const;
 
 export interface TradeProfileRuntimeState {
   enabled: boolean;
+  /**
+   * When true, each profile uses its curated module allowlist ∩ global master ON.
+   * Default false = legacy shared modules for all profiles.
+   */
+  smartBotProfiles: boolean;
   profiles: Record<TradeProfileId, boolean>;
   /** User edits on top of official catalog defaults (per profile) */
   overrides?: Partial<Record<TradeProfileId, TradeProfileParamOverride>>;
@@ -893,6 +1063,15 @@ function mergeMatchRules(
   return merged;
 }
 
+function mergeModules(
+  base: TradeProfileModules | undefined,
+  overlay?: TradeProfileModules | null
+): TradeProfileModules | undefined {
+  if (!base && !overlay) return undefined;
+  const merged: TradeProfileModules = { ...(base || {}), ...(overlay || {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 /** Official catalog entry + persisted user overrides */
 export function resolveTradeProfileDefinition(
   id: TradeProfileId | string | null | undefined
@@ -903,7 +1082,8 @@ export function resolveTradeProfileDefinition(
   const hasOverrides = Boolean(
     ov &&
       ((ov.exitRules && Object.keys(ov.exitRules).length > 0) ||
-        (ov.match && Object.keys(ov.match).length > 0))
+        (ov.match && Object.keys(ov.match).length > 0) ||
+        (ov.modules && Object.keys(ov.modules).length > 0))
   );
   let match = mergeMatchRules(catalog.match, ov?.match);
   // HWR: Quality Filter is source of truth for technical floors when present
@@ -924,6 +1104,7 @@ export function resolveTradeProfileDefinition(
     ...catalog,
     match,
     exitRules: mergeExitRules(catalog.exitRules, ov?.exitRules),
+    modules: mergeModules(catalog.modules, ov?.modules),
     hasOverrides,
   };
 }
@@ -939,6 +1120,7 @@ function defaultRuntimeState(): TradeProfileRuntimeState {
   }
   return {
     enabled: true,
+    smartBotProfiles: false,
     profiles,
     overrides: {},
     autoScoring: { ...DEFAULT_AUTO_SCORING, weights: { ...DEFAULT_AUTO_SCORING.weights } },
@@ -946,7 +1128,7 @@ function defaultRuntimeState(): TradeProfileRuntimeState {
 }
 
 function ensureState(): TradeProfileRuntimeState {
-  const existing = config.tradeProfiles;
+  const existing = config.tradeProfiles as TradeProfileRuntimeState | undefined;
   if (!existing || typeof existing !== 'object') {
     const fresh = defaultRuntimeState();
     writeTradeProfilesState(fresh);
@@ -955,6 +1137,10 @@ function ensureState(): TradeProfileRuntimeState {
 
   const enabled =
     typeof existing.enabled === 'boolean' ? existing.enabled : true;
+  const smartBotProfiles =
+    typeof existing.smartBotProfiles === 'boolean'
+      ? existing.smartBotProfiles
+      : false;
   const profiles: Record<string, boolean> =
     existing.profiles && typeof existing.profiles === 'object'
       ? { ...existing.profiles }
@@ -989,6 +1175,7 @@ function ensureState(): TradeProfileRuntimeState {
 
   const state: TradeProfileRuntimeState = {
     enabled,
+    smartBotProfiles,
     profiles: profiles as Record<TradeProfileId, boolean>,
     overrides,
     autoScoring,
@@ -1004,8 +1191,122 @@ export function getTradeProfileDefinition(
   return hit ?? TRADE_PROFILE_CATALOG[0];
 }
 
+/** Smart Bot Profiles master switch — default OFF = legacy shared modules. */
+export function isSmartBotProfilesEnabled(): boolean {
+  return ensureState().smartBotProfiles === true;
+}
+
+export function setSmartBotProfilesEnabled(
+  enabled: boolean
+): TradeProfileRuntimeState {
+  const state = ensureState();
+  state.smartBotProfiles = Boolean(enabled);
+  persistUserSettings();
+  console.log(
+    `[trade-profiles] Smart Bot Profiles ${state.smartBotProfiles ? 'ON (micro-bots)' : 'OFF (legacy shared modules)'}`
+  );
+  return state;
+}
+
+/**
+ * Resolved module mask for a profile (catalog + overrides).
+ * Empty / missing = inherit-all (Default behaviour).
+ */
+export function resolveProfileModules(
+  profileId: string | null | undefined
+): TradeProfileModules | undefined {
+  if (!profileId) return undefined;
+  return resolveTradeProfileDefinition(profileId).modules;
+}
+
+/**
+ * Whether a profile allowlist permits this strategy key.
+ * Inherit-all when mask empty/missing. Allowlist otherwise (`true` required).
+ */
+export function profileAllowsModule(
+  profileId: string | null | undefined,
+  key: StrategyKey
+): boolean {
+  const modules = resolveProfileModules(profileId);
+  if (!modules || Object.keys(modules).length === 0) return true;
+  return modules[key] === true;
+}
+
+/**
+ * Effective modules for UI/tooltip: profile allowlist ∩ globally ON.
+ * When Smart Bot OFF → shared master note. When inherit → all enabled master.
+ */
+export function listEffectiveModulesForProfile(
+  profileId: string | null | undefined
+): {
+  smartBotProfiles: boolean;
+  mode: 'shared_master' | 'inherit_all' | 'allowlist';
+  modules: Array<{ key: StrategyKey; name: string }>;
+} {
+  const smartBotProfiles = isSmartBotProfilesEnabled();
+  let isEnabled: (key: StrategyKey) => boolean = () => true;
+  let nameFor: (key: StrategyKey) => string = (k) => k;
+  try {
+    const strat = require('./strategies') as typeof import('./strategies');
+    isEnabled = (k) => strat.isStrategyEnabledGlobal(k);
+    nameFor = (k) => strat.getStrategyDefinition(k)?.name || k;
+  } catch {
+    /* bootstrap */
+  }
+
+  if (!smartBotProfiles) {
+    return { smartBotProfiles, mode: 'shared_master', modules: [] };
+  }
+
+  const mask = resolveProfileModules(profileId);
+  if (!mask || Object.keys(mask).length === 0) {
+    return { smartBotProfiles, mode: 'inherit_all', modules: [] };
+  }
+
+  const modules: Array<{ key: StrategyKey; name: string }> = [];
+  for (const [rawKey, on] of Object.entries(mask)) {
+    if (on !== true) continue;
+    const key = rawKey as StrategyKey;
+    if (!isEnabled(key)) continue;
+    modules.push({ key, name: nameFor(key) });
+  }
+  modules.sort((a, b) => a.name.localeCompare(b.name));
+  return { smartBotProfiles, mode: 'allowlist', modules };
+}
+
+/** Active profile gate for nested isStrategyEnabled calls (Smart Bot ON). */
+const strategyProfileGateStack: Array<string | null | undefined> = [];
+
+export function getActiveStrategyProfileGate(): string | null | undefined {
+  if (strategyProfileGateStack.length === 0) return undefined;
+  return strategyProfileGateStack[strategyProfileGateStack.length - 1];
+}
+
+export function pushStrategyProfileGate(
+  profileId: string | null | undefined
+): void {
+  strategyProfileGateStack.push(profileId);
+}
+
+export function popStrategyProfileGate(): void {
+  strategyProfileGateStack.pop();
+}
+
+export async function withStrategyProfileGateAsync<T>(
+  profileId: string | null | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  pushStrategyProfileGate(profileId);
+  try {
+    return await fn();
+  } finally {
+    popStrategyProfileGate();
+  }
+}
+
 export function getTradeProfilesStatus(): {
   enabled: boolean;
+  smartBotProfiles: boolean;
   profiles: Array<
     TradeProfileDefinition & {
       enabled: boolean;
@@ -1013,6 +1314,8 @@ export function getTradeProfilesStatus(): {
       hasOverrides: boolean;
       officialExitRules: TradeProfileExitRules;
       officialMatch: TradeProfileMatchRules;
+      officialModules?: TradeProfileModules;
+      effectiveModules: ReturnType<typeof listEffectiveModulesForProfile>;
     }
   >;
   active: Array<{ id: TradeProfileId; name: string; icon: string; color: string }>;
@@ -1033,10 +1336,13 @@ export function getTradeProfilesStatus(): {
       active: state.enabled && state.profiles[p.id] !== false,
       officialExitRules: { ...p.exitRules },
       officialMatch: { ...p.match },
+      officialModules: p.modules ? { ...p.modules } : undefined,
+      effectiveModules: listEffectiveModulesForProfile(p.id),
     };
   });
   return {
     enabled: state.enabled,
+    smartBotProfiles: state.smartBotProfiles === true,
     profiles,
     active: profiles
       .filter((p) => p.active)
@@ -1148,10 +1454,17 @@ export function setTradeProfileEnabled(
 
 export function updateTradeProfilesConfig(partial: {
   enabled?: boolean;
+  smartBotProfiles?: boolean;
   profiles?: Partial<Record<TradeProfileId, boolean>>;
 }): ReturnType<typeof getTradeProfilesStatus> {
   const state = ensureState();
   if (partial.enabled != null) state.enabled = Boolean(partial.enabled);
+  if (partial.smartBotProfiles != null) {
+    state.smartBotProfiles = Boolean(partial.smartBotProfiles);
+    console.log(
+      `[trade-profiles] Smart Bot Profiles ${state.smartBotProfiles ? 'ON (micro-bots)' : 'OFF (legacy shared modules)'}`
+    );
+  }
   if (partial.profiles) {
     for (const [id, on] of Object.entries(partial.profiles)) {
       if (!ALL_IDS.includes(id as TradeProfileId)) continue;
@@ -1179,6 +1492,10 @@ export function updateTradeProfileParams(
   const prev = state.overrides[id] || {};
   const nextExit = { ...(prev.exitRules || {}), ...(patch.exitRules || {}) };
   const nextMatch = { ...(prev.match || {}), ...(patch.match || {}) };
+  const nextModules = {
+    ...(prev.modules || {}),
+    ...(patch.modules || {}),
+  };
   // Deep-merge qualityFilter nested object
   if (patch.match?.qualityFilter || prev.match?.qualityFilter) {
     nextMatch.qualityFilter = normalizeHwrQualityFilter({
@@ -1198,9 +1515,13 @@ export function updateTradeProfileParams(
       delete (nextMatch as Record<string, unknown>)[k];
     }
   }
+  for (const [k, v] of Object.entries(nextModules)) {
+    if (v == null) delete (nextModules as Record<string, unknown>)[k];
+  }
   state.overrides[id] = {
     exitRules: nextExit,
     match: nextMatch,
+    modules: Object.keys(nextModules).length > 0 ? nextModules : undefined,
   };
   persistUserSettings();
   console.log(`[trade-profiles] Updated params for ${id}`);
@@ -2149,18 +2470,27 @@ function buildAssignmentFromDef(
  * When auto-scoring is ON: weighted factor scores + min threshold (may skip).
  * When OFF: legacy match-rule ranking (no skip-below-min).
  * forceProfileId overrides scoring when that profile is ON.
+ *
+ * `silent: true` skips decision log / console (used for early Smart Bot soft-score).
  */
 export function assignTradeProfile(
-  ctx: TradeProfileMatchContext
+  ctx: TradeProfileMatchContext,
+  opts?: { silent?: boolean }
 ): TradeProfileAssignment {
+  const silent = opts?.silent === true;
+  const finish = (a: TradeProfileAssignment): TradeProfileAssignment => {
+    if (!silent) {
+      logTradeProfileAssignment(a, ctx);
+      recordAssignmentDecision(a, ctx);
+    }
+    return a;
+  };
+
   const state = ensureState();
   const auto = normalizeAutoScoringConfig(state.autoScoring);
 
   if (!state.enabled) {
-    const a = legacyDefaultAssignment('multi-profile off');
-    logTradeProfileAssignment(a, ctx);
-    recordAssignmentDecision(a, ctx);
-    return a;
+    return finish(legacyDefaultAssignment('multi-profile off'));
   }
 
   const candidates = TRADE_PROFILE_CATALOG.filter(
@@ -2171,28 +2501,29 @@ export function assignTradeProfile(
   if (auto.forceProfileId) {
     const forced = candidates.find((p) => p.id === auto.forceProfileId);
     if (forced) {
-      const a = buildAssignmentFromDef(forced, ctx, {
-        score: 100,
-        reason: `forced profile · ${forced.name}`,
-        autoScored: auto.enabled,
-        forced: true,
-        topScores: [
-          {
-            id: forced.id,
-            name: forced.name,
-            icon: forced.icon,
-            score: 100,
-            reason: 'forced',
-          },
-        ],
-      });
-      logTradeProfileAssignment(a, ctx);
-      recordAssignmentDecision(a, ctx);
-      return a;
+      return finish(
+        buildAssignmentFromDef(forced, ctx, {
+          score: 100,
+          reason: `forced profile · ${forced.name}`,
+          autoScored: auto.enabled,
+          forced: true,
+          topScores: [
+            {
+              id: forced.id,
+              name: forced.name,
+              icon: forced.icon,
+              score: 100,
+              reason: 'forced',
+            },
+          ],
+        })
+      );
     }
-    console.log(
-      `[trade-profiles] Force profile ${auto.forceProfileId} is OFF — falling back to scoring`
-    );
+    if (!silent) {
+      console.log(
+        `[trade-profiles] Force profile ${auto.forceProfileId} is OFF — falling back to scoring`
+      );
+    }
   }
 
   if (!auto.enabled) {
@@ -2212,26 +2543,23 @@ export function assignTradeProfile(
       score: Math.round(x.score * 10) / 10,
       reason: x.reason,
     }));
-    logTopScores(ctx, topScores, false);
+    if (!silent) logTopScores(ctx, topScores, false);
 
     const winner = scored[0];
     if (!winner) {
       const a = legacyDefaultAssignment('no profile matched');
       a.topScores = topScores;
-      logTradeProfileAssignment(a, ctx);
-      recordAssignmentDecision(a, ctx);
-      return a;
+      return finish(a);
     }
 
-    const a = buildAssignmentFromDef(winner.def, ctx, {
-      score: Math.round(winner.score * 10) / 10,
-      reason: winner.reason,
-      autoScored: false,
-      topScores,
-    });
-    logTradeProfileAssignment(a, ctx);
-    recordAssignmentDecision(a, ctx);
-    return a;
+    return finish(
+      buildAssignmentFromDef(winner.def, ctx, {
+        score: Math.round(winner.score * 10) / 10,
+        reason: winner.reason,
+        autoScored: false,
+        topScores,
+      })
+    );
   }
 
   // Automatic scoring path
@@ -2285,16 +2613,14 @@ export function assignTradeProfile(
     score: x.score,
     reason: x.reason,
   }));
-  logTopScores(ctx, topScores, true);
+  if (!silent) logTopScores(ctx, topScores, true);
 
   const winner = breakdowns.find((b) => b.score > 0);
   if (!winner) {
     const a = legacyDefaultAssignment('no profile matched (auto)');
     a.topScores = topScores;
     a.autoScored = true;
-    logTradeProfileAssignment(a, ctx);
-    recordAssignmentDecision(a, ctx);
-    return a;
+    return finish(a);
   }
 
   if (
@@ -2316,24 +2642,24 @@ export function assignTradeProfile(
       autoScored: true,
       topScores,
     };
-    console.log(
-      `[trade-profiles] SKIP ${ctx.symbol || 'token'} — ${skip.skipReason}`
-    );
-    logTopScores(ctx, topScores, true);
-    recordAssignmentDecision(skip, ctx);
-    return skip;
+    if (!silent) {
+      console.log(
+        `[trade-profiles] SKIP ${ctx.symbol || 'token'} — ${skip.skipReason}`
+      );
+      logTopScores(ctx, topScores, true);
+    }
+    return finish(skip);
   }
 
   const def = resolveTradeProfileDefinition(winner.profileId);
-  const a = buildAssignmentFromDef(def, ctx, {
-    score: winner.score,
-    reason: winner.reason,
-    autoScored: true,
-    topScores,
-  });
-  logTradeProfileAssignment(a, ctx);
-  recordAssignmentDecision(a, ctx);
-  return a;
+  return finish(
+    buildAssignmentFromDef(def, ctx, {
+      score: winner.score,
+      reason: winner.reason,
+      autoScored: true,
+      topScores,
+    })
+  );
 }
 
 function logTopScores(
@@ -2547,6 +2873,9 @@ export function hydrateTradeProfilesFromSettings(
   }
   const s = saved.tradeProfiles;
   if (typeof s.enabled === 'boolean') base.enabled = s.enabled;
+  if (typeof s.smartBotProfiles === 'boolean') {
+    base.smartBotProfiles = s.smartBotProfiles;
+  }
   if (s.profiles && typeof s.profiles === 'object') {
     const legacyMig = (s.profiles as Record<string, boolean>).migration;
     if (

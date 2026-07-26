@@ -1784,12 +1784,14 @@ export function createServer(): express.Application {
     ensureTradeProfilesInitialized();
     const body = (req.body ?? {}) as {
       enabled?: boolean;
+      smartBotProfiles?: boolean;
       profiles?: Record<string, boolean>;
       id?: string;
       profileEnabled?: boolean;
       params?: {
         exitRules?: Record<string, unknown>;
         match?: Record<string, unknown>;
+        modules?: Record<string, boolean>;
       };
       resetParams?: boolean | 'all';
       autoScoring?: Record<string, unknown>;
@@ -1814,6 +1816,9 @@ export function createServer(): express.Application {
           match: body.params.match as
             | import('./tradeProfiles').TradeProfileMatchRules
             | undefined,
+          modules: body.params.modules as
+            | import('./tradeProfiles').TradeProfileModules
+            | undefined,
         }
       );
     } else if (body.id != null && typeof body.profileEnabled === 'boolean') {
@@ -1824,6 +1829,7 @@ export function createServer(): express.Application {
     } else {
       updateTradeProfilesConfig({
         enabled: body.enabled,
+        smartBotProfiles: body.smartBotProfiles,
         profiles: body.profiles as
           | Partial<Record<import('./tradeProfiles').TradeProfileId, boolean>>
           | undefined,
