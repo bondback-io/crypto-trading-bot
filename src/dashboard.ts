@@ -4760,20 +4760,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <span>Smart Bot Profiles</span>
             </label>
           </div>
-          <div class="card mt-3 mb-3" id="tp-tuning-checklist-card" style="background:#0f172a;border:1px solid #334155;padding:0.75rem">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <div class="text-sm font-semibold text-slate-200">Tuning checklist</div>
-              <button type="button" class="btn btn-secondary text-xs" onclick="resetTuningChecklist()" title="Clear all checklist ticks">Reset checklist</button>
+          <details class="card mt-3 mb-3 tp-tuning-details" id="tp-tuning-checklist-card" style="background:#0f172a;border:1px solid #334155;padding:0.75rem">
+            <summary class="tp-tuning-summary">
+              <span class="tp-tuning-summary-main">
+                <span class="tp-tuning-chevron" aria-hidden="true">▶</span>
+                <span class="text-sm font-semibold text-slate-200">Tuning checklist</span>
+                <span class="mint text-xs font-normal">click to expand</span>
+              </span>
+              <button type="button" class="btn btn-secondary text-xs" onclick="event.preventDefault();event.stopPropagation();resetTuningChecklist()" title="Clear all checklist ticks">Reset checklist</button>
+            </summary>
+            <div class="tp-tuning-body mt-2">
+              <p class="text-xs text-slate-400 mb-2">Follow this for accurate Smart Bot testing. Check items off as you go (saved in this browser).</p>
+              <div class="text-xs font-semibold text-slate-300 mb-1">Before testing</div>
+              <div class="tp-check-list" id="tp-check-before"></div>
+              <div class="text-xs font-semibold text-slate-300 mb-1 mt-3">After ~15–20 closes per busy profile</div>
+              <div class="tp-check-list" id="tp-check-after"></div>
+              <div class="flex flex-wrap gap-2 mt-2">
+                <button type="button" class="btn btn-secondary text-xs" onclick="document.getElementById('trade-profiles-overview-card')?.scrollIntoView({behavior:'smooth',block:'start'})">Jump to scoreboard</button>
+              </div>
             </div>
-            <p class="text-xs text-slate-400 mb-2">Follow this for accurate Smart Bot testing. Check items off as you go (saved in this browser).</p>
-            <div class="text-xs font-semibold text-slate-300 mb-1">Before testing</div>
-            <div class="tp-check-list" id="tp-check-before"></div>
-            <div class="text-xs font-semibold text-slate-300 mb-1 mt-3">After ~15–20 closes per busy profile</div>
-            <div class="tp-check-list" id="tp-check-after"></div>
-            <div class="flex flex-wrap gap-2 mt-2">
-              <button type="button" class="btn btn-secondary text-xs" onclick="document.getElementById('trade-profiles-overview-card')?.scrollIntoView({behavior:'smooth',block:'start'})">Jump to scoreboard</button>
-            </div>
-          </div>
+          </details>
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div style="min-width:0;flex:1">
               <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
