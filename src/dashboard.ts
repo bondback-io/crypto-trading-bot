@@ -4309,15 +4309,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
-        <div class="mt-3 pt-3 border-t border-slate-700/80">
-          <div class="toggle-row">
-          <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
-          <div id="strict-intensity-row" class="mt-2">
-
-            <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
-          </div>
-          <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
-        </div>
         <div class="mint mt-2" id="risk-status">—</div>
       </div>
 
@@ -11102,11 +11093,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     // Risk-level max concurrent positions (RISK_LEVEL_PRESETS.filters.maxConcurrentPositions)
     // Synced into BT "Max concurrent" — NOT a total-trade budget for the lookback.
-    const BT_RISK_MAX_TRADES = { low: 6, medium: 12, high: 20, degen: 50 };
+    const BT_RISK_MAX_TRADES = { on: 12, off: 40 };
 
     function btMaxTradesForRiskLevel(level, cfg) {
       const key = String(level || 'current').toLowerCase();
-      if (key === 'low' || key === 'medium' || key === 'high' || key === 'degen' || key === 'off') {
+      if (key === 'on' || key === 'off') {
         return BT_RISK_MAX_TRADES[key];
       }
       const live =
@@ -11114,7 +11105,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         (cfg && cfg.riskLevelSummary && cfg.riskLevelSummary.active &&
           cfg.riskLevelSummary.active.maxConcurrentPositions) ||
         (_lastConfig && _lastConfig.filters && _lastConfig.filters.maxConcurrentPositions) ||
-        BT_RISK_MAX_TRADES[String((cfg && cfg.riskLevel) || (_lastConfig && _lastConfig.riskLevel) || 'medium')] ||
+        BT_RISK_MAX_TRADES[String((cfg && cfg.riskLevel) || (_lastConfig && _lastConfig.riskLevel) || 'on')] ||
         12;
       return Math.max(1, Math.min(80, Number(live) || 12));
     }
@@ -12468,43 +12459,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function formatRiskLevelLabel(level) {
-      const raw = String(level || 'medium').toLowerCase();
-      if (raw === 'degen') return 'Degen';
+      const raw = String(level || 'on').toLowerCase();
       if (raw === 'off') return 'Off';
+      if (raw === 'on') return 'On';
       return raw.charAt(0).toUpperCase() + raw.slice(1);
     }
 
     function getRiskBadgeState(cfg) {
-      const level = String((cfg && cfg.riskLevel) || 'medium').toLowerCase();
+      const level = String((cfg && cfg.riskLevel) || 'on').toLowerCase();
       const label = formatRiskLevelLabel(level);
       const titles = {
-        low: 'Low risk — tight filters, smaller size, stricter stops',
-        medium: 'Medium risk — balanced recommended default',
-        high: 'High risk — larger size, looser filters (use with caution)',
-        degen: 'Degen — max entries, basic rug/honeypot only + hard floors',
+        on: 'Risk On — lean floors + Copy/Scanner; enable quality modules manually',
         off: 'Risk OFF — Copy + Scanner only; no risk modules or hard floors',
       };
-      const tone =
-        level === 'low'
-          ? 'risk-badge-low'
-          : level === 'high'
-            ? 'risk-badge-high'
-            : level === 'degen'
-              ? 'risk-badge-degen'
-              : 'risk-badge-medium';
-      const icon =
-        level === 'low'
-          ? 'riskLow'
-          : level === 'high'
-            ? 'riskHigh'
-            : level === 'degen'
-              ? 'riskDegen'
-              : 'riskMed';
+      const tone = level === 'off' ? 'risk-badge-high' : 'risk-badge-medium';
+      const icon = level === 'off' ? 'riskHigh' : 'riskMed';
       return {
         label,
         tone,
         icon,
-        title: titles[level] || titles.medium,
+        title: titles[level] || titles.on,
       };
     }
 
@@ -12776,7 +12750,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function setRiskLevel(level) {
       if (level === 'off') {
         const ok = confirm(
-          '⚠️ Risk OFF — ops-only soak (Copy + Scanner).\nNo hard floors / quality gates.\nMax concurrent opens ≥ 30.\nOps rejects only (holding, denied, pause, balance).\n\nApply Risk OFF?'
+          '⚠️ Risk OFF — ops-only soak (Copy + Scanner).\\nNo hard floors / quality gates.\\nMax concurrent opens ≥ 30.\\nOps rejects only (holding, denied, pause, balance).\\n\\nApply Risk OFF?'
         );
         if (!ok) return;
       }
