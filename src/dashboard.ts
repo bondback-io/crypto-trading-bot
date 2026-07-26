@@ -319,6 +319,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       max-width: 18rem;
       margin-left: auto;
     }
+    .strategy-io-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      align-items: center;
+      margin-top: 0.35rem;
+    }
+    .strategy-io-btns .btn {
+      padding: 0.28rem 0.55rem;
+      font-size: 0.72rem;
+      line-height: 1.2;
+    }
+    .strategy-io-status {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 0.25rem;
+      min-height: 1em;
+    }
+    .strategy-io-status.is-ok { color: #6ee7b7; }
+    .strategy-io-status.is-err { color: #fca5a5; }
     .strategies-count-hot {
       cursor: help;
       text-decoration: underline dotted rgba(148,163,184,.55);
@@ -854,6 +874,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .strategy-control-head-meta #strategies-profile {
         margin-left: 0;
         max-width: none;
+      }
+      .strategy-io-btns {
+        width: 100%;
+      }
+      .strategy-io-btns .btn {
+        flex: 1 1 calc(50% - 0.2rem);
+        min-width: 0;
+        justify-content: center;
       }
       .strategy-recipe-banner {
         flex-direction: column;
@@ -4506,6 +4534,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="strategy-control-head">
           <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
+            <div class="strategy-io-btns">
+              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download all module toggles and internal settings as JSON">Export JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles and settings from a previously exported JSON">Import JSON</button>
+              <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
+            </div>
+            <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
             <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → then enable modules one-by-one. Trade Profiles still control per-trade style.</p>
           </div>
           <div class="strategy-control-head-meta">
@@ -6612,6 +6646,80 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         alert(err.message || String(err));
       }
     }
+
+    function setStrategyIoStatus(text, kind) {
+      const el = document.getElementById('strategy-io-status');
+      if (!el) return;
+      el.textContent = text || '';
+      el.classList.toggle('is-ok', kind === 'ok');
+      el.classList.toggle('is-err', kind === 'err');
+    }
+
+    function exportStrategyModulesJson() {
+      setStrategyIoStatus('Exporting…', null);
+      const day = new Date().toISOString().slice(0, 10);
+      const a = document.createElement('a');
+      a.href = '/api/strategies/export';
+      a.download = 'strategy-modules-' + day + '.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setStrategyIoStatus('Downloaded strategy-modules-' + day + '.json', 'ok');
+    }
+
+    function triggerStrategyModulesImport() {
+      const input = document.getElementById('strategy-import-file');
+      if (input) {
+        input.value = '';
+        input.click();
+      }
+    }
+
+    async function importStrategyModulesJson(ev) {
+      const input = ev && ev.target ? ev.target : document.getElementById('strategy-import-file');
+      const file = input && input.files && input.files[0];
+      if (!file) {
+        setStrategyIoStatus('Choose a .json file first', 'err');
+        return;
+      }
+      if (!confirm('Import strategy modules from\\n' + file.name + '?\\n\\nThis applies module toggles and internal settings from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
+        input.value = '';
+        return;
+      }
+      setStrategyIoStatus('Importing…', null);
+      try {
+        const text = await file.text();
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (_) {
+          throw new Error('File is not valid JSON');
+        }
+        const data = await fetchJSON('/api/strategies/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed),
+        });
+        if (data.ok === false) {
+          throw new Error(data.error || data.message || 'Import failed');
+        }
+        renderStrategies(data);
+        window._cfgLoaded = false;
+        await refresh();
+        const msg = (data.import && data.import.message) || data.message || ('Imported · ' + (data.enabledCount || '?') + '/' + (data.totalCount || '?') + ' ON');
+        setStrategyIoStatus(msg, 'ok');
+        alert(msg);
+      } catch (err) {
+        const msg = err.message || String(err);
+        setStrategyIoStatus(msg, 'err');
+        alert('Import failed: ' + msg);
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+    window.exportStrategyModulesJson = exportStrategyModulesJson;
+    window.triggerStrategyModulesImport = triggerStrategyModulesImport;
+    window.importStrategyModulesJson = importStrategyModulesJson;
 
     function showTab(name, btn) {
       document.querySelectorAll('[data-tab-panel]').forEach(el => {

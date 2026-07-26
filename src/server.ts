@@ -1955,6 +1955,46 @@ export function createServer(): express.Application {
     res.json({ ok: true, ...getStrategiesStatus() });
   });
 
+  /** Download Strategy Control Center toggles + internal settings as JSON. */
+  app.get('/api/strategies/export', (req: Request, res: Response) => {
+    const {
+      exportStrategyModulesBundle,
+    } = require('./strategies') as typeof import('./strategies');
+    const label =
+      typeof req.query.label === 'string' && req.query.label.trim()
+        ? req.query.label.trim().slice(0, 120)
+        : undefined;
+    const bundle = exportStrategyModulesBundle({ label });
+    const day = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="strategy-modules-${day}.json"`
+    );
+    res.send(JSON.stringify(bundle, null, 2));
+  });
+
+  /** Import Strategy Control Center JSON (toggles + settings). */
+  app.post('/api/strategies/import', (req: Request, res: Response) => {
+    const {
+      importStrategyModulesBundle,
+      getStrategiesStatus,
+    } = require('./strategies') as typeof import('./strategies');
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      // Accept either raw export object or { bundle: export }
+      const payload =
+        body && typeof body === 'object' && body.bundle && typeof body.bundle === 'object'
+          ? body.bundle
+          : body;
+      const result = importStrategyModulesBundle(payload);
+      res.json({ ...getStrategiesStatus(), import: result, ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ ok: false, error: message });
+    }
+  });
+
   /**
    * Wipe data/*.json persistence files and reload code defaults.
    * Also resets paper balance/history and clears backtest history.

@@ -18,6 +18,8 @@ import {
   persistUserSettings,
   HARD_FILTER_FLOORS,
   normalizeRiskLevel,
+  applyImportedSettingsSnapshot,
+  buildPersistedSettingsSnapshot,
   type RiskLevel,
   DEFAULT_QUICK_SCALPER,
   DEFAULT_MICRO_SCALPER,
@@ -27,6 +29,8 @@ import {
   DEFAULT_POST_RUN_DIP,
   DEFAULT_CHART_PATTERNS,
 } from './config';
+import type { PersistedBotSettings } from './settingsStore';
+import { SETTINGS_VERSION } from './settingsStore';
 import { SHORT_TERM_STRATEGIES } from './shortTermStrategies';
 
 export type StrategyGroup =
@@ -3706,3 +3710,343 @@ export function getStrategiesStatus() {
     enableDeadVolumeExit: config.risk.enableDeadVolumeExit !== false,
   };
 }
+
+/** Strategy Control Center Import/Export JSON schema version. */
+export const STRATEGY_MODULES_SCHEMA_VERSION = 1 as const;
+export const STRATEGY_MODULES_KIND = 'strategy-modules' as const;
+
+export type StrategyModulesExport = {
+  schemaVersion: typeof STRATEGY_MODULES_SCHEMA_VERSION;
+  kind: typeof STRATEGY_MODULES_KIND;
+  exportedAt: string;
+  label?: string;
+  riskLevel: RiskLevel;
+  strategyRecipeMode: StrategyRecipeMode;
+  strategyRecipeRiskLevel: RiskLevel | null;
+  strategyProfile: StrategyProfileId;
+  highWinRatePresetActive: boolean;
+  /** Master ON/OFF map for every registered module. */
+  toggles: StrategyToggleMap;
+  /**
+   * Per-module summary (enabled + dedicated settings when present).
+   * Shared filter/risk/trade knobs also live under `settings` for full restore.
+   */
+  modules: Array<{
+    key: StrategyKey;
+    name: string;
+    group: StrategyGroup;
+    source: StrategySource;
+    enabled: boolean;
+    settings?: Record<string, unknown>;
+  }>;
+  /**
+   * Full internal knobs needed to restore Strategy Control Center state
+   * (filters, scalp engines, trade profiles, etc.).
+   */
+  settings: {
+    trade: Record<string, unknown>;
+    filters: Record<string, unknown>;
+    strategy: Record<string, unknown>;
+    risk: Record<string, unknown>;
+    profitStrategy: Record<string, unknown>;
+    selective: Record<string, unknown>;
+    quickScalper: Record<string, unknown>;
+    microScalper: Record<string, unknown>;
+    momentumBurst: Record<string, unknown>;
+    postMigrationScalp: Record<string, unknown>;
+    reversalScalp: Record<string, unknown>;
+    postRunDip: Record<string, unknown>;
+    technicalLevels: Record<string, unknown>;
+    chartPatterns: Record<string, unknown>;
+    bondingCurve: Record<string, unknown>;
+    mev: Record<string, unknown>;
+    marketScanner: Record<string, unknown>;
+    tradeProfiles?: PersistedBotSettings['tradeProfiles'];
+    tokenMetrics?: Record<string, unknown>;
+    convergenceWindowMs?: number;
+  };
+};
+
+function cloneModuleSettings<T>(value: T): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+/** Dedicated config blob for a module when it owns its own settings object. */
+function dedicatedModuleSettings(
+  key: StrategyKey
+): Record<string, unknown> | undefined {
+  switch (key) {
+    case 'quick_scalper':
+      return cloneModuleSettings(config.quickScalper);
+    case 'micro_scalper':
+      return cloneModuleSettings(config.microScalper);
+    case 'momentum_burst':
+      return cloneModuleSettings(config.momentumBurst);
+    case 'post_migration_scalp':
+      return cloneModuleSettings(config.postMigrationScalp);
+    case 'reversal_scalp':
+      return cloneModuleSettings(config.reversalScalp);
+    case 'post_run_dip':
+      return cloneModuleSettings(config.postRunDip);
+    case 'technical_levels':
+      return cloneModuleSettings(config.technicalLevels);
+    case 'chart_patterns':
+    case 'pattern_volume_dryup_return':
+    case 'pattern_falling_wedge':
+    case 'pattern_structured_pullback':
+    case 'pattern_bull_flag':
+    case 'pattern_trend_continuation':
+      return cloneModuleSettings({
+        ...config.chartPatterns,
+        patterns: { ...(config.chartPatterns?.patterns || {}) },
+      });
+    case 'mev_protection':
+      return cloneModuleSettings(config.mev);
+    case 'ta_market_scanner':
+      return cloneModuleSettings(config.marketScanner);
+    case 'bonding_curve_health':
+      return cloneModuleSettings(config.bondingCurve);
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Build a complete Strategy Control Center export (toggles + internal settings).
+ * Safe to re-import and fine to send to Cursor when updating Risk On defaults.
+ */
+export function exportStrategyModulesBundle(options?: {
+  label?: string;
+}): StrategyModulesExport {
+  const toggles = ensureStrategyToggles();
+  const snap = buildPersistedSettingsSnapshot();
+  const modules = STRATEGY_REGISTRY.map((s) => {
+    const dedicated = dedicatedModuleSettings(s.key);
+    return {
+      key: s.key,
+      name: s.name,
+      group: s.group,
+      source: s.source,
+      enabled: toggles[s.key] === true,
+      ...(dedicated ? { settings: dedicated } : {}),
+    };
+  });
+  return {
+    schemaVersion: STRATEGY_MODULES_SCHEMA_VERSION,
+    kind: STRATEGY_MODULES_KIND,
+    exportedAt: new Date().toISOString(),
+    ...(options?.label ? { label: options.label } : {}),
+    riskLevel: normalizeRiskLevel(config.riskLevel),
+    strategyRecipeMode: ensureStrategyRecipeMode(),
+    strategyRecipeRiskLevel:
+      config.strategyRecipeRiskLevel == null
+        ? null
+        : normalizeRiskLevel(config.strategyRecipeRiskLevel),
+    strategyProfile: (config.strategyProfile || 'custom') as StrategyProfileId,
+    highWinRatePresetActive: config.highWinRatePresetActive === true,
+    toggles: { ...toggles },
+    modules,
+    settings: {
+      trade: cloneModuleSettings(snap.trade ?? {}),
+      filters: cloneModuleSettings(snap.filters ?? {}),
+      strategy: cloneModuleSettings(snap.strategy ?? {}),
+      risk: cloneModuleSettings(snap.risk ?? {}),
+      profitStrategy: cloneModuleSettings(snap.profitStrategy ?? {}),
+      selective: cloneModuleSettings(snap.selective ?? {}),
+      quickScalper: cloneModuleSettings(snap.quickScalper ?? {}),
+      microScalper: cloneModuleSettings(snap.microScalper ?? {}),
+      momentumBurst: cloneModuleSettings(snap.momentumBurst ?? {}),
+      postMigrationScalp: cloneModuleSettings(snap.postMigrationScalp ?? {}),
+      reversalScalp: cloneModuleSettings(snap.reversalScalp ?? {}),
+      postRunDip: cloneModuleSettings(snap.postRunDip ?? {}),
+      technicalLevels: cloneModuleSettings(snap.technicalLevels ?? {}),
+      chartPatterns: cloneModuleSettings(snap.chartPatterns ?? {}),
+      bondingCurve: cloneModuleSettings(snap.bondingCurve ?? {}),
+      mev: cloneModuleSettings(snap.mev ?? {}),
+      marketScanner: cloneModuleSettings(snap.marketScanner ?? {}),
+      tradeProfiles: snap.tradeProfiles
+        ? (cloneModuleSettings(
+            snap.tradeProfiles
+          ) as PersistedBotSettings['tradeProfiles'])
+        : undefined,
+      tokenMetrics: snap.tokenMetrics
+        ? cloneModuleSettings(snap.tokenMetrics)
+        : undefined,
+      convergenceWindowMs: snap.convergenceWindowMs,
+    },
+  };
+}
+
+export type StrategyModulesImportResult = {
+  ok: true;
+  appliedToggles: number;
+  enabledCount: number;
+  totalCount: number;
+  riskLevel: RiskLevel;
+  strategyRecipeMode: StrategyRecipeMode;
+  strategyProfile: StrategyProfileId;
+  message: string;
+};
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Validate + apply a Strategy Control Center JSON export.
+ * Applies settings via the same persisted-settings path, then toggles,
+ * without calling applyRiskLevel (so imported knobs are not overwritten).
+ */
+export function importStrategyModulesBundle(
+  raw: unknown,
+  options?: { persist?: boolean; label?: string }
+): StrategyModulesImportResult {
+  if (!isPlainObject(raw)) {
+    throw new Error('Import JSON must be an object');
+  }
+  const schemaVersion = Number(raw.schemaVersion);
+  if (
+    !Number.isFinite(schemaVersion) ||
+    schemaVersion < 1 ||
+    schemaVersion > STRATEGY_MODULES_SCHEMA_VERSION
+  ) {
+    throw new Error(
+      `Unsupported schemaVersion (expected 1–${STRATEGY_MODULES_SCHEMA_VERSION})`
+    );
+  }
+  if (raw.kind != null && raw.kind !== STRATEGY_MODULES_KIND) {
+    throw new Error(
+      `Unexpected kind "${String(raw.kind)}" (expected "${STRATEGY_MODULES_KIND}")`
+    );
+  }
+
+  const togglesRaw = raw.toggles;
+  const settingsRaw = raw.settings;
+  const modulesRaw = raw.modules;
+
+  if (!isPlainObject(togglesRaw) && !isPlainObject(settingsRaw) && !Array.isArray(modulesRaw)) {
+    throw new Error(
+      'Import JSON must include toggles, settings, and/or modules'
+    );
+  }
+
+  // Build toggle map: prefer top-level toggles; fall back to modules[].enabled
+  const partialToggles: Partial<StrategyToggleMap> = {};
+  if (isPlainObject(togglesRaw)) {
+    for (const [k, v] of Object.entries(togglesRaw)) {
+      if (isStrategyKey(k) && typeof v === 'boolean') partialToggles[k] = v;
+    }
+  } else if (Array.isArray(modulesRaw)) {
+    for (const row of modulesRaw) {
+      if (!isPlainObject(row)) continue;
+      const key = String(row.key || '');
+      if (isStrategyKey(key) && typeof row.enabled === 'boolean') {
+        partialToggles[key] = row.enabled;
+      }
+    }
+  }
+
+  // Apply internal settings first (replace present sections), then toggles.
+  // Do not set trading mode / paper / discovery — strategy control center only.
+  if (isPlainObject(settingsRaw)) {
+    const snap: PersistedBotSettings = {
+      version: SETTINGS_VERSION,
+      updatedAt: Date.now(),
+    };
+    const copyIfObj = (key: keyof PersistedBotSettings) => {
+      const v = settingsRaw[key as string];
+      if (isPlainObject(v)) {
+        (snap as unknown as Record<string, unknown>)[key as string] = v;
+      }
+    };
+    for (const key of [
+      'trade',
+      'filters',
+      'strategy',
+      'risk',
+      'profitStrategy',
+      'selective',
+      'quickScalper',
+      'microScalper',
+      'momentumBurst',
+      'postMigrationScalp',
+      'reversalScalp',
+      'postRunDip',
+      'technicalLevels',
+      'chartPatterns',
+      'bondingCurve',
+      'mev',
+      'marketScanner',
+      'tradeProfiles',
+      'tokenMetrics',
+    ] as const) {
+      copyIfObj(key);
+    }
+    if (typeof settingsRaw.convergenceWindowMs === 'number') {
+      snap.convergenceWindowMs = settingsRaw.convergenceWindowMs;
+    }
+    applyImportedSettingsSnapshot(snap, 'merge');
+  }
+
+  // Risk level field only — do not re-run applyRiskLevel (would wipe knobs).
+  if (raw.riskLevel != null) {
+    config.riskLevel = normalizeRiskLevel(raw.riskLevel as RiskLevel);
+  }
+
+  if (Object.keys(partialToggles).length > 0) {
+    updateStrategyToggles(partialToggles, {
+      persist: false,
+      syncUnderlying: true,
+      markCustom: false,
+    });
+  } else {
+    syncUnderlyingFlagsFromToggles(ensureStrategyToggles());
+  }
+
+  if (raw.strategyRecipeMode === 'synced' || raw.strategyRecipeMode === 'custom') {
+    config.strategyRecipeMode = raw.strategyRecipeMode;
+  } else if (Object.keys(partialToggles).length > 0) {
+    config.strategyRecipeMode = 'custom';
+  }
+
+  if (raw.strategyRecipeRiskLevel === null) {
+    config.strategyRecipeRiskLevel = null;
+  } else if (raw.strategyRecipeRiskLevel != null) {
+    config.strategyRecipeRiskLevel = normalizeRiskLevel(
+      raw.strategyRecipeRiskLevel as RiskLevel
+    );
+  }
+
+  if (isStrategyProfileId(String(raw.strategyProfile || ''))) {
+    config.strategyProfile = raw.strategyProfile as StrategyProfileId;
+  }
+  if (typeof raw.highWinRatePresetActive === 'boolean') {
+    config.highWinRatePresetActive = raw.highWinRatePresetActive;
+  }
+
+  if (options?.persist !== false) persistUserSettings();
+
+  const toggles = ensureStrategyToggles();
+  const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
+  const appliedToggles = Object.keys(partialToggles).length;
+  const label = options?.label || (typeof raw.label === 'string' ? raw.label : '');
+  const message =
+    `Imported ${appliedToggles || '—'} module toggle(s)` +
+    (label ? ` (${label})` : '') +
+    ` · ${enabledCount}/${STRATEGY_KEYS.length} ON` +
+    ` · Risk ${normalizeRiskLevel(config.riskLevel).toUpperCase()}` +
+    ` · recipe ${ensureStrategyRecipeMode()}`;
+
+  console.log(`[strategies] ${message}`);
+  return {
+    ok: true,
+    appliedToggles,
+    enabledCount,
+    totalCount: STRATEGY_KEYS.length,
+    riskLevel: normalizeRiskLevel(config.riskLevel),
+    strategyRecipeMode: ensureStrategyRecipeMode(),
+    strategyProfile: (config.strategyProfile || 'custom') as StrategyProfileId,
+    message,
+  };
+}
+

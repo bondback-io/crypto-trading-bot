@@ -2964,6 +2964,17 @@ function applySettingsSnapshot(
 }
 
 /**
+ * Apply a settings snapshot from Strategy Control Center Import JSON
+ * (or similar). Does not load from disk — caller persists when ready.
+ */
+export function applyImportedSettingsSnapshot(
+  saved: PersistedBotSettings,
+  mode: 'merge' | 'replace' = 'replace'
+): void {
+  applySettingsSnapshot(saved, mode);
+}
+
+/**
  * Apply data/config.json on top of code/env defaults.
  * Saved keys win; new keys from code updates keep their defaults.
  */
