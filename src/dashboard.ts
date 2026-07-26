@@ -4939,13 +4939,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 <th scope="col">Description</th>
                 <th scope="col">Style</th>
                 <th scope="col">Recommended Risk</th>
+                <th scope="col">Win %</th>
+                <th scope="col">Net PnL</th>
+                <th scope="col">Avg hold</th>
+                <th scope="col">Trades</th>
               </tr>
             </thead>
             <tbody id="trade-profiles-overview-body">
-              <tr><td colspan="4" class="mint">Loading…</td></tr>
+              <tr><td colspan="8" class="mint">Loading…</td></tr>
             </tbody>
           </table>
         </div>
+        <div id="tp-scoreboard-detail" class="mt-3 text-xs text-slate-400"></div>
+        <div id="tp-learning-panel" class="mt-3 hidden"></div>
       </div>
     </section>
 
@@ -6593,7 +6599,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               const on = p.active;
               const color = profileColorFor(p.id) || p.color || '#e2e8f0';
               return (
-                '<tr class="' + (on ? 'is-active' : 'is-off') + '" tabindex="0" role="button" ' +
+                '<tr class="' + (on ? 'is-active' : 'is-off') + '" data-tp-score-id="' + escHtml(p.id) + '" tabindex="0" role="button" ' +
                   'onclick="focusTradeProfileCard(\\'' + p.id + '\\')" ' +
                   'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();focusTradeProfileCard(\\'' + p.id + '\\')}" ' +
                   'title="' + (on ? 'Active — jump to controls' : 'Off — jump to controls') + '">' +
@@ -6604,12 +6610,159 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   '<td class="tp-overview-desc">' + escHtml(p.description || '') + '</td>' +
                   '<td class="tp-overview-style">' + escHtml(p.style || '—') + '</td>' +
                   '<td><span class="tp-overview-risk">' + escHtml(p.recommendedRisk || '—') + '</span></td>' +
+                  '<td class="tp-score-win" data-k="win">—</td>' +
+                  '<td class="tp-score-pnl" data-k="pnl">—</td>' +
+                  '<td class="tp-score-hold" data-k="hold">—</td>' +
+                  '<td class="tp-score-n" data-k="n">—</td>' +
                 '</tr>'
               );
             }).join('')
-          : '<tr><td colspan="4" class="mint">No profiles</td></tr>';
+          : '<tr><td colspan="8" class="mint">No profiles</td></tr>';
+        loadTradeProfileIntelligence();
       }
       renderAutoScoringUi(tp);
+    }
+
+    function fmtHoldSec(sec) {
+      if (sec == null || !Number.isFinite(sec) || sec <= 0) return '—';
+      if (sec < 60) return Math.round(sec) + 's';
+      if (sec < 3600) return Math.floor(sec / 60) + 'm ' + Math.round(sec % 60) + 's';
+      return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+    }
+
+    async function loadTradeProfileIntelligence() {
+      const detail = document.getElementById('tp-scoreboard-detail');
+      const panel = document.getElementById('tp-learning-panel');
+      try {
+        const data = await fetchJSON('/api/trade-profiles/intelligence');
+        window.__tpIntelligence = data;
+        const rows = (data.scoreboard && data.scoreboard.rows) || [];
+        const byId = {};
+        rows.forEach(function (r) { byId[r.profileId] = r; });
+        document.querySelectorAll('#trade-profiles-overview-body tr[data-tp-score-id]').forEach(function (tr) {
+          const id = tr.getAttribute('data-tp-score-id');
+          const r = byId[id];
+          const winEl = tr.querySelector('[data-k="win"]');
+          const pnlEl = tr.querySelector('[data-k="pnl"]');
+          const holdEl = tr.querySelector('[data-k="hold"]');
+          const nEl = tr.querySelector('[data-k="n"]');
+          if (!r || r.trades === 0) {
+            if (winEl) winEl.textContent = '—';
+            if (pnlEl) pnlEl.textContent = '—';
+            if (holdEl) holdEl.textContent = '—';
+            if (nEl) nEl.textContent = '0';
+            return;
+          }
+          if (winEl) {
+            winEl.textContent = r.winRatePct.toFixed(0) + '%' + (r.stabilized ? ' ✓' : '');
+            winEl.style.color = r.winRatePct >= 50 ? 'var(--green)' : (r.winRatePct < 40 ? '#f87171' : '');
+          }
+          if (pnlEl) {
+            pnlEl.textContent = (r.netPnlSol >= 0 ? '+' : '') + r.netPnlSol.toFixed(4) + ' SOL';
+            pnlEl.style.color = r.netPnlSol >= 0 ? 'var(--green)' : '#f87171';
+          }
+          if (holdEl) holdEl.textContent = fmtHoldSec(r.avgHoldSec);
+          if (nEl) nEl.textContent = String(r.trades);
+        });
+        if (detail) {
+          const mixBits = rows.filter(function (r) { return r.trades > 0; }).slice(0, 4).map(function (r) {
+            const top = (r.exitMix || []).slice(0, 3).map(function (m) {
+              return m.label + ' ' + m.pct.toFixed(0) + '%';
+            }).join(', ');
+            return escHtml(r.name) + ': ' + (top || '—');
+          });
+          detail.innerHTML = mixBits.length
+            ? '<strong class="text-slate-300">Exit mix</strong> · ' + mixBits.join(' · ')
+            : 'Scoreboard fills after closed trades (need ~' +
+              ((data.scoreboard && data.scoreboard.minSampleForStabilize) || 15) +
+              ' per profile to stabilize).';
+        }
+        if (panel) {
+          const suggestions = data.suggestions || [];
+          if (!suggestions.length) {
+            panel.classList.add('hidden');
+            panel.innerHTML = '';
+          } else {
+            panel.classList.remove('hidden');
+            panel.innerHTML =
+              '<div class="section-title" style="font-size:0.75rem;margin-bottom:0.4rem">Learning suggestions</div>' +
+              '<p class="text-xs text-slate-400 mb-2">Based on closed trades — apply nudges within safe bounds (Size ×, trail, hold, quality floors). Does not raise Max Allowed Trade.</p>' +
+              suggestions.map(function (s) {
+                return (
+                  '<div class="card mb-2" style="padding:0.55rem 0.7rem">' +
+                    '<div class="flex flex-wrap items-center gap-2 justify-between">' +
+                      '<strong>' + escHtml(s.profileName) + '</strong>' +
+                      '<span class="mint">' + s.sampleSize + ' trades · ' +
+                        Number(s.winRatePct).toFixed(0) + '% WR</span>' +
+                    '</div>' +
+                    '<ul class="text-xs mt-1" style="margin:0;padding-left:1rem">' +
+                      (s.messages || []).map(function (m) {
+                        return '<li>' + escHtml(m) + '</li>';
+                      }).join('') +
+                    '</ul>' +
+                    '<div class="mt-2 flex flex-wrap gap-2">' +
+                      '<button type="button" class="btn btn-secondary text-xs" onclick="applyTradeProfileLearning(\\'' +
+                        escHtml(s.profileId) + '\\')">Apply</button>' +
+                    '</div>' +
+                  '</div>'
+                );
+              }).join('') +
+              '<div class="flex flex-wrap gap-2 mt-2">' +
+                '<button type="button" class="btn btn-primary text-xs" onclick="applyTradeProfileLearningAll()">Apply all suggestions</button>' +
+                '<button type="button" class="btn btn-secondary text-xs" onclick="applyStabilizedEntryTightenments()" title="Phase 4: raise conviction/cluster floors on High Win-Rate / Steady Compounder when sample is stabilized and WR is soft">Apply quality entry tightenments</button>' +
+              '</div>';
+          }
+        }
+      } catch (err) {
+        if (detail) detail.textContent = 'Scoreboard unavailable: ' + (err.message || err);
+      }
+    }
+
+    async function applyTradeProfileLearning(profileId) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: profileId }),
+        });
+        if (data.tradeProfiles) renderTradeProfilesUi(data.tradeProfiles);
+        else loadStrategies();
+        alert('Applied learning nudges for ' + profileId);
+      } catch (err) {
+        alert('Learning apply failed: ' + (err.message || err));
+      }
+    }
+
+    async function applyTradeProfileLearningAll() {
+      if (!confirm('Apply all learning suggestions to matching trade profiles?')) return;
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ applyAll: true }),
+        });
+        if (data.tradeProfiles) renderTradeProfilesUi(data.tradeProfiles);
+        else loadStrategies();
+        alert('Applied: ' + ((data.applied || []).join(', ') || 'none'));
+      } catch (err) {
+        alert('Learning apply failed: ' + (err.message || err));
+      }
+    }
+
+    async function applyStabilizedEntryTightenments() {
+      if (!confirm('Raise entry quality floors on stabilized High Win-Rate / Steady Compounder profiles when win rate is soft?')) return;
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ applyStabilizedEntries: true }),
+        });
+        if (data.tradeProfiles) renderTradeProfilesUi(data.tradeProfiles);
+        else loadStrategies();
+        alert('Entry tightenments: ' + ((data.applied || []).join(', ') || 'none ready'));
+      } catch (err) {
+        alert('Entry tighten failed: ' + (err.message || err));
+      }
     }
 
     function renderAutoScoringUi(tp) {

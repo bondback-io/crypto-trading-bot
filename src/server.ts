@@ -1780,6 +1780,73 @@ export function createServer(): express.Application {
     res.json(getTradeProfilesStatus());
   });
 
+  app.get('/api/trade-profiles/intelligence', (_req: Request, res: Response) => {
+    try {
+      const intel = paperTrader.getTradeProfileIntelligence();
+      res.json(intel);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/trade-profiles/learning', (req: Request, res: Response) => {
+    const {
+      applyTradeProfileLearning,
+      applyStabilizedQualityEntryTightenments,
+      getTradeProfilesStatus,
+      ensureTradeProfilesInitialized,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+    ensureTradeProfilesInitialized();
+    const body = (req.body ?? {}) as {
+      applyAll?: boolean;
+      applyStabilizedEntries?: boolean;
+      profileId?: string;
+      suggestion?: {
+        patch?: {
+          exitRules?: Record<string, unknown>;
+          match?: Record<string, number | boolean>;
+        };
+        entryTighten?: Record<string, number | boolean>;
+      };
+    };
+    try {
+      const intel = paperTrader.getTradeProfileIntelligence();
+      const applied: string[] = [];
+      if (body.applyStabilizedEntries) {
+        applied.push(
+          ...applyStabilizedQualityEntryTightenments(intel.suggestions)
+        );
+      }
+      if (body.applyAll) {
+        for (const s of intel.suggestions) {
+          applyTradeProfileLearning(s.profileId, s);
+          applied.push(s.profileId);
+        }
+      } else if (body.profileId && body.suggestion) {
+        applyTradeProfileLearning(body.profileId, body.suggestion);
+        applied.push(body.profileId);
+      } else if (body.profileId) {
+        const hit = intel.suggestions.find((s) => s.profileId === body.profileId);
+        if (hit) {
+          applyTradeProfileLearning(body.profileId, hit);
+          applied.push(body.profileId);
+        }
+      }
+      res.json({
+        ok: true,
+        applied: [...new Set(applied)],
+        tradeProfiles: getTradeProfilesStatus(),
+        intelligence: paperTrader.getTradeProfileIntelligence(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/trade-profiles', (req: Request, res: Response) => {
     const {
       updateTradeProfilesConfig,

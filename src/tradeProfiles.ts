@@ -166,6 +166,18 @@ export interface TradeProfileExitRules {
    */
   aggressiveDeadMarket?: boolean;
   deadVolumeMinHoldMinutes?: number;
+  /**
+   * Adaptive exit brain overrides (Smart Bot / profile micro-bot).
+   * Merged with catalog defaults in profileTradeIntelligence.resolveExitPolicy.
+   */
+  exitPolicy?: {
+    earlyPartialTpPct?: number;
+    earlyPartialFraction?: number;
+    trailTightenFactor?: number;
+    momentumFadeDropPct?: number;
+    aggressiveDeadMarket?: boolean;
+    qualityBreakdownExit?: boolean;
+  };
 }
 
 export interface TradeProfileMatchRules {
@@ -2837,6 +2849,8 @@ export function applyTradeProfileExitRules(
     scalpMomentumFailDropPct?: number;
     openedAt: number;
     deadVolumeMinHoldMinutes?: number;
+    tradeProfileId?: string;
+    profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
   },
   rules: TradeProfileExitRules,
   seedShortTerm?: (
@@ -2854,6 +2868,22 @@ export function applyTradeProfileExitRules(
     stopLossPct: number;
   }>
 ): void {
+  // Adaptive exit policy (catalog defaults ⊕ rules.exitPolicy)
+  try {
+    const { resolveExitPolicy } =
+      require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
+    const policy = resolveExitPolicy(position.tradeProfileId, rules);
+    position.profileExitPolicy = policy;
+    if (policy.aggressiveDeadMarket && position.deadVolumeMinHoldMinutes == null) {
+      position.deadVolumeMinHoldMinutes =
+        rules.deadVolumeMinHoldMinutes != null
+          ? Number(rules.deadVolumeMinHoldMinutes)
+          : 2;
+    }
+  } catch {
+    /* bootstrap */
+  }
+
   if (rules.forceScalp && rules.shortTermStrategyId && seedShortTerm) {
     // Always re-seed when the assigned profile wants a different engine.
     // Previously we kept an earlier scalpMode seed (e.g. post_migration_scalp)
@@ -2967,6 +2997,64 @@ export function hydrateTradeProfilesFromSettings(
 
 export function serializeTradeProfilesForPersist(): TradeProfileRuntimeState {
   return JSON.parse(JSON.stringify(ensureState())) as TradeProfileRuntimeState;
+}
+
+/**
+ * Apply a learning suggestion patch (exit + match + optional entry tighten).
+ * Never widens size above 1.2; respects existing override merge.
+ */
+export function applyTradeProfileLearning(
+  profileId: TradeProfileId | string,
+  suggestion: {
+    patch?: {
+      exitRules?: Partial<TradeProfileExitRules>;
+      match?: Record<string, number | boolean>;
+    };
+    entryTighten?: Record<string, number | boolean>;
+  }
+): ReturnType<typeof getTradeProfilesStatus> {
+  const { mergeLearningExitPatch } =
+    require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
+  const id = profileId as TradeProfileId;
+  const resolved = resolveTradeProfileDefinition(id);
+  const exitPatch = suggestion.patch?.exitRules
+    ? mergeLearningExitPatch(resolved.exitRules, suggestion.patch.exitRules)
+    : undefined;
+  const matchPatch: Partial<TradeProfileMatchRules> = {
+    ...(suggestion.patch?.match as Partial<TradeProfileMatchRules> | undefined),
+    ...(suggestion.entryTighten as Partial<TradeProfileMatchRules> | undefined),
+  };
+  return updateTradeProfileParams(id, {
+    exitRules: exitPatch,
+    match: Object.keys(matchPatch).length ? matchPatch : undefined,
+  });
+}
+
+/**
+ * Auto-apply phase-4 entry tightenments for stabilized quality profiles
+ * that are underperforming. Idempotent-ish (only raises floors).
+ */
+export function applyStabilizedQualityEntryTightenments(
+  suggestions: Array<{
+    profileId: string;
+    entryTighten?: Record<string, number | boolean>;
+  }>
+): string[] {
+  const applied: string[] = [];
+  for (const s of suggestions) {
+    if (!s.entryTighten) continue;
+    if (
+      s.profileId !== 'high_win_rate' &&
+      s.profileId !== 'steady_compounder'
+    ) {
+      continue;
+    }
+    applyTradeProfileLearning(s.profileId, {
+      entryTighten: s.entryTighten,
+    });
+    applied.push(s.profileId);
+  }
+  return applied;
 }
 
 export function ensureTradeProfilesInitialized(): void {

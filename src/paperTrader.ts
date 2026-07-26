@@ -168,6 +168,10 @@ export interface Position {
    * risk.trailingActivationProfit / profitStrategy.trailingStopAfter for this position.
    */
   trailingActivationProfit?: number;
+  /** Frozen adaptive exit policy from trade profile */
+  profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
+  /** Trail already tightened once by adaptive policy */
+  profileTrailTightened?: boolean;
   /** How the entry was discovered */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
   /** Scanner playbook stamp */
@@ -1620,6 +1624,63 @@ export class PaperTrader {
       ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
+    // Adaptive profile exit (sync / backtest)
+    if (position.profileExitPolicy || position.tradeProfileId) {
+      try {
+        const {
+          evaluateAdaptiveProfileExit,
+          resolveExitPolicy,
+        } = require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
+        const policy =
+          position.profileExitPolicy ||
+          resolveExitPolicy(position.tradeProfileId, null);
+        const adapt = evaluateAdaptiveProfileExit({
+          policy,
+          pnlPct: markPnlPct,
+          entryPriceSol: position.entryPriceSol,
+          currentPriceSol: markPrice,
+          highWaterMarkSol: position.highWaterMarkSol,
+          trailingActive: position.trailingActive === true,
+          trailingStopPct: position.trailingStopPct ?? 0,
+          partialSellDone: position.partialSellDone,
+          bagTrimDone: position.bagTrimDone,
+          takeProfitPct: position.takeProfitPct,
+          convictionScore: position.convictionScore,
+          openedAt: position.openedAt,
+          nowMs,
+        });
+        if (
+          adapt.type === 'tighten_trail' &&
+          adapt.newTrailingStopPct != null &&
+          !position.profileTrailTightened
+        ) {
+          position.trailingStopPct = adapt.newTrailingStopPct;
+          position.profileTrailTightened = true;
+        } else if (adapt.type === 'partial' && adapt.fraction != null) {
+          this.simulateSell(position.id, markPrice, adapt.reason || 'Profile early partial', {
+            fraction: adapt.fraction,
+          });
+          position.partialSellDone = true;
+          return {
+            kind: 'partial',
+            reason: adapt.reason || 'Profile early partial',
+            markPnlPct,
+            stillOpen: this.positions.has(positionId),
+          };
+        } else if (adapt.type === 'full' && adapt.reason) {
+          this.simulateSell(position.id, markPrice, adapt.reason);
+          return {
+            kind: 'full',
+            reason: adapt.reason,
+            markPnlPct,
+            stillOpen: this.positions.has(positionId),
+          };
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     // —— Quick Scalper / short-term timed exits (before tiered profit) ——
     if (position.scalpMode && position.scalpDeadlineMs != null) {
       const scalpAction = evaluateShortTermExit({
@@ -2130,6 +2191,57 @@ export class PaperTrader {
         this.log('sell', `${label}: [DEAD_MARKET]${scalpTag} ${deadReason}`);
         await this.closePositionByRules(position, currentPrice, deadReason);
         continue;
+      }
+
+      // Adaptive profile exit brain (early partial / trail tighten / momentum fade)
+      if (position.profileExitPolicy || position.tradeProfileId) {
+        try {
+          const {
+            evaluateAdaptiveProfileExit,
+            resolveExitPolicy,
+          } = require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
+          const policy =
+            position.profileExitPolicy ||
+            resolveExitPolicy(position.tradeProfileId, null);
+          const pnlPct =
+            ((currentPrice - position.entryPriceSol) / position.entryPriceSol) *
+            100;
+          const adapt = evaluateAdaptiveProfileExit({
+            policy,
+            pnlPct,
+            entryPriceSol: position.entryPriceSol,
+            currentPriceSol: currentPrice,
+            highWaterMarkSol: position.highWaterMarkSol,
+            trailingActive: position.trailingActive === true,
+            trailingStopPct: position.trailingStopPct ?? 0,
+            partialSellDone: position.partialSellDone,
+            bagTrimDone: position.bagTrimDone,
+            takeProfitPct: position.takeProfitPct,
+            convictionScore: position.convictionScore,
+            openedAt: position.openedAt,
+          });
+          if (adapt.type === 'tighten_trail' && adapt.newTrailingStopPct != null) {
+            if (!position.profileTrailTightened) {
+              position.trailingStopPct = adapt.newTrailingStopPct;
+              position.profileTrailTightened = true;
+              console.log(
+                `[profile-exit] ${label} — ${adapt.reason}`
+              );
+            }
+          } else if (adapt.type === 'partial' && adapt.fraction != null) {
+            this.simulateSell(position.id, currentPrice, adapt.reason || 'Profile early partial', {
+              fraction: adapt.fraction,
+            });
+            position.partialSellDone = true;
+            this.log('sell', `${label}: [PROFILE_EARLY_PARTIAL] ${adapt.reason}`);
+            continue;
+          } else if (adapt.type === 'full' && adapt.reason) {
+            await this.closePositionByRules(position, currentPrice, adapt.reason);
+            continue;
+          }
+        } catch (err) {
+          console.warn('[profile-exit] adaptive eval failed:', err);
+        }
       }
 
       // Quick Scalper / short-term timed exits (before tiered profit)
@@ -2895,6 +3007,28 @@ export class PaperTrader {
       portfolio: this.getPortfolioSummary(),
       soak: this.getSoakMetrics(),
     };
+  }
+
+  /** Per-profile scoreboard + learning suggestions for Trade Profiles UI */
+  getTradeProfileIntelligence() {
+    const {
+      buildTradeProfileScoreboard,
+      buildProfileLearningSuggestions,
+    } = require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
+    const { TRADE_PROFILE_CATALOG } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const catalog = TRADE_PROFILE_CATALOG.map((p) => ({
+      id: p.id,
+      name: p.name,
+      icon: p.icon,
+      color: p.color,
+    }));
+    const scoreboard = buildTradeProfileScoreboard(
+      this.closedPositions,
+      catalog
+    );
+    const suggestions = buildProfileLearningSuggestions(scoreboard);
+    return { scoreboard, suggestions };
   }
 
   /**
