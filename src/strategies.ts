@@ -1137,6 +1137,44 @@ export const BALANCED_THRESHOLDS: StrategyPresetThresholds = {
   postStopReentryEnabled: true,
 };
 
+/** Minimal selective floors — Risk OFF (entry engines only). */
+export const OFF_RISK_THRESHOLDS: StrategyPresetThresholds = {
+  minWalletQualityScore: 30,
+  minConvictionScore: 15,
+  convergenceRequired: 1,
+  clusterMinWallets: 1,
+  minWalletsForTrade: 1,
+  allowSingleWalletMigration: true,
+  allowSingleWalletTopPerformerMigration: true,
+  requireConvergenceForNormal: false,
+  minLiquidity: 8_000,
+  minMarketCapUsd: 8_000,
+  minVolume24hUsd: 15_000,
+  minRecentVolumeUsd: 1_500,
+  minHolders: 120,
+  minHolderCount: 120,
+  minRecentActivity: 8,
+  maxRiskScore: 95,
+  maxDevHoldPct: 40,
+  maxHolderConcentration: 95,
+  sniperSensitivity: 'low',
+  maxEntryAgeMinutes: 60,
+  preferEntryWithinMinutes: 45,
+  requireMomentumConfirmation: false,
+  smartMoneyFlowWeight: 1.0,
+  confirmationThreshold: 1,
+  deadVolumeUsdPerHour: 80,
+  deadVolumeConsecutiveHours: 3,
+  deadVolumeMinHoldMinutes: 25,
+  maxTradesPerHour: 50,
+  minMsBetweenTrades: 5_000,
+  requireHealthyCurve: false,
+  requireRecentCurveActivity: false,
+  enableEarlyCurvePriority: true,
+  reBuyEnabled: false,
+  postStopReentryEnabled: false,
+};
+
 /** More opportunities, still protected (not Degen). */
 export const AGGRESSIVE_THRESHOLDS: StrategyPresetThresholds = {
   minWalletQualityScore: 48,
@@ -1253,7 +1291,7 @@ export const DEGEN_RECIPE_THRESHOLDS: StrategyPresetThresholds = {
 
 export type StrategyRecipeMode = 'synced' | 'custom';
 
-export type RiskLevelId = 'low' | 'medium' | 'high' | 'degen';
+export type RiskLevelId = 'low' | 'medium' | 'high' | 'degen' | 'off';
 
 /** Per-engine scalp numerics applied with a Risk recipe (when those engines are ON). */
 export interface RiskRecipeScalpParams {
@@ -1682,6 +1720,48 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
       momentum_burst: true,
       post_migration_scalp: true,
       reversal_scalp: true,
+    }),
+  },
+  off: {
+    summary:
+      'Risk OFF — Smart Money Copy + Market Scanner ON; risk-linked / selective modules OFF. Hard floors still apply.',
+    thresholds: OFF_RISK_THRESHOLDS,
+    maxConcurrentPositions: 40,
+    profitStrategy: {
+      takeInitialPercent: 120,
+      partialSellAt: 70,
+      partialSellPercent: 35,
+      trailingStopAfter: 150,
+      trailingStopPct: 30,
+      bagPercent: 40,
+    },
+    toggles: buildRecipeToggles({
+      // Entry engines the user asked to keep
+      ta_market_scanner: true,
+      // Explicitly disable risk-linked + selective-style cores
+      rebuy_on_dip: false,
+      elite_convergence: false,
+      migration_sniper: false,
+      bonding_curve_health: false,
+      hard_quality_gate: false,
+      early_entry_only: false,
+      momentum_confirmation: false,
+      profit_protected: false,
+      mev_protection: false,
+      wallet_quality_scoring: false,
+      multi_factor_conviction: false,
+      time_based_entry: false,
+      wallet_convergence: false,
+      volume_liquidity_filters: false,
+      min_holders_activity: false,
+      sniper_bundler_filters: false,
+      smart_money_flow_weighting: false,
+      // No scalp engines in Risk OFF
+      quick_scalper: false,
+      micro_scalper: false,
+      momentum_burst: false,
+      post_migration_scalp: false,
+      reversal_scalp: false,
     }),
   },
 };

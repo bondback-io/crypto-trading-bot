@@ -34,7 +34,12 @@ import { performanceScoreFromStats } from './performanceScore';
 const DISCLAIMER =
   'Same-window counterfactual only — re-run on a second lookback before trusting winners. Strict Mode is excluded from v1 search.';
 
-const RISK_LEVELS: RiskLevel[] = ['low', 'medium', 'high', 'degen'];
+const RISK_LEVELS: Array<Exclude<RiskLevel, 'off'>> = [
+  'low',
+  'medium',
+  'high',
+  'degen',
+];
 
 export interface OptimizerCandidateMetrics {
   trades: number;
@@ -828,7 +833,7 @@ export function applyOptimizerWinnersToRecipes(
 
   const applied: string[] = [];
   for (const sel of selections) {
-    if (!isRiskLevel(sel.riskLevel)) continue;
+    if (!isRiskLevel(sel.riskLevel) || sel.riskLevel === 'off') continue;
     const block = lastOptimizer.risks.find(
       (r) => r.riskLevel === sel.riskLevel
     );
@@ -872,6 +877,7 @@ export function applyOptimizerWinnersToRecipes(
 
 /** Apply stored optimization overlay after risk recipe (called from applyRiskLevel). */
 export function applyStoredRiskRecipeOptimization(level: RiskLevel): void {
+  if (level === 'off') return;
   const entry = config.riskRecipeOptimizations?.[level];
   if (!entry?.overlay) return;
   applyAdvisorOverlay(entry.overlay, { persist: false });

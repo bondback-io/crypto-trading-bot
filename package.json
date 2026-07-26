@@ -11,6 +11,8 @@
     "prestart": "node -e \"require('fs').accessSync('dist/index.js')\"",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
+    "calibrate:recipes": "tsx scripts/calibrateRiskRecipes.ts",
+    "calibrate:recipes:verify": "tsx scripts/calibrateRiskRecipes.ts --phase=verify",
     "fly:launch": "fly launch --no-deploy",
     "fly:deploy": "fly deploy",
     "fly:logs": "fly logs",

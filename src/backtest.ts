@@ -2144,16 +2144,18 @@ function replayLaunch(
       const markPnl =
         ((last.priceSol - position.entryPriceSol) / position.entryPriceSol) * 100;
       const forceReason = `${isReBuy ? 'rebuy ' : ''}backtest end-of-window`;
+      const holdMs = Math.max(0, (last.time ?? openedAt) - openedAt);
       closed = trader.simulateSell(position.id, last.priceSol, forceReason);
       if (closed) closed.closedAt = last.time;
       pushTake(undefined, closed?.reason ?? 'end-of-window', closed);
       lastExitPrice = closed?.exitPriceSol ?? last.priceSol;
       sellReasons.push(closed?.reason ?? 'end-of-window');
       forcedEndOfWindow = true;
+      const holdMin = (holdMs / 60_000).toFixed(1);
       const forceLine = formatBacktestExitLog(
         event.symbol,
         markPnl,
-        forceReason,
+        `${forceReason} after ${holdMin}m (candle path exhausted — not Mirror TP/SL)`,
         'full'
       );
       debugLog.push(forceLine);

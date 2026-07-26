@@ -847,7 +847,13 @@ export function createServer(): express.Application {
           return;
         }
         for (const r of report.risks) {
-          if (r.winnerId) {
+          if (
+            r.winnerId &&
+            (r.riskLevel === 'low' ||
+              r.riskLevel === 'medium' ||
+              r.riskLevel === 'high' ||
+              r.riskLevel === 'degen')
+          ) {
             selections.push({
               riskLevel: r.riskLevel,
               candidateId: r.winnerId,
@@ -1076,7 +1082,7 @@ export function createServer(): express.Application {
       .trim() as RiskLevel;
     if (!isRiskLevel(level)) {
       res.status(400).json({
-        error: "riskLevel must be 'low' | 'medium' | 'high' | 'degen'",
+        error: "riskLevel must be 'low' | 'medium' | 'high' | 'degen' | 'off'",
       });
       return;
     }

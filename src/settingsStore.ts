@@ -27,7 +27,7 @@ export interface PersistedBotSettings {
   version: number;
   updatedAt: number;
   mode?: 'paper' | 'liveSimulation' | 'live';
-  riskLevel?: 'low' | 'medium' | 'high' | 'degen';
+  riskLevel?: 'low' | 'medium' | 'high' | 'degen' | 'off';
   /** Opt-in Strict Mode overlay (default false) */
   strictMode?: boolean;
   /** Strict intensity when ON: low (most selective) | medium (default) | high (more active) */
@@ -65,7 +65,7 @@ export interface PersistedBotSettings {
   highWinRatePresetActive?: boolean;
   /** synced = Risk owns modules; custom = manual/pack override */
   strategyRecipeMode?: 'synced' | 'custom';
-  strategyRecipeRiskLevel?: 'low' | 'medium' | 'high' | 'degen' | null;
+  strategyRecipeRiskLevel?: 'low' | 'medium' | 'high' | 'degen' | 'off' | null;
   /** Per-risk overlays from Risk Recipe Optimizer */
   riskRecipeOptimizations?: Record<string, unknown>;
   strategyProfileSnapshot?: Record<string, unknown> | null;

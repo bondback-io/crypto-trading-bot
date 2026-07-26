@@ -470,22 +470,23 @@ export function liquidityAtPrice(
 /**
  * Backtest / paper replay path length after launch.
  *
- * IMPORTANT: DexScreener m5 (5m) % is great for reconstructing entry price, but
- * must NOT shrink the sim path — that caused Smart Money Mirror holds of ~15m50s
- * with universal "Forced Lookback ended" exits (path stub ran out before TP/SL/trail).
+ * IMPORTANT: DexScreener m5/h1 % is great for reconstructing entry price, but
+ * must NOT shrink the sim path. A ≥1h floor still left Smart Money Mirror with
+ * ~53m "Forced Lookback ended" holds: path = 1h from launch, entry ~12% in
+ * (+ copy delay) → remaining candles run out before TP 30–50% / trail can arm.
  *
- * Floor path duration at ≥1h when the token is old enough; cap at a few hours so
- * we don't stretch pairCreated→now into multi-day holds for mature launches.
+ * Floor path duration at ≥3h when the token is old enough (min ≥2h); cap at 6h
+ * so we don't stretch pairCreated→now into multi-day holds for mature launches.
  *
- * Scalp timers top out around 7–8 minutes — the ≥45m/1h floors keep path length
- * well beyond any profile hardTimeLimit so timer/TP/SL/trail can fire first.
+ * Scalp timers top out around 7–8 minutes — these floors keep post-entry path
+ * well beyond any scalp hardTimeLimit so timer/TP/SL/trail can fire first.
  */
 export function resolveLaunchPathWindow(opts: {
   launchedAt: number;
   nowMs?: number;
   /**
    * Dex change window used for entry reconstruction (m5/h1/h6/h24).
-   * Short windows (m5) are floored for path *duration* only — see pathHintMs.
+   * Short windows (m5/h1) are floored for path *duration* only — see pathHintMs.
    */
   changeWindowMs?: number;
   maxPathMs?: number;
@@ -495,11 +496,11 @@ export function resolveLaunchPathWindow(opts: {
   const startMs = opts.launchedAt > 0 ? opts.launchedAt : now - 30 * 60_000;
   const ageMs = Math.max(0, now - startMs);
   const changeWin = opts.changeWindowMs ?? 6 * 60 * 60 * 1000;
-  // Never let m5 (5m) reconstruction window truncate replay — swing profiles
-  // (Mirror, Trend, HWR) need hours of post-entry candles for TP/SL/trail.
-  const pathHintMs = Math.max(changeWin, 60 * 60_000); // ≥1h
-  const maxPath = opts.maxPathMs ?? 4 * 60 * 60 * 1000; // 4 hours
-  const minPath = opts.minPathMs ?? 45 * 60_000; // 45 minutes
+  // Never let m5/h1 reconstruction windows truncate swing replay — Mirror /
+  // Trend / HWR need multi-hour post-entry candles for TP/SL/trail.
+  const pathHintMs = Math.max(changeWin, 3 * 60 * 60_000); // ≥3h
+  const maxPath = opts.maxPathMs ?? 6 * 60 * 60 * 1000; // 6 hours
+  const minPath = opts.minPathMs ?? 2 * 60 * 60_000; // 2 hours
 
   let durationMs = Math.min(
     ageMs > 0 ? ageMs : pathHintMs,

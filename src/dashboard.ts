@@ -311,6 +311,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       text-align: right;
       min-width: 0;
       max-width: 100%;
+      position: relative;
     }
     .strategy-control-head-meta #strategies-profile {
       overflow-wrap: anywhere;
@@ -318,6 +319,56 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       max-width: 18rem;
       margin-left: auto;
     }
+    .strategies-count-hot {
+      cursor: help;
+      text-decoration: underline dotted rgba(148,163,184,.55);
+      text-underline-offset: 3px;
+    }
+    .strategies-on-popover {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 40;
+      width: min(20rem, 86vw);
+      max-height: 16rem;
+      overflow: auto;
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-radius: 0.55rem;
+      background: #0b1220;
+      border: 1px solid #334155;
+      box-shadow: 0 12px 28px rgba(2,6,23,.55);
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .strategies-on-popover.hidden { display: none; }
+    .strategies-on-popover .sop-title {
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 0.4rem;
+    }
+    .strategies-on-popover .sop-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.28rem;
+    }
+    .strategies-on-popover .sop-list li {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .strategies-on-popover .sop-name { color: #f8fafc; }
+    .strategies-on-popover .sop-badge {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: #94a3b8;
+      flex: 0 0 auto;
+    }
+    .strategies-on-popover .sop-empty { color: #94a3b8; }
     .strategy-control-actions {
       display: flex;
       flex-wrap: wrap;
@@ -890,6 +941,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       background: linear-gradient(135deg, rgba(239, 68, 68, .16), rgba(88, 28, 135, .22) 45%, rgba(15, 23, 42, .96) 75%);
     }
     .active-profile-banner.tone-degen .active-profile-combo { color: #fca5a5; }
+    .active-profile-banner.tone-off {
+      border-color: rgba(100, 116, 139, .55);
+      background: linear-gradient(135deg, rgba(71, 85, 105, .22), rgba(15, 23, 42, .96) 60%);
+    }
+    .active-profile-banner.tone-off .active-profile-combo { color: #cbd5e1; }
     @media (max-width: 639px) {
       .active-profile-banner { padding: .75rem .85rem; }
       .active-profile-plus { font-size: .85rem; }
@@ -3792,6 +3848,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="medium">Override → Medium</option>
               <option value="high">Override → High</option>
               <option value="degen">Override → Degen</option>
+              <option value="off">Override → Off (entry only)</option>
             </select>
           </label>
           <label class="ctl ctl-lg"><span>Strict Mode <span class="tip" tabindex="0" data-tip="Match live = parity default. Force Off/On overrides for this run only (not saved)."></span></span>
@@ -4255,6 +4312,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced (recommended) — coherent strategy modules">Medium</button>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="More entries, looser filters — higher variance">High</button>
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — safety floors only, highest variance" style="border-color:#a855f7">Degen</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-off" onclick="setRiskLevel('off')" title="Entry engines only (Copy + Scanner) — no risk-linked modules. For testing fills without quality gates." style="border-color:#64748b">Off</button>
           <span class="mint self-center" id="risk-level-label">—</span>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
@@ -4287,7 +4345,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <p class="text-sm text-slate-400 mb-0">Pick Risk Level → strategies and filters are chosen for you. Trade Profiles still control per-trade style.</p>
           </div>
           <div class="strategy-control-head-meta">
-            <div id="strategies-count" class="text-base font-semibold">—</div>
+            <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" title="Hover to see which modules are ON">—</div>
+            <div id="strategies-on-popover" class="strategies-on-popover hidden" role="tooltip"></div>
             <div id="strategies-profile" class="mint text-xs">Loading…</div>
           </div>
         </div>
@@ -5423,6 +5482,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const grid = document.getElementById('strategies-grid');
       const preset = String(data.strategyProfile || 'custom');
       if (count) count.textContent = data.enabledCount + ' / ' + data.totalCount + ' ON';
+      const pop = document.getElementById('strategies-on-popover');
+      if (pop) {
+        const onMods = (data.registry || []).filter(function (s) { return s.enabled; });
+        if (!onMods.length) {
+          pop.innerHTML = '<div class="sop-empty">No modules ON</div>';
+        } else {
+          pop.innerHTML =
+            '<div class="sop-title">' + onMods.length + ' module' + (onMods.length === 1 ? '' : 's') + ' ON</div>' +
+            '<ul class="sop-list">' +
+            onMods.map(function (s) {
+              const badge = s.badge || s.source || '';
+              return '<li><span class="sop-name">' + String(s.name || s.key) + '</span>' +
+                (badge ? '<span class="sop-badge">' + badge + '</span>' : '') + '</li>';
+            }).join('') +
+            '</ul>';
+        }
+      }
       if (profile) {
         const recipe = data.recipe || {};
         const modeLabel = recipe.mode === 'custom' ? 'Custom modules' : 'Synced to Risk';
@@ -11052,7 +11128,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function btMaxTradesForRiskLevel(level, cfg) {
       const key = String(level || 'current').toLowerCase();
-      if (key === 'low' || key === 'medium' || key === 'high' || key === 'degen') {
+      if (key === 'low' || key === 'medium' || key === 'high' || key === 'degen' || key === 'off') {
         return BT_RISK_MAX_TRADES[key];
       }
       const live =
@@ -12425,6 +12501,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function formatRiskLevelLabel(level) {
       const raw = String(level || 'medium').toLowerCase();
       if (raw === 'degen') return 'Degen';
+      if (raw === 'off') return 'Off';
       return raw.charAt(0).toUpperCase() + raw.slice(1);
     }
 
@@ -12436,6 +12513,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         medium: 'Medium risk — balanced recommended default',
         high: 'High risk — larger size, looser filters (use with caution)',
         degen: 'Degen — max entries, basic rug/honeypot only + hard floors',
+        off: 'Risk OFF — Copy + Scanner only; no risk-linked modules',
       };
       const tone =
         level === 'low'
@@ -12530,6 +12608,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function activeProfileToneClass(cfg) {
       const level = String((cfg && cfg.riskLevel) || 'medium').toLowerCase();
       if (level === 'degen') return 'tone-degen';
+      if (level === 'off') return 'tone-off';
       if (level === 'high') return 'tone-high';
       if (level === 'low') return 'tone-low';
       return 'tone-medium';
@@ -12540,7 +12619,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!source) return;
       const tone = activeProfileToneClass(source);
       document.querySelectorAll('[data-active-profile]').forEach((el) => {
-        el.classList.remove('tone-low', 'tone-medium', 'tone-high', 'tone-degen');
+        el.classList.remove('tone-low', 'tone-medium', 'tone-high', 'tone-degen', 'tone-off');
         el.classList.add(tone);
         const hint = el.querySelector('.active-profile-hint');
         if (hint && !hint.querySelector('button')) {
@@ -12753,7 +12832,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const level = (cfg && cfg.riskLevel) || 'medium';
       const sum = (cfg && cfg.riskLevelSummary) || {};
       const active = sum.active || {};
-      const ids = ['low', 'medium', 'high', 'degen'];
+      const ids = ['low', 'medium', 'high', 'degen', 'off'];
       ids.forEach((id) => {
         ['risk-lvl-', 'cfg-risk-lvl-'].forEach((prefix) => {
           const btn = document.getElementById(prefix + id);
@@ -12766,6 +12845,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             btn.style.background = on ? 'linear-gradient(135deg,#c2410c,#7c3aed)' : '';
             btn.style.color = on ? '#fff' : '';
             btn.style.borderColor = '#a855f7';
+          } else if (id === 'off') {
+            btn.className = on
+              ? 'btn text-xs sm:text-sm'
+              : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
+            btn.style.background = on ? '#475569' : '';
+            btn.style.color = on ? '#fff' : '';
+            btn.style.borderColor = '#64748b';
           } else {
             btn.className = on
               ? 'btn btn-primary text-xs sm:text-sm'
@@ -12780,7 +12866,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (label) label.textContent = (sum.label || level).toUpperCase() + (sum.description ? ' — ' + sum.description : '');
 
       const warnText =
-        level === 'degen'
+        level === 'off'
+          ? (sum.warning || '⚠️ Risk OFF — entry engines only. Hard floors still apply.')
+          : level === 'degen'
           ? (sum.warning || '⚠️ DEGEN mode maximizes entries — only basic rug/honeypot safety + hard floors. Extremely high variance.')
           : level === 'high'
             ? (sum.warning || '⚠️ High risk mode increases position size and reduces filters — use with caution')
@@ -12791,7 +12879,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (warnText) {
           w.textContent = warnText;
           w.classList.remove('hidden');
-          w.style.color = level === 'degen' ? '#c084fc' : '';
+          w.style.color = level === 'degen' ? '#c084fc' : level === 'off' ? '#94a3b8' : '';
         } else {
           w.textContent = '';
           w.classList.add('hidden');
@@ -12852,6 +12940,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (level === 'degen') {
         const ok = confirm(
           '⚠️ DEGEN mode maximizes open trades — only basic rug/honeypot filters + hard floors.\\n50 concurrent positions · 0.25 SOL base · very loose gates.\\n\\nApply Degen settings?'
+        );
+        if (!ok) return;
+      }
+      if (level === 'off') {
+        const ok = confirm(
+          '⚠️ Risk OFF — turns off risk-linked / selective modules.\\nKeeps Smart Money Copy + Market Scanner (and basic safety floors).\\nStrict Mode will be forced OFF.\\n\\nUse this to test how the bot takes trades without quality gates.\\n\\nApply Risk OFF?'
         );
         if (!ok) return;
       }
@@ -13611,10 +13705,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
     }
 
+    function wireStrategiesOnPopover() {
+      const count = document.getElementById('strategies-count');
+      const pop = document.getElementById('strategies-on-popover');
+      if (!count || !pop || count.dataset.onPopoverWired === '1') return;
+      count.dataset.onPopoverWired = '1';
+      const show = () => pop.classList.remove('hidden');
+      const hide = () => pop.classList.add('hidden');
+      count.addEventListener('mouseenter', show);
+      count.addEventListener('focus', show);
+      count.addEventListener('mouseleave', (e) => {
+        if (pop.contains(e.relatedTarget)) return;
+        hide();
+      });
+      count.addEventListener('blur', hide);
+      pop.addEventListener('mouseleave', hide);
+      pop.addEventListener('mouseenter', show);
+    }
+
     loadTradingWallets();
     refreshDiscoveryStatus();
     try { onNansenPresetChange(); loadNansenCached(); } catch (_) {}
     loadStrategies();
+    wireStrategiesOnPopover();
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);

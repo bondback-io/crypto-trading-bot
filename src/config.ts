@@ -42,7 +42,7 @@ export { hasPersistedSettings };
  * live — real swaps with trading wallet keys
  */
 export type TradingMode = 'paper' | 'liveSimulation' | 'live';
-export type RiskLevel = 'low' | 'medium' | 'high' | 'degen';
+export type RiskLevel = 'low' | 'medium' | 'high' | 'degen' | 'off';
 
 export function isTradingMode(v: unknown): v is TradingMode {
   return v === 'paper' || v === 'liveSimulation' || v === 'live';
@@ -53,6 +53,7 @@ export const RISK_LEVELS: readonly RiskLevel[] = [
   'medium',
   'high',
   'degen',
+  'off',
 ] as const;
 
 export function isRiskLevel(value: string): value is RiskLevel {
@@ -65,12 +66,16 @@ export const HIGH_RISK_WARNING =
 export const DEGEN_RISK_WARNING =
   '⚠️ DEGEN mode maximizes entries — only basic rug/honeypot safety + hard floors. Extremely high variance; expect many open positions.';
 
+export const OFF_RISK_WARNING =
+  '⚠️ Risk OFF — entry engines only (Copy + Market Scanner). Quality/selective gates and risk-linked modules are disabled. Hard rug/liq/volume floors still apply. For testing how the bot takes trades without risk rules.';
+
 /** Human labels for dashboard */
 export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
   low: 'Low — fewer trades, higher selectivity',
   medium: 'Medium — balanced (recommended)',
   high: 'High — more entries, looser filters',
   degen: 'Degen — max entries, safety floors only',
+  off: 'Off — entry engines only (no risk modules)',
 };
 
 export interface SellTier {
@@ -1429,6 +1434,134 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       requireHealthyCurve: false,
     },
   },
+  off: {
+    label: 'Off',
+    description:
+      'Entry engines only — Smart Money Copy + Market Scanner. Risk-linked modules and selective gates off. Hard floors still apply.',
+    warning: OFF_RISK_WARNING,
+    trade: {
+      baseTradeAmountSol: 0.2,
+      tradeAmountSol: 0.2,
+      riskMultiplier: 0.55,
+      convictionMultiplier: 1.5,
+      minProfitPercent: 35,
+      maxProfitPercent: 200,
+      stopLossPercent: -40,
+    },
+    filters: {
+      minLiquidity: 8_000,
+      minMarketCapUsd: 8_000,
+      maxDevHoldPct: 40,
+      maxDevPercent: 40,
+      maxTopHolderPct: 95,
+      maxHolderConcentration: 95,
+      minTop10HolderPct: 8,
+      maxEstimatedTaxPct: 50,
+      maxRiskScore: 95,
+      skipIfMintAuthority: false,
+      sniperSensitivity: 'low',
+      convergenceRequired: 1,
+      maxConcurrentPositions: 40,
+      dailyLossLimitSol: 12,
+      minVolume24hUsd: 15_000,
+      minRecentVolumeUsd: 1_500,
+      minRecentBuyVolumeUsd: 800,
+      minHolderCount: 120,
+      minHolders: 120,
+      minRecentActivity: 8,
+      requireLiquidityLocked: false,
+      checkHoneypot: true,
+      skipIfDevRecentSells: false,
+      enableAntiRug: true,
+      enableSniperFilter: false,
+      clusterMinWallets: 1,
+      enableWalletQualityGate: false,
+      minWalletQualityScore: 30,
+      maxEntryAgeMinutes: 60,
+      requireMomentumConfirmation: false,
+      enableEntryTimingGate: false,
+    },
+    risk: {
+      enabled: true,
+      useRiskSizing: true,
+      riskPercentPerTrade: 2.5,
+      maxTradeSol: 1.8,
+      minTradeSol: 0.03,
+      weeklyLossLimitSol: 15,
+      maxDrawdownPct: 55,
+      trailingStopPct: 30,
+      trailingStopPercent: 30,
+      trailingActivationProfit: 35,
+      deadVolumeUsdPerHour: 80,
+      deadVolumeConsecutiveHours: 3,
+      deadVolumeMinHoldMinutes: 25,
+      lowConvictionTrailThreshold: 30,
+      lowConvictionTrailTightenPct: 4,
+      normal: {
+        riskPercentPerTrade: 2.4,
+        trailingStopPct: 30,
+        hardStopLossPct: -40,
+        tiers: [
+          { profitPct: 50, sellPct: 30 },
+          { profitPct: 100, sellPct: 25 },
+        ],
+      },
+      migration: {
+        riskPercentPerTrade: 3.0,
+        trailingStopPct: 32,
+        hardStopLossPct: -48,
+        sizeMultiplier: 1.4,
+        tiers: [
+          { profitPct: 50, sellPct: 30 },
+          { profitPct: 100, sellPct: 25 },
+        ],
+      },
+    },
+    selective: {
+      enabled: false,
+      minConvictionScore: 15,
+      requireConvergenceForNormal: false,
+      allowSingleWalletMigration: true,
+      minWalletsForTrade: 1,
+      minVolume24hUsd: 15_000,
+      minHolderCount: 120,
+      maxTradesPerHour: 50,
+      minMsBetweenTrades: 5_000,
+      riskScoreSizeCutoff: 95,
+      minRiskSizeMultiplier: 0.8,
+      extraConvergenceAboveRisk: 0,
+      highRiskConvergenceThreshold: 99,
+    },
+    profitStrategy: {
+      takeInitialPercent: 120,
+      partialSellAt: 70,
+      partialSellPercent: 35,
+      trailingStopAfter: 150,
+      trailingStopPct: 30,
+      bagPercent: 40,
+      riskBasedAdjustment: false,
+      highRiskScoreThreshold: 90,
+    },
+    strategy: {
+      enableMigrationOnly: false,
+      migrationSizeMultiplier: 1.8,
+      confirmationThreshold: 1,
+      reBuyMinProfitPct: 40,
+      postStopReentryEnabled: false,
+      reEntryMaxPerMint: 2,
+      reEntryWatchMinutes: 90,
+      reEntryMinReclaimPct: 3,
+      reEntryMinVolumeIncreasePct: 20,
+      reEntryConfirmationWallets: 1,
+      reEntrySizeMultiplier: 0.9,
+      reEntryCooldownMinutes: 3,
+      reEntryAfterMaxProfitEnabled: false,
+    },
+    bondingCurve: {
+      requireHealthyCurve: false,
+      requireRecentCurveActivity: false,
+    },
+  },
 };
 
 /**
@@ -1844,14 +1977,14 @@ export interface BotConfig {
    */
   strategyRecipeMode: 'synced' | 'custom';
   /** Last Risk Level whose strategy recipe was applied (UI) */
-  strategyRecipeRiskLevel: 'low' | 'medium' | 'high' | 'degen' | null;
+  strategyRecipeRiskLevel: RiskLevel | null;
   /**
    * Per-risk overlays from Risk Recipe Optimizer (applied after synced recipe).
    * Strict Mode is independent and not stored here.
    */
   riskRecipeOptimizations?: Partial<
     Record<
-      'low' | 'medium' | 'high' | 'degen',
+      Exclude<RiskLevel, 'off'>,
       {
         overlay: import('./backtestAdvisor').AdvisorOverlay;
         label: string;
@@ -2575,7 +2708,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.strategyRecipeRiskLevel === 'low' ||
       config.strategyRecipeRiskLevel === 'medium' ||
       config.strategyRecipeRiskLevel === 'high' ||
-      config.strategyRecipeRiskLevel === 'degen'
+      config.strategyRecipeRiskLevel === 'degen' ||
+      config.strategyRecipeRiskLevel === 'off'
         ? config.strategyRecipeRiskLevel
         : config.riskLevel || 'medium',
     riskRecipeOptimizations: config.riskRecipeOptimizations
@@ -3136,7 +3270,8 @@ function applySettingsSnapshot(
     saved.strategyRecipeRiskLevel === 'low' ||
     saved.strategyRecipeRiskLevel === 'medium' ||
     saved.strategyRecipeRiskLevel === 'high' ||
-    saved.strategyRecipeRiskLevel === 'degen'
+    saved.strategyRecipeRiskLevel === 'degen' ||
+    saved.strategyRecipeRiskLevel === 'off'
   ) {
     config.strategyRecipeRiskLevel = saved.strategyRecipeRiskLevel;
   } else if (saved.strategyRecipeRiskLevel === null) {
@@ -4406,6 +4541,10 @@ export function applyRiskLevel(
   }
   const preset = RISK_LEVEL_PRESETS[level];
   config.riskLevel = level;
+  // Risk OFF cannot stack Strict — clear before recipe apply
+  if (level === 'off') {
+    config.strictMode = false;
+  }
 
   Object.assign(config.trade, preset.trade);
   if (preset.trade.baseTradeAmountSol != null) {
@@ -4567,6 +4706,47 @@ export function applyRiskLevel(
           config.marketScanner.minConfluenceScore = Math.min(
             config.marketScanner.minConfluenceScore ?? 40,
             25
+          );
+          config.marketScanner.pauseScannerOnlyInRiskOff = false;
+        }
+        syncConfigAliases();
+      }
+      // Risk OFF: entry engines only — force Strict off + disable selective gates
+      if (level === 'off') {
+        config.strictMode = false;
+        Object.assign(config.filters, {
+          enableWalletQualityGate: false,
+          enableEntryTimingGate: false,
+          requireMomentumConfirmation: false,
+          enableSniperFilter: false,
+          skipIfDevRecentSells: false,
+          convergenceRequired: 1,
+          clusterMinWallets: 1,
+          maxConcurrentPositions: preset.filters.maxConcurrentPositions ?? 40,
+          maxRiskScore: preset.filters.maxRiskScore ?? 95,
+        });
+        Object.assign(config.selective, {
+          enabled: false,
+          minConvictionScore: 15,
+          requireConvergenceForNormal: false,
+          minWalletsForTrade: 1,
+        });
+        if (config.tradeProfiles?.autoScoring) {
+          config.tradeProfiles.autoScoring.skipBelowMin = false;
+          config.tradeProfiles.autoScoring.minScore = Math.min(
+            config.tradeProfiles.autoScoring.minScore ?? 45,
+            20
+          );
+        }
+        if (config.marketScanner) {
+          config.marketScanner.requireTaSetup = false;
+          config.marketScanner.minRankScore = Math.min(
+            config.marketScanner.minRankScore ?? 42,
+            30
+          );
+          config.marketScanner.minConfluenceScore = Math.min(
+            config.marketScanner.minConfluenceScore ?? 40,
+            20
           );
           config.marketScanner.pauseScannerOnlyInRiskOff = false;
         }

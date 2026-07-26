@@ -160,6 +160,17 @@ const RISK_REENTRY_DEFAULTS: Record<
     cooldownMs: 2 * 60_000,
     minAliveVolumeUsd: 250,
   },
+  /** Risk OFF — rebuy module is disabled; keep mild defaults if enabled manually */
+  off: {
+    maxPerMint: 2,
+    watchMinutes: 90,
+    minReclaimPct: 5,
+    minVolumeIncreasePct: 30,
+    confirmationWallets: 1,
+    sizeMultiplier: 0.85,
+    cooldownMs: 5 * 60_000,
+    minAliveVolumeUsd: 300,
+  },
 };
 
 /** Strict intensity overlays on top of risk defaults (when Strict Mode is ON). */

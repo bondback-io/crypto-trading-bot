@@ -71,9 +71,25 @@ export function isCloudHost(): boolean {
   return isRunningOnRender() || isRunningOnFly();
 }
 
+function sleepSyncMs(ms: number): void {
+  const end = Date.now() + Math.max(0, ms);
+  while (Date.now() < end) {
+    /* busy-wait — only used for short OneDrive lock retries */
+  }
+}
+
+function isBusyFsError(err: unknown): boolean {
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code?: string }).code || '')
+      : '';
+  return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
+}
+
 /**
  * Atomic JSON write: write temp file then rename (safe across crashes).
  * On Windows, replaces destination if rename-over-existing fails.
+ * Retries unlink/rename briefly for OneDrive / AV file locks (EBUSY).
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
   ensureDataDir();
@@ -86,15 +102,41 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     fs.writeFileSync(tmp, payload, 'utf-8');
-    try {
-      fs.renameSync(tmp, filePath);
-    } catch {
-      // Windows: rename onto existing file often fails
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        try {
+          fs.renameSync(tmp, filePath);
+          return;
+        } catch (renameErr) {
+          // Windows: rename onto existing file often fails
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+          fs.renameSync(tmp, filePath);
+          return;
+        }
+      } catch (err) {
+        lastErr = err;
+        if (!isBusyFsError(err) || attempt === 7) break;
+        sleepSyncMs(40 * (attempt + 1));
       }
-      fs.renameSync(tmp, filePath);
     }
+    // Last resort: direct overwrite (still better than losing progress)
+    try {
+      fs.writeFileSync(filePath, payload, 'utf-8');
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {
+        /* ignore */
+      }
+      return;
+    } catch {
+      /* fall through */
+    }
+    throw lastErr instanceof Error
+      ? lastErr
+      : new Error('atomicWriteJson failed');
   } catch (err) {
     try {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
