@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Scanner / Strategies; Config / Logs / Backtester via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Scanner / Strategies / Backtester; Config / Logs via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -1073,8 +1073,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         0 0 0 1px rgba(14, 165, 233, 0.12),
         0 10px 28px rgba(2, 6, 23, 0.45),
         inset 0 1px 0 rgba(148, 163, 184, 0.08);
-      padding: 1.1rem 1.15rem 1.15rem;
-      /* visible so help tips are not clipped */
+      padding: 0.85rem 0.95rem 0.95rem;
       overflow: visible;
     }
     .card-open-positions::before {
@@ -1087,22 +1086,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-radius: 0.75rem 0 0 0.75rem;
       background: linear-gradient(180deg, #34d399, #38bdf8);
     }
+    .card-closed-trades {
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(30, 41, 59, 0.95) 55%),
+        #1e293b;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      box-shadow:
+        0 0 0 1px rgba(56, 189, 248, 0.08),
+        0 8px 22px rgba(2, 6, 23, 0.4);
+      padding: 0.85rem 0.95rem 0.95rem;
+      overflow: visible;
+    }
     .card-open-positions .section-title-open {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 0.75rem;
+      gap: 0.5rem;
       flex-wrap: wrap;
-      margin-bottom: 0.9rem;
+      margin-bottom: 0.55rem;
     }
     .card-open-positions .section-title-open .title-left {
       display: inline-flex;
       align-items: center;
-      gap: 0.45rem;
+      gap: 0.4rem;
       flex-wrap: wrap;
     }
     .card-open-positions .section-title-open .title-text {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 800;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -1111,10 +1122,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .card-open-positions .pos-count-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.35rem;
-      padding: 0.2rem 0.65rem;
+      gap: 0.3rem;
+      padding: 0.15rem 0.55rem;
       border-radius: 9999px;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       background: rgba(16, 185, 129, 0.18);
       border: 1px solid rgba(52, 211, 153, 0.4);
@@ -1128,54 +1139,183 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .card-open-positions .title-right {
       display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.45rem;
       flex-wrap: wrap;
     }
     .card-open-positions .sell-all-btn[hidden] {
       display: none !important;
     }
-    .card-open-positions .positions-scroll {
+    .card-open-positions .positions-scroll,
+    .card-closed-trades .closed-trades-scroll {
       overflow-x: auto;
-      max-height: 22rem;
       overflow-y: auto;
-      border-radius: 0.55rem;
+      max-height: min(58vh, 40rem);
+      border-radius: 0.5rem;
       border: 1px solid rgba(51, 65, 85, 0.7);
       background: rgba(15, 23, 42, 0.55);
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable;
     }
     .card-open-positions #positions-table,
-    .card-open-positions #trades-positions-table {
+    .card-open-positions #trades-positions-table,
+    .card-closed-trades #closed-table,
+    .card-closed-trades #trades-closed-table {
       min-width: 52rem;
       margin: 0;
+      border-collapse: separate;
+      border-spacing: 0;
     }
     .card-open-positions #positions-table thead th,
-    .card-open-positions #trades-positions-table thead th {
+    .card-open-positions #trades-positions-table thead th,
+    .card-closed-trades #closed-table thead th,
+    .card-closed-trades #trades-closed-table thead th {
       position: sticky;
       top: 0;
-      z-index: 1;
-      background: rgba(15, 23, 42, 0.96);
-      color: #cbd5e1;
-      border-bottom: 1px solid rgba(52, 211, 153, 0.25);
-      padding: 0.65rem 0.55rem;
+      z-index: 2;
+      background: rgba(15, 23, 42, 0.98);
+      color: #94a3b8;
+      border-bottom: 1px solid rgba(52, 211, 153, 0.22);
+      padding: 0.38rem 0.4rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+    .card-closed-trades #closed-table thead th,
+    .card-closed-trades #trades-closed-table thead th {
+      border-bottom-color: rgba(56, 189, 248, 0.22);
     }
     .card-open-positions #positions-table tbody td,
-    .card-open-positions #trades-positions-table tbody td {
-      padding: 0.75rem 0.55rem;
-      border-bottom-color: rgba(51, 65, 85, 0.55);
-      vertical-align: top;
+    .card-open-positions #trades-positions-table tbody td,
+    .card-closed-trades #closed-table tbody td,
+    .card-closed-trades #trades-closed-table tbody td {
+      padding: 0.4rem 0.4rem;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.45);
+      vertical-align: middle;
+      font-size: 0.78rem;
+      line-height: 1.25;
     }
     .card-open-positions #positions-table tbody tr:hover,
-    .card-open-positions #trades-positions-table tbody tr:hover {
+    .card-open-positions #trades-positions-table tbody tr:hover,
+    .card-closed-trades #closed-table tbody tr:hover,
+    .card-closed-trades #trades-closed-table tbody tr:hover {
       background: rgba(56, 189, 248, 0.06);
     }
     .card-open-positions tr.pos-row-partial td {
       background: rgba(16, 185, 129, 0.07);
-      border-top: 1px solid rgba(52, 211, 153, 0.22);
+      border-top: 1px solid rgba(52, 211, 153, 0.18);
     }
     .card-open-positions tr.pos-row-partial:hover td {
       background: rgba(16, 185, 129, 0.11);
     }
     .card-open-positions tr.pos-row-trail td {
       box-shadow: inset 3px 0 0 rgba(167, 139, 250, 0.65);
+    }
+    /* Compact dense cells */
+    .card-open-positions .pos-token-head { gap: 0.25rem 0.35rem; }
+    .card-open-positions .pos-token-main .mint,
+    .card-open-positions .pos-token-meta {
+      font-size: 0.65rem !important;
+      line-height: 1.2;
+      margin-top: 0.1rem;
+    }
+    .card-open-positions .pos-status-row { margin-top: 0.2rem; gap: 0.2rem; }
+    .card-open-positions .pos-status-badge {
+      padding: 0.1rem 0.35rem;
+      font-size: 8px;
+    }
+    .card-open-positions .pos-size-card,
+    .card-open-positions .pos-pnl-cell {
+      line-height: 1.2;
+    }
+    .card-open-positions .pos-size-label,
+    .card-open-positions .pos-pnl-sub,
+    .card-closed-trades .pos-pnl-sub {
+      font-size: 0.65rem;
+      color: #94a3b8;
+    }
+    .card-open-positions .pos-pnl-main,
+    .card-closed-trades .pos-pnl-main {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.82rem;
+    }
+    .card-open-positions .mint-ca,
+    .card-closed-trades .mint-ca {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    .card-open-positions .mint-ca .ca-btn,
+    .card-closed-trades .mint-ca .ca-btn,
+    .card-open-positions .wallet-copy-cell .ca-btn,
+    .card-closed-trades .wallet-copy-cell .ca-btn {
+      padding: 0.05rem 0.3rem;
+      font-size: 0.62rem;
+      min-height: 0;
+    }
+    .card-open-positions .wallet-copy-cell { gap: 0.12rem; }
+    .card-open-positions .trade-pnl-badge {
+      width: 1.15rem;
+      height: 1.15rem;
+      font-size: 0.7rem;
+    }
+    .card-open-positions .trail-cell-compact {
+      font-size: 0.72rem;
+      white-space: nowrap;
+      max-width: 9.5rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-open-positions .open-profile-filter,
+    .card-closed-trades .closed-profile-filter,
+    .card-closed-trades .closed-filter {
+      margin-bottom: 0.4rem !important;
+    }
+    .card-open-positions .closed-filter-btn,
+    .card-closed-trades .closed-filter-btn {
+      padding: 0.28rem 0.5rem;
+      min-height: 1.65rem;
+      font-size: 10px;
+    }
+    @media (min-width: 1024px) {
+      .card-open-positions .positions-scroll,
+      .card-closed-trades .closed-trades-scroll {
+        max-height: min(62vh, 44rem);
+      }
+      .card-open-positions .pos-token-meta-extra {
+        display: none; /* hide verbose liq/BE lines on desktop — still in title */
+      }
+    }
+    @media (max-width: 639px) {
+      .card-open-positions,
+      .card-closed-trades {
+        padding: 0.7rem 0.65rem 0.75rem;
+      }
+      .card-open-positions .positions-scroll,
+      .card-closed-trades .closed-trades-scroll {
+        max-height: min(70vh, 28rem);
+      }
+      .card-open-positions #positions-table,
+      .card-open-positions #trades-positions-table,
+      .card-closed-trades #closed-table,
+      .card-closed-trades #trades-closed-table {
+        min-width: 48rem;
+      }
+      .card-open-positions #positions-table tbody td,
+      .card-open-positions #trades-positions-table tbody td,
+      .card-closed-trades #closed-table tbody td,
+      .card-closed-trades #trades-closed-table tbody td {
+        padding: 0.45rem 0.35rem;
+        font-size: 0.75rem;
+      }
+      .card-open-positions .sell-all-btn {
+        min-height: 2.25rem;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+      }
     }
     .positions-empty {
       text-align: center;
@@ -1343,10 +1483,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       white-space: nowrap;
       line-height: 1.25;
       letter-spacing: 0.01em;
-      max-width: none;
+      max-width: 11rem;
       vertical-align: middle;
-      /* Keep profile colour text readable on dark tables */
+      position: static;
+      float: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
       -webkit-text-fill-color: currentColor;
+      box-sizing: border-box;
     }
     .trade-profile-badge .tpb-icon {
       font-size: 0.85rem;
@@ -1355,19 +1499,45 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .trade-profile-badge .tpb-name {
       font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
     @media (max-width: 640px) {
       .trade-profile-badge {
         font-size: 0.7rem;
         padding: 0.22rem 0.45rem;
         gap: 0.25rem;
+        max-width: 9rem;
       }
       .trade-profile-badge .tpb-icon { font-size: 0.8rem; }
     }
+    td .trade-profile-badge {
+      margin: 0;
+    }
+    .wallet-copy-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .wallet-copy-row {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem 0.35rem;
+      max-width: 100%;
+    }
+    .wallet-copy-cell .ca-btn {
+      padding: 0.05rem 0.35rem;
+      font-size: 0.65rem;
+      line-height: 1.2;
+      border-radius: 0.3rem;
+    }
     .pos-token-main .trade-profile-badge,
     .trade-group-summary .trade-profile-badge {
-      margin-top: 0.25rem;
-      display: inline-flex;
+      display: none; /* profile lives in PROFILE column only */
     }
     .tp-chip,
     .tp-overview-name,
@@ -3018,7 +3188,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       #logs-full, #system-logs { max-height: 60vh !important; }
       #activity, #trades-activity, #activity-signals { max-height: 16rem !important; }
       #migrations, #trades-migrations { max-height: 10rem !important; }
-      .positions-scroll { max-height: min(22rem, 55vh); }
+      .positions-scroll,
+      .closed-trades-scroll { max-height: min(70vh, 28rem); }
       .btn { min-height: 2.5rem; }
       .risk-level-toggle .btn,
       #risk-level-toggle .btn { min-height: 2.5rem; flex: 1 1 auto; justify-content: center; }
@@ -3041,7 +3212,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config, Logs, and Backtester" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config and Logs" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -3056,10 +3227,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
             Logs
-          </button>
-          <button type="button" role="menuitem" data-settings-tab="backtester" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
-            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>
-            Backtester
           </button>
         </div>
       </div>
@@ -3108,6 +3275,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
       <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
+      <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts"><span class="btn-label-short">BT</span><span class="btn-label-full">Backtester</span></button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -3255,7 +3423,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="card">
+      <div class="card card-closed-trades" id="closed-trades-panel">
         <div class="closed-trades-head">
           <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
@@ -3265,7 +3433,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
-        <div class="overflow-x-auto max-h-56 overflow-y-auto">
+        <div class="closed-trades-scroll">
           <table id="closed-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
@@ -3357,7 +3525,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="card">
+      <div class="card card-closed-trades" id="trades-closed-trades-panel">
         <div class="closed-trades-head">
           <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
@@ -3367,7 +3535,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
-        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+        <div class="closed-trades-scroll">
           <table id="trades-closed-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
             <tbody></tbody>
@@ -6461,7 +6629,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs' || name === 'backtester');
+        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -6862,8 +7030,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const prog = openPositionProgress(p);
       if (!prog.hasPartial) {
         return (
-          '<div class="pos-size-card">' +
-            '<div class="pos-size-label">Size</div>' +
+          '<div class="pos-size-card" title="Position size">' +
             '<div class="pos-size-main">' +
               fmtCostSolUsd(prog.remain || prog.initial, prog.remainUsd, prog.solUsd) +
             '</div>' +
@@ -6875,20 +7042,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? (' · $' + Number(prog.remainUsd).toFixed(2))
           : '';
       return (
-        '<div class="pos-size-card">' +
-          '<div class="pos-size-label">Original</div>' +
+        '<div class="pos-size-card" title="Original ' +
+          fmtCostSolUsd(prog.initial, prog.initialUsd, prog.solUsd).replace(/<[^>]+>/g, '') +
+          ' · taken ' + prog.takenPct.toFixed(0) + '%">' +
           '<div class="pos-size-main">' +
-            fmtCostSolUsd(prog.initial, prog.initialUsd, prog.solUsd) +
+            fmtSolShort(prog.remain) + ' SOL' + remainUsdBit +
           '</div>' +
-          '<div class="pos-partial-line" title="Share of original size already exited vs still held">' +
-            '<span class="pos-taken">Taken ' + prog.takenPct.toFixed(0) + '%</span>' +
-            '<span class="mint"> • </span>' +
-            '<span class="pos-remain">Remaining ' + prog.remainPct.toFixed(0) + '%</span>' +
-          '</div>' +
-          '<div class="pos-remain-usd" title="Remaining cost basis">' +
-            'Left ' + fmtSolShort(prog.remain) + ' SOL' + remainUsdBit +
-            ' <span class="mint">(' + fmtSolShort(prog.taken) + ' SOL taken)</span>' +
-          '</div>' +
+          '<div class="pos-pnl-sub">left ' + prog.remainPct.toFixed(0) + '% · took ' + prog.takenPct.toFixed(0) + '%</div>' +
           '<div class="pos-partial-bar" title="' + prog.takenPct.toFixed(0) + '% taken">' +
             '<span style="width:' + Math.min(100, Math.max(0, prog.takenPct)).toFixed(1) + '%"></span>' +
           '</div>' +
@@ -6909,22 +7069,45 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         prog.remain > 0 && Number.isFinite(pnl)
           ? prog.remain * (pnl / 100)
           : null;
+      const solUsd = p.solUsd != null ? Number(p.solUsd) : NaN;
+      const unrealUsd =
+        unrealSol != null && Number.isFinite(solUsd) && solUsd > 0
+          ? unrealSol * solUsd
+          : null;
       const main =
         '<div class="pos-pnl-main" style="color:' + color + '">' +
           (pnl > 0 ? '+' : '') + pnl.toFixed(1) + '%' +
         '</div>';
       const subParts = [];
       if (unrealSol != null && Number.isFinite(unrealSol)) {
+        const usdBit =
+          unrealUsd != null
+            ? ' · ' + (unrealUsd < 0 ? '-$' : '$') + Math.abs(unrealUsd).toFixed(2)
+            : '';
         subParts.push(
-          'unreal ' + (unrealSol >= 0 ? '+' : '') + fmtSolShort(unrealSol) + ' SOL'
+          'unreal ' +
+            (unrealSol >= 0 ? '+' : '') +
+            fmtSolShort(unrealSol) +
+            ' SOL' +
+            usdBit
         );
       }
       if (prog.hasPartial) {
         subParts.push('on remaining');
         const realized = Number(p.realizedPnlSol);
         if (Number.isFinite(realized) && Math.abs(realized) > 1e-8) {
+          const realizedUsd =
+            Number.isFinite(solUsd) && solUsd > 0 ? realized * solUsd : null;
           subParts.push(
-            'realized ' + (realized >= 0 ? '+' : '') + realized.toFixed(4) + ' SOL'
+            'realized ' +
+              (realized >= 0 ? '+' : '') +
+              realized.toFixed(4) +
+              ' SOL' +
+              (realizedUsd != null
+                ? ' · ' +
+                  (realizedUsd < 0 ? '-$' : '$') +
+                  Math.abs(realizedUsd).toFixed(2)
+                : '')
           );
         }
       }
@@ -6952,7 +7135,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '</span>' +
           '<div class="pos-token-main">' +
             fmtToken(p.symbol, p.name, p.mint) +
-            fmtTradeProfileBadge(p) +
             (riskBit || '') +
             fmtOpenStatusBadges(p, prog) +
           '</div>' +
@@ -7102,7 +7284,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ' SOL (' +
         (pct > 0 ? '+' : '') +
         pct.toFixed(0) +
-        '%)';
+        '%)' +
+        (function () {
+          const rate = p.solUsd != null ? Number(p.solUsd) : NaN;
+          if (!(rate > 0) || !Number.isFinite(pnl)) return '';
+          const usd = pnl * rate;
+          return ' · ' + (usd < 0 ? '-$' : '$') + Math.abs(usd).toFixed(2);
+        })();
       const exitStyle = classifyExitStyle(final && final.reason);
       const exitBit = 'Exit: ' + exitStyleIconHtml(exitStyle.key) + escHtml(exitStyle.label);
       const openedAt = Number(p.openedAt || final.openedAt || 0);
@@ -7119,8 +7307,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '<span class="trade-pnl-badge is-' + pnlTone + '" title="' + badgeTitle + '" aria-label="' + badgeTitle + '">' +
           badgeLabel +
         '</span>' +
-        '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>' +
-        fmtTradeProfileBadge(p),
+        '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>',
         '<span class="trade-group-summary-exits">' + partialBit + '</span>',
       ];
       if (entryBit) {
@@ -7218,8 +7405,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const compact = opts.compact === true;
       return (
         '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + v.color +
-        ';border-color:' + v.color + ';background:color-mix(in srgb,' + v.color + ' 22%, #0f172a)">' +
-        '<span class="tpb-icon">' + escHtml(v.icon) + '</span>' +
+        ';border-color:' + v.color + ';background:#0f172a">' +
+        '<span class="tpb-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         '</span>'
       );
@@ -7243,11 +7430,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : (p.reason || '—');
       const pnlSol = Number(p.pnlSol || 0);
       const pnlPct = Number(p.pnlPct || 0);
+      const solUsd = p.solUsd != null ? Number(p.solUsd) : NaN;
+      const pnlUsd =
+        Number.isFinite(solUsd) && solUsd > 0
+          ? pnlSol * solUsd
+          : p.pnlUsd != null
+            ? Number(p.pnlUsd)
+            : null;
       const pnlHtml = opts.pnlHtml != null
         ? opts.pnlHtml
         : (
-            ((pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL') +
-            '<span class="mint">(' + pnlPct.toFixed(0) + '%)</span>'
+            '<div class="pos-pnl-cell">' +
+              '<div class="pos-pnl-main" style="color:inherit">' +
+                ((pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL') +
+                '<span class="mint"> (' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)</span>' +
+              '</div>' +
+              (pnlUsd != null && Number.isFinite(pnlUsd)
+                ? '<div class="pos-pnl-sub">' +
+                  (pnlUsd < 0 ? '-$' : '$') +
+                  Math.abs(pnlUsd).toFixed(2) +
+                  '</div>'
+                : '') +
+            '</div>'
           );
       const closedCell = opts.closedHtml != null
         ? opts.closedHtml
@@ -7611,7 +7815,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     /**
      * Copied wallet + converging wallets.
      * Hover (desktop) / tap (mobile) shows smart-wallet entry MC when known.
-     * Prefixes a colour-coded entry-source badge (Scanner / Copy / Migration).
+     * Addr button copies the wallet address.
      */
     function fmtWalletConvergence(p) {
       const entrySrc = p && p.entrySource;
@@ -7631,10 +7835,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : null;
         const primary = names ? String(names[0]) : 'migration';
         return (
-          fmtEntrySourceBadge(p) +
-          ' <span class="mint" title="Migration entry">' +
-          primary.replace(/</g, '&lt;').slice(0, 14) +
-          '</span>'
+          '<div class="wallet-copy-cell">' +
+            fmtEntrySourceBadge(p) +
+            ' <span class="mint" title="Migration entry">' +
+            primary.replace(/</g, '&lt;').slice(0, 14) +
+            '</span>' +
+          '</div>'
         );
       }
       const names = (p && p.sourceNames && p.sourceNames.length)
@@ -7646,34 +7852,72 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const total = names ? names.length : (addrs ? addrs.length : 0);
       if (total <= 0) {
         const bare = fmtEntrySourceBadge(p);
-        return bare || '<span class="mint">—</span>';
+        return bare
+          ? '<div class="wallet-copy-cell">' + bare + '</div>'
+          : '<span class="mint">—</span>';
       }
+      const primaryAddr = addrs && addrs[0] ? String(addrs[0]) : '';
       const primary = names
         ? String(names[0])
-        : (addrs[0].slice(0, 4) + '…' + addrs[0].slice(-4));
+        : primaryAddr
+          ? primaryAddr.slice(0, 4) + '…' + primaryAddr.slice(-4)
+          : 'wallet';
       const others = total - 1;
       const srcMc = p.sourceEntryMcUsd != null
         ? Number(p.sourceEntryMcUsd)
         : (p.smartWalletEntryMarketCapUsd != null
           ? Number(p.smartWalletEntryMarketCapUsd)
           : null);
-      const mcLabel = srcMc != null && Number.isFinite(srcMc) && srcMc > 0
+      const yourMc = p.entryMarketCapUsd != null
+        ? Number(p.entryMarketCapUsd)
+        : null;
+      const srcMcLabel = srcMc != null && Number.isFinite(srcMc) && srcMc > 0
         ? fmtUsdShort(srcMc)
         : null;
-      const tipText = mcLabel
-        ? 'Smart wallet bought at MC ' + mcLabel
-        : 'Copied wallet' + (others > 0 ? ' (+' + others + ' converged)' : '') +
+      const yourMcLabel = yourMc != null && Number.isFinite(yourMc) && yourMc > 0
+        ? fmtUsdShort(yourMc)
+        : null;
+      let tipText;
+      if (srcMcLabel) {
+        tipText = 'Smart wallet entry MC ' + srcMcLabel;
+        if (yourMcLabel && yourMcLabel !== srcMcLabel) {
+          tipText += ' · your buy MC ' + yourMcLabel;
+        }
+      } else if (yourMcLabel) {
+        tipText = 'Wallet entry MC not stored · your buy MC ' + yourMcLabel;
+      } else {
+        tipText =
+          'Copied wallet' +
+          (others > 0 ? ' (+' + others + ' converged)' : '') +
           ' · entry MC not stored';
+      }
+      if (primaryAddr) tipText += ' · ' + primaryAddr;
       const tipEsc = tipText.replace(/"/g, '&quot;').replace(/</g, '&lt;');
       const label = primary.replace(/</g, '&lt;') +
         (others > 0 ? ' <span class="mint">+' + others + '</span>' : '');
+      const mcChip = srcMcLabel
+        ? '<span class="mint" style="font-size:0.68rem">MC ' + srcMcLabel + '</span>'
+        : (yourMcLabel
+          ? '<span class="mint" style="font-size:0.68rem" title="Fallback: your fill MC">buy ' + yourMcLabel + '</span>'
+          : '');
+      const copyBtn = primaryAddr
+        ? '<button type="button" class="ca-btn" data-addr="' + escAttr(primaryAddr) +
+          '" onclick="copyWalletAddress(event)" title="Copy wallet address">Addr</button>'
+        : '';
       return (
-        fmtEntrySourceBadge(p, { forceCopy: true }) +
-        ' <span class="pos-hold wallet-mc-tip" style="color:#38bdf8" title="' + tipEsc +
-        '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
-        '<span class="pos-hold-dur">' + label + '</span>' +
-        '<span class="pos-hold-entry">' + tipEsc + '</span>' +
-        '</span>'
+        '<div class="wallet-copy-cell">' +
+          '<div class="wallet-copy-row">' +
+            '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="' + tipEsc +
+            '">Copy</span>' +
+            '<span class="pos-hold wallet-mc-tip" style="color:#38bdf8" title="' + tipEsc +
+            '" onclick="togglePosHoldEntry(this)" role="button" tabindex="0">' +
+              '<span class="pos-hold-dur">' + label + '</span>' +
+              '<span class="pos-hold-entry">' + tipEsc + '</span>' +
+            '</span>' +
+            copyBtn +
+          '</div>' +
+          (mcChip ? '<div class="wallet-copy-row">' + mcChip + '</div>' : '') +
+        '</div>'
       );
     }
 
@@ -10539,54 +10783,55 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const peak = p.highWaterMarkSol != null
               ? p.highWaterMarkSol.toExponential(2)
               : '—';
+            const tip = 'Trailing ACTIVE · ' + (p.trailingStopPct ?? '—') + '% from peak · stop ' + stop + ' · peak ' + peak;
             trailCell =
-              '<span style="color:var(--green)">ACTIVE ' + (p.trailingStopPct ?? '—') + '%</span>' +
-              '<div class="mint">stop ' + stop + ' · peak ' + peak + '</div>';
+              '<span class="trail-cell-compact" style="color:var(--green)" title="' + tip.replace(/"/g, '&quot;') +
+              '">ON ' + (p.trailingStopPct ?? '—') + '%</span>';
           } else {
+            const tip = 'Trail off until +' + armAt + '% profit, then ' + (p.trailingStopPct ?? '—') + '% from peak';
             trailCell =
-              '<span class="mint">off until +' + armAt + '%</span>' +
-              '<div class="mint">then ' + (p.trailingStopPct ?? '—') + '% from peak</div>';
+              '<span class="trail-cell-compact mint" title="' + tip.replace(/"/g, '&quot;') +
+              '">+' + armAt + '% → ' + (p.trailingStopPct ?? '—') + '%</span>';
           }
           const ar = p.antiRug;
           const be = ar?.birdeye;
-          const riskBit = ar
-            ? '<div class="mint" style="color:' +
-              (ar.riskLevel === 'high' || ar.riskLevel === 'critical' ? 'var(--red)' : 'var(--muted)') +
-              '">risk ' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + ar.flags[0] : '') + '</div>' +
-              (p.convictionScore != null
-                ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
-                : '') +
-              (p.technicalLevels && p.technicalLevels.summary
-                ? '<div class="mint" title="Fib + support/resistance">' +
-                  (p.technicalLevels.nearKeyFib || p.technicalLevels.nearSupport
-                    ? '<strong style="color:var(--green)">◎ ' + p.technicalLevels.summary + '</strong>'
-                    : '◎ ' + p.technicalLevels.summary) +
-                  '</div>'
-                : '') +
-              (be && (be.liquidityUsd != null || be.volume24hUsd != null)
-                ? '<div class="mint">BE liq $' +
-                  (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
-                  (be.volume24hUsd != null ? ' · vol $' + Number(be.volume24hUsd).toFixed(0) : '') +
-                  (be.smartMoneyScore != null ? ' · SM ' + be.smartMoneyScore : '') +
-                  '</div>'
-                : '') +
-              (ar.liquidityUsd != null || ar.volume24hUsd != null || ar.holderCount != null || ar.bondingCurveProgressPct != null
-                ? '<div class="mint">liq $' +
-                  (ar.liquidityUsd != null ? Number(ar.liquidityUsd).toFixed(0) : '?') +
-                  (ar.volume24hUsd != null ? ' · vol24h $' + Number(ar.volume24hUsd).toFixed(0) : '') +
-                  (ar.holderCount != null ? ' · holders ' + ar.holderCount : '') +
-                  (ar.bondingCurveProgressPct != null
-                    ? ' · curve ' + Number(ar.bondingCurveProgressPct).toFixed(0) + '%' +
-                      (ar.curveHealth ? ' (' + ar.curveHealth + ')' : '')
-                    : '') +
-                  '</div>'
-                : '')
-            : (p.convictionScore != null
-              ? '<div class="mint">conviction ' + p.convictionScore + '</div>'
-              : '') +
-              (p.technicalLevels && p.technicalLevels.summary
-                ? '<div class="mint">◎ ' + p.technicalLevels.summary + '</div>'
-                : '');
+          const riskBits = [];
+          const riskTips = [];
+          if (ar) {
+            riskBits.push('r' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + String(ar.flags[0]).slice(0, 18) : ''));
+            riskTips.push('risk ' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + ar.flags[0] : ''));
+          }
+          if (p.convictionScore != null) {
+            riskBits.push('c' + p.convictionScore);
+            riskTips.push('conviction ' + p.convictionScore);
+          }
+          if (p.technicalLevels && p.technicalLevels.summary) {
+            riskBits.push(String(p.technicalLevels.summary).slice(0, 22));
+            riskTips.push(p.technicalLevels.summary);
+          }
+          if (be && (be.liquidityUsd != null || be.volume24hUsd != null)) {
+            riskTips.push(
+              'BE liq $' + (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
+              (be.volume24hUsd != null ? ' · vol $' + Number(be.volume24hUsd).toFixed(0) : '') +
+              (be.smartMoneyScore != null ? ' · SM ' + be.smartMoneyScore : '')
+            );
+          }
+          if (ar && (ar.liquidityUsd != null || ar.volume24hUsd != null || ar.holderCount != null)) {
+            riskTips.push(
+              'liq $' + (ar.liquidityUsd != null ? Number(ar.liquidityUsd).toFixed(0) : '?') +
+              (ar.volume24hUsd != null ? ' · vol24h $' + Number(ar.volume24hUsd).toFixed(0) : '') +
+              (ar.holderCount != null ? ' · holders ' + ar.holderCount : '')
+            );
+          }
+          const riskBit = riskBits.length
+            ? '<div class="pos-token-meta mint" title="' +
+              escAttr(riskTips.join(' · ')) +
+              '" style="color:' +
+              (ar && (ar.riskLevel === 'high' || ar.riskLevel === 'critical') ? 'var(--red)' : 'var(--muted)') +
+              '">' +
+              escHtml(riskBits.join(' · ')) +
+              '</div>'
+            : '';
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
