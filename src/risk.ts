@@ -130,6 +130,8 @@ export function calculateDynamicPositionSize(options: {
   riskScore?: number;
   convictionScore?: number;
   sizeMultiplier?: number;
+  /** Open positions — when set, size scales down as book fills toward maxConcurrent */
+  openCount?: number;
 }): DynamicSizeResult {
   const risk = config.risk ?? DEFAULT_RISK;
   const trade = config.trade;
@@ -171,6 +173,20 @@ export function calculateDynamicPositionSize(options: {
 
   let size = baseSol * riskFactor * convictionFactor * migrationFactor;
 
+  // Concurrent-aware scale: shrink toward minTradeSol as open book fills
+  const maxConc = Math.max(1, config.filters.maxConcurrentPositions || 1);
+  const openCount =
+    options.openCount != null && Number.isFinite(options.openCount)
+      ? Math.max(0, options.openCount)
+      : 0;
+  let concurrentFactor = 1;
+  if (maxConc >= 8 && openCount > 0) {
+    const util = clamp01(openCount / maxConc);
+    // At 0% util → 1.0; at 100% util → 0.35 (still above min clamp later)
+    concurrentFactor = 1 - util * 0.65;
+    size *= concurrentFactor;
+  }
+
   // Optional portfolio %-of-equity override when risk engine sizing is on
   if (
     isStrategyEnabled('dynamic_position_sizing') &&
@@ -207,6 +223,9 @@ export function calculateDynamicPositionSize(options: {
   }
   if (options.kind === 'migration' && migrationFactor > 1) {
     parts.push('migration priority');
+  }
+  if (concurrentFactor < 0.97) {
+    parts.push(`concurrent ${openCount}/${maxConc}`);
   }
   if (parts.length === 0) parts.push('base size');
 

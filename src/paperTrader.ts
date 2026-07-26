@@ -33,6 +33,12 @@ import {
   effectiveLowConvictionTrailThreshold,
   effectiveLowConvictionTrailTightenPct,
 } from './filterEffective';
+import {
+  classifyExitKey,
+  markPnlPct,
+  type ExitMixKey,
+  type SoakMetrics,
+} from './soakMetrics';
 import { isStrategyEnabled } from './strategies';
 import {
   evaluateScalpProtectiveTrail,
@@ -2710,6 +2716,63 @@ export class PaperTrader {
     return (wins / reps.length) * 100;
   }
 
+  /** Soak / tuning baseline: opens/hr, exit mix, fee drag vs mark. */
+  getSoakMetrics(maxConcurrentHint?: number): SoakMetrics {
+    const now = Date.now();
+    const hourAgo = now - 60 * 60 * 1000;
+    const closed = representativeClosedTrades(this.closedPositions);
+    const opensLastHour =
+      [...this.positions.values()].filter((p) => p.openedAt >= hourAgo).length +
+      closed.filter((p) => p.openedAt >= hourAgo).length;
+    const closesLastHour = closed.filter(
+      (p) => (p.closedAt ?? 0) >= hourAgo
+    ).length;
+
+    const mixCounts = new Map<
+      string,
+      { key: ExitMixKey; label: string; count: number }
+    >();
+    let realizedSum = 0;
+    let feeDragSum = 0;
+    let feeDragN = 0;
+    for (const p of closed) {
+      const { key, label } = classifyExitKey(p.reason);
+      const prev = mixCounts.get(key);
+      if (prev) prev.count += 1;
+      else mixCounts.set(key, { key, label, count: 1 });
+      realizedSum += p.pnlPct ?? 0;
+      const mark = markPnlPct(p.entryPriceSol, p.exitPriceSol ?? 0);
+      if (mark != null && p.pnlPct != null) {
+        feeDragSum += mark - p.pnlPct;
+        feeDragN += 1;
+      }
+    }
+    const n = closed.length;
+    const exitMix = [...mixCounts.values()]
+      .map((b) => ({
+        key: b.key,
+        label: b.label,
+        count: b.count,
+        pct: n > 0 ? Number(((b.count / n) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      opensLastHour,
+      closesLastHour,
+      openCount: this.positions.size,
+      maxConcurrentHint:
+        maxConcurrentHint ?? config.filters.maxConcurrentPositions ?? 40,
+      exitMix,
+      avgRealizedPnlPct: n > 0 ? Number((realizedSum / n).toFixed(2)) : 0,
+      avgFeeDragPct: feeDragN > 0 ? Number((feeDragSum / feeDragN).toFixed(2)) : 0,
+      totalFeeDragPctPoints: Number(feeDragSum.toFixed(2)),
+      closedSampleSize: n,
+      feeDragSampleSize: feeDragN,
+      capturedAt: now,
+    };
+  }
+
   /** Aggregate stats for dashboard / backtest */
   getStats() {
     const closedRaw = this.closedPositions;
@@ -2822,6 +2885,7 @@ export class PaperTrader {
       })(),
       mode: this.mode,
       portfolio: this.getPortfolioSummary(),
+      soak: this.getSoakMetrics(),
     };
   }
 

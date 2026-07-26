@@ -3220,6 +3220,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
+      <div class="card mt-2.5 sm:mt-3" id="soak-metrics-card" title="Post-rebuild soak baseline — entry volume first, then exits/fees">
+        <div class="section-title" style="margin-bottom:0.4rem">Soak / Tuning Baseline</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div><div class="stat-label">Opens / hr</div><div class="text-lg font-semibold" id="soak-opens-hr">—</div></div>
+          <div><div class="stat-label">Open / max</div><div class="text-lg font-semibold" id="soak-open-max">—</div></div>
+          <div><div class="stat-label">Avg realized %</div><div class="text-lg font-semibold" id="soak-avg-realized">—</div></div>
+          <div><div class="stat-label">Avg fee drag %</div><div class="text-lg font-semibold" id="soak-fee-drag" title="Mark move minus fee-aware realized — positive = fees ate edge">—</div></div>
+        </div>
+        <div class="mint text-xs mt-2" id="soak-exit-mix">Exit mix: —</div>
+        <div class="mint text-xs mt-1" id="soak-skip-top">Skip reasons: —</div>
+      </div>
+
 <div class="card card-open-positions" id="open-positions-panel">
         <div class="section-title-open">
           <div class="title-left">
@@ -4289,34 +4301,41 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span class="active-profile-kicker">Active Profile</span>
             <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
               <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-              <span class="risk-badge-label">Medium</span>
+              <span class="risk-badge-label">On</span>
             </span>
-            <span class="active-profile-plus" aria-hidden="true">+</span>
-            <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
-              <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
-              <span class="strict-badge-label">Strict Off</span>
-            </span>
-            <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually."></span>
+            <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually one-by-one."></span>
           </div>
           <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.</p>
         </div>
-        <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
+        <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="On = lean baseline. Off = ops-only soak for high entry volume."></span></div>
         <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
           <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-on" onclick="setRiskLevel('on')" title="Lean baseline — hard floors + Copy/Scanner; enable quality modules manually">On</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-off" onclick="setRiskLevel('off')" title="Ops-only soak: Copy + Scanner, no hard floors; max concurrent ≥ 30" style="border-color:#64748b">Off</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-off" onclick="setRiskLevel('off')" title="Ops-only soak: Copy + Scanner, no hard floors; max concurrent 40" style="border-color:#64748b">Off</button>
+          <button type="button" class="btn btn-secondary text-xs sm:text-sm" id="btn-soak-preset" onclick="applySoakPreset()" title="Risk Off + clear skip counters — signal soak for 15–30+ opens">Soak preset</button>
           <span class="mint self-center" id="risk-level-label">—</span>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mint mt-2" id="risk-status">—</div>
+        <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem" id="module-tune-card">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <div class="text-sm font-semibold text-slate-200">Module A/B tune order</div>
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-secondary text-xs" onclick="enableNextTuneModule()" title="Enable the next recommended module">Enable next</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetSkipReasonCounts()" title="Clear skip-reason tallies">Clear skips</button>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400 mb-1" id="module-tune-hint">Enable one module at a time after soak baseline.</p>
+          <ol class="text-xs text-slate-300 m-0 pl-4" id="module-tune-list" style="line-height:1.45"></ol>
+        </div>
       </div>
 
       <div class="card strategy-control-card">
         <div class="strategy-control-head">
           <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
-            <p class="text-sm text-slate-400 mb-0">Pick Risk Level → strategies and filters are chosen for you. Trade Profiles still control per-trade style.</p>
+            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → then enable modules one-by-one. Trade Profiles still control per-trade style.</p>
           </div>
           <div class="strategy-control-head-meta">
             <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" title="Hover to see which modules are ON">—</div>
@@ -4334,9 +4353,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="strat-setup-guide mt-3" id="strat-setup-guide">
-          <div class="sg-step"><span class="sg-num">1</span><span><strong>Risk Level</strong> (+ optional Strict) — size, safety floors, and which strategy modules turn on.</span></div>
-          <div class="sg-step"><span class="sg-num">2</span><span><strong>Trade Profiles</strong> — turn ON the styles you want. The bot auto-picks the best match per trade and freezes that profile’s TP/SL/timer.</span></div>
-          <div class="sg-step"><span class="sg-num">3</span><span><strong>Optional packs</strong> (below) — advanced override. Applying a pack leaves Risk sync (custom modules until you Reset).</span></div>
+          <div class="sg-step"><span class="sg-num">1</span><span><strong>Soak preset (Risk Off)</strong> — prove entries (15–30 opens). Watch soak strip + skip reasons.</span></div>
+          <div class="sg-step"><span class="sg-num">2</span><span><strong>Exits + size</strong> — small base size; concurrent scale-down; dead-market / trail firing.</span></div>
+          <div class="sg-step"><span class="sg-num">3</span><span><strong>Risk On lean</strong> — then Enable next module one-by-one; keep only if entry rate stays healthy.</span></div>
         </div>
 
         <div class="strategy-control-actions">
@@ -5449,6 +5468,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function renderStrategies(data) {
       _strategiesStatus = data;
+      if (data.moduleTune) renderModuleTune(data.moduleTune);
       const count = document.getElementById('strategies-count');
       const profile = document.getElementById('strategies-profile');
       const restore = document.getElementById('strategies-restore');
@@ -10068,6 +10088,40 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
           : tr.tradesLastHour + '/hr';
       }
+      const soak = status.soak || s.soak;
+      const soakOpens = document.getElementById('soak-opens-hr');
+      if (soakOpens && soak) {
+        soakOpens.textContent = String(soak.opensLastHour ?? '—');
+        const om = document.getElementById('soak-open-max');
+        if (om) om.textContent = (soak.openCount ?? 0) + ' / ' + (soak.maxConcurrentHint ?? '—');
+        const ar = document.getElementById('soak-avg-realized');
+        if (ar) {
+          const v = Number(soak.avgRealizedPnlPct || 0);
+          ar.textContent = (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+          ar.style.color = v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--muted)';
+        }
+        const fd = document.getElementById('soak-fee-drag');
+        if (fd) {
+          const v = Number(soak.avgFeeDragPct || 0);
+          fd.textContent = (v > 0 ? '+' : '') + v.toFixed(1) + '%';
+          fd.style.color = v > 5 ? 'var(--amber, #fbbf24)' : 'var(--muted)';
+        }
+        const mixEl = document.getElementById('soak-exit-mix');
+        if (mixEl) {
+          const mix = (soak.exitMix || []).slice(0, 5)
+            .map(function (b) { return b.label + ' ' + b.count + ' (' + b.pct + '%)'; })
+            .join(' · ');
+          mixEl.textContent = 'Exit mix: ' + (mix || 'no closes yet');
+        }
+        const skipEl = document.getElementById('soak-skip-top');
+        if (skipEl) {
+          const skips = (status.monitor && status.monitor.skipReasonCounts) || [];
+          const top = skips.slice(0, 5)
+            .map(function (x) { return x.reason + ' ×' + x.count; })
+            .join(' · ');
+          skipEl.textContent = 'Skip reasons: ' + (top || 'none yet');
+        }
+      }
       const pnlEl = document.getElementById('stat-pnl');
       const realized = status.portfolio?.realizedPnlSol != null
         ? Number(status.portfolio.realizedPnlSol)
@@ -12750,7 +12804,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function setRiskLevel(level) {
       if (level === 'off') {
         const ok = confirm(
-          '⚠️ Risk OFF — ops-only soak (Copy + Scanner).\\nNo hard floors / quality gates.\\nMax concurrent opens ≥ 30.\\nOps rejects only (holding, denied, pause, balance).\\n\\nApply Risk OFF?'
+          '⚠️ Risk OFF — ops-only soak (Copy + Scanner).\\nNo hard floors / quality gates.\\nMax concurrent opens 40 · small size.\\nOps rejects only (holding, denied, pause, balance).\\n\\nApply Risk OFF?'
         );
         if (!ok) return;
       }
@@ -12762,7 +12816,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         });
         if (data.config) {
           applyPresetConfigSnapshot(data.config);
-          updateStrictModeUI(data.config, null);
+          if (typeof updateStrictModeUI === 'function') updateStrictModeUI(data.config, null);
         }
         await refresh();
         if (typeof loadStrategies === 'function') await loadStrategies();
@@ -12781,6 +12835,74 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       } catch (err) {
         alert(err.message || String(err));
       }
+    }
+
+    async function applySoakPreset() {
+      const ok = confirm(
+        'Apply Soak preset?\\n• Risk Off (ops-only)\\n• Max concurrent 40\\n• Small base size\\n• Clear skip-reason counters\\n\\nGoal: many signal entries (15–30+), not profit.'
+      );
+      if (!ok) return;
+      try {
+        const data = await fetchJSON('/api/tuning/soak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (data.config) applyPresetConfigSnapshot(data.config);
+        await refresh();
+        if (typeof loadStrategies === 'function') await loadStrategies();
+        alert(data.hint || 'Soak preset applied.');
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+
+    async function resetSkipReasonCounts() {
+      try {
+        await fetchJSON('/api/tuning/skip-reasons/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        await refresh();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+
+    async function enableNextTuneModule() {
+      try {
+        const data = await fetchJSON('/api/tuning/module-next', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (typeof loadStrategies === 'function') await loadStrategies();
+        else renderModuleTune(data.moduleTune || (data.status && data.status));
+        await refresh();
+        if (data.enabled) {
+          alert('Enabled module: ' + data.enabled + '\\nRe-check soak opens/hr + skip reasons before enabling another.');
+        } else {
+          alert((data.status && data.status.hint) || 'All recommended tune modules already ON.');
+        }
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+
+    function renderModuleTune(mt) {
+      const list = document.getElementById('module-tune-list');
+      const hint = document.getElementById('module-tune-hint');
+      if (!mt) return;
+      if (hint) hint.textContent = mt.hint || '';
+      if (!list) return;
+      list.innerHTML = (mt.order || []).map(function (s) {
+        const mark = s.enabled ? 'ON' : 'off';
+        const color = s.enabled ? 'var(--green)' : 'var(--muted)';
+        return '<li><span style="color:' + color + '">[' + mark + ']</span> ' +
+          escHtml(String(s.index) + '. ' + s.label) +
+          ' <span class="mint">— ' + escHtml(s.why || '') + '</span></li>';
+      }).join('');
     }
 
     async function saveProfitStrategy(silent) {

@@ -1337,9 +1337,9 @@ function applyRiskRecipeExtras(recipe: RiskStrategyRecipe): void {
 export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   on: {
     summary:
-      'Lean On — Smart Money Copy + Market Scanner; quality/conviction/scalps OFF until enabled manually',
+      'Lean On — Smart Money Copy + Market Scanner; quality/conviction/anti-rug/scalps OFF until enabled manually',
     thresholds: BALANCED_THRESHOLDS,
-    maxConcurrentPositions: 12,
+    maxConcurrentPositions: 24,
     profitStrategy: {
       takeInitialPercent: 90,
       partialSellAt: 50,
@@ -1350,6 +1350,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
     },
     toggles: buildRecipeToggles({
       ta_market_scanner: true,
+      anti_rug_honeypot: false,
       rebuy_on_dip: false,
       elite_convergence: false,
       migration_sniper: false,
@@ -1376,7 +1377,7 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
   },
   off: {
     summary:
-      'Risk OFF — Smart Money Copy + Market Scanner ON; anti-rug / risk-linked modules OFF; hard floors bypassed; maxConcurrent ≥ 30 for signal soak',
+      'Risk OFF — Smart Money Copy + Market Scanner ON; anti-rug / risk-linked modules OFF; hard floors bypassed; maxConcurrent 40; small size for soak',
     thresholds: OFF_RISK_THRESHOLDS,
     maxConcurrentPositions: 40,
     profitStrategy: {
@@ -1419,6 +1420,92 @@ export const RISK_STRATEGY_RECIPES: Record<RiskLevelId, RiskStrategyRecipe> = {
 export function getRiskStrategyRecipe(level: RiskLevelId): RiskStrategyRecipe {
   const canonical = normalizeRiskLevel(level);
   return RISK_STRATEGY_RECIPES[canonical] ?? RISK_STRATEGY_RECIPES.on;
+}
+
+/**
+ * Recommended one-by-one module enable order after bare rebuild soak.
+ * Entry engines stay on; enable these next and keep/drop by soak metrics.
+ */
+export const MODULE_TUNE_ORDER: Array<{
+  key: StrategyKey;
+  label: string;
+  why: string;
+}> = [
+  {
+    key: 'anti_rug_honeypot',
+    label: 'Anti-rug / honeypot',
+    why: 'Cut obvious rugs; measure open-rate drop vs disasters',
+  },
+  {
+    key: 'dead_market_exit',
+    label: 'Dead-market exit',
+    why: 'Exit hygiene before more entry filters',
+  },
+  {
+    key: 'volume_liquidity_filters',
+    label: 'Volume / liquidity floors',
+    why: 'Cut dead books; watch if opens crater',
+  },
+  {
+    key: 'min_holders_activity',
+    label: 'Min holders / activity',
+    why: 'Companion floor to volume/liq',
+  },
+  {
+    key: 'wallet_quality_scoring',
+    label: 'Wallet quality',
+    why: 'Smarter copy-wallet gating',
+  },
+  {
+    key: 'multi_factor_conviction',
+    label: 'Multi-factor conviction',
+    why: 'Easy to over-gate — enable only after floors/quality',
+  },
+  {
+    key: 'time_based_entry',
+    label: 'Time-based entry',
+    why: 'Entry age / timing selectivity',
+  },
+  {
+    key: 'wallet_convergence',
+    label: 'Wallet convergence',
+    why: 'Require multi-wallet confirmation',
+  },
+];
+
+export function getModuleTuneStatus() {
+  const toggles = ensureStrategyToggles();
+  const steps = MODULE_TUNE_ORDER.map((step, index) => ({
+    ...step,
+    index: index + 1,
+    enabled: toggles[step.key] === true,
+  }));
+  const next = steps.find((s) => !s.enabled) ?? null;
+  const enabledTune = steps.filter((s) => s.enabled).map((s) => s.key);
+  return {
+    order: steps,
+    next,
+    enabledTune,
+    hint: next
+      ? `Next: enable ${next.label} (${next.key}) — ${next.why}`
+      : 'All recommended tune modules are ON — evaluate keep/drop via soak metrics',
+  };
+}
+
+/** Enable the next OFF module in MODULE_TUNE_ORDER (marks recipe custom). */
+export function enableNextTuneModule(): {
+  enabled: StrategyKey | null;
+  status: ReturnType<typeof getModuleTuneStatus>;
+} {
+  const status = getModuleTuneStatus();
+  if (!status.next) {
+    return { enabled: null, status };
+  }
+  updateStrategyToggles({ [status.next.key]: true }, { markCustom: true });
+  return {
+    enabled: status.next.key,
+    status: getModuleTuneStatus(),
+  };
 }
 
 export function ensureStrategyRecipeMode(): StrategyRecipeMode {
@@ -3564,6 +3651,7 @@ export function getStrategiesStatus() {
     winRate55_60Description: WIN_RATE_55_60_DESCRIPTION,
     highWinRatePresetActive: config.highWinRatePresetActive === true,
     balancedThresholds: { ...BALANCED_THRESHOLDS },
+    moduleTune: getModuleTuneStatus(),
     aggressiveThresholds: { ...AGGRESSIVE_THRESHOLDS },
     quickScalperThresholds: { ...QUICK_SCALPER_THRESHOLDS },
     microScalperThresholds: { ...MICRO_SCALPER_THRESHOLDS },

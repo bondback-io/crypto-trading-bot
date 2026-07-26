@@ -10,6 +10,7 @@ import {
   PublicKey,
 } from '@solana/web3.js';
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
+import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
@@ -3089,6 +3090,7 @@ function resolveTradeSize(
     riskScore: opts?.riskScore,
     convictionScore: opts?.convictionScore,
     sizeMultiplier: opts?.sizeMultiplier,
+    openCount: paperTrader.getOpenPositions().length,
   });
 }
 
@@ -3123,9 +3125,38 @@ function recordSignalSizing(
 /** Last reason from passesFilters / recordRejectedSignal (for scanner annotate). */
 let lastFilterSkipReason: string | null = null;
 
+/** Rolling skip-reason tallies for soak / module A/B tuning. */
+const skipReasonCounts = new Map<string, number>();
+const MAX_SKIP_REASON_KEYS = 40;
+
+function bumpSkipReason(reason: string): void {
+  const key = normalizeSkipReason(reason);
+  skipReasonCounts.set(key, (skipReasonCounts.get(key) || 0) + 1);
+  if (skipReasonCounts.size > MAX_SKIP_REASON_KEYS) {
+    // Drop lowest-count keys when oversized
+    const ranked = [...skipReasonCounts.entries()].sort((a, b) => a[1] - b[1]);
+    for (let i = 0; i < ranked.length - MAX_SKIP_REASON_KEYS + 5; i++) {
+      skipReasonCounts.delete(ranked[i][0]);
+    }
+  }
+}
+
+export function getSkipReasonCounts(): Array<{ reason: string; count: number }> {
+  return [...skipReasonCounts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15);
+}
+
+export function resetSkipReasonCounts(): void {
+  skipReasonCounts.clear();
+  lastFilterSkipReason = null;
+}
+
 /** Record a filter reject on the sizing panel so Signals tab isn't blank. */
 function recordRejectedSignal(signal: TradeSignal, reason: string): void {
   lastFilterSkipReason = reason;
+  bumpSkipReason(reason);
   const kind: 'migration' | 'normal' =
     signal.isMigration || signal.nearMigration || signal.earlyBuy
       ? 'migration'
@@ -4152,6 +4183,8 @@ export function getMonitorStatus(): {
   tradeRate: ReturnType<typeof getTradeRateStatus>;
   selectiveEnabled: boolean;
   recentSizedSignals: number;
+  skipReasonCounts: Array<{ reason: string; count: number }>;
+  lastFilterSkipReason: string | null;
 } {
   const risk = getRiskStatus({
     equitySol: paperTrader.getEquitySol(),
@@ -4194,6 +4227,8 @@ export function getMonitorStatus(): {
     tradeRate: getTradeRateStatus(),
     selectiveEnabled: config.selective?.enabled !== false,
     recentSizedSignals: recentSignals.length,
+    skipReasonCounts: getSkipReasonCounts(),
+    lastFilterSkipReason,
   };
 }
 

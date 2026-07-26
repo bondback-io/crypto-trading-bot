@@ -71,6 +71,7 @@ import {
   refreshWalletActivity,
   pruneLowQualityWallets,
   refreshAllWalletQualityScores,
+  resetSkipReasonCounts,
 } from './monitor';
 import {
   updateRiskConfig,
@@ -289,6 +290,7 @@ export function createServer(): express.Application {
       portfolio,
       winRate: paperTrader.getWinRatePct(),
       stats: paperStats,
+      soak: paperTrader.getSoakMetrics(),
       performanceScore: liveSimScore,
       charts: usesPaperAccounting() ? paperTrader.getChartData() : null,
       rpc: getRpcStats(),
@@ -1043,16 +1045,72 @@ export function createServer(): express.Application {
     }
     try {
       const result = applyRiskLevel(level);
+      if (level === 'off') {
+        resetSkipReasonCounts();
+      }
       res.json({
         ok: true,
         ...result,
         config: getConfigSnapshot(),
+        soak: paperTrader.getSoakMetrics(),
       });
     } catch (err) {
       res.status(400).json({
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  });
+
+  /** One-click signal soak: Risk Off + recipe reset + clear skip counters. */
+  app.post('/api/tuning/soak', (_req: Request, res: Response) => {
+    try {
+      const result = applyRiskLevel('off');
+      resetSkipReasonCounts();
+      res.json({
+        ok: true,
+        mode: 'soak',
+        ...result,
+        config: getConfigSnapshot(),
+        soak: paperTrader.getSoakMetrics(),
+        monitor: getMonitorStatus(),
+        hint: 'Risk Off soak active — Copy + Scanner, max concurrent 40, small size, ops-only gates. Watch Overview soak strip + skip reasons.',
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/tuning/skip-reasons/reset', (_req: Request, res: Response) => {
+    resetSkipReasonCounts();
+    res.json({ ok: true, skipReasonCounts: [] });
+  });
+
+  app.post('/api/tuning/module-next', (_req: Request, res: Response) => {
+    const { enableNextTuneModule, getModuleTuneStatus } =
+      require('./strategies') as typeof import('./strategies');
+    const result = enableNextTuneModule();
+    res.json({
+      ok: true,
+      ...result,
+      moduleTune: getModuleTuneStatus(),
+      strategies: (
+        require('./strategies') as typeof import('./strategies')
+      ).getStrategiesStatus(),
+    });
+  });
+
+  app.get('/api/tuning/status', (_req: Request, res: Response) => {
+    const { getModuleTuneStatus } =
+      require('./strategies') as typeof import('./strategies');
+    res.json({
+      soak: paperTrader.getSoakMetrics(),
+      skipReasonCounts: getMonitorStatus().skipReasonCounts,
+      lastFilterSkipReason: getMonitorStatus().lastFilterSkipReason,
+      moduleTune: getModuleTuneStatus(),
+      riskLevel: normalizeRiskLevel(config.riskLevel),
+    });
   });
 
   app.post('/api/risk', (req: Request, res: Response) => {
