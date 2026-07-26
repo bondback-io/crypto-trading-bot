@@ -30,7 +30,7 @@ import {
 } from './marketData';
 import { cacheTokenMeta } from './tokenMeta';
 import { logger } from './logger';
-import { calculateDynamicPositionSize } from './risk';
+import { calculateDynamicPositionSize, clampToMaxAllowedTradeSol } from './risk';
 import {
   evaluateSignalConviction,
   canExecuteTradeAt,
@@ -1818,6 +1818,7 @@ function replayLaunch(
     ) {
       sizeSol = Number((sizeSol * er.sizeMultiplier).toFixed(6));
     }
+    sizeSol = clampToMaxAllowedTradeSol(sizeSol, 'backtest');
 
     let useScalp = scalpResolved != null;
     let shortTermId = scalpResolved?.id;

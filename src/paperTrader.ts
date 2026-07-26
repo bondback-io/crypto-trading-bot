@@ -11,6 +11,7 @@ import {
   computeEquitySol,
   evaluateRiskLimits,
   resetPeakEquity,
+  clampToMaxAllowedTradeSol,
 } from './risk';
 import {
   evaluateProfitAction,
@@ -1046,10 +1047,14 @@ export class PaperTrader {
       candleSource?: 'real' | 'synthetic';
     }
   ): Position | null {
-    const spendSol =
+    const spendSol = clampToMaxAllowedTradeSol(
       solAmount ??
-      config.trade.baseTradeAmountSol ??
-      config.trade.tradeAmountSol;
+        config.trade.baseTradeAmountSol ??
+        config.trade.tradeAmountSol,
+      meta?.entrySource
+        ? `simulateBuy:${meta.entrySource}`
+        : `simulateBuy:${meta?.strategyKind ?? 'normal'}`
+    );
     const tokenName = (meta?.name || symbol || mintPrefix(mint)).trim();
     const tokenSymbol = (symbol || mintPrefix(mint)).trim();
     const label = formatTokenLabel(tokenSymbol, tokenName, mint);

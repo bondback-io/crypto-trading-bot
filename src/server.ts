@@ -1474,6 +1474,7 @@ export function createServer(): express.Application {
       trade: {
         baseTradeAmountSol:
           config.trade.baseTradeAmountSol ?? config.trade.tradeAmountSol,
+        maxAllowedTradeSol: config.trade.maxAllowedTradeSol ?? 1.5,
         riskMultiplier: config.trade.riskMultiplier ?? 0.4,
         convictionMultiplier: config.trade.convictionMultiplier ?? 1.45,
       },
@@ -2262,6 +2263,7 @@ export function createServer(): express.Application {
     const {
       tradeAmountSol,
       baseTradeAmountSol,
+      maxAllowedTradeSol,
       riskMultiplier,
       convictionMultiplier,
       minProfitPercent,
@@ -2275,6 +2277,9 @@ export function createServer(): express.Application {
       }),
       ...(tradeAmountSol !== undefined && {
         tradeAmountSol: Number(tradeAmountSol),
+      }),
+      ...(maxAllowedTradeSol !== undefined && {
+        maxAllowedTradeSol: Number(maxAllowedTradeSol),
       }),
       ...(riskMultiplier !== undefined && {
         riskMultiplier: Number(riskMultiplier),

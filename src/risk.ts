@@ -5,6 +5,7 @@
 import {
   config,
   DEFAULT_RISK,
+  DEFAULT_MAX_ALLOWED_TRADE_SOL,
   StrategyRiskRules,
   RiskConfig,
   persistUserSettings,
@@ -12,7 +13,7 @@ import {
 import { isStrategyEnabled } from './strategies';
 
 export type { StrategyRiskRules, RiskConfig };
-export { DEFAULT_RISK };
+export { DEFAULT_RISK, DEFAULT_MAX_ALLOWED_TRADE_SOL };
 
 export type RiskHaltReason =
   | 'daily_loss'
@@ -119,6 +120,27 @@ function clamp01(n: number): number {
 }
 
 /**
+ * Hard ceiling on final entry size (SOL). Applies after all sizing math.
+ * Clamps — never rejects. Shared choke for paper, live, and backtest.
+ */
+export function clampToMaxAllowedTradeSol(
+  sizeSol: number,
+  source = 'entry'
+): number {
+  const raw = Number(sizeSol);
+  if (!Number.isFinite(raw) || raw <= 0) return raw;
+  const cap = Number(config.trade?.maxAllowedTradeSol);
+  const maxAllowed =
+    Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_MAX_ALLOWED_TRADE_SOL;
+  if (raw <= maxAllowed) return raw;
+  const capped = Number(maxAllowed.toFixed(6));
+  console.log(
+    `[risk] Max Allowed Trade clamp (${source}): ${raw.toFixed(4)} → ${capped.toFixed(4)} SOL (cap ${maxAllowed})`
+  );
+  return capped;
+}
+
+/**
  * Dynamic position sizing from baseTradeAmountSol × risk × conviction.
  * High anti-rug risk score → smaller (down to riskMultiplier × base).
  * High conviction → larger (up to convictionMultiplier × base).
@@ -205,6 +227,7 @@ export function calculateDynamicPositionSize(options: {
   const hardCap = Math.max(risk.maxTradeSol, baseSol * 3);
   size = Math.min(size, hardCap);
   size = Math.max(risk.minTradeSol, Number(size.toFixed(4)));
+  size = clampToMaxAllowedTradeSol(size, 'dynamicSizing');
 
   const parts: string[] = [];
   if (riskScore != null) {

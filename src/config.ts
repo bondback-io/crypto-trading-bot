@@ -186,6 +186,12 @@ export interface TradeConfig {
   /** Same as baseTradeAmountSol — preferred legacy name */
   tradeAmountSol: number;
   /**
+   * Hard ceiling on final entry size (SOL) after all sizing math
+   * (risk/conviction/profile/concurrent). Clamps — does not reject.
+   * Persists across Risk On/Off (not overwritten by presets).
+   */
+  maxAllowedTradeSol: number;
+  /**
    * Floor size multiplier applied at max risk score (e.g. 0.4 = 40% of base).
    * Lower = smaller positions on high-risk tokens.
    */
@@ -201,6 +207,9 @@ export interface TradeConfig {
   /** Stop-loss as negative % (e.g. -35 = sell at 35% loss) */
   stopLossPercent: number;
 }
+
+/** Default hard cap on final buy size (SOL). Above normal base×multipliers. */
+export const DEFAULT_MAX_ALLOWED_TRADE_SOL = 1.5;
 
 /** Advanced tiered profit-taking (recover initial → partial → trail + bag) */
 export interface ProfitStrategyConfig {
@@ -1906,6 +1915,7 @@ export const config: BotConfig = {
     // Match On RISK_LEVEL_PRESETS (lean baseline)
     baseTradeAmountSol: 0.14,
     tradeAmountSol: 0.14,
+    maxAllowedTradeSol: DEFAULT_MAX_ALLOWED_TRADE_SOL,
     riskMultiplier: 0.45,
     convictionMultiplier: 1.5,
     minProfitPercent: 42,
@@ -2611,6 +2621,13 @@ function syncConfigAliases(): void {
     config.trade.tradeAmountSol = config.trade.baseTradeAmountSol;
   } else if (config.trade.tradeAmountSol != null) {
     config.trade.baseTradeAmountSol = config.trade.tradeAmountSol;
+  }
+  if (
+    config.trade.maxAllowedTradeSol == null ||
+    !Number.isFinite(Number(config.trade.maxAllowedTradeSol)) ||
+    Number(config.trade.maxAllowedTradeSol) <= 0
+  ) {
+    config.trade.maxAllowedTradeSol = DEFAULT_MAX_ALLOWED_TRADE_SOL;
   }
   if (config.trade.riskMultiplier == null) {
     config.trade.riskMultiplier = 0.45;
@@ -3893,6 +3910,12 @@ export function updateTradeConfig(partial: Partial<TradeConfig>): void {
     config.trade.baseTradeAmountSol = partial.tradeAmountSol;
     config.trade.tradeAmountSol = partial.tradeAmountSol;
   }
+  if (partial.maxAllowedTradeSol != null) {
+    const n = Number(partial.maxAllowedTradeSol);
+    config.trade.maxAllowedTradeSol = Number.isFinite(n) && n > 0
+      ? Math.min(50, Math.max(0.01, n))
+      : DEFAULT_MAX_ALLOWED_TRADE_SOL;
+  }
   if (partial.riskMultiplier != null) {
     config.trade.riskMultiplier = Math.min(
       1,
@@ -4141,6 +4164,9 @@ export function applyRiskLevel(
   const preset = RISK_LEVEL_PRESETS[canonical];
   config.riskLevel = canonical;
 
+  // Keep user hard size cap across Risk On/Off — presets do not set it.
+  const preservedMaxAllowed = config.trade.maxAllowedTradeSol;
+
   Object.assign(config.trade, preset.trade);
   if (preset.trade.baseTradeAmountSol != null) {
     config.trade.tradeAmountSol = preset.trade.baseTradeAmountSol;
@@ -4148,6 +4174,19 @@ export function applyRiskLevel(
   } else if (preset.trade.tradeAmountSol != null) {
     config.trade.baseTradeAmountSol = preset.trade.tradeAmountSol;
     config.trade.tradeAmountSol = preset.trade.tradeAmountSol;
+  }
+  if (
+    preservedMaxAllowed != null &&
+    Number.isFinite(Number(preservedMaxAllowed)) &&
+    Number(preservedMaxAllowed) > 0
+  ) {
+    config.trade.maxAllowedTradeSol = Number(preservedMaxAllowed);
+  } else if (
+    config.trade.maxAllowedTradeSol == null ||
+    !Number.isFinite(Number(config.trade.maxAllowedTradeSol)) ||
+    Number(config.trade.maxAllowedTradeSol) <= 0
+  ) {
+    config.trade.maxAllowedTradeSol = DEFAULT_MAX_ALLOWED_TRADE_SOL;
   }
 
   Object.assign(config.filters, preset.filters);

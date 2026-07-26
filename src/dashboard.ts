@@ -4976,6 +4976,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="range" id="tradeAmountSol" min="0.01" max="2" step="0.01" value="0.14" />
             </div>
             <div class="field">
+              <label title="Hard ceiling on final entry size after all sizing math (risk/conviction/profile/concurrent). Clamps oversized buys — does not reject. Separate from Base Trade.">Max Allowed Trade (SOL) — <span class="val" id="v-maxAllowedTradeSol">1.5</span></label>
+              <input type="range" id="maxAllowedTradeSol" min="0.05" max="10" step="0.05" value="1.5" />
+            </div>
+            <div class="field">
               <label title="Size floor multiplier at max risk score (lower = smaller on risky tokens)">Risk Multiplier — <span class="val" id="v-riskMultiplier">0.40</span></label>
               <input type="range" id="riskMultiplier" min="0.1" max="1" step="0.05" value="0.4" />
             </div>
@@ -7100,7 +7104,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       loadSystemLogs();
     }
     const rangeFields = [
-      'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
+      'tradeAmountSol','maxAllowedTradeSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
       'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
       'minDevHoldPct','maxDevHoldPct','minTopHolderPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct',
       'minRiskScore','maxRiskScore','minEstimatedTaxPct','maxEstimatedTaxPct',
@@ -12087,7 +12091,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function saveTradeConfig(silent) {
       const body = {};
-      ['tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
+      ['tradeAmountSol','maxAllowedTradeSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent'].forEach(k => {
         body[k] = Number(document.getElementById(k).value);
       });
       body.baseTradeAmountSol = body.tradeAmountSol;

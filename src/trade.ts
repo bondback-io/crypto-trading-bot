@@ -42,6 +42,7 @@ import {
   estimateBondingCurveMarketCapUsd,
 } from './bondingCurve';
 import { resolveTop10HoldPctForEntry } from './tokenMetrics';
+import { clampToMaxAllowedTradeSol } from './risk';
 
 const jupiter = createJupiterApiClient();
 
@@ -358,13 +359,15 @@ export async function executeBuy(
     return { success: false, mode: config.mode, error: pumpFunGate };
   }
 
-  const solAmount =
-    meta?.solAmount ??
-    config.trade.baseTradeAmountSol ??
-    config.trade.tradeAmountSol;
   const slippageBps = meta?.slippageBps ?? config.paper.slippageBps;
   const strategyKind =
     meta?.strategyKind ?? (meta?.priority ? 'migration' : 'normal');
+  const solAmount = clampToMaxAllowedTradeSol(
+    meta?.solAmount ??
+      config.trade.baseTradeAmountSol ??
+      config.trade.tradeAmountSol,
+    `executeBuy:${strategyKind}`
+  );
 
   if (paperTrader.hasOpenMint(mint)) {
     return {
