@@ -110,6 +110,7 @@ import {
 import {
   evaluateBuyPumpFunOnlyGate,
   evaluateEntryTimingGate,
+  evaluateHolderConcentrationHardFloors,
 } from './deadTokenFilters';
 import {
   fetchBondingCurve,
@@ -3693,9 +3694,40 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // On-chain / Dex metrics + comprehensive anti-rug
-  // Risk OFF: skip anti-rug / metrics hard gates — Copy/Scanner signals pass through
+  // Risk OFF: skip soft anti-rug / metrics hard gates — but still enforce
+  // Top-10% min/max when configured (>0). Soak zeros both so this is a no-op.
   if (config.riskLevel === 'off') {
-    // fall through to rate limits / conviction below
+    const minTop10Cfg = Number(filters.minTop10HolderPct) || 0;
+    const maxTop10Cfg = Number(filters.maxHolderConcentration) || 0;
+    if (minTop10Cfg > 0 || maxTop10Cfg > 0) {
+      try {
+        const { resolveTop10HoldPctForEntry } = await import('./tokenMetrics');
+        const top10HoldPct = await resolveTop10HoldPctForEntry(
+          signal.mint,
+          signal.metrics?.top10HoldPct
+        );
+        if (signal.metrics) signal.metrics.top10HoldPct = top10HoldPct;
+        const holderGate = evaluateHolderConcentrationHardFloors({
+          top10HoldPct,
+          insiderPct: null,
+        });
+        if (holderGate.skipReasons.length > 0) {
+          const reason = holderGate.skipReasons[0]!;
+          console.log(
+            `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ${reason}`
+          );
+          recordRejectedSignal(signal, reason);
+          return false;
+        }
+      } catch (err) {
+        console.warn(
+          `[monitor] Top-10 holder gate failed for ${signal.mint.slice(0, 8)}…:`,
+          err instanceof Error ? err.message : err
+        );
+        recordRejectedSignal(signal, 'top 10 holders unknown (gate fetch failed)');
+        return false;
+      }
+    }
   } else {
   const antiRugEnabled =
     isStrategyEnabled('anti_rug_honeypot') &&
@@ -3709,6 +3741,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     (filters.maxDevPercent ?? 0) > 0 ||
     (filters.maxTopHolderPct ?? 0) > 0 ||
     (filters.maxHolderConcentration ?? 0) > 0 ||
+    (filters.minTop10HolderPct ?? 0) > 0 ||
     filters.skipIfMintAuthority;
 
   if (needsMetrics) {

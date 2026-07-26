@@ -10,6 +10,7 @@ import {
   effectiveMinLiquidityUsd,
   effectiveMinMarketCapUsd,
   effectiveMinTop10HolderPct,
+  effectiveMaxTop10HolderPct,
 } from './config';
 import { getBondingCurvePda } from './bondingCurve';
 import { getConnection } from './connection';
@@ -638,7 +639,7 @@ export function evaluateTokenMetricsFilters(
     }
   }
 
-  const maxConc = filters.maxHolderConcentration ?? 0;
+  const maxConc = effectiveMaxTop10HolderPct();
   if (maxConc > 0 && metrics.top10HoldPct != null) {
     if (metrics.top10HoldPct > maxConc) {
       reasons.push(
@@ -648,19 +649,27 @@ export function evaluateTokenMetricsFilters(
   }
 
   const minTop10 = effectiveMinTop10HolderPct();
-  if (
-    minTop10 > 0 &&
-    metrics.top10HoldPct != null &&
-    Number.isFinite(metrics.top10HoldPct)
-  ) {
-    if (metrics.top10HoldPct < minTop10) {
-      reasons.push(
-        `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
-      );
+  if (minTop10 > 0 || maxConc > 0) {
+    if (
+      metrics.top10HoldPct != null &&
+      Number.isFinite(metrics.top10HoldPct)
+    ) {
+      if (minTop10 > 0 && metrics.top10HoldPct < minTop10) {
+        reasons.push(
+          `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
+        );
+      }
+    } else {
+      // Fail closed when Top-10% min/max gate is active (matches hard floors).
+      const band =
+        minTop10 > 0 && maxConc > 0
+          ? `${minTop10}–${maxConc}%`
+          : minTop10 > 0
+            ? `≥ ${minTop10}%`
+            : `≤ ${maxConc}%`;
+      reasons.push(`top10 holders unknown (need ${band})`);
     }
   }
-  // Unknown top-10: do not fail-closed here (RPC/Birdeye gaps). Hard floors
-  // still reject known-too-low via evaluateHolderConcentrationHardFloors.
 
   if (filters.skipIfMintAuthority && metrics.mintAuthority) {
     reasons.push(`mint authority still set (${metrics.mintAuthority.slice(0, 8)}…)`);

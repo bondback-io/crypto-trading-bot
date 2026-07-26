@@ -5012,9 +5012,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $8,000 (recommended $8k–$15k). High/Degen cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">10000</span></label><input type="range" id="minLiquidity" min="8000" max="100000" step="500" value="10000" /></div>
             <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across all risk levels (including Degen). Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
             <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
-            <div class="field"><label title="Max % held by top 10 wallets">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">35</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="35" /></div>
-            <div class="field"><label title="Min % held by top 10 wallets (excludes Pump bonding-curve vault — Jupiter-style). Floor 5% (default 8%) — rejects suspiciously dispersed / honeypot holder distributions. Unknown top-10 fails closed. Non-bypassable.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="40" step="1" value="8" /></div>
-            <div class="field"><label title="Max % held by a single wallet">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
+            <div class="field"><label title="Min % held by top 10 wallets (excludes Pump bonding-curve vault — Jupiter-style). Floor 5% when Risk On (default 8%). Pair with Max Top-10% for a valid band (e.g. 8–70%). Unknown top-10 fails closed when min or max is on. Enforced whenever set &gt; 0 (Risk Off soak zeros both).">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="80" step="1" value="8" /></div>
+            <div class="field"><label title="Max % held by top 10 wallets (pair with Min Top-10%). Default 70. 0 = off. Same key as maxHolderConcentration — not the single-wallet Max Top Holder %. Unknown fails closed when on.">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">70</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="70" /></div>
+            <div class="field"><label title="Max % held by a single wallet (independent of Top-10% band)">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
             <div class="field"><label title="Hard max insider/rat (or extreme dev) hold %. Floor cap 50% — non-bypassable across risk levels. Sniper sensitivity may be stricter.">Max Insider % — <span class="val" id="v-maxInsiderPctDisplay">50</span></label><input type="range" id="maxInsiderPctDisplay" min="50" max="50" step="1" value="50" disabled title="Hard floor 50% — not adjustable below (non-bypassable)" /></div>
             <div class="field"><label title="Composite rug/risk score ceiling (0-100)">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="20" max="100" step="5" value="70" /></div>
             <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
@@ -7038,6 +7038,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     rangeFields.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', () => {
+        // Keep Top-10% min ≤ max when both are set
+        if (id === 'minTop10HolderPct' || id === 'maxHolderConcentration') {
+          const minEl = document.getElementById('minTop10HolderPct');
+          const maxEl = document.getElementById('maxHolderConcentration');
+          if (minEl && maxEl) {
+            let minV = Number(minEl.value);
+            let maxV = Number(maxEl.value);
+            if (maxV > 0 && minV > maxV) {
+              if (id === 'minTop10HolderPct') {
+                maxEl.value = String(minV);
+                maxV = minV;
+                const maxLab = document.getElementById('v-maxHolderConcentration');
+                if (maxLab) maxLab.textContent = maxEl.value;
+              } else {
+                minEl.value = String(maxV);
+                minV = maxV;
+                const minLab = document.getElementById('v-minTop10HolderPct');
+                if (minLab) minLab.textContent = minEl.value;
+              }
+            }
+          }
+        }
         const v = document.getElementById('v-' + id);
         if (v) v.textContent = el.value;
       });
@@ -11303,7 +11325,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               ? \` <span style="color:\${sn.highRisk || sn.sniperHighRisk ? 'var(--red)' : 'var(--muted)'}">sniper \${sn.sniperScore != null ? sn.sniperScore : '?'}\${sn.sniperCount != null ? ' · n=' + sn.sniperCount : ''}\${sn.bundlerPct != null ? ' · bundler ' + Number(sn.bundlerPct).toFixed(0) + '%' : ''}\${sn.insiderPct != null ? ' · insider ' + Number(sn.insiderPct).toFixed(0) + '%' : ''}</span>\`
               : '';
             const metricsLine = (m.liquidityUsd != null || m.devHoldPct != null || ar.riskScore != null || bc.progressPct != null || sn.sniperScore != null || beLiq != null || beVol != null || beHold != null)
-              ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · vol24h $\${beVol != null ? beVol.toFixed(0) : '?'} · holders \${beHold != null ? beHold : '?'} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : (m.topHolderPct != null ? Number(m.topHolderPct).toFixed(1) + '%' : '?')}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
+              ? \` <span class="mint">liq $\${m.liquidityUsd != null ? Number(m.liquidityUsd).toFixed(0) : (beLiq != null ? beLiq.toFixed(0) : '?')} · vol24h $\${beVol != null ? beVol.toFixed(0) : '?'} · holders \${beHold != null ? beHold : '?'} · dev \${m.devHoldPct != null ? Number(m.devHoldPct).toFixed(1) + '%' : '?'} · top10 \${m.top10HoldPct != null ? Number(m.top10HoldPct).toFixed(0) + '%' : '?'}\${m.topHolderPct != null ? ' · top1 ' + Number(m.topHolderPct).toFixed(1) + '%' : ''}\${m.devActiveRecently ? ' · dev active' : ''}\${ar.honeypot ? ' · honeypot?' : ''}\${ar.recentDevSells ? ' · dev sells' : ''}\${ar.liquidityLockedOrBurned === true ? ' · LP locked' : ''}\${flagBits ? ' · ' + flagBits : ''}</span>\${birdeyeBadge}\${curveBadge}\${sniperBadge}\${riskBadge}\`
               : '';
             const skipBadge = a.skipReason
               ? \` <span style="color:var(--muted)">· \${a.tradeStatus === 'waiting' ? 'waiting' : 'skip'}: \${escHtml(String(a.skipReason).slice(0, 80))}</span>\`

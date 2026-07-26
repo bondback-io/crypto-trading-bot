@@ -16,6 +16,7 @@ import {
   effectiveMinMarketCapUsd,
   effectiveMinRecentActivity,
   effectiveMinTop10HolderPct,
+  effectiveMaxTop10HolderPct,
   effectiveMaxInsiderPct,
 } from './config';
 import type { BondingCurveHealth } from './bondingCurve';
@@ -84,6 +85,9 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('low bonding curve + dead') ||
     r.includes('top 10 holders too low') ||
     r.includes('top10 holders too low') ||
+    r.includes('top 10 holders too high') ||
+    r.includes('top10 holders too high') ||
+    r.includes('high holder concentration') ||
     r.includes('top 10 holders unknown') ||
     r.includes('top10 holders unknown') ||
     r.includes('insider % too high') ||
@@ -679,51 +683,77 @@ export interface HolderConcentrationSnapshot {
 
 /**
  * Non-bypassable holder-dispersion / insider ceilings.
- * - Reject when top10 is present and below min (default 8%, hard ≥5%).
- * - Fail closed when top10 is unknown after metrics fetch (mirror MC unknown gate).
+ * - Reject when top10 is present and below min (default 8%, hard ≥5%) or above max.
+ * - Fail closed when top10 is unknown and min/max gate is active.
  * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
+ * - Risk OFF soak zeros min+max → gate inactive. If user sets min/max > 0, enforce anyway.
  */
 export function evaluateHolderConcentrationHardFloors(
   snap: HolderConcentrationSnapshot
 ): DeadTokenFilterResult {
-  // Risk OFF: no top-10 / insider hard floors
-  if (config.riskLevel === 'off') {
-    return { skipReasons: [], scorePenalty: 0, flags: [] };
-  }
-
   const skipReasons: string[] = [];
   const flags: DeadTokenFilterResult['flags'] = [];
   let scorePenalty = 0;
 
   const minTop10 = effectiveMinTop10HolderPct();
+  const maxTop10 = effectiveMaxTop10HolderPct();
+  const top10GateActive = minTop10 > 0 || maxTop10 > 0;
   const maxInsider = effectiveMaxInsiderPct();
+  // Insider hard cap is disabled under Risk OFF (effectiveMaxInsiderPct → 100).
+  const insiderGateActive = maxInsider < 100;
 
-  if (snap.top10HoldPct != null && Number.isFinite(snap.top10HoldPct)) {
-    if (snap.top10HoldPct < minTop10) {
-      scorePenalty += 35;
-      flags.push({
-        id: 'hard_top10_too_low',
-        severity: 'critical',
-        label: 'Top-10 holders too low',
-        detail: `${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%`,
-      });
-      skipReasons.push(
-        `Skipped — top 10 holders too low (${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%)`
-      );
-    }
-  } else {
-    // Soft penalty when top-10 is missing (RPC/Birdeye often unavailable).
-    // Still hard-skip when we *know* concentration is too low above.
-    scorePenalty += 18;
-    flags.push({
-      id: 'soft_unknown_top10',
-      severity: 'medium',
-      label: 'Top-10 holders unknown',
-      detail: `need ≥ ${minTop10}% when data available`,
-    });
+  if (!top10GateActive && !insiderGateActive) {
+    return { skipReasons: [], scorePenalty: 0, flags: [] };
   }
 
-  if (snap.insiderPct != null && Number.isFinite(snap.insiderPct)) {
+  if (top10GateActive) {
+    if (snap.top10HoldPct != null && Number.isFinite(snap.top10HoldPct)) {
+      if (minTop10 > 0 && snap.top10HoldPct < minTop10) {
+        scorePenalty += 35;
+        flags.push({
+          id: 'hard_top10_too_low',
+          severity: 'critical',
+          label: 'Top-10 holders too low',
+          detail: `${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%`,
+        });
+        skipReasons.push(
+          `Skipped — top 10 holders too low (${snap.top10HoldPct.toFixed(1)}% < ${minTop10}%)`
+        );
+      }
+      if (maxTop10 > 0 && snap.top10HoldPct > maxTop10) {
+        scorePenalty += 35;
+        flags.push({
+          id: 'hard_top10_too_high',
+          severity: 'critical',
+          label: 'Top-10 holders too high',
+          detail: `${snap.top10HoldPct.toFixed(1)}% > ${maxTop10}%`,
+        });
+        skipReasons.push(
+          `Skipped — top 10 holders too high (${snap.top10HoldPct.toFixed(1)}% > ${maxTop10}%)`
+        );
+      }
+    } else {
+      // Fail closed when min/max gate is active and top-10 is unknown.
+      scorePenalty += 35;
+      const band =
+        minTop10 > 0 && maxTop10 > 0
+          ? `${minTop10}–${maxTop10}%`
+          : minTop10 > 0
+            ? `≥ ${minTop10}%`
+            : `≤ ${maxTop10}%`;
+      flags.push({
+        id: 'hard_unknown_top10',
+        severity: 'critical',
+        label: 'Top-10 holders unknown',
+        detail: `need ${band}`,
+      });
+      skipReasons.push(
+        `Skipped — top 10 holders unknown (need ${band})`
+      );
+    }
+  }
+
+  if (insiderGateActive && snap.insiderPct != null && Number.isFinite(snap.insiderPct)) {
     if (snap.insiderPct >= maxInsider) {
       scorePenalty += 35;
       flags.push({
@@ -740,6 +770,7 @@ export function evaluateHolderConcentrationHardFloors(
 
   // Extreme deployer hold (≥ hard insider cap) — same non-bypassable class
   if (
+    insiderGateActive &&
     snap.devHoldPct != null &&
     Number.isFinite(snap.devHoldPct) &&
     snap.devHoldPct >= maxInsider

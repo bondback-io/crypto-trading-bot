@@ -391,10 +391,10 @@ async function runAntiRugChecks(
 
   const maxDev =
     filters.maxDevPercent ?? filters.maxDevHoldPct ?? 15;
+  // maxHolderConcentration = Top-10% max (pair with minTop10HolderPct).
+  // Do not fall back to maxTopHolderPct (that is single-wallet max).
   const maxConc =
-    filters.maxHolderConcentration ??
-    filters.maxTopHolderPct ??
-    40;
+    filters.maxHolderConcentration ?? 0;
   const maxTax = filters.maxEstimatedTaxPct ?? 25;
   const maxScore = filters.maxRiskScore ?? 70;
   const requireLock = filters.requireLiquidityLocked === true;
@@ -804,9 +804,10 @@ async function runAntiRugChecks(
     }
   }
 
-  // --- Non-bypassable holder dispersion / insider ceilings (all risk levels) ---
-  // Fail closed when top10 unknown; known values below minTop10HolderPct hard-reject.
+  // --- Non-bypassable holder dispersion / insider ceilings ---
+  // Fail closed when top10 unknown and min/max gate active; enforce both bounds.
   // top10HoldPct is Jupiter-style (bonding-curve vault excluded) from tokenMetrics.
+  // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces.
   const holderHard = evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,
     insiderPct: checks.insiderPct,
@@ -1058,12 +1059,13 @@ async function runAntiRugChecks(
     }
   }
 
-  // Hard floors are never bypassable — even when enableAntiRug is off
-  // (except Risk OFF, which empties dead-token / holder hard floors).
+  // Hard floors are never bypassable — even when enableAntiRug is off.
+  // Risk OFF only ignores soft anti-rug skips; holder hard floors still apply
+  // when min/max Top-10% are configured (>0). Soak zeros both to stay open.
   const riskOff = config.riskLevel === 'off';
   const hasHardSkip =
-    !riskOff &&
-    (hardSkipReasons.length > 0 ||
+    hardSkipReasons.length > 0 ||
+    (!riskOff &&
       skipReasons.some((r) => isNonBypassableSkipReason(r)));
   const softSkips = skipReasons.filter((r) => !isNonBypassableSkipReason(r));
   // Risk OFF: ignore soft anti-rug skips (modules/floors are intentionally off)

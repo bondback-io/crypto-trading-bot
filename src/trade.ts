@@ -477,8 +477,8 @@ export async function executeBuy(
     );
   }
 
-  // Hard top-10 floor at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.
-  // Risk OFF: evaluateHolderConcentrationHardFloors returns empty.
+  // Hard top-10 band at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.
+  // Enforced whenever min/max > 0 (including Risk Off if user set them; soak zeros both).
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
     meta?.top10HoldPct
@@ -495,7 +495,7 @@ export async function executeBuy(
     );
     return { success: false, mode: config.mode, error: reason };
   }
-  if (config.riskLevel !== 'off' && top10HoldPct != null) {
+  if (top10HoldPct != null) {
     console.log(
       `[trade] Entry top10 OK ${symbol}: ${top10HoldPct.toFixed(1)}%`
     );

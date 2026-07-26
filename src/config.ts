@@ -1299,11 +1299,15 @@ export interface FilterConfig {
   maxDevPercent: number;
   /** Skip if largest single holder % exceeds this (0 = disabled) */
   maxTopHolderPct: number;
-  /** Skip if top-10 holders concentration % exceeds this (0 = disabled) */
+  /**
+   * Max Top-10% holder concentration (pair with minTop10HolderPct).
+   * 0 = disabled. Default 70. Independent of maxTopHolderPct (single wallet).
+   */
   maxHolderConcentration: number;
   /**
-   * Skip if top-10 holders concentration % is below this (honeypot dispersion).
-   * Clamped to HARD_FILTER_FLOORS.minTop10HolderPct (5). Default 8.
+   * Min Top-10% holder concentration (honeypot dispersion floor).
+   * Clamped to HARD_FILTER_FLOORS.minTop10HolderPct (5) when Risk On. Default 8.
+   * Pair with maxHolderConcentration for a valid band (e.g. 8–70%).
    */
   minTop10HolderPct: number;
   /** Master switch for comprehensive anti-rug checks */
@@ -2390,12 +2394,8 @@ function syncConfigAliases(): void {
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;
   }
-  // Keep maxTopHolderPct ↔ maxHolderConcentration in sync
-  if (config.filters.maxTopHolderPct != null) {
-    config.filters.maxHolderConcentration = config.filters.maxTopHolderPct;
-  } else if (config.filters.maxHolderConcentration != null) {
-    config.filters.maxTopHolderPct = config.filters.maxHolderConcentration;
-  }
+  // maxTopHolderPct = single largest wallet; maxHolderConcentration = Top-10%.
+  // Do NOT sync them — they are independent metrics.
   // Keep minHolders ↔ minHolderCount in sync (prefer whichever was set higher)
   const holders = Math.max(
     config.filters.minHolders ?? 0,
@@ -2405,6 +2405,8 @@ function syncConfigAliases(): void {
     config.filters.minHolders = holders;
     config.filters.minHolderCount = holders;
   }
+  // Clamp Top-10% band: min ≤ max when both enabled
+  clampTop10HolderBand();
   // Risk OFF intentionally zeros floors — do not re-apply absolute clamps
   if (config.riskLevel === 'off') {
     if (config.filters.minRecentVolumeUsd == null) {
@@ -3561,7 +3563,7 @@ export function effectiveMinRecentActivity(): number {
   );
 }
 
-/** Min top-10 concentration — never below HARD_FILTER_FLOORS (5%), default 8%. Risk OFF → 0. */
+/** Min top-10 concentration — never below HARD_FILTER_FLOORS (5%), default 8%. Risk OFF → configured (0 when soak). */
 export function effectiveMinTop10HolderPct(): number {
   if (!hardFilterFloorsActive()) {
     const configured = Number(config.filters.minTop10HolderPct);
@@ -3570,6 +3572,31 @@ export function effectiveMinTop10HolderPct(): number {
   const configured = Number(config.filters.minTop10HolderPct);
   const preferred = Number.isFinite(configured) && configured > 0 ? configured : 8;
   return Math.max(preferred, HARD_FILTER_FLOORS.minTop10HolderPct);
+}
+
+/**
+ * Max Top-10% concentration (filters.maxHolderConcentration).
+ * 0 = disabled. Independent of maxTopHolderPct (single wallet).
+ */
+export function effectiveMaxTop10HolderPct(): number {
+  const configured = Number(config.filters.maxHolderConcentration);
+  if (!Number.isFinite(configured) || configured <= 0) return 0;
+  return Math.min(100, configured);
+}
+
+/** Ensure minTop10 ≤ maxHolderConcentration when both are enabled. */
+export function clampTop10HolderBand(): void {
+  const min = Number(config.filters.minTop10HolderPct);
+  const max = Number(config.filters.maxHolderConcentration);
+  if (
+    Number.isFinite(min) &&
+    min > 0 &&
+    Number.isFinite(max) &&
+    max > 0 &&
+    min > max
+  ) {
+    config.filters.maxHolderConcentration = min;
+  }
 }
 
 /** Hard max insider / extreme-dev hold % — non-bypassable across risk levels (OFF → disabled). */
@@ -3885,6 +3912,7 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
       HARD_FILTER_FLOORS.minTop10HolderPct
     );
   }
+  clampTop10HolderBand();
   persistUserSettings();
 }
 
@@ -4066,13 +4094,8 @@ export function applyRiskLevel(
   } else if (preset.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = preset.filters.maxDevHoldPct;
   }
-  if (preset.filters.maxTopHolderPct != null) {
-    config.filters.maxHolderConcentration = preset.filters.maxTopHolderPct;
-    config.filters.maxTopHolderPct = preset.filters.maxTopHolderPct;
-  } else if (preset.filters.maxHolderConcentration != null) {
-    config.filters.maxTopHolderPct = preset.filters.maxHolderConcentration;
-    config.filters.maxHolderConcentration = preset.filters.maxHolderConcentration;
-  }
+  // maxTopHolderPct (single) and maxHolderConcentration (Top-10%) stay independent.
+  // Object.assign already copied both from the preset when present.
 
   if (canonical === 'off') {
     config.filters.minHolders = Math.max(0, config.filters.minHolders ?? 0);
@@ -4346,6 +4369,7 @@ export function getRiskLevelSummary() {
       minRecentBuyVolumeUsd: effectiveMinRecentBuyVolumeUsd(),
       minRecentActivity: effectiveMinRecentActivity(),
       minTop10HolderPct: effectiveMinTop10HolderPct(),
+      maxTop10HolderPct: effectiveMaxTop10HolderPct(),
       maxInsiderPctHard: effectiveMaxInsiderPct(),
       requireHealthyCurve: config.bondingCurve.requireHealthyCurve === true,
       buyPumpFunOnly: config.filters.buyPumpFunOnly === true,

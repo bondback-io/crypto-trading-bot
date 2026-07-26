@@ -2626,6 +2626,7 @@ export function createServer(): express.Application {
       'maxDevPercent',
       'maxTopHolderPct',
       'maxHolderConcentration',
+      'minTop10HolderPct',
       'maxEstimatedTaxPct',
       'maxRiskScore',
       'convergenceRequired',
