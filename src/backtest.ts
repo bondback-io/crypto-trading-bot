@@ -319,7 +319,13 @@ export interface ProfileBreakdownMetrics {
 }
 
 export interface BacktestSummary {
+  /**
+   * Primary / scored win rate — excludes `forcedEndOfWindow` trades
+   * (aligned with strategy breakdown + optimizer).
+   */
   winRatePct: number;
+  /** Win rate across all closes including EOW (transparency) */
+  winRatePctAll: number;
   totalPnlSol: number;
   returnPct: number;
   avgWinPct: number;
@@ -351,9 +357,11 @@ export interface BacktestSummary {
   bestTrade: BacktestTradeResult | null;
   worstTrade: BacktestTradeResult | null;
   totalTrades: number;
+  /** Scored wins (excludes EOW) — pairs with winRatePct */
   wins: number;
+  /** Scored losses (excludes EOW) — pairs with winRatePct */
   losses: number;
-  /** Wins ÷ losses (∞ → 999 when no losses) */
+  /** Wins ÷ losses (∞ → 999 when no losses); scored only */
   winLossRatio: number;
   reBuyTrades: number;
   strategyBreakdown: StrategyBreakdownMetrics[];
@@ -757,8 +765,14 @@ function buildSummary(
   startingBalanceSol = 10,
   windowHours?: number
 ): BacktestSummary {
-  const wins = trades.filter((t) => t.pnlSol > 0);
-  const losses = trades.filter((t) => t.pnlSol <= 0);
+  // Headline WR / W-L match strategy buckets + optimizer: exclude EOW MTM.
+  // Total PnL / return / equity DD still include every close.
+  const scored = trades.filter((t) => !t.forcedEndOfWindow);
+  const wins = scored.filter((t) => t.pnlSol > 0);
+  const losses = scored.filter((t) => t.pnlSol <= 0);
+  const winsAll = trades.filter((t) => t.pnlSol > 0);
+  const forcedEndOfWindowTrades = trades.filter((t) => t.forcedEndOfWindow)
+    .length;
   const totalPnlSol = trades.reduce((s, t) => s + t.pnlSol, 0);
   const totalPnlUsd = trades.reduce(
     (s, t) => s + (t.pnlUsd ?? t.pnlSol * (t.solUsd || solUsd)),
@@ -830,12 +844,18 @@ function buildSummary(
         ? spanMs / 3_600_000
         : 1;
   const tradesPerHour = trades.length / Math.max(hours, 0.25);
-  const winRatePct = trades.length ? (wins.length / trades.length) * 100 : 0;
+  const winRatePct = scored.length
+    ? (wins.length / scored.length) * 100
+    : 0;
+  const winRatePctAll = trades.length
+    ? (winsAll.length / trades.length) * 100
+    : 0;
   const winRatePerTradeFrequency =
     winRatePct / Math.max(tradesPerHour, 0.05);
 
   return {
     winRatePct,
+    winRatePctAll,
     totalPnlSol,
     returnPct:
       startingBalanceSol > 0
@@ -886,7 +906,7 @@ function buildSummary(
     reBuyTrades: trades.filter((t) => t.isReBuy).length,
     strategyBreakdown: [migration, normal],
     profileBreakdown: buildProfileBreakdown(trades),
-    forcedEndOfWindowTrades: trades.filter((t) => t.forcedEndOfWindow).length,
+    forcedEndOfWindowTrades,
   };
 }
 
@@ -3113,7 +3133,10 @@ export async function runBacktest(
         : `Backtest (${configUsedFinal.riskLevel} risk · ${configUsedFinal.strictLabel}): ${primary.lastTrades.length} trades` +
           ` · max concurrent ${maxConcurrent}` +
           (simulations > 1 ? ` × ${simulations} sims` : '') +
-          `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${stats.winRatePct.toFixed(0)}%` +
+          `, net ${stats.netPnlSol.toFixed(4)} SOL (~$${summary.totalPnlUsd.toFixed(0)}), WR ${summary.winRatePct.toFixed(0)}%` +
+          (summary.forcedEndOfWindowTrades
+            ? ` (excl. ${summary.forcedEndOfWindowTrades} EOW)`
+            : '') +
           ` · PF ${summary.profitFactor}` +
           ` · Sharpe ${summary.sharpeRatio}` +
           ` · maxDD ${summary.maxDrawdownPct}%` +
@@ -3348,6 +3371,7 @@ export function exportLastBacktestJson(): string | null {
     riskComparison: lastResult.riskComparison,
     metrics: {
       winRatePct: lastResult.summary.winRatePct,
+      winRatePctAll: lastResult.summary.winRatePctAll,
       profitFactor: lastResult.summary.profitFactor,
       totalPnlSol: lastResult.summary.totalPnlSol,
       totalPnlUsd: lastResult.summary.totalPnlUsd,

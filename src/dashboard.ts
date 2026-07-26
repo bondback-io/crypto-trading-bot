@@ -3875,7 +3875,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 mb-3">
-          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win Rate</div><div class="stat" id="bt-stat-wr">—</div><div class="mint mt-1" id="bt-stat-wr-sub">—</div></div>
+          <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Win Rate <span class="tip" tabindex="0" data-tip="Scored win rate after fees/slip — excludes forced end-of-window (EOW) exits. Subtitle shows W/L on scored trades; EOW still count in Total Net PnL."></span></div><div class="stat" id="bt-stat-wr">—</div><div class="mint mt-1" id="bt-stat-wr-sub">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Profit Factor</div><div class="stat" id="bt-stat-pf">—</div><div class="mint mt-1" id="bt-stat-expect">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Total Net PnL</div><div class="stat" id="bt-stat-pnl">—</div></div>
           <div class="card !py-3 !bg-slate-900/50"><div class="stat-label">Max Drawdown</div><div class="stat" id="bt-stat-maxdd">—</div><div class="mint mt-1" id="bt-stat-dd">avg trade DD —</div></div>
@@ -7766,6 +7766,31 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '</div>';
     }
 
+    /**
+     * When exit reason quotes a mark ±X% (price vs entry), clarify vs fee-aware
+     * realized pnlPct so green marks that print red after slip/fees aren't
+     * mistaken for a WR counting bug.
+     */
+    function fmtMarkVsRealized(reason, pnlPct) {
+      const m = String(reason || '').match(/\\bmark\\s*([+-]?\\d+(?:\\.\\d+)?)%/i);
+      if (!m) return { chip: '', tip: '', inline: '' };
+      const markPct = Number(m[1]);
+      const real = Number(pnlPct || 0);
+      if (!Number.isFinite(markPct)) return { chip: '', tip: '', inline: '' };
+      const fmt = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
+      const label = 'mark ' + fmt(markPct) + ' → realized ' + fmt(real);
+      const tip =
+        'Mark = price move vs entry at exit decision. Realized = fee+slip aware PnL % (row %). ' +
+        label + '.';
+      const chip =
+        ' <span class="mint text-xs" style="opacity:.9;white-space:nowrap" title="' +
+        tip.replace(/"/g, '&quot;') +
+        '">' +
+        label +
+        '</span>';
+      return { chip: chip, tip: tip, inline: chip };
+    }
+
     function fmtExitTakes(t) {
       const takes = Array.isArray(t.exitTakes) ? t.exitTakes : [];
       const path = t.profitPath || '';
@@ -8202,8 +8227,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (wr) wr.textContent = (sum.winRatePct != null ? sum.winRatePct : stats.winRatePct || 0).toFixed(0) + '%';
       const wrSub = document.getElementById('bt-stat-wr-sub');
       if (wrSub) {
+        const eowN = Number(sum.forcedEndOfWindowTrades || 0);
         wrSub.textContent =
-          (sum.wins ?? 0) + 'W / ' + (sum.losses ?? 0) + 'L';
+          (sum.wins ?? 0) + 'W / ' + (sum.losses ?? 0) + 'L' +
+          (eowN > 0 ? ' (excl. ' + eowN + ' EOW)' : '');
+        if (eowN > 0 && sum.winRatePctAll != null) {
+          wrSub.title =
+            'Scored WR excludes end-of-window exits. All-trades WR (incl. EOW): ' +
+            Number(sum.winRatePctAll).toFixed(0) + '%';
+        } else {
+          wrSub.title = 'Wins / losses on strategy exits (EOW excluded from WR)';
+        }
       }
       const tradesEl = document.getElementById('bt-stat-trades');
       if (tradesEl) {
@@ -8225,7 +8259,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const wlCounts = document.getElementById('bt-stat-wl-counts');
       if (wlCounts) {
-        wlCounts.textContent = (sum.wins ?? 0) + ' wins · ' + (sum.losses ?? 0) + ' losses';
+        const eowN = Number(sum.forcedEndOfWindowTrades || 0);
+        wlCounts.textContent =
+          (sum.wins ?? 0) + ' wins · ' + (sum.losses ?? 0) + ' losses' +
+          (eowN > 0 ? ' (excl. ' + eowN + ' EOW)' : '');
       }
       const pfEl = document.getElementById('bt-stat-pf');
       if (pfEl) {
@@ -8384,7 +8421,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               const liq = t.liquidityUsd;
               const reason = t.reason || '—';
               const debugLines = (t.debugLog || []).join('\\n');
+              const markVsReal = fmtMarkVsRealized(reason, pct);
               const reasonTip = (t.reasonDetail || reason).replace(/"/g, '&quot;') +
+                (markVsReal.tip ? '\\n\\n' + markVsReal.tip.replace(/"/g, '&quot;') : '') +
                 (debugLines ? '\\n\\n— Debug —\\n' + debugLines.replace(/"/g, '&quot;') : '');
               const scalpChip = t.shortTermStrategyId
                 ? ' <span class="mint text-xs" style="opacity:.85" title="Scalp engine">' +
@@ -8398,7 +8437,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 (t.migrated ? ' 🚀' : t.isPumpFun ? ' 🎯' : '') +
                 (t.isReBuy ? ' <span class="mint">rebuy</span>' : '') + eowChip + '</td>' +
                 '<td>' + fmtTradeProfileBadge(t) + scalpChip + '</td>' +
-                '<td style="color:' + color + ';font-weight:700">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</td>' +
+                '<td style="color:' + color + ';font-weight:700" title="' +
+                  (markVsReal.tip ? markVsReal.tip.replace(/"/g, '&quot;') : 'Fee-aware realized PnL % vs cost') +
+                '">' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%</td>' +
                 '<td>' + fmtPnlSolUsd(t) + '</td>' +
                 '<td>' + fmtExitTakes(t) + '</td>' +
                 '<td class="mint" title="Smart wallet entry MC">' + fmtUsdShort(walletMc) + '</td>' +
@@ -8417,6 +8458,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 (t.smartWalletCount != null ? t.smartWalletCount : (t.sourceNames || []).length) +
                 ((t.sourceNames || []).length ? ' (' + t.sourceNames.slice(0, 2).join(', ') + ')' : '') + '</td>' +
                 '<td class="mint" title="' + reasonTip + '">' + reason.replace(/</g, '&lt;') +
+                (markVsReal.inline || '') +
                 ((t.debugLog || []).length ? ' <span style="opacity:.6">(' + t.debugLog.length + ' steps)</span>' : '') +
                 '</td>' +
                 '<td class="mint" title="Smart wallet entry">' + fmtWalletEntry(walletTs) + '</td>' +

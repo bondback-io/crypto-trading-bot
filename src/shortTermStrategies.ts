@@ -627,7 +627,8 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
 }
 
 /**
- * Evaluate short-term exit: SL → TP → momentum fail → stall → timer.
+ * Evaluate short-term exit: SL → TP → momentum fail → underwater stall → timer.
+ * Stall only cuts slightly-red marks with no pop (never green marks / fee traps).
  * Call before tiered profit strategy when scalpMode is set.
  *
  * SL has a short grace after open so fill/Dex mark mismatches cannot
@@ -697,22 +698,33 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     }
   }
 
-  // Early stall: no meaningful pop by ~40% of the timer → cut before flat dump.
+  // Early stall: no meaningful pop by ~40% of the timer → cut only when stuck
+  // slightly red (never force-exit a green mark into fee+slip losses).
   // Skip for Post-Run Dip — those holds are designed to wait through quiet periods.
+  // Round-trip paper cost (fee×2 + slip×2) raises the "pop" bar so a peak that
+  // still couldn't cover costs does not count as momentum.
   const stallAfterMs = Math.max(45_000, Math.round(windowMs * 0.4));
   if (
     view.strategyId !== 'post_run_dip' &&
     ageMs >= stallAfterMs &&
     view.nowMs < view.deadlineMs
   ) {
-    const neverPopped = peakPnlPct < 4;
-    const stillFlat = Math.abs(pnlPct) < 2.5;
-    if (neverPopped && stillFlat) {
+    const feeBps = Number(config.paper?.feeBps) || 30;
+    const slipBps = Number(config.paper?.slippageBps) || 150;
+    const roundTripCostPct = (feeBps * 2 + slipBps * 2) / 100;
+    const peakPopPct = Math.max(4, roundTripCostPct + 1);
+    // Cost-aware: also refuse stall when mark already covers ~¼ of RT costs
+    // (redundant with pnlPct >= 0 at default ~3.6% RT, but keeps the floor
+    // if fees/slip are dialed down).
+    const nearBreakevenAfterCosts = pnlPct >= roundTripCostPct * 0.25;
+    const neverPopped = peakPnlPct < peakPopPct;
+    const stuckSlightlyRed = pnlPct < 0 && pnlPct > -2.5;
+    if (neverPopped && stuckSlightlyRed && !nearBreakevenAfterCosts) {
       const heldSec = Math.max(0, Math.round(ageMs / 1000));
       return {
         type: 'full',
         exitKind: 'scalp_signal_fail',
-        reason: `${label} momentum stalled after ${heldSec}s (peak +${peakPnlPct.toFixed(1)}%, mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+        reason: `${label} stalled underwater after ${heldSec}s (peak +${peakPnlPct.toFixed(1)}%, mark ${pnlPct.toFixed(1)}%, RT ~${roundTripCostPct.toFixed(1)}%)`,
       };
     }
   }
