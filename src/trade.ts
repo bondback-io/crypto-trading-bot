@@ -170,7 +170,7 @@ export interface BuyOptions {
   sourceEntryMcUsd?: number;
   /**
    * Jupiter-style top-10 holder % (bonding curve / LP excluded) from anti-rug.
-   * Re-checked at executeBuy; unknown fails closed.
+   * Re-checked at executeBuy; known out-of-band hard-skips, unknown is soft-only.
    */
   top10HoldPct?: number | null;
   /** Entry conviction 0–100 for exit discipline */
@@ -477,7 +477,8 @@ export async function executeBuy(
     );
   }
 
-  // Hard top-10 band at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.
+  // Hard top-10 band at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass
+  // known out-of-band values. Unknown top10 is soft-only (does not hard-skip).
   // Enforced whenever min/max > 0 (including Risk Off if user set them; soak zeros both).
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
@@ -498,6 +499,13 @@ export async function executeBuy(
   if (top10HoldPct != null) {
     console.log(
       `[trade] Entry top10 OK ${symbol}: ${top10HoldPct.toFixed(1)}%`
+    );
+  } else if (
+    (Number(config.filters.minTop10HolderPct) || 0) > 0 ||
+    (Number(config.filters.maxHolderConcentration) || 0) > 0
+  ) {
+    console.log(
+      `[trade] Entry top10 soft-pass ${symbol}: unknown (gate active, known-only enforce)`
     );
   }
 

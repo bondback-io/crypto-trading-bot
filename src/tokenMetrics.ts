@@ -649,25 +649,18 @@ export function evaluateTokenMetricsFilters(
   }
 
   const minTop10 = effectiveMinTop10HolderPct();
-  if (minTop10 > 0 || maxConc > 0) {
-    if (
-      metrics.top10HoldPct != null &&
-      Number.isFinite(metrics.top10HoldPct)
-    ) {
-      if (minTop10 > 0 && metrics.top10HoldPct < minTop10) {
-        reasons.push(
-          `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
-        );
-      }
-    } else {
-      // Fail closed when Top-10% min/max gate is active (matches hard floors).
-      const band =
-        minTop10 > 0 && maxConc > 0
-          ? `${minTop10}–${maxConc}%`
-          : minTop10 > 0
-            ? `≥ ${minTop10}%`
-            : `≤ ${maxConc}%`;
-      reasons.push(`top10 holders unknown (need ${band})`);
+  // Enforce Top-10% band only when known — unknown must not fail-closed
+  // (RPC gaps are common; hard floors still reject known out-of-band via
+  // evaluateHolderConcentrationHardFloors).
+  if (
+    minTop10 > 0 &&
+    metrics.top10HoldPct != null &&
+    Number.isFinite(metrics.top10HoldPct)
+  ) {
+    if (metrics.top10HoldPct < minTop10) {
+      reasons.push(
+        `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`
+      );
     }
   }
 

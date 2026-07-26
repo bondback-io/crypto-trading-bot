@@ -683,10 +683,11 @@ export interface HolderConcentrationSnapshot {
 
 /**
  * Non-bypassable holder-dispersion / insider ceilings.
- * - Reject when top10 is present and below min (default 8%, hard ≥5%) or above max.
- * - Fail closed when top10 is unknown and min/max gate is active.
+ * - Reject when top10 is **known** and below min (default 8%, hard ≥5%) or above max.
+ * - Unknown top10: soft penalty only (RPC/Birdeye gaps are common on fresh mints).
+ *   Fail-closed unknown zeroed Risk ON lean entry rate after 6333c83.
  * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
- * - Risk OFF soak zeros min+max → gate inactive. If user sets min/max > 0, enforce anyway.
+ * - Risk OFF soak zeros min+max → gate inactive. If user sets min/max > 0, enforce known bounds.
  */
 export function evaluateHolderConcentrationHardFloors(
   snap: HolderConcentrationSnapshot
@@ -733,8 +734,9 @@ export function evaluateHolderConcentrationHardFloors(
         );
       }
     } else {
-      // Fail closed when min/max gate is active and top-10 is unknown.
-      scorePenalty += 35;
+      // Soft only — missing top-10 must not hard-kill lean Risk ON entries.
+      // Known out-of-band values still hard-reject above.
+      scorePenalty += 18;
       const band =
         minTop10 > 0 && maxTop10 > 0
           ? `${minTop10}–${maxTop10}%`
@@ -742,14 +744,11 @@ export function evaluateHolderConcentrationHardFloors(
             ? `≥ ${minTop10}%`
             : `≤ ${maxTop10}%`;
       flags.push({
-        id: 'hard_unknown_top10',
-        severity: 'critical',
+        id: 'soft_unknown_top10',
+        severity: 'medium',
         label: 'Top-10 holders unknown',
-        detail: `need ${band}`,
+        detail: `need ${band} when data available`,
       });
-      skipReasons.push(
-        `Skipped — top 10 holders unknown (need ${band})`
-      );
     }
   }
 

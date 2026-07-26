@@ -3724,8 +3724,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           `[monitor] Top-10 holder gate failed for ${signal.mint.slice(0, 8)}…:`,
           err instanceof Error ? err.message : err
         );
-        recordRejectedSignal(signal, 'top 10 holders unknown (gate fetch failed)');
-        return false;
+        // Soft-pass — unknown top10 no longer fail-closed (align with hard floors).
+        console.log(
+          `[monitor] Top-10 soft-pass (${signalKind}) ${signal.symbol}: fetch failed, known-only enforce`
+        );
       }
     }
   } else {

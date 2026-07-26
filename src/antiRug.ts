@@ -805,9 +805,9 @@ async function runAntiRugChecks(
   }
 
   // --- Non-bypassable holder dispersion / insider ceilings ---
-  // Fail closed when top10 unknown and min/max gate active; enforce both bounds.
+  // Enforce known Top-10% min/max; unknown is soft-only (lean Risk ON must still enter).
   // top10HoldPct is Jupiter-style (bonding-curve vault excluded) from tokenMetrics.
-  // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces.
+  // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces known bounds.
   const holderHard = evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,
     insiderPct: checks.insiderPct,

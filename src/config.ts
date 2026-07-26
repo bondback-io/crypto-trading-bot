@@ -979,12 +979,16 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     filters: {
       minLiquidity: 10_000,
       minMarketCapUsd: 8_000,
+      minDevHoldPct: 0,
       maxDevHoldPct: 14,
       maxDevPercent: 14,
+      minTopHolderPct: 0,
       maxTopHolderPct: 70,
       maxHolderConcentration: 70,
       minTop10HolderPct: 8,
+      minEstimatedTaxPct: 0,
       maxEstimatedTaxPct: 24,
+      minRiskScore: 0,
       maxRiskScore: 78,
       skipIfMintAuthority: false,
       sniperSensitivity: 'medium',
@@ -1100,12 +1104,16 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     filters: {
       minLiquidity: 0,
       minMarketCapUsd: 0,
+      minDevHoldPct: 0,
       maxDevHoldPct: 0,
       maxDevPercent: 0,
+      minTopHolderPct: 0,
       maxTopHolderPct: 0,
       maxHolderConcentration: 0,
       minTop10HolderPct: 0,
+      minEstimatedTaxPct: 0,
       maxEstimatedTaxPct: 100,
+      minRiskScore: 0,
       maxRiskScore: 100,
       skipIfMintAuthority: false,
       sniperSensitivity: 'low',
@@ -1293,21 +1301,33 @@ export interface FilterConfig {
    * Strict Mode always applies an intensity cap via effectiveMaxEntryMarketCapUsd().
    */
   maxEntryMarketCapUsd: number;
+  /**
+   * Min deployer hold % (pair with maxDevHoldPct). 0 = no floor.
+   * Known values below min skip when gate active.
+   */
+  minDevHoldPct: number;
   /** Skip if estimated dev/authority hold % exceeds this (0 = disabled) */
   maxDevHoldPct: number;
   /** Preferred alias for maxDevHoldPct (anti-rug) */
   maxDevPercent: number;
+  /**
+   * Min single-wallet hold % (pair with maxTopHolderPct). 0 = no floor.
+   * Independent of Top-10% band (minTop10HolderPct / maxHolderConcentration).
+   */
+  minTopHolderPct: number;
   /** Skip if largest single holder % exceeds this (0 = disabled) */
   maxTopHolderPct: number;
   /**
    * Max Top-10% holder concentration (pair with minTop10HolderPct).
    * 0 = disabled. Default 70. Independent of maxTopHolderPct (single wallet).
+   * Known values above max hard-skip; unknown is soft-only.
    */
   maxHolderConcentration: number;
   /**
    * Min Top-10% holder concentration (honeypot dispersion floor).
    * Clamped to HARD_FILTER_FLOORS.minTop10HolderPct (5) when Risk On. Default 8.
    * Pair with maxHolderConcentration for a valid band (e.g. 8–70%).
+   * Known values below min hard-skip; unknown is soft-only (does not block entry).
    */
   minTop10HolderPct: number;
   /** Master switch for comprehensive anti-rug checks */
@@ -1318,8 +1338,18 @@ export interface FilterConfig {
   skipIfDevRecentSells: boolean;
   /** Probe Jupiter buy→sell for honeypot / high tax */
   checkHoneypot: boolean;
+  /**
+   * Min estimated round-trip tax/loss % (pair with maxEstimatedTaxPct).
+   * 0 = no floor.
+   */
+  minEstimatedTaxPct: number;
   /** Max estimated round-trip loss % before skip (tax/slip proxy) */
   maxEstimatedTaxPct: number;
+  /**
+   * Min composite risk score (pair with maxRiskScore). 0 = no floor.
+   * Value must fall in [min, max] when gate active.
+   */
+  minRiskScore: number;
   /** Skip when composite risk score ≥ this (0–100) */
   maxRiskScore: number;
   /** Skip tokens that still have a mint authority */
@@ -1887,8 +1917,10 @@ export const config: BotConfig = {
     minLiquidity: 10_000,
     minMarketCapUsd: 8_000,
     maxEntryMarketCapUsd: 0,
+    minDevHoldPct: 0,
     maxDevHoldPct: 14,
     maxDevPercent: 14,
+    minTopHolderPct: 0,
     maxTopHolderPct: 70,
     maxHolderConcentration: 70,
     minTop10HolderPct: 8,
@@ -1896,7 +1928,9 @@ export const config: BotConfig = {
     requireLiquidityLocked: false,
     skipIfDevRecentSells: true,
     checkHoneypot: true,
+    minEstimatedTaxPct: 0,
     maxEstimatedTaxPct: 24,
+    minRiskScore: 0,
     maxRiskScore: 78,
     // Pump.fun bonding-curve tokens keep mint authority until migration —
     // hard-skipping them blocks almost all early copy signals.
