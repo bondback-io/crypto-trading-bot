@@ -606,7 +606,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
-    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab) {
+    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip) {
       background: #059669;
       color: white;
       border: 1px solid #059669;
@@ -1202,7 +1202,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       z-index: 2;
       background: rgba(15, 23, 42, 0.98);
       color: #94a3b8;
-      border-bottom: 1px solid rgba(52, 211, 153, 0.22);
+      border-bottom: 1px solid rgba(71, 85, 105, 0.55);
+      border-left: none;
+      border-right: none;
       padding: 0.38rem 0.4rem;
       font-size: 0.65rem;
       letter-spacing: 0.04em;
@@ -1210,16 +1212,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       white-space: nowrap;
       font-weight: 700;
     }
-    .card-closed-trades #closed-table thead th,
-    .card-closed-trades #trades-closed-table thead th {
-      border-bottom-color: rgba(56, 189, 248, 0.22);
-    }
     .card-open-positions #positions-table tbody td,
     .card-open-positions #trades-positions-table tbody td,
     .card-closed-trades #closed-table tbody td,
     .card-closed-trades #trades-closed-table tbody td {
       padding: 0.4rem 0.4rem;
-      border-bottom: 1px solid rgba(51, 65, 85, 0.45);
+      border-bottom: 1px solid rgba(51, 65, 85, 0.35);
+      border-left: none;
+      border-right: none;
       vertical-align: middle;
       font-size: 0.78rem;
       line-height: 1.25;
@@ -2231,33 +2231,37 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       min-width: 2.5rem;
       min-height: 2rem;
       margin-right: 0.4rem;
-      padding: 0.2rem 0.4rem;
+      padding: 0.28rem 0.5rem;
       border-radius: 0.4rem;
-      border: 1px solid rgba(100, 116, 139, 0.55);
-      background: rgba(30, 41, 59, 0.95);
-      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.55) !important;
+      background: #0f172a !important;
+      color: #f1f5f9 !important;
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       line-height: 1;
       cursor: pointer;
       vertical-align: top;
       flex-shrink: 0;
       -webkit-tap-highlight-color: transparent;
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.8);
     }
     .trade-group-toggle:hover,
     .trade-group-toggle:focus-visible {
-      border-color: rgba(56, 189, 248, 0.65);
-      color: #e2e8f0;
+      border-color: rgba(125, 211, 252, 0.75) !important;
+      color: #ffffff !important;
+      background: #1e293b !important;
       outline: none;
     }
     .trade-group-toggle[aria-expanded="true"] {
-      border-color: rgba(52, 211, 153, 0.45);
-      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(52, 211, 153, 0.65) !important;
+      background: #064e3b !important;
+      color: #ecfdf5 !important;
     }
     .trade-group-chevron {
       display: inline-block;
       width: 0.7rem;
       font-size: 9px;
+      color: inherit;
       transition: transform 0.15s ease;
     }
     .trade-group-toggle[aria-expanded="true"] .trade-group-chevron {
@@ -2265,12 +2269,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .trade-group-expand-hint {
       font-size: 9px;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
-      color: #94a3b8;
+      color: inherit !important;
+      font-weight: 800;
+      opacity: 0.95;
     }
     .trade-group-toggle[aria-expanded="true"] .trade-group-expand-hint {
-      color: #86efac;
+      color: inherit !important;
     }
     .trade-group-head {
       display: flex;
@@ -2321,7 +2327,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     tr.trade-group-parent.is-expanded td {
       background: rgba(15, 23, 42, 0.72);
-      box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.55);
+    }
+    tr.trade-group-parent.is-expanded td:first-child {
+      box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.45);
     }
     .trade-group-parent td:first-child {
       min-width: 12rem;
@@ -2331,12 +2339,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       background: rgba(15, 23, 42, 0.28);
       font-size: 12px;
       color: #cbd5e1;
-      border-left: 3px solid rgba(56, 189, 248, 0.28);
+      border-left: none;
       padding-top: 0.55rem;
       padding-bottom: 0.55rem;
     }
     tr.trade-group-child td:first-child {
       padding-left: 1.85rem;
+      box-shadow: inset 3px 0 0 rgba(71, 85, 105, 0.65);
     }
     tr.trade-group-child.trade-group-child-last td {
       border-bottom: 2px solid rgba(71, 85, 105, 0.55);
@@ -8095,6 +8104,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!btn) return;
       const gid = btn.getAttribute('data-group');
       if (!gid) return;
+      if (!window._expandedClosedTradeGroups) {
+        window._expandedClosedTradeGroups = {};
+      }
       const expanded = btn.getAttribute('aria-expanded') === 'true';
       const next = !expanded;
       btn.setAttribute('aria-expanded', next ? 'true' : 'false');
@@ -8106,6 +8118,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.querySelectorAll('tr.trade-group-child[data-group="' + gid + '"]').forEach((row) => {
         row.hidden = !next;
       });
+      if (next) window._expandedClosedTradeGroups[gid] = true;
+      else delete window._expandedClosedTradeGroups[gid];
     }
     window.toggleClosedTradeGroup = toggleClosedTradeGroup;
 
@@ -8113,6 +8127,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window._closedProfileFilter = window._closedProfileFilter || 'all';
     window._openProfileFilter = window._openProfileFilter || 'all';
     window._closedTradeGroups = window._closedTradeGroups || [];
+    window._expandedClosedTradeGroups = window._expandedClosedTradeGroups || {};
     window._lastOpenPositions = window._lastOpenPositions || [];
 
     function syncClosedTradesFilterButtons(filter) {
@@ -8243,19 +8258,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           });
         }
 
+        const expandedMap = window._expandedClosedTradeGroups || {};
+        const isExpanded = !!expandedMap[g.gid];
         const toggleHtml =
           '<button type="button" class="trade-group-toggle" data-group="' +
           g.gid +
-          '" aria-expanded="false" onclick="toggleClosedTradeGroup(this)" title="Show partial exits">' +
+          '" aria-expanded="' + (isExpanded ? 'true' : 'false') +
+          '" onclick="event.stopPropagation(); toggleClosedTradeGroup(this)" title="' +
+          (isExpanded ? 'Hide partial exits' : 'Show partial exits') + '">' +
           '<span class="trade-group-chevron" aria-hidden="true">▶</span>' +
-          '<span class="trade-group-expand-hint">Details</span>' +
+          '<span class="trade-group-expand-hint">' + (isExpanded ? 'Hide' : 'Details') + '</span>' +
           '</button>';
         const reasonOverride = g.final
           ? (partialN + ' partial' + (partialN === 1 ? '' : 's') +
             ' + ' + fmtExitStyleHtml(g.final.reason))
           : fmtExitStyleHtml(p.reason);
         const parentRow = renderClosedTradeRow(p, {
-          rowClass: 'trade-group-parent',
+          rowClass: 'trade-group-parent' + (isExpanded ? ' is-expanded' : ''),
           toggleHtml,
           summaryHtml: fmtClosedGroupSummary(g),
           reasonOverride,
@@ -8285,7 +8304,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           return renderClosedTradeRow(c, {
             rowClass: 'trade-group-child' + (isLast ? ' trade-group-child-last' : ''),
             groupAttr: ' data-group="' + g.gid + '"',
-            hidden: true,
+            hidden: !isExpanded,
             profileSource: p,
             exitLabel: labelClosedExit(c, partialIdx, g.initialCost) + '<br/>',
             reasonOverride: isFinal
