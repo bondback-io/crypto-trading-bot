@@ -76,6 +76,7 @@ import {
   assignTradeProfile,
   stampFromAssignment,
   ensureTradeProfilesInitialized,
+  applyTradeProfileSizing,
   FRESH_MIGRATION_MAX_AGE_HOURS,
   FRESH_MIGRATION_MAX_MC_USD,
   type TradeProfileId,
@@ -1809,16 +1810,12 @@ function replayLaunch(
       return { trade: null, exitIdx: fromIdx, profileSkip: true };
     }
 
-    let sizeSol = sizing.sizeSol;
     const er = profileAssignment.exitRules;
-    if (
-      er.sizeMultiplier != null &&
-      Number.isFinite(er.sizeMultiplier) &&
-      er.sizeMultiplier > 0
-    ) {
-      sizeSol = Number((sizeSol * er.sizeMultiplier).toFixed(6));
-    }
-    sizeSol = clampToMaxAllowedTradeSol(sizeSol, 'backtest');
+    const sized = applyTradeProfileSizing(sizing.sizeSol, er);
+    let sizeSol = clampToMaxAllowedTradeSol(
+      sized.sizeSol,
+      sized.usedOverride ? 'backtestProfileOverride' : 'backtest'
+    );
 
     let useScalp = scalpResolved != null;
     let shortTermId = scalpResolved?.id;

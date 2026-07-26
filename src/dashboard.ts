@@ -6489,6 +6489,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<label>Hold min (s)<input type="number" data-k="hardTimeLimitSecMin" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMin, off.hardTimeLimitSecMin))) + '" /></label>' +
                 '<label>Hold max (s)<input type="number" data-k="hardTimeLimitSecMax" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMax, off.hardTimeLimitSecMax))) + '" /></label>' +
                 '<label>Size ×<input type="number" data-k="sizeMultiplier" step="0.05" min="0.2" max="2" value="' + escHtml(String(num(er.sizeMultiplier, off.sizeMultiplier != null ? off.sizeMultiplier : 1))) + '" /></label>' +
+                '<label title="Fixed SOL size for every trade on this profile. Overrides Config Base Trade SOL and Size ×. Empty = normal sizing. Still capped by Max Allowed Trade.">Max Trade Override<input type="number" data-k="maxTradeOverrideSol" step="0.01" min="0" max="10" placeholder="default" value="' +
+                  (er.maxTradeOverrideSol != null && Number(er.maxTradeOverrideSol) > 0
+                    ? escHtml(String(er.maxTradeOverrideSol))
+                    : '') +
+                '" /></label>' +
                 '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
                 (p.id === 'high_win_rate'
                   ? (function () {
@@ -6791,6 +6796,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       root.querySelectorAll('input[data-k]').forEach(function (inp) {
         const k = inp.getAttribute('data-k');
         const raw = inp.value;
+        // Max Trade Override: empty / 0 clears → normal sizing
+        if (k === 'maxTradeOverrideSol') {
+          const n = raw === '' || raw == null ? 0 : Number(raw);
+          if (inp.getAttribute('data-match') === '1') return;
+          exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
+          return;
+        }
         if (raw === '' || raw == null) return;
         const n = Number(raw);
         if (!Number.isFinite(n)) return;

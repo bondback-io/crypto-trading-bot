@@ -21,6 +21,7 @@ import {
   stampFromAssignment,
   isSmartBotProfilesEnabled,
   withStrategyProfileGateAsync,
+  applyTradeProfileSizing,
   type TradeProfileMatchContext,
 } from './tradeProfiles';
 import { refreshOpenMarketActivity } from './marketData';
@@ -93,6 +94,7 @@ import {
   onRiskHalt,
   getRiskStatus,
   clearRiskHalt,
+  clampToMaxAllowedTradeSol,
   type DynamicSizeResult,
 } from './risk';
 import {
@@ -1977,6 +1979,22 @@ async function executeSignalBuy(
   }
 
   Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+  buyOpts.tradeProfileScore = profileAssignment.score;
+  buyOpts.tradeProfileReason = profileAssignment.reason;
+  const erScan = profileAssignment.exitRules;
+  const sizedScan = applyTradeProfileSizing(
+    buyOpts.solAmount ?? sizing.sizeSol,
+    erScan
+  );
+  buyOpts.solAmount = clampToMaxAllowedTradeSol(
+    sizedScan.sizeSol,
+    sizedScan.usedOverride ? 'profileOverride' : 'scannerProfileSize'
+  );
+  if (sizedScan.sizeNote) {
+    buyOpts.sizeReason =
+      (buyOpts.sizeReason || sizing.reason) +
+      ` · profile ${profileAssignment.name} ${sizedScan.sizeNote}`;
+  }
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
@@ -1990,7 +2008,7 @@ async function executeSignalBuy(
     markScannerCooldown(signal.mint, true);
     console.log(
       `[monitor] Scanner trade executed (${result.mode}): ${signal.symbol} ` +
-        `@ ${sizing.sizeSol.toFixed(3)} SOL · ${profileAssignment.name}`
+        `@ ${(buyOpts.solAmount ?? sizing.sizeSol).toFixed(3)} SOL · ${profileAssignment.name}`
     );
   } else {
     annotateActivityFeed(buy.mint, buy.signature, {
@@ -2916,18 +2934,15 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       buyOpts.shortTermStrategyId = er.shortTermStrategyId;
     }
   }
-  if (
-    er.sizeMultiplier != null &&
-    Number.isFinite(er.sizeMultiplier) &&
-    er.sizeMultiplier > 0 &&
-    buyOpts.solAmount != null
-  ) {
-    buyOpts.solAmount = Number(
-      (buyOpts.solAmount * er.sizeMultiplier).toFixed(6)
-    );
+  const sized = applyTradeProfileSizing(buyOpts.solAmount ?? sizing.sizeSol, er);
+  buyOpts.solAmount = clampToMaxAllowedTradeSol(
+    sized.sizeSol,
+    sized.usedOverride ? 'profileOverride' : 'profileSize'
+  );
+  if (sized.sizeNote) {
     buyOpts.sizeReason =
       (buyOpts.sizeReason || 'Dynamic size') +
-      ` · profile ${profileAssignment.name} ×${er.sizeMultiplier}`;
+      ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
   }
 
   recordSignalSizing(signal, sizing, true);

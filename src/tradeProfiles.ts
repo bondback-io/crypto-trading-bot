@@ -155,6 +155,12 @@ export interface TradeProfileExitRules {
   /** Optional size multiplier vs dynamic size (1 = unchanged) */
   sizeMultiplier?: number;
   /**
+   * Fixed SOL size for every trade on this profile (UI: Max Trade Override).
+   * When > 0: replaces dynamic sizing (baseSol × risk/conviction × Size ×).
+   * When unset / 0 / null: normal sizing. Still clamped by global maxAllowedTradeSol.
+   */
+  maxTradeOverrideSol?: number;
+  /**
    * Aggressive dead-market exit: shorter min-hold before dead-volume can fire.
    * Frozen onto the position when set.
    */
@@ -1001,6 +1007,50 @@ export function normalizeStopLossPct(value: number): number {
   return value > 0 ? -Math.abs(value) : value;
 }
 
+/**
+ * Fixed SOL size when maxTradeOverrideSol > 0; else null (use normal sizing).
+ * Caller must still apply global maxAllowedTradeSol clamp.
+ */
+export function resolveMaxTradeOverrideSol(
+  exitRules?: TradeProfileExitRules | null
+): number | null {
+  const v = Number(exitRules?.maxTradeOverrideSol);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return Number(v.toFixed(6));
+}
+
+/**
+ * Apply profile size: Max Trade Override (fixed) wins over Size ×.
+ * Does not clamp to global maxAllowedTradeSol — caller must.
+ */
+export function applyTradeProfileSizing(
+  currentSizeSol: number,
+  exitRules?: TradeProfileExitRules | null
+): {
+  sizeSol: number;
+  usedOverride: boolean;
+  sizeNote?: string;
+} {
+  const override = resolveMaxTradeOverrideSol(exitRules);
+  if (override != null) {
+    return {
+      sizeSol: override,
+      usedOverride: true,
+      sizeNote: `Max Trade Override ${override} SOL`,
+    };
+  }
+  const mult = exitRules?.sizeMultiplier;
+  if (mult != null && Number.isFinite(mult) && mult > 0) {
+    const sizeSol = Number((currentSizeSol * mult).toFixed(6));
+    return {
+      sizeSol,
+      usedOverride: false,
+      sizeNote: mult !== 1 ? `size ×${mult}` : undefined,
+    };
+  }
+  return { sizeSol: currentSizeSol, usedOverride: false };
+}
+
 /** Turn range fields into concrete frozen values for one trade */
 export function materializeExitRules(
   rules: TradeProfileExitRules
@@ -1507,6 +1557,15 @@ export function updateTradeProfileParams(
   // Drop null/NaN keys so clearing a field falls back to official default
   for (const [k, v] of Object.entries(nextExit)) {
     if (v == null || (typeof v === 'number' && !Number.isFinite(v))) {
+      delete (nextExit as Record<string, unknown>)[k];
+      continue;
+    }
+    // Empty / 0 Max Trade Override → unset (use normal sizing)
+    if (
+      k === 'maxTradeOverrideSol' &&
+      typeof v === 'number' &&
+      v <= 0
+    ) {
       delete (nextExit as Record<string, unknown>)[k];
     }
   }
@@ -2717,9 +2776,13 @@ function logTradeProfileAssignment(
     er.stopLossPct != null ? `SL ${er.stopLossPct}%` : null,
     er.trailingStopPct != null ? `trail ${er.trailingStopPct}%` : null,
     er.hardTimeLimitSec != null ? `timer ${er.hardTimeLimitSec}s` : null,
-    er.sizeMultiplier != null && er.sizeMultiplier !== 1
-      ? `size ×${er.sizeMultiplier}`
-      : null,
+    er.maxTradeOverrideSol != null &&
+    Number.isFinite(er.maxTradeOverrideSol) &&
+    er.maxTradeOverrideSol > 0
+      ? `override ${er.maxTradeOverrideSol} SOL`
+      : er.sizeMultiplier != null && er.sizeMultiplier !== 1
+        ? `size ×${er.sizeMultiplier}`
+        : null,
   ]
     .filter(Boolean)
     .join(', ');
