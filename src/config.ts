@@ -32,6 +32,7 @@ import {
   type PersistedBotSettings,
 } from './settingsStore';
 import { resetAllPersistedData } from './dataDir';
+import { clearDashboardStateCache } from './dashboardState';
 import { rpcEndpointsFromEnv } from './rpcUrl';
 
 export type { SmartWallet, TradingWalletSlot, TradingWalletRole };
@@ -3675,6 +3676,7 @@ export function resetToDefaults(): {
   dataDir: string;
 } {
   const result = resetAllPersistedData();
+  clearDashboardStateCache();
   applySettingsSnapshot(CODE_DEFAULT_SETTINGS, 'replace');
   // Fresh install / reset: no tracked smart wallets (discover & add as needed)
   config.smartWallets = [];

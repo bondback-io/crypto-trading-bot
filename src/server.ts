@@ -48,6 +48,10 @@ import {
 import { getJitoStatus } from './jito';
 import { getMevStatus, updateMevConfig } from './mev';
 import { getPersistenceStatus } from './dataDir';
+import {
+  getLastDashboardResetAt,
+  markDashboardReset,
+} from './dashboardState';
 import { paperTrader } from './paperTrader';
 import { updateProfitStrategyConfig } from './profitStrategy';
 import {
@@ -308,6 +312,7 @@ export function createServer(): express.Application {
             publicKey: pubkey?.toBase58() ?? null,
           }
         : null,
+      lastDashboardResetAt: getLastDashboardResetAt(),
     });
   });
 
@@ -972,6 +977,7 @@ export function createServer(): express.Application {
     const monitor = resetMonitorSession();
     clearRiskHalt();
     clearMonitorRiskHalt();
+    const lastDashboardResetAt = markDashboardReset();
     res.json({
       ok: true,
       paper,
@@ -982,6 +988,7 @@ export function createServer(): express.Application {
       stats: paperTrader.getStats(),
       soak: paperTrader.getSoakMetrics(),
       monitorStatus: getMonitorStatus(),
+      lastDashboardResetAt,
     });
   });
 

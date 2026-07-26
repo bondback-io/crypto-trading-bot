@@ -49,6 +49,8 @@ export const PERSIST_FILES = {
   backtestHistory: 'backtestHistory.json',
   optimizerLast: 'optimizerLast.json',
   tradingWallets: 'trading-wallets.json',
+  /** Overview Reset timestamp + session meta */
+  dashboardState: 'dashboardState.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',
@@ -225,6 +227,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.legacyBacktest,
     PERSIST_FILES.optimizerLast,
     PERSIST_FILES.tradingWallets,
+    PERSIST_FILES.dashboardState,
   ];
   const deleted: string[] = [];
   for (const name of names) {

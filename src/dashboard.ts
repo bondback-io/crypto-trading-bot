@@ -2470,6 +2470,31 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #94a3b8;
       margin-left: 0.3rem;
     }
+    .ov-reset-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.65rem;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+    .ov-reset-meta {
+      text-align: right;
+      line-height: 1.25;
+      min-width: 0;
+    }
+    .ov-reset-elapsed {
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: #94a3b8;
+      letter-spacing: 0.02em;
+    }
+    .ov-reset-at {
+      font-size: 10px;
+      font-weight: 500;
+      color: #64748b;
+      white-space: nowrap;
+    }
     .ov-equity-rows {
       display: grid;
       gap: 0.45rem;
@@ -3469,7 +3494,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
             <div class="ov-equity-value" id="ov-equity">—<span class="ov-unit">SOL</span></div>
           </div>
-          <button type="button" class="btn btn-secondary text-xs" id="btn-dashboard-reset" onclick="resetDashboardSession()" title="Clear balance, trades, PnL, signals, and soak stats for a fresh module test. Does not change Risk or modules.">Reset</button>
+          <div class="ov-reset-wrap">
+            <div class="ov-reset-meta" id="ov-reset-meta" title="Time since last Overview Reset">
+              <div class="ov-reset-elapsed" id="ov-reset-elapsed">—</div>
+              <div class="ov-reset-at" id="ov-reset-at">Never reset</div>
+            </div>
+            <button type="button" class="btn btn-secondary text-xs" id="btn-dashboard-reset" onclick="resetDashboardSession()" title="Clear balance, trades, PnL, signals, and soak stats for a fresh module test. Does not change Risk or modules.">Reset</button>
+          </div>
         </div>
         <div class="ov-equity-rows">
           <div class="ov-equity-row">
@@ -10131,6 +10162,67 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    /** Epoch ms of last Overview Reset (from /api/status); null = never. */
+    let _lastDashboardResetAt = null;
+
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+    function formatResetElapsed(ms) {
+      if (ms == null || !Number.isFinite(ms)) return '—';
+      const totalSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+      const days = Math.floor(totalSec / 86400);
+      const hours = Math.floor((totalSec % 86400) / 3600);
+      const mins = Math.floor((totalSec % 3600) / 60);
+      const secs = totalSec % 60;
+      if (days > 0) return days + 'd ' + hours + 'h ' + pad2(mins) + 'm';
+      if (hours > 0) return hours + 'h ' + pad2(mins) + 'm ' + pad2(secs) + 's';
+      if (mins > 0) return mins + 'm ' + pad2(secs) + 's';
+      return secs + 's';
+    }
+
+    function formatResetLocal(ms) {
+      if (ms == null || !Number.isFinite(ms)) return 'Never reset';
+      const d = new Date(ms);
+      const weekday = d.toLocaleDateString(undefined, { weekday: 'short' });
+      const day = pad2(d.getDate());
+      const month = pad2(d.getMonth() + 1);
+      const year = d.getFullYear();
+      const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      return weekday + ' ' + day + '/' + month + '/' + year + ' ' + time;
+    }
+
+    function setLastDashboardResetAt(ms) {
+      const next =
+        ms != null && Number.isFinite(Number(ms)) ? Math.floor(Number(ms)) : null;
+      _lastDashboardResetAt = next;
+      paintDashboardResetTimer();
+    }
+
+    function paintDashboardResetTimer() {
+      const elapsedEl = document.getElementById('ov-reset-elapsed');
+      const atEl = document.getElementById('ov-reset-at');
+      const meta = document.getElementById('ov-reset-meta');
+      if (!elapsedEl && !atEl) return;
+      if (_lastDashboardResetAt == null) {
+        if (elapsedEl) elapsedEl.textContent = '—';
+        if (atEl) atEl.textContent = 'Never reset';
+        if (meta) meta.title = 'Dashboard has not been reset yet';
+        return;
+      }
+      if (elapsedEl) elapsedEl.textContent = formatResetElapsed(_lastDashboardResetAt);
+      if (atEl) atEl.textContent = formatResetLocal(_lastDashboardResetAt);
+      if (meta) {
+        meta.title =
+          'Last Overview Reset: ' + formatResetLocal(_lastDashboardResetAt) +
+          ' · elapsed ' + formatResetElapsed(_lastDashboardResetAt);
+      }
+    }
+
+    function tickDashboardResetTimer() {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      paintDashboardResetTimer();
+    }
+
     async function resetDashboardSession() {
       if (!confirm(
         'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons.\\n\\nKeeps: Risk On/Off and strategy modules.\\n\\nContinue?'
@@ -10141,6 +10233,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         });
+        if (data.lastDashboardResetAt != null) {
+          setLastDashboardResetAt(data.lastDashboardResetAt);
+        } else {
+          setLastDashboardResetAt(Date.now());
+        }
         await refresh();
         const bal = data.balance != null ? Number(data.balance).toFixed(4) : '—';
         alert('Dashboard reset · balance ' + bal + ' SOL');
@@ -10532,6 +10629,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const hdrEq = document.getElementById('header-equity');
       if (hdrEq) hdrEq.textContent = equitySol != null ? fmtSolCompact(equitySol) : '—';
+
+      if (status.lastDashboardResetAt !== undefined) {
+        setLastDashboardResetAt(status.lastDashboardResetAt);
+      }
 
       const availEl = document.getElementById('ov-available');
       if (availEl) availEl.textContent = availSol != null ? fmtSolCompact(availSol) + ' SOL' : '—';
@@ -14333,6 +14434,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
+    setInterval(tickDashboardResetTimer, 1000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') paintDashboardResetTimer();
+    });
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
     const tabNames = ['overview', 'trades', 'wallets', 'signals', 'scanner', 'strategies', 'backtester', 'config', 'logs'];
     const startTab = tabNames.includes(savedTab) ? savedTab : 'overview';
