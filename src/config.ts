@@ -916,7 +916,7 @@ export interface SelectiveTradingConfig {
 /** Defaults match Medium risk preset (recommended). */
 export const DEFAULT_SELECTIVE: SelectiveTradingConfig = {
   enabled: true,
-  minConvictionScore: 48,
+  minConvictionScore: 40,
   requireConvergenceForNormal: true,
   allowSingleWalletMigration: true,
   minWalletsForTrade: 2,
@@ -1109,8 +1109,6 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
       minRecentActivity: 10,
       maxEntryAgeMinutes: 15,
       requireMomentumConfirmation: false,
-      enableWalletQualityGate: true,
-      minWalletQualityScore: 60,
     },
     risk: {
       riskPercentPerTrade: 1.35,
@@ -1148,7 +1146,7 @@ export const RISK_LEVEL_PRESETS: Record<RiskLevel, RiskLevelPreset> = {
     },
     selective: {
       enabled: true,
-      minConvictionScore: 48,
+      minConvictionScore: 40,
       requireConvergenceForNormal: true,
       allowSingleWalletMigration: true,
       minWalletsForTrade: 2,
@@ -2185,7 +2183,7 @@ export const config: BotConfig = {
     minRecentActivity: 10,
     buyPumpFunOnly: true,
     enableWalletQualityGate: true,
-    minWalletQualityScore: 60,
+    minWalletQualityScore: 55,
     walletQualityInactiveDays: 5,
     enableWalletQualityAutoPrune: false,
     maxEntryAgeMinutes: 15,
@@ -2426,7 +2424,7 @@ export const config: BotConfig = {
     lookbackHours: 6,
     maxCandidatesPerPoll: 15,
     cooldownMs: 45 * 60_000,
-    minRankScore: 55,
+    minRankScore: 42,
     requireTaSetup: true,
     minPatternConfidence: 55,
     preferRealCandles: true,
@@ -2711,7 +2709,7 @@ function syncConfigAliases(): void {
     config.filters.minWalletQualityScore == null ||
     !Number.isFinite(Number(config.filters.minWalletQualityScore))
   ) {
-    config.filters.minWalletQualityScore = 60;
+    config.filters.minWalletQualityScore = 55;
   }
   if (
     config.filters.walletQualityInactiveDays == null ||
@@ -3697,7 +3695,7 @@ function applyWalletQualityEntryMigration(): boolean {
     config.filters.minWalletQualityScore == null ||
     Number(config.filters.minWalletQualityScore) <= 0
   ) {
-    config.filters.minWalletQualityScore = 60;
+    config.filters.minWalletQualityScore = 55;
   }
   if (config.filters.walletQualityInactiveDays == null) {
     config.filters.walletQualityInactiveDays = 5;
