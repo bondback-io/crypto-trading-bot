@@ -9,14 +9,9 @@
  * Hard floors and risk/strict gates still apply on every re-entry buy.
  */
 
-import { config, type RiskLevel } from './config';
+import { config, normalizeRiskLevel, type RiskLevel } from './config';
 import { fetchLivePriceSol } from './marketData';
 import { logger, errorToMeta, loggedFetch } from './logger';
-import {
-  getStrictModeIntensity,
-  isStrictMode,
-  type StrictModeIntensity,
-} from './strictMode';
 import { isStrategyEnabled } from './strategies';
 
 export interface SellHistoryEntry {
@@ -120,17 +115,7 @@ const RISK_REENTRY_DEFAULTS: Record<
     | 'minProfitPct'
   >
 > = {
-  low: {
-    maxPerMint: 1,
-    watchMinutes: 45,
-    minReclaimPct: 12,
-    minVolumeIncreasePct: 80,
-    confirmationWallets: 4,
-    sizeMultiplier: 0.45,
-    cooldownMs: 15 * 60_000,
-    minAliveVolumeUsd: 800,
-  },
-  medium: {
+  on: {
     maxPerMint: 2,
     watchMinutes: 90,
     minReclaimPct: 8,
@@ -139,26 +124,6 @@ const RISK_REENTRY_DEFAULTS: Record<
     sizeMultiplier: 0.65,
     cooldownMs: 8 * 60_000,
     minAliveVolumeUsd: 500,
-  },
-  high: {
-    maxPerMint: 3,
-    watchMinutes: 120,
-    minReclaimPct: 5,
-    minVolumeIncreasePct: 35,
-    confirmationWallets: 2,
-    sizeMultiplier: 0.8,
-    cooldownMs: 4 * 60_000,
-    minAliveVolumeUsd: 350,
-  },
-  degen: {
-    maxPerMint: 4,
-    watchMinutes: 180,
-    minReclaimPct: 3,
-    minVolumeIncreasePct: 25,
-    confirmationWallets: 1,
-    sizeMultiplier: 0.95,
-    cooldownMs: 2 * 60_000,
-    minAliveVolumeUsd: 250,
   },
   /** Risk OFF — rebuy module is disabled; keep mild defaults if enabled manually */
   off: {
@@ -173,91 +138,28 @@ const RISK_REENTRY_DEFAULTS: Record<
   },
 };
 
-/** Strict intensity overlays on top of risk defaults (when Strict Mode is ON). */
-const STRICT_REENTRY_OVERLAY: Record<
-  StrictModeIntensity,
-  {
-    maxPerMintDelta: number;
-    watchMinutesFactor: number;
-    reclaimAdd: number;
-    volumeAdd: number;
-    walletsAdd: number;
-    sizeFactor: number;
-    cooldownFactor: number;
-    aliveVolumeFactor: number;
-  }
-> = {
-  low: {
-    maxPerMintDelta: -1,
-    watchMinutesFactor: 0.75,
-    reclaimAdd: 4,
-    volumeAdd: 25,
-    walletsAdd: 2,
-    sizeFactor: 0.7,
-    cooldownFactor: 1.5,
-    aliveVolumeFactor: 1.4,
-  },
-  medium: {
-    maxPerMintDelta: 0,
-    watchMinutesFactor: 0.9,
-    reclaimAdd: 2,
-    volumeAdd: 15,
-    walletsAdd: 1,
-    sizeFactor: 0.85,
-    cooldownFactor: 1.2,
-    aliveVolumeFactor: 1.2,
-  },
-  high: {
-    maxPerMintDelta: 0,
-    watchMinutesFactor: 1.0,
-    reclaimAdd: 0,
-    volumeAdd: 5,
-    walletsAdd: 0,
-    sizeFactor: 0.95,
-    cooldownFactor: 1.0,
-    aliveVolumeFactor: 1.05,
-  },
-};
-
 export function getReEntryEffectiveParams(): ReEntryEffectiveParams {
-  const level: RiskLevel =
-    config.riskLevel === 'low' ||
-    config.riskLevel === 'high' ||
-    config.riskLevel === 'degen'
-      ? config.riskLevel
-      : 'medium';
+  const level = normalizeRiskLevel(config.riskLevel);
   const base = RISK_REENTRY_DEFAULTS[level];
   const s = config.strategy;
 
-  let maxPerMint = s.reEntryMaxPerMint ?? s.reBuyMaxPerMint ?? base.maxPerMint;
-  let watchMinutes = s.reEntryWatchMinutes ?? base.watchMinutes;
-  let minReclaimPct = s.reEntryMinReclaimPct ?? base.minReclaimPct;
-  let minVolumeIncreasePct =
+  const maxPerMint = s.reEntryMaxPerMint ?? s.reBuyMaxPerMint ?? base.maxPerMint;
+  const watchMinutes = s.reEntryWatchMinutes ?? base.watchMinutes;
+  const minReclaimPct = s.reEntryMinReclaimPct ?? base.minReclaimPct;
+  const minVolumeIncreasePct =
     s.reEntryMinVolumeIncreasePct ??
     s.reBuyVolumeIncreasePct ??
     base.minVolumeIncreasePct;
-  let confirmationWallets =
+  const confirmationWallets =
     s.reEntryConfirmationWallets ??
     s.confirmationThreshold ??
     base.confirmationWallets;
-  let sizeMultiplier = s.reEntrySizeMultiplier ?? base.sizeMultiplier;
-  let cooldownMs =
+  const sizeMultiplier = s.reEntrySizeMultiplier ?? base.sizeMultiplier;
+  const cooldownMs =
     s.reEntryCooldownMinutes != null
       ? Math.max(0, s.reEntryCooldownMinutes) * 60_000
       : base.cooldownMs;
-  let minAliveVolumeUsd = base.minAliveVolumeUsd;
-
-  if (isStrictMode()) {
-    const o = STRICT_REENTRY_OVERLAY[getStrictModeIntensity()];
-    maxPerMint = Math.max(1, maxPerMint + o.maxPerMintDelta);
-    watchMinutes = Math.max(15, Math.round(watchMinutes * o.watchMinutesFactor));
-    minReclaimPct = minReclaimPct + o.reclaimAdd;
-    minVolumeIncreasePct = minVolumeIncreasePct + o.volumeAdd;
-    confirmationWallets = Math.max(1, confirmationWallets + o.walletsAdd);
-    sizeMultiplier = Math.max(0.2, sizeMultiplier * o.sizeFactor);
-    cooldownMs = Math.round(cooldownMs * o.cooldownFactor);
-    minAliveVolumeUsd = Math.round(minAliveVolumeUsd * o.aliveVolumeFactor);
-  }
+  const minAliveVolumeUsd = base.minAliveVolumeUsd;
 
   return {
     profitDipEnabled:

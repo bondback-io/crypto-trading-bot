@@ -1059,11 +1059,16 @@ async function runAntiRugChecks(
   }
 
   // Hard floors are never bypassable — even when enableAntiRug is off
+  // (except Risk OFF, which empties dead-token / holder hard floors).
+  const riskOff = config.riskLevel === 'off';
   const hasHardSkip =
-    hardSkipReasons.length > 0 ||
-    skipReasons.some((r) => isNonBypassableSkipReason(r));
+    !riskOff &&
+    (hardSkipReasons.length > 0 ||
+      skipReasons.some((r) => isNonBypassableSkipReason(r)));
   const softSkips = skipReasons.filter((r) => !isNonBypassableSkipReason(r));
-  const ok = !hasHardSkip && (!enabled || softSkips.length === 0);
+  // Risk OFF: ignore soft anti-rug skips (modules/floors are intentionally off)
+  const ok =
+    !hasHardSkip && (riskOff || !enabled || softSkips.length === 0);
 
   return {
     mint,

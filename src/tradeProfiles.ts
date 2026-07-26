@@ -2300,7 +2300,7 @@ export function assignTradeProfile(
   if (
     auto.skipBelowMin &&
     winner.score < auto.minScore &&
-    config.riskLevel !== 'degen'
+    config.riskLevel !== 'off'
   ) {
     const skip: TradeProfileAssignment = {
       profileId: 'default',

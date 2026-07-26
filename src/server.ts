@@ -10,8 +10,6 @@ import {
   removeSmartWallet,
   toggleSmartWallet,
   setMode,
-  setStrictMode,
-  setStrictModeIntensity,
   updateTradeConfig,
   updateFilterConfig,
   updateStrategyConfig,
@@ -23,8 +21,8 @@ import {
   applyRiskLevel,
   getRiskLevelSummary,
   RISK_LEVEL_PRESETS,
-  HIGH_RISK_WARNING,
-  DEGEN_RISK_WARNING,
+  OFF_RISK_WARNING,
+  normalizeRiskLevel,
   isRiskLevel,
   isTradingMode,
   usesPaperAccounting,
@@ -38,7 +36,6 @@ import {
   RiskLevel,
 } from './config';
 import { performanceScoreFromStats } from './performanceScore';
-import { isStrictModeIntensity } from './strictMode';
 import { isValidSolanaAddress, inferWalletCategory } from './walletStore';
 import {
   getLiveBalanceSol,
@@ -75,7 +72,6 @@ import {
   pruneLowQualityWallets,
   refreshAllWalletQualityScores,
 } from './monitor';
-import { getStrictModeStatus } from './strictMode';
 import {
   updateRiskConfig,
   clearRiskHalt,
@@ -427,35 +423,16 @@ export function createServer(): express.Application {
         useLiveData?: boolean;
         allowSynthetic?: boolean;
         startingBalanceSol?: number;
-        riskLevel?: 'low' | 'medium' | 'high' | 'degen' | 'current';
+        riskLevel?: 'on' | 'off' | 'current';
         compareRiskLevels?: boolean;
         useSavedConfigFilters?: boolean;
         minConvictionScore?: number;
         minWalletQualityScore?: number;
-        strictMode?: boolean;
-        strictModeIntensity?: 'low' | 'medium' | 'high';
-        /** When true, force Strict + intensity to match current live config */
-        matchLiveStrict?: boolean;
         /** Live-Sim parity (default true). Synthetic / multi-sim are Advanced. */
         parityMode?: boolean;
       };
 
       const { runBacktest } = await import('./backtest');
-      let strictMode =
-        body.strictMode !== undefined ? Boolean(body.strictMode) : undefined;
-      let strictModeIntensity =
-        body.strictModeIntensity != null &&
-        isStrictModeIntensity(body.strictModeIntensity)
-          ? body.strictModeIntensity
-          : undefined;
-      if (body.matchLiveStrict) {
-        strictMode = config.strictMode === true;
-        strictModeIntensity =
-          config.strictModeIntensity === 'low' ||
-          config.strictModeIntensity === 'high'
-            ? config.strictModeIntensity
-            : 'medium';
-      }
 
       const result = await runBacktest({
         hours: body.hours != null ? Number(body.hours) : undefined,
@@ -488,8 +465,6 @@ export function createServer(): express.Application {
           body.minWalletQualityScore != null
             ? Number(body.minWalletQualityScore)
             : undefined,
-        strictMode,
-        strictModeIntensity,
         useLiveData:
           body.useLiveData !== undefined
             ? Boolean(body.useLiveData)
@@ -722,7 +697,7 @@ export function createServer(): express.Application {
     }
   });
 
-  /** Risk Recipe Optimizer — bounded search per Low/Med/High/Degen */
+  /** Risk Recipe Optimizer — bounded search for Risk On overlays */
   app.post('/backtest/optimize', async (req: Request, res: Response) => {
     try {
       const {
@@ -749,10 +724,9 @@ export function createServer(): express.Application {
         useLastBacktestWindow?: boolean;
       };
       const risks = Array.isArray(body.risks)
-        ? body.risks.filter(
-            (r): r is 'low' | 'medium' | 'high' | 'degen' =>
-              r === 'low' || r === 'medium' || r === 'high' || r === 'degen'
-          )
+        ? body.risks
+            .map((r) => normalizeRiskLevel(r))
+            .filter((r): r is 'on' => r === 'on')
         : undefined;
       const maxCandidatesPerRisk =
         body.maxCandidatesPerRisk != null
@@ -832,7 +806,7 @@ export function createServer(): express.Application {
         applyWinners?: boolean;
       };
       let selections: Array<{
-        riskLevel: 'low' | 'medium' | 'high' | 'degen';
+        riskLevel: 'on';
         candidateId: string;
       }> = [];
 
@@ -847,31 +821,19 @@ export function createServer(): express.Application {
           return;
         }
         for (const r of report.risks) {
-          if (
-            r.winnerId &&
-            (r.riskLevel === 'low' ||
-              r.riskLevel === 'medium' ||
-              r.riskLevel === 'high' ||
-              r.riskLevel === 'degen')
-          ) {
+          if (r.winnerId && normalizeRiskLevel(r.riskLevel) === 'on') {
             selections.push({
-              riskLevel: r.riskLevel,
+              riskLevel: 'on',
               candidateId: r.winnerId,
             });
           }
         }
       } else if (Array.isArray(body.selections)) {
         for (const s of body.selections) {
-          const level = s.riskLevel;
-          if (
-            (level === 'low' ||
-              level === 'medium' ||
-              level === 'high' ||
-              level === 'degen') &&
-            s.candidateId
-          ) {
+          const level = normalizeRiskLevel(s.riskLevel);
+          if (level === 'on' && s.candidateId) {
             selections.push({
-              riskLevel: level,
+              riskLevel: 'on',
               candidateId: String(s.candidateId),
             });
           }
@@ -1054,35 +1016,28 @@ export function createServer(): express.Application {
       riskLevel: config.riskLevel,
       riskLevelSummary: getRiskLevelSummary(),
       presets: {
-        low: {
-          label: RISK_LEVEL_PRESETS.low.label,
-          description: RISK_LEVEL_PRESETS.low.description,
+        on: {
+          label: RISK_LEVEL_PRESETS.on.label,
+          description: RISK_LEVEL_PRESETS.on.description,
         },
-        medium: {
-          label: RISK_LEVEL_PRESETS.medium.label,
-          description: RISK_LEVEL_PRESETS.medium.description,
-        },
-        high: {
-          label: RISK_LEVEL_PRESETS.high.label,
-          description: RISK_LEVEL_PRESETS.high.description,
-          warning: HIGH_RISK_WARNING,
-        },
-        degen: {
-          label: RISK_LEVEL_PRESETS.degen.label,
-          description: RISK_LEVEL_PRESETS.degen.description,
-          warning: DEGEN_RISK_WARNING,
+        off: {
+          label: RISK_LEVEL_PRESETS.off.label,
+          description: RISK_LEVEL_PRESETS.off.description,
+          warning: OFF_RISK_WARNING,
         },
       },
     });
   });
 
   app.post('/api/config/risk-level', (req: Request, res: Response) => {
-    const level = String((req.body as { riskLevel?: string }).riskLevel || '')
-      .toLowerCase()
-      .trim() as RiskLevel;
+    const level = normalizeRiskLevel(
+      String((req.body as { riskLevel?: string }).riskLevel || '')
+        .toLowerCase()
+        .trim()
+    );
     if (!isRiskLevel(level)) {
       res.status(400).json({
-        error: "riskLevel must be 'low' | 'medium' | 'high' | 'degen' | 'off'",
+        error: "riskLevel must be 'on' | 'off'",
       });
       return;
     }
@@ -2058,9 +2013,7 @@ export function createServer(): express.Application {
           stats: liveStats,
           score: liveScore,
           charts: liveCharts,
-          strictMode: config.strictMode === true,
-          strictModeIntensity: config.strictModeIntensity,
-          riskLevel: config.riskLevel,
+          riskLevel: normalizeRiskLevel(config.riskLevel),
         },
         backtest: bt
           ? {
@@ -2083,53 +2036,6 @@ export function createServer(): express.Application {
       const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ ok: false, error: message });
     }
-  });
-
-  app.post('/api/config/strict-mode', (req: Request, res: Response) => {
-    const body = req.body as {
-      strictMode?: boolean;
-      enabled?: boolean;
-      intensity?: 'low' | 'medium' | 'high';
-      strictModeIntensity?: 'low' | 'medium' | 'high';
-    };
-    const intensity = body.intensity ?? body.strictModeIntensity;
-    const hasToggle =
-      body.strictMode !== undefined || body.enabled !== undefined;
-    if (hasToggle) {
-      const enabled = Boolean(body.strictMode ?? body.enabled);
-      const result = setStrictMode(enabled, {
-        intensity:
-          intensity === 'low' || intensity === 'medium' || intensity === 'high'
-            ? intensity
-            : undefined,
-      });
-      res.json({
-        ...result,
-        status: getStrictModeStatus(),
-        config: getConfigSnapshot(),
-      });
-      return;
-    }
-    if (
-      intensity === 'low' ||
-      intensity === 'medium' ||
-      intensity === 'high'
-    ) {
-      const result = setStrictModeIntensity(intensity);
-      res.json({
-        ...result,
-        status: getStrictModeStatus(),
-        config: getConfigSnapshot(),
-      });
-      return;
-    }
-    res.status(400).json({
-      error: 'Provide strictMode (boolean) and/or intensity (low|medium|high)',
-    });
-  });
-
-  app.get('/api/config/strict-mode', (_req: Request, res: Response) => {
-    res.json(getStrictModeStatus());
   });
 
   // --- Live trading wallets (keys never leave the backend) ---

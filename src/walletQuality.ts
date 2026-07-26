@@ -14,7 +14,7 @@ import {
   inferWalletCategory,
   type WalletCategory,
 } from './walletStore';
-import { effectiveMinWalletQualityScore } from './strictMode';
+import { effectiveMinWalletQualityScore } from './filterEffective';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 

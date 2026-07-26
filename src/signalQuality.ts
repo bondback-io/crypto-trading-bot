@@ -32,7 +32,7 @@ import {
   effectivePreferEntryWithinMinutes,
   effectiveRequireMomentumConfirmation,
   effectiveStrictMinVolume24hUsd,
-} from './strictMode';
+} from './filterEffective';
 import { isStrategyEnabled } from './strategies';
 import {
   resolveSocialSentimentForSignal,

@@ -9,7 +9,7 @@ import {
   PartiallyDecodedInstruction,
   PublicKey,
 } from '@solana/web3.js';
-import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel, healDegenLooseGates } from './config';
+import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
@@ -130,7 +130,7 @@ import {
   effectiveClusterMinWallets,
   effectiveMinWalletQualityScore,
   effectiveMomentumMinHoldPct,
-} from './strictMode';
+} from './filterEffective';
 import {
   isStrategyEnabled,
   logStrategyDecision,
@@ -481,12 +481,6 @@ export function startMonitor(): void {
   if (running) return;
   running = true;
   paused = false;
-
-  try {
-    healDegenLooseGates({ persist: true });
-  } catch {
-    /* ignore */
-  }
 
   console.log(
     `[monitor] Starting — poll every ${config.pollIntervalMs}ms, activity filter: ${config.filters.enableActivityFilter}`
@@ -1614,11 +1608,11 @@ async function handleScannerCandidate(
     const minConfluence =
       config.marketScanner?.minConfluenceScore ?? 40;
     const requireTa =
-      config.riskLevel === 'degen'
+      config.riskLevel === 'off'
         ? false
         : config.marketScanner?.requireTaSetup !== false;
     // Playbook / confluence only hard-gate when Require TA setup is ON
-    // (Degen always skips these so scanner-only can still open).
+    // (Risk Off always skips these so scanner-only can still open).
     if (!hybrid && requireTa) {
       if (!candidate.playbook) {
         finishBuy(candidate.mint, false);
@@ -3552,6 +3546,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   // On-chain / Dex metrics + comprehensive anti-rug
+  // Risk OFF: skip anti-rug / metrics hard gates — Copy/Scanner signals pass through
+  if (config.riskLevel === 'off') {
+    // fall through to rate limits / conviction below
+  } else {
   const antiRugEnabled =
     isStrategyEnabled('anti_rug_honeypot') &&
     config.filters.enableAntiRug !== false;
@@ -3683,6 +3681,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       }
     }
   }
+  } // end riskLevel !== 'off'
 
   const rate = canExecuteTradeNow();
   if (!rate.ok) {
@@ -3798,11 +3797,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   );
 
   // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
-  // Degen always skips this gate (Market TA must not veto max-entries mode).
+  // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&
-    config.riskLevel !== 'degen' &&
+    config.riskLevel !== 'off' &&
     config.marketScanner?.requireTaSetup !== false
   ) {
     const ind = evaluateIndicators({

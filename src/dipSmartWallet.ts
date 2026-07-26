@@ -14,7 +14,7 @@
 
 import { config } from './config';
 import { applyQualityToWallet } from './walletQuality';
-import { effectiveMinWalletQualityScore } from './strictMode';
+import { effectiveMinWalletQualityScore } from './filterEffective';
 
 export type DipSmartWalletSensitivity = 'low' | 'medium' | 'high';
 

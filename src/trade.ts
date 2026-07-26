@@ -15,7 +15,7 @@ import {
   evaluateBuyPumpFunOnlyGate,
   evaluateHolderConcentrationHardFloors,
 } from './deadTokenFilters';
-import { effectiveMaxEntryMarketCapUsd } from './strictMode';
+import { effectiveMaxEntryMarketCapUsd } from './filterEffective';
 import {
   getKeypair,
   estimatePriorityFeeMicroLamports,
@@ -441,25 +441,28 @@ export async function executeBuy(
 
   // Hard entry-MC floor after MC is resolved (all paths: paper, live, migration, re-buy).
   // Catches soft-pass / unknown-Dex cases where Buy MC would otherwise land under $5k.
+  // Risk OFF: floors disabled — allow unknown / any MC.
   const minEntryMc = effectiveMinMarketCapUsd();
-  if (entryMarketCapUsd == null || !(entryMarketCapUsd > 0)) {
-    const reason = `Skipped — market cap unknown (min $${minEntryMc})`;
-    console.log(
-      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} (fill MC unresolved)`
-    );
-    return { success: false, mode: config.mode, error: reason };
-  }
-  if (entryMarketCapUsd < minEntryMc) {
-    const reason =
-      `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
-    console.log(
-      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
-        `(gate MC $${Math.round(entryMarketCapUsd)}, min $${minEntryMc})`
-    );
-    return { success: false, mode: config.mode, error: reason };
+  if (minEntryMc > 0) {
+    if (entryMarketCapUsd == null || !(entryMarketCapUsd > 0)) {
+      const reason = `Skipped — market cap unknown (min $${minEntryMc})`;
+      console.log(
+        `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} (fill MC unresolved)`
+      );
+      return { success: false, mode: config.mode, error: reason };
+    }
+    if (entryMarketCapUsd < minEntryMc) {
+      const reason =
+        `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
+      console.log(
+        `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
+          `(gate MC $${Math.round(entryMarketCapUsd)}, min $${minEntryMc})`
+      );
+      return { success: false, mode: config.mode, error: reason };
+    }
   }
   const maxEntryMc = effectiveMaxEntryMarketCapUsd();
-  if (maxEntryMc > 0 && entryMarketCapUsd > maxEntryMc) {
+  if (maxEntryMc > 0 && entryMarketCapUsd != null && entryMarketCapUsd > maxEntryMc) {
     const reason =
       `Skipped — market cap too high ($${Math.round(entryMarketCapUsd)} > $${maxEntryMc}; already-pumped / dump risk)`;
     console.log(
@@ -467,12 +470,15 @@ export async function executeBuy(
     );
     return { success: false, mode: config.mode, error: reason };
   }
-  console.log(
-    `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}` +
-      (maxEntryMc > 0 ? ` · ≤ max $${maxEntryMc}` : '')
-  );
+  if (minEntryMc > 0 && entryMarketCapUsd != null) {
+    console.log(
+      `[trade] Entry MC OK ${symbol}: $${Math.round(entryMarketCapUsd)} ≥ min $${minEntryMc}` +
+        (maxEntryMc > 0 ? ` · ≤ max $${maxEntryMc}` : '')
+    );
+  }
 
   // Hard top-10 floor at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass.
+  // Risk OFF: evaluateHolderConcentrationHardFloors returns empty.
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
     meta?.top10HoldPct
@@ -489,9 +495,11 @@ export async function executeBuy(
     );
     return { success: false, mode: config.mode, error: reason };
   }
-  console.log(
-    `[trade] Entry top10 OK ${symbol}: ${top10HoldPct!.toFixed(1)}%`
-  );
+  if (config.riskLevel !== 'off' && top10HoldPct != null) {
+    console.log(
+      `[trade] Entry top10 OK ${symbol}: ${top10HoldPct.toFixed(1)}%`
+    );
+  }
 
   if (usesPaperAccounting()) {
     const position = paperTrader.simulateBuy(

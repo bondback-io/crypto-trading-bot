@@ -18,7 +18,7 @@ import {
 import {
   effectiveLowConvictionTrailThreshold,
   effectiveLowConvictionTrailTightenPct,
-} from './strictMode';
+} from './filterEffective';
 
 export type { ProfitStrategyConfig };
 export { DEFAULT_PROFIT_STRATEGY };

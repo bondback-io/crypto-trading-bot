@@ -142,6 +142,8 @@ export function shouldAllowScannerOnly(): boolean {
 
 /** Effective min rank under current regime. */
 export function effectiveMinRankScore(base: number): number {
+  // Risk Level OFF: do not raise bars for SOL regime risk_off
+  if (config.riskLevel === 'off') return base;
   const regime = getCachedMarketRegime().regime;
   if (regime === 'risk_off') return Math.min(100, base + 10);
   return base;
@@ -149,11 +151,13 @@ export function effectiveMinRankScore(base: number): number {
 
 /** Higher confluence floor for scanner-only in risk_off. */
 export function effectiveMinConfluence(base: number): number {
+  if (config.riskLevel === 'off') return base;
   const regime = getCachedMarketRegime().regime;
   if (regime === 'risk_off') return Math.min(100, base + 10);
   return base;
 }
 
 export function isMomentumPlaybookDisabled(): boolean {
+  if (config.riskLevel === 'off') return false;
   return getCachedMarketRegime().regime === 'risk_off';
 }

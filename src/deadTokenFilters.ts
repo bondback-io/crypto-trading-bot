@@ -27,7 +27,7 @@ import {
   effectiveStrictMinRecentBuyVolumeUsd,
   effectiveStrictMinRecentVolumeUsd,
   effectiveStrictMinVolume24hUsd,
-} from './strictMode';
+} from './filterEffective';
 import { isStrategyEnabled } from './strategies';
 
 export interface DeadTokenMarketSnapshot {
@@ -156,6 +156,11 @@ export function evaluateDeadTokenHardFloors(
   snap: DeadTokenMarketSnapshot,
   ctx: DeadTokenFloorContext = {}
 ): DeadTokenFilterResult {
+  // Risk OFF: no liq/volume/MC/holder hard floors — entry engines decide.
+  if (config.riskLevel === 'off') {
+    return { skipReasons: [], scorePenalty: 0, flags: [] };
+  }
+
   const skipReasons: string[] = [];
   const flags: DeadTokenFilterResult['flags'] = [];
   let scorePenalty = 0;
@@ -681,6 +686,11 @@ export interface HolderConcentrationSnapshot {
 export function evaluateHolderConcentrationHardFloors(
   snap: HolderConcentrationSnapshot
 ): DeadTokenFilterResult {
+  // Risk OFF: no top-10 / insider hard floors
+  if (config.riskLevel === 'off') {
+    return { skipReasons: [], scorePenalty: 0, flags: [] };
+  }
+
   const skipReasons: string[] = [];
   const flags: DeadTokenFilterResult['flags'] = [];
   let scorePenalty = 0;

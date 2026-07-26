@@ -3112,7 +3112,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Overview ========== -->
     <section data-tab-panel="overview" class="space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-overview" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-overview" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.">
         <div class="active-profile-main">
           <span class="active-profile-kicker">Active Profile</span>
           <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
@@ -3138,9 +3138,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <span id="market-session-label">Session —</span>
             </span>
           </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top."></span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually."></span>
         </div>
-        <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
+        <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.</p>
       </div>
       <div class="card" style="padding:0.65rem 0.85rem">
         <div class="flex flex-wrap gap-2 items-center justify-between mb-1">
@@ -3843,12 +3843,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </label>
           <label class="ctl ctl-lg"><span>Risk level <span class="tip" tabindex="0" data-tip="Current = your live saved Risk Level (parity default). Overrides apply for this run only then restore."></span></span>
             <select id="bt-risk-level" onchange="onBtRiskLevelChange()">
-              <option value="current" selected>Current (parity)</option>
-              <option value="low">Override → Low</option>
-              <option value="medium">Override → Medium</option>
-              <option value="high">Override → High</option>
-              <option value="degen">Override → Degen</option>
-              <option value="off">Override → Off (entry only)</option>
+              <option value="current" selected>Use live Risk</option>
+              <option value="on">Override → On</option>
+              <option value="off">Override → Off</option>
             </select>
           </label>
           <label class="ctl ctl-lg"><span>Strict Mode <span class="tip" tabindex="0" data-tip="Match live = parity default. Force Off/On overrides for this run only (not saved)."></span></span>
@@ -4081,13 +4078,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card" id="bt-optimizer-card">
-        <div class="section-title">Risk Recipe Optimizer <span class="tip" tabindex="0" data-tip="Searches bounded module/setting combos per Low/Medium/High/Degen on the same BT window. Ranks by constrained win rate (min trades + expectancy + PF floors). Strict Mode is excluded from the search."></span></div>
+        <div class="section-title">Risk Recipe Optimizer <span class="tip" tabindex="0" data-tip="Searches bounded module/setting combos for Risk On on the same BT window. Ranks by constrained win rate."></span></div>
         <p class="mint text-xs mb-2" id="bt-optimizer-disclaimer">Same-window counterfactual — re-run on a second lookback before trusting. Apply writes per-risk overlays (Strict unchanged).</p>
         <div class="flex flex-wrap gap-2 items-center mb-2">
-          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-low" checked /> Low</label>
-          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-medium" checked /> Medium</label>
-          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-high" checked /> High</label>
-          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-degen" checked /> Degen</label>
+          <label class="mint text-xs flex items-center gap-1"><input type="checkbox" id="bt-opt-on" checked /> On</label>
           <label class="mint text-xs flex items-center gap-1">Max/risk <input type="number" id="bt-opt-max" value="16" min="4" max="24" step="1" style="width:3.5rem" /></label>
           <button class="btn btn-primary" id="bt-optimizer-run-btn" onclick="runRiskRecipeOptimizer()" title="Run optimizer on last backtest window">Run optimizer</button>
           <button class="btn btn-danger" id="bt-optimizer-stop-btn" onclick="stopRiskRecipeOptimizer()" title="Stop the running optimizer" disabled>Stop</button>
@@ -4290,7 +4284,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
       <div class="card strategy-risk-card">
-        <div class="active-profile-banner tone-medium mb-3" data-active-profile id="active-profile-strategies" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.">
+        <div class="active-profile-banner tone-medium mb-3" data-active-profile id="active-profile-strategies" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.">
           <div class="active-profile-main">
             <span class="active-profile-kicker">Active Profile</span>
             <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
@@ -4302,17 +4296,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
               <span class="strict-badge-label">Strict Off</span>
             </span>
-            <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top."></span>
+            <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually."></span>
           </div>
-          <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.</p>
+          <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.</p>
         </div>
         <div class="section-title">Risk Level <span class="tip" tabindex="0" data-tip="Preset that auto-tunes position size, filters, stops, drawdown limits, and selective entry gates."></span></div>
         <div class="flex flex-wrap gap-2 items-center mb-2" id="risk-level-toggle">
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-low" onclick="setRiskLevel('low')" title="Fewer trades, higher selectivity — quality-first modules">Low</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-medium" onclick="setRiskLevel('medium')" title="Balanced (recommended) — coherent strategy modules">Medium</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-high" onclick="setRiskLevel('high')" title="More entries, looser filters — higher variance">High</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-degen" onclick="setRiskLevel('degen')" title="Max entries — safety floors only, highest variance" style="border-color:#a855f7">Degen</button>
-          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-off" onclick="setRiskLevel('off')" title="Entry engines only (Copy + Scanner) — no risk-linked modules. For testing fills without quality gates." style="border-color:#64748b">Off</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-on" onclick="setRiskLevel('on')" title="Lean baseline — hard floors + Copy/Scanner; enable quality modules manually">On</button>
+          <button type="button" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" id="risk-lvl-off" onclick="setRiskLevel('off')" title="Ops-only soak: Copy + Scanner, no hard floors; max concurrent ≥ 30" style="border-color:#64748b">Off</button>
           <span class="mint self-center" id="risk-level-label">—</span>
         </div>
         <div id="risk-level-warning" class="hidden text-amber-300 text-sm mb-2 font-medium"></div>
@@ -4320,17 +4311,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mt-3 pt-3 border-t border-slate-700/80">
           <div class="toggle-row">
-            <span title="Opt-in overlay: higher wallet quality, conviction, cluster, timing, volume, and tighter exits on top of the risk level">Strict Mode</span>
-            <label class="switch"><input type="checkbox" id="strict-mode-toggle" onchange="toggleStrictMode(this.checked)" /><span class="slider"></span></label>
-          </div>
           <div id="strict-mode-warning" class="hidden text-amber-300 text-sm mt-1 font-medium">Higher quality trades only – fewer but better setups. Intensity: Low = safest/most selective; High = more active (looser), not safer.</div>
           <div id="strict-intensity-row" class="mt-2">
-            <div class="text-xs text-slate-400 mb-1">Intensity <span class="tip" tabindex="0" data-tip="Active only when Strict Mode is ON. Strict-Low forces Elite Convergence, hard quality gate, early entry, momentum, profit protection + tighter scalp volume/timers. Strict-Medium adds momentum/bonding/profit protection. Strict-High requires momentum only (more active). Stacks on Risk Level."></span></div>
-            <div class="flex flex-wrap gap-2 items-center" id="strict-intensity-toggle">
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-low" onclick="setStrictModeIntensity('low')" title="Most selective Strict — forces elite + hard quality + early entry + momentum + profit protection. Also tightens scalp volume/timers.">Strict-Low</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-medium" onclick="setStrictModeIntensity('medium')" title="Balanced strict overlay (default)">Strict-Medium</button>
-              <button type="button" class="btn bg-slate-800 text-slate-300 text-xs" id="strict-int-high" onclick="setStrictModeIntensity('high')" title="More active Strict — looser than Low/Medium. NOT safer than Strict-Low.">Strict-High</button>
-            </div>
+
             <div class="mint text-xs mt-1" id="strict-intensity-desc">Strict-Medium — balanced strict overlay (default intensity)</div>
           </div>
           <div class="mint text-xs mt-1" id="strict-mode-status">Strict Mode OFF — using risk-level presets</div>
@@ -4594,7 +4577,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="config-panel hidden space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. Change Risk / Strict on the Strategies tab.">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk / Strict on the Strategies tab.">
         <div class="active-profile-main">
           <span class="active-profile-kicker">Active Profile</span>
           <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
@@ -4606,9 +4589,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
             <span class="strict-badge-label">Strict Off</span>
           </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. Change Risk / Strict on the Strategies tab."></span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk / Strict on the Strategies tab."></span>
         </div>
-        <p class="active-profile-hint">Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('strategies')">Edit on Strategies</button></p>
+        <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('strategies')">Edit on Strategies</button></p>
       </div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
@@ -5504,7 +5487,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const modeLabel = recipe.mode === 'custom' ? 'Custom modules' : 'Synced to Risk';
         profile.textContent =
           modeLabel +
-          ' · Risk ' + String(data.riskLevel || 'medium').toUpperCase() +
+          ' · Risk ' + String(data.riskLevel || 'on').toUpperCase() +
           (data.strictMode ? ' · Strict ' + String(data.strictModeIntensity || 'medium') : '') +
           (recipe.enabledCore != null
             ? ' · ' + recipe.enabledCore + ' core · ' + recipe.enabledRisk + ' risk'
@@ -5516,7 +5499,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (recipeBanner && recipeBannerText) {
         const recipe = data.recipe || {};
         recipeBanner.style.display = 'flex';
-        const riskLabel = String(data.riskLevel || 'medium').toUpperCase();
+        const riskLabel = String(data.riskLevel || 'on').toUpperCase();
         if (recipe.mode === 'custom') {
           recipeBanner.classList.add('is-custom');
           recipeBanner.classList.remove('is-synced');
@@ -5630,7 +5613,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const btBanner = document.getElementById('bt-config-banner');
       if (btBanner) {
-        const rl = String(data.riskLevel || 'medium').toUpperCase();
+        const rl = String(data.riskLevel || 'on').toUpperCase();
         btBanner.textContent =
           'Live preset: ' + preset.replace(/_/g, ' ') +
           ' · Risk ' + rl +
@@ -8077,7 +8060,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           chartBacktestRisk = new Chart(canvas, {
             type: 'bar',
             data: {
-              labels: ['low', 'medium', 'high', 'degen'],
+              labels: ['on', 'off'],
               datasets: [
                 {
                   label: 'PnL (SOL)',
@@ -8230,9 +8213,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           cfgUsedEl.classList.remove('hidden');
           const strictTxt = cu.strictLabel
             ? String(cu.strictLabel)
-            : (cu.strictMode
-              ? ('Strict: ON · ' + String(cu.strictModeIntensity || 'medium'))
-              : 'Strict: OFF');
+            : 'Risk ' + String(cu.riskLevel || 'on').toUpperCase();
           const recipeTxt = cu.strategyRecipeMode === 'custom' ? 'recipe: custom' : 'recipe: synced';
           const profilesTxt = cu.tradeProfilesEnabled === false
             ? 'Multi-profile OFF'
@@ -9009,10 +8990,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function selectedOptimizerRisks() {
       const risks = [];
-      if (document.getElementById('bt-opt-low')?.checked) risks.push('low');
-      if (document.getElementById('bt-opt-medium')?.checked) risks.push('medium');
-      if (document.getElementById('bt-opt-high')?.checked) risks.push('high');
-      if (document.getElementById('bt-opt-degen')?.checked) risks.push('degen');
+      if (document.getElementById('bt-opt-on')?.checked) risks.push('on');
       return risks;
     }
 
@@ -9062,7 +9040,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (report.disclaimer ? ' · ' + report.disclaimer.slice(0, 48) + '…' : '');
       }
       host.innerHTML = riskBlocks.map(function (block) {
-        const risk = block.riskLevel || 'medium';
+        const risk = block.riskLevel || 'on';
         const baseline = block.baseline || {};
         const bm = baseline.metrics || {};
         const winnerId = block.winnerId || null;
@@ -9232,7 +9210,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (applyAllWinners) {
         if (!confirm(
           'Apply each risk level\\'s constrained-WR winner to synced Low/Med/High/Degen recipes?\\n\\n' +
-          'Strict Mode is left untouched. Settings persist for the next applyRiskLevel.'
+          'Module toggles stay as set. Settings persist for the next applyRiskLevel.'
         )) return;
         body = { applyWinners: true };
       } else {
@@ -9243,7 +9221,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         if (!confirm(
           'Apply ' + selections.length + ' selected candidate(s) to synced risk recipes?\\n\\n' +
-          'Strict Mode is left untouched.'
+          'Module toggles stay as set.'
         )) return;
         body = { selections: selections };
       }
@@ -10315,7 +10293,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         syncBtMaxTradesFromRisk(cfg);
         if (btBanner) {
-          const rl = (cfg.riskLevel || 'medium').toUpperCase();
+          const rl = (cfg.riskLevel || 'on').toUpperCase();
           const base = cfg.trade.baseTradeAmountSol ?? cfg.trade.tradeAmountSol;
           const preset = String(cfg.strategyProfile || 'custom').replace(/_/g, ' ');
           btBanner.textContent =
@@ -11153,10 +11131,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       syncBtMaxTradesFromRisk(_lastConfig);
     }
 
-    function btStrictIsActive(mode, cfg) {
-      if (mode === 'off') return false;
-      if (mode === 'on') return true;
-      return !!(cfg && cfg.strictMode);
+    function btStrictIsActive(_mode, _cfg) {
+      return false;
     }
 
     function onBtStrictModeChange() {
@@ -11188,14 +11164,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function btStrictPayload() {
-      const mode = (document.getElementById('bt-strict-mode') || {}).value || 'match';
-      let intensity = (document.getElementById('bt-strict-intensity') || {}).value || 'medium';
-      if (intensity !== 'low' && intensity !== 'medium' && intensity !== 'high') {
-        intensity = 'medium';
-      }
-      if (mode === 'match') return { matchLiveStrict: true };
-      if (mode === 'off') return { strictMode: false };
-      return { strictMode: true, strictModeIntensity: intensity };
+      return {};
     }
 
     async function runBacktestMatchingLive() {
@@ -12422,7 +12391,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     };
 
     const ACTIVE_PROFILE_HINT =
-      'Risk Level sets the base risk appetite. Strict Mode adds an extra quality filter on top.';
+      'Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.';
 
     const STATUS_ICONS = {
       play: '<polygon points="5 3 19 12 5 21 5 3"/>',
@@ -12513,7 +12482,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         medium: 'Medium risk — balanced recommended default',
         high: 'High risk — larger size, looser filters (use with caution)',
         degen: 'Degen — max entries, basic rug/honeypot only + hard floors',
-        off: 'Risk OFF — Copy + Scanner only; no risk-linked modules',
+        off: 'Risk OFF — Copy + Scanner only; no risk modules or hard floors',
       };
       const tone =
         level === 'low'
@@ -12556,35 +12525,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
     }
 
-    function getStrictBadgeState(cfg) {
-      const on = !!(cfg && cfg.strictMode);
-      if (!on) {
-        return {
-          label: 'Strict Off',
-          tone: 'strict-badge-off',
-          icon: 'strictOff',
-          title: 'Strict Mode OFF — using Risk Level presets only. Strict Mode adds an extra quality filter on top when enabled.',
-        };
-      }
-      const intensity = (cfg && cfg.strictModeIntensity) || 'medium';
-      const meta = STRICT_INTENSITY_META[intensity] || STRICT_INTENSITY_META.medium;
-      const tone =
-        intensity === 'low'
-          ? 'strict-badge-low'
-          : intensity === 'high'
-            ? 'strict-badge-high'
-            : 'strict-badge-medium';
-      const icon =
-        intensity === 'low'
-          ? 'strictLow'
-          : intensity === 'high'
-            ? 'strictHigh'
-            : 'strictMed';
+    function getStrictBadgeState(_cfg) {
       return {
-        label: meta.label,
-        tone,
-        icon,
-        title: meta.label + ' ON — ' + meta.description,
+        label: 'Modules',
+        tone: 'strict-badge-off',
+        icon: 'strictOff',
+        title: 'Strict Mode removed — use Risk On/Off and module toggles.',
       };
     }
 
@@ -12606,11 +12552,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function activeProfileToneClass(cfg) {
-      const level = String((cfg && cfg.riskLevel) || 'medium').toLowerCase();
-      if (level === 'degen') return 'tone-degen';
+      const level = String((cfg && cfg.riskLevel) || 'on').toLowerCase();
       if (level === 'off') return 'tone-off';
-      if (level === 'high') return 'tone-high';
-      if (level === 'low') return 'tone-low';
       return 'tone-medium';
     }
 
@@ -12630,64 +12573,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       updateStrictBadges(source);
     }
 
-    function updateStrictModeUI(cfg, status) {
-      const on = !!(cfg && cfg.strictMode);
-      const intensity =
-        (status && status.intensity) ||
-        (cfg && cfg.strictModeIntensity) ||
-        'medium';
-      const meta = STRICT_INTENSITY_META[intensity] || STRICT_INTENSITY_META.medium;
-      const ef = (status && status.effective) || {};
-
-      ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
-        const tog = document.getElementById(id);
-        if (tog) tog.checked = on;
-      });
-      ['strict-mode-warning', 'cfg-strict-mode-warning'].forEach((id) => {
-        const warn = document.getElementById(id);
-        if (warn) warn.classList.toggle('hidden', !on);
-      });
-      ['strict-intensity-row', 'cfg-strict-intensity-row'].forEach((id) => {
-        const row = document.getElementById(id);
-        if (!row) return;
-        row.classList.toggle('opacity-60', !on);
-      });
-      ['low', 'medium', 'high'].forEach((id) => {
-        ['strict-int-', 'cfg-strict-int-'].forEach((prefix) => {
-          const btn = document.getElementById(prefix + id);
-          if (!btn) return;
-          const active = id === intensity;
-          btn.className = active
-            ? 'btn btn-primary text-xs'
-            : 'btn bg-slate-800 text-slate-300 text-xs';
-        });
-      });
-      ['strict-intensity-desc', 'cfg-strict-intensity-desc'].forEach((id) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = meta.label + ' — ' + meta.description;
-      });
-      const statusText = on
-        ? (meta.label + ' ON · Q≥' + (ef.minWalletQualityScore ?? '?') +
-           ' · conviction≥' + (ef.minConvictionScore ?? '?') +
-           ' · cluster≥' + (ef.clusterMinWallets ?? '?') +
-           (ef.maxEntryAgeMinutes != null ? ' · entry≤' + ef.maxEntryAgeMinutes + 'm' : '') +
-           (ef.maxEntryMarketCapUsd > 0
-             ? ' · maxMC≤$' + (ef.maxEntryMarketCapUsd >= 1e6
-                 ? (ef.maxEntryMarketCapUsd / 1e6).toFixed(1) + 'M'
-                 : Math.round(ef.maxEntryMarketCapUsd / 1e3) + 'K')
-             : ''))
-        : 'Strict Mode OFF — using risk-level presets';
-      ['strict-mode-status', 'cfg-strict-mode-status'].forEach((id) => {
-        const st = document.getElementById(id);
-        if (st) st.textContent = statusText;
-      });
-      updateActiveProfileSummary(
-        Object.assign({}, _lastConfig || {}, cfg || {}, {
-          strictMode: on,
-          strictModeIntensity: intensity,
-        })
-      );
-      onBtStrictModeChange();
+    function updateStrictModeUI(_cfg, _status) {
+      /* Strict Mode removed */
     }
 
     function applyPresetConfigSnapshot(cfg, strictStatus) {
@@ -12699,45 +12586,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       updateStrictModeUI(cfg, strictStatus);
     }
 
-    async function toggleStrictMode(enabled) {
-      try {
-        const data = await fetchJSON('/api/config/strict-mode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strictMode: !!enabled }),
-        });
-        applyPresetConfigSnapshot(
-          data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
-          data.status
-        );
-        await refresh();
-        if (data.warning && enabled) alert(data.warning);
-        if (typeof loadStrategies === 'function') await loadStrategies();
-      } catch (err) {
-        alert(err.message || String(err));
-        ['strict-mode-toggle', 'cfg-strict-mode-toggle'].forEach((id) => {
-          const tog = document.getElementById(id);
-          if (tog) tog.checked = !enabled;
-        });
-      }
+    async function toggleStrictMode(_enabled) {
+      /* Strict Mode removed */
     }
 
-    async function setStrictModeIntensity(intensity) {
-      try {
-        const data = await fetchJSON('/api/config/strict-mode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ intensity: intensity }),
-        });
-        applyPresetConfigSnapshot(
-          data.config || { strictMode: data.strictMode, strictModeIntensity: data.strictModeIntensity },
-          data.status
-        );
-        await refresh();
-        if (typeof loadStrategies === 'function') await loadStrategies();
-      } catch (err) {
-        alert(err.message || String(err));
-      }
+    async function setStrictModeIntensity(_intensity) {
+      /* Strict Mode removed */
     }
 
     async function bulkImportWallets() {
@@ -12829,23 +12683,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function updateRiskLevelUI(cfg) {
-      const level = (cfg && cfg.riskLevel) || 'medium';
+      const level = (cfg && cfg.riskLevel) || 'on';
       const sum = (cfg && cfg.riskLevelSummary) || {};
       const active = sum.active || {};
-      const ids = ['low', 'medium', 'high', 'degen', 'off'];
+      const ids = ['on', 'off'];
       ids.forEach((id) => {
         ['risk-lvl-', 'cfg-risk-lvl-'].forEach((prefix) => {
           const btn = document.getElementById(prefix + id);
           if (!btn) return;
           const on = id === level;
-          if (id === 'degen') {
-            btn.className = on
-              ? 'btn text-xs sm:text-sm'
-              : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
-            btn.style.background = on ? 'linear-gradient(135deg,#c2410c,#7c3aed)' : '';
-            btn.style.color = on ? '#fff' : '';
-            btn.style.borderColor = '#a855f7';
-          } else if (id === 'off') {
+          if (id === 'off') {
             btn.className = on
               ? 'btn text-xs sm:text-sm'
               : 'btn bg-slate-800 text-slate-300 text-xs sm:text-sm';
@@ -12867,19 +12714,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       const warnText =
         level === 'off'
-          ? (sum.warning || '⚠️ Risk OFF — entry engines only. Hard floors still apply.')
-          : level === 'degen'
-          ? (sum.warning || '⚠️ DEGEN mode maximizes entries — only basic rug/honeypot safety + hard floors. Extremely high variance.')
-          : level === 'high'
-            ? (sum.warning || '⚠️ High risk mode increases position size and reduces filters — use with caution')
-            : '';
+          ? (sum.warning || '⚠️ Risk OFF — ops-only soak. Hard floors bypassed. Concurrent ≥ 30.')
+          : '';
       ['risk-level-warning', 'cfg-risk-level-warning'].forEach((wid) => {
         const w = document.getElementById(wid);
         if (!w) return;
         if (warnText) {
           w.textContent = warnText;
           w.classList.remove('hidden');
-          w.style.color = level === 'degen' ? '#c084fc' : level === 'off' ? '#94a3b8' : '';
+          w.style.color = level === 'off' ? '#94a3b8' : '';
         } else {
           w.textContent = '';
           w.classList.add('hidden');
@@ -12931,21 +12774,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function setRiskLevel(level) {
-      if (level === 'high') {
-        const ok = confirm(
-          '⚠️ High risk mode increases position size and reduces filters — use with caution.\\n\\nApply High risk recommended settings?'
-        );
-        if (!ok) return;
-      }
-      if (level === 'degen') {
-        const ok = confirm(
-          '⚠️ DEGEN mode maximizes open trades — only basic rug/honeypot filters + hard floors.\\n50 concurrent positions · 0.25 SOL base · very loose gates.\\n\\nApply Degen settings?'
-        );
-        if (!ok) return;
-      }
       if (level === 'off') {
         const ok = confirm(
-          '⚠️ Risk OFF — turns off risk-linked / selective modules.\\nKeeps Smart Money Copy + Market Scanner (and basic safety floors).\\nStrict Mode will be forced OFF.\\n\\nUse this to test how the bot takes trades without quality gates.\\n\\nApply Risk OFF?'
+          '⚠️ Risk OFF — ops-only soak (Copy + Scanner).\nNo hard floors / quality gates.\nMax concurrent opens ≥ 30.\nOps rejects only (holding, denied, pause, balance).\n\nApply Risk OFF?'
         );
         if (!ok) return;
       }
@@ -12957,8 +12788,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         });
         if (data.config) {
           applyPresetConfigSnapshot(data.config);
-          const strictStatus = await fetchJSON('/api/config/strict-mode').catch(() => null);
-          updateStrictModeUI(data.config, strictStatus);
+          updateStrictModeUI(data.config, null);
         }
         await refresh();
         if (typeof loadStrategies === 'function') await loadStrategies();

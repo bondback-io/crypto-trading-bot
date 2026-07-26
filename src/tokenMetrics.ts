@@ -14,7 +14,7 @@ import {
 import { getBondingCurvePda } from './bondingCurve';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
-import { effectiveStrictMinVolume24hUsd } from './strictMode';
+import { effectiveStrictMinVolume24hUsd } from './filterEffective';
 
 export interface HolderBucket {
   address: string;
@@ -574,6 +574,11 @@ async function fetchGmgnTokenHints(
 export function evaluateTokenMetricsFilters(
   metrics: TokenMetrics
 ): TokenMetricsFilterResult {
+  // Risk OFF: no metrics floors — signal engines decide
+  if (config.riskLevel === 'off') {
+    return { ok: true, reasons: [], metrics };
+  }
+
   const filters = config.filters;
   const reasons: string[] = [];
 
@@ -586,24 +591,27 @@ export function evaluateTokenMetricsFilters(
 
   const minMc = effectiveMinMarketCapUsd();
   const mc = metrics.marketCapUsd;
-  if (mc != null && mc > 0) {
-    if (mc < minMc) {
-      reasons.push(
-        `market cap $${Math.round(mc)} < min $${minMc}`
-      );
+  if (minMc > 0) {
+    if (mc != null && mc > 0) {
+      if (mc < minMc) {
+        reasons.push(
+          `market cap $${Math.round(mc)} < min $${minMc}`
+        );
+      }
+    } else {
+      reasons.push(`market cap unknown (min $${minMc})`);
     }
-  } else {
-    reasons.push(`market cap unknown (min $${minMc})`);
   }
 
   const minVol = effectiveStrictMinVolume24hUsd();
   const vol = metrics.volume24hUsd;
-  if (vol != null && vol < minVol) {
+  if (minVol > 0 && vol != null && vol < minVol) {
     reasons.push(`volume24h $${vol.toFixed(0)} < min $${minVol}`);
   }
 
   const minHolders = effectiveMinHolders();
   if (
+    minHolders > 0 &&
     metrics.holderCountEstimate != null &&
     metrics.holderCountEstimate < minHolders
   ) {
@@ -640,7 +648,11 @@ export function evaluateTokenMetricsFilters(
   }
 
   const minTop10 = effectiveMinTop10HolderPct();
-  if (metrics.top10HoldPct != null && Number.isFinite(metrics.top10HoldPct)) {
+  if (
+    minTop10 > 0 &&
+    metrics.top10HoldPct != null &&
+    Number.isFinite(metrics.top10HoldPct)
+  ) {
     if (metrics.top10HoldPct < minTop10) {
       reasons.push(
         `top10 concentration ${metrics.top10HoldPct.toFixed(1)}% < min ${minTop10}%`

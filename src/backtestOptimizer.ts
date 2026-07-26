@@ -1,9 +1,8 @@
 /**
  * Risk Recipe Win-Rate Optimizer — bounded search of module/setting combos
- * per Low/Medium/High/Degen on the same backtest window.
+ * for Risk On on the same backtest window.
  *
  * Primary rank: constrained win rate (floors on trades / expectancy / PF).
- * Strict Mode is forced OFF during search (base recipes only).
  */
 
 import fs from 'fs';
@@ -32,14 +31,9 @@ import {
 import { performanceScoreFromStats } from './performanceScore';
 
 const DISCLAIMER =
-  'Same-window counterfactual only — re-run on a second lookback before trusting winners. Strict Mode is excluded from v1 search.';
+  'Same-window counterfactual only — re-run on a second lookback before trusting winners.';
 
-const RISK_LEVELS: Array<Exclude<RiskLevel, 'off'>> = [
-  'low',
-  'medium',
-  'high',
-  'degen',
-];
+const RISK_LEVELS: Array<Exclude<RiskLevel, 'off'>> = ['on'];
 
 export interface OptimizerCandidateMetrics {
   trades: number;
@@ -485,7 +479,6 @@ async function shadowRun(
     useSavedConfigFilters: true,
     parityMode: true,
     persistResult: false,
-    strictMode: false,
     skipOptimizerOverlay: true,
     advisorOverlay: overlay,
     minConvictionScore: overlay.minConvictionScore,

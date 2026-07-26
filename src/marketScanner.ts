@@ -96,6 +96,8 @@ export interface ScannerStatus {
   jupiter?: ReturnType<typeof getJupiterTokensStatus>;
   skipBuckets?: Array<{ reason: string; count: number }>;
   degenRelaxed?: boolean;
+  /** True when Risk Off relaxes TA/volume floors for soak testing */
+  riskOffRelaxed?: boolean;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -147,19 +149,21 @@ function baseScannerCfg() {
 }
 
 /**
- * Effective scanner knobs. Degen auto-relaxes TA/vol gates so "max entries"
- * is not silently vetoed by Market Scanner thresholds.
+ * Effective scanner knobs. Risk Off auto-relax TA/vol gates so ops-only
+ * soak mode is not silently vetoed by Market Scanner thresholds.
  */
 function scannerCfg() {
   const cfg = { ...baseScannerCfg() };
-  if (config.riskLevel === 'degen') {
+  if (config.riskLevel === 'off') {
     cfg.requireTaSetup = false;
-    cfg.minRankScore = Math.min(cfg.minRankScore ?? 42, 35);
-    cfg.minConfluenceScore = Math.min(cfg.minConfluenceScore ?? 40, 25);
-    cfg.minVolumeH24Usd = Math.min(
-      cfg.minVolumeH24Usd ?? 30_000,
-      HARD_FILTER_FLOORS.minVolume24hUsd
-    );
+    cfg.minRankScore = Math.min(cfg.minRankScore ?? 42, 20);
+    cfg.minConfluenceScore = Math.min(cfg.minConfluenceScore ?? 40, 10);
+    cfg.minLiquidityUsd = 0;
+    cfg.minVolumeM5Usd = 0;
+    cfg.minVolumeH1Usd = 0;
+    cfg.minVolumeH6Usd = 0;
+    cfg.minVolumeH24Usd = 0;
+    cfg.minOrganicScore = 0;
     cfg.pauseScannerOnlyInRiskOff = false;
   }
   return cfg;
@@ -242,7 +246,8 @@ export function getScannerStatus(): ScannerStatus {
     outcomes: getScannerOutcomeSummary(),
     jupiter: getJupiterTokensStatus(),
     skipBuckets: getScannerSkipBuckets(8),
-    degenRelaxed: config.riskLevel === 'degen',
+    degenRelaxed: false,
+    riskOffRelaxed: config.riskLevel === 'off',
   };
 }
 
@@ -264,6 +269,9 @@ function pushFeed(row: ScannerCandidate): void {
 }
 
 function hardFloorsOk(event: LaunchEvent): boolean {
+  // Risk OFF: scanner candidates are not volume/liq gated here
+  if (config.riskLevel === 'off') return true;
+
   const cfg = scannerCfg();
   const minLiqGlobal = config.filters.minLiquidity ?? 0;
   const minLiqLocal =
@@ -921,7 +929,7 @@ export async function selectScannerCandidates(
   console.log(
     `[marketScanner] enrich ${prefiltered.length}/${events.length} → ` +
       `${enriched.length} ranked → ${out.length} capped` +
-      (config.riskLevel === 'degen' ? ' (degen-relaxed)' : '')
+      (config.riskLevel === 'off' ? ' (risk-off-relaxed)' : '')
   );
   return out;
 }

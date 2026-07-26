@@ -14,6 +14,7 @@ import {
   isScalperSuiteProfile,
   getScalperSuiteVariantLabel,
   type RiskLevel,
+  normalizeRiskLevel
 } from './config';
 import { PaperTrader, Position, paperTrader } from './paperTrader';
 import {
@@ -61,11 +62,7 @@ import {
   effectiveMinConvictionScore,
   effectiveMinWalletQualityScore,
   effectiveStrictMinVolume24hUsd,
-  getStrictModeIntensity,
-  isStrictMode,
-  isStrictModeIntensity,
-  type StrictModeIntensity,
-} from './strictMode';
+} from './filterEffective';
 import { passesWalletQualityGate } from './walletQuality';
 import { isStrategyEnabled, getQualityModeOverlays } from './strategies';
 import {
@@ -147,24 +144,14 @@ export interface BacktestOptions {
   /** Override wallet quality cutoff for this run only (0 = use live) */
   minWalletQualityScore?: number;
   /**
-   * Strict Mode for this run only (not persisted).
-   * `undefined` = match live saved settings; `true`/`false` = force on/off.
-   */
-  strictMode?: boolean;
-  /**
-   * Intensity when Strict is forced ON for this run (or when matching live ON).
-   * Ignored when Strict is OFF. Default: live intensity / medium.
-   */
-  strictModeIntensity?: StrictModeIntensity;
-  /**
-   * Parity mode (default true): inherit live Risk/Strict/toggles/profiles,
+   * Parity mode (default true): inherit live Risk/toggles/profiles,
    * fail-closed on missing MC/vol when live would reject, synthetic off unless
    * allowSynthetic explicitly true, simulations capped at 1 unless Advanced.
    */
   parityMode?: boolean;
   /**
    * Temporary one-knob advisor overlay (toggles / floors / profiles).
-   * Applied after Risk/Strict overrides; restored in finally via snapshot.
+   * Applied after Risk overrides; restored in finally via snapshot.
    */
   advisorOverlay?: import('./backtestAdvisor').AdvisorOverlay;
   /**
@@ -395,14 +382,10 @@ export interface BacktestResult {
     compareRiskLevels: boolean;
     useSavedConfigFilters: boolean;
     /** Effective Strict Mode for this run (after override / match-live) */
-    strictMode: boolean;
-    strictModeIntensity: StrictModeIntensity;
   };
   /** Snapshot of trading knobs used for this run */
   configUsed: {
     riskLevel: RiskLevel;
-    strictMode: boolean;
-    strictModeIntensity: StrictModeIntensity;
     /** Display e.g. "Strict: OFF" or "Strict: ON · Medium" */
     strictLabel: string;
     strategyRecipeMode?: 'synced' | 'custom';
@@ -1013,12 +996,16 @@ function passesFilters(
   }
 
   // Prefer the stricter of UI override vs selective/live Strict-aware floors
-  const minVol = isStrategyEnabled('volume_liquidity_filters')
-    ? Math.max(
-        options.minVolumeUsd || 0,
-        effectiveStrictMinVolume24hUsd()
-      )
-    : HARD_FILTER_FLOORS.minVolume24hUsd;
+  // Risk OFF: no absolute hard floors — only optional UI overrides
+  const floorsOff = config.riskLevel === 'off';
+  const minVol = floorsOff
+    ? Math.max(0, options.minVolumeUsd || 0)
+    : isStrategyEnabled('volume_liquidity_filters')
+      ? Math.max(
+          options.minVolumeUsd || 0,
+          effectiveStrictMinVolume24hUsd()
+        )
+      : HARD_FILTER_FLOORS.minVolume24hUsd;
   const vol = event.volumeUsd;
   if (minVol > 0) {
     if (vol == null || !(vol > 0)) {
@@ -1032,12 +1019,14 @@ function passesFilters(
     }
   }
 
-  const minLiq = isStrategyEnabled('volume_liquidity_filters')
-    ? Math.max(
-        options.minLiquidityUsd || 0,
-        config.filters.minLiquidity || 0
-      )
-    : HARD_FILTER_FLOORS.minLiquidityUsd;
+  const minLiq = floorsOff
+    ? Math.max(0, options.minLiquidityUsd || 0)
+    : isStrategyEnabled('volume_liquidity_filters')
+      ? Math.max(
+          options.minLiquidityUsd || 0,
+          config.filters.minLiquidity || 0
+        )
+      : HARD_FILTER_FLOORS.minLiquidityUsd;
   const liqAtEntry =
     liquidityAtPrice(
       event.liquidityUsd,
@@ -1058,10 +1047,12 @@ function passesFilters(
       event.lastPriceSol,
       event.entryPriceSol
     ) ?? event.marketCapUsd;
-  const minMc = Math.max(
-    options.minMarketCapUsd || 0,
-    effectiveMinMarketCapUsd()
-  );
+  const minMc = floorsOff
+    ? Math.max(0, options.minMarketCapUsd || 0)
+    : Math.max(
+        options.minMarketCapUsd || 0,
+        effectiveMinMarketCapUsd()
+      );
   if (minMc > 0) {
     if (mcAtEntry == null || mcAtEntry <= 0) {
       // Parity with live executeBuy — missing MC fails closed
@@ -2666,8 +2657,6 @@ function runSinglePass(
 function captureTradingConfigSnapshot() {
   return {
     riskLevel: config.riskLevel,
-    strictMode: config.strictMode,
-    strictModeIntensity: config.strictModeIntensity,
     trade: { ...config.trade },
     filters: { ...config.filters },
     risk: {
@@ -2704,11 +2693,6 @@ function restoreTradingConfigSnapshot(
   snap: ReturnType<typeof captureTradingConfigSnapshot>
 ): void {
   config.riskLevel = snap.riskLevel;
-  config.strictMode = snap.strictMode === true;
-  config.strictModeIntensity =
-    snap.strictModeIntensity === 'low' || snap.strictModeIntensity === 'high'
-      ? snap.strictModeIntensity
-      : 'medium';
   Object.assign(config.trade, snap.trade);
   Object.assign(config.filters, snap.filters);
   config.risk = {
@@ -2743,22 +2727,14 @@ function restoreTradingConfigSnapshot(
 
 function buildConfigUsedSnapshot() {
   const sum = getRiskLevelSummary();
-  const intensity = getStrictModeIntensity();
-  const strictOn = isStrictMode();
-  const intensityLabel =
-    intensity === 'low' ? 'Low' : intensity === 'high' ? 'High' : 'Medium';
   ensureTradeProfilesInitialized();
   const tp = config.tradeProfiles;
   const profilesOn = tp?.profiles
     ? Object.entries(tp.profiles).filter(([, on]) => on).length
     : 0;
   return {
-    riskLevel: (config.riskLevel || 'medium') as RiskLevel,
-    strictMode: strictOn,
-    strictModeIntensity: intensity,
-    strictLabel: strictOn
-      ? `Strict: ON · ${intensityLabel}`
-      : 'Strict: OFF',
+    riskLevel: normalizeRiskLevel(config.riskLevel),
+    strictLabel: `Risk: ${normalizeRiskLevel(config.riskLevel).toUpperCase()}`,
     strategyRecipeMode:
       (config.strategyRecipeMode === 'custom' ? 'custom' : 'synced') as
         | 'synced'
@@ -2815,14 +2791,6 @@ export async function runBacktest(
     }
 
     // Optional run-only overrides for conviction / wallet quality / strict
-    if (options.strictMode === true) {
-      config.strictMode = true;
-    } else if (options.strictMode === false) {
-      config.strictMode = false;
-    }
-    if (isStrictModeIntensity(options.strictModeIntensity)) {
-      config.strictModeIntensity = options.strictModeIntensity;
-    }
     if (
       options.minConvictionScore != null &&
       options.minConvictionScore > 0
@@ -3036,12 +3004,12 @@ export async function runBacktest(
       return { allSkipped, runStats, lastTrades, lastTrader, considered };
     };
 
-    // Optional Low/Medium/High/Degen comparison on the same events
+    // Optional On/Off comparison on the same events
     let riskComparison: BacktestResult['riskComparison'];
     if (compareRiskLevels) {
       riskComparison = [];
       const compareSnap = captureTradingConfigSnapshot();
-      for (const level of ['low', 'medium', 'high', 'degen'] as RiskLevel[]) {
+      for (const level of ['on', 'off'] as RiskLevel[]) {
         applyRiskLevel(level, { persist: false });
         const cmp = await executeSims(events, `Compare ${level}`);
         const sum = buildSummary(
@@ -3156,8 +3124,6 @@ export async function runBacktest(
       simulations,
       dataSource,
       riskLevel: configUsedFinal.riskLevel,
-      strictMode: configUsedFinal.strictMode,
-      strictModeIntensity: configUsedFinal.strictModeIntensity,
     });
 
     const { performanceScoreFromStats } = await import('./performanceScore');
@@ -3186,8 +3152,6 @@ export async function runBacktest(
         riskLevel: requestedLevel,
         compareRiskLevels,
         useSavedConfigFilters,
-        strictMode: configUsedFinal.strictMode,
-        strictModeIntensity: configUsedFinal.strictModeIntensity,
       },
       configUsed: configUsedFinal,
       riskComparison,

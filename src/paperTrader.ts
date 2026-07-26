@@ -32,7 +32,7 @@ import {
   effectiveDeadVolumeUsdPerHour,
   effectiveLowConvictionTrailThreshold,
   effectiveLowConvictionTrailTightenPct,
-} from './strictMode';
+} from './filterEffective';
 import { isStrategyEnabled } from './strategies';
 import {
   evaluateScalpProtectiveTrail,
