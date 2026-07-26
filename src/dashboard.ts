@@ -2243,6 +2243,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       text-decoration: line-through;
       opacity: 0.85;
     }
+    .tp-tuning-details > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      user-select: none;
+    }
+    .tp-tuning-details > summary::-webkit-details-marker { display: none; }
+    .tp-tuning-summary-main {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-width: 0;
+    }
+    .tp-tuning-chevron {
+      display: inline-block;
+      font-size: 0.65rem;
+      color: #94a3b8;
+      transition: transform 0.15s ease;
+    }
+    .tp-tuning-details[open] .tp-tuning-chevron {
+      transform: rotate(90deg);
+      color: #34d399;
+    }
+    .tp-tuning-details[open] .tp-tuning-summary-main .mint {
+      display: none;
+    }
     .trade-group-toggle {
       display: inline-flex;
       align-items: center;
@@ -13510,6 +13540,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.toggleTuningChecklistItem = toggleTuningChecklistItem;
     window.resetTuningChecklist = resetTuningChecklist;
 
+    const TP_CHECKLIST_OPEN_KEY = 'tpTuningChecklistOpenV1';
+    function wireTuningChecklistCollapse() {
+      const el = document.getElementById('tp-tuning-checklist-card');
+      if (!el || el.tagName !== 'DETAILS') return;
+      try {
+        if (localStorage.getItem(TP_CHECKLIST_OPEN_KEY) === '1') {
+          el.setAttribute('open', '');
+        }
+      } catch (_) {}
+      el.addEventListener('toggle', function () {
+        try {
+          localStorage.setItem(
+            TP_CHECKLIST_OPEN_KEY,
+            el.open ? '1' : '0'
+          );
+        } catch (_) {}
+      });
+    }
+
     async function pruneLowQuality() {
       const hard = confirm(
         'Prune low-quality wallets?\\n\\nOK = hard-remove below threshold\\nCancel = unwatch/down-weight only (safer)'
@@ -14767,7 +14816,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refreshDiscoveryStatus();
     try { onNansenPresetChange(); loadNansenCached(); } catch (_) {}
     loadStrategies();
-    try { renderTuningChecklist(); } catch (_) {}
+    try { renderTuningChecklist(); wireTuningChecklistCollapse(); } catch (_) {}
     wireStrategiesOnPopover();
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
