@@ -5011,13 +5011,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $8,000 (recommended $8k–$15k). High/Degen cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">10000</span></label><input type="range" id="minLiquidity" min="8000" max="100000" step="500" value="10000" /></div>
             <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across all risk levels (including Degen). Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
-            <div class="field"><label title="Max % of supply held by the deployer">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
+            <div class="field"><label title="Min % of supply held by the deployer (0 = no floor). Pair with Max Dev %.">Min Dev % — <span class="val" id="v-minDevHoldPct">0</span></label><input type="range" id="minDevHoldPct" min="0" max="80" step="1" value="0" /></div>
+            <div class="field"><label title="Max % of supply held by the deployer (0 = off). Pair with Min Dev %.">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Min % held by top 10 wallets (excludes Pump bonding-curve vault — Jupiter-style). Floor 5% when Risk On (default 8%). Pair with Max Top-10% for a valid band (e.g. 8–70%). Known values below min are blocked; unknown top-10 is soft-only (does not hard-skip). Risk Off soak zeros both.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="80" step="1" value="8" /></div>
             <div class="field"><label title="Max % held by top 10 wallets (pair with Min Top-10%). Default 70. 0 = off. Same key as maxHolderConcentration — not the single-wallet Max Top Holder %. Known values above max are blocked; unknown is soft-only.">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">70</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="70" /></div>
-            <div class="field"><label title="Max % held by a single wallet (independent of Top-10% band)">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
+            <div class="field"><label title="Min % held by a single wallet (0 = no floor). Independent of Top-10% band.">Min Top Holder % — <span class="val" id="v-minTopHolderPct">0</span></label><input type="range" id="minTopHolderPct" min="0" max="90" step="1" value="0" /></div>
+            <div class="field"><label title="Max % held by a single wallet (independent of Top-10% band). 0 = off.">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
             <div class="field"><label title="Hard max insider/rat (or extreme dev) hold %. Floor cap 50% — non-bypassable across risk levels. Sniper sensitivity may be stricter.">Max Insider % — <span class="val" id="v-maxInsiderPctDisplay">50</span></label><input type="range" id="maxInsiderPctDisplay" min="50" max="50" step="1" value="50" disabled title="Hard floor 50% — not adjustable below (non-bypassable)" /></div>
-            <div class="field"><label title="Composite rug/risk score ceiling (0-100)">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="20" max="100" step="5" value="70" /></div>
-            <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="5" max="80" step="5" value="25" /></div>
+            <div class="field"><label title="Min composite rug/risk score (0 = no floor). Pair with Max Risk Score.">Min Risk Score — <span class="val" id="v-minRiskScore">0</span></label><input type="range" id="minRiskScore" min="0" max="100" step="5" value="0" /></div>
+            <div class="field"><label title="Composite rug/risk score ceiling (0-100). 0 = off.">Max Risk Score — <span class="val" id="v-maxRiskScore">70</span></label><input type="range" id="maxRiskScore" min="0" max="100" step="5" value="70" /></div>
+            <div class="field"><label title="Min estimated transfer tax / honeypot tax (0 = no floor). Pair with Max Tax %.">Min Tax % — <span class="val" id="v-minEstimatedTaxPct">0</span></label><input type="range" id="minEstimatedTaxPct" min="0" max="80" step="5" value="0" /></div>
+            <div class="field"><label title="Estimated transfer tax / honeypot tax ceiling (0 = off). Pair with Min Tax %.">Max Tax % — <span class="val" id="v-maxEstimatedTaxPct">25</span></label><input type="range" id="maxEstimatedTaxPct" min="0" max="80" step="5" value="25" /></div>
             <div class="field"><label title="Source wallet must have been active this many days">Min Activity Days — <span class="val" id="v-minActivityDays">7</span></label><input type="range" id="minActivityDays" min="1" max="30" step="1" value="7" /></div>
             <div class="field"><label title="Source wallet min trades in last 30 days">Min Trades 30d — <span class="val" id="v-minTradesLast30d">5</span></label><input type="range" id="minTradesLast30d" min="0" max="50" step="1" value="5" /></div>
             <div class="field"><label title="Minimum 24h volume USD. Floor $15,000 for mature entries; early pump/migration may pass via recent (1h) volume + liquidity instead.">Min Vol 24h USD — <span class="val" id="v-minVolume24hUsd">25000</span></label><input type="range" id="minVolume24hUsd" min="15000" max="200000" step="500" value="25000" /></div>
@@ -5391,7 +5395,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       near_migration_curve: ['nearMigrationCurvePct'],
       early_curve_smart_money: ['earlyCurveMaxPct', 'minEarlyBirdeyeSmartMoneyScore', 'earlyCurveMinSmartWallets'],
       rebuy_on_dip: ['reEntryAfterMaxProfitEnabled', 'reBuyMinProfitPct', 'reBuyDipPercent', 'confirmationThreshold', 'reBuyVolumeIncreasePct', 'reEntryMaxPerMint', 'reEntryWatchMinutes', 'reEntryMinReclaimPct', 'reEntryMinVolumeIncreasePct', 'reEntrySizeMultiplier', 'reEntryCooldownMinutes'],
-      anti_rug_honeypot: ['maxDevHoldPct', 'maxHolderConcentration', 'maxTopHolderPct', 'maxRiskScore', 'maxEstimatedTaxPct', 'checkHoneypot', 'skipIfDevRecentSells', 'requireLiquidityLocked', 'skipIfMintAuthority'],
+      anti_rug_honeypot: ['minDevHoldPct', 'maxDevHoldPct', 'minTop10HolderPct', 'maxHolderConcentration', 'minTopHolderPct', 'maxTopHolderPct', 'minRiskScore', 'maxRiskScore', 'minEstimatedTaxPct', 'maxEstimatedTaxPct', 'checkHoneypot', 'skipIfDevRecentSells', 'requireLiquidityLocked', 'skipIfMintAuthority'],
       min_holders_activity: ['minHolders', 'minRecentActivity', 'minActivityDays', 'minTradesLast30d'],
       volume_liquidity_filters: ['minLiquidity', 'minVolume24hUsd', 'minRecentVolumeUsd', 'minRecentBuyVolumeUsd'],
       dead_market_exit: ['deadVolumeUsdPerHour', 'deadVolumeConsecutiveHours', 'deadVolumeMinHoldMinutes'],
@@ -7067,32 +7071,40 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     const rangeFields = [
       'tradeAmountSol','riskMultiplier','convictionMultiplier','minProfitPercent','maxProfitPercent','stopLossPercent',
       'convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
-      'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
+      'minDevHoldPct','maxDevHoldPct','minTopHolderPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct',
+      'minRiskScore','maxRiskScore','minEstimatedTaxPct','maxEstimatedTaxPct',
       'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
       'minHolders','minRecentActivity'
+    ];
+    const filterBandPairs = [
+      ['minTop10HolderPct', 'maxHolderConcentration'],
+      ['minDevHoldPct', 'maxDevHoldPct'],
+      ['minTopHolderPct', 'maxTopHolderPct'],
+      ['minRiskScore', 'maxRiskScore'],
+      ['minEstimatedTaxPct', 'maxEstimatedTaxPct'],
     ];
     rangeFields.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('input', () => {
-        // Keep Top-10% min ≤ max when both are set
-        if (id === 'minTop10HolderPct' || id === 'maxHolderConcentration') {
-          const minEl = document.getElementById('minTop10HolderPct');
-          const maxEl = document.getElementById('maxHolderConcentration');
-          if (minEl && maxEl) {
-            let minV = Number(minEl.value);
-            let maxV = Number(maxEl.value);
-            if (maxV > 0 && minV > maxV) {
-              if (id === 'minTop10HolderPct') {
-                maxEl.value = String(minV);
-                maxV = minV;
-                const maxLab = document.getElementById('v-maxHolderConcentration');
-                if (maxLab) maxLab.textContent = maxEl.value;
-              } else {
-                minEl.value = String(maxV);
-                minV = maxV;
-                const minLab = document.getElementById('v-minTop10HolderPct');
-                if (minLab) minLab.textContent = minEl.value;
-              }
+        // Keep each filter band min ≤ max when both sides are set (>0)
+        for (const [minId, maxId] of filterBandPairs) {
+          if (id !== minId && id !== maxId) continue;
+          const minEl = document.getElementById(minId);
+          const maxEl = document.getElementById(maxId);
+          if (!minEl || !maxEl) continue;
+          let minV = Number(minEl.value);
+          let maxV = Number(maxEl.value);
+          if (maxV > 0 && minV > maxV) {
+            if (id === minId) {
+              maxEl.value = String(minV);
+              maxV = minV;
+              const maxLab = document.getElementById('v-' + maxId);
+              if (maxLab) maxLab.textContent = maxEl.value;
+            } else {
+              minEl.value = String(maxV);
+              minV = maxV;
+              const minLab = document.getElementById('v-' + minId);
+              if (minLab) minLab.textContent = minEl.value;
             }
           }
         }
@@ -12076,7 +12088,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : true,
       };
       ['convergenceRequired','maxConcurrentPositions','dailyLossLimitSol','minWinRate','minLiquidity','minMarketCapUsd',
-       'maxDevHoldPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct','maxRiskScore','maxEstimatedTaxPct',
+       'minDevHoldPct','maxDevHoldPct','minTopHolderPct','maxTopHolderPct','maxHolderConcentration','minTop10HolderPct',
+       'minRiskScore','maxRiskScore','minEstimatedTaxPct','maxEstimatedTaxPct',
        'minActivityDays','minTradesLast30d','minVolume24hUsd','minRecentVolumeUsd','minRecentBuyVolumeUsd',
        'minHolders','minRecentActivity','minWalletQualityScore','walletQualityInactiveDays','maxEntryAgeMinutes',
        'preferEntryWithinMinutes','clusterMinWallets','clusterWindowMinutes','smartMoneyFlowWeight',

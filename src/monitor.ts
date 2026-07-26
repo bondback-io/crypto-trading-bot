@@ -3740,8 +3740,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     isStrategyEnabled('technical_levels') ||
     (filters.minLiquidity ?? 0) > 0 ||
     (filters.maxDevHoldPct ?? 0) > 0 ||
+    (filters.minDevHoldPct ?? 0) > 0 ||
     (filters.maxDevPercent ?? 0) > 0 ||
     (filters.maxTopHolderPct ?? 0) > 0 ||
+    (filters.minTopHolderPct ?? 0) > 0 ||
     (filters.maxHolderConcentration ?? 0) > 0 ||
     (filters.minTop10HolderPct ?? 0) > 0 ||
     filters.skipIfMintAuthority;

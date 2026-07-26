@@ -622,19 +622,29 @@ export function evaluateTokenMetricsFilters(
   }
 
   const maxDev = filters.maxDevHoldPct ?? 0;
-  if (maxDev > 0 && metrics.devHoldPct != null) {
-    if (metrics.devHoldPct > maxDev) {
+  const minDev = filters.minDevHoldPct ?? 0;
+  if (metrics.devHoldPct != null) {
+    if (maxDev > 0 && metrics.devHoldPct > maxDev) {
       reasons.push(
         `dev concentration ${metrics.devHoldPct.toFixed(1)}% > max ${maxDev}%`
+      );
+    } else if (minDev > 0 && metrics.devHoldPct < minDev) {
+      reasons.push(
+        `dev concentration ${metrics.devHoldPct.toFixed(1)}% < min ${minDev}%`
       );
     }
   }
 
   const maxTop = filters.maxTopHolderPct ?? 0;
-  if (maxTop > 0 && metrics.topHolderPct != null) {
-    if (metrics.topHolderPct > maxTop) {
+  const minTop = filters.minTopHolderPct ?? 0;
+  if (metrics.topHolderPct != null) {
+    if (maxTop > 0 && metrics.topHolderPct > maxTop) {
       reasons.push(
         `top holder ${metrics.topHolderPct.toFixed(1)}% > max ${maxTop}%`
+      );
+    } else if (minTop > 0 && metrics.topHolderPct < minTop) {
+      reasons.push(
+        `top holder ${metrics.topHolderPct.toFixed(1)}% < min ${minTop}%`
       );
     }
   }

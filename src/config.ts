@@ -3620,8 +3620,21 @@ export function effectiveMaxTop10HolderPct(): number {
 
 /** Ensure minTop10 ≤ maxHolderConcentration when both are enabled. */
 export function clampTop10HolderBand(): void {
-  const min = Number(config.filters.minTop10HolderPct);
-  const max = Number(config.filters.maxHolderConcentration);
+  clampMinMaxBand('minTop10HolderPct', 'maxHolderConcentration');
+}
+
+/** Ensure min ≤ max for a filter band when both sides are enabled (>0). */
+function clampMinMaxBand(
+  minKey: 'minTop10HolderPct' | 'minDevHoldPct' | 'minTopHolderPct' | 'minRiskScore' | 'minEstimatedTaxPct',
+  maxKey:
+    | 'maxHolderConcentration'
+    | 'maxDevHoldPct'
+    | 'maxTopHolderPct'
+    | 'maxRiskScore'
+    | 'maxEstimatedTaxPct'
+): void {
+  const min = Number(config.filters[minKey]);
+  const max = Number(config.filters[maxKey]);
   if (
     Number.isFinite(min) &&
     min > 0 &&
@@ -3629,7 +3642,20 @@ export function clampTop10HolderBand(): void {
     max > 0 &&
     min > max
   ) {
-    config.filters.maxHolderConcentration = min;
+    (config.filters as unknown as Record<string, number>)[maxKey] = min;
+  }
+}
+
+/** Clamp all holder/risk min–max bands so min ≤ max when both enabled. */
+export function clampHolderRiskFilterBands(): void {
+  clampTop10HolderBand();
+  clampMinMaxBand('minDevHoldPct', 'maxDevHoldPct');
+  clampMinMaxBand('minTopHolderPct', 'maxTopHolderPct');
+  clampMinMaxBand('minRiskScore', 'maxRiskScore');
+  clampMinMaxBand('minEstimatedTaxPct', 'maxEstimatedTaxPct');
+  // Keep maxDevPercent alias in sync after possible maxDevHoldPct bump
+  if (config.filters.maxDevHoldPct != null) {
+    config.filters.maxDevPercent = config.filters.maxDevHoldPct;
   }
 }
 
@@ -3946,7 +3972,7 @@ export function updateFilterConfig(partial: Partial<FilterConfig>): void {
       HARD_FILTER_FLOORS.minTop10HolderPct
     );
   }
-  clampTop10HolderBand();
+  clampHolderRiskFilterBands();
   persistUserSettings();
 }
 
@@ -4265,11 +4291,15 @@ export function applyRiskLevel(
         minHolderCount: 0,
         minRecentActivity: 0,
         minTop10HolderPct: 0,
+        minDevHoldPct: 0,
         maxDevHoldPct: 0,
         maxDevPercent: 0,
+        minTopHolderPct: 0,
         maxTopHolderPct: 0,
         maxHolderConcentration: 0,
+        minEstimatedTaxPct: 0,
         maxEstimatedTaxPct: 100,
+        minRiskScore: 0,
         maxRiskScore: 100,
         enableAntiRug: false,
         checkHoneypot: false,

@@ -391,12 +391,17 @@ async function runAntiRugChecks(
 
   const maxDev =
     filters.maxDevPercent ?? filters.maxDevHoldPct ?? 15;
+  const minDev = filters.minDevHoldPct ?? 0;
   // maxHolderConcentration = Top-10% max (pair with minTop10HolderPct).
   // Do not fall back to maxTopHolderPct (that is single-wallet max).
   const maxConc =
     filters.maxHolderConcentration ?? 0;
+  const minTopHolder = filters.minTopHolderPct ?? 0;
+  const maxTopHolder = filters.maxTopHolderPct ?? 0;
   const maxTax = filters.maxEstimatedTaxPct ?? 25;
+  const minTax = filters.minEstimatedTaxPct ?? 0;
   const maxScore = filters.maxRiskScore ?? 70;
+  const minScore = filters.minRiskScore ?? 0;
   const requireLock = filters.requireLiquidityLocked === true;
   const skipDevSells = filters.skipIfDevRecentSells !== false;
   const checkHoneypot = filters.checkHoneypot !== false;
@@ -481,9 +486,9 @@ async function runAntiRugChecks(
   // Dead-token hard floors run once AFTER Birdeye enrichment below so missing
   // Dex metrics are not fail-closed as "Dead liquidity" / $0 volume.
 
-  // Dev holdings
-  if (maxDev > 0 && metrics.devHoldPct != null) {
-    if (metrics.devHoldPct > maxDev) {
+  // Dev holdings (min–max band; 0 min = no floor, 0 max = no ceiling)
+  if (metrics.devHoldPct != null) {
+    if (maxDev > 0 && metrics.devHoldPct > maxDev) {
       score += 30;
       flags.push({
         id: 'high_dev_holdings',
@@ -494,7 +499,18 @@ async function runAntiRugChecks(
       skipReasons.push(
         `Skipped - high dev holdings (${metrics.devHoldPct.toFixed(1)}% > ${maxDev}%)`
       );
-    } else if (metrics.devHoldPct > maxDev * 0.7) {
+    } else if (minDev > 0 && metrics.devHoldPct < minDev) {
+      score += 20;
+      flags.push({
+        id: 'low_dev_holdings',
+        severity: 'high',
+        label: 'Dev holdings below band',
+        detail: `${metrics.devHoldPct.toFixed(1)}% < ${minDev}%`,
+      });
+      skipReasons.push(
+        `Skipped - low dev holdings (${metrics.devHoldPct.toFixed(1)}% < ${minDev}%)`
+      );
+    } else if (maxDev > 0 && metrics.devHoldPct > maxDev * 0.7) {
       score += 10;
       flags.push({
         id: 'elevated_dev_holdings',
@@ -502,6 +518,33 @@ async function runAntiRugChecks(
         label: 'Elevated dev holdings',
         detail: `${metrics.devHoldPct.toFixed(1)}%`,
       });
+    }
+  }
+
+  // Single top holder % (independent of Top-10% band)
+  if (metrics.topHolderPct != null) {
+    if (maxTopHolder > 0 && metrics.topHolderPct > maxTopHolder) {
+      score += 22;
+      flags.push({
+        id: 'top_holder_high',
+        severity: 'high',
+        label: 'Top holder too high',
+        detail: `${metrics.topHolderPct.toFixed(1)}% > ${maxTopHolder}%`,
+      });
+      skipReasons.push(
+        `Skipped - high top holder (${metrics.topHolderPct.toFixed(1)}% > ${maxTopHolder}%)`
+      );
+    } else if (minTopHolder > 0 && metrics.topHolderPct < minTopHolder) {
+      score += 15;
+      flags.push({
+        id: 'top_holder_low',
+        severity: 'medium',
+        label: 'Top holder below band',
+        detail: `${metrics.topHolderPct.toFixed(1)}% < ${minTopHolder}%`,
+      });
+      skipReasons.push(
+        `Skipped - low top holder (${metrics.topHolderPct.toFixed(1)}% < ${minTopHolder}%)`
+      );
     }
   }
 
@@ -519,8 +562,8 @@ async function runAntiRugChecks(
         `Skipped - high holder concentration (top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%)`
       );
     }
-  } else if (maxConc > 0 && metrics.topHolderPct != null) {
-    // Fallback: single top holder vs concentration limit
+  } else if (maxConc > 0 && metrics.topHolderPct != null && maxTopHolder <= 0) {
+    // Fallback: single top holder vs concentration limit (only if dedicated top-holder max off)
     if (metrics.topHolderPct > maxConc) {
       score += 20;
       flags.push({
@@ -715,6 +758,7 @@ async function runAntiRugChecks(
         );
       } else if (
         tax.roundTripLossPct != null &&
+        maxTax > 0 &&
         tax.roundTripLossPct > maxTax
       ) {
         score += 30;
@@ -726,6 +770,21 @@ async function runAntiRugChecks(
         });
         skipReasons.push(
           `Skipped - high buy/sell tax (~${tax.roundTripLossPct.toFixed(1)}% round-trip)`
+        );
+      } else if (
+        tax.roundTripLossPct != null &&
+        minTax > 0 &&
+        tax.roundTripLossPct < minTax
+      ) {
+        score += 15;
+        flags.push({
+          id: 'low_tax',
+          severity: 'medium',
+          label: 'Tax below band',
+          detail: `round-trip loss ~${tax.roundTripLossPct.toFixed(1)}% < ${minTax}%`,
+        });
+        skipReasons.push(
+          `Skipped - buy/sell tax below band (~${tax.roundTripLossPct.toFixed(1)}% < ${minTax}%)`
         );
       } else if (tax.roundTripLossPct != null && tax.roundTripLossPct > 10) {
         score += 8;
@@ -1042,7 +1101,7 @@ async function runAntiRugChecks(
   score = Math.min(100, Math.max(0, Math.round(score)));
 
   // Aggregate risk-score gate (optional filters only — hard floors already applied)
-  if (enabled && score >= maxScore) {
+  if (enabled && maxScore > 0 && score >= maxScore) {
     const already = skipReasons.some((r) => r.includes('risk score'));
     if (!already) {
       skipReasons.push(
@@ -1055,6 +1114,21 @@ async function runAntiRugChecks(
         severity: 'high',
         label: 'Risk score too high',
         detail: `${score} ≥ ${maxScore}`,
+      });
+    }
+  } else if (enabled && minScore > 0 && score < minScore) {
+    const already = skipReasons.some((r) => r.includes('risk score'));
+    if (!already) {
+      skipReasons.push(
+        `Skipped - risk score below band (${score} < ${minScore})`
+      );
+    }
+    if (!flags.some((f) => f.id === 'risk_score_low')) {
+      flags.push({
+        id: 'risk_score_low',
+        severity: 'medium',
+        label: 'Risk score below band',
+        detail: `${score} < ${minScore}`,
       });
     }
   }
