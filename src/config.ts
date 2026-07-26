@@ -2059,7 +2059,7 @@ export const config: BotConfig = {
   strategyProfileSnapshot: null,
   tradeProfiles: {
     enabled: true,
-    smartBotProfiles: false,
+    smartBotProfiles: true,
     profiles: {
       default: true,
       scalper: true,
@@ -2322,6 +2322,8 @@ const TRADING_MODE_LIVE_SIM_DEFAULT_V2 = 'tradingMode_liveSimDefault_v2';
  * Prior v113 floors were $5k liq / $5k MC / $10k 24h / $800 recent.
  */
 const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
+/** One-shot: Smart Bot Profiles ON by default (micro-bots). */
+const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
@@ -2961,7 +2963,7 @@ function applySettingsSnapshot(
     if (!config.tradeProfiles) {
       config.tradeProfiles = {
         enabled: true,
-        smartBotProfiles: false,
+        smartBotProfiles: true,
         profiles: {
           default: true,
           scalper: true,
@@ -3185,6 +3187,28 @@ export function applyPersistedSettings(): boolean {
     console.warn(
       '[settings] strategy toggles seed skipped:',
       err instanceof Error ? err.message : err
+    );
+  }
+
+  if (!settingsMigrations[SMART_BOT_DEFAULT_ON_V1]) {
+    if (!config.tradeProfiles) {
+      (config as { tradeProfiles?: { smartBotProfiles?: boolean } }).tradeProfiles =
+        { smartBotProfiles: true };
+    } else {
+      config.tradeProfiles.smartBotProfiles = true;
+    }
+    settingsMigrations[SMART_BOT_DEFAULT_ON_V1] = true;
+    try {
+      const { setSmartBotProfilesEnabled, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      setSmartBotProfilesEnabled(true);
+    } catch {
+      /* tradeProfiles may not be ready */
+    }
+    persistUserSettings();
+    console.log(
+      '[settings] Applied smartBotDefaultOn_v1 — Smart Bot Profiles ON by default'
     );
   }
 
@@ -4091,6 +4115,14 @@ export function removeSmartWallet(address: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Clear every tracked smart wallet (Watch list). */
+export function clearAllSmartWallets(): number {
+  const n = config.smartWallets.length;
+  config.smartWallets = [];
+  saveWalletsToDisk([]);
+  return n;
 }
 
 export function toggleSmartWallet(address: string, enabled: boolean): void {

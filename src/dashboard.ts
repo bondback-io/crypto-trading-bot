@@ -2223,6 +2223,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .pos-size-card { max-width: 12rem; }
       .pos-status-badge { font-size: 8.5px; padding: 0.2rem 0.4rem; }
     }
+    .tp-check-list label {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      margin: 0.28rem 0;
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      line-height: 1.35;
+      cursor: pointer;
+    }
+    .tp-check-list input[type="checkbox"] {
+      margin-top: 0.15rem;
+      flex-shrink: 0;
+      accent-color: #34d399;
+    }
+    .tp-check-list label.is-done {
+      color: #94a3b8;
+      text-decoration: line-through;
+      opacity: 0.85;
+    }
     .trade-group-toggle {
       display: inline-flex;
       align-items: center;
@@ -4008,7 +4028,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
           <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
           <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
-          <button class="btn btn-warning" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
+          <button class="btn btn-secondary" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
+          <button class="btn btn-danger" onclick="resetWalletTracker()" title="Remove ALL tracked smart wallets from the Watch list. Boot will not auto-reload favourites until you click Import Favourites again."><span class="btn-label-short">Reset</span><span class="btn-label-full">Reset Wallet Tracker</span></button>
           <span class="mint" id="gmgn-status"></span>
         </div>
         <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
@@ -4734,10 +4755,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
               <p class="text-xs text-slate-400 mb-0">ON = each profile uses its own module set (micro-bots). OFF = current shared modules for all profiles.</p>
             </div>
-            <label class="ctl-check" title="Default OFF keeps legacy shared-module behaviour">
+              <label class="ctl-check" title="Default ON — each profile uses its own module allowlist (micro-bots)">
               <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
               <span>Smart Bot Profiles</span>
             </label>
+          </div>
+          <div class="card mt-3 mb-3" id="tp-tuning-checklist-card" style="background:#0f172a;border:1px solid #334155;padding:0.75rem">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div class="text-sm font-semibold text-slate-200">Tuning checklist</div>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetTuningChecklist()" title="Clear all checklist ticks">Reset checklist</button>
+            </div>
+            <p class="text-xs text-slate-400 mb-2">Follow this for accurate Smart Bot testing. Check items off as you go (saved in this browser).</p>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Before testing</div>
+            <div class="tp-check-list" id="tp-check-before"></div>
+            <div class="text-xs font-semibold text-slate-300 mb-1 mt-3">After ~15–20 closes per busy profile</div>
+            <div class="tp-check-list" id="tp-check-after"></div>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button type="button" class="btn btn-secondary text-xs" onclick="document.getElementById('trade-profiles-overview-card')?.scrollIntoView({behavior:'smooth',block:'start'})">Jump to scoreboard</button>
+            </div>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div style="min-width:0;flex:1">
@@ -6413,6 +6448,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       window.__tradeProfilesStatus = tp;
+      try {
+        renderTuningChecklist();
+      } catch (_) {}
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
@@ -13361,6 +13399,111 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    async function resetWalletTracker() {
+      if (
+        !confirm(
+          'Reset Wallet Tracker?\\n\\nThis removes ALL tracked smart wallets from the Watch list.\\n\\nBoot will not auto-import favourites again until you click Import Favourites.\\n\\nContinue?'
+        )
+      ) {
+        return;
+      }
+      const status = document.getElementById('gmgn-status');
+      if (status) status.textContent = 'Resetting wallet tracker…';
+      try {
+        const data = await fetchJSON('/api/wallets/reset-tracker', {
+          method: 'POST',
+        });
+        if (status) {
+          status.textContent =
+            'Removed ' +
+            (data.removed ?? 0) +
+            ' wallet(s) · Import Favourites to reload';
+        }
+        if (typeof refresh === 'function') refresh();
+        alert(data.message || 'Wallet tracker reset.');
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Reset failed: ' + (err.message || err));
+      }
+    }
+    window.resetWalletTracker = resetWalletTracker;
+
+    const TP_CHECKLIST_KEY = 'tpTuningChecklistV1';
+    const TP_CHECK_BEFORE = [
+      { id: 'risk_on', label: 'Risk On (lean)' },
+      { id: 'smart_bot', label: 'Smart Bot Profiles ON' },
+      { id: 'modules_on', label: 'Allowlist modules ON for each active profile (hover Modules)' },
+      { id: 'size_caps', label: 'Max Allowed Trade / Max Trade Override set' },
+      { id: 'no_learn_yet', label: 'Don’t Apply learning yet' },
+    ];
+    const TP_CHECK_AFTER = [
+      { id: 'scoreboard', label: 'Read scoreboard (Win % / PnL / hold / exit mix)' },
+      { id: 'tune_exits', label: 'Tune exits on losers first (TP/SL/trail/hold)' },
+      { id: 'learn_one', label: 'Apply learning one profile at a time' },
+      { id: 'pause_losers', label: 'Pause chronic losers' },
+      { id: 'entry_tighten', label: 'Then tighten HWR / Steady entries only' },
+      { id: 'rerun', label: 'Reset → re-run short window → compare' },
+      { id: 'export', label: 'Export JSON when happy' },
+    ];
+
+    function loadTuningChecklistState() {
+      try {
+        return JSON.parse(localStorage.getItem(TP_CHECKLIST_KEY) || '{}') || {};
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function saveTuningChecklistState(state) {
+      try {
+        localStorage.setItem(TP_CHECKLIST_KEY, JSON.stringify(state || {}));
+      } catch (_) {}
+    }
+
+    function renderTuningChecklist() {
+      const state = loadTuningChecklistState();
+      function paint(elId, items) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        el.innerHTML = items
+          .map(function (item) {
+            const on = state[item.id] === true;
+            return (
+              '<label class="' +
+              (on ? 'is-done' : '') +
+              '"><input type="checkbox" data-check-id="' +
+              item.id +
+              '"' +
+              (on ? ' checked' : '') +
+              ' onchange="toggleTuningChecklistItem(this)" /><span>' +
+              escHtml(item.label) +
+              '</span></label>'
+            );
+          })
+          .join('');
+      }
+      paint('tp-check-before', TP_CHECK_BEFORE);
+      paint('tp-check-after', TP_CHECK_AFTER);
+    }
+
+    function toggleTuningChecklistItem(input) {
+      if (!input) return;
+      const id = input.getAttribute('data-check-id');
+      if (!id) return;
+      const state = loadTuningChecklistState();
+      state[id] = !!input.checked;
+      saveTuningChecklistState(state);
+      const lab = input.closest('label');
+      if (lab) lab.classList.toggle('is-done', !!input.checked);
+    }
+
+    function resetTuningChecklist() {
+      saveTuningChecklistState({});
+      renderTuningChecklist();
+    }
+    window.toggleTuningChecklistItem = toggleTuningChecklistItem;
+    window.resetTuningChecklist = resetTuningChecklist;
+
     async function pruneLowQuality() {
       const hard = confirm(
         'Prune low-quality wallets?\\n\\nOK = hard-remove below threshold\\nCancel = unwatch/down-weight only (safer)'
@@ -14618,6 +14761,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     refreshDiscoveryStatus();
     try { onNansenPresetChange(); loadNansenCached(); } catch (_) {}
     loadStrategies();
+    try { renderTuningChecklist(); } catch (_) {}
     wireStrategiesOnPopover();
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();

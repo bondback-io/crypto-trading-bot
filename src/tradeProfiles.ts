@@ -1182,7 +1182,7 @@ function defaultRuntimeState(): TradeProfileRuntimeState {
   }
   return {
     enabled: true,
-    smartBotProfiles: false,
+    smartBotProfiles: true,
     profiles,
     overrides: {},
     autoScoring: { ...DEFAULT_AUTO_SCORING, weights: { ...DEFAULT_AUTO_SCORING.weights } },
@@ -1202,7 +1202,7 @@ function ensureState(): TradeProfileRuntimeState {
   const smartBotProfiles =
     typeof existing.smartBotProfiles === 'boolean'
       ? existing.smartBotProfiles
-      : false;
+      : true;
   const profiles: Record<string, boolean> =
     existing.profiles && typeof existing.profiles === 'object'
       ? { ...existing.profiles }

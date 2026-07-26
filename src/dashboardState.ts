@@ -24,6 +24,11 @@ export interface DashboardState {
   lastDashboardResetAt: number | null;
   /** Build identity when the reset timer was last aligned to a deploy */
   lastBuildId: string | null;
+  /**
+   * When true, skip boot-time Import Favourites auto-load
+   * (set by Reset Wallet Tracker until user runs Import Favourites again).
+   */
+  skipFavouritesAutoImport?: boolean;
 }
 
 let cached: DashboardState | null = null;
@@ -46,6 +51,7 @@ function normalize(raw: Partial<DashboardState> | null): DashboardState {
         : Date.now(),
     lastDashboardResetAt: ts,
     lastBuildId,
+    skipFavouritesAutoImport: raw?.skipFavouritesAutoImport === true,
   };
 }
 
@@ -90,6 +96,7 @@ export function ensureDashboardResetTimerForBuild(
       updatedAt: ts,
       lastDashboardResetAt: ts,
       lastBuildId: buildId,
+      skipFavouritesAutoImport: state.skipFavouritesAutoImport === true,
     });
     if (!buildEnsureDone) {
       const reason = missingTs && !buildChanged ? 'first-run' : 'new-build';
@@ -119,8 +126,22 @@ export function markDashboardReset(atMs: number = Date.now()): number {
     updatedAt: ts,
     lastDashboardResetAt: ts,
     lastBuildId: prev.lastBuildId ?? getBuildId(),
+    skipFavouritesAutoImport: prev.skipFavouritesAutoImport === true,
   });
   return ts;
+}
+
+export function getSkipFavouritesAutoImport(): boolean {
+  return loadDashboardState().skipFavouritesAutoImport === true;
+}
+
+export function setSkipFavouritesAutoImport(skip: boolean): void {
+  const prev = loadDashboardState();
+  saveDashboardState({
+    ...prev,
+    updatedAt: Date.now(),
+    skipFavouritesAutoImport: skip === true,
+  });
 }
 
 /** Drop in-memory cache (e.g. after wipe of data files). */

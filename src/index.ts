@@ -118,6 +118,17 @@ async function main(): Promise<void> {
       });
 
       // Stagger: wallet polling first, migration listener a few seconds later
+      try {
+        const { ensureFavouritesAutoImportOnBoot } =
+          await import('./walletDiscovery');
+        await ensureFavouritesAutoImportOnBoot();
+      } catch (err) {
+        console.warn(
+          '[boot] Favourites auto-import error:',
+          err instanceof Error ? err.message : err
+        );
+      }
+
       startMonitor();
       await new Promise((r) => setTimeout(r, 3_000));
       startMigrationListener();

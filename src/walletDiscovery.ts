@@ -1805,3 +1805,50 @@ export async function importFavouritesSmartWallets(
   };
 }
 
+/**
+ * Boot helper: if no tracked wallets and user has not Reset the tracker,
+ * run the same Import Favourites flow so wallets are watching by default.
+ */
+export async function ensureFavouritesAutoImportOnBoot(): Promise<{
+  ran: boolean;
+  imported: number;
+  message: string;
+}> {
+  const {
+    getSkipFavouritesAutoImport,
+    setSkipFavouritesAutoImport,
+  } = require('./dashboardState') as typeof import('./dashboardState');
+  const { config } = require('./config') as typeof import('./config');
+
+  if (getSkipFavouritesAutoImport()) {
+    return {
+      ran: false,
+      imported: 0,
+      message: 'Favourites auto-import skipped (wallet tracker was reset)',
+    };
+  }
+  if ((config.smartWallets?.length ?? 0) > 0) {
+    return {
+      ran: false,
+      imported: 0,
+      message: `Favourites auto-import skipped (${config.smartWallets.length} wallets already tracked)`,
+    };
+  }
+
+  console.log('[wallets] No tracked wallets — auto Import Favourites…');
+  try {
+    const result = await importFavouritesSmartWallets({ force: true });
+    setSkipFavouritesAutoImport(false);
+    console.log(`[wallets] ${result.message}`);
+    return {
+      ran: true,
+      imported: result.imported,
+      message: result.message,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[wallets] Favourites auto-import failed:', message);
+    return { ran: true, imported: 0, message };
+  }
+}
+

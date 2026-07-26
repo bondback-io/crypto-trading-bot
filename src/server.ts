@@ -8,6 +8,7 @@ import {
   addSmartWallet,
   upsertSmartWallet,
   removeSmartWallet,
+  clearAllSmartWallets,
   toggleSmartWallet,
   setMode,
   updateTradeConfig,
@@ -3607,6 +3608,13 @@ export function createServer(): express.Application {
     async (req: Request, res: Response) => {
       try {
         const force = req.body?.force !== false;
+        try {
+          const { setSkipFavouritesAutoImport } =
+            require('./dashboardState') as typeof import('./dashboardState');
+          setSkipFavouritesAutoImport(false);
+        } catch {
+          /* ignore */
+        }
         const result = await importFavouritesSmartWallets({ force });
         const monitoring = syncWalletsToMonitoring(
           result.addedAddresses,
@@ -4398,6 +4406,29 @@ export function createServer(): express.Application {
   app.delete('/api/wallets/:address', (req: Request, res: Response) => {
     removeSmartWallet(String(req.params.address));
     res.json({ wallets: config.smartWallets });
+  });
+
+  /** Wipe all tracked smart wallets (Watch list). Skips boot auto-import until Import Favourites. */
+  app.post('/api/wallets/reset-tracker', (_req: Request, res: Response) => {
+    const removed = clearAllSmartWallets();
+    try {
+      const { setSkipFavouritesAutoImport } =
+        require('./dashboardState') as typeof import('./dashboardState');
+      setSkipFavouritesAutoImport(true);
+    } catch {
+      /* ignore */
+    }
+    const monitoring = syncWalletsToMonitoring([], 'reset-tracker');
+    console.log(
+      `[wallets] Reset Wallet Tracker — removed ${removed} wallet(s)`
+    );
+    res.json({
+      ok: true,
+      removed,
+      wallets: getWalletsWithActivity(),
+      monitoring,
+      message: `Removed ${removed} tracked wallet(s). Import Favourites to reload defaults.`,
+    });
   });
 
   app.patch('/api/wallets/:address', (req: Request, res: Response) => {
