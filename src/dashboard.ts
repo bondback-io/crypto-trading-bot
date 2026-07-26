@@ -7005,7 +7005,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         );
       } else {
         badges.push(
-          '<span class="pos-status-badge is-full" title="No partial exits yet — full size still open">Full Position</span>'
+          '<span class="pos-status-badge is-full" title="No partial exits yet — full size still open">Full</span>'
         );
       }
       if (p.trailingActive) {
