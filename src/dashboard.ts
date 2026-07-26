@@ -5309,6 +5309,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     paintProfileColourLegends();
 
+    /** Globally ON for a tip row — prefer live Strategy Control Center toggles. */
+    function profileTipModuleOn(m) {
+      if (
+        _strategiesStatus &&
+        _strategiesStatus.toggles &&
+        m &&
+        m.key != null &&
+        Object.prototype.hasOwnProperty.call(_strategiesStatus.toggles, m.key)
+      ) {
+        return _strategiesStatus.toggles[m.key] !== false;
+      }
+      return !m || m.enabled !== false;
+    }
+
     /** Rich modules popover HTML for a trade profile (designed allowlist + global ON/OFF). */
     function fmtProfileModulesPopover(p) {
       const eff = p && p.effectiveModules;
@@ -5320,11 +5334,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? ''
         : '<div class="tp-mod-note">Smart Bot Profiles off — shared master modules apply</div>';
       let body = '';
+      let activeCount = 0;
+      let totalCount = 0;
       if (!eff || eff.mode === 'inherit_all' || (p && p.id === 'default')) {
         body =
           '<div class="tp-mod-inherit">All enabled master modules (inherit)</div>';
+        // Same universe as Strategy Control Center (globally ON / total registry).
+        if (_strategiesStatus) {
+          activeCount = Number(_strategiesStatus.enabledCount) || 0;
+          totalCount = Number(_strategiesStatus.totalCount) || 0;
+        }
       } else {
         const mods = eff.modules || [];
+        totalCount = mods.length;
+        activeCount = mods.filter(profileTipModuleOn).length;
         if (!mods.length) {
           body = '<div class="tp-mod-empty">No modules in allowlist</div>';
         } else {
@@ -5332,7 +5355,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             '<ul class="tp-mod-list">' +
             mods
               .map(function (m) {
-                const on = m.enabled !== false;
+                const on = profileTipModuleOn(m);
                 return (
                   '<li class="' +
                   (on ? 'is-on' : 'is-off') +
@@ -5349,9 +5372,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             '</ul>';
         }
       }
+      const countBit =
+        totalCount > 0 || (eff && eff.mode === 'allowlist')
+          ? ' ' + activeCount + '/' + totalCount
+          : '';
       return (
         '<span class="tp-mod-pop" role="tooltip">' +
-        '<div class="tp-mod-title">Modules</div>' +
+        '<div class="tp-mod-title">Modules' + countBit + '</div>' +
         note +
         body +
         '</span>'
@@ -6806,6 +6833,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           body: JSON.stringify({ action: 'set', key, enabled }),
         });
         renderStrategies(data);
+        if (window.__tradeProfilesStatus) {
+          renderTradeProfilesUi(window.__tradeProfilesStatus);
+        }
         window._cfgLoaded = false;
         refresh();
       } catch (err) {
@@ -6841,6 +6871,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           return;
         }
         renderStrategies(data);
+        if (window.__tradeProfilesStatus) {
+          renderTradeProfilesUi(window.__tradeProfilesStatus);
+        }
         window._cfgLoaded = false;
         await refresh();
       } catch (err) {
@@ -6905,6 +6938,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           throw new Error(data.error || data.message || 'Import failed');
         }
         renderStrategies(data);
+        if (window.__tradeProfilesStatus) {
+          renderTradeProfilesUi(window.__tradeProfilesStatus);
+        }
         window._cfgLoaded = false;
         await refresh();
         const msg = (data.import && data.import.message) || data.message || ('Imported · ' + (data.enabledCount || '?') + '/' + (data.totalCount || '?') + ' ON');
