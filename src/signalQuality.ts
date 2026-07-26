@@ -1004,3 +1004,8 @@ export function getTradeRateStatus(): {
     msSinceLastTrade: last != null ? now - last : null,
   };
 }
+
+/** Clear hourly trade-rate buffer (dashboard session reset). */
+export function clearRecentTradeTimes(): void {
+  recentTradeTimes.length = 0;
+}

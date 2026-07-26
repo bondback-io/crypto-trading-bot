@@ -3150,9 +3150,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="trade-profiles-active" id="trade-profiles-active-chips">Loading…</div>
       </div>
       <div class="ov-equity-panel" id="ov-equity-panel" title="Available moves into Positions when you open a trade; marks update Unrealized continuously; closes credit Available and Realized.">
-        <div class="ov-equity-main">
-          <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
-          <div class="ov-equity-value" id="ov-equity">—<span class="ov-unit">SOL</span></div>
+        <div class="ov-equity-main" style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem">
+          <div>
+            <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
+            <div class="ov-equity-value" id="ov-equity">—<span class="ov-unit">SOL</span></div>
+          </div>
+          <button type="button" class="btn btn-secondary text-xs" id="btn-dashboard-reset" onclick="resetDashboardSession()" title="Clear balance, trades, PnL, signals, and soak stats for a fresh module test. Does not change Risk or modules.">Reset</button>
         </div>
         <div class="ov-equity-rows">
           <div class="ov-equity-row">
@@ -9472,6 +9475,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         refresh();
       } catch (err) {
         status.textContent = ' · ' + err.message;
+      }
+    }
+
+    async function resetDashboardSession() {
+      if (!confirm(
+        'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons.\\n\\nKeeps: Risk On/Off and strategy modules.\\n\\nContinue?'
+      )) return;
+      try {
+        const data = await fetchJSON('/api/dashboard/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        await refresh();
+        const bal = data.balance != null ? Number(data.balance).toFixed(4) : '—';
+        alert('Dashboard reset · balance ' + bal + ' SOL');
+      } catch (err) {
+        alert('Reset failed: ' + (err.message || err));
       }
     }
 

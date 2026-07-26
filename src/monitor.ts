@@ -118,6 +118,7 @@ import {
   canExecuteTradeNow,
   recordTradeExecuted,
   getTradeRateStatus,
+  clearRecentTradeTimes,
 } from './signalQuality';
 import {
   applyQualityToWallet,
@@ -469,6 +470,28 @@ function finishBuy(mint: string, success: boolean): void {
 export function clearTradedMints(): void {
   tradedMints.clear();
   pendingBuys.clear();
+}
+
+/**
+ * Wipe in-memory signal/session tallies for a fresh module soak test.
+ * Does not stop the monitor or change risk/module settings.
+ */
+export function resetMonitorSession(): {
+  clearedActivity: number;
+  clearedSizedSignals: number;
+  clearedSignalTimestamps: number;
+} {
+  const clearedActivity = activityFeed.length;
+  const clearedSizedSignals = recentSignals.length;
+  const clearedSignalTimestamps = signals24hTimestamps.length;
+  activityFeed.length = 0;
+  recentSignals.length = 0;
+  signals24hTimestamps.length = 0;
+  recentBuys.clear();
+  clearTradedMints();
+  resetSkipReasonCounts();
+  clearRecentTradeTimes();
+  return { clearedActivity, clearedSizedSignals, clearedSignalTimestamps };
 }
 
 const ACTIVITY_REFRESH_MS = 15 * 60 * 1000; // re-check activity every 15 min

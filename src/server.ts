@@ -72,6 +72,7 @@ import {
   pruneLowQualityWallets,
   refreshAllWalletQualityScores,
   resetSkipReasonCounts,
+  resetMonitorSession,
 } from './monitor';
 import {
   updateRiskConfig,
@@ -958,6 +959,29 @@ export function createServer(): express.Application {
       stats: paperTrader.getStats(),
       open: paperTrader.getOpenPositions(),
       closed: paperTrader.getClosedPositions(),
+    });
+  });
+
+  /**
+   * Full Overview session reset for module A/B tests:
+   * balance, equity, open/closed trades, logs, signals, skip tallies, trade-rate.
+   * Does not change risk level or strategy modules.
+   */
+  app.post('/api/dashboard/reset', (_req: Request, res: Response) => {
+    const paper = paperTrader.reset({ clearHistory: true });
+    const monitor = resetMonitorSession();
+    clearRiskHalt();
+    clearMonitorRiskHalt();
+    res.json({
+      ok: true,
+      paper,
+      monitor,
+      startingBalanceSol: config.paper.startingBalanceSol,
+      balance: paperTrader.getBalance(),
+      equity: paperTrader.getEquitySol(),
+      stats: paperTrader.getStats(),
+      soak: paperTrader.getSoakMetrics(),
+      monitorStatus: getMonitorStatus(),
     });
   });
 
