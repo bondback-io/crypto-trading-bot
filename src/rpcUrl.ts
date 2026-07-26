@@ -5,9 +5,16 @@
 
 export const PUBLIC_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
 
-/** Extra free/public endpoints used only as last-resort failover */
+/**
+ * Extra free/public Solana mainnet endpoints used as last-resort failover
+ * after your RPC_URL / RPC_FALLBACKS. No API keys required — rate-limited.
+ * Prefer a paid Helius/QuickNode/Alchemy primary for production.
+ */
 export const PUBLIC_RPC_FALLBACKS = [
   'https://solana-rpc.publicnode.com',
+  'https://solana.drpc.org',
+  'https://rpc.ankr.com/solana',
+  'https://solana.api.onfinality.io/public',
 ] as const;
 
 const PLACEHOLDER_RE =
@@ -39,8 +46,13 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
   if (!u) return true;
   return (
     u.includes('mainnet-beta.solana.com') ||
+    u.includes('api.mainnet.solana.com') ||
     u.includes('api.devnet.solana.com') ||
     u.includes('publicnode.com') ||
+    u.includes('solana.drpc.org') ||
+    u.includes('rpc.ankr.com/solana') ||
+    u.includes('onfinality.io') ||
+    u.includes('1rpc.io/sol') ||
     u.includes('solana-mainnet.g.alchemy.com/v2/demo') ||
     isPlaceholderRpcUrl(url)
   );
