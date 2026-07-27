@@ -93,8 +93,6 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('top 10 holders too high') ||
     r.includes('top10 holders too high') ||
     r.includes('high holder concentration') ||
-    r.includes('top 10 holders unknown') ||
-    r.includes('top10 holders unknown') ||
     r.includes('insider % too high') ||
     r.includes('insider % unknown') ||
     r.includes('buy-heavy') ||
@@ -797,7 +795,7 @@ export interface HolderConcentrationSnapshot {
 /**
  * Non-bypassable holder-dispersion / insider ceilings.
  * - Reject when top10 is **known** and below min (default 8%, hard ≥5%) or above max.
- * - Risk On: unknown top10 hard-skips when min/max gate is active (after Jupiter + on-chain attempts).
+ * - Unknown top10 (after Jupiter + on-chain attempts): soft penalty only — lean Risk On must still enter.
  * - Risk OFF soak zeros min+max → gate inactive. If user sets min/max > 0, enforce known bounds.
  * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
  */
@@ -845,25 +843,9 @@ export function evaluateHolderConcentrationHardFloors(
           `Skipped — top 10 holders too high (${snap.top10HoldPct.toFixed(1)}% > ${maxTop10}%)`
         );
       }
-    } else if (hardFilterFloorsActive()) {
-      // Risk On: fail closed — unknown top10 must not soft-pass Min Top-10 gate
-      scorePenalty += 35;
-      const band =
-        minTop10 > 0 && maxTop10 > 0
-          ? `${minTop10}–${maxTop10}%`
-          : minTop10 > 0
-            ? `≥ ${minTop10}%`
-            : `≤ ${maxTop10}%`;
-      flags.push({
-        id: 'hard_unknown_top10',
-        severity: 'critical',
-        label: 'Top-10 holders unknown',
-        detail: `need ${band}`,
-      });
-      skipReasons.push('Skipped — top 10 holders unknown');
     } else {
-      // Risk Off with user-enabled gate: soft penalty only
-      scorePenalty += 18;
+      // Soft-pass unknown after Jupiter + on-chain (known band still hard above)
+      scorePenalty += hardFilterFloorsActive() ? 18 : 12;
       const band =
         minTop10 > 0 && maxTop10 > 0
           ? `${minTop10}–${maxTop10}%`

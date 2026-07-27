@@ -10,6 +10,7 @@ import { getConnection } from './connection';
 import {
   fetchTokenMetrics,
   getCachedTokenMetrics,
+  resolveTop10HoldPctForEntry,
   TokenMetrics,
   summarizeTokenMetrics,
 } from './tokenMetrics';
@@ -438,6 +439,24 @@ async function runAntiRugChecks(
   const metrics =
     getCachedTokenMetrics(mint) ?? (await fetchTokenMetrics(mint));
   sources.push(metrics.source || 'tokenMetrics');
+
+  // Prefer Jupiter Terminal Top 10 H. (audit.topHoldersPercentage) over on-chain
+  // so Risk On entry matches Terminal / executeBuy — on-chain alone often null after LP exclusion.
+  try {
+    const resolvedTop10 = await resolveTop10HoldPctForEntry(
+      mint,
+      metrics.top10HoldPct
+    );
+    if (resolvedTop10 != null && Number.isFinite(resolvedTop10)) {
+      metrics.top10HoldPct = resolvedTop10;
+      sources.push('jupiter-top10');
+    }
+  } catch (err) {
+    console.warn(
+      `[anti-rug] Top-10 resolve failed for ${mint.slice(0, 8)}…:`,
+      err instanceof Error ? err.message : err
+    );
+  }
 
   checks.liquidityUsd = metrics.liquidityUsd;
   checks.marketCapUsd = metrics.marketCapUsd;
@@ -897,8 +916,8 @@ async function runAntiRugChecks(
   }
 
   // --- Non-bypassable holder dispersion / insider ceilings ---
-  // Enforce known Top-10% min/max; unknown is soft-only (lean Risk ON must still enter).
-  // top10HoldPct is Jupiter-style (bonding-curve vault excluded) from tokenMetrics.
+  // Enforce known Top-10% min/max; unknown is soft-only after Jupiter + on-chain attempts.
+  // checks.top10HoldPct prefers Jupiter audit.topHoldersPercentage when available.
   // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces known bounds.
   const holderHard = evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,

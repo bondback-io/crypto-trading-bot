@@ -1809,13 +1809,8 @@ export function evaluateLaneEntryFloors(
     Number.isFinite(m.minHolders) &&
     m.minHolders > 0
   ) {
-    if (holders == null) {
-      return {
-        ok: false,
-        reason: `${def.name} needs ≥${m.minHolders} holders — count unknown`,
-      };
-    }
-    if (holders < m.minHolders) {
+    // Known-only: unknown holders do not fail the lane (metrics often arrive after enrich)
+    if (holders != null && holders < m.minHolders) {
       return {
         ok: false,
         reason: `${def.name} holders ${holders} < ${m.minHolders}`,
@@ -1946,7 +1941,8 @@ function scoreProfile(
     ctx.convictionScore != null && Number.isFinite(ctx.convictionScore)
       ? Number(ctx.convictionScore)
       : null;
-  if (m.minConviction != null && (conv == null || conv < m.minConviction)) {
+  // Known-only: unknown conviction does not hard-zero early lane fight (computed later in gate)
+  if (m.minConviction != null && conv != null && conv < m.minConviction) {
     return { score: 0, reason: `conviction < ${m.minConviction}` };
   }
 
@@ -2227,7 +2223,7 @@ function scoreProfile(
     if (isScalp || isDip || isMig || isMomentum || isReversal) {
       return { score: 0, reason: 'not a trend hold setup' };
     }
-    if (conv == null || conv < (m.minConviction ?? 50)) {
+    if (conv != null && conv < (m.minConviction ?? 50)) {
       return { score: 0, reason: 'conviction too low for trend' };
     }
     let quality = 0;
@@ -2263,8 +2259,12 @@ function scoreProfile(
         };
       }
     }
-    score += 50 + Math.min(35, (conv - 50) * 0.7) + quality * 8;
-    bits.push(`trend conviction ${conv}`);
+    const convPart =
+      conv != null ? Math.min(35, (conv - 50) * 0.7) : 0;
+    score += 50 + convPart + quality * 8;
+    bits.push(
+      conv != null ? `trend conviction ${conv}` : 'trend conviction pending'
+    );
     if (mc != null && mc >= 300_000) {
       score += 14;
       bits.push(`established MC $${Math.round(mc)}`);
@@ -2275,7 +2275,7 @@ function scoreProfile(
     if (isScalp || isDip || isMig || isMomentum || isReversal) {
       return { score: 0, reason: 'not a compounder setup' };
     }
-    if (conv == null || conv < (m.minConviction ?? 45)) {
+    if (conv != null && conv < (m.minConviction ?? 45)) {
       return { score: 0, reason: 'conviction too low for compounder' };
     }
     const ageFloor =
@@ -2307,8 +2307,14 @@ function scoreProfile(
       q += 1;
       bits.push(`1h vol $${Math.round(volH1)}`);
     }
-    score += 48 + Math.min(25, (conv - 45) * 0.5) + q * 10;
-    bits.push(`compounder conviction ${conv}`);
+    const convPart =
+      conv != null ? Math.min(25, (conv - 45) * 0.5) : 0;
+    score += 48 + convPart + q * 10;
+    bits.push(
+      conv != null
+        ? `compounder conviction ${conv}`
+        : 'compounder conviction pending'
+    );
     if (mc != null && mc >= 300_000) {
       score += 10;
       bits.push(`established MC $${Math.round(mc)}`);
@@ -2323,7 +2329,7 @@ function scoreProfile(
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };
     }
-    if (conv == null || conv < (m.minConviction ?? 52)) {
+    if (conv != null && conv < (m.minConviction ?? 52)) {
       return { score: 0, reason: 'conviction too low for mirror' };
     }
     // Late fill after peak — copy already chasing; Mirror wants fresher entries
@@ -2359,15 +2365,23 @@ function scoreProfile(
         reason: `wallet quality ${wq.toFixed(0)} < ${m.minWalletQuality}`,
       };
     }
-    // Unknown WQ in BT: demand higher conviction + cluster
-    if (wq == null && (conv < 58 || (wallets != null && wallets < 3))) {
+    // Unknown WQ in BT: demand higher conviction + cluster (skip when conviction pending)
+    if (
+      wq == null &&
+      conv != null &&
+      (conv < 58 || (wallets != null && wallets < 3))
+    ) {
       return {
         score: 0,
         reason: 'mirror needs WQ or 3+ wallets + conviction 58+',
       };
     }
-    score += 58 + Math.min(25, (conv - 52) * 0.6);
-    bits.push(`mirror conviction ${conv}`);
+    const mirrorConv =
+      conv != null ? Math.min(25, (conv - 52) * 0.6) : 0;
+    score += 58 + mirrorConv;
+    bits.push(
+      conv != null ? `mirror conviction ${conv}` : 'mirror conviction pending'
+    );
     if (clusterOk) {
       score += 18;
       bits.push(`${wallets} wallets`);
@@ -2398,7 +2412,7 @@ function scoreProfile(
     if (isScalp || isDip || isMomentum || isReversal) {
       return { score: 0, reason: 'not high-win-rate selective' };
     }
-    if (conv == null || conv < (m.minConviction ?? 75)) {
+    if (conv != null && conv < (m.minConviction ?? 75)) {
       return { score: 0, reason: 'conviction too low' };
     }
     if (
@@ -2418,8 +2432,14 @@ function scoreProfile(
         reason: `wallet quality ${wq.toFixed(0)} < ${m.minWalletQuality}`,
       };
     }
-    score += 62 + Math.min(35, (conv - 75) * 0.8);
-    bits.push(`high-quality conviction ${conv}`);
+    const hwrConv =
+      conv != null ? Math.min(35, (conv - 75) * 0.8) : 0;
+    score += 62 + hwrConv;
+    bits.push(
+      conv != null
+        ? `high-quality conviction ${conv}`
+        : 'high-quality conviction pending'
+    );
     if (wallets != null && wallets >= (m.minWalletCount ?? 3)) {
       score += 14;
       bits.push(`cluster ${wallets}`);

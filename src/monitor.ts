@@ -103,6 +103,7 @@ import {
 } from './risk';
 import {
   fetchTokenMetrics,
+  getCachedTokenMetrics,
   summarizeTokenMetrics,
   clearTokenMetricsCache,
 } from './tokenMetrics';
@@ -222,6 +223,86 @@ function buildTradeProfileMatchContext(
       return n > 0 ? sum / n : null;
     })(),
   };
+}
+
+/**
+ * Best-effort MC / holders / volume before Smart Bot lane fight.
+ * Wallet signals often arrive without metrics; without this, minConviction /
+ * Min MC Override / Scalper Max MC zero every lane.
+ */
+async function enrichSignalForLaneFight(signal: TradeSignal): Promise<void> {
+  const needsMetrics =
+    !signal.metrics ||
+    signal.metrics.marketCapUsd == null ||
+    signal.metrics.holderCountEstimate == null ||
+    signal.metrics.volumeH1Usd == null;
+  if (needsMetrics) {
+    try {
+      const raw =
+        getCachedTokenMetrics(signal.mint) ??
+        (await fetchTokenMetrics(signal.mint));
+      const summary = summarizeTokenMetrics(raw);
+      if (!signal.metrics) {
+        signal.metrics = summary;
+      } else {
+        signal.metrics = {
+          ...signal.metrics,
+          marketCapUsd:
+            signal.metrics.marketCapUsd ?? summary.marketCapUsd ?? null,
+          holderCountEstimate:
+            signal.metrics.holderCountEstimate ??
+            summary.holderCountEstimate ??
+            null,
+          volumeH1Usd:
+            signal.metrics.volumeH1Usd ?? summary.volumeH1Usd ?? null,
+          volumeM5Usd:
+            signal.metrics.volumeM5Usd ?? summary.volumeM5Usd ?? null,
+          recentBuyVolumeUsd:
+            signal.metrics.recentBuyVolumeUsd ??
+            summary.recentBuyVolumeUsd ??
+            null,
+          liquidityUsd:
+            signal.metrics.liquidityUsd ?? summary.liquidityUsd ?? null,
+          priceChange24hPct:
+            signal.metrics.priceChange24hPct ??
+            summary.priceChange24hPct ??
+            null,
+          priceChangeH1Pct:
+            signal.metrics.priceChangeH1Pct ??
+            summary.priceChangeH1Pct ??
+            null,
+          top10HoldPct:
+            signal.metrics.top10HoldPct ?? summary.top10HoldPct ?? null,
+        };
+      }
+    } catch (err) {
+      console.warn(
+        `[monitor] Lane enrich metrics failed for ${signal.mint.slice(0, 8)}…:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (signal.sourceEntryMcUsd == null || !(signal.sourceEntryMcUsd > 0)) {
+    const fromMetrics = signal.metrics?.marketCapUsd;
+    if (fromMetrics != null && fromMetrics > 0) {
+      signal.sourceEntryMcUsd = fromMetrics;
+    } else {
+      try {
+        const mc = await resolveSourceEntryMcUsd(signal.mint);
+        if (mc != null && mc > 0) signal.sourceEntryMcUsd = mc;
+      } catch {
+        /* non-fatal */
+      }
+    }
+  }
+
+  console.log(
+    `[monitor] Lane enrich ${signal.symbol}: ` +
+      `MC=${signal.sourceEntryMcUsd != null ? `$${Math.round(signal.sourceEntryMcUsd)}` : '?'} · ` +
+      `holders=${signal.metrics?.holderCountEstimate ?? '?'} · ` +
+      `vol1h=${signal.metrics?.volumeH1Usd != null ? `$${Math.round(signal.metrics.volumeH1Usd)}` : '?'}`
+  );
 }
 
 /** Attach short-term scalp / post-run dip seed when an active strategy qualifies. */
@@ -3349,8 +3430,11 @@ export function resetSkipReasonCounts(): void {
 }
 
 /** Record a filter reject on the sizing panel so Signals tab isn't blank. */
+let suppressRejectSideEffects = false;
 function recordRejectedSignal(signal: TradeSignal, reason: string): void {
   lastFilterSkipReason = reason;
+  // Cascade retries must not annotate/bump until the final passer fails
+  if (suppressRejectSideEffects) return;
   bumpSkipReason(reason);
   const kind: 'migration' | 'normal' =
     signal.isMigration || signal.nearMigration || signal.earlyBuy
@@ -3621,15 +3705,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
-  // Smart Bot Profiles ON: parallel lane fight (floors + match), then gate
-  // module filters with the winning profile. Smart Bot OFF: legacy global modules.
-  let gateProfileId: string | null | undefined = undefined;
+  // Smart Bot Profiles ON: enrich → lane fight (floors + match) → cascade
+  // passers under each profile gate (CORE ∩ assigned modules). Smart Bot OFF:
+  // legacy global modules only.
+  let lanePassers: TradeProfileLaneResult[] | null = null;
   if (isSmartBotProfilesEnabled()) {
+    await enrichSignalForLaneFight(signal);
     const ctx = buildTradeProfileMatchContext(signal);
     const lanes = evaluateTradeProfileLanes(ctx, { silent: false });
     logLaneFightDecisions(signal, lanes);
-    const winner = pickWinningTradeProfileLane(lanes);
-    if (!winner || !winner.assignment) {
+    lanePassers = lanes.filter((l) => l.passed && l.assignment);
+    if (!lanePassers.length) {
       const failBits = lanes
         .filter((l) => !l.passed)
         .slice(0, 4)
@@ -3645,18 +3731,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       );
       return false;
     }
-    gateProfileId = winner.profileId;
-    signal.candidateTradeProfileId = winner.profileId;
+    const top = lanePassers[0]!;
     console.log(
-      `[monitor] Smart Bot lane winner=${winner.name} (${winner.profileId}) ` +
-        `score=${winner.score} · ${signal.symbol}` +
-        (lanes.filter((l) => l.passed).length > 1
-          ? ` · beat ${lanes.filter((l) => l.passed && l.profileId !== winner.profileId).map((l) => l.name).join(', ')}`
-          : '')
+      `[monitor] Smart Bot lane passers=${lanePassers.map((l) => `${l.name}:${l.score}`).join(', ')} ` +
+        `· top=${top.name} (${top.profileId}) · ${signal.symbol}`
     );
   }
 
-  return withStrategyProfileGateAsync(gateProfileId, async () => {
+  const runModuleFilters = async (): Promise<boolean> => {
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
   if (
     (isStrategyEnabled('wallet_quality_scoring') ||
@@ -4173,7 +4255,57 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   return true;
-  }); // withStrategyProfileGateAsync
+  };
+
+  if (!lanePassers) {
+    return withStrategyProfileGateAsync(undefined, runModuleFilters);
+  }
+
+  const cascadeFails: string[] = [];
+  suppressRejectSideEffects = true;
+  try {
+    for (const passer of lanePassers) {
+      signal.candidateTradeProfileId = passer.profileId;
+      lastFilterSkipReason = null;
+      console.log(
+        `[monitor] Lane cascade try=${passer.name} (${passer.profileId}) ` +
+          `score=${passer.score} · ${signal.symbol}`
+      );
+      const ok = await withStrategyProfileGateAsync(
+        passer.profileId,
+        runModuleFilters
+      );
+      if (ok) {
+        console.log(
+          `[monitor] Lane cascade win=${passer.name} (${passer.profileId}) · ${signal.symbol}`
+        );
+        return true;
+      }
+      const why = lastFilterSkipReason || 'module filters';
+      cascadeFails.push(`${passer.name}: ${why}`);
+      console.log(
+        `[monitor] Lane cascade fail=${passer.name} · ${why}`
+      );
+      // CORE / hard floors fail every profile — no point trying the rest
+      if (isNonBypassableSkipReason(why)) {
+        console.log(
+          `[monitor] Lane cascade stop — hard skip: ${why}`
+        );
+        break;
+      }
+    }
+  } finally {
+    suppressRejectSideEffects = false;
+  }
+  const cascadeReason =
+    cascadeFails.slice(0, 4).join(' · ') ||
+    'all lane passers failed modules';
+  recordRejectedSignal(signal, `smart-bot cascade: ${cascadeReason}`);
+  console.log(
+    `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+      `reason=smart-bot cascade: ${cascadeReason}`
+  );
+  return false;
 }
 
 function checkConvergence(mint: string): TradeSignal | null {

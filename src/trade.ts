@@ -605,8 +605,8 @@ export async function executeBuy(
   }
 
   // Hard top-10 + insider at execute (mirrors anti-rug). Soft-pass / early paper cannot
-  // bypass known out-of-band values. Unknown top10 is soft-only; unknown insider fails
-  // closed under Risk On.
+  // bypass known out-of-band values. Unknown top10 is soft-only after Jupiter + on-chain;
+  // unknown insider fails closed under Risk On.
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
     meta?.top10HoldPct
@@ -661,13 +661,12 @@ export async function executeBuy(
     (Number(config.filters.minTop10HolderPct) || 0) > 0 ||
     (Number(config.filters.maxHolderConcentration) || 0) > 0
   ) {
-    // Risk Off soft-pass path only — Risk On hard-skips unknown above
     logger.info('Trade', 'Entry top10 soft-pass unknown', {
       mint: mint.slice(0, 12),
       symbol,
     });
     console.log(
-      `[trade] Entry top10 soft-pass ${symbol}: unknown (Risk Off / gate inactive)`
+      `[trade] Entry top10 soft-pass ${symbol}: unknown after Jupiter + on-chain`
     );
   }
   if (insiderPct != null && hardFilterFloorsActive()) {
