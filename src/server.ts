@@ -2087,6 +2087,35 @@ export function createServer(): express.Application {
   });
 
   /**
+   * Strategy-scoped reset: modules + Trade Profiles → code/catalog defaults,
+   * Risk On lean recipe. Does not wipe wallets / paper / backtest history.
+   */
+  app.post('/api/strategies/reset-defaults', (req: Request, res: Response) => {
+    try {
+      const {
+        resetStrategyModulesToDefaults,
+        getStrategiesStatus,
+        ensureStrategyToggles,
+      } = require('./strategies') as typeof import('./strategies');
+      const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureStrategyToggles();
+      ensureTradeProfilesInitialized();
+      const result = resetStrategyModulesToDefaults();
+      res.json({
+        ok: true,
+        ...getStrategiesStatus(),
+        tradeProfiles: getTradeProfilesStatus(),
+        reset: result,
+        message: result.message,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  /**
    * Wipe data/*.json persistence files and reload code defaults.
    * Also resets paper balance/history and clears backtest history.
    */

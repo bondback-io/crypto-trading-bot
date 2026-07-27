@@ -20,6 +20,7 @@ import {
   normalizeRiskLevel,
   applyImportedSettingsSnapshot,
   buildPersistedSettingsSnapshot,
+  getCodeDefaultSettings,
   type RiskLevel,
   DEFAULT_QUICK_SCALPER,
   DEFAULT_MICRO_SCALPER,
@@ -4114,25 +4115,27 @@ export function importStrategyModulesBundle(
     }
   }
 
-  // Risk level field only — do not re-run applyRiskLevel (would wipe knobs).
+  // Risk level field only — do not re-run applyRiskLevel (would wipe knobs/toggles).
   if (raw.riskLevel != null) {
     config.riskLevel = normalizeRiskLevel(raw.riskLevel as RiskLevel);
   }
 
-  if (Object.keys(partialToggles).length > 0) {
+  const importedToggleCount = Object.keys(partialToggles).length;
+  if (importedToggleCount > 0) {
+    // Always mark custom when toggles are imported so a later Risk On/Off
+    // (or reset_recipe) cannot silently replace the imported ON/OFF map with
+    // the lean recipe. Previously markCustom:false + strategyRecipeMode:synced
+    // from the export left imports fragile / looking like they "didn't stick".
     updateStrategyToggles(partialToggles, {
       persist: false,
       syncUnderlying: true,
-      markCustom: false,
+      markCustom: true,
     });
   } else {
     syncUnderlyingFlagsFromToggles(ensureStrategyToggles());
-  }
-
-  if (raw.strategyRecipeMode === 'synced' || raw.strategyRecipeMode === 'custom') {
-    config.strategyRecipeMode = raw.strategyRecipeMode;
-  } else if (Object.keys(partialToggles).length > 0) {
-    config.strategyRecipeMode = 'custom';
+    if (raw.strategyRecipeMode === 'synced' || raw.strategyRecipeMode === 'custom') {
+      config.strategyRecipeMode = raw.strategyRecipeMode;
+    }
   }
 
   if (raw.strategyRecipeRiskLevel === null) {
@@ -4146,15 +4149,19 @@ export function importStrategyModulesBundle(
   if (isStrategyProfileId(String(raw.strategyProfile || ''))) {
     config.strategyProfile = raw.strategyProfile as StrategyProfileId;
   }
-  if (typeof raw.highWinRatePresetActive === 'boolean') {
-    config.highWinRatePresetActive = raw.highWinRatePresetActive;
+  // Imported toggles already force custom + clear HWR; only honor file flags
+  // when no toggle map was applied.
+  if (importedToggleCount === 0) {
+    if (typeof raw.highWinRatePresetActive === 'boolean') {
+      config.highWinRatePresetActive = raw.highWinRatePresetActive;
+    }
   }
 
   if (options?.persist !== false) persistUserSettings();
 
   const toggles = ensureStrategyToggles();
   const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
-  const appliedToggles = Object.keys(partialToggles).length;
+  const appliedToggles = importedToggleCount;
   const appliedProfileOverrides = countProfileOverrides(
     config.tradeProfiles?.overrides
   );
@@ -4162,12 +4169,14 @@ export function importStrategyModulesBundle(
   const smartBotProfiles = config.tradeProfiles?.smartBotProfiles === true;
   const label = options?.label || (typeof raw.label === 'string' ? raw.label : '');
   const message =
-    `Imported ${appliedToggles || '—'} module toggle(s)` +
+    `Imported · ${enabledCount}/${STRATEGY_KEYS.length} modules ON` +
+    (appliedToggles
+      ? ` (${appliedToggles} toggle values applied)`
+      : ' (no toggle map in file)') +
     ` · ${appliedProfileOverrides} profile override(s)` +
     ` · multi-profile ${tradeProfilesEnabled ? 'ON' : 'OFF'}` +
     ` · smart bot ${smartBotProfiles ? 'ON' : 'OFF'}` +
     (label ? ` (${label})` : '') +
-    ` · ${enabledCount}/${STRATEGY_KEYS.length} ON` +
     ` · Risk ${normalizeRiskLevel(config.riskLevel).toUpperCase()}` +
     ` · recipe ${ensureStrategyRecipeMode()}`;
 
@@ -4184,6 +4193,107 @@ export function importStrategyModulesBundle(
     tradeProfilesEnabled,
     smartBotProfiles,
     message,
+  };
+}
+
+/**
+ * Strategy-scoped reset: restore Control Center settings + Trade Profiles to
+ * code/catalog defaults and re-apply Risk On lean module recipe.
+ * Does not wipe wallets, paper balance, or backtest history.
+ */
+export function resetStrategyModulesToDefaults(options?: {
+  persist?: boolean;
+}): {
+  ok: true;
+  message: string;
+  enabledCount: number;
+  totalCount: number;
+  riskLevel: RiskLevel;
+  strategyRecipeMode: StrategyRecipeMode;
+  strategyProfile: StrategyProfileId;
+  tradeProfilesEnabled: boolean;
+  smartBotProfiles: boolean;
+} {
+  const defaults = getCodeDefaultSettings();
+  const snap: PersistedBotSettings = {
+    version: SETTINGS_VERSION,
+    updatedAt: Date.now(),
+  };
+  for (const key of [
+    'trade',
+    'filters',
+    'strategy',
+    'risk',
+    'profitStrategy',
+    'selective',
+    'quickScalper',
+    'microScalper',
+    'momentumBurst',
+    'postMigrationScalp',
+    'reversalScalp',
+    'postRunDip',
+    'technicalLevels',
+    'chartPatterns',
+    'bondingCurve',
+    'mev',
+    'tokenMetrics',
+  ] as const) {
+    const v = defaults[key];
+    if (v != null && typeof v === 'object') {
+      (snap as unknown as Record<string, unknown>)[key] = cloneModuleSettings(v);
+    }
+  }
+  if (typeof defaults.convergenceWindowMs === 'number') {
+    snap.convergenceWindowMs = defaults.convergenceWindowMs;
+  }
+  applyImportedSettingsSnapshot(snap, 'replace');
+
+  if (defaults.marketScanner && typeof defaults.marketScanner === 'object') {
+    config.marketScanner = cloneModuleSettings(
+      defaults.marketScanner
+    ) as unknown as typeof config.marketScanner;
+  }
+
+  config.strategyProfile = 'custom';
+  config.highWinRatePresetActive = false;
+  config.strategyProfileSnapshot = null;
+  config.riskRecipeOptimizations =
+    defaults.riskRecipeOptimizations &&
+    typeof defaults.riskRecipeOptimizations === 'object'
+      ? (cloneModuleSettings(
+          defaults.riskRecipeOptimizations
+        ) as typeof config.riskRecipeOptimizations)
+      : {};
+
+  const { resetTradeProfilesToCatalogDefaults } =
+    require('./tradeProfiles') as typeof import('./tradeProfiles');
+  resetTradeProfilesToCatalogDefaults({ persist: false });
+
+  const { applyRiskLevel } = require('./config') as typeof import('./config');
+  applyRiskLevel('on', { persist: false });
+
+  if (options?.persist !== false) persistUserSettings();
+
+  const toggles = ensureStrategyToggles();
+  const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
+  const tradeProfilesEnabled = config.tradeProfiles?.enabled !== false;
+  const smartBotProfiles = config.tradeProfiles?.smartBotProfiles === true;
+  const message =
+    `Reset Strategy to code defaults · Risk ON lean · Trade Profiles catalog` +
+    ` · multi-profile ${tradeProfilesEnabled ? 'ON' : 'OFF'}` +
+    ` · smart bot ${smartBotProfiles ? 'ON' : 'OFF'}` +
+    ` · ${enabledCount}/${STRATEGY_KEYS.length} modules ON`;
+  console.log(`[strategies] ${message}`);
+  return {
+    ok: true,
+    message,
+    enabledCount,
+    totalCount: STRATEGY_KEYS.length,
+    riskLevel: normalizeRiskLevel(config.riskLevel),
+    strategyRecipeMode: ensureStrategyRecipeMode(),
+    strategyProfile: (config.strategyProfile || 'custom') as StrategyProfileId,
+    tradeProfilesEnabled,
+    smartBotProfiles,
   };
 }
 

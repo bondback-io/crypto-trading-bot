@@ -2438,6 +2438,11 @@ const CODE_DEFAULT_SETTINGS: PersistedBotSettings = cloneJson(
   buildPersistedSettingsSnapshot()
 );
 
+/** Snapshot of code/env defaults captured at module load (before config.json merge). */
+export function getCodeDefaultSettings(): PersistedBotSettings {
+  return cloneJson(CODE_DEFAULT_SETTINGS);
+}
+
 function syncConfigAliases(): void {
   if (config.filters.maxDevHoldPct != null) {
     config.filters.maxDevPercent = config.filters.maxDevHoldPct;

@@ -3471,13 +3471,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <svg id="mode-badge-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
             <span id="mode-badge-label">LIVE SIM</span>
           </span>
-          <span id="header-risk-badge" class="risk-badge risk-badge-medium has-tip" data-risk-badge title="Risk Level sets the base risk appetite">
+          <span id="header-risk-badge" class="risk-badge risk-badge-medium has-tip" data-risk-badge title="Risk On/Off sets the base risk appetite">
             <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">Medium</span>
-          </span>
-          <span id="header-strict-badge" class="strict-badge strict-badge-off has-tip" data-strict-badge title="Strict Mode is an extra quality filter on top of Risk Level">
-            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
-            <span class="strict-badge-label">Strict Off</span>
+            <span class="risk-badge-label">On</span>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
@@ -3515,12 +3511,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <span class="active-profile-kicker">Active Profile</span>
           <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
             <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">Medium</span>
-          </span>
-          <span class="active-profile-plus" aria-hidden="true">+</span>
-          <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
-            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
-            <span class="strict-badge-label">Strict Off</span>
+            <span class="risk-badge-label">On</span>
           </span>
           <span class="active-profile-extras" aria-label="Mode and run status">
             <span class="run-status run-running has-tip" data-run-status title="Monitor run status">
@@ -4268,21 +4259,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="off">Override → Off</option>
             </select>
           </label>
-          <label class="ctl ctl-lg"><span>Strict Mode <span class="tip" tabindex="0" data-tip="Match live = parity default. Force Off/On overrides for this run only (not saved)."></span></span>
-            <select id="bt-strict-mode" onchange="onBtStrictModeChange()">
-              <option value="match" selected>Match live</option>
-              <option value="off">Force OFF</option>
-              <option value="on">Force ON</option>
-            </select>
-          </label>
-          <label class="ctl ctl-md" id="bt-strict-intensity-wrap"><span>Strict intensity <span class="tip" tabindex="0" data-tip="Off when Strict is inactive. Used when Match live (if Strict ON) or Force ON. Low = most selective."></span></span>
-            <select id="bt-strict-intensity">
-              <option value="off">Off</option>
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
         </div>
         <div class="filters-row mb-3">
           <label class="ctl-check" title="Use live DexScreener/GMGN market data when available"><input type="checkbox" id="bt-live" checked /> Live data</label>
@@ -4304,13 +4280,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="filters-row mb-1">
             <label class="ctl-check" title="Non-parity: invent price paths when live data is thin"><input type="checkbox" id="bt-synthetic" /> Allow synthetic</label>
-            <label class="ctl-check" title="Non-parity: also run Low/Med/High/Degen on the same events"><input type="checkbox" id="bt-compare-risk" /> Compare Low / Med / High / Degen</label>
+            <label class="ctl-check" title="Non-parity: also run Risk On/Off on the same events"><input type="checkbox" id="bt-compare-risk" /> Compare Risk On / Off</label>
           </div>
         </details>
         <div id="bt-config-used" class="mint text-sm mb-2 hidden"></div>
         <div class="flex flex-wrap gap-2 items-center mb-2">
           <button class="btn btn-primary" id="bt-run-btn" onclick="runBacktest()" title="Run with Live Sim parity defaults">Run Backtest</button>
-          <button class="btn btn-secondary" onclick="runBacktestMatchingLive()" title="Force current live risk + Strict Mode">Match live Strict</button>
+          <button class="btn btn-secondary" onclick="runBacktestMatchingLive()" title="Force current live Risk On/Off">Match live Risk</button>
           <button class="btn btn-secondary" onclick="loadLastBacktest()" title="Reload the most recent backtest from memory/disk">Load last</button>
           <button class="btn btn-secondary" onclick="exportBacktestCsv()" title="Download trade results as CSV"><span class="btn-label-short">CSV</span><span class="btn-label-full">Export CSV</span></button>
           <button class="btn btn-secondary" onclick="exportBacktestJson()" title="Download full metrics report as JSON"><span class="btn-label-short">JSON</span><span class="btn-label-full">Export JSON</span></button>
@@ -4329,7 +4305,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough. Check Compare Low/Med/High to add a risk-level breakdown."></span></div>
+        <div class="section-title">Performance Metrics <span class="tip" tabindex="0" data-tip="Key backtest KPIs after fees/slippage. Profit factor = gross wins ÷ gross losses. Sharpe = mean trade return ÷ std (not annualized). Max DD is equity-curve peak-to-trough. Check Compare Risk On/Off to add a risk-level breakdown."></span></div>
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-2.5 sm:gap-3 mb-3">
           <div class="card !py-3 !bg-slate-900/50 score-card">
             <div class="stat-label">Performance Score <span class="tip" tabindex="0" data-tip="Score 0–100 from weighted Win Rate (30%), Profit Factor (25%), Max Drawdown inverted (20%), Avg Win/Loss (15%), sample-size confidence (10%). Tiny samples are penalized. A≥80, B≥65, C≥50, D≥35, else F."></span></div>
@@ -4403,8 +4379,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div id="bt-risk-compare" class="hidden">
-          <div class="section-title !text-sm">Risk Level Breakdown <span class="tip" tabindex="0" data-tip="Enable Compare Low / Med / High / Degen on the run controls to populate this table and chart. Does not change live settings."></span></div>
-          <p class="mint text-xs mb-2">Enable <strong>Compare Low / Med / High / Degen</strong> above, then re-run to compare the same events across risk presets.</p>
+          <div class="section-title !text-sm">Risk Level Breakdown <span class="tip" tabindex="0" data-tip="Enable Compare Risk On / Off on the run controls to populate this table and chart. Does not change live settings."></span></div>
+          <p class="mint text-xs mb-2">Enable <strong>Compare Risk On / Off</strong> above, then re-run to compare the same events across risk presets.</p>
           <div class="overflow-x-auto mb-3">
             <table id="bt-risk-compare-table">
               <thead>
@@ -4423,7 +4399,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             </table>
           </div>
           <div class="chart-wrap mb-2" style="height:240px"><canvas id="bt-chart-risk"></canvas></div>
-          <div class="chart-empty mint" id="bt-chart-risk-empty">No risk comparison yet — check Compare Low / Med / High / Degen and run</div>
+          <div class="chart-empty mint" id="bt-chart-risk-empty">No risk comparison yet — check Compare Risk On / Off and run</div>
         </div>
       </div>
 
@@ -4746,6 +4722,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="strategy-io-btns">
               <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to current code/catalog defaults (Risk On lean). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
@@ -4763,7 +4740,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span class="strategy-recipe-banner-title" id="strategy-recipe-banner-title">Synced to Risk</span>
             <span class="strategy-recipe-banner-detail" id="strategy-recipe-banner-text"></span>
           </div>
-          <button type="button" class="btn btn-secondary text-xs" id="strategy-recipe-reset" onclick="applyStrategiesAction('reset_recipe')">Reset to risk defaults</button>
         </div>
 
         <div class="strat-setup-guide mt-3" id="strat-setup-guide">
@@ -4775,8 +4751,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="strategy-control-actions">
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('enable_all')">Enable All modules</button>
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('disable_all')">Disable All modules</button>
-          <button class="btn btn-secondary text-xs" id="strategies-restore" onclick="applyStrategiesAction('restore')" disabled>Restore Previous pack</button>
-          <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('reset_recipe')" title="Re-apply modules for the current Risk Level">Reset to risk defaults</button>
         </div>
 
         <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
@@ -4876,132 +4850,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
 
-        <details class="strat-adv-pack" id="module-packs-panel">
-          <summary>
-            <span>Optional · Quality module packs <span class="mint font-normal" id="module-packs-active-label"></span></span>
-          </summary>
-          <div class="strat-adv-body">
-            <p class="strat-adv-hint">Advanced override — leaves Risk sync. Bulk-enables filter modules + quality thresholds. Does <strong>not</strong> replace Trade Profiles. Prefer Balanced unless you want a specific win-rate style.</p>
-            <div class="strategy-preset-grid" id="strategy-presets">
-              <button type="button" class="strategy-preset-btn" data-preset="high_win_rate" role="switch" aria-checked="false" onclick="applyStrategiesAction('high_win_rate')">
-                <span class="preset-copy">
-                  <span class="preset-label">60%+ Win Rate pack</span>
-                  <span class="preset-desc">Fewest trades · highest quality bars</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="win_rate_55_60" role="switch" aria-checked="false" onclick="applyStrategiesAction('win_rate_55_60')">
-                <span class="preset-copy">
-                  <span class="preset-label">55–60% Win Rate pack</span>
-                  <span class="preset-desc">Quality focus · more trades than 60%+</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="balanced" role="switch" aria-checked="false" onclick="applyStrategiesAction('balanced')">
-                <span class="preset-copy">
-                  <span class="preset-label">Balanced pack</span>
-                  <span class="preset-desc">Best overall risk/reward start</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="aggressive" role="switch" aria-checked="false" onclick="applyStrategiesAction('aggressive')">
-                <span class="preset-copy">
-                  <span class="preset-label">Aggressive pack</span>
-                  <span class="preset-desc">More opportunities · still protected</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-            </div>
-          </div>
-        </details>
-
-        <details class="strat-adv-pack" id="scalp-packs-panel">
-          <summary>
-            <span>Optional · Scalp engines <span class="mint font-normal" id="scalp-packs-active-label"></span></span>
-          </summary>
-          <div class="strat-adv-body">
-            <p class="strat-adv-hint">
-              Advanced override — leaves Risk sync. With <strong>Multi-profile ON</strong>, leave this alone unless you want timed-scalp modules enabled globally.
-              The bot <strong>auto-picks</strong> which scalp engine fits (migration → micro → momentum → reversal among enabled ones).
-              Trade Profiles then override TP/SL/timer when assigned (Scalper → quick scalp, Momentum Burst profile → burst, etc.).
-              Use a <strong>Suite</strong> only to turn Micro+Momentum+Post-Mig(+Reversal) all ON with shared timers.
-              Risk Level High/Degen already enables some scalp engines when synced.
-            </p>
-            <div class="strat-pack-section-label">Suite variants</div>
-            <div class="strategy-preset-grid short-term-presets" id="strategy-presets-suite">
-              <button type="button" class="strategy-preset-btn" data-preset="scalper_suite" data-accent="teal" role="switch" aria-checked="false" onclick="applyStrategiesAction('scalper_suite')">
-                <span class="preset-copy">
-                  <span class="preset-label">Scalper Suite · Standard</span>
-                  <span class="preset-desc">Balanced timers · Micro + Momentum + Migration + Reversal</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="aggressive_scalper" data-accent="orange" role="switch" aria-checked="false" onclick="applyStrategiesAction('aggressive_scalper')">
-                <span class="preset-copy">
-                  <span class="preset-label">Suite · Aggressive</span>
-                  <span class="preset-desc">Faster timers · higher TP · looser volume filters</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="conservative_scalper" data-accent="sky" role="switch" aria-checked="false" onclick="applyStrategiesAction('conservative_scalper')">
-                <span class="preset-copy">
-                  <span class="preset-label">Suite · Conservative</span>
-                  <span class="preset-desc">Tighter SL · stricter volume · smaller size</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-            </div>
-            <div class="strat-pack-section-label">Single engines</div>
-            <div class="strategy-preset-grid short-term-presets" id="strategy-presets-short">
-              <button type="button" class="strategy-preset-btn" data-preset="quick_scalper" role="switch" aria-checked="false" onclick="applyStrategiesAction('quick_scalper')">
-                <span class="preset-copy">
-                  <span class="preset-label">Quick Scalper</span>
-                  <span class="preset-desc">Maps to Trade Profile · Scalper</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="micro_scalper" role="switch" aria-checked="false" onclick="applyStrategiesAction('micro_scalper')">
-                <span class="preset-copy">
-                  <span class="preset-label">Micro-Scalper</span>
-                  <span class="preset-desc">Ultra-fast · seconds holds</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="momentum_burst" role="switch" aria-checked="false" onclick="applyStrategiesAction('momentum_burst')">
-                <span class="preset-copy">
-                  <span class="preset-label">Momentum Burst</span>
-                  <span class="preset-desc">Maps to Trade Profile · Momentum Burst</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="post_migration_scalp" role="switch" aria-checked="false" onclick="applyStrategiesAction('post_migration_scalp')">
-                <span class="preset-copy">
-                  <span class="preset-label">Post-Migration Scalp</span>
-                  <span class="preset-desc">Maps to Trade Profile · Migration Sniper</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="strategy-preset-btn" data-preset="reversal_scalp" role="switch" aria-checked="false" onclick="applyStrategiesAction('reversal_scalp')">
-                <span class="preset-copy">
-                  <span class="preset-label">Reversal Scalp</span>
-                  <span class="preset-desc">Maps to Trade Profile · Reversal Scalper</span>
-                </span>
-                <span class="preset-switch" aria-hidden="true"></span>
-              </button>
-            </div>
-            <div id="scalper-suite-settings" class="card mt-2 is-hidden-suite" style="border-color:#0f766e;padding:0.65rem">
-              <div class="section-title !text-sm">Suite fine-tune</div>
-              <p class="mint text-xs mb-2">Only for Suite variants. Tweaks concurrent positions + dead-market hold. Member timers live under each strategy module card below.</p>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <label class="ctl"><span>Max concurrent (2–3)</span><input type="number" id="suite-max-pos" min="2" max="3" step="1" value="3" /></label>
-                <label class="ctl"><span>Dead-market min hold (min)</span><input type="number" id="suite-dead-hold" min="1" max="30" step="1" value="4" /></label>
-              </div>
-              <button type="button" class="btn btn-primary mt-2 text-xs" onclick="saveScalperSuiteSettings()">Save suite settings</button>
-              <div class="mint text-xs mt-1" id="suite-settings-status"></div>
-            </div>
-          </div>
-        </details>
-
         <div id="strategies-warning" class="hidden mt-3 p-2 rounded-lg text-amber-200 text-xs" style="background:#422006;border:1px solid #92400e"></div>
       </div>
       <div id="strategies-grid" class="grid md:grid-cols-2 gap-3 sm:gap-4">
@@ -5037,19 +4885,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="config-panel hidden space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk / Strict on the Strategies tab.">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Strategies tab.">
         <div class="active-profile-main">
           <span class="active-profile-kicker">Active Profile</span>
           <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
             <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">Medium</span>
+            <span class="risk-badge-label">On</span>
           </span>
-          <span class="active-profile-plus" aria-hidden="true">+</span>
-          <span class="strict-badge strict-badge-off" data-strict-badge title="Strict Mode status">
-            <svg class="status-ico strict-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6l7-3z"/></svg>
-            <span class="strict-badge-label">Strict Off</span>
-          </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk / Strict on the Strategies tab."></span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Strategies tab."></span>
         </div>
         <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('strategies')">Edit on Strategies</button></p>
       </div>
@@ -5130,8 +4973,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">12</span></label><input type="range" id="maxConcurrentPositions" min="1" max="50" step="1" value="12" /></div>
             <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
-            <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $8,000 (recommended $8k–$15k). High/Degen cannot go below the floor.">Min Liquidity USD — <span class="val" id="v-minLiquidity">10000</span></label><input type="range" id="minLiquidity" min="8000" max="100000" step="500" value="10000" /></div>
-            <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across all risk levels (including Degen). Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
+            <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $8,000 (recommended $8k–$15k). Floor is non-bypassable.">Min Liquidity USD — <span class="val" id="v-minLiquidity">10000</span></label><input type="range" id="minLiquidity" min="8000" max="100000" step="500" value="10000" /></div>
+            <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across Risk On/Off. Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
             <div class="field"><label title="Min % of supply held by the deployer (0 = no floor). Pair with Max Dev %.">Min Dev % — <span class="val" id="v-minDevHoldPct">0</span></label><input type="range" id="minDevHoldPct" min="0" max="80" step="1" value="0" /></div>
             <div class="field"><label title="Max % of supply held by the deployer (0 = off). Pair with Min Dev %.">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
             <div class="field"><label title="Min % held by top 10 wallets (excludes Pump bonding-curve vault — Jupiter-style). Floor 5% when Risk On (default 8%). Pair with Max Top-10% for a valid band (e.g. 8–70%). Known values below min are blocked; unknown top-10 is soft-only (does not hard-skip). Risk Off soak zeros both.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="80" step="1" value="8" /></div>
@@ -5153,7 +4996,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="mt-2 space-y-0">
             <p class="mint mb-2">Master safety switches moved to Strategies. Configure their thresholds here.</p>
-            <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path / Degen.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
@@ -6055,7 +5898,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             (recipe.divergedFromRecipe
               ? recipe.divergedFromRecipe + ' modules differ from recipe. '
               : '') +
-            'Reset to re-apply ' + riskLabel + ' modules.';
+            'Use Reset Strategy (Defaults) for a full code reset.';
         } else {
           recipeBanner.classList.add('is-synced');
           recipeBanner.classList.remove('is-custom');
@@ -6071,33 +5914,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           recipeBannerText.style.display = detailBits.length ? '' : 'none';
         }
       }
-      if (restore) restore.disabled = !data.canRestorePrevious;
-      document.querySelectorAll('#strategy-presets [data-preset], #strategy-presets-short [data-preset], #strategy-presets-suite [data-preset]').forEach(btn => {
-        const on = btn.getAttribute('data-preset') === preset;
-        btn.classList.toggle('active', on);
-        btn.setAttribute('aria-checked', on ? 'true' : 'false');
-      });
+      if (restore) restore.disabled = !data.canRestorePrevious; // Restore UI removed — keep harmless
       const suitePresets = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
-      const qualityPacks = ['high_win_rate', 'win_rate_55_60', 'balanced', 'aggressive'];
-      const shortPacks = suitePresets.concat(['quick_scalper','micro_scalper','momentum_burst','post_migration_scalp','reversal_scalp']);
-      const suiteEl = document.getElementById('scalper-suite-settings');
-      if (suiteEl) {
-        suiteEl.classList.toggle('is-hidden-suite', suitePresets.indexOf(preset) < 0);
-      }
-      const modLabel = document.getElementById('module-packs-active-label');
-      if (modLabel) {
-        modLabel.textContent = qualityPacks.indexOf(preset) >= 0 ? '· active: ' + preset.replace(/_/g, ' ') : '';
-      }
-      const scalpLabel = document.getElementById('scalp-packs-active-label');
-      if (scalpLabel) {
-        scalpLabel.textContent = shortPacks.indexOf(preset) >= 0 ? '· active: ' + preset.replace(/_/g, ' ') : '';
-      }
-      // Auto-open the relevant optional panel when a pack is active
-      const modPanel = document.getElementById('module-packs-panel');
-      const scalpPanel = document.getElementById('scalp-packs-panel');
-      if (modPanel && qualityPacks.indexOf(preset) >= 0) modPanel.open = true;
-      if (scalpPanel && shortPacks.indexOf(preset) >= 0) scalpPanel.open = true;
-      const shortTermPresets = shortPacks;
+      const shortTermPresets = suitePresets.concat(['quick_scalper','micro_scalper','momentum_burst','post_migration_scalp','reversal_scalp']);
       if (warning) {
         const activePreset = (data.presets || []).find(p => p.active);
         const warnText = data.highWinRatePresetActive
@@ -6443,23 +6262,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const on = cp.patterns && cp.patterns[id] ? cp.patterns[id].enabled !== false : false;
         el.checked = on;
       });
-      const suiteProfiles = ['scalper_suite', 'aggressive_scalper', 'conservative_scalper'];
-      const suiteMax = document.getElementById('suite-max-pos');
-      if (suiteMax) {
-        const maxPos =
-          suiteProfiles.includes(preset) && data.maxConcurrentPositions != null
-            ? data.maxConcurrentPositions
-            : (data.scalperSuiteDefaults?.maxConcurrentPositions ?? 3);
-        suiteMax.value = String(Math.max(2, Math.min(3, Number(maxPos) || 3)));
-      }
-      const suiteDead = document.getElementById('suite-dead-hold');
-      if (suiteDead) {
-        suiteDead.value = String(
-          data.deadVolumeMinHoldMinutes ??
-            data.scalperSuiteDefaults?.deadVolumeMinHoldMinutes ??
-            4
-        );
-      }
     }
 
     async function loadStrategies() {
@@ -7233,6 +7035,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         window._cfgLoaded = false;
         await refresh();
+        // Re-fetch strategies so the ON count matches persisted toggles (import marks recipe custom).
+        try { await loadStrategies(); } catch (_) {}
         const msg = (data.import && data.import.message) || data.message || ('Imported · ' + (data.enabledCount || '?') + '/' + (data.totalCount || '?') + ' ON');
         setStrategyIoStatus(msg, 'ok');
         alert(msg);
@@ -7244,9 +7048,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (input) input.value = '';
       }
     }
+    async function resetStrategyModulesToDefaults() {
+      if (!confirm(
+        'Reset Strategy to code defaults?\\n\\n' +
+        'This restores strategy module toggles/settings and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override, Smart Bot, enable map) to current build defaults, then applies Risk On lean.\\n\\n' +
+        'Does NOT wipe wallets, paper balance, or Overview session.\\n\\nContinue?'
+      )) return;
+      setStrategyIoStatus('Resetting strategy defaults…', null);
+      try {
+        const data = await fetchJSON('/api/strategies/reset-defaults', { method: 'POST' });
+        if (data.ok === false) {
+          throw new Error(data.error || data.message || 'Reset failed');
+        }
+        renderStrategies(data);
+        if (data.tradeProfiles) {
+          renderTradeProfilesUi(data.tradeProfiles);
+        }
+        window._cfgLoaded = false;
+        await refresh();
+        try { await loadStrategies(); } catch (_) {}
+        const msg = (data.reset && data.reset.message) || data.message || 'Strategy defaults restored';
+        setStrategyIoStatus(msg, 'ok');
+        alert(msg);
+      } catch (err) {
+        const msg = err.message || String(err);
+        setStrategyIoStatus(msg, 'err');
+        alert('Reset failed: ' + msg);
+      }
+    }
     window.exportStrategyModulesJson = exportStrategyModulesJson;
     window.triggerStrategyModulesImport = triggerStrategyModulesImport;
     window.importStrategyModulesJson = importStrategyModulesJson;
+    window.resetStrategyModulesToDefaults = resetStrategyModulesToDefaults;
 
     function showTab(name, btn) {
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
@@ -10172,7 +10005,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       let body;
       if (applyAllWinners) {
         if (!confirm(
-          'Apply each risk level\\'s constrained-WR winner to synced Low/Med/High/Degen recipes?\\n\\n' +
+          'Apply each risk level\\'s constrained-WR winner to synced Risk On/Off recipes?\\n\\n' +
           'Module toggles stay as set. Settings persist for the next applyRiskLevel.'
         )) return;
         body = { applyWinners: true };
@@ -12222,31 +12055,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function onBtStrictModeChange() {
-      const sel = document.getElementById('bt-strict-mode');
-      const intensityEl = document.getElementById('bt-strict-intensity');
-      const wrap = document.getElementById('bt-strict-intensity-wrap');
-      if (!sel || !wrap) return;
-      const cfg = _lastConfig || window._lastConfig;
-      const mode = sel.value || 'match';
-      const active = btStrictIsActive(mode, cfg);
-      const liveIntensity =
-        (cfg && (cfg.strictModeIntensity === 'low' || cfg.strictModeIntensity === 'high' || cfg.strictModeIntensity === 'medium'))
-          ? cfg.strictModeIntensity
-          : 'medium';
-      wrap.style.opacity = active ? '1' : '0.5';
-      if (!intensityEl) return;
-      const offOpt = intensityEl.querySelector('option[value="off"]');
-      if (offOpt) offOpt.disabled = active;
-      if (!active) {
-        intensityEl.value = 'off';
-        intensityEl.disabled = true;
-        return;
-      }
-      // Match live: show live intensity (read-only). Force ON: editable override.
-      intensityEl.disabled = mode !== 'on';
-      if (intensityEl.value === 'off' || mode === 'match') {
-        intensityEl.value = liveIntensity;
-      }
+      /* Strict Mode UI removed */
     }
 
     function btStrictPayload() {
@@ -12254,12 +12063,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function runBacktestMatchingLive() {
-      const strictSel = document.getElementById('bt-strict-mode');
-      if (strictSel) strictSel.value = 'match';
       const riskSel = document.getElementById('bt-risk-level');
       if (riskSel) riskSel.value = 'current';
       syncBtMaxTradesFromRisk(_lastConfig);
-      onBtStrictModeChange();
       showTab('backtester');
       await runBacktest({ matchLiveStrict: true });
     }
@@ -13728,21 +13534,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       };
     }
 
-    function updateStrictBadges(cfg) {
-      const state = getStrictBadgeState(cfg);
-      document.querySelectorAll('[data-strict-badge]').forEach((el) => {
-        el.classList.remove(
-          'strict-badge-off',
-          'strict-badge-low',
-          'strict-badge-medium',
-          'strict-badge-high'
-        );
-        el.classList.add(state.tone);
-        el.title = state.title;
-        const label = el.querySelector('.strict-badge-label');
-        if (label) label.textContent = state.label;
-        setStatusIcon(el.querySelector('.strict-badge-icon'), state.icon);
-      });
+    function updateStrictBadges(_cfg) {
+      /* Strict Mode badges removed from UI */
     }
 
     function activeProfileToneClass(cfg) {
@@ -13882,7 +13675,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const active = sum.active || {};
       const ids = ['on', 'off'];
       ids.forEach((id) => {
-        ['risk-lvl-', 'cfg-risk-lvl-'].forEach((prefix) => {
+        ['risk-lvl-'].forEach((prefix) => {
           const btn = document.getElementById(prefix + id);
           if (!btn) return;
           const on = id === level;
@@ -13990,7 +13783,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           data.summary && data.summary.recipeMode === 'synced'
             ? '\\nStrategy modules re-synced to this Risk Level.'
             : data.summary && data.summary.recipeMode === 'custom'
-              ? '\\nStrategy modules left custom (Reset to risk defaults to re-sync).'
+              ? '\\nStrategy modules left custom (Reset Strategy Defaults for a full code reset).'
               : '';
         alert(
           'Risk level set to ' + String(level).toUpperCase() +

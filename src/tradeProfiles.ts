@@ -1618,6 +1618,21 @@ export function resetTradeProfileParams(
   return getTradeProfilesStatus();
 }
 
+/**
+ * Full Trade Profiles stack → catalog defaults:
+ * multi-profile ON, Smart Bot ON, default enable map, no overrides, default auto-scoring.
+ */
+export function resetTradeProfilesToCatalogDefaults(options?: {
+  persist?: boolean;
+}): ReturnType<typeof getTradeProfilesStatus> {
+  writeTradeProfilesState(defaultRuntimeState());
+  if (options?.persist !== false) persistUserSettings();
+  console.log(
+    '[trade-profiles] Reset to catalog defaults (multi-profile + Smart Bot + enable map + overrides cleared)'
+  );
+  return getTradeProfilesStatus();
+}
+
 /** Default freshness gates for Migration Sniper (pump.fun → DEX grads only). */
 export const FRESH_MIGRATION_MAX_AGE_HOURS = 2;
 export const FRESH_MIGRATION_MAX_MC_USD = 450_000;
