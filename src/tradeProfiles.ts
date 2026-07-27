@@ -2020,6 +2020,16 @@ function scoreProfile(
       drop != null &&
       drop >= (m.minDropFromPeakPct ?? 18));
 
+  // Specialty engines that should own the mint over Trend/Compounder.
+  // Pattern-inferred "momentum" (e.g. bull_flag) must NOT veto Trend Rider —
+  // bull_flag / structured_pullback / trend_continuation are Trend primary patterns.
+  const specialtyArmed =
+    isScalp ||
+    isDip ||
+    isMig ||
+    isReversal ||
+    ctx.shortTermStrategyId === 'momentum_burst';
+
   if (m.requireCluster && m.minWalletCount != null) {
     if (wallets != null && wallets < m.minWalletCount) {
       return {
@@ -2220,7 +2230,7 @@ function scoreProfile(
   }
 
   if (m.preferTrend) {
-    if (isScalp || isDip || isMig || isMomentum || isReversal) {
+    if (specialtyArmed) {
       return { score: 0, reason: 'not a trend hold setup' };
     }
     if (conv != null && conv < (m.minConviction ?? 50)) {
@@ -2272,7 +2282,7 @@ function scoreProfile(
   }
 
   if (m.preferSteadyCompounder) {
-    if (isScalp || isDip || isMig || isMomentum || isReversal) {
+    if (specialtyArmed) {
       return { score: 0, reason: 'not a compounder setup' };
     }
     if (conv != null && conv < (m.minConviction ?? 45)) {
