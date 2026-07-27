@@ -4790,27 +4790,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </p>
         <div class="toggle-row">
           <span>Enable Zion</span>
-          <label class="switch"><input type="checkbox" id="zion-enabled" /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-enabled" onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>KOL Token Scanner</span>
-          <label class="switch"><input type="checkbox" id="zion-scanner-enabled" checked /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-scanner-enabled" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Auto-create offers from scanner</span>
-          <label class="switch"><input type="checkbox" id="zion-auto-offer" checked /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-auto-offer" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Tracked wallets as boost</span>
-          <label class="switch"><input type="checkbox" id="zion-tracked-boost" checked /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-tracked-boost" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Email on offer</span>
-          <label class="switch"><input type="checkbox" id="zion-email-offer" checked /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-email-offer" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Email when placed</span>
-          <label class="switch"><input type="checkbox" id="zion-email-placed" checked /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-email-placed" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div id="zion-status" class="mint text-xs mb-2 mt-2">—</div>
       </div>
@@ -14955,6 +14955,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window._zionShownOffers = _zionShownOffers;
     let _zionActiveOfferId = null;
     let _zionCache = null;
+    let _zionFormHydrated = false;
+    let _zionSaveInFlight = false;
 
     function fillZionForm(cfg) {
       if (!cfg) return;
@@ -14982,6 +14984,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       setVal('zion-sl', cfg.defaults?.stopLossPct);
       setVal('zion-trail', cfg.defaults?.trailingStopPct);
       setVal('zion-trail-act', cfg.defaults?.trailingActivationProfit);
+      _zionFormHydrated = true;
     }
 
     function renderZionFeeds(data) {
@@ -15053,9 +15056,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       _zionCache = data;
       const panel = document.querySelector('[data-tab-panel="zion"]');
       const onZion = panel && !panel.classList.contains('hidden');
+      // Do not rewrite toggles from the 5s poll — that snapped Enable Zion OFF
+      // before Save could stick. Status/feeds only; form via loadZion/save.
       if (onZion) {
-        fillZionForm(data.config || {});
         renderZionFeeds(data);
+        if (!_zionFormHydrated && !_zionSaveInFlight) {
+          fillZionForm(data.config || {});
+        }
       }
       const pending = ((data && data.offers) || []).filter(function (o) { return o.status === 'pending'; });
       for (let i = 0; i < pending.length; i++) {
@@ -15081,35 +15088,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function saveZionConfig() {
+      if (_zionSaveInFlight) return;
+      _zionSaveInFlight = true;
       const st = document.getElementById('zion-save-status');
       if (st) st.textContent = 'Saving…';
       try {
+        const enabledEl = document.getElementById('zion-enabled');
+        const scannerEl = document.getElementById('zion-scanner-enabled');
+        const autoEl = document.getElementById('zion-auto-offer');
+        const boostEl = document.getElementById('zion-tracked-boost');
+        const emailOfferEl = document.getElementById('zion-email-offer');
+        const emailPlacedEl = document.getElementById('zion-email-placed');
+        const useExitsEl = document.getElementById('zion-use-exits');
         const body = {
-          enabled: document.getElementById('zion-enabled')?.checked === true,
+          enabled: !!(enabledEl && enabledEl.checked),
           scanner: {
-            enabled: document.getElementById('zion-scanner-enabled')?.checked !== false,
-            pollIntervalMs: Number(document.getElementById('zion-poll-ms')?.value) || 60000,
-            universeSize: Number(document.getElementById('zion-universe')?.value) || 60,
+            enabled: scannerEl ? !!scannerEl.checked : true,
+            pollIntervalMs: Number(document.getElementById('zion-poll-ms') && document.getElementById('zion-poll-ms').value) || 60000,
+            universeSize: Number(document.getElementById('zion-universe') && document.getElementById('zion-universe').value) || 60,
           },
-          autoOfferFromScanner: document.getElementById('zion-auto-offer')?.checked !== false,
-          useTrackedWalletsAsBoost: document.getElementById('zion-tracked-boost')?.checked !== false,
-          notifyEmailOnOffer: document.getElementById('zion-email-offer')?.checked !== false,
-          notifyEmailOnPlaced: document.getElementById('zion-email-placed')?.checked !== false,
-          minKolWallets: Number(document.getElementById('zion-min-kol')?.value) || 2,
-          minWalletQuality: Number(document.getElementById('zion-min-quality')?.value) || 50,
-          minMcUsd: Number(document.getElementById('zion-min-mc')?.value) || 0,
-          maxMcUsd: Number(document.getElementById('zion-max-mc')?.value) || 0,
-          offerTtlMinutes: Number(document.getElementById('zion-ttl')?.value) || 30,
-          mintCooldownMinutes: Number(document.getElementById('zion-cooldown')?.value) || 120,
+          autoOfferFromScanner: autoEl ? !!autoEl.checked : true,
+          useTrackedWalletsAsBoost: boostEl ? !!boostEl.checked : true,
+          notifyEmailOnOffer: emailOfferEl ? !!emailOfferEl.checked : true,
+          notifyEmailOnPlaced: emailPlacedEl ? !!emailPlacedEl.checked : true,
+          minKolWallets: Number(document.getElementById('zion-min-kol') && document.getElementById('zion-min-kol').value) || 2,
+          minWalletQuality: Number(document.getElementById('zion-min-quality') && document.getElementById('zion-min-quality').value) || 50,
+          minMcUsd: Number(document.getElementById('zion-min-mc') && document.getElementById('zion-min-mc').value) || 0,
+          maxMcUsd: Number(document.getElementById('zion-max-mc') && document.getElementById('zion-max-mc').value) || 0,
+          offerTtlMinutes: Number(document.getElementById('zion-ttl') && document.getElementById('zion-ttl').value) || 30,
+          mintCooldownMinutes: Number(document.getElementById('zion-cooldown') && document.getElementById('zion-cooldown').value) || 120,
           defaults: {
-            sizeMode: document.getElementById('zion-size-mode')?.value || 'sol',
-            solAmount: Number(document.getElementById('zion-sol')?.value) || 0.25,
-            usdAmount: Number(document.getElementById('zion-usd')?.value) || 50,
-            takeProfitPct: Number(document.getElementById('zion-tp')?.value) || 80,
-            stopLossPct: Number(document.getElementById('zion-sl')?.value) || -25,
-            trailingStopPct: Number(document.getElementById('zion-trail')?.value) || 18,
-            trailingActivationProfit: Number(document.getElementById('zion-trail-act')?.value) || 35,
-            useExitPresets: document.getElementById('zion-use-exits')?.checked !== false,
+            sizeMode: (document.getElementById('zion-size-mode') && document.getElementById('zion-size-mode').value) || 'sol',
+            solAmount: Number(document.getElementById('zion-sol') && document.getElementById('zion-sol').value) || 0.25,
+            usdAmount: Number(document.getElementById('zion-usd') && document.getElementById('zion-usd').value) || 50,
+            takeProfitPct: Number(document.getElementById('zion-tp') && document.getElementById('zion-tp').value) || 80,
+            stopLossPct: Number(document.getElementById('zion-sl') && document.getElementById('zion-sl').value) || -25,
+            trailingStopPct: Number(document.getElementById('zion-trail') && document.getElementById('zion-trail').value) || 18,
+            trailingActivationProfit: Number(document.getElementById('zion-trail-act') && document.getElementById('zion-trail-act').value) || 35,
+            useExitPresets: useExitsEl ? !!useExitsEl.checked : true,
           },
         };
         const data = await fetchJSON('/api/config/zion', {
@@ -15117,12 +15133,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        fillZionForm(data.config || body);
-        if (st) st.textContent = 'Saved' + (data.config?.enabled ? ' · ON' : ' · OFF');
-        await loadZion();
+        if (data && data.config) {
+          fillZionForm(data.config);
+          _zionCache = Object.assign({}, _zionCache || {}, {
+            config: data.config,
+            scanner: data.scanner || (_zionCache && _zionCache.scanner) || {},
+            status: Object.assign({}, (_zionCache && _zionCache.status) || {}, {
+              enabled: data.config.enabled === true,
+            }),
+          });
+          renderZionFeeds(_zionCache);
+        } else {
+          fillZionForm(body);
+        }
+        if (st) {
+          st.textContent =
+            'Saved' + (data && data.config && data.config.enabled ? ' · ON' : ' · OFF');
+        }
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
         alert(err.message || String(err));
+      } finally {
+        _zionSaveInFlight = false;
       }
     }
 
