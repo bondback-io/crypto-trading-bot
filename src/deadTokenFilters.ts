@@ -94,13 +94,11 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('top10 holders too high') ||
     r.includes('high holder concentration') ||
     r.includes('insider % too high') ||
-    r.includes('insider % unknown') ||
     r.includes('buy-heavy') ||
     r.includes('buy/sell txn ratio') ||
     r.includes('organic score too low') ||
     r.includes('organic / pro-quality') ||
     r.includes('market cap too low') ||
-    r.includes('market cap unknown') ||
     r.includes('low mc with near-zero volume') ||
     r.includes('not a pump.fun mint') ||
     r.includes('fake holders') ||
@@ -286,8 +284,8 @@ export function evaluateDeadTokenHardFloors(
   const recentNearZero =
     recentVol != null && Number.isFinite(recentVol) && recentVol < nearZeroVolThreshold;
 
-  // --- Non-bypassable entry market-cap floors (all risk levels, no early soft-pass) ---
-  // Fail closed when MC is unknown — never allow a sub-$5k entry via missing Dex MC.
+  // --- Non-bypassable entry market-cap floors (known values only) ---
+  // Unknown MC soft-passes (Dex 429 / RPC gaps); known below min still hard-rejects.
   const minMc = effectiveMinMarketCapUsd();
   const maxMc = effectiveMaxEntryMarketCapUsd();
   const mc = snap.marketCapUsd;
@@ -330,16 +328,13 @@ export function evaluateDeadTokenHardFloors(
       );
     }
   } else {
-    scorePenalty += 35;
+    scorePenalty += 12;
     flags.push({
-      id: 'hard_unknown_market_cap',
-      severity: 'critical',
+      id: 'soft_unknown_market_cap',
+      severity: 'medium',
       label: 'Market cap unknown',
-      detail: `need ≥ $${minMc}`,
+      detail: `need ≥ $${minMc} when data available`,
     });
-    skipReasons.push(
-      `Skipped — market cap unknown (min ${formatMcShort(minMc)})`
-    );
   }
 
   // Post-dump / low-MC tokens never get early soft-pass on thin recent volume.
@@ -796,6 +791,7 @@ export interface HolderConcentrationSnapshot {
  * Non-bypassable holder-dispersion / insider ceilings.
  * - Reject when top10 is **known** and below min (default 8%, hard ≥5%) or above max.
  * - Unknown top10 (after Jupiter + on-chain attempts): soft penalty only — lean Risk On must still enter.
+ * - Unknown insider (after GMGN attempt): soft penalty only; known ≥ hard max still rejects.
  * - Risk OFF soak zeros min+max → gate inactive. If user sets min/max > 0, enforce known bounds.
  * - Reject when insider (or extreme ≥50% dev) hold is present and ≥ hard max (50%).
  */
@@ -875,17 +871,14 @@ export function evaluateHolderConcentrationHardFloors(
       );
     }
   } else if (insiderGateActive) {
-    // Risk On: fail closed when GMGN insider is missing — known CXMT-class bypass
-    scorePenalty += 35;
+    // Soft-pass unknown after GMGN attempt — known ≥ hard max still rejects above
+    scorePenalty += hardFilterFloorsActive() ? 18 : 12;
     flags.push({
-      id: 'hard_insider_unknown',
-      severity: 'critical',
+      id: 'soft_unknown_insider',
+      severity: 'medium',
       label: 'Insider % unknown',
-      detail: `need < ${maxInsider}% (hard floor)`,
+      detail: `need < ${maxInsider}% when data available`,
     });
-    skipReasons.push(
-      `Skipped — insider % unknown (hard floor; need < ${maxInsider}%)`
-    );
   }
 
   // Extreme deployer hold (≥ hard insider cap) — same non-bypassable class

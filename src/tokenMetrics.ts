@@ -21,6 +21,7 @@ import {
   jupiterTopHoldersPercentage,
   lookupCachedJupiterToken,
 } from './jupiterTokens';
+import { isStrategyEnabled } from './strategies';
 
 export interface HolderBucket {
   address: string;
@@ -135,13 +136,19 @@ function emptyMetrics(mint: string, error?: string): TokenMetrics {
   };
 }
 
-/** Public cache peek (no network) */
-export function getCachedTokenMetrics(mint: string): TokenMetrics | null {
+/** Public cache peek (no network). Optionally return stale expired entries. */
+export function getCachedTokenMetrics(
+  mint: string,
+  opts?: { allowStale?: boolean }
+): TokenMetrics | null {
   const hit = cache.get(mint);
   if (!hit) return null;
-  if (hit.expiresAt < Date.now()) {
-    cache.delete(mint);
-    return null;
+  const expired = hit.expiresAt < Date.now();
+  if (expired) {
+    // Keep entry for allowStale / Dex-429 fallback — do not delete here
+    if (!opts?.allowStale) return null;
+    if (hit.data?.error) return null;
+    return { ...hit.data, source: 'cache' };
   }
   return { ...hit.data, source: 'cache' };
 }
@@ -224,25 +231,50 @@ export async function fetchTokenMetrics(
         fetchOnChainHolderMetrics(mint),
       ]);
 
+      // Dex 429 / empty: keep last good metrics rather than wiping MC/liq
+      const stale = getCachedTokenMetrics(mint, { allowStale: true });
+      const dexEmpty =
+        dex.marketCapUsd == null &&
+        dex.liquidityUsd == null &&
+        dex.volume24hUsd == null;
+
       const merged: TokenMetrics = {
         ...base,
         ...onchain,
-        symbol: dex.symbol ?? onchain.symbol,
-        name: dex.name ?? onchain.name,
-        liquidityUsd: dex.liquidityUsd ?? onchain.liquidityUsd ?? null,
-        marketCapUsd: dex.marketCapUsd ?? null,
-        volume24hUsd: dex.volume24hUsd ?? null,
-        volumeH1Usd: dex.volumeH1Usd ?? null,
-        volumeM5Usd: dex.volumeM5Usd ?? null,
-        recentBuyVolumeUsd: dex.recentBuyVolumeUsd ?? null,
-        buysH1: dex.buysH1 ?? null,
-        sellsH1: dex.sellsH1 ?? null,
-        txnsH1: dex.txnsH1 ?? null,
-        priceChangeH1Pct: dex.priceChangeH1Pct ?? null,
-        priceChange24hPct: dex.priceChange24hPct ?? null,
-        priceUsd: dex.priceUsd ?? null,
-        pairCreatedAtMs: dex.pairCreatedAtMs ?? null,
-        source: 'dexscreener+rpc',
+        symbol: dex.symbol ?? onchain.symbol ?? stale?.symbol,
+        name: dex.name ?? onchain.name ?? stale?.name,
+        liquidityUsd:
+          dex.liquidityUsd ??
+          onchain.liquidityUsd ??
+          (dexEmpty ? stale?.liquidityUsd ?? null : null),
+        marketCapUsd:
+          dex.marketCapUsd ??
+          (dexEmpty ? stale?.marketCapUsd ?? null : null),
+        volume24hUsd:
+          dex.volume24hUsd ??
+          (dexEmpty ? stale?.volume24hUsd ?? null : null),
+        volumeH1Usd:
+          dex.volumeH1Usd ?? (dexEmpty ? stale?.volumeH1Usd ?? null : null),
+        volumeM5Usd:
+          dex.volumeM5Usd ?? (dexEmpty ? stale?.volumeM5Usd ?? null : null),
+        recentBuyVolumeUsd:
+          dex.recentBuyVolumeUsd ??
+          (dexEmpty ? stale?.recentBuyVolumeUsd ?? null : null),
+        buysH1: dex.buysH1 ?? (dexEmpty ? stale?.buysH1 ?? null : null),
+        sellsH1: dex.sellsH1 ?? (dexEmpty ? stale?.sellsH1 ?? null : null),
+        txnsH1: dex.txnsH1 ?? (dexEmpty ? stale?.txnsH1 ?? null : null),
+        priceChangeH1Pct:
+          dex.priceChangeH1Pct ??
+          (dexEmpty ? stale?.priceChangeH1Pct ?? null : null),
+        priceChange24hPct:
+          dex.priceChange24hPct ??
+          (dexEmpty ? stale?.priceChange24hPct ?? null : null),
+        priceUsd:
+          dex.priceUsd ?? (dexEmpty ? stale?.priceUsd ?? null : null),
+        pairCreatedAtMs:
+          dex.pairCreatedAtMs ??
+          (dexEmpty ? stale?.pairCreatedAtMs ?? null : null),
+        source: dexEmpty && stale ? 'cache' : 'dexscreener+rpc',
         fetchedAt: Date.now(),
       };
 
@@ -281,7 +313,10 @@ export async function fetchTokenMetrics(
 
       cache.set(mint, {
         data: merged,
-        expiresAt: Date.now() + cacheTtlMs(),
+        // Longer TTL when we had to reuse stale Dex fields (429 soft path)
+        expiresAt:
+          Date.now() +
+          (dexEmpty && stale ? Math.max(cacheTtlMs(), 180_000) : cacheTtlMs()),
       });
       return merged;
     } catch (err) {
@@ -318,6 +353,29 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
         mint: mint.slice(0, 12),
         status: res.status,
       });
+      // On rate-limit, prefer stale cache over empty (caller merges)
+      if (res.status === 429) {
+        const stale = getCachedTokenMetrics(mint, { allowStale: true });
+        if (stale) {
+          return {
+            symbol: stale.symbol,
+            name: stale.name,
+            liquidityUsd: stale.liquidityUsd,
+            marketCapUsd: stale.marketCapUsd,
+            volume24hUsd: stale.volume24hUsd,
+            volumeH1Usd: stale.volumeH1Usd,
+            volumeM5Usd: stale.volumeM5Usd,
+            recentBuyVolumeUsd: stale.recentBuyVolumeUsd,
+            buysH1: stale.buysH1,
+            sellsH1: stale.sellsH1,
+            txnsH1: stale.txnsH1,
+            priceChangeH1Pct: stale.priceChangeH1Pct,
+            priceChange24hPct: stale.priceChange24hPct,
+            priceUsd: stale.priceUsd,
+            pairCreatedAtMs: stale.pairCreatedAtMs ?? null,
+          };
+        }
+      }
       return {};
     }
     const data = (await res.json()) as {
@@ -658,6 +716,8 @@ async function fetchGmgnTokenHints(
 /**
  * Apply configured filters to metrics (liquidity, volume, holders, concentration).
  * Uses effective hard floors so High risk cannot undercut absolute mins.
+ * Unknown MC is soft (Dex 429 / RPC gaps) — known MC below min still hard-rejects.
+ * Min liq / min holders only hard-enforce when their strategy modules (or anti-rug) are ON.
  */
 export function evaluateTokenMetricsFilters(
   metrics: TokenMetrics
@@ -669,36 +729,37 @@ export function evaluateTokenMetricsFilters(
 
   const filters = config.filters;
   const reasons: string[] = [];
+  const antiRugOn =
+    isStrategyEnabled('anti_rug_honeypot') &&
+    config.filters.enableAntiRug !== false;
+  const enforceLiq =
+    antiRugOn || isStrategyEnabled('volume_liquidity_filters');
+  const enforceHolders =
+    antiRugOn || isStrategyEnabled('min_holders_activity');
 
   const minLiq = effectiveMinLiquidityUsd();
   const liq = metrics.liquidityUsd;
   // Unknown liquidity must not fail-closed as $0
-  if (liq != null && liq < minLiq) {
+  if (enforceLiq && liq != null && liq < minLiq) {
     reasons.push(`liquidity $${liq.toFixed(0)} < min $${minLiq}`);
   }
 
   const minMc = effectiveMinMarketCapUsd();
   const mc = metrics.marketCapUsd;
-  if (minMc > 0) {
-    if (mc != null && mc > 0) {
-      if (mc < minMc) {
-        reasons.push(
-          `market cap $${Math.round(mc)} < min $${minMc}`
-        );
-      }
-    } else {
-      reasons.push(`market cap unknown (min $${minMc})`);
-    }
+  // Known-only: unknown MC soft-passes (Dex rate-limits must not zero all entries)
+  if (minMc > 0 && mc != null && mc > 0 && mc < minMc) {
+    reasons.push(`market cap $${Math.round(mc)} < min $${minMc}`);
   }
 
   const minVol = effectiveStrictMinVolume24hUsd();
   const vol = metrics.volume24hUsd;
-  if (minVol > 0 && vol != null && vol < minVol) {
+  if (enforceLiq && minVol > 0 && vol != null && vol < minVol) {
     reasons.push(`volume24h $${vol.toFixed(0)} < min $${minVol}`);
   }
 
   const minHolders = effectiveMinHolders();
   if (
+    enforceHolders &&
     minHolders > 0 &&
     metrics.holderCountEstimate != null &&
     metrics.holderCountEstimate < minHolders

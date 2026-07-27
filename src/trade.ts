@@ -44,13 +44,12 @@ import {
   getCachedSolUsdPrice,
   marketCapAtPrice,
 } from './marketData';
-import { fetchTokenMetrics } from './tokenMetrics';
+import { fetchTokenMetrics, getCachedTokenMetrics, resolveTop10HoldPctForEntry } from './tokenMetrics';
 import {
   fetchBondingCurve,
   estimateBondingCurvePriceSol,
   estimateBondingCurveMarketCapUsd,
 } from './bondingCurve';
-import { resolveTop10HoldPctForEntry } from './tokenMetrics';
 import { clampToMaxAllowedTradeSol } from './risk';
 import {
   evaluateAffordability,
@@ -554,7 +553,7 @@ export async function executeBuy(
     };
   }
 
-  const entryMarketCapUsd = await resolveEntryMarketCapUsd(
+  let entryMarketCapUsd = await resolveEntryMarketCapUsd(
     mint,
     priceSol,
     meta?.entryMarketCapUsd
@@ -567,20 +566,53 @@ export async function executeBuy(
       : undefined;
 
   // Hard entry-MC floor after MC is resolved (all paths: paper, live, migration, re-buy).
-  // Catches soft-pass / unknown-Dex cases where Buy MC would otherwise land under $5k.
+  // Known MC below min still hard-rejects. Unknown after fallbacks soft-passes (Dex 429).
   // Risk OFF: floors disabled — allow unknown / any MC.
   const minEntryMc = effectiveMinMarketCapUsd();
+  if (
+    minEntryMc > 0 &&
+    (entryMarketCapUsd == null || !(entryMarketCapUsd > 0))
+  ) {
+    // Fallbacks when Dex/fill MC unresolved
+    if (sourceEntryMcUsd != null && sourceEntryMcUsd > 0) {
+      entryMarketCapUsd = sourceEntryMcUsd;
+    } else {
+      const cached = getCachedTokenMetrics(mint, { allowStale: true });
+      if (cached?.marketCapUsd != null && cached.marketCapUsd > 0) {
+        entryMarketCapUsd = cached.marketCapUsd;
+      } else {
+        try {
+          const fromSource = await resolveSourceEntryMcUsd(mint);
+          if (fromSource != null && fromSource > 0) {
+            entryMarketCapUsd = fromSource;
+          }
+        } catch {
+          /* non-fatal */
+        }
+      }
+    }
+  }
   if (minEntryMc > 0) {
     if (entryMarketCapUsd == null || !(entryMarketCapUsd > 0)) {
-      const reason = `Skipped — market cap unknown (min $${minEntryMc})`;
+      logger.info('Trade', 'FILTER_SKIP entry MC soft-pass unknown', {
+        mint: mint.slice(0, 12),
+        symbol,
+        minEntryMc,
+      });
       console.log(
-        `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} (fill MC unresolved)`
+        `[trade] Entry MC soft-pass ${symbol}: unknown after curve/Dex/cache ` +
+          `(min $${minEntryMc}) — allowing fill`
       );
-      return { success: false, mode: config.mode, error: reason };
-    }
-    if (entryMarketCapUsd < minEntryMc) {
+      // Soft-pass — do not block; known-below-min still hard below
+    } else if (entryMarketCapUsd < minEntryMc) {
       const reason =
         `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
+      logger.info('Trade', 'FILTER_SKIP entry MC', {
+        mint: mint.slice(0, 12),
+        symbol,
+        reason,
+        entryMarketCapUsd,
+      });
       console.log(
         `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
           `(gate MC $${Math.round(entryMarketCapUsd)}, min $${minEntryMc})`
@@ -589,9 +621,19 @@ export async function executeBuy(
     }
   }
   const maxEntryMc = effectiveMaxEntryMarketCapUsd();
-  if (maxEntryMc > 0 && entryMarketCapUsd != null && entryMarketCapUsd > maxEntryMc) {
+  if (
+    maxEntryMc > 0 &&
+    entryMarketCapUsd != null &&
+    entryMarketCapUsd > maxEntryMc
+  ) {
     const reason =
       `Skipped — market cap too high ($${Math.round(entryMarketCapUsd)} > $${maxEntryMc}; already-pumped / dump risk)`;
+    logger.info('Trade', 'FILTER_SKIP entry MC', {
+      mint: mint.slice(0, 12),
+      symbol,
+      reason,
+      entryMarketCapUsd,
+    });
     console.log(
       `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason}`
     );
@@ -606,7 +648,7 @@ export async function executeBuy(
 
   // Hard top-10 + insider at execute (mirrors anti-rug). Soft-pass / early paper cannot
   // bypass known out-of-band values. Unknown top10 is soft-only after Jupiter + on-chain;
-  // unknown insider fails closed under Risk On.
+  // unknown insider is soft-only after GMGN attempt (known ≥50% still hard).
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
     meta?.top10HoldPct

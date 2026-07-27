@@ -2862,21 +2862,26 @@ export function assignTradeProfile(
     }
   }
 
-  // Smart Bot lane-fight winner — stamp the same profile that gated filters
+  // Smart Bot lane-fight winner — stamp the same profile that gated filters.
+  // Floors/modules already ran in the cascade; do not re-score into skipBelowMin.
   if (ctx.preferProfileId) {
     const preferred = candidates.find((p) => p.id === ctx.preferProfileId);
     if (preferred) {
-      const floors = evaluateLaneEntryFloors(preferred, ctx);
       const scored = scoreProfile(preferred, ctx);
-      if (floors.ok && scored.score > 0) {
-        return finish(
-          buildAssignmentFromDef(preferred, ctx, {
-            score: Math.round(scored.score * 10) / 10,
-            reason: `lane winner · ${scored.reason}`,
-            autoScored: auto.enabled,
-          })
-        );
-      }
+      const score =
+        scored.score > 0
+          ? Math.round(scored.score * 10) / 10
+          : Math.max(1, preferred.priority || 1);
+      return finish(
+        buildAssignmentFromDef(preferred, ctx, {
+          score,
+          reason:
+            scored.score > 0
+              ? `lane winner · ${scored.reason}`
+              : `lane winner · stamped (${scored.reason || 'post-filter'})`,
+          autoScored: auto.enabled,
+        })
+      );
     }
   }
 

@@ -16,6 +16,7 @@ import { getConnection, getRpcStats, getRpcUrl } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
+import { logger } from './logger';
 import {
   assignTradeProfile,
   stampFromAssignment,
@@ -3436,6 +3437,13 @@ function recordRejectedSignal(signal: TradeSignal, reason: string): void {
   // Cascade retries must not annotate/bump until the final passer fails
   if (suppressRejectSideEffects) return;
   bumpSkipReason(reason);
+  logger.info('Trade', 'FILTER_SKIP', {
+    mint: signal.mint.slice(0, 12),
+    symbol: signal.symbol,
+    reason,
+    entrySource: signal.entrySource ?? null,
+    profile: signal.candidateTradeProfileId ?? null,
+  });
   const kind: 'migration' | 'normal' =
     signal.isMigration || signal.nearMigration || signal.earlyBuy
       ? 'migration'
