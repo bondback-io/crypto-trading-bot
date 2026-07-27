@@ -152,7 +152,7 @@ export function normalizeRpcEndpoints(
 /**
  * Resolve dual-lane RPC list from env.
  * - RPC_URL / RPC_PRIMARY → primary
- * - RPC_SECONDARY, else first RPC_FALLBACKS entry → secondary
+ * - RPC_SECONDARY (or SECONDARY_RPC alias), else first RPC_FALLBACKS entry → secondary
  * - remaining RPC_FALLBACKS → extra fallbacks
  */
 export function rpcEndpointsFromEnv(
@@ -167,12 +167,29 @@ export function rpcEndpointsFromEnv(
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+
+  const fromRpcSecondary = process.env.RPC_SECONDARY?.trim() || '';
+  const fromAlias = process.env.SECONDARY_RPC?.trim() || '';
   let secondary =
-    (secondaryEnv ?? process.env.RPC_SECONDARY)?.trim() || '';
+    secondaryEnv != null
+      ? String(secondaryEnv).trim()
+      : fromRpcSecondary || fromAlias;
+  if (!fromRpcSecondary && fromAlias && secondaryEnv == null) {
+    console.warn(
+      '[rpc] Using SECONDARY_RPC as secondary lane — prefer renaming to RPC_SECONDARY'
+    );
+  }
   if (!secondary && fallbacks.length > 0) {
     secondary = fallbacks[0];
   }
   const rest = fallbacks.filter((u) => u !== secondary && u !== primary);
+
+  if (secondary && secondary === primary) {
+    console.warn(
+      '[rpc] RPC_SECONDARY matches RPC_URL — both lanes share one endpoint. ' +
+        'Set a distinct paid secondary URL so Zion/activity do not starve copy signals.'
+    );
+  }
 
   const candidates: Array<{
     url: string;

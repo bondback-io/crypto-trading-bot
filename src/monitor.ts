@@ -598,6 +598,8 @@ let activityTimer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let paused = false;
 let pollInFlight = false;
+/** Rotates which wallets are polled first so a mid-cycle 429 cannot starve the same tail forever. */
+let pollRotationOffset = 0;
 let onSignalHandler: SignalHandler | null = null;
 
 /** Detect Solana RPC / HTTP 429 rate-limit errors from web3.js or providers. */
@@ -831,10 +833,18 @@ async function pollAllWallets(): Promise<void> {
     // Keep concurrent RPC polls low on public RPCs; paid endpoints can go faster
     const batchSize = publicRpc ? 4 : 6;
     const batchGapMs = publicRpc ? 200 : 80;
+    const n = wallets.length;
+    const offset =
+      n > 0 ? ((pollRotationOffset % n) + n) % n : 0;
+    // Rotate start so 429 short-circuit does not always skip the same wallets
+    const ordered =
+      n === 0 || offset === 0
+        ? wallets
+        : wallets.slice(offset).concat(wallets.slice(0, offset));
     let rateLimited = false;
-    for (let i = 0; i < wallets.length; i += batchSize) {
+    for (let i = 0; i < ordered.length; i += batchSize) {
       if (rateLimited) break;
-      const batch = wallets.slice(i, i + batchSize);
+      const batch = ordered.slice(i, i + batchSize);
       const results = await Promise.allSettled(
         batch.map((wallet) => pollWallet(wallet))
       );
@@ -850,9 +860,13 @@ async function pollAllWallets(): Promise<void> {
         );
         break;
       }
-      if (i + batchSize < wallets.length) {
+      if (i + batchSize < ordered.length) {
         await new Promise((r) => setTimeout(r, batchGapMs));
       }
+    }
+    // Advance even on early abort so every wallet gets turns under rate limit
+    if (n > 0) {
+      pollRotationOffset = (offset + batchSize) % n;
     }
 
     // Drain buy handlers after signature scan so detection isn't blocked by anti-rug

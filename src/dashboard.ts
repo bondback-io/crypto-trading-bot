@@ -5771,7 +5771,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary (RPC_URL)</strong> — Trade profile bots, copy + signal scanner, market scanner entry RPC, Pump.fun migrate scanner, open-trade on-chain needs.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary (RPC_SECONDARY or first RPC_FALLBACKS)</strong> — Zion + Place Trade, KOL Token Scanner, Zion trade requests / open-trade on-chain bits, wallet on-chain activity refresh.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking on the other paid RPC (or any healthy fallback). Recovers to the preferred lane when it is healthy again. Override with RPC_FAILOVER_DOWN_MS (ms). Set RPC_URL + a distinct RPC_SECONDARY (or first distinct RPC_FALLBACKS entry) so Zion KOL does not share CU with copy/signals.</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking on the other paid RPC (or any healthy fallback). Recovers to the preferred lane when it is healthy again. Override with RPC_FAILOVER_DOWN_MS (ms). Set RPC_URL + a distinct RPC_SECONDARY (different URL — alias SECONDARY_RPC also accepted) so Zion KOL does not share CU with copy/signals.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>

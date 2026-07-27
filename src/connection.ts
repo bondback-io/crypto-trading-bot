@@ -174,15 +174,29 @@ function ensureEndpoints(): void {
         .join(', ')
   );
   console.log(
-    `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} · ` +
-      `secondary→${endpoints[preferredSecondary]?.endpoint.label} · ` +
-      `cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down`
+    `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} ` +
+      `(${maskUrlForLog(endpoints[preferredPrimary]?.endpoint.url)}) · ` +
+      `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
+      `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
+      `cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
+      (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
   );
   if (preferredPrimary === preferredSecondary) {
     console.warn(
       '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
-        'Set a distinct RPC_SECONDARY (or first distinct RPC_FALLBACKS entry).'
+        'Set a distinct RPC_SECONDARY (must differ from RPC_URL).'
     );
+  }
+}
+
+function maskUrlForLog(url: string | undefined): string {
+  if (!url) return '—';
+  try {
+    const u = new URL(url);
+    const host = u.host || 'rpc';
+    return host.length > 40 ? host.slice(0, 38) + '…' : host;
+  } catch {
+    return url.replace(/\/\/.*@/, '//***@').slice(0, 40);
   }
 }
 
