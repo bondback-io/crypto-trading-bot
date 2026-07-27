@@ -16551,6 +16551,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.declineZionOffer = declineZionOffer;
     window.placeZionTrade = placeZionTrade;
     window.renderZionOpenTrades = renderZionOpenTrades;
+    try {
+      ensureZionStack();
+      window.addEventListener('resize', function () {
+        layoutZionOfferStack();
+      });
+    } catch (_) {}
 
 
     async function saveTechnicalLevelsConfig(silent) {
