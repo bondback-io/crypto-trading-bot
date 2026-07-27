@@ -1188,7 +1188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .card-open-positions #trades-positions-table,
     .card-closed-trades #closed-table,
     .card-closed-trades #trades-closed-table {
-      min-width: 52rem;
+      min-width: 50rem;
       margin: 0;
       border-collapse: separate;
       border-spacing: 0;
@@ -1297,6 +1297,91 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .card-open-positions .pos-tpsl-cell {
+      font-size: 0.7rem;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+    .card-open-positions .pos-more-info {
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .card-open-positions .pos-more-info-label {
+      color: #38bdf8;
+      font-size: 0.68rem;
+      font-weight: 650;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 2px;
+      white-space: nowrap;
+    }
+    .card-open-positions .pos-more-info-label.is-empty {
+      color: #64748b;
+      font-weight: 500;
+    }
+    #pos-more-info-float {
+      display: none;
+      position: fixed;
+      z-index: 80;
+      max-width: min(22rem, calc(100vw - 1.25rem));
+      max-height: min(70vh, 28rem);
+      overflow: auto;
+      padding: 0.65rem 0.75rem;
+      border-radius: 10px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      background: rgba(15, 23, 42, 0.98);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      line-height: 1.35;
+    }
+    #pos-more-info-float.is-open { display: block; }
+    #pos-more-info-float .pmi-title {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #7dd3fc;
+      margin-bottom: 0.4rem;
+    }
+    #pos-more-info-float .pmi-score {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-bottom: 0.45rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      background: rgba(16, 185, 129, 0.1);
+      color: #6ee7b7;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    #pos-more-info-float .pmi-score.is-mid {
+      border-color: rgba(251, 191, 36, 0.4);
+      background: rgba(251, 191, 36, 0.08);
+      color: #fbbf24;
+    }
+    #pos-more-info-float .pmi-score.is-low {
+      border-color: rgba(248, 113, 113, 0.4);
+      background: rgba(248, 113, 113, 0.08);
+      color: #fca5a5;
+    }
+    #pos-more-info-float .pmi-line {
+      margin: 0.22rem 0;
+      color: #94a3b8;
+    }
+    #pos-more-info-float .pmi-line strong {
+      color: #e2e8f0;
+      font-weight: 650;
+    }
+    #pos-more-info-float .pmi-empty {
+      color: #94a3b8;
+      font-style: italic;
+    }
     .card-open-positions .open-profile-filter,
     .card-closed-trades .closed-profile-filter,
     .card-closed-trades .closed-filter {
@@ -1330,7 +1415,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       .card-open-positions #trades-positions-table,
       .card-closed-trades #closed-table,
       .card-closed-trades #trades-closed-table {
-        min-width: 48rem;
+        min-width: 44rem;
       }
       .card-open-positions #positions-table tbody td,
       .card-open-positions #trades-positions-table tbody td,
@@ -3131,7 +3216,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     #bt-results-table { min-width: 64rem; }
     #positions-table,
-    #trades-positions-table { min-width: 62rem; }
+    #trades-positions-table { min-width: 56rem; }
     #closed-table,
     #trades-closed-table { min-width: 58rem; }
     #pump-activity-table,
@@ -3649,7 +3734,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL on the remaining size, trailing stop, take-profit, and stop-loss. Coloured profile badges show which strategy owns each trade. Use Sell to force-close the full position."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL, trailing stop, TP/SL, and Reason → More Info (profile assignment, entry path, MC, technicals, wallets, quality 0–100). Use Sell to force-close."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
@@ -3659,11 +3744,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="closed-filter mb-2 open-profile-filter" role="group" aria-label="Filter open positions by profile" style="margin-top:0.35rem"></div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </div>
+
+      <div id="pos-more-info-float" role="tooltip" aria-hidden="true"></div>
 
       <div class="card card-closed-trades" id="closed-trades-panel">
         <div class="closed-trades-head">
@@ -3761,7 +3848,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="closed-filter mb-2 open-profile-filter" id="open-profile-filter" role="group" aria-label="Filter open trades by profile" style="margin-top:0.35rem"></div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP</th><th>SL</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -8536,6 +8623,342 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         label + '</span>';
     }
 
+    /** 0–100 quality score for an open position (profile score preferred). */
+    function computeOpenQualityScore(p) {
+      if (!p) return null;
+      if (p.tradeProfileScore != null && Number.isFinite(Number(p.tradeProfileScore))) {
+        return Math.round(Math.max(0, Math.min(100, Number(p.tradeProfileScore))));
+      }
+      let score = 35;
+      let used = false;
+      if (p.convictionScore != null && Number.isFinite(Number(p.convictionScore))) {
+        score += Math.min(30, Number(p.convictionScore) * 0.3);
+        used = true;
+      }
+      if (p.scannerConfluence != null && Number.isFinite(Number(p.scannerConfluence))) {
+        score += Math.min(20, Number(p.scannerConfluence) * 0.2);
+        used = true;
+      }
+      if (p.antiRug && p.antiRug.riskScore != null && Number.isFinite(Number(p.antiRug.riskScore))) {
+        score += Math.max(0, 15 - Number(p.antiRug.riskScore) * 0.15);
+        used = true;
+      }
+      const wallets = (p.sourceNames && p.sourceNames.length) || (p.sourceWallets && p.sourceWallets.length) || 0;
+      if (wallets > 0) {
+        score += Math.min(10, wallets * 3);
+        used = true;
+      }
+      if (p.tradeProfileReason || p.entrySource || p.scannerPlaybook) used = true;
+      if (!used) return null;
+      return Math.round(Math.max(0, Math.min(100, score)));
+    }
+
+    function buildOpenEntryReasonDetail(p) {
+      const lines = [];
+      if (!p) {
+        return { hasInfo: false, quality: null, qualityEstimated: false, lines: [] };
+      }
+      const profileName =
+        p.tradeProfileName ||
+        (p.tradeProfileId ? String(p.tradeProfileId).replace(/_/g, ' ') : null);
+      if (profileName) {
+        lines.push({
+          label: 'Profile',
+          text:
+            profileName +
+            (p.tradeProfileReason ? ' — ' + String(p.tradeProfileReason) : ''),
+        });
+      } else if (p.tradeProfileReason) {
+        lines.push({ label: 'Profile', text: String(p.tradeProfileReason) });
+      }
+
+      if (p.entrySource) {
+        const srcLabel =
+          p.entrySource === 'wallet'
+            ? 'Smart wallet copy'
+            : p.entrySource === 'scanner'
+              ? 'Market scanner'
+              : p.entrySource === 'migration'
+                ? 'Migration event'
+                : p.entrySource === 'hybrid'
+                  ? 'Hybrid (wallet + scanner)'
+                  : String(p.entrySource);
+        lines.push({ label: 'Entry path', text: srcLabel });
+      }
+
+      if (p.entryMarketCapUsd != null && Number(p.entryMarketCapUsd) > 0) {
+        let mcText = 'Entered at ' + fmtUsdShort(p.entryMarketCapUsd) + ' MC';
+        if (
+          p.sourceEntryMcUsd != null &&
+          Number(p.sourceEntryMcUsd) > 0 &&
+          Math.abs(Number(p.sourceEntryMcUsd) - Number(p.entryMarketCapUsd)) /
+            Number(p.entryMarketCapUsd) >
+            0.02
+        ) {
+          mcText +=
+            ' (source wallet bought near ' +
+            fmtUsdShort(p.sourceEntryMcUsd) +
+            ')';
+        }
+        lines.push({ label: 'Market cap', text: mcText });
+      }
+
+      if (p.convictionScore != null && Number.isFinite(Number(p.convictionScore))) {
+        lines.push({
+          label: 'Conviction',
+          text: String(Number(p.convictionScore).toFixed(0)) + ' / 100',
+        });
+      }
+
+      const techBits = [];
+      if (p.technicalLevels && p.technicalLevels.summary) {
+        techBits.push(String(p.technicalLevels.summary));
+      }
+      if (p.candleSource) {
+        techBits.push(
+          p.candleSource === 'real'
+            ? 'Real candle data'
+            : 'Synthetic / proxy candles'
+        );
+      }
+      if (p.shortTermStrategyId) {
+        techBits.push(
+          'Scalp engine: ' + String(p.shortTermStrategyId).replace(/_/g, ' ')
+        );
+      } else if (p.scalpMode) {
+        techBits.push('Scalp / short-term exit mode armed');
+      }
+      if (techBits.length) {
+        lines.push({ label: 'Technicals', text: techBits.join(' · ') });
+      }
+
+      if (p.scannerPlaybook || p.scannerConfluence != null) {
+        const bits = [];
+        if (p.scannerPlaybook) bits.push(String(p.scannerPlaybook).replace(/_/g, ' '));
+        if (p.scannerConfluence != null && Number.isFinite(Number(p.scannerConfluence))) {
+          bits.push('confluence ' + Number(p.scannerConfluence).toFixed(0));
+        }
+        lines.push({ label: 'Scanner', text: bits.join(' · ') });
+      }
+
+      const walletNames = (p.sourceNames || []).filter(Boolean);
+      if (walletNames.length) {
+        lines.push({
+          label: 'Smart wallets',
+          text: walletNames.slice(0, 6).join(', ') + (walletNames.length > 6 ? '…' : ''),
+        });
+      } else if (p.sourceWallets && p.sourceWallets.length) {
+        lines.push({
+          label: 'Smart wallets',
+          text:
+            p.sourceWallets.length +
+            ' wallet' +
+            (p.sourceWallets.length === 1 ? '' : 's') +
+            ' (addresses on file)',
+        });
+      }
+
+      if (p.volumeH1Usd != null && Number(p.volumeH1Usd) > 0) {
+        lines.push({
+          label: 'Volume / flow',
+          text:
+            '1h vol ' +
+            fmtUsdShort(p.volumeH1Usd) +
+            (p.txnsH1 != null ? ' · ' + p.txnsH1 + ' txns' : ''),
+        });
+      }
+
+      if (p.antiRug) {
+        const ar = p.antiRug;
+        const flags = (ar.flags || []).slice(0, 4).join(', ');
+        lines.push({
+          label: 'Risk / anti-rug',
+          text:
+            'score ' +
+            (ar.riskScore != null ? ar.riskScore : '?') +
+            (ar.riskLevel ? ' (' + ar.riskLevel + ')' : '') +
+            (flags ? ' · ' + flags : ''),
+        });
+      }
+
+      const qualityRaw = computeOpenQualityScore(p);
+      const qualityEstimated =
+        qualityRaw != null &&
+        !(
+          p.tradeProfileScore != null &&
+          Number.isFinite(Number(p.tradeProfileScore))
+        );
+
+      return {
+        hasInfo: lines.length > 0 || qualityRaw != null,
+        quality: qualityRaw,
+        qualityEstimated,
+        lines,
+      };
+    }
+
+    function renderOpenReasonPanelHtml(detail) {
+      if (!detail || !detail.hasInfo) {
+        return '<div class="pmi-empty">No info available</div>';
+      }
+      let html = '<div class="pmi-title">Entry reason</div>';
+      if (detail.quality != null) {
+        const q = detail.quality;
+        const cls = q >= 70 ? '' : q >= 45 ? ' is-mid' : ' is-low';
+        html +=
+          '<div class="pmi-score' +
+          cls +
+          '">Quality ' +
+          q +
+          ' / 100' +
+          (detail.qualityEstimated ? ' · est.' : '') +
+          '</div>';
+      }
+      html += detail.lines
+        .map(function (line) {
+          return (
+            '<div class="pmi-line"><strong>' +
+            escHtml(line.label) +
+            ':</strong> ' +
+            escHtml(line.text) +
+            '</div>'
+          );
+        })
+        .join('');
+      return html;
+    }
+
+    function fmtOpenReasonCell(p) {
+      const detail = buildOpenEntryReasonDetail(p);
+      const labelCls = detail.hasInfo ? '' : ' is-empty';
+      const payload = encodeURIComponent(JSON.stringify(detail));
+      return (
+        '<span class="pos-more-info" tabindex="0" role="button" ' +
+        'aria-label="More entry info" data-pos-more="' +
+        escAttr(payload) +
+        '" ' +
+        'onmouseenter="showPosMoreInfo(this,event)" ' +
+        'onfocus="showPosMoreInfo(this,event)" ' +
+        'onclick="togglePosMoreInfo(this,event)" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();togglePosMoreInfo(this,event);}">' +
+        '<span class="pos-more-info-label' +
+        labelCls +
+        '">More Info</span>' +
+        '</span>'
+      );
+    }
+
+    function ensurePosMoreInfoFloat() {
+      let el = document.getElementById('pos-more-info-float');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'pos-more-info-float';
+        el.setAttribute('role', 'tooltip');
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+
+    function placePosMoreInfoFloat(anchor, floatEl) {
+      const rect = anchor.getBoundingClientRect();
+      const pad = 8;
+      floatEl.style.visibility = 'hidden';
+      floatEl.classList.add('is-open');
+      floatEl.setAttribute('aria-hidden', 'false');
+      const fw = floatEl.offsetWidth || 280;
+      const fh = floatEl.offsetHeight || 160;
+      let left = rect.left;
+      let top = rect.bottom + pad;
+      if (left + fw > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - fw - pad);
+      }
+      if (top + fh > window.innerHeight - pad) {
+        top = Math.max(pad, rect.top - fh - pad);
+      }
+      floatEl.style.left = left + 'px';
+      floatEl.style.top = top + 'px';
+      floatEl.style.visibility = 'visible';
+    }
+
+    function showPosMoreInfo(anchor, ev) {
+      if (!anchor) return;
+      const raw = anchor.getAttribute('data-pos-more') || '';
+      let detail = null;
+      try {
+        detail = JSON.parse(decodeURIComponent(raw));
+      } catch (_) {
+        detail = { hasInfo: false };
+      }
+      const floatEl = ensurePosMoreInfoFloat();
+      floatEl.innerHTML = renderOpenReasonPanelHtml(detail);
+      placePosMoreInfoFloat(anchor, floatEl);
+      window._posMoreInfoAnchor = anchor;
+    }
+
+    function hidePosMoreInfo(force) {
+      const floatEl = document.getElementById('pos-more-info-float');
+      if (!floatEl) return;
+      if (!force && floatEl.dataset.pinned === '1') return;
+      floatEl.classList.remove('is-open');
+      floatEl.setAttribute('aria-hidden', 'true');
+      floatEl.dataset.pinned = '0';
+      window._posMoreInfoAnchor = null;
+    }
+
+    function togglePosMoreInfo(anchor, ev) {
+      if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      const floatEl = ensurePosMoreInfoFloat();
+      const open =
+        floatEl.classList.contains('is-open') &&
+        window._posMoreInfoAnchor === anchor &&
+        floatEl.dataset.pinned === '1';
+      if (open) {
+        hidePosMoreInfo(true);
+        return;
+      }
+      showPosMoreInfo(anchor, ev);
+      floatEl.dataset.pinned = '1';
+    }
+
+    document.addEventListener(
+      'mouseout',
+      function (ev) {
+        const floatEl = document.getElementById('pos-more-info-float');
+        if (!floatEl || floatEl.dataset.pinned === '1') return;
+        const to = ev.relatedTarget;
+        if (
+          to &&
+          to.closest &&
+          (to.closest('.pos-more-info') || to.closest('#pos-more-info-float'))
+        ) {
+          return;
+        }
+        const from = ev.target;
+        if (
+          from &&
+          from.closest &&
+          (from.closest('.pos-more-info') || from.closest('#pos-more-info-float'))
+        ) {
+          hidePosMoreInfo(false);
+        }
+      },
+      true
+    );
+
+    document.addEventListener('click', function (ev) {
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      if (t.closest('.pos-more-info') || t.closest('#pos-more-info-float')) return;
+      hidePosMoreInfo(true);
+    });
+
+    window.showPosMoreInfo = showPosMoreInfo;
+    window.togglePosMoreInfo = togglePosMoreInfo;
+    window.hidePosMoreInfo = hidePosMoreInfo;
+
     function fmtOpenedHoldCell(openedAt) {
       const ts = Number(openedAt);
       if (!ts || !Number.isFinite(ts)) return '—';
@@ -11558,6 +11981,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
           const tokenCell = fmtOpenTokenCell(p, riskBit);
+          const reasonCell = fmtOpenReasonCell(p);
+          const tpSlCell =
+            '<span class="pos-tpsl-cell" title="Take-profit / stop-loss">' +
+            '+' +
+            Number(p.takeProfitPct || 0).toFixed(0) +
+            '% / ' +
+            Number(p.stopLossPct || 0) +
+            '%</span>';
           const rowClass = [
             prog.hasPartial ? 'pos-row-partial' : '',
             p.trailingActive ? 'pos-row-trail' : '',
@@ -11575,8 +12006,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <td>\${volCell}</td>
             <td>\${pnlCell}</td>
             <td>\${trailCell}</td>
-            <td>+\${p.takeProfitPct.toFixed(0)}%</td>
-            <td>\${p.stopLossPct}%</td>
+            <td>\${tpSlCell}</td>
+            <td>\${reasonCell}</td>
             <td>\${openedCell}</td>
             <td><button class="danger" onclick="forceSellPosition('\${p.id}', '\${sellLabel}')" title="Force sell entire position">Sell</button></td>
           </tr>\`;
