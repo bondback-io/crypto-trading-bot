@@ -3763,6 +3763,8 @@ export type StrategyModulesExport = {
   schemaVersion: typeof STRATEGY_MODULES_SCHEMA_VERSION;
   kind: typeof STRATEGY_MODULES_KIND;
   exportedAt: string;
+  /** Stable id for boot migration stamps (bump when shipping new defaults). */
+  defaultsId?: string;
   label?: string;
   riskLevel: RiskLevel;
   strategyRecipeMode: StrategyRecipeMode;
@@ -4229,6 +4231,62 @@ export function getBakedStrategyModulesDefault(): StrategyModulesExport {
   return JSON.parse(JSON.stringify(baked)) as StrategyModulesExport;
 }
 
+/** Migration stamp for the current baked defaults file. */
+export function bakedStrategyModulesDefaultStamp(
+  baked?: StrategyModulesExport
+): string {
+  const b = baked ?? getBakedStrategyModulesDefault();
+  const id =
+    (typeof b.defaultsId === 'string' && b.defaultsId.trim()) ||
+    (typeof b.exportedAt === 'string' && b.exportedAt.trim()) ||
+    'v1';
+  const {
+    STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX,
+  } = require('./config') as typeof import('./config');
+  return `${STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX}${id}`;
+}
+
+/**
+ * On boot / deploy: if this build's baked strategy+trade-profile defaults have
+ * not been applied yet, import them (once per defaultsId). Does not wipe wallets
+ * or paper. Re-runs automatically when defaultsId / exportedAt in the JSON changes.
+ */
+export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
+  try {
+    const {
+      hasSettingsMigration,
+      completeSettingsMigration,
+      clearPriorStrategyModulesDefaultMigrations,
+    } = require('./config') as typeof import('./config');
+
+    const baked = getBakedStrategyModulesDefault();
+    const stamp = bakedStrategyModulesDefaultStamp(baked);
+    if (hasSettingsMigration(stamp)) {
+      return false;
+    }
+
+    clearPriorStrategyModulesDefaultMigrations(stamp);
+    const result = importStrategyModulesBundle(baked, {
+      persist: false,
+      label: 'boot-default',
+    });
+    completeSettingsMigration(stamp);
+    console.log(
+      `[settings] Applied baked strategy defaults (${stamp}) · ` +
+        `${result.enabledCount}/${result.totalCount} modules ON · ` +
+        `${result.appliedProfileOverrides} profile override(s) · ` +
+        `recipe ${result.strategyRecipeMode}`
+    );
+    return true;
+  } catch (err) {
+    console.warn(
+      '[settings] Baked strategy defaults boot apply skipped:',
+      err instanceof Error ? err.message : err
+    );
+    return false;
+  }
+}
+
 export function resetStrategyModulesToDefaults(options?: {
   persist?: boolean;
 }): {
@@ -4242,12 +4300,24 @@ export function resetStrategyModulesToDefaults(options?: {
   tradeProfilesEnabled: boolean;
   smartBotProfiles: boolean;
 } {
-  const result = importStrategyModulesBundle(getBakedStrategyModulesDefault(), {
+  const baked = getBakedStrategyModulesDefault();
+  const result = importStrategyModulesBundle(baked, {
     persist: options?.persist !== false,
-    label: 'code-default-2026-07-27',
+    label: 'code-default-reset',
   });
+  try {
+    const {
+      clearPriorStrategyModulesDefaultMigrations,
+      completeSettingsMigration,
+    } = require('./config') as typeof import('./config');
+    const stamp = bakedStrategyModulesDefaultStamp(baked);
+    clearPriorStrategyModulesDefaultMigrations(stamp);
+    completeSettingsMigration(stamp);
+  } catch {
+    /* migration bookkeeping best-effort */
+  }
   const message =
-    `Reset Strategy to baked defaults (2026-07-27 with Trade Profiles)` +
+    `Reset Strategy to baked defaults (${baked.defaultsId || baked.exportedAt || 'shipped'})` +
     ` · ${result.enabledCount}/${result.totalCount} modules ON` +
     ` · ${result.appliedProfileOverrides} profile override(s)` +
     ` · multi-profile ${result.tradeProfilesEnabled ? 'ON' : 'OFF'}` +

@@ -2426,10 +2426,38 @@ const TRADING_MODE_LIVE_SIM_DEFAULT_V2 = 'tradingMode_liveSimDefault_v2';
 const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
 /** One-shot: Smart Bot Profiles ON by default (micro-bots). */
 const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
+/** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
+export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
+  'strategyModulesDefault@';
 const OLD_MAX_PROFIT_DEFAULTS = new Set([100, 500]);
 const NEW_MAX_PROFIT_DEFAULT = 1000;
 const MAX_PROFIT_PERCENT_CEILING = 5000;
 let settingsMigrations: Record<string, boolean> = {};
+
+/** True when a one-shot settings migration id has already run. */
+export function hasSettingsMigration(id: string): boolean {
+  return settingsMigrations[id] === true;
+}
+
+/** Mark a migration complete and persist (keeps redeploys from re-running it). */
+export function completeSettingsMigration(id: string): void {
+  settingsMigrations[id] = true;
+  persistUserSettings();
+}
+
+/** Drop older strategyModulesDefault@* stamps when applying a newer baked default. */
+export function clearPriorStrategyModulesDefaultMigrations(
+  keepId: string
+): void {
+  for (const key of Object.keys(settingsMigrations)) {
+    if (
+      key.startsWith(STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX) &&
+      key !== keepId
+    ) {
+      delete settingsMigrations[key];
+    }
+  }
+}
 
 export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
   return {
@@ -3888,6 +3916,18 @@ export function initWallets(): void {
 
   initTradingWallets();
   applyPersistedSettings();
+  // Ship baked strategy module + Trade Profile defaults on first boot / when
+  // defaultsId changes in src/defaults/strategyModulesDefault.json (new deploy).
+  try {
+    const { applyBakedStrategyModulesDefaultOnBoot } =
+      require('./strategies') as typeof import('./strategies');
+    applyBakedStrategyModulesDefaultOnBoot();
+  } catch (err) {
+    console.warn(
+      '[config] Baked strategy defaults boot hook failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /** Load live trading wallet slots (metadata only) */

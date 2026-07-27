@@ -1,6 +1,7 @@
 {
   "schemaVersion": 2,
   "kind": "strategy-modules",
+  "defaultsId": "2026-07-27-with-trade-profiles",
   "exportedAt": "2026-07-27T09:41:50.305Z",
   "riskLevel": "on",
   "strategyRecipeMode": "custom",
