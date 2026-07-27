@@ -4070,7 +4070,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
@@ -4172,7 +4172,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="trades-closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
@@ -5620,7 +5620,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, or a trade closes in profit. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_HOST/USER/PASS. Secrets stay in Render env — not in this form."></span></div>
+        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, a trade closes in profit, or Zion offers fire. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Without a verified domain, Resend’s onboarding@resend.dev sender can ONLY email the address on your Resend account — verify a domain + set RESEND_FROM to email anyone else. Secrets stay in Render env."></span></div>
         <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
         <div class="grid grid-2 gap-3">
           <label class="ctl"><span>Enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
@@ -12462,7 +12462,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (deliveryHint && cfg.emailDelivery) {
           const d = cfg.emailDelivery;
           deliveryHint.textContent = d.configured
-            ? ('Delivery: ' + d.provider.toUpperCase() + ' ready → ' + (d.to || 'no recipient'))
+            ? ('Delivery: ' + d.provider.toUpperCase() + ' ready → ' + (d.to || 'no recipient') +
+              (d.from ? ' · from ' + d.from : '') +
+              (d.hint ? ' · ' + d.hint : ''))
             : (d.hint || 'Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail.');
           deliveryHint.style.color = d.configured ? '#34d399' : '#fbbf24';
         }

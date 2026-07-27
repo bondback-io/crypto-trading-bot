@@ -142,6 +142,19 @@ async function main(): Promise<void> {
           err instanceof Error ? err.message : err
         );
       }
+      try {
+        const { emailDeliveryStatus } = await import('./emailNotifications');
+        const d = emailDeliveryStatus();
+        console.log(
+          `[boot] Email delivery: provider=${d.provider} configured=${d.configured} ` +
+            `to=${d.to || '(none)'} from=${d.from || '(none)'} · ${d.hint}`
+        );
+      } catch (err) {
+        console.warn(
+          '[boot] Email delivery status error:',
+          err instanceof Error ? err.message : err
+        );
+      }
       await new Promise((r) => setTimeout(r, 3_000));
       startMigrationListener();
       console.log('[boot] Monitor + migration listener started');

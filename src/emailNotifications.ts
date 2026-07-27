@@ -42,15 +42,21 @@ export function emailDeliveryStatus(): {
   configured: boolean;
   provider: 'resend' | 'smtp' | 'none';
   to: string;
+  from: string;
   hint: string;
 } {
   const to = String(config.notifications?.email || '').trim();
+  const from = resolveFromAddress();
   if (resendConfigured()) {
+    const testingLimit = /@resend\.dev\b/i.test(from);
     return {
       configured: true,
       provider: 'resend',
       to,
-      hint: 'Resend API key detected',
+      from,
+      hint: testingLimit
+        ? `Resend ready (from ${from}). Testing mode only delivers to your Resend-account email until you verify a domain and set RESEND_FROM.`
+        : `Resend ready · from ${from}`,
     };
   }
   if (smtpConfigured()) {
@@ -58,6 +64,7 @@ export function emailDeliveryStatus(): {
       configured: true,
       provider: 'smtp',
       to,
+      from,
       hint: `SMTP ${process.env.SMTP_HOST}`,
     };
   }
@@ -65,6 +72,7 @@ export function emailDeliveryStatus(): {
     configured: false,
     provider: 'none',
     to,
+    from,
     hint:
       'Set RESEND_API_KEY (recommended on Render) or SMTP_HOST / SMTP_USER / SMTP_PASS',
   };
@@ -99,6 +107,35 @@ function resolveFromAddress(): string {
   if (resendConfigured()) return 'Crypto Trading Bot <onboarding@resend.dev>';
   if (process.env.SMTP_USER?.trim()) return process.env.SMTP_USER.trim();
   return 'crypto-trading-bot@localhost';
+}
+
+function formatResendError(status: number, body: string): string {
+  const raw = body.slice(0, 500) || `HTTP ${status}`;
+  let message = raw;
+  try {
+    const parsed = JSON.parse(body) as { message?: string };
+    if (parsed?.message) message = String(parsed.message);
+  } catch {
+    /* keep raw */
+  }
+  const from = resolveFromAddress();
+  if (
+    status === 403 &&
+    /only send testing emails to your own email/i.test(message)
+  ) {
+    return (
+      `${message} — With from=${from}, Resend only delivers to the email on your Resend account. ` +
+      `Either set notification Email to that Resend-account address, or verify a domain at resend.com/domains ` +
+      `and set RESEND_FROM to an address on that domain (e.g. Bot <alerts@yourdomain.com>).`
+    );
+  }
+  if (status === 401) {
+    return `${message} — Check RESEND_API_KEY on Render (exact name, then redeploy).`;
+  }
+  if (status === 422 && /from/i.test(message)) {
+    return `${message} — RESEND_FROM must use a verified domain. Current from=${from}.`;
+  }
+  return `Resend HTTP ${status}: ${message}`;
 }
 
 function cooldownMs(kind: NotificationKind): number {
@@ -159,9 +196,7 @@ async function sendViaResend(opts: {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(
-      `Resend HTTP ${res.status}: ${body.slice(0, 300) || res.statusText}`
-    );
+    throw new Error(formatResendError(res.status, body));
   }
 }
 
