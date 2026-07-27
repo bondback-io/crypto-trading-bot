@@ -1912,6 +1912,8 @@ async function executeSignalBuy(
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    insiderPct:
+      signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
     entrySource: signal.entrySource,
     scannerPlaybook: signal.scannerPlaybook,
@@ -2147,6 +2149,8 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    insiderPct:
+      signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
     entrySource: signal.entrySource ?? 'migration',
     ...resolveScalpBuyFlag(signal),
@@ -2751,6 +2755,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sizeReason?: string;
     sourceEntryMcUsd?: number;
     top10HoldPct?: number | null;
+    insiderPct?: number | null;
     convictionScore?: number;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
@@ -2786,6 +2791,8 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     sizeReason: sizing.reason,
     sourceEntryMcUsd: signal.sourceEntryMcUsd,
     top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+    insiderPct:
+      signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
     entrySource:
       signal.entrySource ??
@@ -3168,6 +3175,8 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       strategyKind: signal.isMigration ? 'migration' : 'normal',
       sourceEntryMcUsd: signal.sourceEntryMcUsd,
       top10HoldPct: signal.metrics?.top10HoldPct ?? null,
+      insiderPct:
+        signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
       convictionScore: signal.convictionScore,
       ...resolveScalpBuyFlag(signal),
       antiRug: signal.antiRug

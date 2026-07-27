@@ -9,12 +9,19 @@ import {
   Transaction,
   VersionedTransaction,
 } from '@solana/web3.js';
-import { config, getActiveTradingWallet, effectiveMinMarketCapUsd, usesPaperAccounting } from './config';
+import {
+  config,
+  getActiveTradingWallet,
+  effectiveMinMarketCapUsd,
+  hardFilterFloorsActive,
+  usesPaperAccounting,
+} from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   evaluateBuyPumpFunOnlyGate,
   evaluateHolderConcentrationHardFloors,
 } from './deadTokenFilters';
+import { getTokenSniperActivity } from './gmgn';
 import { effectiveMaxEntryMarketCapUsd } from './filterEffective';
 import {
   getKeypair,
@@ -178,6 +185,11 @@ export interface BuyOptions {
    * Re-checked at executeBuy; known out-of-band hard-skips, unknown is soft-only.
    */
   top10HoldPct?: number | null;
+  /**
+   * GMGN insider / rat hold % from anti-rug. Re-checked at executeBuy under Risk On
+   * (unknown fail-closed via hard floors).
+   */
+  insiderPct?: number | null;
   /** Entry conviction 0–100 for exit discipline */
   convictionScore?: number;
   /** Seed Quick Scalper timed TP/SL/timer on open */
@@ -569,22 +581,40 @@ export async function executeBuy(
     );
   }
 
-  // Hard top-10 band at execute (mirrors anti-rug). Soft-pass / early paper cannot bypass
-  // known out-of-band values. Unknown top10 is soft-only (does not hard-skip).
-  // Enforced whenever min/max > 0 (including Risk Off if user set them; soak zeros both).
+  // Hard top-10 + insider at execute (mirrors anti-rug). Soft-pass / early paper cannot
+  // bypass known out-of-band values. Unknown top10 is soft-only; unknown insider fails
+  // closed under Risk On.
   const top10HoldPct = await resolveTop10HoldPctForEntry(
     mint,
     meta?.top10HoldPct
   );
+  let insiderPct =
+    meta?.insiderPct != null && Number.isFinite(meta.insiderPct)
+      ? meta.insiderPct
+      : null;
+  if (insiderPct == null && hardFilterFloorsActive()) {
+    try {
+      const sniper = await getTokenSniperActivity(mint);
+      if (sniper.source !== 'none' && sniper.insiderPct != null) {
+        insiderPct = sniper.insiderPct;
+      }
+    } catch (err) {
+      console.warn(
+        `[trade] Insider fetch failed for ${mint.slice(0, 8)}…:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
   const holderGate = evaluateHolderConcentrationHardFloors({
     top10HoldPct,
-    insiderPct: null,
+    insiderPct,
   });
   if (holderGate.skipReasons.length > 0) {
     const reason = holderGate.skipReasons[0]!;
     console.log(
       `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
-        `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'})`
+        `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'} · ` +
+        `insider=${insiderPct != null ? insiderPct.toFixed(0) + '%' : '?'})`
     );
     return { success: false, mode: config.mode, error: reason };
   }
@@ -598,6 +628,11 @@ export async function executeBuy(
   ) {
     console.log(
       `[trade] Entry top10 soft-pass ${symbol}: unknown (gate active, known-only enforce)`
+    );
+  }
+  if (insiderPct != null && hardFilterFloorsActive()) {
+    console.log(
+      `[trade] Entry insider OK ${symbol}: ${insiderPct.toFixed(0)}%`
     );
   }
 

@@ -49,6 +49,8 @@ export interface DeadTokenMarketSnapshot {
   marketCapUsd?: number | null;
   isMigrated?: boolean;
   curveHealth?: BondingCurveHealth | null;
+  /** Jupiter organicScore 0–100 when known */
+  organicScore?: number | null;
 }
 
 export interface DeadTokenFloorContext {
@@ -91,6 +93,11 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('top 10 holders unknown') ||
     r.includes('top10 holders unknown') ||
     r.includes('insider % too high') ||
+    r.includes('insider % unknown') ||
+    r.includes('buy-heavy') ||
+    r.includes('buy/sell txn ratio') ||
+    r.includes('organic score too low') ||
+    r.includes('organic / pro-quality') ||
     r.includes('market cap too low') ||
     r.includes('market cap unknown') ||
     r.includes('low mc with near-zero volume') ||
@@ -626,6 +633,50 @@ export function evaluateDeadTokenHardFloors(
     });
   }
 
+  // Buy-heavy txn asymmetry (honeypot / wash-buy charts) — non-bypassable when sample enough
+  if (
+    buys != null &&
+    sells != null &&
+    Number.isFinite(buys) &&
+    Number.isFinite(sells) &&
+    sells >= HARD_FILTER_FLOORS.minSellsForBuyHeavyGate
+  ) {
+    const buyHeavyRatio = buys / Math.max(sells, 1);
+    if (buyHeavyRatio >= HARD_FILTER_FLOORS.maxBuySellTxnRatio) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_buy_heavy_txns',
+        severity: 'critical',
+        label: 'Buy-heavy txn ratio',
+        detail: `${buys} buys / ${sells} sells = ${buyHeavyRatio.toFixed(1)}×`,
+      });
+      skipReasons.push(
+        `Skipped — buy-heavy txn ratio (${buys} buys / ${sells} sells = ${buyHeavyRatio.toFixed(1)}× ≥ ${HARD_FILTER_FLOORS.maxBuySellTxnRatio}×)`
+      );
+    }
+  }
+
+  // Jupiter organic / pro-quality proxy — known-only (unknown fail-open for early Pump)
+  const org = snap.organicScore;
+  const minOrg = HARD_FILTER_FLOORS.minOrganicScore;
+  if (
+    minOrg > 0 &&
+    org != null &&
+    Number.isFinite(org) &&
+    org < minOrg
+  ) {
+    scorePenalty += 28;
+    flags.push({
+      id: 'hard_low_organic_score',
+      severity: 'critical',
+      label: 'Organic / pro-quality score too low',
+      detail: `organicScore ${Math.round(org)} < ${minOrg}`,
+    });
+    skipReasons.push(
+      `Skipped — organic score too low (${Math.round(org)} < ${minOrg}; organic / pro-quality proxy)`
+    );
+  }
+
   // Dumping from recent high (short-term drawdown proxy) — non-bypassable when enabled
   if (effectiveRejectDumpingToken()) {
     const maxDd = effectiveMaxDrawdownFromRecentHighPct();
@@ -767,6 +818,18 @@ export function evaluateHolderConcentrationHardFloors(
         `Skipped — insider % too high (${snap.insiderPct.toFixed(0)}% ≥ ${maxInsider}%)`
       );
     }
+  } else if (insiderGateActive) {
+    // Risk On: fail closed when GMGN insider is missing — known CXMT-class bypass
+    scorePenalty += 35;
+    flags.push({
+      id: 'hard_insider_unknown',
+      severity: 'critical',
+      label: 'Insider % unknown',
+      detail: `need < ${maxInsider}% (hard floor)`,
+    });
+    skipReasons.push(
+      `Skipped — insider % unknown (hard floor; need < ${maxInsider}%)`
+    );
   }
 
   // Extreme deployer hold (≥ hard insider cap) — same non-bypassable class

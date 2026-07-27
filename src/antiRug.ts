@@ -5,7 +5,7 @@
  */
 
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
-import { config, effectiveMinMarketCapUsd } from './config';
+import { config, effectiveMinMarketCapUsd, hardFilterFloorsActive } from './config';
 import { getConnection } from './connection';
 import {
   fetchTokenMetrics,
@@ -41,6 +41,7 @@ import {
   isNonBypassableSkipReason,
 } from './deadTokenFilters';
 import { getCachedSolUsdPrice } from './marketData';
+import { lookupCachedJupiterToken } from './jupiterTokens';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
 export { isNonBypassableSkipReason };
@@ -286,6 +287,11 @@ export interface AntiRugEvalOptions {
   earlyEntry?: boolean;
   /** Migration / graduated token */
   isMigrated?: boolean;
+  /** Jupiter organicScore when already known (scanner / cache) */
+  organicScore?: number | null;
+  /** Jupiter txn counts fallback when Dex h1 missing */
+  jupiterBuys?: number | null;
+  jupiterSells?: number | null;
 }
 
 export async function evaluateAntiRug(
@@ -334,6 +340,9 @@ export async function evaluateAntiRug(
       const report = await runAntiRugChecks(mint, {
         earlyEntry: options.earlyEntry,
         isMigrated: options.isMigrated,
+        organicScore: options.organicScore,
+        jupiterBuys: options.jupiterBuys,
+        jupiterSells: options.jupiterSells,
       });
       cache.set(cacheKey, {
         report: { ...report, fromCache: false },
@@ -378,7 +387,13 @@ export async function evaluateAntiRug(
 
 async function runAntiRugChecks(
   mint: string,
-  ctx: { earlyEntry?: boolean; isMigrated?: boolean } = {}
+  ctx: {
+    earlyEntry?: boolean;
+    isMigrated?: boolean;
+    organicScore?: number | null;
+    jupiterBuys?: number | null;
+    jupiterSells?: number | null;
+  } = {}
 ): Promise<AntiRugReport> {
   const filters = config.filters;
   const enabled = filters.enableAntiRug !== false;
@@ -799,8 +814,13 @@ async function runAntiRugChecks(
   }
 
   // --- GMGN sniper / bundler / insider ---
+  // Soft sniper/bundler scoring stays gated by enableSniperFilter.
+  // Insider hard-floor data is fetched whenever Risk On floors are active so
+  // CXMT-class 90%+ insider tokens cannot pass with insiderPct=null.
   let sniperSummary: ReturnType<typeof summarizeSniper> | undefined;
-  if (filters.enableSniperFilter !== false) {
+  const softSniperOn = filters.enableSniperFilter !== false;
+  const needInsiderForHardFloor = hardFilterFloorsActive();
+  if (softSniperOn || needInsiderForHardFloor) {
     try {
       const sniper: GmgnSniperReport = await getTokenSniperActivity(mint);
       if (sniper.source !== 'none') {
@@ -811,53 +831,66 @@ async function runAntiRugChecks(
         checks.insiderPct = sniper.insiderPct;
         sniperSummary = summarizeSniper(sniper);
 
-        // Raise composite risk with sniper score (weighted)
-        const sniperBoost = Math.round(sniper.sniperScore * 0.45);
-        score += sniperBoost;
+        if (softSniperOn) {
+          // Raise composite risk with sniper score (weighted)
+          const sniperBoost = Math.round(sniper.sniperScore * 0.45);
+          score += sniperBoost;
 
-        if (sniper.highRisk || sniper.warnings.length > 0) {
-          const sev: FlagSeverity = sniper.highRisk
-            ? 'critical'
-            : sniper.sniperScore >= 50
-              ? 'high'
-              : 'medium';
-          flags.push({
-            id: 'sniper_activity',
-            severity: sev,
-            label: sniper.highRisk
-              ? 'Heavy sniper/bundler activity'
-              : 'Sniper activity detected',
-            detail: sniper.warnings.slice(0, 2).join('; ') ||
-              `score ${sniper.sniperScore}`,
-          });
-        }
+          if (sniper.highRisk || sniper.warnings.length > 0) {
+            const sev: FlagSeverity = sniper.highRisk
+              ? 'critical'
+              : sniper.sniperScore >= 50
+                ? 'high'
+                : 'medium';
+            flags.push({
+              id: 'sniper_activity',
+              severity: sev,
+              label: sniper.highRisk
+                ? 'Heavy sniper/bundler activity'
+                : 'Sniper activity detected',
+              detail: sniper.warnings.slice(0, 2).join('; ') ||
+                `score ${sniper.sniperScore}`,
+            });
+          }
 
-        if (sniper.bundlerPct != null && sniper.bundlerPct >= 20) {
-          flags.push({
-            id: 'bundlers',
-            severity: sniper.bundlerPct >= 40 ? 'high' : 'medium',
-            label: `Bundlers ${sniper.bundlerPct.toFixed(0)}%`,
-          });
-        }
-        if (sniper.insiderPct != null && sniper.insiderPct >= 15) {
+          if (sniper.bundlerPct != null && sniper.bundlerPct >= 20) {
+            flags.push({
+              id: 'bundlers',
+              severity: sniper.bundlerPct >= 40 ? 'high' : 'medium',
+              label: `Bundlers ${sniper.bundlerPct.toFixed(0)}%`,
+            });
+          }
+          if (sniper.insiderPct != null && sniper.insiderPct >= 15) {
+            flags.push({
+              id: 'insiders',
+              severity: sniper.insiderPct >= 30 ? 'high' : 'medium',
+              label: `Insiders ${sniper.insiderPct.toFixed(0)}%`,
+            });
+          }
+
+          const gate = shouldSkipForSnipers(sniper);
+          if (gate.skip && enabled) {
+            skipReasons.push(
+              gate.reason ||
+                `Skipped - heavy sniper activity (score ${sniper.sniperScore})`
+            );
+          }
+        } else if (sniper.insiderPct != null && sniper.insiderPct >= 15) {
+          // Hard-floor-only fetch: surface insider for UI without soft skips
           flags.push({
             id: 'insiders',
             severity: sniper.insiderPct >= 30 ? 'high' : 'medium',
             label: `Insiders ${sniper.insiderPct.toFixed(0)}%`,
           });
         }
-
-        const gate = shouldSkipForSnipers(sniper);
-        if (gate.skip && enabled) {
-          skipReasons.push(
-            gate.reason ||
-              `Skipped - heavy sniper activity (score ${sniper.sniperScore})`
-          );
-        }
+      } else if (needInsiderForHardFloor) {
+        console.warn(
+          `[anti-rug] Insider hard-floor fetch returned none for ${mint.slice(0, 8)}…`
+        );
       }
     } catch (err) {
       console.warn(
-        `[anti-rug] Sniper fetch failed for ${mint.slice(0, 8)}…:`,
+        `[anti-rug] Sniper/insider fetch failed for ${mint.slice(0, 8)}…:`,
         err instanceof Error ? err.message : err
       );
     }
@@ -1065,6 +1098,37 @@ async function runAntiRugChecks(
   });
 
   // --- Non-bypassable dead-token floors (after Dex + Birdeye + curve MC merge) ---
+  // Enrich with Jupiter cache when Dex h1 txn counts / organicScore missing.
+  const jupCached = lookupCachedJupiterToken(mint);
+  const organicScore =
+    ctx.organicScore != null && Number.isFinite(ctx.organicScore)
+      ? ctx.organicScore
+      : jupCached?.organicScore != null &&
+          Number.isFinite(Number(jupCached.organicScore))
+        ? Number(jupCached.organicScore)
+        : null;
+  const jupBuys =
+    ctx.jupiterBuys != null && Number.isFinite(ctx.jupiterBuys)
+      ? ctx.jupiterBuys
+      : jupCached?.stats1h?.numBuys != null &&
+          Number.isFinite(Number(jupCached.stats1h.numBuys))
+        ? Number(jupCached.stats1h.numBuys)
+        : null;
+  const jupSells =
+    ctx.jupiterSells != null && Number.isFinite(ctx.jupiterSells)
+      ? ctx.jupiterSells
+      : jupCached?.stats1h?.numSells != null &&
+          Number.isFinite(Number(jupCached.stats1h.numSells))
+        ? Number(jupCached.stats1h.numSells)
+        : null;
+  const buysH1 =
+    metrics.buysH1 != null && Number.isFinite(metrics.buysH1)
+      ? metrics.buysH1
+      : jupBuys;
+  const sellsH1 =
+    metrics.sellsH1 != null && Number.isFinite(metrics.sellsH1)
+      ? metrics.sellsH1
+      : jupSells;
   const hard = evaluateDeadTokenHardFloors(
     {
       liquidityUsd: checks.liquidityUsd,
@@ -1072,8 +1136,8 @@ async function runAntiRugChecks(
       volumeH1Usd: checks.volumeH1Usd,
       volumeM5Usd: metrics.volumeM5Usd,
       recentBuyVolumeUsd: checks.recentBuyVolumeUsd,
-      buysH1: metrics.buysH1,
-      sellsH1: metrics.sellsH1,
+      buysH1,
+      sellsH1,
       txnsH1: checks.txnsH1,
       holderCount: checks.holderCount,
       buySellRatio: checks.birdeyeBuySellRatio,
@@ -1083,6 +1147,7 @@ async function runAntiRugChecks(
       marketCapUsd: checks.marketCapUsd,
       isMigrated,
       curveHealth,
+      organicScore,
     },
     floorCtx
   );

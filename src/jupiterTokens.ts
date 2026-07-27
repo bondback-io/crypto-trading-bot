@@ -82,6 +82,35 @@ export function getJupiterTokensStatus(): {
   };
 }
 
+/**
+ * Best-effort lookup from in-memory Jupiter category caches (no network).
+ * Used to enrich anti-rug hard floors with organicScore / buy-sell txn counts.
+ */
+export function lookupCachedJupiterToken(
+  mint: string
+): JupiterTokenInfo | null {
+  const key = String(mint || '').trim();
+  if (!key) return null;
+  const now = Date.now();
+  let best: JupiterTokenInfo | null = null;
+  for (const hit of cache.values()) {
+    if (hit.expiresAt <= now) continue;
+    const found = hit.tokens.find((t) => t?.id === key);
+    if (!found) continue;
+    if (!best) {
+      best = found;
+      continue;
+    }
+    // Prefer entry with organicScore / richer 1h stats
+    const bestOrg = best.organicScore != null ? 1 : 0;
+    const foundOrg = found.organicScore != null ? 1 : 0;
+    const bestBuys = best.stats1h?.numBuys != null ? 1 : 0;
+    const foundBuys = found.stats1h?.numBuys != null ? 1 : 0;
+    if (foundOrg + foundBuys > bestOrg + bestBuys) best = found;
+  }
+  return best;
+}
+
 function volumeFromStats(
   stats: JupiterSwapStats | null | undefined,
   preferOrganic: boolean

@@ -1291,6 +1291,19 @@ export const HARD_FILTER_FLOORS = {
    * Reject when insiderPct (or extreme dev hold) ≥ this — non-bypassable.
    */
   maxInsiderPct: 50,
+  /**
+   * Max Dex/Jupiter buy÷sell txn ratio (h1). Buy-heavy honeypots often show
+   * hundreds of buys vs few sells. Requires minSellsForBuyHeavyGate sells.
+   */
+  maxBuySellTxnRatio: 15,
+  /** Min sells in window before buy-heavy ratio gate applies */
+  minSellsForBuyHeavyGate: 10,
+  /**
+   * Jupiter organicScore floor (0–100) when score is known.
+   * Proxy for “pro / organic” quality — not Terminal Pro Traders %.
+   * Unknown score does not hard-skip (early Pump often has no Jupiter card).
+   */
+  minOrganicScore: 30,
 } as const;
 
 export interface FilterConfig {
