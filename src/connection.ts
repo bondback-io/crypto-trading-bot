@@ -178,6 +178,21 @@ function ensureEndpoints(): void {
       `secondary→${endpoints[preferredSecondary]?.endpoint.label} · ` +
       `cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down`
   );
+  if (preferredPrimary === preferredSecondary) {
+    console.warn(
+      '[rpc] Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. ' +
+        'Set a distinct RPC_SECONDARY (or first distinct RPC_FALLBACKS entry).'
+    );
+  }
+}
+
+/** True when both lanes prefer the same endpoint index / URL (no distinct secondary). */
+export function lanesShareEndpoint(): boolean {
+  ensureEndpoints();
+  if (preferredPrimary === preferredSecondary) return true;
+  const pUrl = endpoints[preferredPrimary]?.endpoint.url;
+  const sUrl = endpoints[preferredSecondary]?.endpoint.url;
+  return Boolean(pUrl && sUrl && pUrl === sUrl);
 }
 
 function currentRole(): RpcRole {
@@ -453,6 +468,8 @@ export function getRpcStats(): {
     downForMs: number;
   };
   failoverDownMs: number;
+  /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
+  lanesShareEndpoint: boolean;
   supports: typeof RPC_LANE_SUPPORTS;
   endpoints: RpcEndpointStats[];
   jitoEnabled: boolean;
@@ -470,6 +487,7 @@ export function getRpcStats(): {
   const pActive = endpoints[pIdx];
   const sActive = endpoints[sIdx];
   const anyHealthy = endpoints.some((e) => e.healthy);
+  const share = lanesShareEndpoint();
   let warning: string | null = null;
   if (!anyHealthy) {
     warning =
@@ -487,6 +505,9 @@ export function getRpcStats(): {
     sIdx !== preferredSecondary
   ) {
     warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
+  } else if (share) {
+    warning =
+      'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
   }
 
   const maskUrl = (url: string) =>
@@ -510,6 +531,7 @@ export function getRpcStats(): {
       downForMs: downForMs(sPref),
     },
     failoverDownMs: failoverDownMs(),
+    lanesShareEndpoint: share,
     supports: RPC_LANE_SUPPORTS,
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;

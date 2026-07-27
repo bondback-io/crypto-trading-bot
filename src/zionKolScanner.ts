@@ -6,7 +6,7 @@
 
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection } from './connection';
+import { getConnection, lanesShareEndpoint } from './connection';
 import { logger, errorToMeta } from './logger';
 import {
   atomicWriteJson,
@@ -89,6 +89,46 @@ let pollInFlight = false;
 let lastPollAt = 0;
 let lastError: string | null = null;
 let lastUniverseMessage = '';
+
+/** Skip polls until this timestamp after RPC 429 (protects shared primary CU). */
+let rpcCooldownUntil = 0;
+let rpcCooldownMs = 60_000;
+const RPC_COOLDOWN_MIN_MS = 60_000;
+const RPC_COOLDOWN_MAX_MS = 5 * 60_000;
+
+function isRpcRateLimitError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? `${err.message} ${err.name}`
+      : String(err ?? '');
+  return (
+    /\b429\b/i.test(msg) ||
+    /too many requests/i.test(msg) ||
+    /rate.?limit/i.test(msg)
+  );
+}
+
+function noteRpcRateLimit(err: unknown): void {
+  const now = Date.now();
+  rpcCooldownUntil = now + rpcCooldownMs;
+  lastError = err instanceof Error ? err.message : String(err);
+  logger.warn(
+    'ZionScanner',
+    `RPC 429 — cooling down ${Math.round(rpcCooldownMs / 1000)}s ` +
+      `(sharedLane=${lanesShareEndpoint()})`,
+    errorToMeta(err)
+  );
+  rpcCooldownMs = Math.min(RPC_COOLDOWN_MAX_MS, rpcCooldownMs * 2);
+}
+
+function clearRpcCooldownOnSuccess(): void {
+  if (rpcCooldownMs > RPC_COOLDOWN_MIN_MS) {
+    rpcCooldownMs = RPC_COOLDOWN_MIN_MS;
+  }
+  if (rpcCooldownUntil > 0 && Date.now() >= rpcCooldownUntil) {
+    rpcCooldownUntil = 0;
+  }
+}
 
 function zionCfg() {
   return config.zion;
@@ -330,10 +370,13 @@ async function parseBuysFromSig(
 
 async function pollUniverseBatch(): Promise<number> {
   if (!universe.length) return 0;
-  const batchSize = Math.max(
+  const share = lanesShareEndpoint();
+  // Shared lane: cap concurrency so Zion does not starve copy/signals
+  const rawBatch = Math.max(
     2,
     Math.min(12, Number(zionCfg().scanner.batchSize) || 6)
   );
+  const batchSize = share ? Math.min(3, rawBatch) : rawBatch;
   const start = rotationIndex % universe.length;
   const batch: UniverseWallet[] = [];
   for (let i = 0; i < batchSize && i < universe.length; i++) {
@@ -369,6 +412,11 @@ async function pollUniverseBatch(): Promise<number> {
       }
       if (lastOk) lastSignature.set(wallet.address, lastOk);
     } catch (err) {
+      if (isRpcRateLimitError(err)) {
+        noteRpcRateLimit(err);
+        // Abort rest of batch — further parses would only burn more CU
+        break;
+      }
       logger.warn(
         'ZionScanner',
         `Poll fail ${wallet.name}`,
@@ -577,17 +625,30 @@ async function rebuildCandidates(): Promise<void> {
 export async function runZionScannerPollOnce(): Promise<void> {
   if (pollInFlight) return;
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
+  if (Date.now() < rpcCooldownUntil) {
+    lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
+    return;
+  }
   pollInFlight = true;
   try {
     if (!universe.length) loadUniverseCache();
     await refreshUniverse(false);
+    // Bail if cooldown was set mid-refresh (unlikely) or before batch
+    if (Date.now() < rpcCooldownUntil) return;
     await pollUniverseBatch();
-    await rebuildCandidates();
-    lastPollAt = Date.now();
-    lastError = null;
+    if (Date.now() >= rpcCooldownUntil) {
+      await rebuildCandidates();
+      lastPollAt = Date.now();
+      lastError = null;
+      clearRpcCooldownOnSuccess();
+    }
   } catch (err) {
-    lastError = err instanceof Error ? err.message : String(err);
-    logger.warn('ZionScanner', 'Poll failed', errorToMeta(err));
+    if (isRpcRateLimitError(err)) {
+      noteRpcRateLimit(err);
+    } else {
+      lastError = err instanceof Error ? err.message : String(err);
+      logger.warn('ZionScanner', 'Poll failed', errorToMeta(err));
+    }
   } finally {
     pollInFlight = false;
   }
@@ -650,12 +711,16 @@ export function startZionKolScanner(): void {
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
   running = true;
   loadUniverseCache();
-  const interval = Math.max(
+  const share = lanesShareEndpoint();
+  const configured = Math.max(
     30_000,
     Number(zionCfg().scanner.pollIntervalMs) || 60_000
   );
+  // Shared primary/secondary URL: enforce ≥90s so Zion yields CU to copy
+  const interval = share ? Math.max(90_000, configured) : configured;
   console.log(
-    `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}`
+    `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
+      (share ? ' (shared RPC lane — throttled)' : '')
   );
   setTimeout(() => {
     void runZionScannerPollOnce();

@@ -12,7 +12,7 @@ import {
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats, getRpcUrl } from './connection';
+import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
@@ -600,6 +600,19 @@ let paused = false;
 let pollInFlight = false;
 let onSignalHandler: SignalHandler | null = null;
 
+/** Detect Solana RPC / HTTP 429 rate-limit errors from web3.js or providers. */
+function isRpcRateLimitError(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? `${err.message} ${err.name}`
+      : String(err ?? '');
+  return (
+    /\b429\b/i.test(msg) ||
+    /too many requests/i.test(msg) ||
+    /rate.?limit/i.test(msg)
+  );
+}
+
 /**
  * Atomically reserve a mint before any slow await on the buy path.
  * Returns false if already pending, already held, or previously traded
@@ -816,11 +829,27 @@ async function pollAllWallets(): Promise<void> {
     const wallets = getWalletsForPolling();
     const publicRpc = isPublicRpcUrl(getRpcUrl());
     // Keep concurrent RPC polls low on public RPCs; paid endpoints can go faster
-    const batchSize = publicRpc ? 4 : 8;
+    const batchSize = publicRpc ? 4 : 6;
     const batchGapMs = publicRpc ? 200 : 80;
+    let rateLimited = false;
     for (let i = 0; i < wallets.length; i += batchSize) {
+      if (rateLimited) break;
       const batch = wallets.slice(i, i + batchSize);
-      await Promise.allSettled(batch.map((wallet) => pollWallet(wallet)));
+      const results = await Promise.allSettled(
+        batch.map((wallet) => pollWallet(wallet))
+      );
+      for (const r of results) {
+        if (r.status === 'rejected' && isRpcRateLimitError(r.reason)) {
+          rateLimited = true;
+          break;
+        }
+      }
+      if (rateLimited) {
+        console.warn(
+          '[monitor] RPC 429 — skipping rest of poll cycle to protect copy CU'
+        );
+        break;
+      }
       if (i + batchSize < wallets.length) {
         await new Promise((r) => setTimeout(r, batchGapMs));
       }
@@ -865,38 +894,40 @@ export async function checkWalletLastTrade(
   signature?: string;
   failed?: boolean;
 }> {
-  try {
-    const pubkey = new PublicKey(address);
-    const conn = getConnection();
-    const cutoff30d = Math.floor((Date.now() - 30 * MS_PER_DAY) / 1000);
+  return runWithRpcRole('secondary', async () => {
+    try {
+      const pubkey = new PublicKey(address);
+      const conn = getConnection();
+      const cutoff30d = Math.floor((Date.now() - 30 * MS_PER_DAY) / 1000);
 
-    const signatures = await conn.getSignaturesForAddress(pubkey, {
-      limit: 100,
-    });
+      const signatures = await conn.getSignaturesForAddress(pubkey, {
+        limit: 40,
+      });
 
-    if (signatures.length === 0) {
-      return { lastTradedAt: null, tradesLast30d: 0 };
+      if (signatures.length === 0) {
+        return { lastTradedAt: null, tradesLast30d: 0 };
+      }
+
+      const newest = signatures[0];
+      const lastTradedAt = newest.blockTime
+        ? newest.blockTime * 1000
+        : Date.now();
+
+      const tradesLast30d = signatures.filter(
+        (s) => s.blockTime != null && s.blockTime >= cutoff30d
+      ).length;
+
+      return {
+        lastTradedAt,
+        tradesLast30d,
+        signature: newest.signature,
+      };
+    } catch (err) {
+      console.warn(`[monitor] Activity check failed for ${address.slice(0, 8)}…:`, err);
+      // Do NOT invent zeros — callers must keep prior lastTradedAt / tradesLast30d
+      return { lastTradedAt: null, tradesLast30d: 0, failed: true };
     }
-
-    const newest = signatures[0];
-    const lastTradedAt = newest.blockTime
-      ? newest.blockTime * 1000
-      : Date.now();
-
-    const tradesLast30d = signatures.filter(
-      (s) => s.blockTime != null && s.blockTime >= cutoff30d
-    ).length;
-
-    return {
-      lastTradedAt,
-      tradesLast30d,
-      signature: newest.signature,
-    };
-  } catch (err) {
-    console.warn(`[monitor] Activity check failed for ${address.slice(0, 8)}…:`, err);
-    // Do NOT invent zeros — callers must keep prior lastTradedAt / tradesLast30d
-    return { lastTradedAt: null, tradesLast30d: 0, failed: true };
-  }
+  });
 }
 
 /** Refresh activity metadata for one wallet (GMGN first, on-chain fallback) */
@@ -1046,12 +1077,18 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
 
-  for (const wallet of config.smartWallets) {
-    const report = await refreshWalletActivity(wallet);
-    reports.push(report);
-  }
-
-  return reports;
+  return runWithRpcRole('secondary', async () => {
+    for (let i = 0; i < config.smartWallets.length; i++) {
+      const wallet = config.smartWallets[i];
+      const report = await refreshWalletActivity(wallet);
+      reports.push(report);
+      // Stagger on-chain sweeps so a shared RPC isn't hit with a full dump
+      if (i + 1 < config.smartWallets.length) {
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    }
+    return reports;
+  });
 }
 
 /**
@@ -1624,6 +1661,7 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
     }
     // If every parse failed, leave lastSeen unchanged so we retry the same tip
   } catch (err) {
+    if (isRpcRateLimitError(err)) throw err;
     console.error(`[monitor] Error polling ${wallet.name}:`, err);
   }
 }
