@@ -1,6 +1,6 @@
 /**
  * Multi-RPC connection manager with dual lanes (primary / secondary),
- * health monitoring, 5-minute cross-lane failover, priority fees, and stats.
+ * health monitoring, 30s cross-lane failover, priority fees, and stats.
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
@@ -88,14 +88,24 @@ const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
 
+/** Default cross-lane piggyback grace — preferred must stay unhealthy this long. */
+const DEFAULT_FAILOVER_DOWN_MS = 30_000;
+/** Floor so env typos cannot collapse failover to zero. */
+const MIN_FAILOVER_DOWN_MS = 5_000;
+
 function failoverDownMs(): number {
   const fromEnv = Number(process.env.RPC_FAILOVER_DOWN_MS);
-  if (Number.isFinite(fromEnv) && fromEnv >= 60_000) return fromEnv;
+  if (Number.isFinite(fromEnv) && fromEnv >= MIN_FAILOVER_DOWN_MS) return fromEnv;
   const fromCfg = Number(
     (config.rpc as { failoverDownMs?: number } | undefined)?.failoverDownMs
   );
-  if (Number.isFinite(fromCfg) && fromCfg >= 60_000) return fromCfg;
-  return 5 * 60_000;
+  if (Number.isFinite(fromCfg) && fromCfg >= MIN_FAILOVER_DOWN_MS) return fromCfg;
+  return DEFAULT_FAILOVER_DOWN_MS;
+}
+
+function formatFailoverGrace(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60_000)}m`;
 }
 
 function parseRpcList(): RpcEndpoint[] {
@@ -166,7 +176,7 @@ function ensureEndpoints(): void {
   console.log(
     `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} · ` +
       `secondary→${endpoints[preferredSecondary]?.endpoint.label} · ` +
-      `cross-lane failover after ${Math.round(failoverDownMs() / 60_000)}m down`
+      `cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down`
   );
 }
 
@@ -310,7 +320,7 @@ function recordFailure(index: number, error: string): void {
 async function maybeSwitchEndpoints(): Promise<void> {
   ensureEndpoints();
   if (endpoints.length <= 1) return;
-  // Re-resolve both lanes (may piggyback after 5m).
+  // Re-resolve both lanes (may piggyback after grace).
   resolveIndexForRole('primary');
   resolveIndexForRole('secondary');
 }
@@ -370,7 +380,7 @@ export async function withRpc<T>(
     const state = endpoints[index];
     if (!state) continue;
 
-    // Before 5m grace, stay on preferred even if flaky (first attempt only).
+    // Before failover grace, stay on preferred even if flaky (first attempt only).
     const pref = preferredIndexFor(r);
     if (
       attempt > 0 &&
@@ -471,12 +481,12 @@ export function getRpcStats(): {
     warning =
       'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Prefer a paid Helius/QuickNode RPC_URL.';
   } else if (pIdx !== preferredPrimary) {
-    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${Math.round(failoverDownMs() / 60_000)}m).`;
+    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (
     preferredSecondary !== preferredPrimary &&
     sIdx !== preferredSecondary
   ) {
-    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${Math.round(failoverDownMs() / 60_000)}m).`;
+    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${formatFailoverGrace(failoverDownMs())}).`;
   }
 
   const maskUrl = (url: string) =>

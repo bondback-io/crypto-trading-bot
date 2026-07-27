@@ -2255,7 +2255,7 @@ export const config: BotConfig = {
     endpoints: rpcEndpointsFromEnv(),
     healthIntervalMs: 30_000,
     failureThreshold: 3,
-    failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 5 * 60_000,
+    failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
