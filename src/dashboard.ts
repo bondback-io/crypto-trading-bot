@@ -5766,9 +5766,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <label class="ctl ctl-sm"><span>Max buyers <span class="tip" tabindex="0" data-tip="Recent same-block buyers before sandwich abort."></span></span><input type="number" id="sandwichMaxRecentBuys" value="3" /></label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
-          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Latency and success rate for each configured RPC endpoint."></span></div>
+          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Dual-lane Solana RPC: Primary for trading/copy/migrate; Secondary for Zion/KOL. If a lane is down &gt;5 minutes, traffic piggybacks on the other."></span></div>
+          <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary (RPC_URL)</strong> — Trade profile bots, copy + signal scanner, market scanner entry RPC, Pump.fun migrate scanner, open-trade on-chain needs.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary (RPC_SECONDARY or first RPC_FALLBACKS)</strong> — Zion + Place Trade, KOL Token Scanner, Zion trade requests / open-trade on-chain bits, wallet on-chain activity refresh.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥5 minutes before piggybacking on the other paid RPC. Set RPC_URL + RPC_SECONDARY (or RPC_FALLBACKS) in env — replace later anytime.</div>
+          </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
-          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
+          <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
           <div class="mint mt-2" id="jito-status"></div>
         </div>
       </div>
@@ -12184,9 +12191,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.getElementById('rpc-latency').textContent =
         activeEp.latencyMs != null ? activeEp.latencyMs + 'ms' : '—';
       document.getElementById('rpc-summary').textContent =
-        'Active: ' + (rpc.active || '—') +
+        'Primary active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
+        ' · Failover after: ' + (rpc.failoverDownMs != null ? Math.round(Number(rpc.failoverDownMs) / 60000) + 'm' : '5m') +
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
+      const laneSt = document.getElementById('rpc-lane-status');
+      if (laneSt) {
+        const p = rpc.primary || {};
+        const s = rpc.secondary || {};
+        laneSt.textContent =
+          'Primary lane: ' + (p.label || '—') +
+          (p.failover ? ' (FAILOVER)' : '') +
+          (p.healthy === false ? ' · preferred DOWN' : '') +
+          ' · Secondary lane: ' + (s.label || '—') +
+          (s.failover ? ' (FAILOVER)' : '') +
+          (s.healthy === false ? ' · preferred DOWN' : '');
+      }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {
         if (rpc.ok === false) {
@@ -12209,10 +12229,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const rpcBody = document.querySelector('#rpc-table tbody');
       if (rpcBody) {
         rpcBody.innerHTML = (rpc.endpoints || []).length === 0
-          ? '<tr><td colspan="5" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
+          ? '<tr><td colspan="6" style="color:var(--muted)">No RPC endpoints configured</td></tr>'
           : rpc.endpoints.map(e => \`
             <tr>
               <td title="\${e.url}">\${e.label}</td>
+              <td>\${e.lane || e.role || '—'}</td>
               <td>\${e.healthy ? '✅' : '❌'}</td>
               <td>\${e.latencyMs != null ? e.latencyMs + 'ms' : '—'}</td>
               <td>\${e.successRate != null ? Number(e.successRate).toFixed(0) : '—'}% (\${e.successCount || 0}/\${(e.successCount || 0) + (e.failureCount || 0)})</td>

@@ -1,8 +1,9 @@
 /**
- * Multi-RPC connection manager with health monitoring, auto-failover,
- * priority fee estimation, and latency/success stats.
+ * Multi-RPC connection manager with dual lanes (primary / secondary),
+ * health monitoring, 5-minute cross-lane failover, priority fees, and stats.
  */
 
+import { AsyncLocalStorage } from 'async_hooks';
 import {
   Connection,
   Keypair,
@@ -20,22 +21,29 @@ import {
   PUBLIC_SOLANA_RPC,
   normalizeRpcEndpoints,
   rpcEndpointsFromEnv,
+  RPC_LANE_SUPPORTS,
+  type RpcLaneRole,
 } from './rpcUrl';
 
 dotenv.config();
 
 const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
+/** Workload lane — primary = trading/copy; secondary = Zion / KOL / enrichment */
+export type RpcRole = 'primary' | 'secondary';
+
 export interface RpcEndpoint {
   url: string;
   label: string;
   /** Optional dedicated websocket URL */
   wsUrl?: string;
+  role?: RpcLaneRole;
 }
 
 export interface RpcEndpointStats {
   url: string;
   label: string;
+  role: RpcLaneRole;
   healthy: boolean;
   latencyMs: number | null;
   successCount: number;
@@ -43,7 +51,10 @@ export interface RpcEndpointStats {
   successRate: number;
   lastError?: string;
   lastCheckedAt: number | null;
+  unhealthySince: number | null;
   isActive: boolean;
+  /** Preferred endpoint for primary or secondary lane */
+  lane?: RpcRole | null;
 }
 
 interface EndpointState {
@@ -56,14 +67,36 @@ interface EndpointState {
   lastError?: string;
   lastCheckedAt: number | null;
   consecutiveFailures: number;
+  unhealthySince: number | null;
+  role: RpcLaneRole;
 }
 
 let endpoints: EndpointState[] = [];
+/** Preferred index for each lane */
+let preferredPrimary = 0;
+let preferredSecondary = 0;
+/** Currently resolved index serving each lane (may differ after failover) */
+let activePrimary = 0;
+let activeSecondary = 0;
+/** Legacy single active pointer — mirrors primary lane for older callers */
 let activeIndex = 0;
+
+const rpcRoleAls = new AsyncLocalStorage<RpcRole>();
+
 /** Cached keypairs by trading wallet id — secrets never leave process memory */
 const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
+
+function failoverDownMs(): number {
+  const fromEnv = Number(process.env.RPC_FAILOVER_DOWN_MS);
+  if (Number.isFinite(fromEnv) && fromEnv >= 60_000) return fromEnv;
+  const fromCfg = Number(
+    (config.rpc as { failoverDownMs?: number } | undefined)?.failoverDownMs
+  );
+  if (Number.isFinite(fromCfg) && fromCfg >= 60_000) return fromCfg;
+  return 5 * 60_000;
+}
 
 function parseRpcList(): RpcEndpoint[] {
   const fromConfig = config.rpc?.endpoints ?? [];
@@ -73,6 +106,7 @@ function parseRpcList(): RpcEndpoint[] {
         url: e.url,
         label: e.label || `rpc-${i + 1}`,
         wsUrl: e.wsUrl,
+        role: (e as { role?: RpcLaneRole }).role,
       }))
     );
   }
@@ -87,42 +121,157 @@ function ensureEndpoints(): void {
   if (endpoints.length > 0) return;
 
   const list = parseRpcList();
-  endpoints = list.map((endpoint) => ({
-    endpoint,
-    connection: new Connection(endpoint.url, {
-      commitment: 'confirmed',
-      wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
-      // Public RPCs 429 heavily; default web3 retries can hang boot/health for minutes.
-      disableRetryOnRateLimit: true,
-    }),
-    healthy: true,
-    latencyMs: null,
-    successCount: 0,
-    failureCount: 0,
-    lastCheckedAt: null,
-    consecutiveFailures: 0,
-  }));
+  endpoints = list.map((endpoint) => {
+    const role: RpcLaneRole =
+      endpoint.role ||
+      (endpoint.label === 'primary'
+        ? 'primary'
+        : endpoint.label === 'secondary'
+          ? 'secondary'
+          : 'fallback');
+    return {
+      endpoint: { ...endpoint, role },
+      connection: new Connection(endpoint.url, {
+        commitment: 'confirmed',
+        wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
+        disableRetryOnRateLimit: true,
+      }),
+      healthy: true,
+      latencyMs: null,
+      successCount: 0,
+      failureCount: 0,
+      lastCheckedAt: null,
+      consecutiveFailures: 0,
+      unhealthySince: null,
+      role,
+    };
+  });
 
-  activeIndex = 0;
+  preferredPrimary = Math.max(
+    0,
+    endpoints.findIndex((e) => e.role === 'primary')
+  );
+  const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
+  preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
+  activePrimary = preferredPrimary;
+  activeSecondary = preferredSecondary;
+  activeIndex = activePrimary;
+
   console.log(
     `[rpc] Initialized ${endpoints.length} endpoint(s): ` +
-      endpoints.map((e) => e.endpoint.label).join(', ')
+      endpoints
+        .map((e) => `${e.endpoint.label}[${e.role}]`)
+        .join(', ')
+  );
+  console.log(
+    `[rpc] Lanes — primary→${endpoints[preferredPrimary]?.endpoint.label} · ` +
+      `secondary→${endpoints[preferredSecondary]?.endpoint.label} · ` +
+      `cross-lane failover after ${Math.round(failoverDownMs() / 60_000)}m down`
   );
 }
 
-export function getRpcUrl(): string {
-  ensureEndpoints();
-  return endpoints[activeIndex]?.endpoint.url || DEFAULT_RPC;
+function currentRole(): RpcRole {
+  return rpcRoleAls.getStore() ?? 'primary';
 }
 
-export function getConnection(): Connection {
-  ensureEndpoints();
-  return endpoints[activeIndex].connection;
+/** Run work on the secondary (or primary) lane — nested getConnection() inherits the role. */
+export async function runWithRpcRole<T>(
+  role: RpcRole,
+  fn: () => Promise<T> | T
+): Promise<T> {
+  return rpcRoleAls.run(role, async () => await fn());
 }
 
-export function getActiveEndpointLabel(): string {
+function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
-  return endpoints[activeIndex]?.endpoint.label || 'unknown';
+  return role === 'primary' ? preferredPrimary : preferredSecondary;
+}
+
+function downForMs(state: EndpointState | undefined): number {
+  if (!state || state.healthy || !state.unhealthySince) return 0;
+  return Math.max(0, Date.now() - state.unhealthySince);
+}
+
+/**
+ * Resolve which endpoint index should serve a lane.
+ * Preferred stays sticky until unhealthy for failoverDownMs, then piggybacks
+ * on the other lane (or any healthy fallback).
+ */
+function resolveIndexForRole(role: RpcRole): number {
+  ensureEndpoints();
+  const preferred = preferredIndexFor(role);
+  const pref = endpoints[preferred];
+  if (pref?.healthy) {
+    if (role === 'primary') activePrimary = preferred;
+    else activeSecondary = preferred;
+    if (role === 'primary') activeIndex = preferred;
+    return preferred;
+  }
+
+  const downMs = downForMs(pref);
+  if (downMs > 0 && downMs < failoverDownMs()) {
+    // Still within grace — keep hammering preferred (health monitor will recover).
+    return preferred;
+  }
+
+  const otherPreferred = preferredIndexFor(
+    role === 'primary' ? 'secondary' : 'primary'
+  );
+  if (
+    otherPreferred !== preferred &&
+    endpoints[otherPreferred]?.healthy
+  ) {
+    if (
+      (role === 'primary' ? activePrimary : activeSecondary) !== otherPreferred
+    ) {
+      console.warn(
+        `[rpc] ${role} lane piggybacking on ${endpoints[otherPreferred].endpoint.label} ` +
+          `(preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s)`
+      );
+    }
+    if (role === 'primary') {
+      activePrimary = otherPreferred;
+      activeIndex = otherPreferred;
+    } else {
+      activeSecondary = otherPreferred;
+    }
+    return otherPreferred;
+  }
+
+  for (let i = 0; i < endpoints.length; i++) {
+    if (endpoints[i]?.healthy) {
+      if (role === 'primary') {
+        activePrimary = i;
+        activeIndex = i;
+      } else {
+        activeSecondary = i;
+      }
+      return i;
+    }
+  }
+
+  return preferred;
+}
+
+export function getRpcUrl(role?: RpcRole): string {
+  ensureEndpoints();
+  const r = role ?? currentRole();
+  const idx = resolveIndexForRole(r);
+  return endpoints[idx]?.endpoint.url || DEFAULT_RPC;
+}
+
+export function getConnection(role?: RpcRole): Connection {
+  ensureEndpoints();
+  const r = role ?? currentRole();
+  const idx = resolveIndexForRole(r);
+  return endpoints[idx].connection;
+}
+
+export function getActiveEndpointLabel(role?: RpcRole): string {
+  ensureEndpoints();
+  const r = role ?? currentRole();
+  const idx = resolveIndexForRole(r);
+  return endpoints[idx]?.endpoint.label || 'unknown';
 }
 
 function recordSuccess(index: number, latencyMs: number): void {
@@ -132,6 +281,7 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.latencyMs = latencyMs;
   state.healthy = true;
   state.consecutiveFailures = 0;
+  state.unhealthySince = null;
   state.lastCheckedAt = Date.now();
   state.lastError = undefined;
 }
@@ -146,35 +296,23 @@ function recordFailure(index: number, error: string): void {
 
   const threshold = config.rpc?.failureThreshold ?? 3;
   if (state.consecutiveFailures >= threshold) {
+    if (state.healthy) {
+      state.unhealthySince = Date.now();
+    }
     state.healthy = false;
     console.warn(
       `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures`
     );
-    void maybeSwitchEndpoint();
+    void maybeSwitchEndpoints();
   }
 }
 
-async function maybeSwitchEndpoint(): Promise<void> {
+async function maybeSwitchEndpoints(): Promise<void> {
   ensureEndpoints();
   if (endpoints.length <= 1) return;
-
-  const current = endpoints[activeIndex];
-  if (current?.healthy) return;
-
-  for (let i = 0; i < endpoints.length; i++) {
-    if (i === activeIndex) continue;
-    const candidate = endpoints[i];
-    const ok = await probeEndpoint(i);
-    if (ok) {
-      activeIndex = i;
-      console.log(
-        `[rpc] 🔄 Switched to ${candidate.endpoint.label} (${candidate.endpoint.url.slice(0, 40)}…)`
-      );
-      return;
-    }
-  }
-
-  console.error('[rpc] All endpoints unhealthy — staying on current');
+  // Re-resolve both lanes (may piggyback after 5m).
+  resolveIndexForRole('primary');
+  resolveIndexForRole('secondary');
 }
 
 async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
@@ -201,53 +339,80 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   }
 }
 
-/** Run a timed RPC call against the active endpoint; failover on failure */
+/** Run a timed RPC call against the lane's active endpoint; failover on failure */
 export async function withRpc<T>(
   label: string,
-  fn: (conn: Connection) => Promise<T>
+  fn: (conn: Connection) => Promise<T>,
+  role?: RpcRole
 ): Promise<T> {
   ensureEndpoints();
-  const startIndex = activeIndex;
+  const r = role ?? currentRole();
+  const startIndex = resolveIndexForRole(r);
   let lastError: unknown;
 
+  // Build attempt order: lane preferred → other lane → remaining
+  const order: number[] = [];
+  const pushUnique = (i: number) => {
+    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+  };
+  pushUnique(startIndex);
+  pushUnique(preferredIndexFor(r === 'primary' ? 'secondary' : 'primary'));
+  for (let i = 0; i < endpoints.length; i++) pushUnique(i);
+
   logger.info('RPC', `start: ${label}`, {
-    active: endpoints[activeIndex]?.endpoint.label,
+    role: r,
+    active: endpoints[startIndex]?.endpoint.label,
     endpoints: endpoints.length,
   });
 
-  for (let attempt = 0; attempt < endpoints.length; attempt++) {
-    const index = (startIndex + attempt) % endpoints.length;
+  for (let attempt = 0; attempt < order.length; attempt++) {
+    const index = order[attempt];
     const state = endpoints[index];
-    if (!state.healthy && attempt > 0) continue;
+    if (!state) continue;
+
+    // Before 5m grace, stay on preferred even if flaky (first attempt only).
+    const pref = preferredIndexFor(r);
+    if (
+      attempt > 0 &&
+      index !== pref &&
+      downForMs(endpoints[pref]) < failoverDownMs() &&
+      endpoints[pref] &&
+      !endpoints[pref].healthy
+    ) {
+      // Prefer not to jump early — but if preferred is hard-failing this call, allow next.
+    }
+    if (!state.healthy && attempt > 0 && downForMs(endpoints[pref]) < failoverDownMs()) {
+      // Skip known-unhealthy others until preferred has been down long enough
+      if (index !== pref) continue;
+    }
 
     const t0 = Date.now();
     try {
-      const prev = activeIndex;
-      activeIndex = index;
+      if (r === 'primary') {
+        activePrimary = index;
+        activeIndex = index;
+      } else {
+        activeSecondary = index;
+      }
       const result = await fn(state.connection);
       const latencyMs = Date.now() - t0;
       recordSuccess(index, latencyMs);
-      if (prev !== index && state.healthy) {
-        logger.info('RPC', `${label} succeeded after failover`, {
-          endpoint: state.endpoint.label,
-          latencyMs,
-          attempt: attempt + 1,
-        });
-      } else {
-        logger.info('RPC', `${label} ok`, {
-          endpoint: state.endpoint.label,
-          latencyMs,
-        });
-      }
+      logger.info('RPC', `${label} ok`, {
+        role: r,
+        endpoint: state.endpoint.label,
+        latencyMs,
+        attempt: attempt + 1,
+      });
       return result;
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
       recordFailure(index, message);
       logger.warn('RPC', `${label} failed`, {
+        role: r,
         endpoint: state.endpoint.label,
         attempt: attempt + 1,
-        maxAttempts: endpoints.length,
+        maxAttempts: order.length,
         latencyMs: Date.now() - t0,
         ...errorToMeta(err),
       });
@@ -263,6 +428,22 @@ export async function withRpc<T>(
 export function getRpcStats(): {
   active: string;
   activeUrl: string;
+  primary: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+  };
+  secondary: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+  };
+  failoverDownMs: number;
+  supports: typeof RPC_LANE_SUPPORTS;
   endpoints: RpcEndpointStats[];
   jitoEnabled: boolean;
   priorityFeeLamports: number | null;
@@ -272,7 +453,12 @@ export function getRpcStats(): {
   warning: string | null;
 } {
   ensureEndpoints();
-  const active = endpoints[activeIndex];
+  const pIdx = resolveIndexForRole('primary');
+  const sIdx = resolveIndexForRole('secondary');
+  const pPref = endpoints[preferredPrimary];
+  const sPref = endpoints[preferredSecondary];
+  const pActive = endpoints[pIdx];
+  const sActive = endpoints[sIdx];
   const anyHealthy = endpoints.some((e) => e.healthy);
   let warning: string | null = null;
   if (!anyHealthy) {
@@ -280,19 +466,51 @@ export function getRpcStats(): {
       'All RPC endpoints unhealthy — wallet buy detection is paused until RPC recovers. ' +
       'Set a real Helius/QuickNode RPC_URL on Render (not a placeholder).';
   } else if (
-    /mainnet-beta\.solana\.com|publicnode\.com/i.test(active?.endpoint.url || '')
+    /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
   ) {
     warning =
-      'Using a public Solana RPC — fine for paper, but rate limits can miss buys. Prefer a paid Helius/QuickNode RPC_URL.';
+      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Prefer a paid Helius/QuickNode RPC_URL.';
+  } else if (pIdx !== preferredPrimary) {
+    warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${Math.round(failoverDownMs() / 60_000)}m).`;
+  } else if (
+    preferredSecondary !== preferredPrimary &&
+    sIdx !== preferredSecondary
+  ) {
+    warning = `Secondary lane piggybacking on ${sActive?.endpoint.label} (preferred secondary down >${Math.round(failoverDownMs() / 60_000)}m).`;
   }
+
+  const maskUrl = (url: string) =>
+    url.replace(/\/\/.*@/, '//***@').slice(0, 72);
+
   return {
-    active: getActiveEndpointLabel(),
-    activeUrl: getRpcUrl(),
+    active: getActiveEndpointLabel('primary'),
+    activeUrl: getRpcUrl('primary'),
+    primary: {
+      label: pActive?.endpoint.label || 'primary',
+      url: maskUrl(pActive?.endpoint.url || ''),
+      healthy: Boolean(pPref?.healthy),
+      failover: pIdx !== preferredPrimary,
+      downForMs: downForMs(pPref),
+    },
+    secondary: {
+      label: sActive?.endpoint.label || 'secondary',
+      url: maskUrl(sActive?.endpoint.url || ''),
+      healthy: Boolean(sPref?.healthy),
+      failover: sIdx !== preferredSecondary,
+      downForMs: downForMs(sPref),
+    },
+    failoverDownMs: failoverDownMs(),
+    supports: RPC_LANE_SUPPORTS,
     endpoints: endpoints.map((s, i) => {
       const total = s.successCount + s.failureCount;
+      let lane: RpcRole | null = null;
+      if (i === preferredPrimary) lane = 'primary';
+      else if (i === preferredSecondary && preferredSecondary !== preferredPrimary)
+        lane = 'secondary';
       return {
         url: s.endpoint.url,
         label: s.endpoint.label,
+        role: s.role,
         healthy: s.healthy,
         latencyMs: s.latencyMs,
         successCount: s.successCount,
@@ -300,7 +518,9 @@ export function getRpcStats(): {
         successRate: total === 0 ? 100 : (s.successCount / total) * 100,
         lastError: s.lastError,
         lastCheckedAt: s.lastCheckedAt,
-        isActive: i === activeIndex,
+        unhealthySince: s.unhealthySince,
+        isActive: i === pIdx || i === sIdx,
+        lane,
       };
     }),
     jitoEnabled: Boolean(config.rpc?.jito?.enabled),
@@ -549,19 +769,21 @@ export async function getTradingWalletsStatus(): Promise<{
 export async function testConnection(): Promise<boolean> {
   ensureEndpoints();
   startRpcHealthMonitor();
-  const ok = await probeEndpoint(activeIndex, 6_000);
+  const primaryIdx = resolveIndexForRole('primary');
+  const ok = await probeEndpoint(primaryIdx, 6_000);
   if (ok) {
     console.log(
-      `[connection] RPC OK — ${getActiveEndpointLabel()} latency ${endpoints[activeIndex].latencyMs}ms`
+      `[connection] RPC OK — ${getActiveEndpointLabel('primary')} latency ${endpoints[primaryIdx].latencyMs}ms`
     );
     return true;
   }
 
-  await maybeSwitchEndpoint();
-  const retry = await probeEndpoint(activeIndex, 6_000);
+  await maybeSwitchEndpoints();
+  const retryIdx = resolveIndexForRole('primary');
+  const retry = await probeEndpoint(retryIdx, 6_000);
   if (retry) {
     console.log(
-      `[connection] RPC OK after failover → ${getActiveEndpointLabel()}`
+      `[connection] RPC OK after failover → ${getActiveEndpointLabel('primary')}`
     );
     return true;
   }
@@ -583,9 +805,7 @@ export function startRpcHealthMonitor(): void {
       for (let i = 0; i < endpoints.length; i++) {
         await probeEndpoint(i);
       }
-      if (!endpoints[activeIndex]?.healthy) {
-        await maybeSwitchEndpoint();
-      }
+      await maybeSwitchEndpoints();
     })();
   }, interval);
 

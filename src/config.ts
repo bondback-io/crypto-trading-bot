@@ -1818,9 +1818,11 @@ export interface BotConfig {
 
   /** Multi-RPC + Jito + priority fees */
   rpc: {
-    endpoints: { url: string; label: string; wsUrl?: string }[];
+    endpoints: { url: string; label: string; wsUrl?: string; role?: string }[];
     healthIntervalMs: number;
     failureThreshold: number;
+    /** Prefer other lane only after preferred endpoint is unhealthy this long (ms). */
+    failoverDownMs: number;
     priorityFee: {
       minMicroLamports: number;
       maxMicroLamports: number;
@@ -2253,6 +2255,7 @@ export const config: BotConfig = {
     endpoints: rpcEndpointsFromEnv(),
     healthIntervalMs: 30_000,
     failureThreshold: 3,
+    failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 5 * 60_000,
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
@@ -4872,9 +4875,11 @@ export function getConfigSnapshot() {
       endpoints: config.rpc.endpoints.map((e) => ({
         label: e.label,
         url: e.url.replace(/\/\/.*@/, '//***@').slice(0, 60),
+        role: (e as { role?: string }).role,
       })),
       jitoEnabled: config.rpc.jito.enabled,
       healthIntervalMs: config.rpc.healthIntervalMs,
+      failoverDownMs: config.rpc.failoverDownMs,
     },
     mev: { ...config.mev },
     tokenMetrics: { ...config.tokenMetrics },

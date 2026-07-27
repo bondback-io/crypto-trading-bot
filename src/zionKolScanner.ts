@@ -295,7 +295,7 @@ async function parseBuysFromSig(
   wallet: UniverseWallet,
   signature: string
 ): Promise<number> {
-  const conn = getConnection();
+  const conn = getConnection('secondary');
   const tx = await conn.getParsedTransaction(signature, {
     maxSupportedTransactionVersion: 0,
     commitment: 'confirmed',
@@ -341,7 +341,7 @@ async function pollUniverseBatch(): Promise<number> {
   }
   rotationIndex = (start + batch.length) % Math.max(1, universe.length);
 
-  const conn = getConnection();
+  const conn = getConnection('secondary');
   let buys = 0;
 
   for (const wallet of batch) {

@@ -13,6 +13,7 @@ import {
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
 import { executeBuy } from './trade';
+import { runWithRpcRole } from './connection';
 import { getCachedSolUsdPrice } from './marketData';
 import { paperTrader } from './paperTrader';
 import { clampToMaxAllowedTradeSol } from './risk';
@@ -378,7 +379,9 @@ export async function executeApprovedOffer(
   }
 
   try {
-    const result = await executeBuy(offer.mint, offer.symbol, buyOpts);
+    const result = await runWithRpcRole('secondary', () =>
+      executeBuy(offer.mint, offer.symbol, buyOpts)
+    );
     if (!result?.success) {
       offer.status = 'failed';
       offer.error = result?.error || 'executeBuy failed';
