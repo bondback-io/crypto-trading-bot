@@ -3420,56 +3420,23 @@ export function applyPersistedSettings(): boolean {
   }
 
   if (!settingsMigrations[ZION_SAFEGUARDS_V1]) {
-    if (!config.zion) {
-      (config as { zion?: typeof config.zion }).zion = {
+    config.zion.minKolWallets = 2;
+    config.zion.minWalletQuality = 40;
+    config.zion.minMcUsd = 50_000;
+    config.zion.maxMcUsd = 500_000_000;
+    config.zion.offerTtlMinutes = 60;
+    config.zion.mintCooldownMinutes = 120;
+    if (!config.zion.scanner) {
+      config.zion.scanner = {
         enabled: true,
-        scanner: {
-          enabled: true,
-          pollIntervalMs: 30_000,
-          universeSize: 60,
-          activityLookbackMinutes: 45,
-          batchSize: 6,
-        },
-        minKolWallets: 2,
-        minWalletQuality: 40,
-        minMcUsd: 50_000,
-        maxMcUsd: 500_000_000,
-        offerTtlMinutes: 60,
-        mintCooldownMinutes: 120,
-        useTrackedWalletsAsBoost: true,
-        autoOfferFromScanner: true,
-        defaults: {
-          sizeMode: 'sol',
-          solAmount: 0.25,
-          usdAmount: 50,
-          takeProfitPct: 80,
-          stopLossPct: -25,
-          trailingStopPct: 18,
-          trailingActivationProfit: 35,
-          useExitPresets: true,
-        },
-        notifyEmailOnOffer: true,
-        notifyEmailOnPlaced: true,
+        pollIntervalMs: 30_000,
+        universeSize: 60,
+        activityLookbackMinutes: 45,
+        batchSize: 6,
       };
     } else {
-      config.zion.minKolWallets = 2;
-      config.zion.minWalletQuality = 40;
-      config.zion.minMcUsd = 50_000;
-      config.zion.maxMcUsd = 500_000_000;
-      config.zion.offerTtlMinutes = 60;
-      config.zion.mintCooldownMinutes = 120;
-      if (!config.zion.scanner) {
-        config.zion.scanner = {
-          enabled: true,
-          pollIntervalMs: 30_000,
-          universeSize: 60,
-          activityLookbackMinutes: 45,
-          batchSize: 6,
-        };
-      } else {
-        config.zion.scanner.pollIntervalMs = 30_000;
-        config.zion.scanner.universeSize = 60;
-      }
+      config.zion.scanner.pollIntervalMs = 30_000;
+      config.zion.scanner.universeSize = 60;
     }
     settingsMigrations[ZION_SAFEGUARDS_V1] = true;
     persistUserSettings();

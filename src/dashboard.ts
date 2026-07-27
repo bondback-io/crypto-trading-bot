@@ -1928,6 +1928,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       gap: 0.4rem;
       align-items: center;
     }
+    .zion-offer-actions .btn.is-expired,
+    .zion-offer-actions .btn:disabled {
+      opacity: 0.42;
+      pointer-events: none;
+      filter: grayscale(0.35);
+      cursor: not-allowed;
+    }
+    .zion-cand-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+      margin-top: 0.45rem;
+    }
+    .zion-cand-card .mint-ca,
+    .zion-offer-row .mint-ca {
+      margin-top: 0.3rem;
+    }
     @keyframes zion-card-in {
       from { opacity: 0; transform: translateY(18px) scale(0.96); }
       to { opacity: 1; transform: none; }
@@ -15781,6 +15799,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 'zion-cand-card' +
                 (status === 'offered' ? ' is-offered' : '') +
                 (status === 'skipped' ? ' is-skipped' : '');
+              const linked =
+                (c.offerId && findZionOffer(c.offerId)) ||
+                findZionOfferByMint(c.mint);
+              const linkedDisp = linked ? zionOfferDisplayStatus(linked) : null;
+              const openBtn =
+                linked && linkedDisp && linkedDisp.key === 'active'
+                  ? '<button type="button" class="btn btn-primary text-xs" onclick="openZionOfferModal(\\'' +
+                    escAttr(linked.id) +
+                    '\\')" title="Re-open trade request popup">Open trade</button>'
+                  : linked
+                    ? '<button type="button" class="btn btn-secondary text-xs" onclick="openZionOfferModal(\\'' +
+                      escAttr(linked.id) +
+                      '\\')" title="View offer details">View</button>'
+                    : '';
+              const remain =
+                linked && linkedDisp && linkedDisp.key === 'active'
+                  ? '<span class="mint text-xs">' +
+                    zionRemainLabel(linked.expiresAt) +
+                    '</span>'
+                  : '';
               return (
                 '<div class="' +
                 cardCls +
@@ -15791,7 +15829,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 escHtml(c.symbol || '?') +
                 '</span>' +
                 '<span class="zion-status-pill is-' +
-                (status === 'offered' ? 'active' : status === 'skipped' ? 'declined' : 'approved') +
+                (status === 'offered'
+                  ? 'active'
+                  : status === 'skipped'
+                    ? 'declined'
+                    : 'approved') +
                 '">' +
                 escHtml(status) +
                 '</span>' +
@@ -15816,10 +15858,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     '</span>'
                   : '') +
                 '</div>' +
+                fmtMintCa(c.mint) +
                 '<div class="mint text-xs mt-1">' +
                 (kols || '—') +
                 (c.skipReason ? ' · ' + escHtml(c.skipReason) : '') +
                 '</div>' +
+                (openBtn || remain
+                  ? '<div class="zion-cand-actions">' + openBtn + remain + '</div>'
+                  : '') +
                 '</div>'
               );
             })
@@ -15835,11 +15881,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           offersEl.innerHTML = offers
             .map(function (o) {
               const disp = zionOfferDisplayStatus(o);
-              const canOpen = disp.key === 'active';
+              const canOpen = true;
               const openBtn = canOpen
-                ? '<button class="btn btn-primary text-xs" onclick="openZionOfferModal(\\'' +
+                ? '<button class="btn ' +
+                  (disp.key === 'active' ? 'btn-primary' : 'btn-secondary') +
+                  ' text-xs" onclick="openZionOfferModal(\\'' +
                   escAttr(o.id) +
-                  '\\')">Open</button>'
+                  '\\')">' +
+                  (disp.key === 'active' ? 'Open' : 'View') +
+                  '</button>'
                 : '';
               const remain =
                 disp.key === 'active' ? zionRemainLabel(o.expiresAt) : '';
@@ -15866,6 +15916,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '</span>' +
                 (remain ? '<span class="mint">' + remain + '</span>' : '') +
                 '</div>' +
+                fmtMintCa(o.mint) +
                 '<div class="mint text-xs mt-1">' +
                 escHtml((o.reasons || []).slice(0, 3).join(' · ') || o.source || '') +
                 '</div>' +
@@ -15961,9 +16012,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const st = document.getElementById('zion-save-status');
       try {
         const data = await fetchJSON('/api/zion');
+        _zionCache = data;
         fillZionForm(data.config || {});
         renderZionFeeds(data);
-        _zionCache = data;
         if (st) st.textContent = 'Loaded';
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
@@ -16046,6 +16097,78 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return offers.find(function (o) { return o.id === id; }) || null;
     }
 
+    function findZionOfferByMint(mint) {
+      const m = String(mint || '').trim();
+      if (!m) return null;
+      const offers = (_zionCache && _zionCache.offers) || [];
+      const pending = offers.find(function (o) {
+        return o.mint === m && zionOfferDisplayStatus(o).key === 'active';
+      });
+      if (pending) return pending;
+      return offers.find(function (o) { return o.mint === m; }) || null;
+    }
+
+    function zionExpireProgress(o) {
+      const exp = Number(o && o.expiresAt) || 0;
+      const created = Number(o && o.createdAt) || (exp ? exp - 60 * 60_000 : 0);
+      const total = Math.max(1, exp - created);
+      const left = exp - Date.now();
+      return {
+        leftMs: left,
+        pct: Math.max(0, Math.min(1, left / total)),
+        expired: left <= 0,
+      };
+    }
+
+    function applyZionOfferExpiryUi(card, o) {
+      if (!card || !o) return zionOfferDisplayStatus(o);
+      const disp = zionOfferDisplayStatus(o);
+      const progress = zionExpireProgress(o);
+      const bar = card.querySelector('[data-zion-expire-bar]');
+      const label = card.querySelector('[data-zion-expire-label]');
+      const placeBtn = card.querySelector('[data-zion-place]');
+      const title = card.querySelector('.zion-offer-title');
+      const st = card.querySelector('[data-zion-status]');
+      if (bar) bar.style.transform = 'scaleX(' + progress.pct.toFixed(4) + ')';
+      if (label) {
+        if (progress.expired || disp.key !== 'active') {
+          label.textContent =
+            disp.key === 'active' ? 'Offer expired' : 'Offer ' + disp.label.toLowerCase();
+        } else {
+          label.textContent = 'Expires in ' + zionRemainLabel(o.expiresAt).replace(/ left$/, '');
+        }
+      }
+      if (title) {
+        title.textContent = (o.symbol || '?') + ' · ' + disp.label;
+      }
+      const canPlace = disp.key === 'active' && !progress.expired;
+      if (placeBtn) {
+        if (canPlace) {
+          placeBtn.disabled = false;
+          placeBtn.classList.remove('is-expired', 'hidden');
+          placeBtn.style.display = '';
+          placeBtn.textContent = 'Place Trade';
+        } else {
+          placeBtn.disabled = true;
+          placeBtn.classList.add('is-expired');
+          placeBtn.textContent = 'Expired';
+          placeBtn.style.display = 'none';
+        }
+      }
+      if (st && (progress.expired || disp.key !== 'active')) {
+        const cur = String(st.textContent || '');
+        if (!/Placed|Placing|fail/i.test(cur)) {
+          st.textContent =
+            disp.key === 'executed'
+              ? 'Already placed'
+              : 'Offer ' +
+                disp.label.toLowerCase() +
+                ' — Place Trade unavailable';
+        }
+      }
+      return disp;
+    }
+
     function openZionOfferModal(id, offer, opts) {
       opts = opts || {};
       const o = offer || findZionOffer(id);
@@ -16058,15 +16181,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       const disp = zionOfferDisplayStatus(o);
-      if (disp.key !== 'active' && !opts.force) {
-        alert('Offer is ' + disp.label.toLowerCase() + ' — cannot place.');
-        return;
-      }
       _zionActiveOfferId = o.id;
       _zionShownOffers.add(o.id);
       const existing = document.getElementById('zion-offer-card-' + o.id);
       if (existing) {
         existing.classList.remove('is-leaving');
+        applyZionOfferExpiryUi(existing, o);
         existing.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         return;
       }
@@ -16086,6 +16206,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           );
         })
         .join(' · ');
+      const canPlace = disp.key === 'active';
 
       const card = document.createElement('div');
       card.className = 'zion-offer-card';
@@ -16106,8 +16227,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '">Close</button>' +
         '</div>' +
         '<div class="zion-countdown">' +
-        '<span data-zion-count-label>Auto-hide in 30s</span>' +
-        '<div class="zion-countdown-bar"><span data-zion-count-bar style="transform:scaleX(1)"></span></div>' +
+        '<span data-zion-expire-label>Expires in —</span>' +
+        '<div class="zion-countdown-bar"><span data-zion-expire-bar style="transform:scaleX(1)"></span></div>' +
+        (opts.auto
+          ? '<div class="mint text-xs mt-1" data-zion-autohide-label>Popup auto-hides in 30s (offer stays Active)</div>'
+          : '') +
         '</div>' +
         '<div class="zion-offer-stats">' +
         '<div class="zion-offer-stat"><span class="lbl">MC</span><span class="val">' +
@@ -16134,55 +16258,83 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ')</span> ' +
         (kols || '—') +
         '</div>' +
-        '<div class="mint text-xs mt-1" style="word-break:break-all">' +
-        escHtml(o.mint) +
+        '<div class="mt-2">' +
+        fmtMintCa(o.mint) +
         '</div>' +
         '</div>' +
         '<div class="grid grid-cols-2 gap-2 mb-2">' +
         '<label class="ctl ctl-sm"><span>SOL amount</span><input type="number" data-zion-sol min="0.01" step="0.01" value="' +
         escAttr(String(solDef)) +
-        '" /></label>' +
+        '"' +
+        (canPlace ? '' : ' disabled') +
+        ' /></label>' +
         '<label class="ctl ctl-sm"><span>USD amount</span><input type="number" data-zion-usd min="1" step="1" value="' +
         escAttr(String(usdDef)) +
-        '" /></label>' +
+        '"' +
+        (canPlace ? '' : ' disabled') +
+        ' /></label>' +
         '</div>' +
         '<div class="toggle-row mb-2">' +
         '<span>Apply buy / TP / SL / trail presets</span>' +
         '<label class="switch"><input type="checkbox" data-zion-exits' +
         (exitsOn ? ' checked' : '') +
+        (canPlace ? '' : ' disabled') +
         ' /><span class="slider"></span></label>' +
         '</div>' +
         '<div class="zion-offer-actions">' +
-        '<button type="button" class="btn btn-primary" style="background:#16a34a" data-zion-place="' +
+        '<button type="button" class="btn btn-primary' +
+        (canPlace ? '' : ' is-expired') +
+        '" style="background:#16a34a' +
+        (canPlace ? '' : ';display:none') +
+        '" data-zion-place="' +
         escAttr(o.id) +
-        '">Place Trade</button>' +
+        '"' +
+        (canPlace ? '' : ' disabled') +
+        '>' +
+        (canPlace ? 'Place Trade' : 'Expired') +
+        '</button>' +
         '<button type="button" class="btn btn-secondary" data-zion-decline="' +
         escAttr(o.id) +
-        '">Cancel</button>' +
+        '"' +
+        (canPlace ? '' : ' disabled') +
+        '>Cancel</button>' +
         '</div>' +
-        '<div class="mint text-xs mt-2" data-zion-status>Ready · stays Active in Zion tab after auto-hide</div>';
+        '<div class="mint text-xs mt-2" data-zion-status>' +
+        (canPlace
+          ? 'Ready · reopen anytime from Zion feed while Active'
+          : 'Offer ' + disp.label.toLowerCase() + ' — Place Trade unavailable') +
+        '</div>';
 
       stack.appendChild(card);
+      applyZionOfferExpiryUi(card, o);
 
       const started = Date.now();
-      const bar = card.querySelector('[data-zion-count-bar]');
-      const label = card.querySelector('[data-zion-count-label]');
+      const hideLabel = card.querySelector('[data-zion-autohide-label]');
       const tick = function () {
-        const left = Math.max(0, ZION_POPUP_TTL_MS - (Date.now() - started));
-        const pct = left / ZION_POPUP_TTL_MS;
-        if (bar) bar.style.transform = 'scaleX(' + pct.toFixed(4) + ')';
-        if (label) {
-          label.textContent =
-            'Auto-hide in ' + Math.ceil(left / 1000) + 's · offer stays Active';
+        const live = findZionOffer(o.id) || o;
+        const cur = applyZionOfferExpiryUi(card, live);
+        if (opts.auto && hideLabel) {
+          const hideLeft = Math.max(0, ZION_POPUP_TTL_MS - (Date.now() - started));
+          hideLabel.textContent =
+            'Popup auto-hides in ' +
+            Math.ceil(hideLeft / 1000) +
+            's (offer stays Active)';
+          if (hideLeft <= 0) {
+            dismissZionOfferCard(o.id);
+            return;
+          }
         }
-        if (left <= 0) {
-          dismissZionOfferCard(o.id);
+        if (cur.key !== 'active' && !opts.auto) {
+          /* keep card open so user can still copy CA / read reasons */
         }
       };
-      const interval = setInterval(tick, 200);
-      const timeout = setTimeout(function () {
-        dismissZionOfferCard(o.id);
-      }, ZION_POPUP_TTL_MS);
+      const interval = setInterval(tick, 250);
+      let timeout = null;
+      if (opts.auto) {
+        timeout = setTimeout(function () {
+          dismissZionOfferCard(o.id);
+        }, ZION_POPUP_TTL_MS);
+      }
       clearZionPopupTimer(o.id);
       _zionPopupTimers.set(o.id, { interval: interval, timeout: timeout });
       tick();
@@ -16218,6 +16370,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!offerId) return;
       const card = document.getElementById('zion-offer-card-' + offerId);
       const st = card && card.querySelector('[data-zion-status]');
+      const live = findZionOffer(offerId);
+      if (!live || zionOfferDisplayStatus(live).key !== 'active') {
+        if (card && live) applyZionOfferExpiryUi(card, live);
+        if (st) st.textContent = 'Offer expired — Place Trade unavailable';
+        return;
+      }
       if (st) st.textContent = 'Placing…';
       try {
         const solEl = card && card.querySelector('[data-zion-sol]');

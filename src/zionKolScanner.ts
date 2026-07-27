@@ -19,6 +19,7 @@ import { getTopSmartWallets } from './gmgn';
 import { isDeniedCopyMint } from './deniedMints';
 import {
   maybeCreateOffer,
+  getPendingOfferForMint,
   type ZionKolWalletRef,
   type ZionOfferSource,
 } from './zion';
@@ -32,6 +33,8 @@ export interface ZionKolCandidate {
   name: string;
   timestamp: number;
   status: ZionKolCandidateStatus;
+  /** Linked pending offer id when status is offered */
+  offerId?: string;
   score: number;
   reasons: string[];
   skipReason?: string;
@@ -507,7 +510,16 @@ async function rebuildCandidates(): Promise<void> {
         liquidityUsd: agg.liquidityUsd,
         holders: agg.holders,
       });
-      if (offer) cand.status = 'offered';
+      if (offer) {
+        cand.status = 'offered';
+        cand.offerId = offer.id;
+      }
+    } else {
+      const pending = getPendingOfferForMint(agg.mint);
+      if (pending) {
+        cand.status = 'offered';
+        cand.offerId = pending.id;
+      }
     }
 
     next.push(cand);

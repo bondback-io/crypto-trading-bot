@@ -120,9 +120,17 @@ export function getOffer(id: string): ZionOffer | null {
 }
 
 export function hasPendingOfferForMint(mint: string): boolean {
+  return getPendingOfferForMint(mint) != null;
+}
+
+export function getPendingOfferForMint(mint: string): ZionOffer | null {
   ensureLoaded();
   expireStaleOffers();
-  return offers.some((o) => o.mint === mint && o.status === 'pending');
+  const m = String(mint || '').trim();
+  if (!m) return null;
+  return (
+    offers.find((o) => o.mint === m && o.status === 'pending') ?? null
+  );
 }
 
 function isMintCoolingDown(mint: string): boolean {
@@ -170,7 +178,9 @@ export function maybeCreateOffer(
   const mint = String(input.mint || '').trim();
   if (!mint) return null;
 
-  if (hasPendingOfferForMint(mint)) return null;
+  if (hasPendingOfferForMint(mint)) {
+    return getPendingOfferForMint(mint);
+  }
   if (isMintCoolingDown(mint)) return null;
 
   const open = paperTrader.getOpenPositions().some((p) => p.mint === mint);
