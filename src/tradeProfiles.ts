@@ -2986,7 +2986,10 @@ export function hydrateTradeProfilesFromSettings(
     }
   }
   if (s.overrides && typeof s.overrides === 'object') {
-    base.overrides = { ...s.overrides };
+    // Deep-clone nested exitRules/match/modules so Max Trade Override etc. stick
+    base.overrides = JSON.parse(JSON.stringify(s.overrides)) as Partial<
+      Record<TradeProfileId, TradeProfileParamOverride>
+    >;
   }
   if (s.autoScoring && typeof s.autoScoring === 'object') {
     base.autoScoring = normalizeAutoScoringConfig(s.autoScoring);

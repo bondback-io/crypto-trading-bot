@@ -4744,8 +4744,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
             <div class="strategy-io-btns">
-              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download all module toggles and internal settings as JSON">Export JSON</button>
-              <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles and settings from a previously exported JSON">Import JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override) as JSON">Export JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
@@ -7203,7 +7203,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         setStrategyIoStatus('Choose a .json file first', 'err');
         return;
       }
-      if (!confirm('Import strategy modules from\\n' + file.name + '?\\n\\nThis applies module toggles and internal settings from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
+      if (!confirm('Import strategy modules + Trade Profiles from\\n' + file.name + '?\\n\\nThis applies module toggles, internal settings, and Trade Profile params (TP/SL/hold/Size ×/Max Trade Override, Smart Bot, etc.) from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
         input.value = '';
         return;
       }
@@ -7225,7 +7225,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           throw new Error(data.error || data.message || 'Import failed');
         }
         renderStrategies(data);
-        if (window.__tradeProfilesStatus) {
+        if (data.tradeProfiles) {
+          renderTradeProfilesUi(data.tradeProfiles);
+        } else if (window.__tradeProfilesStatus) {
           renderTradeProfilesUi(window.__tradeProfilesStatus);
         }
         window._cfgLoaded = false;

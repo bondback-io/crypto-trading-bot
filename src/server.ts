@@ -2057,12 +2057,14 @@ export function createServer(): express.Application {
     res.send(JSON.stringify(bundle, null, 2));
   });
 
-  /** Import Strategy Control Center JSON (toggles + settings). */
+  /** Import Strategy Control Center JSON (toggles + settings + trade profiles). */
   app.post('/api/strategies/import', (req: Request, res: Response) => {
     const {
       importStrategyModulesBundle,
       getStrategiesStatus,
     } = require('./strategies') as typeof import('./strategies');
+    const { getTradeProfilesStatus, ensureTradeProfilesInitialized } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       // Accept either raw export object or { bundle: export }
@@ -2071,7 +2073,13 @@ export function createServer(): express.Application {
           ? body.bundle
           : body;
       const result = importStrategyModulesBundle(payload);
-      res.json({ ...getStrategiesStatus(), import: result, ok: true });
+      ensureTradeProfilesInitialized();
+      res.json({
+        ...getStrategiesStatus(),
+        tradeProfiles: getTradeProfilesStatus(),
+        import: result,
+        ok: true,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(400).json({ ok: false, error: message });

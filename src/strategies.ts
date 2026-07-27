@@ -3756,7 +3756,7 @@ export function getStrategiesStatus() {
 }
 
 /** Strategy Control Center Import/Export JSON schema version. */
-export const STRATEGY_MODULES_SCHEMA_VERSION = 1 as const;
+export const STRATEGY_MODULES_SCHEMA_VERSION = 2 as const;
 export const STRATEGY_MODULES_KIND = 'strategy-modules' as const;
 
 export type StrategyModulesExport = {
@@ -3783,6 +3783,12 @@ export type StrategyModulesExport = {
     enabled: boolean;
     settings?: Record<string, unknown>;
   }>;
+  /**
+   * Trade Profiles (Scalper, Trend Rider, etc.) — full runtime snapshot including
+   * per-profile overrides (TP/SL/hold/Size ×/maxTradeOverrideSol/match/modules).
+   * Also mirrored under `settings.tradeProfiles` for v1 compatibility.
+   */
+  tradeProfiles?: PersistedBotSettings['tradeProfiles'];
   /**
    * Full internal knobs needed to restore Strategy Control Center state
    * (filters, scalp engines, trade profiles, etc.).
@@ -3864,6 +3870,20 @@ export function exportStrategyModulesBundle(options?: {
 }): StrategyModulesExport {
   const toggles = ensureStrategyToggles();
   const snap = buildPersistedSettingsSnapshot();
+  // Prefer live runtime serialize so Max Trade Override / nested exitRules are current
+  let tradeProfiles: PersistedBotSettings['tradeProfiles'];
+  try {
+    const { serializeTradeProfilesForPersist, ensureTradeProfilesInitialized } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    ensureTradeProfilesInitialized();
+    tradeProfiles = serializeTradeProfilesForPersist() as PersistedBotSettings['tradeProfiles'];
+  } catch {
+    tradeProfiles = snap.tradeProfiles
+      ? (cloneModuleSettings(
+          snap.tradeProfiles
+        ) as PersistedBotSettings['tradeProfiles'])
+      : undefined;
+  }
   const modules = STRATEGY_REGISTRY.map((s) => {
     const dedicated = dedicatedModuleSettings(s.key);
     return {
@@ -3890,6 +3910,11 @@ export function exportStrategyModulesBundle(options?: {
     highWinRatePresetActive: config.highWinRatePresetActive === true,
     toggles: { ...toggles },
     modules,
+    tradeProfiles: tradeProfiles
+      ? (cloneModuleSettings(
+          tradeProfiles
+        ) as PersistedBotSettings['tradeProfiles'])
+      : undefined,
     settings: {
       trade: cloneModuleSettings(snap.trade ?? {}),
       filters: cloneModuleSettings(snap.filters ?? {}),
@@ -3908,9 +3933,9 @@ export function exportStrategyModulesBundle(options?: {
       bondingCurve: cloneModuleSettings(snap.bondingCurve ?? {}),
       mev: cloneModuleSettings(snap.mev ?? {}),
       marketScanner: cloneModuleSettings(snap.marketScanner ?? {}),
-      tradeProfiles: snap.tradeProfiles
+      tradeProfiles: tradeProfiles
         ? (cloneModuleSettings(
-            snap.tradeProfiles
+            tradeProfiles
           ) as PersistedBotSettings['tradeProfiles'])
         : undefined,
       tokenMetrics: snap.tokenMetrics
@@ -3924,16 +3949,38 @@ export function exportStrategyModulesBundle(options?: {
 export type StrategyModulesImportResult = {
   ok: true;
   appliedToggles: number;
+  appliedProfileOverrides: number;
   enabledCount: number;
   totalCount: number;
   riskLevel: RiskLevel;
   strategyRecipeMode: StrategyRecipeMode;
   strategyProfile: StrategyProfileId;
+  tradeProfilesEnabled: boolean;
+  smartBotProfiles: boolean;
   message: string;
 };
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function countProfileOverrides(
+  overrides: unknown
+): number {
+  if (!isPlainObject(overrides)) return 0;
+  let n = 0;
+  for (const ov of Object.values(overrides)) {
+    if (!isPlainObject(ov)) continue;
+    const exitRules = ov.exitRules;
+    const match = ov.match;
+    const modules = ov.modules;
+    const hasExit =
+      isPlainObject(exitRules) && Object.keys(exitRules).length > 0;
+    const hasMatch = isPlainObject(match) && Object.keys(match).length > 0;
+    const hasMods = isPlainObject(modules) && Object.keys(modules).length > 0;
+    if (hasExit || hasMatch || hasMods) n += 1;
+  }
+  return n;
 }
 
 /**
@@ -3967,10 +4014,21 @@ export function importStrategyModulesBundle(
   const togglesRaw = raw.toggles;
   const settingsRaw = raw.settings;
   const modulesRaw = raw.modules;
+  // v2 top-level tradeProfiles preferred; fall back to settings.tradeProfiles (v1)
+  const tradeProfilesRaw = isPlainObject(raw.tradeProfiles)
+    ? raw.tradeProfiles
+    : isPlainObject(settingsRaw) && isPlainObject(settingsRaw.tradeProfiles)
+      ? settingsRaw.tradeProfiles
+      : null;
 
-  if (!isPlainObject(togglesRaw) && !isPlainObject(settingsRaw) && !Array.isArray(modulesRaw)) {
+  if (
+    !isPlainObject(togglesRaw) &&
+    !isPlainObject(settingsRaw) &&
+    !Array.isArray(modulesRaw) &&
+    !tradeProfilesRaw
+  ) {
     throw new Error(
-      'Import JSON must include toggles, settings, and/or modules'
+      'Import JSON must include toggles, settings, modules, and/or tradeProfiles'
     );
   }
 
@@ -3992,44 +4050,68 @@ export function importStrategyModulesBundle(
 
   // Apply internal settings first (replace present sections), then toggles.
   // Do not set trading mode / paper / discovery — strategy control center only.
-  if (isPlainObject(settingsRaw)) {
+  if (isPlainObject(settingsRaw) || tradeProfilesRaw) {
     const snap: PersistedBotSettings = {
       version: SETTINGS_VERSION,
       updatedAt: Date.now(),
     };
-    const copyIfObj = (key: keyof PersistedBotSettings) => {
-      const v = settingsRaw[key as string];
-      if (isPlainObject(v)) {
-        (snap as unknown as Record<string, unknown>)[key as string] = v;
+    if (isPlainObject(settingsRaw)) {
+      const copyIfObj = (key: keyof PersistedBotSettings) => {
+        const v = settingsRaw[key as string];
+        if (isPlainObject(v)) {
+          (snap as unknown as Record<string, unknown>)[key as string] = v;
+        }
+      };
+      for (const key of [
+        'trade',
+        'filters',
+        'strategy',
+        'risk',
+        'profitStrategy',
+        'selective',
+        'quickScalper',
+        'microScalper',
+        'momentumBurst',
+        'postMigrationScalp',
+        'reversalScalp',
+        'postRunDip',
+        'technicalLevels',
+        'chartPatterns',
+        'bondingCurve',
+        'mev',
+        'marketScanner',
+        'tradeProfiles',
+        'tokenMetrics',
+      ] as const) {
+        copyIfObj(key);
       }
-    };
-    for (const key of [
-      'trade',
-      'filters',
-      'strategy',
-      'risk',
-      'profitStrategy',
-      'selective',
-      'quickScalper',
-      'microScalper',
-      'momentumBurst',
-      'postMigrationScalp',
-      'reversalScalp',
-      'postRunDip',
-      'technicalLevels',
-      'chartPatterns',
-      'bondingCurve',
-      'mev',
-      'marketScanner',
-      'tradeProfiles',
-      'tokenMetrics',
-    ] as const) {
-      copyIfObj(key);
+      if (typeof settingsRaw.convergenceWindowMs === 'number') {
+        snap.convergenceWindowMs = settingsRaw.convergenceWindowMs;
+      }
     }
-    if (typeof settingsRaw.convergenceWindowMs === 'number') {
-      snap.convergenceWindowMs = settingsRaw.convergenceWindowMs;
+    // Top-level tradeProfiles wins over settings.tradeProfiles
+    if (tradeProfilesRaw) {
+      snap.tradeProfiles =
+        tradeProfilesRaw as PersistedBotSettings['tradeProfiles'];
     }
     applyImportedSettingsSnapshot(snap, 'merge');
+
+    // Hydrate runtime Trade Profiles state from the applied snapshot
+    try {
+      const { hydrateTradeProfilesFromSettings, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      hydrateTradeProfilesFromSettings({
+        tradeProfiles: config.tradeProfiles as unknown as Partial<
+          import('./tradeProfiles').TradeProfileRuntimeState
+        >,
+      });
+    } catch (err) {
+      console.warn(
+        '[strategies] tradeProfiles hydrate skipped:',
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 
   // Risk level field only — do not re-run applyRiskLevel (would wipe knobs).
@@ -4073,9 +4155,17 @@ export function importStrategyModulesBundle(
   const toggles = ensureStrategyToggles();
   const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
   const appliedToggles = Object.keys(partialToggles).length;
+  const appliedProfileOverrides = countProfileOverrides(
+    config.tradeProfiles?.overrides
+  );
+  const tradeProfilesEnabled = config.tradeProfiles?.enabled !== false;
+  const smartBotProfiles = config.tradeProfiles?.smartBotProfiles === true;
   const label = options?.label || (typeof raw.label === 'string' ? raw.label : '');
   const message =
     `Imported ${appliedToggles || '—'} module toggle(s)` +
+    ` · ${appliedProfileOverrides} profile override(s)` +
+    ` · multi-profile ${tradeProfilesEnabled ? 'ON' : 'OFF'}` +
+    ` · smart bot ${smartBotProfiles ? 'ON' : 'OFF'}` +
     (label ? ` (${label})` : '') +
     ` · ${enabledCount}/${STRATEGY_KEYS.length} ON` +
     ` · Risk ${normalizeRiskLevel(config.riskLevel).toUpperCase()}` +
@@ -4085,11 +4175,14 @@ export function importStrategyModulesBundle(
   return {
     ok: true,
     appliedToggles,
+    appliedProfileOverrides,
     enabledCount,
     totalCount: STRATEGY_KEYS.length,
     riskLevel: normalizeRiskLevel(config.riskLevel),
     strategyRecipeMode: ensureStrategyRecipeMode(),
     strategyProfile: (config.strategyProfile || 'custom') as StrategyProfileId,
+    tradeProfilesEnabled,
+    smartBotProfiles,
     message,
   };
 }

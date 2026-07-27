@@ -2391,18 +2391,19 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     strategyProfileSnapshot: config.strategyProfileSnapshot
       ? (cloneJson(config.strategyProfileSnapshot) as PersistedBotSettings['strategyProfileSnapshot'])
       : null,
+    // Deep-clone nested exitRules/match/modules (shallow spread dropped Max Trade Override etc.)
     tradeProfiles: config.tradeProfiles
-      ? {
+      ? (cloneJson({
           enabled: config.tradeProfiles.enabled !== false,
           smartBotProfiles: config.tradeProfiles.smartBotProfiles === true,
           profiles: { ...(config.tradeProfiles.profiles || {}) },
           overrides: config.tradeProfiles.overrides
-            ? { ...config.tradeProfiles.overrides }
-            : undefined,
+            ? cloneJson(config.tradeProfiles.overrides)
+            : {},
           autoScoring: config.tradeProfiles.autoScoring
-            ? JSON.parse(JSON.stringify(config.tradeProfiles.autoScoring))
+            ? cloneJson(config.tradeProfiles.autoScoring)
             : undefined,
-        }
+        }) as PersistedBotSettings['tradeProfiles'])
       : undefined,
     paper: { ...config.paper },
     marketScanner: { ...config.marketScanner },
@@ -2993,17 +2994,23 @@ function applySettingsSnapshot(
         default: true,
       };
     }
+    // Deep-replace overrides when present so nested exitRules/match/modules
+    // (e.g. maxTradeOverrideSol) are not lost to shallow per-profile merges.
     if (tp.overrides && typeof tp.overrides === 'object') {
-      config.tradeProfiles.overrides = {
-        ...(config.tradeProfiles.overrides || {}),
-        ...tp.overrides,
-      };
+      config.tradeProfiles.overrides = cloneJson(tp.overrides) as NonNullable<
+        typeof config.tradeProfiles.overrides
+      >;
     }
     if (tp.autoScoring && typeof tp.autoScoring === 'object') {
-      config.tradeProfiles.autoScoring = {
+      config.tradeProfiles.autoScoring = cloneJson({
         ...(config.tradeProfiles.autoScoring || {}),
         ...tp.autoScoring,
-      };
+        weights: {
+          ...(config.tradeProfiles.autoScoring?.weights || {}),
+          ...((tp.autoScoring as { weights?: Record<string, number> }).weights ||
+            {}),
+        },
+      }) as NonNullable<typeof config.tradeProfiles.autoScoring>;
     }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
@@ -4565,17 +4572,13 @@ export function getConfigSnapshot() {
       config.strategyRecipeMode === 'custom' ? 'custom' : 'synced',
     strategyRecipeRiskLevel: config.strategyRecipeRiskLevel ?? normalizeRiskLevel(config.riskLevel),
     tradeProfiles: config.tradeProfiles
-      ? {
+      ? (cloneJson({
           enabled: config.tradeProfiles.enabled !== false,
           smartBotProfiles: config.tradeProfiles.smartBotProfiles === true,
-          profiles: { ...(config.tradeProfiles.profiles || {}) },
-          overrides: config.tradeProfiles.overrides
-            ? { ...config.tradeProfiles.overrides }
-            : undefined,
-          autoScoring: config.tradeProfiles.autoScoring
-            ? JSON.parse(JSON.stringify(config.tradeProfiles.autoScoring))
-            : undefined,
-        }
+          profiles: config.tradeProfiles.profiles || {},
+          overrides: config.tradeProfiles.overrides || {},
+          autoScoring: config.tradeProfiles.autoScoring,
+        }) as typeof config.tradeProfiles)
       : undefined,
     paper: { ...config.paper },
     marketScanner: { ...config.marketScanner },
