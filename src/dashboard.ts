@@ -3519,6 +3519,47 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       scroll-snap-align: start;
       min-height: 2.5rem;
     }
+    /* Zion — always-visible orange accent in the main nav */
+    .nav-tabs .btn.nav-tab-zion {
+      background: rgba(234, 88, 12, 0.16);
+      color: #fdba74;
+      border: 1px solid rgba(249, 115, 22, 0.42);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .nav-tabs .btn.nav-tab-zion:hover {
+      background: rgba(234, 88, 12, 0.28);
+      color: #ffedd5;
+      border-color: rgba(251, 146, 60, 0.7);
+    }
+    .nav-tabs .btn.nav-tab-zion-active {
+      background: linear-gradient(180deg, #f97316 0%, #ea580c 100%);
+      color: #fff7ed;
+      border-color: #fb923c;
+      box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.35), 0 8px 18px rgba(234, 88, 12, 0.28);
+    }
+    .nav-tabs .btn.nav-tab-zion .btn-label-full::before,
+    .nav-tabs .btn.nav-tab-zion .btn-label-short::before {
+      content: '◈ ';
+      opacity: 0.9;
+    }
+    @media (max-width: 640px) {
+      .nav-tabs .btn.nav-tab-zion {
+        padding-left: 0.7rem;
+        padding-right: 0.7rem;
+      }
+    }
+    .zion-panel .zion-hero-card {
+      border: 1px solid rgba(249, 115, 22, 0.28);
+      background: linear-gradient(160deg, rgba(67, 20, 7, 0.35) 0%, #0f172a 42%, #111827 100%);
+      box-shadow: inset 0 1px 0 rgba(251, 146, 60, 0.12);
+    }
+    .zion-panel .zion-hero-card .section-title {
+      color: #fdba74;
+    }
+    .zion-panel .zion-accent {
+      color: #fb923c;
+    }
     .overflow-x-auto {
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-x: contain;
@@ -3857,7 +3898,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config and Logs" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config, Backtester, and Logs" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -3868,6 +3909,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="backtester" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/></svg></span>
+            Backtester
           </button>
           <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
@@ -3911,13 +3956,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <!-- Tabs -->
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
+      <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
-      <button data-tab="zion" onclick="showTab('zion', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
-      <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts"><span class="btn-label-short">BT</span><span class="btn-label-full">Backtester</span></button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -5096,12 +5140,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     </section>
 
     <!-- ========== TAB: Zion ========== -->
-    <section data-tab-panel="zion" class="hidden space-y-4">
+    <section data-tab-panel="zion" class="zion-panel hidden space-y-4">
       <div class="card">
+        <div class="section-title">KOL Token Scanner Feed</div>
+        <div id="zion-scanner-feed" class="max-h-80 overflow-y-auto text-sm">—</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Trade Requests</div>
+        <div id="zion-offers-feed" class="max-h-96 overflow-y-auto text-sm">—</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Open Trades <span class="tip" tabindex="0" data-tip="Positions entered via Zion / KOL Scan Place Trade. Overview and Trades tabs still show every open position."></span></div>
+        <div id="zion-open-trades" class="max-h-72 overflow-y-auto text-sm">—</div>
+      </div>
+
+      <div class="card zion-hero-card">
         <div class="section-title">Zion <span class="tip" tabindex="0" data-tip="Personal KOL micro-bot. Isolated from copy trading and Market/Pump scanners. Never auto-buys — only creates trade offers for manual approval."></span></div>
         <p class="text-sm text-slate-400 mb-3" style="line-height:1.45">
-          Primary signal: <strong style="color:#5eead4">KOL Token Scanner</strong> (Kolscan + GMGN universe, not your watch list).
-          Tracked smart wallets are a <strong style="color:#5eead4">secondary boost</strong> only. Enabling Zion does not change Copy, Market Scanner, or strategy toggles.
+          Primary signal: <strong class="zion-accent">KOL Token Scanner</strong> (Kolscan + GMGN universe, not your watch list).
+          Tracked smart wallets are a <strong class="zion-accent">secondary boost</strong> only. Enabling Zion does not change Copy, Market Scanner, or strategy toggles.
         </p>
         <div class="toggle-row">
           <span>Enable Zion</span>
@@ -5128,16 +5187,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-email-placed" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div id="zion-status" class="mint text-xs mb-2 mt-2">—</div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">KOL Token Scanner Feed</div>
-        <div id="zion-scanner-feed" class="max-h-80 overflow-y-auto text-sm">—</div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Open Trades <span class="tip" tabindex="0" data-tip="Positions entered via Zion / KOL Scan Place Trade. Overview and Trades tabs still show every open position."></span></div>
-        <div id="zion-open-trades" class="max-h-72 overflow-y-auto text-sm">—</div>
       </div>
 
       <div class="card">
@@ -5176,11 +5225,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="loadZion()" title="Reload from server">Reload</button>
           <span class="mint" id="zion-save-status">—</span>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Trade Requests</div>
-        <div id="zion-offers-feed" class="max-h-96 overflow-y-auto text-sm">—</div>
       </div>
     </section>
 
@@ -7620,17 +7664,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       document.querySelectorAll('.nav-tabs [data-tab]').forEach(el => {
         const on = el.getAttribute('data-tab') === name;
-        el.classList.toggle('bg-emerald-600', on);
-        el.classList.toggle('text-white', on);
-        el.classList.toggle('bg-slate-800', !on);
-        el.classList.toggle('text-slate-300', !on);
+        const isZion = el.getAttribute('data-tab') === 'zion';
+        el.classList.toggle('bg-emerald-600', on && !isZion);
+        el.classList.toggle('text-white', on && !isZion);
+        el.classList.toggle('bg-slate-800', !on && !isZion);
+        el.classList.toggle('text-slate-300', !on && !isZion);
+        el.classList.toggle('nav-tab-zion', isZion);
+        el.classList.toggle('nav-tab-zion-active', on && isZion);
       });
       document.querySelectorAll('[data-settings-tab]').forEach(el => {
         el.classList.toggle('active', el.getAttribute('data-settings-tab') === name);
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs');
+        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs' || name === 'backtester');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -16618,7 +16665,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (document.visibilityState === 'visible') paintDashboardResetTimer();
     });
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'scanner', 'zion', 'strategies', 'backtester', 'config', 'logs'];
+    const tabNames = ['overview', 'zion', 'trades', 'wallets', 'signals', 'scanner', 'strategies', 'backtester', 'config', 'logs'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = qs && qs.get('tab');
     const qsOffer = qs && qs.get('offer');
