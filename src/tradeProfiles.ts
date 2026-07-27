@@ -2885,10 +2885,11 @@ export function assignTradeProfile(
       return finish(
         buildAssignmentFromDef(preferred, ctx, {
           score,
+          // Keep UI reason clean — never show a reject reason on a forced stamp
           reason:
             scored.score > 0
               ? `lane winner · ${scored.reason}`
-              : `lane winner · stamped (${scored.reason || 'post-filter'})`,
+              : `lane winner · ${preferred.name}`,
           autoScored: auto.enabled,
         })
       );
