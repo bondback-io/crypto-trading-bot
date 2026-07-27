@@ -6667,6 +6667,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const overviewIds = [
           'scalper',
           'dip_buyer',
+          'trend_rider',
           'migration_sniper',
           'high_win_rate',
           'momentum_burst',
