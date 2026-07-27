@@ -5111,8 +5111,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts to your inbox when equity is low, a buy is blocked for insufficient available SOL, or a trade closes in profit. SMTP credentials stay in .env (SMTP_HOST / SMTP_USER / SMTP_PASS). Without SMTP, events still appear in Logs."></span></div>
-        <div class="mint text-xs mb-3">Default recipient is set in config. Configure SMTP in .env to deliver mail.</div>
+        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, or a trade closes in profit. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_HOST/USER/PASS. Secrets stay in Render env — not in this form."></span></div>
+        <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
         <div class="grid grid-2 gap-3">
           <label class="ctl"><span>Enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
           <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="isaacpascua87@gmail.com" placeholder="you@example.com" /></label>
@@ -11244,6 +11244,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setChk('notify-insufficient', n.insufficientFundsEnabled !== false);
           setChk('notify-profit-close', n.profitableCloseEnabled !== false);
         }
+        const deliveryHint = document.getElementById('notify-delivery-hint');
+        if (deliveryHint && cfg.emailDelivery) {
+          const d = cfg.emailDelivery;
+          deliveryHint.textContent = d.configured
+            ? ('Delivery: ' + d.provider.toUpperCase() + ' ready → ' + (d.to || 'no recipient'))
+            : (d.hint || 'Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail.');
+          deliveryHint.style.color = d.configured ? '#34d399' : '#fbbf24';
+        }
         syncBtMaxTradesFromRisk(cfg);
         if (btBanner) {
           const rl = (cfg.riskLevel || 'on').toUpperCase();
@@ -14516,11 +14524,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         await saveNotificationsConfig();
         const data = await fetchJSON('/api/notifications/test', { method: 'POST' });
         if (data && data.ok === false) throw new Error(data.error || 'Test failed');
-        if (status) status.textContent = 'Test email sent';
-        alert('Test email sent (check inbox / spam)');
+        if (status) {
+          status.textContent =
+            'Test sent via ' + ((data && data.provider) || 'email');
+        }
+        alert(
+          'Test email sent via ' +
+            ((data && data.provider) || 'email') +
+            ' — check inbox / spam for ' +
+            (((document.getElementById('notify-email') || {}).value) || 'your address')
+        );
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
-        alert('Test email failed: ' + (err.message || String(err)) + '\\n\\nSet SMTP_HOST, SMTP_USER, SMTP_PASS in .env');
+        alert(
+          'Test email failed: ' +
+            (err.message || String(err)) +
+            '\\n\\nOn Render → Environment, set RESEND_API_KEY (recommended) or SMTP_HOST / SMTP_USER / SMTP_PASS, then redeploy.'
+        );
       }
     }
     window.testNotificationEmail = testNotificationEmail;

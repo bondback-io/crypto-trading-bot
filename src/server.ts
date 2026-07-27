@@ -1759,7 +1759,14 @@ export function createServer(): express.Application {
   // --- Config ---
 
   app.get('/api/config', (_req: Request, res: Response) => {
-    res.json(getConfigSnapshot());
+    const snap = getConfigSnapshot();
+    try {
+      const { emailDeliveryStatus } =
+        require('./emailNotifications') as typeof import('./emailNotifications');
+      res.json({ ...snap, emailDelivery: emailDeliveryStatus() });
+    } catch {
+      res.json(snap);
+    }
   });
 
   app.get('/api/strategies', (_req: Request, res: Response) => {
@@ -2432,14 +2439,25 @@ export function createServer(): express.Application {
 
   app.post('/api/notifications/test', async (_req: Request, res: Response) => {
     try {
-      const { sendTestNotificationEmail } =
+      const { sendTestNotificationEmail, emailDeliveryStatus } =
         require('./emailNotifications') as typeof import('./emailNotifications');
       const result = await sendTestNotificationEmail();
       if (!result.ok) {
-        res.status(400).json(result);
+        res.status(400).json({ ...result, delivery: emailDeliveryStatus() });
         return;
       }
-      res.json(result);
+      res.json({ ...result, delivery: emailDeliveryStatus() });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get('/api/notifications/status', (_req: Request, res: Response) => {
+    try {
+      const { emailDeliveryStatus } =
+        require('./emailNotifications') as typeof import('./emailNotifications');
+      res.json({ ok: true, delivery: emailDeliveryStatus() });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ ok: false, error: message });

@@ -1,6 +1,6 @@
 /**
- * Basic email notifications (SMTP via nodemailer).
- * Disabled gracefully when SMTP is not configured — events still hit Logs.
+ * Email notifications via Resend API (preferred on Render) or SMTP (nodemailer).
+ * Without either configured, events still hit Logs; send is skipped with a warning.
  */
 
 import nodemailer from 'nodemailer';
@@ -19,12 +19,53 @@ const lastSentAt: CooldownMap = {};
 let transporter: Transporter | null = null;
 let transporterKey = '';
 
+function resendConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim());
+}
+
 function smtpConfigured(): boolean {
   return Boolean(
     process.env.SMTP_HOST?.trim() &&
       process.env.SMTP_USER?.trim() &&
       process.env.SMTP_PASS?.trim()
   );
+}
+
+/** True when at least one delivery backend is configured. */
+export function emailDeliveryConfigured(): boolean {
+  return resendConfigured() || smtpConfigured();
+}
+
+export function emailDeliveryStatus(): {
+  configured: boolean;
+  provider: 'resend' | 'smtp' | 'none';
+  to: string;
+  hint: string;
+} {
+  const to = String(config.notifications?.email || '').trim();
+  if (resendConfigured()) {
+    return {
+      configured: true,
+      provider: 'resend',
+      to,
+      hint: 'Resend API key detected',
+    };
+  }
+  if (smtpConfigured()) {
+    return {
+      configured: true,
+      provider: 'smtp',
+      to,
+      hint: `SMTP ${process.env.SMTP_HOST}`,
+    };
+  }
+  return {
+    configured: false,
+    provider: 'none',
+    to,
+    hint:
+      'Set RESEND_API_KEY (recommended on Render) or SMTP_HOST / SMTP_USER / SMTP_PASS',
+  };
 }
 
 function getTransporter(): Transporter | null {
@@ -49,11 +90,24 @@ function getTransporter(): Transporter | null {
   return transporter;
 }
 
+function resolveFromAddress(): string {
+  if (process.env.SMTP_FROM?.trim()) return process.env.SMTP_FROM.trim();
+  if (process.env.RESEND_FROM?.trim()) return process.env.RESEND_FROM.trim();
+  // Resend onboarding sender works without verifying a domain
+  if (resendConfigured()) return 'Crypto Trading Bot <onboarding@resend.dev>';
+  if (process.env.SMTP_USER?.trim()) return process.env.SMTP_USER.trim();
+  return 'crypto-trading-bot@localhost';
+}
+
 function cooldownMs(kind: NotificationKind): number {
   const n = config.notifications;
-  if (kind === 'lowEquity') return Math.max(60_000, Number(n.lowEquityCooldownMs) || 6 * 3600_000);
+  if (kind === 'lowEquity')
+    return Math.max(60_000, Number(n.lowEquityCooldownMs) || 6 * 3600_000);
   if (kind === 'insufficientFunds')
-    return Math.max(60_000, Number(n.insufficientFundsCooldownMs) || 30 * 60_000);
+    return Math.max(
+      60_000,
+      Number(n.insufficientFundsCooldownMs) || 30 * 60_000
+    );
   return 0; // profitable closes: always send when enabled
 }
 
@@ -79,6 +133,67 @@ function formatSol(n: number, digits = 4): string {
   return `${sign}${n.toFixed(digits)} SOL`;
 }
 
+async function sendViaResend(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY!.trim();
+  const from = resolveFromAddress();
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from,
+      to: [opts.to],
+      subject: opts.subject,
+      text: opts.text,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(
+      `Resend HTTP ${res.status}: ${body.slice(0, 300) || res.statusText}`
+    );
+  }
+}
+
+async function sendViaSmtp(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<void> {
+  const transport = getTransporter();
+  if (!transport) throw new Error('SMTP transport unavailable');
+  await transport.sendMail({
+    from: resolveFromAddress(),
+    to: opts.to,
+    subject: opts.subject,
+    text: opts.text,
+  });
+}
+
+async function deliverEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<'resend' | 'smtp'> {
+  if (resendConfigured()) {
+    await sendViaResend(opts);
+    return 'resend';
+  }
+  if (smtpConfigured()) {
+    await sendViaSmtp(opts);
+    return 'smtp';
+  }
+  throw new Error(
+    'Email not configured — set RESEND_API_KEY (recommended) or SMTP_HOST / SMTP_USER / SMTP_PASS on Render'
+  );
+}
+
 async function sendMail(opts: {
   subject: string;
   text: string;
@@ -100,30 +215,27 @@ async function sendMail(opts: {
     return false;
   }
 
-  const transport = getTransporter();
-  if (!transport) {
-    logger.warn(
-      'Notify',
-      'Email not sent — configure SMTP_HOST / SMTP_USER / SMTP_PASS in .env',
-      { kind: opts.kind, to, subject: opts.subject }
-    );
+  if (!emailDeliveryConfigured()) {
+    logger.warn('Notify', emailDeliveryStatus().hint, {
+      kind: opts.kind,
+      to,
+      subject: opts.subject,
+    });
     return false;
   }
 
-  const from =
-    process.env.SMTP_FROM?.trim() ||
-    process.env.SMTP_USER!.trim() ||
-    'crypto-trading-bot@localhost';
-
   try {
-    await transport.sendMail({
-      from,
+    const provider = await deliverEmail({
       to,
       subject: opts.subject,
       text: opts.text,
     });
     lastSentAt[opts.kind] = Date.now();
-    logger.info('Notify', `Email sent: ${opts.subject}`, { kind: opts.kind, to });
+    logger.info('Notify', `Email sent via ${provider}: ${opts.subject}`, {
+      kind: opts.kind,
+      to,
+      provider,
+    });
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -264,40 +376,31 @@ export async function notifyProfitableClose(input: {
   await sendMail({ subject, text, kind: 'profitableClose' });
 }
 
-/** Test SMTP from dashboard/API (optional). */
+/** Test email from dashboard/API. */
 export async function sendTestNotificationEmail(): Promise<{
   ok: boolean;
   error?: string;
+  provider?: string;
 }> {
   const to = String(config.notifications?.email || '').trim();
   if (!to) return { ok: false, error: 'No notification email configured' };
-  if (!smtpConfigured()) {
+  if (!emailDeliveryConfigured()) {
     return {
       ok: false,
-      error: 'SMTP not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS)',
+      error: emailDeliveryStatus().hint,
     };
   }
-  // Bypass kind toggles / cooldown for explicit test
-  const prev = { ...lastSentAt };
   try {
-    const transport = getTransporter();
-    if (!transport) return { ok: false, error: 'SMTP transport unavailable' };
-    const from =
-      process.env.SMTP_FROM?.trim() ||
-      process.env.SMTP_USER!.trim() ||
-      'crypto-trading-bot@localhost';
-    await transport.sendMail({
-      from,
+    const provider = await deliverEmail({
       to,
       subject: '[Bot] Test notification',
-      text: `Test email from crypto trading bot at ${new Date().toISOString()}`,
+      text: `Test email from crypto trading bot at ${new Date().toISOString()}\n\nIf you received this, delivery is working.`,
     });
-    logger.info('Notify', 'Test email sent', { to });
-    return { ok: true };
+    logger.info('Notify', `Test email sent via ${provider}`, { to, provider });
+    return { ok: true, provider };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error('Notify', `Test email failed: ${message}`);
-    Object.assign(lastSentAt, prev);
     return { ok: false, error: message };
   }
 }
