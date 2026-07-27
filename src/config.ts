@@ -2350,15 +2350,15 @@ export const config: BotConfig = {
     enabled: true,
     scanner: {
       enabled: true,
-      pollIntervalMs: 60_000,
+      pollIntervalMs: 30_000,
       universeSize: 60,
       activityLookbackMinutes: 45,
       batchSize: 6,
     },
     minKolWallets: 2,
-    minWalletQuality: 50,
+    minWalletQuality: 40,
     minMcUsd: 50_000,
-    maxMcUsd: 5_000_000,
+    maxMcUsd: 500_000_000,
     offerTtlMinutes: 60,
     mintCooldownMinutes: 120,
     useTrackedWalletsAsBoost: true,
@@ -2441,6 +2441,8 @@ const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
 const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
 /** One-shot: Zion micro-bot ON by default (KOL scanner + offers). */
 const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
+/** One-shot: Zion safeguards MC band + quality/poll defaults. */
+const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -3398,7 +3400,7 @@ export function applyPersistedSettings(): boolean {
       if (!config.zion.scanner) {
         config.zion.scanner = {
           enabled: true,
-          pollIntervalMs: 60_000,
+          pollIntervalMs: 30_000,
           universeSize: 60,
           activityLookbackMinutes: 45,
           batchSize: 6,
@@ -3414,6 +3416,65 @@ export function applyPersistedSettings(): boolean {
     persistUserSettings();
     console.log(
       '[settings] Applied zionDefaultOn_v1 — Zion + KOL scanner ON by default'
+    );
+  }
+
+  if (!settingsMigrations[ZION_SAFEGUARDS_V1]) {
+    if (!config.zion) {
+      (config as { zion?: typeof config.zion }).zion = {
+        enabled: true,
+        scanner: {
+          enabled: true,
+          pollIntervalMs: 30_000,
+          universeSize: 60,
+          activityLookbackMinutes: 45,
+          batchSize: 6,
+        },
+        minKolWallets: 2,
+        minWalletQuality: 40,
+        minMcUsd: 50_000,
+        maxMcUsd: 500_000_000,
+        offerTtlMinutes: 60,
+        mintCooldownMinutes: 120,
+        useTrackedWalletsAsBoost: true,
+        autoOfferFromScanner: true,
+        defaults: {
+          sizeMode: 'sol',
+          solAmount: 0.25,
+          usdAmount: 50,
+          takeProfitPct: 80,
+          stopLossPct: -25,
+          trailingStopPct: 18,
+          trailingActivationProfit: 35,
+          useExitPresets: true,
+        },
+        notifyEmailOnOffer: true,
+        notifyEmailOnPlaced: true,
+      };
+    } else {
+      config.zion.minKolWallets = 2;
+      config.zion.minWalletQuality = 40;
+      config.zion.minMcUsd = 50_000;
+      config.zion.maxMcUsd = 500_000_000;
+      config.zion.offerTtlMinutes = 60;
+      config.zion.mintCooldownMinutes = 120;
+      if (!config.zion.scanner) {
+        config.zion.scanner = {
+          enabled: true,
+          pollIntervalMs: 30_000,
+          universeSize: 60,
+          activityLookbackMinutes: 45,
+          batchSize: 6,
+        };
+      } else {
+        config.zion.scanner.pollIntervalMs = 30_000;
+        config.zion.scanner.universeSize = 60;
+      }
+    }
+    settingsMigrations[ZION_SAFEGUARDS_V1] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied zionSafeguards_v1 — Min MC $50k / Max MC $500M, quality 40, poll 30s'
     );
   }
 

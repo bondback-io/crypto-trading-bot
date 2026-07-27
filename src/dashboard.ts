@@ -5193,13 +5193,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <label class="ctl ctl-sm"><span>Min KOL wallets</span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
-          <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="50" min="0" max="100" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="40" min="0" max="100" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min MC ($)</span><input type="number" id="zion-min-mc" value="50000" min="0" step="1000" /></label>
-          <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="5000000" min="0" step="1000" /></label>
+          <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="500000000" min="0" step="1000" /></label>
           <label class="ctl ctl-sm"><span>Offer TTL (min)</span><input type="number" id="zion-ttl" value="60" min="5" max="240" step="1" title="Pending offers expire after this many minutes (default 60). Popup auto-hides after 30s but the request stays Active until TTL." /></label>
           <label class="ctl ctl-sm"><span>Mint cooldown (min)</span><input type="number" id="zion-cooldown" value="120" min="5" max="1440" step="1" /></label>
           <label class="ctl ctl-sm"><span>Universe size</span><input type="number" id="zion-universe" value="60" min="20" max="100" step="1" /></label>
-          <label class="ctl ctl-sm"><span>Poll interval (ms)</span><input type="number" id="zion-poll-ms" value="60000" min="30000" max="600000" step="1000" /></label>
+          <label class="ctl ctl-sm"><span>Poll interval (ms)</span><input type="number" id="zion-poll-ms" value="30000" min="30000" max="600000" step="1000" /></label>
         </div>
       </div>
 
@@ -15987,7 +15987,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           enabled: !!(enabledEl && enabledEl.checked),
           scanner: {
             enabled: scannerEl ? !!scannerEl.checked : true,
-            pollIntervalMs: Number(document.getElementById('zion-poll-ms') && document.getElementById('zion-poll-ms').value) || 60000,
+            pollIntervalMs: Number(document.getElementById('zion-poll-ms') && document.getElementById('zion-poll-ms').value) || 30000,
             universeSize: Number(document.getElementById('zion-universe') && document.getElementById('zion-universe').value) || 60,
           },
           autoOfferFromScanner: autoEl ? !!autoEl.checked : true,
@@ -15995,9 +15995,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           notifyEmailOnOffer: emailOfferEl ? !!emailOfferEl.checked : true,
           notifyEmailOnPlaced: emailPlacedEl ? !!emailPlacedEl.checked : true,
           minKolWallets: Number(document.getElementById('zion-min-kol') && document.getElementById('zion-min-kol').value) || 2,
-          minWalletQuality: Number(document.getElementById('zion-min-quality') && document.getElementById('zion-min-quality').value) || 50,
-          minMcUsd: Number(document.getElementById('zion-min-mc') && document.getElementById('zion-min-mc').value) || 0,
-          maxMcUsd: Number(document.getElementById('zion-max-mc') && document.getElementById('zion-max-mc').value) || 0,
+          minWalletQuality: Number(document.getElementById('zion-min-quality') && document.getElementById('zion-min-quality').value) || 40,
+          minMcUsd: Number(document.getElementById('zion-min-mc') && document.getElementById('zion-min-mc').value) || 50000,
+          maxMcUsd: Number(document.getElementById('zion-max-mc') && document.getElementById('zion-max-mc').value) || 500000000,
           offerTtlMinutes: Number(document.getElementById('zion-ttl') && document.getElementById('zion-ttl').value) || 60,
           mintCooldownMinutes: Number(document.getElementById('zion-cooldown') && document.getElementById('zion-cooldown').value) || 120,
           defaults: {
