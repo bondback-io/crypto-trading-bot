@@ -1813,6 +1813,63 @@ export class PaperTrader {
       if (scalpAction.type === 'full') {
         const strat =
           position.shortTermStrategyId || 'quick_scalper';
+        // Soft Timer on green/near-flat MB/migration: prefer trail / defer over dump
+        if (
+          scalpAction.exitKind === 'scalp_timer' &&
+          (strat === 'momentum_burst' || strat === 'post_migration_scalp')
+        ) {
+          const softPnl =
+            ((markPrice - position.entryPriceSol) / position.entryPriceSol) *
+            100;
+          const hardMs =
+            position.scalpHardDeadlineMs != null &&
+            position.scalpHardDeadlineMs > position.scalpDeadlineMs!
+              ? position.scalpHardDeadlineMs
+              : position.openedAt +
+                Math.round(
+                  (position.scalpDeadlineMs! - position.openedAt) * 1.4
+                );
+          if (softPnl >= -2 && nowMs < hardMs) {
+            const trailAct = evaluateScalpProtectiveTrail({
+              entryPriceSol: position.entryPriceSol,
+              currentPriceSol: markPrice,
+              highWaterMarkSol: position.highWaterMarkSol,
+              trailingActive: position.trailingActive === true,
+              trailingStopPct: position.trailingStopPct,
+              trailingActivationProfit: position.trailingActivationProfit,
+            });
+            if (trailAct.type === 'arm_trail') {
+              position.trailingActive = true;
+              position.trailingActivatedAt = nowMs;
+              position.trailingStopPct = trailAct.trailPct;
+              position.trailingStopPriceSol =
+                position.highWaterMarkSol * (1 - trailAct.trailPct / 100);
+              this.log('info', `${label}: ${trailAct.reason}`);
+              return {
+                kind: 'arm_trail',
+                reason: trailAct.reason,
+                markPnlPct,
+                stillOpen: true,
+              };
+            }
+            if (trailAct.type === 'trail_exit') {
+              this.simulateSell(position.id, markPrice, trailAct.reason);
+              return {
+                kind: 'trail_exit',
+                reason: trailAct.reason,
+                markPnlPct,
+                stillOpen: this.positions.has(positionId),
+              };
+            }
+            // Defer soft Timer — let hard deadline / fade / trail decide
+            return {
+              kind: 'none',
+              reason: 'soft timer deferred (green/near-flat)',
+              markPnlPct,
+              stillOpen: true,
+            };
+          }
+        }
         const tag = shortTermExitLogTag(scalpAction.exitKind);
         const minFill =
           scalpAction.exitKind === 'scalp_sl'
@@ -2379,6 +2436,56 @@ export class PaperTrader {
         if (scalpAction.type === 'full') {
           const strat =
             position.shortTermStrategyId || 'quick_scalper';
+          // Soft Timer on green/near-flat MB/migration: prefer trail / defer over dump
+          if (
+            scalpAction.exitKind === 'scalp_timer' &&
+            (strat === 'momentum_burst' || strat === 'post_migration_scalp')
+          ) {
+            const softPnl =
+              ((currentPrice - position.entryPriceSol) /
+                position.entryPriceSol) *
+              100;
+            const hardMs =
+              position.scalpHardDeadlineMs != null &&
+              position.scalpHardDeadlineMs > position.scalpDeadlineMs!
+                ? position.scalpHardDeadlineMs
+                : position.openedAt +
+                  Math.round(
+                    (position.scalpDeadlineMs! - position.openedAt) * 1.4
+                  );
+            if (softPnl >= -2 && Date.now() < hardMs) {
+              const trailAct = evaluateScalpProtectiveTrail({
+                entryPriceSol: position.entryPriceSol,
+                currentPriceSol: currentPrice,
+                highWaterMarkSol: position.highWaterMarkSol,
+                trailingActive: position.trailingActive === true,
+                trailingStopPct: position.trailingStopPct,
+                trailingActivationProfit: position.trailingActivationProfit,
+              });
+              if (trailAct.type === 'arm_trail') {
+                position.trailingActive = true;
+                position.trailingActivatedAt = Date.now();
+                position.trailingStopPct = trailAct.trailPct;
+                position.trailingStopPriceSol =
+                  position.highWaterMarkSol * (1 - trailAct.trailPct / 100);
+                this.log('info', `${label}: ${trailAct.reason}`);
+                continue;
+              }
+              if (trailAct.type === 'trail_exit') {
+                console.log(
+                  `[scalp] TRAIL strategy=${strat} ${label} — ${trailAct.reason}`
+                );
+                this.log('sell', `${label}: [SCALP_TRAIL] ${trailAct.reason}`);
+                await this.closePositionByRules(
+                  position,
+                  currentPrice,
+                  trailAct.reason
+                );
+                continue;
+              }
+              continue; // defer soft Timer
+            }
+          }
           const tag = shortTermExitLogTag(scalpAction.exitKind);
           console.log(
             `[scalp] ${tag} strategy=${strat} ${label} — ${scalpAction.reason}`

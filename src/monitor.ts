@@ -19,6 +19,7 @@ import { paperTrader } from './paperTrader';
 import {
   assignTradeProfile,
   stampFromAssignment,
+  applyProfileExitRulesToBuyOpts,
   isSmartBotProfilesEnabled,
   withStrategyProfileGateAsync,
   applyTradeProfileSizing,
@@ -1984,6 +1985,7 @@ async function executeSignalBuy(
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
   const erScan = profileAssignment.exitRules;
+  applyProfileExitRulesToBuyOpts(buyOpts, erScan);
   const sizedScan = applyTradeProfileSizing(
     buyOpts.solAmount ?? sizing.sizeSol,
     erScan
@@ -2138,7 +2140,8 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
   const slippageBps =
     config.strategy.migrationSlippageBps ?? config.paper.slippageBps;
 
-  const result = await executeBuy(signal.mint, signal.symbol, {
+  const scalpFlag = resolveScalpBuyFlag(signal);
+  const buyOpts: Parameters<typeof executeBuy>[2] = {
     sourceWallets: signal.wallets,
     sourceNames: signal.walletNames,
     name: signal.name,
@@ -2153,7 +2156,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
       signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
     entrySource: signal.entrySource ?? 'migration',
-    ...resolveScalpBuyFlag(signal),
+    ...scalpFlag,
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2162,7 +2165,44 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
           ok: signal.antiRug.ok,
         }
       : undefined,
-  });
+  };
+
+  const profileAssignment = assignTradeProfile(
+    buildTradeProfileMatchContext(signal, {
+      scalpMode: buyOpts.scalpMode,
+      shortTermStrategyId: buyOpts.shortTermStrategyId,
+      strategyKind: 'migration',
+    })
+  );
+  if (!profileAssignment.skipped) {
+    Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+    buyOpts.tradeProfileScore = profileAssignment.score;
+    buyOpts.tradeProfileReason = profileAssignment.reason;
+    applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
+    const sized = applyTradeProfileSizing(
+      buyOpts.solAmount ?? sizing.sizeSol,
+      profileAssignment.exitRules
+    );
+    buyOpts.solAmount = clampToMaxAllowedTradeSol(
+      sized.sizeSol,
+      sized.usedOverride ? 'profileOverride' : 'migrationProfileSize'
+    );
+    if (sized.sizeNote) {
+      buyOpts.sizeReason =
+        (buyOpts.sizeReason || sizing.reason) +
+        ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
+    }
+    console.log(
+      `[monitor] Profile ${profileAssignment.icon} ${profileAssignment.name} → ${signal.symbol}` +
+        ` · score ${profileAssignment.score.toFixed(1)} (migration priority)`
+    );
+  } else {
+    console.log(
+      `[monitor] Migration priority — no profile stamp (${profileAssignment.skipReason || profileAssignment.reason})`
+    );
+  }
+
+  const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(event.mint, result.success);
   if (result.success) {
     recordTradeExecuted();
@@ -2172,7 +2212,8 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     });
     console.log(
       `[monitor] Migration priority trade executed (${result.mode}): ${label} ` +
-        `@ ${sizing.sizeSol.toFixed(3)} SOL`
+        `@ ${(buyOpts.solAmount ?? sizing.sizeSol).toFixed(3)} SOL` +
+        (profileAssignment.skipped ? '' : ` · ${profileAssignment.name}`)
     );
   } else {
     annotateActivityFeedByMint(event.mint, {
@@ -2921,44 +2962,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
   const er = profileAssignment.exitRules;
-  if (er.takeProfitPct != null) buyOpts.profileTakeProfitPct = er.takeProfitPct;
-  if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
-  if (er.trailingStopPct != null) {
-    buyOpts.profileTrailingStopPct = er.trailingStopPct;
-  }
-  if (
-    er.trailingActivationProfit != null &&
-    Number.isFinite(er.trailingActivationProfit)
-  ) {
-    buyOpts.profileTrailingActivationProfit = er.trailingActivationProfit;
-  }
-  if (er.hardTimeLimitSec != null) {
-    buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
-  }
-  if (
-    er.momentumFailDropPct != null &&
-    Number.isFinite(er.momentumFailDropPct) &&
-    er.momentumFailDropPct > 0
-  ) {
-    buyOpts.profileMomentumFailDropPct = er.momentumFailDropPct;
-  }
-  if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
-  if (
-    er.deadVolumeMinHoldMinutes != null &&
-    Number.isFinite(er.deadVolumeMinHoldMinutes)
-  ) {
-    buyOpts.profileDeadVolumeMinHoldMinutes = er.deadVolumeMinHoldMinutes;
-  }
-  if (er.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
-  if (er.forceScalp) {
-    buyOpts.profileForceScalp = true;
-    if (!buyOpts.scalpMode && er.shortTermStrategyId) {
-      buyOpts.scalpMode = true;
-      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
-    } else if (er.shortTermStrategyId && !buyOpts.shortTermStrategyId) {
-      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
-    }
-  }
+  applyProfileExitRulesToBuyOpts(buyOpts, er);
   const sized = applyTradeProfileSizing(buyOpts.solAmount ?? sizing.sizeSol, er);
   buyOpts.solAmount = clampToMaxAllowedTradeSol(
     sized.sizeSol,
@@ -3166,7 +3170,8 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
     recordSignalSizing(signal, sizing, true);
     console.log(`[monitor] ${sizing.reason}`);
 
-    const result = await executeBuy(mint, candidate.symbol, {
+    const scalpFlag = resolveScalpBuyFlag(signal);
+    const buyOpts: Parameters<typeof executeBuy>[2] = {
       sourceWallets: signal.wallets,
       sourceNames: signal.walletNames,
       name: candidate.name,
@@ -3178,7 +3183,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       insiderPct:
         signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
       convictionScore: signal.convictionScore,
-      ...resolveScalpBuyFlag(signal),
+      ...scalpFlag,
       antiRug: signal.antiRug
         ? {
             riskScore: signal.antiRug.riskScore,
@@ -3187,7 +3192,36 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
             ok: signal.antiRug.ok,
           }
         : undefined,
-    });
+    };
+
+    const profileAssignment = assignTradeProfile(
+      buildTradeProfileMatchContext(signal, {
+        scalpMode: buyOpts.scalpMode,
+        shortTermStrategyId: buyOpts.shortTermStrategyId,
+        strategyKind: buyOpts.strategyKind,
+      })
+    );
+    if (!profileAssignment.skipped) {
+      Object.assign(buyOpts, stampFromAssignment(profileAssignment));
+      buyOpts.tradeProfileScore = profileAssignment.score;
+      buyOpts.tradeProfileReason = profileAssignment.reason;
+      applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
+      const sized = applyTradeProfileSizing(
+        buyOpts.solAmount ?? sizing.sizeSol,
+        profileAssignment.exitRules
+      );
+      buyOpts.solAmount = clampToMaxAllowedTradeSol(
+        sized.sizeSol,
+        sized.usedOverride ? 'profileOverride' : 'reentryProfileSize'
+      );
+      if (sized.sizeNote) {
+        buyOpts.sizeReason =
+          (buyOpts.sizeReason || sizing.reason) +
+          ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
+      }
+    }
+
+    const result = await executeBuy(mint, candidate.symbol, buyOpts);
 
     finishBuy(mint, result.success);
     if (result.success) {

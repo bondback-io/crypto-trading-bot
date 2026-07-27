@@ -1751,12 +1751,15 @@ function scoreProfile(
     ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
       ? Number(ctx.volumeH1Usd)
       : null;
+  // Real M5 only — do not fall back to recent buy-USD (that inflated MB scores)
   const volM5 =
     ctx.volumeM5Usd != null && Number.isFinite(ctx.volumeM5Usd)
       ? Number(ctx.volumeM5Usd)
-      : ctx.recentBuyVolumeUsd != null && Number.isFinite(ctx.recentBuyVolumeUsd)
-        ? Number(ctx.recentBuyVolumeUsd)
-        : null;
+      : null;
+  const buyPressureUsd =
+    ctx.recentBuyVolumeUsd != null && Number.isFinite(ctx.recentBuyVolumeUsd)
+      ? Number(ctx.recentBuyVolumeUsd)
+      : null;
   const ageH =
     ctx.tokenAgeHours != null && Number.isFinite(ctx.tokenAgeHours)
       ? Number(ctx.tokenAgeHours)
@@ -1796,7 +1799,14 @@ function scoreProfile(
       m.minVolumeM5Usd != null &&
       volM5 >= m.minVolumeM5Usd &&
       !isDip &&
-      !isMig);
+      !isMig &&
+      // Buy pressure or bull-flag — volume alone is not a burst
+      ((buyPressureUsd != null &&
+        buyPressureUsd >= Math.min(800, m.minVolumeM5Usd * 0.4)) ||
+        (ctx.chartPatternHits || []).some(
+          (h) => h.id === 'bull_flag' && h.breakout === true
+        ) ||
+        (ctx.chartPatternIds || []).includes('bull_flag')));
   const isReversal =
     ctx.shortTermStrategyId === 'reversal_scalp' ||
     (Boolean(m.preferReversal) &&
@@ -1979,6 +1989,12 @@ function scoreProfile(
           ? `burst vol M5 $${Math.round(volM5)}`
           : 'momentum pressure'
       );
+      if (buyPressureUsd != null && buyPressureUsd > 0) {
+        bits.push(`buy $${Math.round(buyPressureUsd)}`);
+      }
+      if ((ctx.chartPatternIds || []).includes('bull_flag')) {
+        bits.push('bull_flag');
+      }
     } else {
       return { score: 0, reason: 'not a momentum burst setup' };
     }
@@ -2845,6 +2861,71 @@ export function stampFromAssignment(
     tradeProfileScore: a.score,
     tradeProfileReason: a.reason,
   };
+}
+
+/** Buy-option fields written from profile exit rules (executeBuy → position). */
+export interface ProfileExitBuyOpts {
+  scalpMode?: boolean;
+  shortTermStrategyId?: ShortTermStrategyId;
+  profileTakeProfitPct?: number;
+  profileStopLossPct?: number;
+  profileTrailingStopPct?: number;
+  profileTrailingActivationProfit?: number;
+  profileForceScalp?: boolean;
+  profileHardTimeLimitSec?: number;
+  profileOverrideScalpParams?: boolean;
+  profileMomentumFailDropPct?: number;
+  profileDeadVolumeMinHoldMinutes?: number;
+  profileAggressiveDeadMarket?: boolean;
+}
+
+/**
+ * Copy materialized profile exit rules onto buyOpts so simulateBuy /
+ * registerLivePosition can freeze TP/SL/timer/forceScalp on the position.
+ * When forceScalp is set, always overwrite shortTermStrategyId (mismatched
+ * engines from resolveScalpBuyFlag must not stick).
+ */
+export function applyProfileExitRulesToBuyOpts(
+  buyOpts: ProfileExitBuyOpts,
+  er: TradeProfileExitRules | null | undefined
+): void {
+  if (!er) return;
+  if (er.takeProfitPct != null) buyOpts.profileTakeProfitPct = er.takeProfitPct;
+  if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
+  if (er.trailingStopPct != null) {
+    buyOpts.profileTrailingStopPct = er.trailingStopPct;
+  }
+  if (
+    er.trailingActivationProfit != null &&
+    Number.isFinite(er.trailingActivationProfit)
+  ) {
+    buyOpts.profileTrailingActivationProfit = er.trailingActivationProfit;
+  }
+  if (er.hardTimeLimitSec != null) {
+    buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
+  }
+  if (
+    er.momentumFailDropPct != null &&
+    Number.isFinite(er.momentumFailDropPct) &&
+    er.momentumFailDropPct > 0
+  ) {
+    buyOpts.profileMomentumFailDropPct = er.momentumFailDropPct;
+  }
+  if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
+  if (
+    er.deadVolumeMinHoldMinutes != null &&
+    Number.isFinite(er.deadVolumeMinHoldMinutes)
+  ) {
+    buyOpts.profileDeadVolumeMinHoldMinutes = er.deadVolumeMinHoldMinutes;
+  }
+  if (er.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
+  if (er.forceScalp) {
+    buyOpts.profileForceScalp = true;
+    if (er.shortTermStrategyId) {
+      buyOpts.scalpMode = true;
+      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
+    }
+  }
 }
 
 /**

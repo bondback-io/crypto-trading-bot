@@ -497,15 +497,26 @@ export function qualifiesShortTermEntry(
     }
   }
 
-  // Momentum Burst requires meaningful buy pressure when available
+  // Momentum Burst: enforce volume + buy-pressure floors (no smart-money bypass)
   if (id === 'momentum_burst') {
+    const vol = Math.max(
+      Number(input.volume24hUsd) || 0,
+      Number(input.recentVolumeUsd) || 0
+    );
     const buy = Number(input.recentBuyVolumeUsd) || 0;
-    if (p.minBuyPressureUsd > 0 && buy > 0 && buy < p.minBuyPressureUsd) {
+    if (p.minVolumeUsd > 0 && vol < p.minVolumeUsd) {
+      return {
+        ok: false,
+        reason: `${p.label} volume $${vol.toFixed(0)} < $${p.minVolumeUsd}`,
+      };
+    }
+    if (p.minBuyPressureUsd > 0 && buy < p.minBuyPressureUsd) {
       return {
         ok: false,
         reason: `${p.label} buy momentum $${buy.toFixed(0)} < $${p.minBuyPressureUsd}`,
       };
     }
+    return { ok: true };
   }
 
   return volumeOk(p, input);
@@ -634,9 +645,9 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
  * SL has a short grace after open so fill/Dex mark mismatches cannot
  * instantly stop out a Scalper (seen as 0.1s holds with −10% phantom marks).
  *
- * Soft timer: a still-green trade past the primary deadline is deferred to
- * protective trail / momentum-fail until hardDeadline (1.4× window) so we
- * don't systematically dump flat/slightly-green marks on identical timers.
+ * Soft timer: Momentum Burst / post-migration defer any green or near-flat
+ * mark (pnl ≥ −2%) until hardDeadline; other strategies still require a
+ * meaningful soft-green pop (~25% of TP) before deferring to trail.
  */
 export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction {
   if (!(view.entryPriceSol > 0) || !(view.currentPriceSol > 0)) {
@@ -731,15 +742,26 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
 
   if (view.nowMs >= view.deadlineMs) {
     const heldSec = Math.max(0, Math.round(ageMs / 1000));
-    // Soft green floor: ~25% of the way to TP (capped) — defer dump to trail
-    const softGreen = Math.min(
-      12,
-      Math.max(5, Number.isFinite(view.tpPct) ? view.tpPct * 0.25 : 5)
-    );
-    const stillWorking =
-      pnlPct >= softGreen && peakPnlPct >= softGreen && hwm > view.entryPriceSol;
-    if (stillWorking && view.nowMs < hardDeadlineMs) {
-      return { type: 'none' };
+    const burstStyle =
+      view.strategyId === 'momentum_burst' ||
+      view.strategyId === 'post_migration_scalp';
+    if (burstStyle) {
+      // Defer any green / near-flat until hard deadline — only Timer when red/dead
+      const nearFlatOrGreen = pnlPct >= -2;
+      if (nearFlatOrGreen && view.nowMs < hardDeadlineMs) {
+        return { type: 'none' };
+      }
+    } else {
+      // Soft green floor: ~25% of the way to TP (capped) — defer dump to trail
+      const softGreen = Math.min(
+        12,
+        Math.max(5, Number.isFinite(view.tpPct) ? view.tpPct * 0.25 : 5)
+      );
+      const stillWorking =
+        pnlPct >= softGreen && peakPnlPct >= softGreen && hwm > view.entryPriceSol;
+      if (stillWorking && view.nowMs < hardDeadlineMs) {
+        return { type: 'none' };
+      }
     }
     return {
       type: 'full',
