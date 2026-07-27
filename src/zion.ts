@@ -192,7 +192,7 @@ export function maybeCreateOffer(
     if (maxMc > 0 && input.mcUsd > maxMc) return null;
   }
 
-  const ttlMin = Math.max(5, Number(config.zion.offerTtlMinutes) || 30);
+  const ttlMin = Math.max(5, Number(config.zion.offerTtlMinutes) || 60);
   const now = Date.now();
   const offer: ZionOffer = {
     id: randomUUID(),
@@ -321,8 +321,14 @@ export async function executeApprovedOffer(
     tradeProfileId: 'zion',
     tradeProfileName: 'Zion',
     tradeProfileIcon: '◈',
-    tradeProfileColor: '#34d399',
-    tradeProfileReason: offer.reasons.slice(0, 3).join(' · ') || 'KOL scanner',
+    tradeProfileColor: '#f8fafc',
+    tradeProfileScore:
+      offer.score != null && Number.isFinite(offer.score)
+        ? Math.round(Math.max(0, Math.min(100, offer.score)))
+        : undefined,
+    tradeProfileReason:
+      offer.reasons.slice(0, 3).join(' · ') ||
+      'Triggered manually via Zion / KOL Scan',
     entryMarketCapUsd: offer.mcUsd,
   };
 

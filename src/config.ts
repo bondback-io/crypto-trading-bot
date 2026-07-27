@@ -2359,7 +2359,7 @@ export const config: BotConfig = {
     minWalletQuality: 50,
     minMcUsd: 50_000,
     maxMcUsd: 5_000_000,
-    offerTtlMinutes: 30,
+    offerTtlMinutes: 60,
     mintCooldownMinutes: 120,
     useTrackedWalletsAsBoost: true,
     autoOfferFromScanner: true,

@@ -1628,6 +1628,258 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     td .trade-profile-badge {
       margin: 0;
     }
+    /* Zion — inverted near-white badge so it reads as its own profile colour */
+    .trade-profile-badge.is-zion {
+      color: #0f172a !important;
+      border-color: #e2e8f0 !important;
+      background: #f8fafc !important;
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+    }
+    .zion-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      line-height: 1.2;
+    }
+    .zion-status-pill.is-active {
+      color: #5eead4;
+      border-color: #2dd4bf66;
+      background: #134e4a55;
+    }
+    .zion-status-pill.is-expired {
+      color: #94a3b8;
+      border-color: #47556988;
+      background: #1e293b88;
+    }
+    .zion-status-pill.is-executed {
+      color: #4ade80;
+      border-color: #22c55e55;
+      background: #14532d44;
+    }
+    .zion-status-pill.is-failed,
+    .zion-status-pill.is-declined {
+      color: #fca5a5;
+      border-color: #ef444455;
+      background: #7f1d1d33;
+    }
+    .zion-status-pill.is-approved {
+      color: #fbbf24;
+      border-color: #f59e0b55;
+      background: #78350f33;
+    }
+    .zion-cand-card {
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #0f172a 0%, #111827 60%, #0b1220 100%);
+      transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+    }
+    .zion-cand-card:hover {
+      border-color: #334155;
+      box-shadow: 0 8px 24px rgba(0,0,0,.28);
+      transform: translateY(-1px);
+    }
+    .zion-cand-card.is-offered {
+      border-color: #2dd4bf55;
+      box-shadow: inset 0 0 0 1px #2dd4bf22;
+    }
+    .zion-cand-card.is-skipped {
+      opacity: 0.72;
+    }
+    .zion-cand-sym {
+      font-weight: 700;
+      color: #f1f5f9;
+      letter-spacing: 0.01em;
+    }
+    .zion-cand-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.55rem;
+      margin-top: 0.35rem;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+    .zion-cand-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 6px;
+      background: #1e293b99;
+      border: 1px solid #33415566;
+      color: #cbd5e1;
+      font-size: 0.7rem;
+    }
+    .zion-cand-chip.is-score {
+      color: #5eead4;
+      border-color: #2dd4bf44;
+    }
+    .zion-cand-chip.is-boost {
+      color: #fbbf24;
+      border-color: #f59e0b44;
+    }
+    .zion-offer-row {
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.5rem;
+      background: #0f172a;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .zion-open-row {
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(90deg, #0f172a, #111827);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .zion-offer-stack {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 95;
+      display: flex;
+      flex-direction: column-reverse;
+      align-items: stretch;
+      gap: 12px;
+      width: min(420px, calc(100vw - 24px));
+      max-height: calc(100vh - 28px);
+      overflow: visible;
+      pointer-events: none;
+    }
+    .zion-offer-card {
+      pointer-events: auto;
+      position: relative;
+      background: linear-gradient(160deg, #0b1220 0%, #0f172a 45%, #111827 100%);
+      border: 1px solid #2dd4bf66;
+      border-radius: 14px;
+      padding: 14px 16px 12px;
+      box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(94,234,212,.08);
+      transform-origin: bottom right;
+      animation: zion-card-in 0.38s cubic-bezier(.22,1,.36,1) both;
+      overflow: hidden;
+    }
+    .zion-offer-card.is-leaving {
+      animation: zion-card-out 0.28s ease-in forwards;
+      pointer-events: none;
+    }
+    .zion-offer-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 2px;
+      background: linear-gradient(90deg, #5eead4, #f8fafc, #5eead4);
+      opacity: 0.85;
+    }
+    .zion-offer-kicker {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: #5eead4;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .zion-offer-title {
+      color: #f8fafc;
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-top: 0.15rem;
+      line-height: 1.25;
+    }
+    .zion-offer-body {
+      margin: 0.65rem 0 0.75rem;
+      color: #cbd5e1;
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+    .zion-offer-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.4rem;
+      margin-bottom: 0.55rem;
+    }
+    .zion-offer-stat {
+      background: #02061799;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 0.35rem 0.45rem;
+    }
+    .zion-offer-stat .lbl {
+      display: block;
+      font-size: 0.62rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .zion-offer-stat .val {
+      color: #e2e8f0;
+      font-weight: 650;
+      font-size: 0.8rem;
+    }
+    .zion-countdown {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin: 0.35rem 0 0.65rem;
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
+    .zion-countdown-bar {
+      flex: 1;
+      height: 4px;
+      border-radius: 999px;
+      background: #1e293b;
+      overflow: hidden;
+    }
+    .zion-countdown-bar > span {
+      display: block;
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #5eead4, #34d399);
+      transform-origin: left center;
+      transition: transform 0.2s linear;
+    }
+    .zion-offer-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    @keyframes zion-card-in {
+      from { opacity: 0; transform: translateY(18px) scale(0.96); }
+      to { opacity: 1; transform: none; }
+    }
+    @keyframes zion-card-out {
+      to { opacity: 0; transform: translateY(12px) scale(0.96); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .zion-offer-card,
+      .zion-offer-card.is-leaving,
+      .zion-cand-card {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
     .wallet-copy-cell {
       display: flex;
       flex-direction: column;
@@ -4821,13 +5073,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
+        <div class="section-title">Open Trades <span class="tip" tabindex="0" data-tip="Positions entered via Zion / KOL Scan Place Trade. Overview and Trades tabs still show every open position."></span></div>
+        <div id="zion-open-trades" class="max-h-72 overflow-y-auto text-sm">—</div>
+      </div>
+
+      <div class="card">
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <label class="ctl ctl-sm"><span>Min KOL wallets</span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="50" min="0" max="100" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min MC ($)</span><input type="number" id="zion-min-mc" value="50000" min="0" step="1000" /></label>
           <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="5000000" min="0" step="1000" /></label>
-          <label class="ctl ctl-sm"><span>Offer TTL (min)</span><input type="number" id="zion-ttl" value="30" min="5" max="240" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Offer TTL (min)</span><input type="number" id="zion-ttl" value="60" min="5" max="240" step="1" title="Pending offers expire after this many minutes (default 60). Popup auto-hides after 30s but the request stays Active until TTL." /></label>
           <label class="ctl ctl-sm"><span>Mint cooldown (min)</span><input type="number" id="zion-cooldown" value="120" min="5" max="1440" step="1" /></label>
           <label class="ctl ctl-sm"><span>Universe size</span><input type="number" id="zion-universe" value="60" min="20" max="100" step="1" /></label>
           <label class="ctl ctl-sm"><span>Poll interval (ms)</span><input type="number" id="zion-poll-ms" value="60000" min="30000" max="600000" step="1000" /></label>
@@ -4864,31 +5121,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
-    <div id="zion-offer-modal" class="hidden" style="position:fixed;inset:0;z-index:80;background:rgba(2,6,23,.72);display:none;align-items:center;justify-content:center;padding:16px">
-      <div style="width:min(520px,100%);max-height:90vh;overflow:auto;background:#0f172a;border:1px solid #334155;border-radius:12px;padding:16px 18px;box-shadow:0 20px 50px rgba(0,0,0,.45)">
-        <div class="flex items-start justify-between gap-3 mb-2">
-          <div>
-            <div class="text-xs" style="color:#5eead4">Zion trade request</div>
-            <div id="zion-modal-title" class="text-lg font-semibold text-white">—</div>
-          </div>
-          <button type="button" class="btn btn-secondary text-xs" onclick="closeZionOfferModal()">Close</button>
-        </div>
-        <div id="zion-modal-body" class="text-sm text-slate-300 space-y-2 mb-3" style="line-height:1.45">—</div>
-        <div class="grid grid-cols-2 gap-2 mb-2">
-          <label class="ctl ctl-sm"><span>SOL amount</span><input type="number" id="zion-modal-sol" min="0.01" step="0.01" /></label>
-          <label class="ctl ctl-sm"><span>USD amount</span><input type="number" id="zion-modal-usd" min="1" step="1" /></label>
-        </div>
-        <div class="toggle-row mb-3">
-          <span>Apply buy / TP / SL / trail presets</span>
-          <label class="switch"><input type="checkbox" id="zion-modal-exits" checked /><span class="slider"></span></label>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="btn btn-primary" style="background:#16a34a" onclick="placeZionTrade()">Place Trade</button>
-          <button type="button" class="btn btn-secondary" onclick="declineZionOffer()">Cancel</button>
-        </div>
-        <div id="zion-modal-status" class="mint text-xs mt-2">—</div>
-      </div>
-    </div>
+    <div id="zion-offer-stack" class="zion-offer-stack" aria-live="polite"></div>
 
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
@@ -5450,6 +5683,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       steady_compounder: { name: 'Steady Compounder', icon: '◇', color: '#8ba3c7' },
       reversal_scalper: { name: 'Reversal Scalper', icon: '↺', color: '#ff6b3d' },
       smart_money_mirror: { name: 'Smart Money Mirror', icon: '⧉', color: '#fbbf24' },
+      zion: { name: 'Zion', icon: '◈', color: '#f8fafc' },
       legacy: { name: 'Legacy', icon: '·', color: '#64748b' },
       skipped: { name: 'Skipped', icon: '⊘', color: '#64748b' },
     };
@@ -5482,17 +5716,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       'steady_compounder',
       'reversal_scalper',
       'smart_money_mirror',
+      'zion',
     ];
 
     function buildProfileColourLegendHtml() {
       return PROFILE_LEGEND_IDS.map(function (id) {
         const v = PROFILE_VISUALS[id];
         if (!v) return '';
+        const isZion = id === 'zion';
+        const style = isZion
+          ? 'color:#0f172a;border-color:#e2e8f0;background:#f8fafc'
+          : 'color:' + v.color + ';border-color:' + v.color + '99;background:' + v.color + '1f';
+        const swatch = isZion ? '#0f172a' : v.color;
         return (
-          '<span class="profile-colour-legend-item" style="color:' + v.color +
-          ';border-color:' + v.color + '99;background:' + v.color + '1f" title="' +
+          '<span class="profile-colour-legend-item" style="' + style + '" title="' +
           escHtml(v.name) + '">' +
-            '<span class="profile-colour-legend-swatch" style="background:' + v.color + '" aria-hidden="true"></span>' +
+            '<span class="profile-colour-legend-swatch" style="background:' + swatch + '" aria-hidden="true"></span>' +
             '<span class="profile-colour-legend-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
             '<span class="profile-colour-legend-name">' + escHtml(v.name) + '</span>' +
           '</span>'
@@ -8163,9 +8402,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         (p && p.tradeProfileReason ? ' — ' + String(p.tradeProfileReason) : '') +
         modulesLine;
       const compact = opts.compact === true;
+      const isZion = v.id === 'zion';
+      const badgeStyle = isZion
+        ? ''
+        : 'color:' + v.color + ';border-color:' + v.color + ';background:#0f172a';
       return (
-        '<span class="trade-profile-badge" title="' + escHtml(title) + '" style="color:' + v.color +
-        ';border-color:' + v.color + ';background:#0f172a">' +
+        '<span class="trade-profile-badge' + (isZion ? ' is-zion' : '') +
+        '" title="' + escHtml(title) + '"' +
+        (badgeStyle ? ' style="' + badgeStyle + '"' : '') + '>' +
         '<span class="tpb-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         '</span>'
@@ -8794,8 +9038,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 ? 'Migration event'
                 : p.entrySource === 'hybrid'
                   ? 'Hybrid (wallet + scanner)'
-                  : String(p.entrySource);
+                  : p.entrySource === 'zion'
+                    ? 'Triggered manually via Zion / KOL Scan'
+                    : String(p.entrySource);
         lines.push({ label: 'Entry path', text: srcLabel });
+      } else if (p.tradeProfileId === 'zion') {
+        lines.push({
+          label: 'Entry path',
+          text: 'Triggered manually via Zion / KOL Scan',
+        });
+      }
+
+      if (p.entrySource === 'zion' || p.tradeProfileId === 'zion') {
+        lines.push({
+          label: 'Zion',
+          text: 'Manual Place Trade from a KOL scanner offer — not auto-bought by copy or Market Scanner.',
+        });
       }
 
       if (p.entryMarketCapUsd != null && Number(p.entryMarketCapUsd) > 0) {
@@ -12140,6 +12398,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       });
       paintOpenPositionsTables();
+      if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
       window._closedTradeGroups = buildClosedTradeGroups(
         positions.closed || [],
@@ -14957,6 +15216,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let _zionCache = null;
     let _zionFormHydrated = false;
     let _zionSaveInFlight = false;
+    const ZION_POPUP_TTL_MS = 30_000;
+    const _zionPopupTimers = window._zionPopupTimers || new Map();
+    window._zionPopupTimers = _zionPopupTimers;
 
     function fillZionForm(cfg) {
       if (!cfg) return;
@@ -14987,6 +15249,103 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       _zionFormHydrated = true;
     }
 
+    function zionOfferDisplayStatus(o) {
+      const now = Date.now();
+      if (!o) return { key: 'expired', label: 'Expired' };
+      if (o.status === 'pending') {
+        if (o.expiresAt && o.expiresAt <= now) {
+          return { key: 'expired', label: 'Expired' };
+        }
+        return { key: 'active', label: 'Active' };
+      }
+      if (o.status === 'expired') return { key: 'expired', label: 'Expired' };
+      if (o.status === 'executed') return { key: 'executed', label: 'Executed' };
+      if (o.status === 'failed') return { key: 'failed', label: 'Failed' };
+      if (o.status === 'declined') return { key: 'declined', label: 'Declined' };
+      if (o.status === 'approved') return { key: 'approved', label: 'Approved' };
+      return { key: String(o.status || 'expired'), label: String(o.status || 'Expired') };
+    }
+
+    function zionFmtUsd(n) {
+      if (n == null || !Number.isFinite(Number(n))) return '—';
+      return '$' + Math.round(Number(n)).toLocaleString();
+    }
+
+    function zionRemainLabel(expiresAt) {
+      if (!expiresAt) return '';
+      const ms = expiresAt - Date.now();
+      if (ms <= 0) return 'expired';
+      const m = Math.floor(ms / 60000);
+      const s = Math.floor((ms % 60000) / 1000);
+      if (m >= 60) {
+        const h = Math.floor(m / 60);
+        return h + 'h ' + (m % 60) + 'm left';
+      }
+      if (m > 0) return m + 'm ' + s + 's left';
+      return s + 's left';
+    }
+
+    function renderZionOpenTrades() {
+      const el = document.getElementById('zion-open-trades');
+      if (!el) return;
+      const open = window._lastOpenPositions || [];
+      const zionOpen = open.filter(function (p) {
+        return (
+          (p && p.entrySource === 'zion') ||
+          (p && p.tradeProfileId === 'zion')
+        );
+      });
+      if (!zionOpen.length) {
+        el.innerHTML =
+          '<div class="mint">No open Zion / KOL Scan positions. Overview still lists every trade.</div>';
+        return;
+      }
+      el.innerHTML = zionOpen
+        .map(function (p) {
+          const pnl = Number(p.unrealizedPnlPct);
+          const pnlTxt = Number.isFinite(pnl)
+            ? (pnl >= 0 ? '+' : '') + pnl.toFixed(1) + '%'
+            : '—';
+          const pnlColor =
+            Number.isFinite(pnl) && pnl >= 0 ? 'var(--green,#4ade80)' : 'var(--red,#f87171)';
+          const sellLabel = String(p.symbol || (p.mint || '').slice(0, 6)).replace(/'/g, "\\\\'");
+          return (
+            '<div class="zion-open-row">' +
+            '<div>' +
+            '<div class="flex flex-wrap gap-2 items-center">' +
+            fmtTradeProfileBadge(p, { compact: false }) +
+            '<strong style="color:#f1f5f9">' +
+            escHtml(p.symbol || '?') +
+            '</strong>' +
+            '<span class="mint">' +
+            zionFmtUsd(p.entryMarketCapUsd) +
+            ' buy MC</span>' +
+            '</div>' +
+            '<div class="mint text-xs mt-1">' +
+            escHtml(
+              (p.tradeProfileReason ||
+                'Triggered manually via Zion / KOL Scan').slice(0, 120)
+            ) +
+            '</div>' +
+            '</div>' +
+            '<div class="flex flex-wrap gap-2 items-center">' +
+            '<span style="color:' +
+            pnlColor +
+            ';font-weight:700">' +
+            pnlTxt +
+            '</span>' +
+            '<button class="danger text-xs" onclick="forceSellPosition(\\'' +
+            escAttr(p.id) +
+            '\\', \\'' +
+            sellLabel +
+            '\\')" title="Force sell">Sell</button>' +
+            '</div>' +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+
     function renderZionFeeds(data) {
       const st = document.getElementById('zion-status');
       if (st && data) {
@@ -15005,24 +15364,65 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (feed) {
         const cands = (data && data.candidates) || [];
         if (!cands.length) {
-          feed.innerHTML = '<div class="mint">No KOL scanner candidates yet — enable Zion and wait for a poll.</div>';
+          feed.innerHTML =
+            '<div class="mint">No KOL scanner candidates yet — enable Zion and wait for a poll.</div>';
         } else {
-          feed.innerHTML = cands.map(function (c) {
-            const kols = (c.kolWallets || []).slice(0, 4).map(function (w) { return escHtml(w.name || w.address.slice(0, 6)); }).join(', ');
-            return (
-              '<div class="py-2 border-b border-slate-800">' +
-              '<div class="flex flex-wrap gap-2 items-center">' +
-              '<strong style="color:#e2e8f0">' + escHtml(c.symbol || '?') + '</strong>' +
-              '<span class="mint">score ' + Math.round(c.score || 0) + '</span>' +
-              '<span class="mint">' + escHtml(c.status || '') + '</span>' +
-              (c.trackedBoostCount ? '<span style="color:#fbbf24">tracked+' + c.trackedBoostCount + '</span>' : '') +
-              (c.mcUsd != null ? '<span class="mint">MC $' + Math.round(c.mcUsd).toLocaleString() + '</span>' : '') +
-              '<span class="mint">KOLs ' + (c.kolCount || 0) + '</span>' +
-              '</div>' +
-              '<div class="mint text-xs">' + kols + (c.skipReason ? ' · ' + escHtml(c.skipReason) : '') + '</div>' +
-              '</div>'
-            );
-          }).join('');
+          feed.innerHTML = cands
+            .map(function (c) {
+              const kols = (c.kolWallets || [])
+                .slice(0, 5)
+                .map(function (w) {
+                  return escHtml(w.name || (w.address || '').slice(0, 6));
+                })
+                .join(', ');
+              const status = String(c.status || 'seen');
+              const cardCls =
+                'zion-cand-card' +
+                (status === 'offered' ? ' is-offered' : '') +
+                (status === 'skipped' ? ' is-skipped' : '');
+              return (
+                '<div class="' +
+                cardCls +
+                '">' +
+                '<div class="flex flex-wrap gap-2 items-center justify-between">' +
+                '<div class="flex flex-wrap gap-2 items-center">' +
+                '<span class="zion-cand-sym">' +
+                escHtml(c.symbol || '?') +
+                '</span>' +
+                '<span class="zion-status-pill is-' +
+                (status === 'offered' ? 'active' : status === 'skipped' ? 'declined' : 'approved') +
+                '">' +
+                escHtml(status) +
+                '</span>' +
+                '</div>' +
+                '<span class="zion-cand-chip is-score">◈ ' +
+                Math.round(c.score || 0) +
+                '</span>' +
+                '</div>' +
+                '<div class="zion-cand-meta">' +
+                (c.mcUsd != null
+                  ? '<span class="zion-cand-chip">MC ' + zionFmtUsd(c.mcUsd) + '</span>'
+                  : '') +
+                (c.volumeH1Usd != null
+                  ? '<span class="zion-cand-chip">Vol1h ' + zionFmtUsd(c.volumeH1Usd) + '</span>'
+                  : '') +
+                '<span class="zion-cand-chip">KOLs ' +
+                (c.kolCount || 0) +
+                '</span>' +
+                (c.trackedBoostCount
+                  ? '<span class="zion-cand-chip is-boost">tracked +' +
+                    c.trackedBoostCount +
+                    '</span>'
+                  : '') +
+                '</div>' +
+                '<div class="mint text-xs mt-1">' +
+                (kols || '—') +
+                (c.skipReason ? ' · ' + escHtml(c.skipReason) : '') +
+                '</div>' +
+                '</div>'
+              );
+            })
+            .join('');
         }
       }
       const offersEl = document.getElementById('zion-offers-feed');
@@ -15031,46 +15431,128 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (!offers.length) {
           offersEl.innerHTML = '<div class="mint">No trade requests yet.</div>';
         } else {
-          offersEl.innerHTML = offers.map(function (o) {
-            const openBtn =
-              o.status === 'pending'
-                ? '<button class="btn btn-primary text-xs" onclick="openZionOfferModal(\\'' + escAttr(o.id) + '\\')">Open</button>'
+          offersEl.innerHTML = offers
+            .map(function (o) {
+              const disp = zionOfferDisplayStatus(o);
+              const canOpen = disp.key === 'active';
+              const openBtn = canOpen
+                ? '<button class="btn btn-primary text-xs" onclick="openZionOfferModal(\\'' +
+                  escAttr(o.id) +
+                  '\\')">Open</button>'
                 : '';
-            return (
-              '<div class="py-2 border-b border-slate-800 flex flex-wrap gap-2 items-center justify-between">' +
-              '<div>' +
-              '<strong style="color:#e2e8f0">' + escHtml(o.symbol) + '</strong> ' +
-              '<span class="mint">' + escHtml(o.status) + '</span> ' +
-              '<span class="mint">score ' + Math.round(o.score || 0) + '</span> ' +
-              (o.mcUsd != null ? '<span class="mint">MC $' + Math.round(o.mcUsd).toLocaleString() + '</span> ' : '') +
-              '<span class="mint">KOLs ' + (o.kolCount || 0) + '</span>' +
-              '</div>' + openBtn +
-              '</div>'
-            );
-          }).join('');
+              const remain =
+                disp.key === 'active' ? zionRemainLabel(o.expiresAt) : '';
+              return (
+                '<div class="zion-offer-row">' +
+                '<div>' +
+                '<div class="flex flex-wrap gap-2 items-center">' +
+                '<strong style="color:#e2e8f0">' +
+                escHtml(o.symbol) +
+                '</strong>' +
+                '<span class="zion-status-pill is-' +
+                disp.key +
+                '">' +
+                escHtml(disp.label) +
+                '</span>' +
+                '<span class="mint">score ' +
+                Math.round(o.score || 0) +
+                '</span>' +
+                (o.mcUsd != null
+                  ? '<span class="mint">MC ' + zionFmtUsd(o.mcUsd) + '</span>'
+                  : '') +
+                '<span class="mint">KOLs ' +
+                (o.kolCount || 0) +
+                '</span>' +
+                (remain ? '<span class="mint">' + remain + '</span>' : '') +
+                '</div>' +
+                '<div class="mint text-xs mt-1">' +
+                escHtml((o.reasons || []).slice(0, 3).join(' · ') || o.source || '') +
+                '</div>' +
+                '</div>' +
+                openBtn +
+                '</div>'
+              );
+            })
+            .join('');
         }
       }
+      renderZionOpenTrades();
+    }
+
+    function ensureZionStack() {
+      let stack = document.getElementById('zion-offer-stack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'zion-offer-stack';
+        stack.className = 'zion-offer-stack';
+        stack.setAttribute('aria-live', 'polite');
+        document.body.appendChild(stack);
+      }
+      return stack;
+    }
+
+    function clearZionPopupTimer(id) {
+      const t = _zionPopupTimers.get(id);
+      if (!t) return;
+      if (t.interval) clearInterval(t.interval);
+      if (t.timeout) clearTimeout(t.timeout);
+      _zionPopupTimers.delete(id);
+    }
+
+    function dismissZionOfferCard(id, opts) {
+      opts = opts || {};
+      clearZionPopupTimer(id);
+      const card = document.getElementById('zion-offer-card-' + id);
+      if (!card) {
+        if (_zionActiveOfferId === id) _zionActiveOfferId = null;
+        return;
+      }
+      const finish = function () {
+        if (card.parentNode) card.parentNode.removeChild(card);
+        if (_zionActiveOfferId === id) _zionActiveOfferId = null;
+      };
+      if (opts.immediate) {
+        finish();
+        return;
+      }
+      card.classList.add('is-leaving');
+      setTimeout(finish, 280);
+    }
+
+    function closeZionOfferModal() {
+      if (_zionActiveOfferId) {
+        dismissZionOfferCard(_zionActiveOfferId);
+        return;
+      }
+      const stack = document.getElementById('zion-offer-stack');
+      if (!stack) return;
+      const cards = stack.querySelectorAll('.zion-offer-card');
+      cards.forEach(function (card) {
+        const oid = card.getAttribute('data-offer-id');
+        if (oid) dismissZionOfferCard(oid);
+      });
     }
 
     function handleZionRefresh(data) {
       _zionCache = data;
       const panel = document.querySelector('[data-tab-panel="zion"]');
       const onZion = panel && !panel.classList.contains('hidden');
-      // Do not rewrite toggles from the 5s poll — that snapped Enable Zion OFF
-      // before Save could stick. Status/feeds only; form via loadZion/save.
       if (onZion) {
         renderZionFeeds(data);
         if (!_zionFormHydrated && !_zionSaveInFlight) {
           fillZionForm(data.config || {});
         }
+      } else {
+        renderZionOpenTrades();
       }
-      const pending = ((data && data.offers) || []).filter(function (o) { return o.status === 'pending'; });
+      const pending = ((data && data.offers) || []).filter(function (o) {
+        return zionOfferDisplayStatus(o).key === 'active';
+      });
       for (let i = 0; i < pending.length; i++) {
         const o = pending[i];
         if (_zionShownOffers.has(o.id)) continue;
         _zionShownOffers.add(o.id);
-        openZionOfferModal(o.id, o);
-        break;
+        openZionOfferModal(o.id, o, { auto: true });
       }
     }
 
@@ -15115,7 +15597,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           minWalletQuality: Number(document.getElementById('zion-min-quality') && document.getElementById('zion-min-quality').value) || 50,
           minMcUsd: Number(document.getElementById('zion-min-mc') && document.getElementById('zion-min-mc').value) || 0,
           maxMcUsd: Number(document.getElementById('zion-max-mc') && document.getElementById('zion-max-mc').value) || 0,
-          offerTtlMinutes: Number(document.getElementById('zion-ttl') && document.getElementById('zion-ttl').value) || 30,
+          offerTtlMinutes: Number(document.getElementById('zion-ttl') && document.getElementById('zion-ttl').value) || 60,
           mintCooldownMinutes: Number(document.getElementById('zion-cooldown') && document.getElementById('zion-cooldown').value) || 120,
           defaults: {
             sizeMode: (document.getElementById('zion-size-mode') && document.getElementById('zion-size-mode').value) || 'sol',
@@ -15163,100 +15645,234 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return offers.find(function (o) { return o.id === id; }) || null;
     }
 
-    function openZionOfferModal(id, offer) {
+    function openZionOfferModal(id, offer, opts) {
+      opts = opts || {};
       const o = offer || findZionOffer(id);
       if (!o) {
         fetchJSON('/api/zion/offers/' + encodeURIComponent(id) + '/open', { method: 'POST' })
           .then(function (res) {
-            if (res.offer) openZionOfferModal(id, res.offer);
+            if (res.offer) openZionOfferModal(id, res.offer, opts);
           })
           .catch(function () {});
         return;
       }
+      const disp = zionOfferDisplayStatus(o);
+      if (disp.key !== 'active' && !opts.force) {
+        alert('Offer is ' + disp.label.toLowerCase() + ' — cannot place.');
+        return;
+      }
       _zionActiveOfferId = o.id;
       _zionShownOffers.add(o.id);
-      const modal = document.getElementById('zion-offer-modal');
-      if (modal) {
-        modal.classList.remove('hidden');
-        modal.style.display = 'flex';
+      const existing = document.getElementById('zion-offer-card-' + o.id);
+      if (existing) {
+        existing.classList.remove('is-leaving');
+        existing.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        return;
       }
-      const title = document.getElementById('zion-modal-title');
-      if (title) title.textContent = (o.symbol || '?') + ' · ' + (o.status || '');
-      const body = document.getElementById('zion-modal-body');
-      if (body) {
-        const kols = (o.kolWallets || []).map(function (w) {
-          return escHtml(w.name || '') + ' <span class="mint">(' + escHtml((w.address || '').slice(0, 8)) + '…)</span>';
-        }).join('<br/>');
-        body.innerHTML =
-          '<div><span class="mint">Mint</span> ' + escHtml(o.mint) + '</div>' +
-          (o.mcUsd != null ? '<div><span class="mint">MC</span> $' + Math.round(o.mcUsd).toLocaleString() + '</div>' : '') +
-          (o.volumeH1Usd != null ? '<div><span class="mint">Vol 1h</span> $' + Math.round(o.volumeH1Usd).toLocaleString() + '</div>' : '') +
-          (o.liquidityUsd != null ? '<div><span class="mint">Liq</span> $' + Math.round(o.liquidityUsd).toLocaleString() + '</div>' : '') +
-          (o.holders != null ? '<div><span class="mint">Holders</span> ' + o.holders + '</div>' : '') +
-          '<div><span class="mint">Score</span> ' + Math.round(o.score || 0) + ' · <span class="mint">Source</span> ' + escHtml(o.source || '') + '</div>' +
-          '<div><span class="mint">Reasons</span> ' + escHtml((o.reasons || []).join(' · ')) + '</div>' +
-          '<div class="mt-2"><span class="mint">KOLs (' + (o.kolCount || 0) + ')</span><br/>' + (kols || '—') + '</div>';
-      }
+
+      const stack = ensureZionStack();
       const d = (_zionCache && _zionCache.config && _zionCache.config.defaults) || {};
-      const solEl = document.getElementById('zion-modal-sol');
-      const usdEl = document.getElementById('zion-modal-usd');
-      const exEl = document.getElementById('zion-modal-exits');
-      if (solEl) solEl.value = d.solAmount != null ? d.solAmount : 0.25;
-      if (usdEl) usdEl.value = d.usdAmount != null ? d.usdAmount : 50;
-      if (exEl) exEl.checked = d.useExitPresets !== false;
-      const st = document.getElementById('zion-modal-status');
-      if (st) st.textContent = o.status === 'pending' ? 'Ready' : ('Status: ' + o.status);
-      showTab('zion', document.querySelector('[data-tab="zion"]'));
-      try {
-        fetchJSON('/api/zion/offers/' + encodeURIComponent(o.id) + '/open', { method: 'POST' }).catch(function () {});
-      } catch (_) {}
-    }
+      const solDef = d.solAmount != null ? d.solAmount : 0.25;
+      const usdDef = d.usdAmount != null ? d.usdAmount : 50;
+      const exitsOn = d.useExitPresets !== false;
+      const kols = (o.kolWallets || [])
+        .map(function (w) {
+          return (
+            escHtml(w.name || 'KOL') +
+            ' <span class="mint">(' +
+            escHtml((w.address || '').slice(0, 8)) +
+            '…)</span>'
+          );
+        })
+        .join(' · ');
 
-    function closeZionOfferModal() {
-      const modal = document.getElementById('zion-offer-modal');
-      if (modal) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
+      const card = document.createElement('div');
+      card.className = 'zion-offer-card';
+      card.id = 'zion-offer-card-' + o.id;
+      card.setAttribute('data-offer-id', o.id);
+      card.innerHTML =
+        '<div class="flex items-start justify-between gap-2">' +
+        '<div>' +
+        '<div class="zion-offer-kicker"><span aria-hidden="true">◈</span> Zion trade request</div>' +
+        '<div class="zion-offer-title">' +
+        escHtml(o.symbol || '?') +
+        ' · ' +
+        escHtml(disp.label) +
+        '</div>' +
+        '</div>' +
+        '<button type="button" class="btn btn-secondary text-xs" data-zion-dismiss="' +
+        escAttr(o.id) +
+        '">Close</button>' +
+        '</div>' +
+        '<div class="zion-countdown">' +
+        '<span data-zion-count-label>Auto-hide in 30s</span>' +
+        '<div class="zion-countdown-bar"><span data-zion-count-bar style="transform:scaleX(1)"></span></div>' +
+        '</div>' +
+        '<div class="zion-offer-stats">' +
+        '<div class="zion-offer-stat"><span class="lbl">MC</span><span class="val">' +
+        zionFmtUsd(o.mcUsd) +
+        '</span></div>' +
+        '<div class="zion-offer-stat"><span class="lbl">Vol 1h</span><span class="val">' +
+        zionFmtUsd(o.volumeH1Usd) +
+        '</span></div>' +
+        '<div class="zion-offer-stat"><span class="lbl">Liq</span><span class="val">' +
+        zionFmtUsd(o.liquidityUsd) +
+        '</span></div>' +
+        '</div>' +
+        '<div class="zion-offer-body">' +
+        '<div><span class="mint">Score</span> ' +
+        Math.round(o.score || 0) +
+        ' · <span class="mint">Source</span> ' +
+        escHtml(o.source || '') +
+        '</div>' +
+        '<div class="mt-1"><span class="mint">Reasons</span> ' +
+        escHtml((o.reasons || []).join(' · ') || '—') +
+        '</div>' +
+        '<div class="mt-1"><span class="mint">KOLs (' +
+        (o.kolCount || 0) +
+        ')</span> ' +
+        (kols || '—') +
+        '</div>' +
+        '<div class="mint text-xs mt-1" style="word-break:break-all">' +
+        escHtml(o.mint) +
+        '</div>' +
+        '</div>' +
+        '<div class="grid grid-cols-2 gap-2 mb-2">' +
+        '<label class="ctl ctl-sm"><span>SOL amount</span><input type="number" data-zion-sol min="0.01" step="0.01" value="' +
+        escAttr(String(solDef)) +
+        '" /></label>' +
+        '<label class="ctl ctl-sm"><span>USD amount</span><input type="number" data-zion-usd min="1" step="1" value="' +
+        escAttr(String(usdDef)) +
+        '" /></label>' +
+        '</div>' +
+        '<div class="toggle-row mb-2">' +
+        '<span>Apply buy / TP / SL / trail presets</span>' +
+        '<label class="switch"><input type="checkbox" data-zion-exits' +
+        (exitsOn ? ' checked' : '') +
+        ' /><span class="slider"></span></label>' +
+        '</div>' +
+        '<div class="zion-offer-actions">' +
+        '<button type="button" class="btn btn-primary" style="background:#16a34a" data-zion-place="' +
+        escAttr(o.id) +
+        '">Place Trade</button>' +
+        '<button type="button" class="btn btn-secondary" data-zion-decline="' +
+        escAttr(o.id) +
+        '">Cancel</button>' +
+        '</div>' +
+        '<div class="mint text-xs mt-2" data-zion-status>Ready · stays Active in Zion tab after auto-hide</div>';
+
+      stack.appendChild(card);
+
+      const started = Date.now();
+      const bar = card.querySelector('[data-zion-count-bar]');
+      const label = card.querySelector('[data-zion-count-label]');
+      const tick = function () {
+        const left = Math.max(0, ZION_POPUP_TTL_MS - (Date.now() - started));
+        const pct = left / ZION_POPUP_TTL_MS;
+        if (bar) bar.style.transform = 'scaleX(' + pct.toFixed(4) + ')';
+        if (label) {
+          label.textContent =
+            'Auto-hide in ' + Math.ceil(left / 1000) + 's · offer stays Active';
+        }
+        if (left <= 0) {
+          dismissZionOfferCard(o.id);
+        }
+      };
+      const interval = setInterval(tick, 200);
+      const timeout = setTimeout(function () {
+        dismissZionOfferCard(o.id);
+      }, ZION_POPUP_TTL_MS);
+      clearZionPopupTimer(o.id);
+      _zionPopupTimers.set(o.id, { interval: interval, timeout: timeout });
+      tick();
+
+      if (!opts.auto) {
+        showTab('zion', document.querySelector('[data-tab="zion"]'));
       }
-      _zionActiveOfferId = null;
+      try {
+        fetchJSON('/api/zion/offers/' + encodeURIComponent(o.id) + '/open', {
+          method: 'POST',
+        }).catch(function () {});
+      } catch (_) {}
     }
 
-    async function declineZionOffer() {
-      if (!_zionActiveOfferId) { closeZionOfferModal(); return; }
+    async function declineZionOffer(id) {
+      const offerId = id || _zionActiveOfferId;
+      if (!offerId) {
+        closeZionOfferModal();
+        return;
+      }
       try {
-        await fetchJSON('/api/zion/offers/' + encodeURIComponent(_zionActiveOfferId) + '/decline', { method: 'POST' });
+        await fetchJSON(
+          '/api/zion/offers/' + encodeURIComponent(offerId) + '/decline',
+          { method: 'POST' }
+        );
       } catch (_) {}
-      closeZionOfferModal();
+      dismissZionOfferCard(offerId, { immediate: true });
       loadZion();
     }
 
-    async function placeZionTrade() {
-      if (!_zionActiveOfferId) return;
-      const st = document.getElementById('zion-modal-status');
+    async function placeZionTrade(id) {
+      const offerId = id || _zionActiveOfferId;
+      if (!offerId) return;
+      const card = document.getElementById('zion-offer-card-' + offerId);
+      const st = card && card.querySelector('[data-zion-status]');
       if (st) st.textContent = 'Placing…';
       try {
+        const solEl = card && card.querySelector('[data-zion-sol]');
+        const usdEl = card && card.querySelector('[data-zion-usd]');
+        const exEl = card && card.querySelector('[data-zion-exits]');
         const body = {
-          solAmount: Number(document.getElementById('zion-modal-sol')?.value) || undefined,
-          usdAmount: Number(document.getElementById('zion-modal-usd')?.value) || undefined,
-          useExitPresets: document.getElementById('zion-modal-exits')?.checked !== false,
+          solAmount: Number(solEl && solEl.value) || undefined,
+          usdAmount: Number(usdEl && usdEl.value) || undefined,
+          useExitPresets: !(exEl && exEl.checked === false),
         };
-        const mode = (_zionCache && _zionCache.config && _zionCache.config.defaults && _zionCache.config.defaults.sizeMode) || 'sol';
+        const mode =
+          (_zionCache &&
+            _zionCache.config &&
+            _zionCache.config.defaults &&
+            _zionCache.config.defaults.sizeMode) ||
+          'sol';
         if (mode === 'usd') delete body.solAmount;
         else delete body.usdAmount;
-        const res = await fetchJSON('/api/zion/offers/' + encodeURIComponent(_zionActiveOfferId) + '/approve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const res = await fetchJSON(
+          '/api/zion/offers/' + encodeURIComponent(offerId) + '/approve',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }
+        );
         if (!res.ok) throw new Error(res.error || 'Place trade failed');
         if (st) st.textContent = 'Placed';
-        setTimeout(closeZionOfferModal, 600);
+        setTimeout(function () {
+          dismissZionOfferCard(offerId);
+        }, 500);
         loadZion();
         refresh();
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
       }
     }
+
+    document.addEventListener('click', function (ev) {
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const place = t.closest('[data-zion-place]');
+      if (place) {
+        placeZionTrade(place.getAttribute('data-zion-place'));
+        return;
+      }
+      const decline = t.closest('[data-zion-decline]');
+      if (decline) {
+        declineZionOffer(decline.getAttribute('data-zion-decline'));
+        return;
+      }
+      const dismiss = t.closest('[data-zion-dismiss]');
+      if (dismiss) {
+        dismissZionOfferCard(dismiss.getAttribute('data-zion-dismiss'));
+      }
+    });
 
     window.loadZion = loadZion;
     window.saveZionConfig = saveZionConfig;
@@ -15265,6 +15881,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.declineZionOfferModal = declineZionOffer;
     window.declineZionOffer = declineZionOffer;
     window.placeZionTrade = placeZionTrade;
+    window.renderZionOpenTrades = renderZionOpenTrades;
+
 
     async function saveTechnicalLevelsConfig(silent) {
       const fibRaw = document.getElementById('tl-priority-fibs')?.value || '0.5,0.618';

@@ -311,6 +311,8 @@ export const TRADE_PROFILE_COLORS = {
   steady_compounder: '#8ba3c7', // Grey-Blue
   reversal_scalper: '#ff6b3d', // Red-Orange
   smart_money_mirror: '#fbbf24', // Gold / Yellow
+  /** Manual KOL / Zion micro-bot entries — near-white badge on dark UI */
+  zion: '#f8fafc',
   legacy: '#64748b',
   skipped: '#64748b',
 } as const;
