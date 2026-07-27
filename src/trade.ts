@@ -20,6 +20,7 @@ import { isDeniedCopyMint } from './deniedMints';
 import {
   evaluateBuyPumpFunOnlyGate,
   evaluateHolderConcentrationHardFloors,
+  evaluateFakeHolderVelocityGate,
 } from './deadTokenFilters';
 import { getTokenSniperActivity } from './gmgn';
 import { effectiveMaxEntryMarketCapUsd } from './filterEffective';
@@ -43,6 +44,7 @@ import {
   getCachedSolUsdPrice,
   marketCapAtPrice,
 } from './marketData';
+import { fetchTokenMetrics } from './tokenMetrics';
 import {
   fetchBondingCurve,
   estimateBondingCurvePriceSol,
@@ -437,6 +439,26 @@ export async function executeBuy(
     return { success: false, mode: config.mode, error: pumpFunGate };
   }
 
+  // Hard floor: fake-holder velocity (always on — all profiles + Zion Place Trade).
+  try {
+    const metrics = await fetchTokenMetrics(mint);
+    const fakeHolders = evaluateFakeHolderVelocityGate({
+      holderCount: metrics.holderCountEstimate,
+      launchedAtMs: metrics.pairCreatedAtMs,
+    });
+    if (fakeHolders) {
+      console.log(
+        `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${fakeHolders}`
+      );
+      return { success: false, mode: config.mode, error: fakeHolders };
+    }
+  } catch (err) {
+    console.warn(
+      `[trade] Fake-holder check failed for ${mint.slice(0, 8)}…:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+
   // Hard floor: Reason-column quality 0–4 never open (matches More Info score).
   const qualityGate = evaluateEntryQualityHardFloor(meta);
   if (qualityGate) {
@@ -783,6 +805,10 @@ export async function executeBuy(
         profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
+        entrySource: meta?.entrySource,
+        scannerPlaybook: meta?.scannerPlaybook,
+        scannerConfluence: meta?.scannerConfluence,
+        candleSource: meta?.candleSource,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

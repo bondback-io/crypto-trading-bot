@@ -51,6 +51,8 @@ export interface DeadTokenMarketSnapshot {
   curveHealth?: BondingCurveHealth | null;
   /** Jupiter organicScore 0–100 when known */
   organicScore?: number | null;
+  /** Launch / first-pool time (ms) when known — for fake-holder velocity */
+  pairCreatedAtMs?: number | null;
 }
 
 export interface DeadTokenFloorContext {
@@ -102,6 +104,8 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('market cap unknown') ||
     r.includes('low mc with near-zero volume') ||
     r.includes('not a pump.fun mint') ||
+    r.includes('fake holders') ||
+    r.includes('holder velocity') ||
     r.includes('dumping from recent high') ||
     r.includes('signal too old') ||
     r.includes('entry age') ||
@@ -113,9 +117,9 @@ export function isNonBypassableSkipReason(reason: string): boolean {
   );
 }
 
-/** Pump.fun convention: mint address ends with case-sensitive `pump`. */
+/** Pump.fun convention: mint address ends with `pump` (case-insensitive). */
 export function isPumpFunMintSuffix(mint: string): boolean {
-  return typeof mint === 'string' && mint.endsWith('pump');
+  return typeof mint === 'string' && mint.toLowerCase().endsWith('pump');
 }
 
 export function pumpFunMintSkipReason(mint: string): string {
@@ -131,6 +135,41 @@ export function evaluateBuyPumpFunOnlyGate(mint: string): string | null {
   if (config.filters.buyPumpFunOnly !== true) return null;
   if (isPumpFunMintSuffix(mint)) return null;
   return pumpFunMintSkipReason(mint);
+}
+
+/**
+ * Fake-holder velocity hard floors (always on — Zion + all profiles / master bot).
+ * Blocks inflated holder counts too soon after launch/migration:
+ *   ≥2,000 within 15m · ≥5,000 within 30m · ≥10,000 within 1h
+ * Unknown age or holders → fail-open (cannot evaluate).
+ */
+export const FAKE_HOLDER_VELOCITY_FLOORS = [
+  { maxAgeMs: 15 * 60_000, maxHolders: 2_000, label: '15m' },
+  { maxAgeMs: 30 * 60_000, maxHolders: 5_000, label: '30m' },
+  { maxAgeMs: 60 * 60_000, maxHolders: 10_000, label: '1h' },
+] as const;
+
+export function evaluateFakeHolderVelocityGate(input: {
+  holderCount?: number | null;
+  launchedAtMs?: number | null;
+  nowMs?: number;
+}): string | null {
+  const holders = Number(input.holderCount);
+  const launchedAt = Number(input.launchedAtMs);
+  if (!Number.isFinite(holders) || holders <= 0) return null;
+  if (!Number.isFinite(launchedAt) || launchedAt <= 0) return null;
+  const now = Number(input.nowMs) > 0 ? Number(input.nowMs) : Date.now();
+  const ageMs = Math.max(0, now - launchedAt);
+  for (const floor of FAKE_HOLDER_VELOCITY_FLOORS) {
+    if (ageMs <= floor.maxAgeMs && holders >= floor.maxHolders) {
+      const ageMin = Math.max(1, Math.round(ageMs / 60_000));
+      return (
+        `Skipped — fake holders suspected (${Math.round(holders).toLocaleString()} holders ` +
+        `in ${ageMin}m · block ≥${floor.maxHolders.toLocaleString()} within ${floor.label})`
+      );
+    }
+  }
+  return null;
 }
 
 function formatMcShort(usd: number): string {
@@ -169,6 +208,26 @@ export function evaluateDeadTokenHardFloors(
   snap: DeadTokenMarketSnapshot,
   ctx: DeadTokenFloorContext = {}
 ): DeadTokenFilterResult {
+  // Fake-holder velocity always applies (Risk On/Off) — inflated holders near launch.
+  const fakeHolders = evaluateFakeHolderVelocityGate({
+    holderCount: snap.holderCount,
+    launchedAtMs: snap.pairCreatedAtMs ?? null,
+  });
+  if (fakeHolders) {
+    return {
+      skipReasons: [fakeHolders],
+      scorePenalty: 45,
+      flags: [
+        {
+          id: 'hard_fake_holder_velocity',
+          severity: 'critical',
+          label: 'Fake holders suspected',
+          detail: fakeHolders,
+        },
+      ],
+    };
+  }
+
   // Risk OFF: no liq/volume/MC/holder hard floors — entry engines decide.
   if (config.riskLevel === 'off') {
     return { skipReasons: [], scorePenalty: 0, flags: [] };

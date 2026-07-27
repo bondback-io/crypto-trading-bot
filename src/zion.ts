@@ -16,6 +16,7 @@ import { executeBuy } from './trade';
 import { getCachedSolUsdPrice } from './marketData';
 import { paperTrader } from './paperTrader';
 import { clampToMaxAllowedTradeSol } from './risk';
+import { isPumpFunMintSuffix } from './deadTokenFilters';
 
 export type ZionOfferStatus =
   | 'pending'
@@ -188,6 +189,10 @@ export function maybeCreateOffer(
 
   const mint = String(input.mint || '').trim();
   if (!mint) return null;
+
+  if (!isPumpFunMintSuffix(mint)) {
+    return null;
+  }
 
   if (hasPendingOfferForMint(mint)) {
     return getPendingOfferForMint(mint);

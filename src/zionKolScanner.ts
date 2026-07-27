@@ -23,6 +23,12 @@ import {
   type ZionKolWalletRef,
   type ZionOfferSource,
 } from './zion';
+import {
+  evaluateFakeHolderVelocityGate,
+  isPumpFunMintSuffix,
+  pumpFunMintSkipReason,
+} from './deadTokenFilters';
+import { lookupCachedJupiterToken } from './jupiterTokens';
 
 export type ZionKolCandidateStatus = 'seen' | 'offered' | 'skipped';
 
@@ -65,6 +71,7 @@ interface MintAgg {
   volumeH1Usd?: number;
   liquidityUsd?: number;
   holders?: number;
+  pairCreatedAtMs?: number;
 }
 
 const UNIVERSE_FILE = dataFile(PERSIST_FILES.zionKolUniverse);
@@ -192,6 +199,8 @@ async function fetchDexMetrics(mint: string): Promise<{
   mcUsd?: number;
   volumeH1Usd?: number;
   liquidityUsd?: number;
+  pairCreatedAtMs?: number;
+  holders?: number;
 }> {
   try {
     const ctrl = new AbortController();
@@ -213,6 +222,8 @@ async function fetchDexMetrics(mint: string): Promise<{
     const vol = sol.volume as { h1?: number } | undefined;
     const liq = sol.liquidity as { usd?: number } | undefined;
     const mc = Number(sol.marketCap ?? sol.fdv ?? NaN);
+    const created = Number(sol.pairCreatedAt ?? NaN);
+    const jup = lookupCachedJupiterToken(mint);
     return {
       symbol: base?.symbol,
       name: base?.name,
@@ -224,6 +235,12 @@ async function fetchDexMetrics(mint: string): Promise<{
       liquidityUsd:
         liq?.usd != null && Number.isFinite(Number(liq.usd))
           ? Number(liq.usd)
+          : undefined,
+      pairCreatedAtMs:
+        Number.isFinite(created) && created > 0 ? created : undefined,
+      holders:
+        jup?.holderCount != null && Number.isFinite(Number(jup.holderCount))
+          ? Number(jup.holderCount)
           : undefined,
     };
   } catch {
@@ -380,6 +397,28 @@ function scoreAgg(agg: MintAgg): {
   skipReason?: string;
 } {
   const reasons: string[] = [];
+  if (!isPumpFunMintSuffix(agg.mint)) {
+    return {
+      score: 0,
+      reasons,
+      source: 'kol_scanner',
+      ok: false,
+      skipReason: pumpFunMintSkipReason(agg.mint),
+    };
+  }
+  const fakeHolders = evaluateFakeHolderVelocityGate({
+    holderCount: agg.holders,
+    launchedAtMs: agg.pairCreatedAtMs,
+  });
+  if (fakeHolders) {
+    return {
+      score: 0,
+      reasons,
+      source: 'kol_scanner',
+      ok: false,
+      skipReason: fakeHolders,
+    };
+  }
   const minKol = Math.max(1, Number(zionCfg().minKolWallets) || 2);
   const minQ = Math.max(0, Number(zionCfg().minWalletQuality) || 0);
   const kolWallets = [...agg.wallets.values()].filter(
@@ -463,13 +502,15 @@ async function rebuildCandidates(): Promise<void> {
   );
 
   for (const agg of sorted.slice(0, 40)) {
-    if (agg.mcUsd == null) {
+    if (agg.mcUsd == null || agg.pairCreatedAtMs == null || agg.holders == null) {
       const m = await fetchDexMetrics(agg.mint);
       if (m.symbol) agg.symbol = m.symbol;
       if (m.name) agg.name = m.name;
       if (m.mcUsd != null) agg.mcUsd = m.mcUsd;
       if (m.volumeH1Usd != null) agg.volumeH1Usd = m.volumeH1Usd;
       if (m.liquidityUsd != null) agg.liquidityUsd = m.liquidityUsd;
+      if (m.pairCreatedAtMs != null) agg.pairCreatedAtMs = m.pairCreatedAtMs;
+      if (m.holders != null) agg.holders = m.holders;
     }
 
     const ranked = scoreAgg(agg);

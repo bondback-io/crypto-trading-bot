@@ -1789,6 +1789,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #fbbf24;
       border-color: #f59e0b44;
     }
+    .zion-found-ago {
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      letter-spacing: 0.01em;
+      line-height: 1.2;
+    }
+    .zion-cand-card .zion-found-ago,
+    .zion-offer-row .zion-found-ago {
+      margin-left: 0.35rem;
+    }
     .zion-offer-row {
       border: 1px solid #1e293b;
       border-radius: 10px;
@@ -9833,6 +9846,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '</div>';
     }
 
+    /** Compact relative age for Zion feed headers ("12s", "5m", "2h") — no "ago". */
+    function fmtFoundAgoCompact(ts) {
+      const t = Number(ts);
+      if (!t || !Number.isFinite(t)) return '';
+      const ms = Math.max(0, Date.now() - t);
+      if (ms < 1000) return '0s';
+      if (ms < 60_000) return Math.floor(ms / 1000) + 's';
+      if (ms < 3_600_000) return Math.floor(ms / 60_000) + 'm';
+      if (ms < 86_400_000) return Math.floor(ms / 3_600_000) + 'h';
+      return Math.floor(ms / 86_400_000) + 'd';
+    }
+
+    function zionFoundAgoHtml(ts, titlePrefix) {
+      const compact = fmtFoundAgoCompact(ts);
+      if (!compact) return '';
+      const t = Number(ts);
+      const abs = new Date(t).toLocaleString();
+      const tip = (titlePrefix ? titlePrefix + ' · ' : '') + abs;
+      return (
+        '<span class="zion-found-ago" title="' +
+        escAttr(tip) +
+        '">' +
+        escHtml(compact) +
+        '</span>'
+      );
+    }
+
     /** Relative "Xs/Xm/Xh/Xd ago" for event timestamps (migrations, signals, trades). */
     function fmtTimeAgo(ts) {
       const t = Number(ts);
@@ -15913,9 +15953,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 escHtml(status) +
                 '</span>' +
                 '</div>' +
+                '<div class="flex items-center gap-2">' +
                 '<span class="zion-cand-chip is-score">◈ ' +
                 Math.round(c.score || 0) +
                 '</span>' +
+                zionFoundAgoHtml(c.timestamp, 'Found') +
+                '</div>' +
                 '</div>' +
                 '<div class="zion-cand-meta">' +
                 (c.mcUsd != null
@@ -15970,7 +16013,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 disp.key === 'active' ? zionRemainLabel(o.expiresAt) : '';
               return (
                 '<div class="zion-offer-row">' +
-                '<div>' +
+                '<div style="flex:1;min-width:0">' +
+                '<div class="flex flex-wrap gap-2 items-center justify-between">' +
                 '<div class="flex flex-wrap gap-2 items-center">' +
                 '<strong style="color:#e2e8f0">' +
                 escHtml(o.symbol) +
@@ -15990,6 +16034,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 (o.kolCount || 0) +
                 '</span>' +
                 (remain ? '<span class="mint">' + remain + '</span>' : '') +
+                '</div>' +
+                zionFoundAgoHtml(o.createdAt, 'Request created') +
                 '</div>' +
                 fmtMintCa(o.mint) +
                 '<div class="mint text-xs mt-1">' +
@@ -16483,6 +16529,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       if (st) st.textContent = 'Placing…';
+      const placeBtn = card && card.querySelector('[data-zion-place]');
+      if (placeBtn) placeBtn.disabled = true;
       try {
         const solEl = card && card.querySelector('[data-zion-sol]');
         const usdEl = card && card.querySelector('[data-zion-usd]');
@@ -16509,14 +16557,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           }
         );
         if (!res.ok) throw new Error(res.error || 'Place trade failed');
+        if (st) st.textContent = 'Placed — refreshing…';
+        // Force-pull open positions so Overview / Zion Open Trades update even if
+        // a background refresh() is in-flight and would otherwise no-op.
+        try {
+          const posData = await fetchJSON('/api/positions');
+          window._lastOpenPositions = (posData && posData.open) || [];
+          if (typeof paintOpenPositionsTables === 'function') {
+            paintOpenPositionsTables();
+          }
+          renderZionOpenTrades();
+        } catch (_) {}
+        try {
+          await loadZion();
+        } catch (_) {}
         if (st) st.textContent = 'Placed';
         setTimeout(function () {
           dismissZionOfferCard(offerId);
-        }, 500);
-        loadZion();
-        refresh();
+        }, 600);
+        // Kick a full dashboard refresh after the in-flight lock clears.
+        setTimeout(function () {
+          try {
+            window._refreshInFlight = false;
+            refresh();
+          } catch (_) {}
+        }, 750);
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
+        if (placeBtn) placeBtn.disabled = false;
       }
     }
 

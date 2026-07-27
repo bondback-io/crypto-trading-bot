@@ -1148,6 +1148,9 @@ async function runAntiRugChecks(
       isMigrated,
       curveHealth,
       organicScore,
+      pairCreatedAtMs:
+        (metrics as { pairCreatedAtMs?: number | null }).pairCreatedAtMs ??
+        null,
     },
     floorCtx
   );
