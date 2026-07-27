@@ -5188,7 +5188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="number" id="ms-min-liq" value="8000" min="0" max="5000000" step="500" />
             </label>
             <label class="ctl ctl-sm">
-              <span>Min organic score <span class="tip" tabindex="0" data-tip="Scanner soft floor (Jupiter organicScore 0–100). 0 = disabled for scanner. Separate Risk On hard floor also rejects known scores below 30 as an organic / pro-quality proxy (not Terminal Pro Traders %). Unknown score does not hard-skip early Pump."></span></span>
+              <span>Min organic score <span class="tip" tabindex="0" data-tip="Scanner soft floor (Jupiter organicScore 0–100). 0 = disabled for scanner. Risk On also hard-rejects known scores below 30 as the bot's organic / pro-quality proxy. Terminal Pro Traders % is not available via Jupiter Tokens API — organicScore is the closest gate. Unknown score does not hard-skip early Pump."></span></span>
               <input type="number" id="ms-min-organic" value="0" min="0" max="100" step="1" />
             </label>
           </div>
@@ -5383,13 +5383,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
             <div class="strategy-io-btns">
-              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override) as JSON">Export JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override/Min MC Override/Max MC) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to the baked 2026-07-27 defaults (with trade profile overrides). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
-            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → then enable modules one-by-one. Trade Profiles still control per-trade style.</p>
+            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. With Smart Bot ON, each Trade Profile’s modules + Min MC Override / Max MC drive which lane can take a token.</p>
           </div>
           <div class="strategy-control-head-meta">
             <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" title="Hover to see which modules are ON">—</div>
@@ -5420,9 +5420,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
             <div style="min-width:0;flex:1">
               <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
-              <p class="text-xs text-slate-400 mb-0">ON = each profile uses its own module set (micro-bots). OFF = current shared modules for all profiles.</p>
+              <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Master Strategies = capability / kill switches. OFF = shared master modules for all profiles.</p>
             </div>
-              <label class="ctl-check" title="Default ON — each profile uses its own module allowlist (micro-bots)">
+              <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
               <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
               <span>Smart Bot Profiles</span>
             </label>
@@ -5640,8 +5640,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across Risk On/Off. Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
             <div class="field"><label title="Min % of supply held by the deployer (0 = no floor). Pair with Max Dev %.">Min Dev % — <span class="val" id="v-minDevHoldPct">0</span></label><input type="range" id="minDevHoldPct" min="0" max="80" step="1" value="0" /></div>
             <div class="field"><label title="Max % of supply held by the deployer (0 = off). Pair with Min Dev %.">Max Dev % — <span class="val" id="v-maxDevHoldPct">15</span></label><input type="range" id="maxDevHoldPct" min="0" max="80" step="1" value="15" /></div>
-            <div class="field"><label title="Min % held by top 10 wallets (excludes Pump bonding-curve vault — Jupiter-style). Floor 5% when Risk On (default 8%). Pair with Max Top-10% for a valid band (e.g. 8–70%). Known values below min are blocked; unknown top-10 is soft-only (does not hard-skip). Risk Off soak zeros both.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="80" step="1" value="8" /></div>
-            <div class="field"><label title="Max % held by top 10 wallets (pair with Min Top-10%). Default 70. 0 = off. Same key as maxHolderConcentration — not the single-wallet Max Top Holder %. Known values above max are blocked; unknown is soft-only.">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">70</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="70" /></div>
+            <div class="field"><label title="Min % held by top 10 wallets (Jupiter Terminal Top 10 H. / audit.topHoldersPercentage preferred; on-chain excludes bonding-curve + LP vaults). Floor 5% when Risk On (default 8%). Pair with Max Top-10% for a valid band (e.g. 8–70%). Known values below min are blocked. Under Risk On, unknown top-10 hard-skips after Jupiter + on-chain attempts. Risk Off soak zeros both.">Min Top-10 % — <span class="val" id="v-minTop10HolderPct">8</span></label><input type="range" id="minTop10HolderPct" min="5" max="80" step="1" value="8" /></div>
+            <div class="field"><label title="Max % held by top 10 wallets (pair with Min Top-10%). Default 70. 0 = off. Same key as maxHolderConcentration — not the single-wallet Max Top Holder %. Known values above max are blocked. Under Risk On, unknown top-10 hard-skips.">Max Top-10 % — <span class="val" id="v-maxHolderConcentration">70</span></label><input type="range" id="maxHolderConcentration" min="0" max="90" step="1" value="70" /></div>
             <div class="field"><label title="Min % held by a single wallet (0 = no floor). Independent of Top-10% band.">Min Top Holder % — <span class="val" id="v-minTopHolderPct">0</span></label><input type="range" id="minTopHolderPct" min="0" max="90" step="1" value="0" /></div>
             <div class="field"><label title="Max % held by a single wallet (independent of Top-10% band). 0 = off.">Max Top Holder % — <span class="val" id="v-maxTopHolderPct">70</span></label><input type="range" id="maxTopHolderPct" min="0" max="90" step="1" value="70" /></div>
             <div class="field"><label title="Hard max insider/rat (or extreme dev) hold %. Floor cap 50% — non-bypassable on Risk On. GMGN insider is fetched even when Sniper Filter is OFF. Unknown insider % fails closed on Risk On (CXMT-class honeypot bypass).">Max Insider % — <span class="val" id="v-maxInsiderPctDisplay">50</span></label><input type="range" id="maxInsiderPctDisplay" min="50" max="50" step="1" value="50" disabled title="Hard floor 50% — not adjustable (Risk On; unknown fails closed)" /></div>
@@ -7076,6 +7076,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     ? escHtml(String(er.maxTradeOverrideSol))
                     : '') +
                 '" /></label>' +
+                '<label title="Raises this profile’s min market cap above Config Min MC. Empty = use global only. Cannot go below the global Risk On floor.">Min MC Override<input type="number" data-k="minMarketCapUsd" data-match="1" step="1000" min="0" placeholder="global" value="' +
+                  (match.minMarketCapUsd != null && Number(match.minMarketCapUsd) > 0
+                    ? escHtml(String(match.minMarketCapUsd))
+                    : om.minMarketCapUsd != null && Number(om.minMarketCapUsd) > 0
+                      ? escHtml(String(om.minMarketCapUsd))
+                      : '') +
+                '" /></label>' +
+                '<label title="Lane max market cap USD. Empty = no lane max (catalog default if any). Scalper often uses a low max.">Max MC $<input type="number" data-k="maxMarketCapUsd" data-match="1" step="1000" min="0" placeholder="default" value="' +
+                  (match.maxMarketCapUsd != null && Number(match.maxMarketCapUsd) > 0
+                    ? escHtml(String(match.maxMarketCapUsd))
+                    : om.maxMarketCapUsd != null && Number(om.maxMarketCapUsd) > 0
+                      ? escHtml(String(om.maxMarketCapUsd))
+                      : '') +
+                '" /></label>' +
                 '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
                 (p.id === 'high_win_rate'
                   ? (function () {
@@ -7533,6 +7547,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
         }
+        // Min MC Override / Max MC: empty / 0 clears → catalog / global only
+        if (k === 'minMarketCapUsd' || k === 'maxMarketCapUsd') {
+          const n = raw === '' || raw == null ? 0 : Number(raw);
+          match[k] = Number.isFinite(n) && n > 0 ? n : 0;
+          return;
+        }
         if (raw === '' || raw == null) return;
         const n = Number(raw);
         if (!Number.isFinite(n)) return;
@@ -7697,7 +7717,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         setStrategyIoStatus('Choose a .json file first', 'err');
         return;
       }
-      if (!confirm('Import strategy modules + Trade Profiles from\\n' + file.name + '?\\n\\nThis applies module toggles, internal settings, and Trade Profile params (TP/SL/hold/Size ×/Max Trade Override, Smart Bot, etc.) from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
+        if (!confirm('Import strategy modules + Trade Profiles from\\n' + file.name + '?\\n\\nThis applies module toggles, internal settings, and Trade Profile params (TP/SL/hold/Size ×/Max Trade Override/Min MC Override/Max MC, Smart Bot, etc.) from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
         input.value = '';
         return;
       }

@@ -16,6 +16,11 @@ import { getBondingCurvePda } from './bondingCurve';
 import { getConnection } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { effectiveStrictMinVolume24hUsd } from './filterEffective';
+import {
+  fetchJupiterTokenByMint,
+  jupiterTopHoldersPercentage,
+  lookupCachedJupiterToken,
+} from './jupiterTokens';
 
 export interface HolderBucket {
   address: string;
@@ -143,12 +148,30 @@ export function getCachedTokenMetrics(mint: string): TokenMetrics | null {
 
 /**
  * Resolve Jupiter-style top-10 hold % for entry gates.
- * Prefers a caller-provided value, then cache, then a best-effort on-chain fetch.
+ * Prefer Jupiter Terminal audit.topHoldersPercentage (matches UI Top 10 H.),
+ * then caller-provided, metrics cache, then on-chain (curve/LP excluded).
  */
 export async function resolveTop10HoldPctForEntry(
   mint: string,
   provided?: number | null
 ): Promise<number | null> {
+  // Jupiter audit is authoritative vs Terminal — prefer over inflated on-chain.
+  try {
+    const jup =
+      lookupCachedJupiterToken(mint) ?? (await fetchJupiterTokenByMint(mint));
+    const jupTop = jupiterTopHoldersPercentage(jup);
+    if (jupTop != null) {
+      // Keep metrics cache aligned so monitor/anti-rug see the same value
+      const cached = cache.get(mint);
+      if (cached) {
+        cached.data.top10HoldPct = jupTop;
+      }
+      return jupTop;
+    }
+  } catch {
+    /* fall through */
+  }
+
   if (provided != null && Number.isFinite(provided)) return provided;
   const cached = getCachedTokenMetrics(mint);
   if (cached?.top10HoldPct != null && Number.isFinite(cached.top10HoldPct)) {
@@ -236,6 +259,19 @@ export async function fetchTokenMetrics(
         }
       }
 
+      // Prefer Jupiter Terminal Top-10 (pool excluded) over on-chain sum
+      try {
+        const jup =
+          lookupCachedJupiterToken(mint) ??
+          (await fetchJupiterTokenByMint(mint));
+        const jupTop = jupiterTopHoldersPercentage(jup);
+        if (jupTop != null) {
+          merged.top10HoldPct = jupTop;
+        }
+      } catch {
+        /* keep on-chain top10 */
+      }
+
       // Dev recent activity
       if (merged.devWallet) {
         const activity = await fetchDevActivity(merged.devWallet);
@@ -287,6 +323,7 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
     const data = (await res.json()) as {
       pairs?: Array<{
         chainId?: string;
+        pairAddress?: string;
         liquidity?: { usd?: number };
         marketCap?: number;
         fdv?: number;
@@ -370,6 +407,59 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
   }
 }
 
+/**
+ * Jupiter-style Top-10 excludes bonding-curve + AMM/pool vaults.
+ * Collect pool / vault owner addresses to skip when summing retail top-10.
+ */
+async function resolvePoolVaultExcludeOwners(
+  mint: string
+): Promise<Set<string>> {
+  const exclude = new Set<string>();
+  try {
+    exclude.add(getBondingCurvePda(mint).toBase58());
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const jup =
+      lookupCachedJupiterToken(mint) ?? (await fetchJupiterTokenByMint(mint));
+    const graduated = String(jup?.graduatedPool || '').trim();
+    if (graduated) exclude.add(graduated);
+    const firstPool = String(jup?.firstPool?.id || '').trim();
+    // firstPool.id is sometimes the mint itself on Pump — only add if distinct
+    if (firstPool && firstPool !== mint) exclude.add(firstPool);
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const res = await loggedFetch(
+      `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+      {
+        context: 'DexScreener',
+        label: 'pool vaults',
+        timeoutMs: 6_000,
+        headers: { Accept: 'application/json' },
+      }
+    );
+    if (res.ok) {
+      const data = (await res.json()) as {
+        pairs?: Array<{ chainId?: string; pairAddress?: string }>;
+      };
+      for (const p of data.pairs ?? []) {
+        if (p.chainId !== 'solana') continue;
+        const addr = String(p.pairAddress || '').trim();
+        if (addr) exclude.add(addr);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return exclude;
+}
+
 async function fetchOnChainHolderMetrics(
   mint: string
 ): Promise<Partial<TokenMetrics>> {
@@ -410,14 +500,8 @@ async function fetchOnChainHolderMetrics(
   let topHolderPct: number | null = null;
   let top10HoldPct: number | null = null;
 
-  // Jupiter-style top-10 excludes the Pump bonding-curve vault. Including it
-  // inflates concentration (~80–99%) and makes minTop10HolderPct meaningless.
-  let curveOwner: string | null = null;
-  try {
-    curveOwner = getBondingCurvePda(mint).toBase58();
-  } catch {
-    curveOwner = null;
-  }
+  // Jupiter-style top-10 excludes Pump bonding-curve vault + post-migration LP.
+  const excludeOwners = await resolvePoolVaultExcludeOwners(mint);
 
   try {
     const largest = await conn.getTokenLargestAccounts(mintKey);
@@ -427,11 +511,12 @@ async function fetchOnChainHolderMetrics(
         ? supplyUi
         : accounts.reduce((s, a) => s + Number(a.uiAmount ?? 0), 0) || 1;
 
-    // Resolve owners for top accounts (token account → owner). Pull up to 20 so
-    // we still have 10 retail wallets after excluding the bonding-curve vault.
-    for (const acc of accounts.slice(0, 20)) {
+    // Resolve owners for top accounts (token account → owner). Pull up to 30 so
+    // we still have 10 retail wallets after excluding curve / LP vaults.
+    for (const acc of accounts.slice(0, 30)) {
       const amountUi = Number(acc.uiAmount ?? 0);
-      let owner = acc.address.toBase58();
+      const tokenAccount = acc.address.toBase58();
+      let owner = tokenAccount;
       try {
         const tok = await conn.getParsedAccountInfo(acc.address);
         const info = (
@@ -444,8 +529,10 @@ async function fetchOnChainHolderMetrics(
         // keep token account address
       }
 
-      // Skip bonding-curve vault (Jupiter Top-10 H. excludes pool/curve)
-      if (curveOwner && owner === curveOwner) continue;
+      // Skip bonding-curve / AMM pool vaults (Jupiter Top-10 H. excludes these)
+      if (excludeOwners.has(owner) || excludeOwners.has(tokenAccount)) {
+        continue;
+      }
 
       const pct = (amountUi / supply) * 100;
       const isAuthority =

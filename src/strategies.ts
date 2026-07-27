@@ -3787,7 +3787,7 @@ export type StrategyModulesExport = {
   }>;
   /**
    * Trade Profiles (Scalper, Trend Rider, etc.) — full runtime snapshot including
-   * per-profile overrides (TP/SL/hold/Size ×/maxTradeOverrideSol/match/modules).
+   * per-profile overrides (TP/SL/hold/Size ×/maxTradeOverrideSol/minMarketCapUsd/maxMarketCapUsd/match/modules).
    * Also mirrored under `settings.tradeProfiles` for v1 compatibility.
    */
   tradeProfiles?: PersistedBotSettings['tradeProfiles'];

@@ -183,8 +183,9 @@ export interface BuyOptions {
    */
   sourceEntryMcUsd?: number;
   /**
-   * Jupiter-style top-10 holder % (bonding curve / LP excluded) from anti-rug.
-   * Re-checked at executeBuy; known out-of-band hard-skips, unknown is soft-only.
+   * Jupiter-style top-10 holder % (bonding curve / LP excluded) from anti-rug /
+   * Jupiter audit. Re-checked at executeBuy; known out-of-band hard-skips.
+   * Unknown hard-skips under Risk On when min/max Top-10 gate is active.
    */
   top10HoldPct?: number | null;
   /**
@@ -633,6 +634,13 @@ export async function executeBuy(
   });
   if (holderGate.skipReasons.length > 0) {
     const reason = holderGate.skipReasons[0]!;
+    logger.info('Trade', 'FILTER_SKIP holder concentration', {
+      mint: mint.slice(0, 12),
+      symbol,
+      reason,
+      top10HoldPct: top10HoldPct ?? null,
+      insiderPct: insiderPct ?? null,
+    });
     console.log(
       `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
         `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'} · ` +
@@ -641,6 +649,11 @@ export async function executeBuy(
     return { success: false, mode: config.mode, error: reason };
   }
   if (top10HoldPct != null) {
+    logger.info('Trade', 'Entry top10 OK', {
+      mint: mint.slice(0, 12),
+      symbol,
+      top10HoldPct,
+    });
     console.log(
       `[trade] Entry top10 OK ${symbol}: ${top10HoldPct.toFixed(1)}%`
     );
@@ -648,8 +661,13 @@ export async function executeBuy(
     (Number(config.filters.minTop10HolderPct) || 0) > 0 ||
     (Number(config.filters.maxHolderConcentration) || 0) > 0
   ) {
+    // Risk Off soft-pass path only — Risk On hard-skips unknown above
+    logger.info('Trade', 'Entry top10 soft-pass unknown', {
+      mint: mint.slice(0, 12),
+      symbol,
+    });
     console.log(
-      `[trade] Entry top10 soft-pass ${symbol}: unknown (gate active, known-only enforce)`
+      `[trade] Entry top10 soft-pass ${symbol}: unknown (Risk Off / gate inactive)`
     );
   }
   if (insiderPct != null && hardFilterFloorsActive()) {
@@ -696,6 +714,7 @@ export async function executeBuy(
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
+        top10HoldPct,
       }
     );
     if (!position) {
@@ -809,6 +828,7 @@ export async function executeBuy(
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
+        top10HoldPct,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

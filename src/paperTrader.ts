@@ -134,6 +134,8 @@ export interface Position {
   sourceEntryMcUsd?: number;
   /** Market cap USD at exit (live mark MC preferred; else scaled from entry) */
   exitMarketCapUsd?: number;
+  /** Jupiter-style Top 10 Holders % resolved at entry (for audit / UI) */
+  top10HoldPct?: number | null;
   /**
    * Wall-clock ms when rolling 1h volume / tx activity first went "dead".
    * Cleared when activity recovers above thresholds.
@@ -800,6 +802,7 @@ export class PaperTrader {
     scannerPlaybook?: string;
     scannerConfluence?: number;
     candleSource?: 'real' | 'synthetic';
+    top10HoldPct?: number | null;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -873,6 +876,10 @@ export class PaperTrader {
       scannerPlaybook: input.scannerPlaybook,
       scannerConfluence: input.scannerConfluence,
       candleSource: input.candleSource,
+      top10HoldPct:
+        input.top10HoldPct != null && Number.isFinite(input.top10HoldPct)
+          ? input.top10HoldPct
+          : undefined,
     };
 
     if (input.scalpMode) {
@@ -1049,6 +1056,7 @@ export class PaperTrader {
       scannerPlaybook?: string;
       scannerConfluence?: number;
       candleSource?: 'real' | 'synthetic';
+      top10HoldPct?: number | null;
     }
   ): Position | null {
     const spendSol = clampToMaxAllowedTradeSol(
@@ -1208,6 +1216,10 @@ export class PaperTrader {
       scannerPlaybook: meta?.scannerPlaybook,
       scannerConfluence: meta?.scannerConfluence,
       candleSource: meta?.candleSource,
+      top10HoldPct:
+        meta?.top10HoldPct != null && Number.isFinite(meta.top10HoldPct)
+          ? meta.top10HoldPct
+          : undefined,
     };
 
     if (meta?.scalpMode) {

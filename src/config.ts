@@ -1300,8 +1300,8 @@ export const HARD_FILTER_FLOORS = {
   minSellsForBuyHeavyGate: 10,
   /**
    * Jupiter organicScore floor (0–100) when score is known.
-   * Proxy for “pro / organic” quality — not Terminal Pro Traders %.
-   * Unknown score does not hard-skip (early Pump often has no Jupiter card).
+   * Proxy for organic / pro-quality — Terminal Pro Traders % is not in the
+   * Jupiter Tokens API. Unknown score does not hard-skip (early Pump often has no Jupiter card).
    */
   minOrganicScore: 30,
 } as const;

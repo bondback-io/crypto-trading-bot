@@ -25,6 +25,17 @@ export interface JupiterSwapStats {
   numNetBuyers?: number;
 }
 
+export interface JupiterTokenAudit {
+  mintAuthorityDisabled?: boolean;
+  freezeAuthorityDisabled?: boolean;
+  /** Jupiter Terminal–style Top 10 Holders % (pool/curve excluded) */
+  topHoldersPercentage?: number;
+  devBalancePercentage?: number;
+  devMigrations?: number;
+  devMints?: number;
+  isSus?: boolean;
+}
+
 export interface JupiterTokenInfo {
   id: string;
   name?: string;
@@ -42,7 +53,10 @@ export interface JupiterTokenInfo {
   tags?: string[] | null;
   launchpad?: string | null;
   createdAt?: string;
+  graduatedPool?: string | null;
+  graduatedAt?: string | null;
   firstPool?: { id?: string; createdAt?: string } | null;
+  audit?: JupiterTokenAudit | null;
   stats5m?: JupiterSwapStats | null;
   stats1h?: JupiterSwapStats | null;
   stats6h?: JupiterSwapStats | null;
@@ -51,9 +65,14 @@ export interface JupiterTokenInfo {
 }
 
 const CACHE_TTL_MS = 75_000;
+const MINT_LOOKUP_TTL_MS = 60_000;
 const cache = new Map<
   string,
   { tokens: JupiterTokenInfo[]; expiresAt: number }
+>();
+const mintLookupCache = new Map<
+  string,
+  { token: JupiterTokenInfo | null; expiresAt: number }
 >();
 
 let lastError: string | null = null;
@@ -83,7 +102,7 @@ export function getJupiterTokensStatus(): {
 }
 
 /**
- * Best-effort lookup from in-memory Jupiter category caches (no network).
+ * Best-effort lookup from in-memory Jupiter category / mint caches (no network).
  * Used to enrich anti-rug hard floors with organicScore / buy-sell txn counts.
  */
 export function lookupCachedJupiterToken(
@@ -92,6 +111,10 @@ export function lookupCachedJupiterToken(
   const key = String(mint || '').trim();
   if (!key) return null;
   const now = Date.now();
+  const mintHit = mintLookupCache.get(key);
+  if (mintHit && mintHit.expiresAt > now && mintHit.token) {
+    return mintHit.token;
+  }
   let best: JupiterTokenInfo | null = null;
   for (const hit of cache.values()) {
     if (hit.expiresAt <= now) continue;
@@ -101,14 +124,131 @@ export function lookupCachedJupiterToken(
       best = found;
       continue;
     }
-    // Prefer entry with organicScore / richer 1h stats
+    // Prefer entry with organicScore / richer 1h stats / audit top10
     const bestOrg = best.organicScore != null ? 1 : 0;
     const foundOrg = found.organicScore != null ? 1 : 0;
+    const bestTop = best.audit?.topHoldersPercentage != null ? 1 : 0;
+    const foundTop = found.audit?.topHoldersPercentage != null ? 1 : 0;
     const bestBuys = best.stats1h?.numBuys != null ? 1 : 0;
     const foundBuys = found.stats1h?.numBuys != null ? 1 : 0;
-    if (foundOrg + foundBuys > bestOrg + bestBuys) best = found;
+    if (foundOrg + foundTop + foundBuys > bestOrg + bestTop + bestBuys) {
+      best = found;
+    }
   }
   return best;
+}
+
+/** Jupiter Terminal–style Top 10 Holders % from cached/fetched token audit. */
+export function jupiterTopHoldersPercentage(
+  token: JupiterTokenInfo | null | undefined
+): number | null {
+  const n = Number(token?.audit?.topHoldersPercentage);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/**
+ * Fetch a single mint via Tokens v2 search (includes audit.topHoldersPercentage).
+ * Short TTL cache; returns null when API key missing or mint not found.
+ */
+export async function fetchJupiterTokenByMint(
+  mint: string
+): Promise<JupiterTokenInfo | null> {
+  const key = String(mint || '').trim();
+  if (!key) return null;
+
+  const now = Date.now();
+  const cached = mintLookupCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.token;
+  }
+
+  const fromCategory = (() => {
+    let best: JupiterTokenInfo | null = null;
+    for (const hit of cache.values()) {
+      if (hit.expiresAt <= now) continue;
+      const found = hit.tokens.find((t) => t?.id === key);
+      if (!found) continue;
+      if (
+        !best ||
+        (found.audit?.topHoldersPercentage != null &&
+          best.audit?.topHoldersPercentage == null)
+      ) {
+        best = found;
+      }
+    }
+    return best;
+  })();
+
+  if (fromCategory && jupiterTopHoldersPercentage(fromCategory) != null) {
+    mintLookupCache.set(key, {
+      token: fromCategory,
+      expiresAt: now + MINT_LOOKUP_TTL_MS,
+    });
+    return fromCategory;
+  }
+
+  const apiKey = getJupiterApiKey();
+  if (!apiKey) {
+    mintLookupCache.set(key, {
+      token: fromCategory,
+      expiresAt: now + Math.min(MINT_LOOKUP_TTL_MS, 15_000),
+    });
+    return fromCategory;
+  }
+
+  const url = `https://api.jup.ag/tokens/v2/search?query=${encodeURIComponent(key)}`;
+  try {
+    const res = await loggedFetch(url, {
+      context: 'Jupiter',
+      label: 'token by mint',
+      timeoutMs: 12_000,
+      headers: {
+        Accept: 'application/json',
+        'x-api-key': apiKey,
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      lastError = `HTTP ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`;
+      logger.warn('Jupiter', 'Mint search failed', {
+        mint: key.slice(0, 12),
+        status: res.status,
+      });
+      mintLookupCache.set(key, {
+        token: fromCategory,
+        expiresAt: now + 15_000,
+      });
+      return fromCategory;
+    }
+    const data = (await res.json()) as unknown;
+    const list = Array.isArray(data)
+      ? (data as JupiterTokenInfo[])
+      : Array.isArray((data as { tokens?: JupiterTokenInfo[] })?.tokens)
+        ? (data as { tokens: JupiterTokenInfo[] }).tokens
+        : [];
+    const exact =
+      list.find((t) => t && String(t.id || '').trim() === key) ?? null;
+    mintLookupCache.set(key, {
+      token: exact,
+      expiresAt: now + MINT_LOOKUP_TTL_MS,
+    });
+    if (exact) {
+      lastError = null;
+      lastFetchAt = now;
+    }
+    return exact ?? fromCategory;
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
+    logger.warn('Jupiter', 'Mint search error', {
+      mint: key.slice(0, 12),
+      ...errorToMeta(err),
+    });
+    mintLookupCache.set(key, {
+      token: fromCategory,
+      expiresAt: now + 15_000,
+    });
+    return fromCategory;
+  }
 }
 
 function volumeFromStats(

@@ -14,7 +14,7 @@
  * Add new profiles by extending TRADE_PROFILE_CATALOG.
  */
 
-import { config, persistUserSettings } from './config';
+import { config, persistUserSettings, effectiveMinMarketCapUsd } from './config';
 import type { ShortTermStrategyId } from './shortTermStrategies';
 import type { StrategyKey } from './strategies';
 import {
@@ -194,7 +194,16 @@ export interface TradeProfileMatchRules {
   minConviction?: number;
   /** Prefer small-cap tokens (Scalper) */
   preferSmallMc?: boolean;
+  /**
+   * Lane Max MC USD — hard reject when known MC is above this.
+   * Empty/unset = no lane max (global filters only).
+   */
   maxMarketCapUsd?: number;
+  /**
+   * Lane Min MC Override USD — raises this profile’s min MC above Config Min MC.
+   * Effective floor = max(global effectiveMinMarketCapUsd, this). Empty/0 = global only.
+   */
+  minMarketCapUsd?: number;
   /** Prefer volume-spike entries (Scalper / Momentum) */
   preferVolumeSpike?: boolean;
   /** Prefer established tokens */
@@ -1001,6 +1010,11 @@ export interface TradeProfileMatchContext {
   /** True when entry came from Market Scanner (not pure wallet copy) */
   scannerOrigin?: boolean;
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | null;
+  /**
+   * Prefer this profile when stamping after a Smart Bot lane fight
+   * (must still pass floors + match).
+   */
+  preferProfileId?: string | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -1587,6 +1601,15 @@ export function updateTradeProfileParams(
     if (k === 'qualityFilter') continue;
     if (v == null || (typeof v === 'number' && !Number.isFinite(v))) {
       delete (nextMatch as Record<string, unknown>)[k];
+      continue;
+    }
+    // Empty / 0 Min MC Override or Max MC → unset (use catalog / global only)
+    if (
+      (k === 'minMarketCapUsd' || k === 'maxMarketCapUsd') &&
+      typeof v === 'number' &&
+      v <= 0
+    ) {
+      delete (nextMatch as Record<string, unknown>)[k];
     }
   }
   for (const [k, v] of Object.entries(nextModules)) {
@@ -1723,10 +1746,198 @@ export function isFreshMigrationContext(
   return evaluateFreshMigrationEligibility(ctx).ok;
 }
 
+/**
+ * Hard lane entry floors (per-profile token targeting).
+ * Cannot undercut global Risk On Min MC — only raise it via minMarketCapUsd.
+ * Anti-rug / honeypot stay global outside this helper.
+ */
+export function evaluateLaneEntryFloors(
+  def: TradeProfileDefinition,
+  ctx: TradeProfileMatchContext
+): { ok: boolean; reason?: string } {
+  const m = def.match;
+  const mc =
+    ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
+      ? Number(ctx.marketCapUsd)
+      : null;
+  const holders =
+    ctx.holderCount != null && Number.isFinite(ctx.holderCount)
+      ? Number(ctx.holderCount)
+      : null;
+
+  const profileMin =
+    m.minMarketCapUsd != null &&
+    Number.isFinite(m.minMarketCapUsd) &&
+    m.minMarketCapUsd > 0
+      ? Number(m.minMarketCapUsd)
+      : 0;
+  const globalMin = effectiveMinMarketCapUsd();
+  const laneMinMc = Math.max(globalMin, profileMin);
+
+  // Profile Min MC Override — hard lane gate (cannot undercut global min)
+  if (profileMin > 0) {
+    if (mc == null || mc <= 0) {
+      return {
+        ok: false,
+        reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
+      };
+    }
+    if (mc < laneMinMc) {
+      return {
+        ok: false,
+        reason: `${def.name} MC $${Math.round(mc)} < lane min $${Math.round(laneMinMc)}`,
+      };
+    }
+  }
+
+  if (
+    m.maxMarketCapUsd != null &&
+    Number.isFinite(m.maxMarketCapUsd) &&
+    m.maxMarketCapUsd > 0
+  ) {
+    // Known-only: unknown MC does not fail Max MC (global gates still apply)
+    if (mc != null && mc > 0 && mc > m.maxMarketCapUsd) {
+      return {
+        ok: false,
+        reason: `${def.name} MC $${Math.round(mc)} > max $${Math.round(m.maxMarketCapUsd)}`,
+      };
+    }
+  }
+
+  if (
+    m.minHolders != null &&
+    Number.isFinite(m.minHolders) &&
+    m.minHolders > 0
+  ) {
+    if (holders == null) {
+      return {
+        ok: false,
+        reason: `${def.name} needs ≥${m.minHolders} holders — count unknown`,
+      };
+    }
+    if (holders < m.minHolders) {
+      return {
+        ok: false,
+        reason: `${def.name} holders ${holders} < ${m.minHolders}`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+export interface TradeProfileLaneResult {
+  profileId: TradeProfileId;
+  name: string;
+  icon: string;
+  color: string;
+  priority: number;
+  score: number;
+  reason: string;
+  passed: boolean;
+  failReason?: string;
+  assignment?: TradeProfileAssignment;
+}
+
+/**
+ * Evaluate every enabled profile with lane floors + match score (parallel compete).
+ * Does not run module filters — caller gates the winner (or tries passers in order).
+ */
+export function evaluateTradeProfileLanes(
+  ctx: TradeProfileMatchContext,
+  opts?: { silent?: boolean }
+): TradeProfileLaneResult[] {
+  const state = ensureState();
+  if (!state.enabled) {
+    return [];
+  }
+  const results: TradeProfileLaneResult[] = [];
+  for (const catalog of TRADE_PROFILE_CATALOG) {
+    if (state.profiles[catalog.id] === false) continue;
+    if (catalog.id === 'default') continue;
+    const def = resolveTradeProfileDefinition(catalog.id);
+    const floors = evaluateLaneEntryFloors(def, ctx);
+    if (!floors.ok) {
+      results.push({
+        profileId: def.id,
+        name: def.name,
+        icon: def.icon,
+        color: def.color,
+        priority: def.priority,
+        score: 0,
+        reason: floors.reason || 'lane floors',
+        passed: false,
+        failReason: floors.reason,
+      });
+      continue;
+    }
+    const scored = scoreProfile(def, ctx);
+    if (scored.score <= 0) {
+      results.push({
+        profileId: def.id,
+        name: def.name,
+        icon: def.icon,
+        color: def.color,
+        priority: def.priority,
+        score: 0,
+        reason: scored.reason,
+        passed: false,
+        failReason: scored.reason,
+      });
+      continue;
+    }
+    const assignment = buildAssignmentFromDef(def, ctx, {
+      score: Math.round(scored.score * 10) / 10,
+      reason: scored.reason,
+      autoScored: false,
+    });
+    results.push({
+      profileId: def.id,
+      name: def.name,
+      icon: def.icon,
+      color: def.color,
+      priority: def.priority,
+      score: assignment.score,
+      reason: assignment.reason,
+      passed: true,
+      assignment,
+    });
+  }
+  results.sort(
+    (a, b) =>
+      Number(b.passed) - Number(a.passed) ||
+      b.score - a.score ||
+      b.priority - a.priority
+  );
+  if (!opts?.silent && results.length) {
+    const bits = results
+      .slice(0, 8)
+      .map(
+        (r) =>
+          `${r.passed ? '✓' : '✗'}${r.name}=${r.passed ? r.score.toFixed(1) : r.failReason || 'fail'}`
+      );
+    console.log(
+      `[trade-profiles] Lane fight ${ctx.symbol || 'token'}: ${bits.join(' · ')}`
+    );
+  }
+  return results;
+}
+
+/** Best passing lane, or null if none passed floors+match. */
+export function pickWinningTradeProfileLane(
+  lanes: TradeProfileLaneResult[]
+): TradeProfileLaneResult | null {
+  return lanes.find((l) => l.passed && l.assignment) ?? null;
+}
+
 function scoreProfile(
   def: TradeProfileDefinition,
   ctx: TradeProfileMatchContext
 ): { score: number; reason: string } {
+  const floors = evaluateLaneEntryFloors(def, ctx);
+  if (!floors.ok) {
+    return { score: 0, reason: floors.reason || 'lane floors' };
+  }
   const m = def.match;
   let score = 0;
   const bits: string[] = [];
@@ -2628,6 +2839,24 @@ export function assignTradeProfile(
       console.log(
         `[trade-profiles] Force profile ${auto.forceProfileId} is OFF — falling back to scoring`
       );
+    }
+  }
+
+  // Smart Bot lane-fight winner — stamp the same profile that gated filters
+  if (ctx.preferProfileId) {
+    const preferred = candidates.find((p) => p.id === ctx.preferProfileId);
+    if (preferred) {
+      const floors = evaluateLaneEntryFloors(preferred, ctx);
+      const scored = scoreProfile(preferred, ctx);
+      if (floors.ok && scored.score > 0) {
+        return finish(
+          buildAssignmentFromDef(preferred, ctx, {
+            score: Math.round(scored.score * 10) / 10,
+            reason: `lane winner · ${scored.reason}`,
+            autoScored: auto.enabled,
+          })
+        );
+      }
     }
   }
 

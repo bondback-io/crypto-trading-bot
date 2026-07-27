@@ -23,7 +23,10 @@ import {
   isSmartBotProfilesEnabled,
   withStrategyProfileGateAsync,
   applyTradeProfileSizing,
+  evaluateTradeProfileLanes,
+  pickWinningTradeProfileLane,
   type TradeProfileMatchContext,
+  type TradeProfileLaneResult,
 } from './tradeProfiles';
 import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
@@ -201,6 +204,7 @@ function buildTradeProfileMatchContext(
     chartPatternHits: signal.chartPatternHits ?? null,
     scannerOrigin: isMarketScannerSignal(signal),
     entrySource: signal.entrySource,
+    preferProfileId: signal.candidateTradeProfileId ?? null,
     walletQualityAvg: (() => {
       const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
       if (!addrs.length) return null;
@@ -450,6 +454,8 @@ export interface TradeSignal {
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
+  /** Jupiter organicScore when known (scanner / pro-quality proxy) */
+  organicScore?: number | null;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -1796,6 +1802,13 @@ async function handleScannerCandidate(
       scannerPlaybook: candidate.playbook,
       scannerConfluence: candidate.confluence,
       candleSource: candidate.candleSource ?? launch.candleSource,
+      organicScore:
+        candidate.organicScore != null &&
+        Number.isFinite(candidate.organicScore)
+          ? candidate.organicScore
+          : launch.organicScore != null && Number.isFinite(launch.organicScore)
+            ? launch.organicScore
+            : null,
       metrics: {
         liquidityUsd: candidate.liquidityUsd ?? launch.liquidityUsd ?? null,
         marketCapUsd: candidate.marketCapUsd ?? launch.marketCapUsd ?? null,
@@ -1819,6 +1832,20 @@ async function handleScannerCandidate(
         source: launch.source,
       } as NonNullable<TradeSignal['metrics']>,
     };
+
+    // Prefer Jupiter Terminal Top-10 when already cached from scanner universe
+    try {
+      const { lookupCachedJupiterToken, jupiterTopHoldersPercentage } =
+        await import('./jupiterTokens');
+      const jupTop = jupiterTopHoldersPercentage(
+        lookupCachedJupiterToken(candidate.mint)
+      );
+      if (jupTop != null && signal.metrics) {
+        signal.metrics.top10HoldPct = jupTop;
+      }
+    } catch {
+      /* ignore */
+    }
 
     // Push into activity feed so dashboard shows scanner rows
     const feedEvent: WalletBuyEvent = {
@@ -1964,6 +1991,7 @@ async function executeSignalBuy(
     chartPatternIds: signal.chartPatternIds ?? null,
     scannerOrigin: isMarketScannerSignal(signal),
     entrySource: signal.entrySource,
+    preferProfileId: signal.candidateTradeProfileId ?? null,
   });
 
   if (profileAssignment.skipped) {
@@ -2918,6 +2946,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       ).chartPatternHits ?? null,
     scannerOrigin: isMarketScannerSignal(signal),
     entrySource: signal.entrySource,
+    preferProfileId: signal.candidateTradeProfileId ?? null,
     walletQualityAvg: (() => {
       const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
       if (!addrs.length) return null;
@@ -3482,6 +3511,50 @@ function isSoftPassableEarlyReason(reason: string): boolean {
   );
 }
 
+/** Compact lane fight log for learning / soak (ring buffer). */
+const LANE_DECISION_LOG_MAX = 200;
+const laneDecisionLog: Array<{
+  at: number;
+  mint: string;
+  symbol: string;
+  winnerId: string | null;
+  lanes: Array<{
+    id: string;
+    name: string;
+    passed: boolean;
+    score: number;
+    reason: string;
+  }>;
+}> = [];
+
+function logLaneFightDecisions(
+  signal: TradeSignal,
+  lanes: TradeProfileLaneResult[]
+): void {
+  const winner = pickWinningTradeProfileLane(lanes);
+  const entry = {
+    at: Date.now(),
+    mint: signal.mint,
+    symbol: signal.symbol,
+    winnerId: winner?.profileId ?? null,
+    lanes: lanes.map((l) => ({
+      id: l.profileId,
+      name: l.name,
+      passed: l.passed,
+      score: l.score,
+      reason: l.passed ? l.reason : l.failReason || l.reason,
+    })),
+  };
+  laneDecisionLog.unshift(entry);
+  if (laneDecisionLog.length > LANE_DECISION_LOG_MAX) {
+    laneDecisionLog.length = LANE_DECISION_LOG_MAX;
+  }
+}
+
+export function getLaneDecisionLog(limit = 50): typeof laneDecisionLog {
+  return laneDecisionLog.slice(0, Math.max(1, Math.min(200, limit)));
+}
+
 async function passesFilters(signal: TradeSignal): Promise<boolean> {
   lastFilterSkipReason = null;
   ensureStrategyToggles();
@@ -3548,29 +3621,38 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
-  // Smart Bot Profiles ON: soft-score early, then gate module filters with winner mask.
-  // Smart Bot OFF: skip — exact legacy path (isStrategyEnabled = global only).
+  // Smart Bot Profiles ON: parallel lane fight (floors + match), then gate
+  // module filters with the winning profile. Smart Bot OFF: legacy global modules.
   let gateProfileId: string | null | undefined = undefined;
   if (isSmartBotProfilesEnabled()) {
-    const early = assignTradeProfile(buildTradeProfileMatchContext(signal), {
-      silent: true,
-    });
-    if (early.skipped) {
-      recordRejectedSignal(
-        signal,
-        early.skipReason || 'No trade profile scored high enough'
-      );
+    const ctx = buildTradeProfileMatchContext(signal);
+    const lanes = evaluateTradeProfileLanes(ctx, { silent: false });
+    logLaneFightDecisions(signal, lanes);
+    const winner = pickWinningTradeProfileLane(lanes);
+    if (!winner || !winner.assignment) {
+      const failBits = lanes
+        .filter((l) => !l.passed)
+        .slice(0, 4)
+        .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
+        .join(' · ');
+      const reason =
+        failBits ||
+        'No trade profile lane passed floors/match';
+      recordRejectedSignal(signal, reason);
       console.log(
         `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-          `reason=smart-bot early profile: ${early.skipReason || early.reason}`
+          `reason=smart-bot lane fight: ${reason}`
       );
       return false;
     }
-    gateProfileId = early.profileId;
-    signal.candidateTradeProfileId = early.profileId;
+    gateProfileId = winner.profileId;
+    signal.candidateTradeProfileId = winner.profileId;
     console.log(
-      `[monitor] Smart Bot early profile=${early.name} (${early.profileId}) ` +
-        `score=${early.score} · ${signal.symbol}`
+      `[monitor] Smart Bot lane winner=${winner.name} (${winner.profileId}) ` +
+        `score=${winner.score} · ${signal.symbol}` +
+        (lanes.filter((l) => l.passed).length > 1
+          ? ` · beat ${lanes.filter((l) => l.passed && l.profileId !== winner.profileId).map((l) => l.name).join(', ')}`
+          : '')
     );
   }
 
@@ -3834,6 +3916,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const report: AntiRugReport = await evaluateAntiRug(signal.mint, {
           earlyEntry,
           isMigrated: Boolean(signal.isMigration),
+          organicScore: signal.organicScore,
         });
         signal.antiRug = summarizeAntiRug(report);
         signal.metrics = report.metricsSummary;
