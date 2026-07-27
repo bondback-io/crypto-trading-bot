@@ -130,6 +130,18 @@ async function main(): Promise<void> {
       }
 
       startMonitor();
+      try {
+        const { syncZionKolScannerLifecycle } = await import('./zionKolScanner');
+        syncZionKolScannerLifecycle();
+        console.log(
+          `[boot] Zion KOL scanner lifecycle synced (enabled=${config.zion?.enabled === true})`
+        );
+      } catch (err) {
+        console.warn(
+          '[boot] Zion scanner sync error:',
+          err instanceof Error ? err.message : err
+        );
+      }
       await new Promise((r) => setTimeout(r, 3_000));
       startMigrationListener();
       console.log('[boot] Monitor + migration listener started');
@@ -141,6 +153,12 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = (): void => {
     console.log('\n[boot] Shutting down…');
+    try {
+      const { stopZionKolScanner } = require('./zionKolScanner') as typeof import('./zionKolScanner');
+      stopZionKolScanner();
+    } catch {
+      /* ignore */
+    }
     stopMigrationListener();
     paperTrader.stopAutoCheck();
     process.exit(0);

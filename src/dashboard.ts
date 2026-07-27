@@ -3600,6 +3600,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
+      <button data-tab="zion" onclick="showTab('zion', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
       <button data-tab="backtester" onclick="showTab('backtester', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Simulate strategies on historical launches with filters and charts"><span class="btn-label-short">BT</span><span class="btn-label-full">Backtester</span></button>
     </nav>
@@ -4779,6 +4780,116 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- ========== TAB: Zion ========== -->
+    <section data-tab-panel="zion" class="hidden space-y-4">
+      <div class="card">
+        <div class="section-title">Zion <span class="tip" tabindex="0" data-tip="Personal KOL micro-bot. Isolated from copy trading and Market/Pump scanners. Never auto-buys — only creates trade offers for manual approval."></span></div>
+        <p class="text-sm text-slate-400 mb-3" style="line-height:1.45">
+          Primary signal: <strong style="color:#5eead4">KOL Token Scanner</strong> (Kolscan + GMGN universe, not your watch list).
+          Tracked smart wallets are a <strong style="color:#5eead4">secondary boost</strong> only. Enabling Zion does not change Copy, Market Scanner, or strategy toggles.
+        </p>
+        <div class="toggle-row">
+          <span>Enable Zion</span>
+          <label class="switch"><input type="checkbox" id="zion-enabled" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>KOL Token Scanner</span>
+          <label class="switch"><input type="checkbox" id="zion-scanner-enabled" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Auto-create offers from scanner</span>
+          <label class="switch"><input type="checkbox" id="zion-auto-offer" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Tracked wallets as boost</span>
+          <label class="switch"><input type="checkbox" id="zion-tracked-boost" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Email on offer</span>
+          <label class="switch"><input type="checkbox" id="zion-email-offer" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Email when placed</span>
+          <label class="switch"><input type="checkbox" id="zion-email-placed" checked /><span class="slider"></span></label>
+        </div>
+        <div id="zion-status" class="mint text-xs mb-2 mt-2">—</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">KOL Token Scanner Feed</div>
+        <div id="zion-scanner-feed" class="max-h-80 overflow-y-auto text-sm">—</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Safeguards</div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <label class="ctl ctl-sm"><span>Min KOL wallets</span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="50" min="0" max="100" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Min MC ($)</span><input type="number" id="zion-min-mc" value="50000" min="0" step="1000" /></label>
+          <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="5000000" min="0" step="1000" /></label>
+          <label class="ctl ctl-sm"><span>Offer TTL (min)</span><input type="number" id="zion-ttl" value="30" min="5" max="240" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Mint cooldown (min)</span><input type="number" id="zion-cooldown" value="120" min="5" max="1440" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Universe size</span><input type="number" id="zion-universe" value="60" min="20" max="100" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Poll interval (ms)</span><input type="number" id="zion-poll-ms" value="60000" min="30000" max="600000" step="1000" /></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Trade Presets</div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <label class="ctl ctl-sm"><span>Size mode</span>
+            <select id="zion-size-mode"><option value="sol">SOL</option><option value="usd">USD</option></select>
+          </label>
+          <label class="ctl ctl-sm"><span>SOL amount</span><input type="number" id="zion-sol" value="0.25" min="0.01" step="0.01" /></label>
+          <label class="ctl ctl-sm"><span>USD amount</span><input type="number" id="zion-usd" value="50" min="1" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Take profit %</span><input type="number" id="zion-tp" value="80" min="5" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Stop loss %</span><input type="number" id="zion-sl" value="-25" max="-1" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Trail stop %</span><input type="number" id="zion-trail" value="18" min="1" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Trail activate %</span><input type="number" id="zion-trail-act" value="35" min="1" step="1" /></label>
+        </div>
+        <div class="toggle-row mt-2">
+          <span>Apply exit presets on Place Trade</span>
+          <label class="switch"><input type="checkbox" id="zion-use-exits" checked /><span class="slider"></span></label>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2 items-center">
+          <button class="btn btn-primary" onclick="saveZionConfig()" title="Save Zion settings">Save Zion Settings</button>
+          <button class="btn btn-secondary" onclick="loadZion()" title="Reload from server">Reload</button>
+          <span class="mint" id="zion-save-status">—</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Trade Requests</div>
+        <div id="zion-offers-feed" class="max-h-96 overflow-y-auto text-sm">—</div>
+      </div>
+    </section>
+
+    <div id="zion-offer-modal" class="hidden" style="position:fixed;inset:0;z-index:80;background:rgba(2,6,23,.72);display:none;align-items:center;justify-content:center;padding:16px">
+      <div style="width:min(520px,100%);max-height:90vh;overflow:auto;background:#0f172a;border:1px solid #334155;border-radius:12px;padding:16px 18px;box-shadow:0 20px 50px rgba(0,0,0,.45)">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div>
+            <div class="text-xs" style="color:#5eead4">Zion trade request</div>
+            <div id="zion-modal-title" class="text-lg font-semibold text-white">—</div>
+          </div>
+          <button type="button" class="btn btn-secondary text-xs" onclick="closeZionOfferModal()">Close</button>
+        </div>
+        <div id="zion-modal-body" class="text-sm text-slate-300 space-y-2 mb-3" style="line-height:1.45">—</div>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <label class="ctl ctl-sm"><span>SOL amount</span><input type="number" id="zion-modal-sol" min="0.01" step="0.01" /></label>
+          <label class="ctl ctl-sm"><span>USD amount</span><input type="number" id="zion-modal-usd" min="1" step="1" /></label>
+        </div>
+        <div class="toggle-row mb-3">
+          <span>Apply buy / TP / SL / trail presets</span>
+          <label class="switch"><input type="checkbox" id="zion-modal-exits" checked /><span class="slider"></span></label>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="btn btn-primary" style="background:#16a34a" onclick="placeZionTrade()">Place Trade</button>
+          <button type="button" class="btn btn-secondary" onclick="declineZionOffer()">Cancel</button>
+        </div>
+        <div id="zion-modal-status" class="mint text-xs mt-2">—</div>
+      </div>
+    </div>
+
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
       <div class="card strategy-risk-card">
@@ -4824,7 +4935,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="strategy-io-btns">
               <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
-              <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to current code/catalog defaults (Risk On lean). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to the baked 2026-07-27 defaults (with trade profile overrides). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
@@ -7170,8 +7281,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     async function resetStrategyModulesToDefaults() {
       if (!confirm(
-        'Reset Strategy to code defaults?\\n\\n' +
-        'This restores strategy module toggles/settings and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override, Smart Bot, enable map) to current build defaults, then applies Risk On lean.\\n\\n' +
+        'Reset Strategy to baked defaults (2026-07-27 with Trade Profiles)?\\n\\n' +
+        'Restores strategy modules, filters, scalp engines, and Trade Profile overrides from the shipped default export.\\n\\n' +
         'Does NOT wipe wallets, paper balance, or Overview session.\\n\\nContinue?'
       )) return;
       setStrategyIoStatus('Resetting strategy defaults…', null);
@@ -7235,6 +7346,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'logs') loadSystemLogs();
       if (name === 'strategies') loadStrategies();
       if (name === 'scanner') loadMarketScannerConfig();
+      if (name === 'zion') loadZion();
       if (name === 'overview' || name === 'signals' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -10952,7 +11064,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (window._refreshInFlight) return;
       window._refreshInFlight = true;
       try {
-      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner] = await Promise.all([
+      const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
         fetchJSON('/api/status'),
         fetchJSON('/api/positions'),
         fetchJSON('/api/logs?limit=50'),
@@ -10964,7 +11076,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/api/signals').catch(() => ({ signals: [], trade: {} })),
         fetchJSON('/api/post-run-dip/smart-wallet').catch(() => ({ events: [], config: {} })),
         fetchJSON('/api/market-scanner').catch(() => ({ status: {}, candidates: [] })),
+        fetchJSON('/api/zion').catch(() => null),
       ]);
+      try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
@@ -14837,6 +14951,289 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    let _zionShownOffers = window._zionShownOffers || new Set();
+    window._zionShownOffers = _zionShownOffers;
+    let _zionActiveOfferId = null;
+    let _zionCache = null;
+
+    function fillZionForm(cfg) {
+      if (!cfg) return;
+      const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+      setChk('zion-enabled', cfg.enabled);
+      setChk('zion-scanner-enabled', cfg.scanner?.enabled !== false);
+      setChk('zion-auto-offer', cfg.autoOfferFromScanner !== false);
+      setChk('zion-tracked-boost', cfg.useTrackedWalletsAsBoost !== false);
+      setChk('zion-email-offer', cfg.notifyEmailOnOffer !== false);
+      setChk('zion-email-placed', cfg.notifyEmailOnPlaced !== false);
+      setChk('zion-use-exits', cfg.defaults?.useExitPresets !== false);
+      setVal('zion-min-kol', cfg.minKolWallets);
+      setVal('zion-min-quality', cfg.minWalletQuality);
+      setVal('zion-min-mc', cfg.minMcUsd);
+      setVal('zion-max-mc', cfg.maxMcUsd);
+      setVal('zion-ttl', cfg.offerTtlMinutes);
+      setVal('zion-cooldown', cfg.mintCooldownMinutes);
+      setVal('zion-universe', cfg.scanner?.universeSize);
+      setVal('zion-poll-ms', cfg.scanner?.pollIntervalMs);
+      setVal('zion-size-mode', cfg.defaults?.sizeMode || 'sol');
+      setVal('zion-sol', cfg.defaults?.solAmount);
+      setVal('zion-usd', cfg.defaults?.usdAmount);
+      setVal('zion-tp', cfg.defaults?.takeProfitPct);
+      setVal('zion-sl', cfg.defaults?.stopLossPct);
+      setVal('zion-trail', cfg.defaults?.trailingStopPct);
+      setVal('zion-trail-act', cfg.defaults?.trailingActivationProfit);
+    }
+
+    function renderZionFeeds(data) {
+      const st = document.getElementById('zion-status');
+      if (st && data) {
+        const sc = data.scanner || {};
+        const zs = data.status || {};
+        st.textContent =
+          (zs.enabled ? 'Zion ON' : 'Zion OFF') +
+          ' · scanner ' + (sc.enabled ? 'ON' : 'OFF') +
+          (sc.running ? ' (running)' : '') +
+          ' · universe ' + (sc.universeSize || 0) +
+          ' · candidates ' + (sc.candidateCount || 0) +
+          ' · pending offers ' + (zs.pendingOffers || 0) +
+          (sc.lastError ? ' · err: ' + sc.lastError : '');
+      }
+      const feed = document.getElementById('zion-scanner-feed');
+      if (feed) {
+        const cands = (data && data.candidates) || [];
+        if (!cands.length) {
+          feed.innerHTML = '<div class="mint">No KOL scanner candidates yet — enable Zion and wait for a poll.</div>';
+        } else {
+          feed.innerHTML = cands.map(function (c) {
+            const kols = (c.kolWallets || []).slice(0, 4).map(function (w) { return escHtml(w.name || w.address.slice(0, 6)); }).join(', ');
+            return (
+              '<div class="py-2 border-b border-slate-800">' +
+              '<div class="flex flex-wrap gap-2 items-center">' +
+              '<strong style="color:#e2e8f0">' + escHtml(c.symbol || '?') + '</strong>' +
+              '<span class="mint">score ' + Math.round(c.score || 0) + '</span>' +
+              '<span class="mint">' + escHtml(c.status || '') + '</span>' +
+              (c.trackedBoostCount ? '<span style="color:#fbbf24">tracked+' + c.trackedBoostCount + '</span>' : '') +
+              (c.mcUsd != null ? '<span class="mint">MC $' + Math.round(c.mcUsd).toLocaleString() + '</span>' : '') +
+              '<span class="mint">KOLs ' + (c.kolCount || 0) + '</span>' +
+              '</div>' +
+              '<div class="mint text-xs">' + kols + (c.skipReason ? ' · ' + escHtml(c.skipReason) : '') + '</div>' +
+              '</div>'
+            );
+          }).join('');
+        }
+      }
+      const offersEl = document.getElementById('zion-offers-feed');
+      if (offersEl) {
+        const offers = (data && data.offers) || [];
+        if (!offers.length) {
+          offersEl.innerHTML = '<div class="mint">No trade requests yet.</div>';
+        } else {
+          offersEl.innerHTML = offers.map(function (o) {
+            const openBtn =
+              o.status === 'pending'
+                ? '<button class="btn btn-primary text-xs" onclick="openZionOfferModal(\\'' + escAttr(o.id) + '\\')">Open</button>'
+                : '';
+            return (
+              '<div class="py-2 border-b border-slate-800 flex flex-wrap gap-2 items-center justify-between">' +
+              '<div>' +
+              '<strong style="color:#e2e8f0">' + escHtml(o.symbol) + '</strong> ' +
+              '<span class="mint">' + escHtml(o.status) + '</span> ' +
+              '<span class="mint">score ' + Math.round(o.score || 0) + '</span> ' +
+              (o.mcUsd != null ? '<span class="mint">MC $' + Math.round(o.mcUsd).toLocaleString() + '</span> ' : '') +
+              '<span class="mint">KOLs ' + (o.kolCount || 0) + '</span>' +
+              '</div>' + openBtn +
+              '</div>'
+            );
+          }).join('');
+        }
+      }
+    }
+
+    function handleZionRefresh(data) {
+      _zionCache = data;
+      const panel = document.querySelector('[data-tab-panel="zion"]');
+      const onZion = panel && !panel.classList.contains('hidden');
+      if (onZion) {
+        fillZionForm(data.config || {});
+        renderZionFeeds(data);
+      }
+      const pending = ((data && data.offers) || []).filter(function (o) { return o.status === 'pending'; });
+      for (let i = 0; i < pending.length; i++) {
+        const o = pending[i];
+        if (_zionShownOffers.has(o.id)) continue;
+        _zionShownOffers.add(o.id);
+        openZionOfferModal(o.id, o);
+        break;
+      }
+    }
+
+    async function loadZion() {
+      const st = document.getElementById('zion-save-status');
+      try {
+        const data = await fetchJSON('/api/zion');
+        fillZionForm(data.config || {});
+        renderZionFeeds(data);
+        _zionCache = data;
+        if (st) st.textContent = 'Loaded';
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    async function saveZionConfig() {
+      const st = document.getElementById('zion-save-status');
+      if (st) st.textContent = 'Saving…';
+      try {
+        const body = {
+          enabled: document.getElementById('zion-enabled')?.checked === true,
+          scanner: {
+            enabled: document.getElementById('zion-scanner-enabled')?.checked !== false,
+            pollIntervalMs: Number(document.getElementById('zion-poll-ms')?.value) || 60000,
+            universeSize: Number(document.getElementById('zion-universe')?.value) || 60,
+          },
+          autoOfferFromScanner: document.getElementById('zion-auto-offer')?.checked !== false,
+          useTrackedWalletsAsBoost: document.getElementById('zion-tracked-boost')?.checked !== false,
+          notifyEmailOnOffer: document.getElementById('zion-email-offer')?.checked !== false,
+          notifyEmailOnPlaced: document.getElementById('zion-email-placed')?.checked !== false,
+          minKolWallets: Number(document.getElementById('zion-min-kol')?.value) || 2,
+          minWalletQuality: Number(document.getElementById('zion-min-quality')?.value) || 50,
+          minMcUsd: Number(document.getElementById('zion-min-mc')?.value) || 0,
+          maxMcUsd: Number(document.getElementById('zion-max-mc')?.value) || 0,
+          offerTtlMinutes: Number(document.getElementById('zion-ttl')?.value) || 30,
+          mintCooldownMinutes: Number(document.getElementById('zion-cooldown')?.value) || 120,
+          defaults: {
+            sizeMode: document.getElementById('zion-size-mode')?.value || 'sol',
+            solAmount: Number(document.getElementById('zion-sol')?.value) || 0.25,
+            usdAmount: Number(document.getElementById('zion-usd')?.value) || 50,
+            takeProfitPct: Number(document.getElementById('zion-tp')?.value) || 80,
+            stopLossPct: Number(document.getElementById('zion-sl')?.value) || -25,
+            trailingStopPct: Number(document.getElementById('zion-trail')?.value) || 18,
+            trailingActivationProfit: Number(document.getElementById('zion-trail-act')?.value) || 35,
+            useExitPresets: document.getElementById('zion-use-exits')?.checked !== false,
+          },
+        };
+        const data = await fetchJSON('/api/config/zion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        fillZionForm(data.config || body);
+        if (st) st.textContent = 'Saved' + (data.config?.enabled ? ' · ON' : ' · OFF');
+        await loadZion();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+        alert(err.message || String(err));
+      }
+    }
+
+    function findZionOffer(id) {
+      const offers = (_zionCache && _zionCache.offers) || [];
+      return offers.find(function (o) { return o.id === id; }) || null;
+    }
+
+    function openZionOfferModal(id, offer) {
+      const o = offer || findZionOffer(id);
+      if (!o) {
+        fetchJSON('/api/zion/offers/' + encodeURIComponent(id) + '/open', { method: 'POST' })
+          .then(function (res) {
+            if (res.offer) openZionOfferModal(id, res.offer);
+          })
+          .catch(function () {});
+        return;
+      }
+      _zionActiveOfferId = o.id;
+      _zionShownOffers.add(o.id);
+      const modal = document.getElementById('zion-offer-modal');
+      if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+      }
+      const title = document.getElementById('zion-modal-title');
+      if (title) title.textContent = (o.symbol || '?') + ' · ' + (o.status || '');
+      const body = document.getElementById('zion-modal-body');
+      if (body) {
+        const kols = (o.kolWallets || []).map(function (w) {
+          return escHtml(w.name || '') + ' <span class="mint">(' + escHtml((w.address || '').slice(0, 8)) + '…)</span>';
+        }).join('<br/>');
+        body.innerHTML =
+          '<div><span class="mint">Mint</span> ' + escHtml(o.mint) + '</div>' +
+          (o.mcUsd != null ? '<div><span class="mint">MC</span> $' + Math.round(o.mcUsd).toLocaleString() + '</div>' : '') +
+          (o.volumeH1Usd != null ? '<div><span class="mint">Vol 1h</span> $' + Math.round(o.volumeH1Usd).toLocaleString() + '</div>' : '') +
+          (o.liquidityUsd != null ? '<div><span class="mint">Liq</span> $' + Math.round(o.liquidityUsd).toLocaleString() + '</div>' : '') +
+          (o.holders != null ? '<div><span class="mint">Holders</span> ' + o.holders + '</div>' : '') +
+          '<div><span class="mint">Score</span> ' + Math.round(o.score || 0) + ' · <span class="mint">Source</span> ' + escHtml(o.source || '') + '</div>' +
+          '<div><span class="mint">Reasons</span> ' + escHtml((o.reasons || []).join(' · ')) + '</div>' +
+          '<div class="mt-2"><span class="mint">KOLs (' + (o.kolCount || 0) + ')</span><br/>' + (kols || '—') + '</div>';
+      }
+      const d = (_zionCache && _zionCache.config && _zionCache.config.defaults) || {};
+      const solEl = document.getElementById('zion-modal-sol');
+      const usdEl = document.getElementById('zion-modal-usd');
+      const exEl = document.getElementById('zion-modal-exits');
+      if (solEl) solEl.value = d.solAmount != null ? d.solAmount : 0.25;
+      if (usdEl) usdEl.value = d.usdAmount != null ? d.usdAmount : 50;
+      if (exEl) exEl.checked = d.useExitPresets !== false;
+      const st = document.getElementById('zion-modal-status');
+      if (st) st.textContent = o.status === 'pending' ? 'Ready' : ('Status: ' + o.status);
+      showTab('zion', document.querySelector('[data-tab="zion"]'));
+      try {
+        fetchJSON('/api/zion/offers/' + encodeURIComponent(o.id) + '/open', { method: 'POST' }).catch(function () {});
+      } catch (_) {}
+    }
+
+    function closeZionOfferModal() {
+      const modal = document.getElementById('zion-offer-modal');
+      if (modal) {
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+      }
+      _zionActiveOfferId = null;
+    }
+
+    async function declineZionOffer() {
+      if (!_zionActiveOfferId) { closeZionOfferModal(); return; }
+      try {
+        await fetchJSON('/api/zion/offers/' + encodeURIComponent(_zionActiveOfferId) + '/decline', { method: 'POST' });
+      } catch (_) {}
+      closeZionOfferModal();
+      loadZion();
+    }
+
+    async function placeZionTrade() {
+      if (!_zionActiveOfferId) return;
+      const st = document.getElementById('zion-modal-status');
+      if (st) st.textContent = 'Placing…';
+      try {
+        const body = {
+          solAmount: Number(document.getElementById('zion-modal-sol')?.value) || undefined,
+          usdAmount: Number(document.getElementById('zion-modal-usd')?.value) || undefined,
+          useExitPresets: document.getElementById('zion-modal-exits')?.checked !== false,
+        };
+        const mode = (_zionCache && _zionCache.config && _zionCache.config.defaults && _zionCache.config.defaults.sizeMode) || 'sol';
+        if (mode === 'usd') delete body.solAmount;
+        else delete body.usdAmount;
+        const res = await fetchJSON('/api/zion/offers/' + encodeURIComponent(_zionActiveOfferId) + '/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(res.error || 'Place trade failed');
+        if (st) st.textContent = 'Placed';
+        setTimeout(closeZionOfferModal, 600);
+        loadZion();
+        refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    window.loadZion = loadZion;
+    window.saveZionConfig = saveZionConfig;
+    window.openZionOfferModal = openZionOfferModal;
+    window.closeZionOfferModal = closeZionOfferModal;
+    window.declineZionOfferModal = declineZionOffer;
+    window.declineZionOffer = declineZionOffer;
+    window.placeZionTrade = placeZionTrade;
+
     async function saveTechnicalLevelsConfig(silent) {
       const fibRaw = document.getElementById('tl-priority-fibs')?.value || '0.5,0.618';
       const secRaw = document.getElementById('tl-secondary-fibs')?.value || '0.382,0.786';
@@ -15217,9 +15614,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (document.visibilityState === 'visible') paintDashboardResetTimer();
     });
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'scanner', 'strategies', 'backtester', 'config', 'logs'];
-    const startTab = tabNames.includes(savedTab) ? savedTab : 'overview';
+    const tabNames = ['overview', 'trades', 'wallets', 'signals', 'scanner', 'zion', 'strategies', 'backtester', 'config', 'logs'];
+    const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
+    const qsTab = qs && qs.get('tab');
+    const qsOffer = qs && qs.get('offer');
+    const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(savedTab) ? savedTab : 'overview');
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
+    if (qsOffer) {
+      setTimeout(function () { openZionOfferModal(qsOffer); }, 400);
+    }
   </script>
 
 </body>

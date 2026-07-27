@@ -173,7 +173,7 @@ export interface Position {
   /** Trail already tightened once by adaptive policy */
   profileTrailTightened?: boolean;
   /** How the entry was discovered */
-  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
   /** Scanner playbook stamp */
   scannerPlaybook?: string;
   scannerConfluence?: number;

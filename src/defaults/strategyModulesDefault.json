@@ -1,0 +1,1640 @@
+{
+  "schemaVersion": 2,
+  "kind": "strategy-modules",
+  "exportedAt": "2026-07-27T09:41:50.305Z",
+  "riskLevel": "on",
+  "strategyRecipeMode": "custom",
+  "strategyRecipeRiskLevel": "on",
+  "strategyProfile": "custom",
+  "highWinRatePresetActive": false,
+  "toggles": {
+    "smart_money_copy": true,
+    "ta_market_scanner": true,
+    "wallet_convergence": true,
+    "migration_priority": true,
+    "near_migration_curve": true,
+    "early_curve_smart_money": true,
+    "rebuy_on_dip": true,
+    "elite_convergence": true,
+    "migration_sniper": true,
+    "anti_rug_honeypot": true,
+    "bonding_curve_health": true,
+    "min_holders_activity": true,
+    "volume_liquidity_filters": true,
+    "dead_market_exit": true,
+    "dynamic_position_sizing": true,
+    "tiered_profit_taking": true,
+    "wallet_quality_scoring": true,
+    "multi_factor_conviction": true,
+    "time_based_entry": true,
+    "hard_quality_gate": true,
+    "early_entry_only": true,
+    "sniper_bundler_filters": true,
+    "social_sentiment_filter": true,
+    "trending_narrative_boost": true,
+    "volume_spike_filter": true,
+    "confirmation_layer": true,
+    "market_session_filter": false,
+    "post_run_dip": true,
+    "technical_levels": true,
+    "chart_patterns": true,
+    "pattern_volume_dryup_return": true,
+    "pattern_falling_wedge": true,
+    "pattern_structured_pullback": true,
+    "pattern_bull_flag": true,
+    "pattern_trend_continuation": true,
+    "mev_protection": true,
+    "momentum_confirmation": true,
+    "smart_money_flow_weighting": true,
+    "profit_protected": true,
+    "quick_scalper": true,
+    "micro_scalper": true,
+    "momentum_burst": true,
+    "post_migration_scalp": true,
+    "reversal_scalp": true
+  },
+  "modules": [
+    {
+      "key": "smart_money_copy",
+      "name": "Smart Money Copy",
+      "group": "entry",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "ta_market_scanner",
+      "name": "Market Scanner (TA)",
+      "group": "entry",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "pollIntervalMs": 15000,
+        "lookbackHours": 6,
+        "maxCandidatesPerPoll": 15,
+        "cooldownMs": 2700000,
+        "minRankScore": 42,
+        "requireTaSetup": true,
+        "minPatternConfidence": 55,
+        "preferRealCandles": true,
+        "syntheticPenalty": 8,
+        "minConfluenceScore": 40,
+        "playbookMode": "auto",
+        "pauseScannerOnlyInRiskOff": true,
+        "requireRsForMomentum": true,
+        "requireMtfAligned": false,
+        "minLiquidityUsd": 8000,
+        "minOrganicScore": 0,
+        "preferOrganicVolume": true,
+        "jupiterTrendingEnabled": true,
+        "jupiterCategory": "toptraded",
+        "jupiterPumpFunOnly": true,
+        "jupiterLimit": 100,
+        "jupiterMergeIntervals": true,
+        "minVolumeM5Usd": 1000,
+        "minVolumeH1Usd": 5000,
+        "minVolumeH6Usd": 10000,
+        "minVolumeH24Usd": 15000
+      }
+    },
+    {
+      "key": "wallet_convergence",
+      "name": "Wallet Convergence / Clustering",
+      "group": "entry",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "migration_priority",
+      "name": "Migration Priority",
+      "group": "entry",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "near_migration_curve",
+      "name": "Near-Migration Curve Priority",
+      "group": "entry",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "early_curve_smart_money",
+      "name": "Early-Curve Smart Money",
+      "group": "entry",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "rebuy_on_dip",
+      "name": "Re-Buy on Dip",
+      "group": "entry",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "elite_convergence",
+      "name": "Elite Convergence Only",
+      "group": "entry",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "migration_sniper",
+      "name": "Migration Sniper Mode",
+      "group": "entry",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "anti_rug_honeypot",
+      "name": "Anti-Rug + Honeypot",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "bonding_curve_health",
+      "name": "Bonding Curve Health",
+      "group": "filters",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "cacheTtlMs": 12000,
+        "migrationThresholdSol": 85,
+        "initialRealTokenReserves": 793100000000000,
+        "requireHealthyCurve": true,
+        "minCurveProgress": 0,
+        "maxCurveProgressForEntry": 98,
+        "preferNearMigrationMinPct": 70,
+        "preferNearMigrationMaxPct": 95,
+        "requireRecentCurveActivity": true
+      }
+    },
+    {
+      "key": "min_holders_activity",
+      "name": "Min Holders + Activity",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "volume_liquidity_filters",
+      "name": "Volume / Liquidity Filters",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "dead_market_exit",
+      "name": "Dead Market Exit",
+      "group": "exit",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "dynamic_position_sizing",
+      "name": "Dynamic Position Sizing",
+      "group": "risk",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "tiered_profit_taking",
+      "name": "Tiered Profit Taking + Bag + Trailing",
+      "group": "exit",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "wallet_quality_scoring",
+      "name": "Wallet Quality Scoring",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "multi_factor_conviction",
+      "name": "Multi-Factor Conviction Score",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "time_based_entry",
+      "name": "Time-Based Entry Window",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "hard_quality_gate",
+      "name": "Hard Quality Score Gate",
+      "group": "filters",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "early_entry_only",
+      "name": "Early Entry Window Only",
+      "group": "filters",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "sniper_bundler_filters",
+      "name": "Sniper / Bundler Filters",
+      "group": "filters",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "social_sentiment_filter",
+      "name": "Social Sentiment Filter",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true
+    },
+    {
+      "key": "trending_narrative_boost",
+      "name": "Trending Narrative Boost",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true
+    },
+    {
+      "key": "volume_spike_filter",
+      "name": "Volume Spike Filter",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true
+    },
+    {
+      "key": "confirmation_layer",
+      "name": "Volume + Sentiment + Narrative Confirmation",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true
+    },
+    {
+      "key": "market_session_filter",
+      "name": "Market Session Filter",
+      "group": "filters",
+      "source": "optional",
+      "enabled": false
+    },
+    {
+      "key": "post_run_dip",
+      "name": "Post-Run Dip / Rotation Buy",
+      "group": "advanced",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "profile": "standard",
+        "sensitivity": "low",
+        "timeLimitMinutes": 90,
+        "setupWatchMinutes": 60,
+        "takeProfitPct": 35,
+        "stopLossPct": -14,
+        "minRunPct": 80,
+        "maxRunPct": 150,
+        "minDipFromPeakPct": 25,
+        "maxDipFromPeakPct": 65,
+        "minTokenAgeHours": 12,
+        "maxTokenAgeHours": 24,
+        "preferNearTechnicals": true,
+        "requireNearTechnicals": false,
+        "preferredFibLevels": [
+          0.5,
+          0.618
+        ],
+        "preferSmartMoney": true,
+        "stronglyPreferSmartMoney": false,
+        "requireSmartMoney": false,
+        "hardRequireSetup": false,
+        "minVolumeUsd": 5000,
+        "minLiquidityUsd": 10000,
+        "minHolders": 60,
+        "boostPoints": 12,
+        "boostPointsMax": 20,
+        "nearTechnicalPct": 2.5,
+        "invalidateOnZoneBreak": true,
+        "invalidateRequireVolume": true,
+        "requireClearVolumeDryUp": true,
+        "flexibleVolumeConfirmation": true,
+        "preferredSessions": [
+          "us",
+          "europe_us"
+        ],
+        "requirePreferredSession": false,
+        "minQualifyScore": 55,
+        "smartWalletDipSensitivity": "low",
+        "smartWalletDipBoostPoints": 8,
+        "hardRequireSmartMoneyInConservative": false
+      }
+    },
+    {
+      "key": "technical_levels",
+      "name": "Technical Levels (Fib + S/R)",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "medium",
+        "lookbackHours": 4,
+        "lookbackHoursMin": 2,
+        "lookbackHoursMax": 6,
+        "lookbackBars": 96,
+        "pivotWindow": 2,
+        "clusterPct": 2,
+        "zoneWidthPct": 2,
+        "nearPct": 2,
+        "minImpulsePct": 50,
+        "preferRecentImpulse": true,
+        "minTouchesForValid": 2,
+        "minTouchesForStrong": 2,
+        "maxHistoryPoints": 240,
+        "prioritizeFibLevels": [
+          0.5,
+          0.618
+        ],
+        "secondaryFibLevels": [
+          0.382,
+          0.786
+        ],
+        "hardFilter": false,
+        "srLookbackHours": 2,
+        "srLookbackHoursMin": 1,
+        "srLookbackHoursMax": 4,
+        "srLookbackHoursHardMax": 6,
+        "swingStrength": "medium",
+        "preferRecentSupport": true,
+        "favourVolumeReaction": true,
+        "requireBreakCloseInvalidation": true,
+        "fibTreatAsZones": true
+      }
+    },
+    {
+      "key": "chart_patterns",
+      "name": "Chart Patterns (extras)",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "pattern_volume_dryup_return",
+      "name": "Volume Dry-up + Return",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "pattern_falling_wedge",
+      "name": "Falling Wedge Breakout",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "pattern_structured_pullback",
+      "name": "Structured Pullback",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "pattern_bull_flag",
+      "name": "Bull Flag / Pennant",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "pattern_trend_continuation",
+      "name": "Trend Continuation",
+      "group": "filters",
+      "source": "optional",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "sensitivity": "low",
+        "mode": "both",
+        "lookbackBars": 64,
+        "minConfidence": 55,
+        "breakoutPct": 1.2,
+        "pullbackNearPct": 3,
+        "minPoleRunPct": 25,
+        "maxFlagRangePct": 18,
+        "minStructuredDropPct": 8,
+        "maxStructuredDropPct": 35,
+        "volumeDryupRatio": 0.55,
+        "volumeReturnRatio": 1.35,
+        "holderDropPct": 8,
+        "capitulationDropPct": 28,
+        "bearishPenalty": 6,
+        "hardFilter": true,
+        "blockOnBearish": true,
+        "patterns": {
+          "falling_wedge": {
+            "enabled": true
+          },
+          "ascending_triangle": {
+            "enabled": true
+          },
+          "descending_triangle": {
+            "enabled": true
+          },
+          "trend_continuation": {
+            "enabled": true
+          },
+          "structured_pullback": {
+            "enabled": true
+          },
+          "trendline_break": {
+            "enabled": true
+          },
+          "volume_dryup_return": {
+            "enabled": true
+          },
+          "holder_distribution": {
+            "enabled": true
+          },
+          "capitulation": {
+            "enabled": true
+          },
+          "bull_flag": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "key": "mev_protection",
+      "name": "MEV Protection",
+      "group": "advanced",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enableMEVProtection": true,
+        "useJitoBundles": false,
+        "sandwichProtection": true,
+        "sandwichMaxRecentBuys": 3,
+        "sandwichWindowMs": 12000,
+        "sandwichLookbackTxs": 16,
+        "priorityFeeMultiplier": 1.5,
+        "tipMultiplier": 1.5,
+        "abortOnSandwichRisk": true
+      }
+    },
+    {
+      "key": "momentum_confirmation",
+      "name": "Momentum Confirmation",
+      "group": "advanced",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "smart_money_flow_weighting",
+      "name": "Smart Money Flow Weighting",
+      "group": "advanced",
+      "source": "core",
+      "enabled": true
+    },
+    {
+      "key": "profit_protected",
+      "name": "Profit-Protected Profile",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true
+    },
+    {
+      "key": "quick_scalper",
+      "name": "Quick Scalper",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "timeLimitMinutes": 3,
+        "takeProfitPct": 25,
+        "stopLossPct": -12,
+        "minVolumeUsd": 8000,
+        "minBuyPressureUsd": 500
+      }
+    },
+    {
+      "key": "micro_scalper",
+      "name": "Micro-Scalper",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "timeLimitSeconds": 75,
+        "takeProfitPct": 15,
+        "stopLossPct": -8,
+        "minVolumeUsd": 12000,
+        "minBuyPressureUsd": 800
+      }
+    },
+    {
+      "key": "momentum_burst",
+      "name": "Momentum Burst",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "timeLimitSeconds": 200,
+        "timeLimitMinutes": 3,
+        "takeProfitPct": 28,
+        "stopLossPct": -12,
+        "minVolumeUsd": 15000,
+        "minBuyPressureUsd": 1200,
+        "momentumFailDropPct": 6
+      }
+    },
+    {
+      "key": "post_migration_scalp",
+      "name": "Post-Migration Scalp",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "timeLimitSeconds": 90,
+        "takeProfitPct": 25,
+        "stopLossPct": -9,
+        "minVolumeUsd": 10000,
+        "minBuyPressureUsd": 600
+      }
+    },
+    {
+      "key": "reversal_scalp",
+      "name": "Reversal Scalp",
+      "group": "exit",
+      "source": "risk",
+      "enabled": true,
+      "settings": {
+        "enabled": true,
+        "timeLimitSeconds": 75,
+        "takeProfitPct": 18,
+        "stopLossPct": -7,
+        "minVolumeUsd": 8000,
+        "minBuyPressureUsd": 400,
+        "minDropFromPeakPct": 40,
+        "minConvictionScore": 65
+      }
+    }
+  ],
+  "tradeProfiles": {
+    "enabled": true,
+    "smartBotProfiles": true,
+    "profiles": {
+      "default": true,
+      "scalper": true,
+      "dip_buyer": true,
+      "trend_rider": true,
+      "migration_sniper": true,
+      "high_win_rate": true,
+      "momentum_burst": true,
+      "steady_compounder": true,
+      "reversal_scalper": true,
+      "smart_money_mirror": true
+    },
+    "overrides": {
+      "scalper": {
+        "exitRules": {
+          "takeProfitPctMin": 18,
+          "takeProfitPctMax": 30,
+          "stopLossPctMin": 7,
+          "stopLossPctMax": 12,
+          "hardTimeLimitSecMin": 55,
+          "hardTimeLimitSecMax": 220,
+          "sizeMultiplier": 0.65,
+          "maxTradeOverrideSol": 0.15
+        },
+        "match": {
+          "minConviction": 35
+        }
+      },
+      "dip_buyer": {
+        "exitRules": {
+          "takeProfitPctMin": 25,
+          "takeProfitPctMax": 50,
+          "stopLossPctMin": 12,
+          "stopLossPctMax": 18,
+          "sizeMultiplier": 1.1,
+          "maxTradeOverrideSol": 0.75
+        },
+        "match": {
+          "minConviction": 40
+        }
+      },
+      "trend_rider": {
+        "exitRules": {
+          "takeProfitPctMin": 10,
+          "takeProfitPctMax": 22,
+          "stopLossPctMin": 6,
+          "stopLossPctMax": 9,
+          "sizeMultiplier": 1,
+          "maxTradeOverrideSol": 1
+        },
+        "match": {
+          "minConviction": 50
+        }
+      },
+      "migration_sniper": {
+        "exitRules": {
+          "takeProfitPctMin": 25,
+          "takeProfitPctMax": 45,
+          "stopLossPctMin": 10,
+          "stopLossPctMax": 15,
+          "hardTimeLimitSecMin": 90,
+          "hardTimeLimitSecMax": 420,
+          "sizeMultiplier": 1.15,
+          "maxTradeOverrideSol": 0.25
+        },
+        "match": {
+          "minConviction": 35
+        }
+      },
+      "high_win_rate": {
+        "exitRules": {
+          "takeProfitPctMin": 30,
+          "takeProfitPctMax": 70,
+          "stopLossPctMin": 11,
+          "stopLossPctMax": 16,
+          "sizeMultiplier": 0.7,
+          "maxTradeOverrideSol": 1.5
+        },
+        "match": {
+          "minConviction": 65,
+          "qualityFilter": {
+            "enabled": true,
+            "mode": "reject",
+            "minMarketCapUsd": 200000,
+            "preferMarketCapUsd": 400000,
+            "minLiquidityUsd": 12000,
+            "minVolumeH1Usd": 6000,
+            "minHolders": 80,
+            "weakSetupPenalty": 40,
+            "applyToFibSupport": true,
+            "preferFibOrSupport": true,
+            "minPatternConfidence": 68,
+            "cleanSetupBonus": 10
+          }
+        }
+      },
+      "reversal_scalper": {
+        "exitRules": {
+          "takeProfitPctMin": 12,
+          "takeProfitPctMax": 25,
+          "stopLossPctMin": 6,
+          "stopLossPctMax": 10,
+          "hardTimeLimitSecMin": 50,
+          "hardTimeLimitSecMax": 160,
+          "sizeMultiplier": 0.7,
+          "maxTradeOverrideSol": 0.15
+        },
+        "match": {
+          "minConviction": 35
+        }
+      },
+      "smart_money_mirror": {
+        "exitRules": {
+          "takeProfitPctMin": 25,
+          "takeProfitPctMax": 50,
+          "stopLossPctMin": 9,
+          "stopLossPctMax": 14,
+          "sizeMultiplier": 1,
+          "maxTradeOverrideSol": 0.75
+        },
+        "match": {
+          "minConviction": 45
+        }
+      },
+      "steady_compounder": {
+        "exitRules": {
+          "takeProfitPctMin": 8,
+          "takeProfitPctMax": 16,
+          "stopLossPctMin": 4,
+          "stopLossPctMax": 7,
+          "sizeMultiplier": 1,
+          "maxTradeOverrideSol": 1
+        },
+        "match": {
+          "minConviction": 45
+        }
+      },
+      "momentum_burst": {
+        "exitRules": {
+          "takeProfitPctMin": 22,
+          "takeProfitPctMax": 45,
+          "stopLossPctMin": 10,
+          "stopLossPctMax": 14,
+          "hardTimeLimitSecMin": 140,
+          "hardTimeLimitSecMax": 420,
+          "sizeMultiplier": 0.9,
+          "maxTradeOverrideSol": 0.5
+        },
+        "match": {
+          "minConviction": 40
+        }
+      }
+    },
+    "autoScoring": {
+      "enabled": true,
+      "minScore": 45,
+      "skipBelowMin": true,
+      "forceProfileId": null,
+      "weights": {
+        "volume": 20,
+        "smartMoney": 16,
+        "tokenAge": 12,
+        "volatility": 11,
+        "supportFib": 10,
+        "chartPatterns": 10,
+        "migration": 9,
+        "liquidityHolders": 7,
+        "session": 5
+      }
+    }
+  },
+  "settings": {
+    "trade": {
+      "baseTradeAmountSol": 0.14,
+      "tradeAmountSol": 0.14,
+      "maxAllowedTradeSol": 1.5,
+      "riskMultiplier": 0.45,
+      "convictionMultiplier": 1.5,
+      "minProfitPercent": 42,
+      "maxProfitPercent": 1000,
+      "stopLossPercent": -30
+    },
+    "filters": {
+      "minWinRate": 0,
+      "minLiquidity": 9000,
+      "minMarketCapUsd": 8000,
+      "maxEntryMarketCapUsd": 0,
+      "minDevHoldPct": 0,
+      "maxDevHoldPct": 14,
+      "maxDevPercent": 14,
+      "minTopHolderPct": 0,
+      "maxTopHolderPct": 70,
+      "maxHolderConcentration": 70,
+      "minTop10HolderPct": 8,
+      "enableAntiRug": true,
+      "requireLiquidityLocked": true,
+      "skipIfDevRecentSells": false,
+      "checkHoneypot": true,
+      "minEstimatedTaxPct": 0,
+      "maxEstimatedTaxPct": 25,
+      "minRiskScore": 0,
+      "maxRiskScore": 80,
+      "skipIfMintAuthority": true,
+      "enableSniperFilter": true,
+      "sniperSensitivity": "medium",
+      "enableSocialSentimentFilter": true,
+      "socialSentimentSensitivity": "medium",
+      "enableTrendingNarrativeBoost": true,
+      "trendingNarrativeSensitivity": "low",
+      "trendingNarrativeBoostPoints": 6,
+      "enableVolumeSpikeFilter": true,
+      "volumeSpikeSensitivity": "medium",
+      "volumeSpikeWindowMinutes": 3,
+      "volumeSpikeMultiplier": 3,
+      "volumeSpikeBuySidePct": 65,
+      "volumeSpikeMinUsd": 2500,
+      "volumeSpikeBoostPoints": 8,
+      "volumeSpikeHardFilter": false,
+      "enableConfirmationLayer": true,
+      "confirmationSensitivity": "low",
+      "confirmationVolumeWeight": 50,
+      "confirmationSentimentWeight": 25,
+      "confirmationNarrativeWeight": 25,
+      "confirmationBoostPoints": 10,
+      "confirmationHardFilter": false,
+      "enableMarketSessionFilter": false,
+      "marketSessionAllowAsia": false,
+      "marketSessionAllowEurope": false,
+      "marketSessionAllowUs": false,
+      "marketSessionAllowOverlap": false,
+      "marketSessionAllowOffHours": false,
+      "marketSessionPreferred": [
+        "us",
+        "europe_us"
+      ],
+      "marketSessionPreferBoostPoints": 3,
+      "enablePostRunDip": true,
+      "postRunDipSensitivity": "low",
+      "maxSniperCount": 0,
+      "maxBundlerPct": 0,
+      "maxInsiderPct": 0,
+      "maxSniperScore": 0,
+      "convergenceRequired": 2,
+      "maxConcurrentPositions": 12,
+      "dailyLossLimitSol": 2.5,
+      "minActivityDays": 14,
+      "minTradesLast30d": 10,
+      "enableActivityFilter": true,
+      "minVolume24hUsd": 25000,
+      "minRecentVolumeUsd": 2500,
+      "minRecentBuyVolumeUsd": 1500,
+      "minHolderCount": 120,
+      "minHolders": 120,
+      "minRecentActivity": 10,
+      "buyPumpFunOnly": true,
+      "enableWalletQualityGate": true,
+      "minWalletQualityScore": 55,
+      "walletQualityInactiveDays": 5,
+      "enableWalletQualityAutoPrune": false,
+      "maxEntryAgeMinutes": 15,
+      "preferEntryWithinMinutes": 5,
+      "rejectDumpingToken": true,
+      "maxDrawdownFromRecentHighPct": 35,
+      "enableEntryTimingGate": true,
+      "clusterMinWallets": 2,
+      "clusterWindowMinutes": 5,
+      "allowSingleWalletTopPerformerMigration": true,
+      "smartMoneyFlowWeight": 1.35,
+      "requireMomentumConfirmation": true,
+      "momentumLookbackMinutes": 15,
+      "momentumMinHoldPct": -5
+    },
+    "strategy": {
+      "enableConvergence": true,
+      "enableMigrationOnly": false,
+      "enableMigrationPriority": true,
+      "enableBondingCurvePriority": true,
+      "nearMigrationCurvePct": 90,
+      "enableEarlyCurvePriority": true,
+      "earlyCurveMaxPct": 70,
+      "minEarlyBirdeyeSmartMoneyScore": 40,
+      "earlyCurveMinSmartWallets": 2,
+      "enableAutoSell": true,
+      "migrationSizeMultiplier": 1.55,
+      "migrationSlippageBps": 100,
+      "migrationVolumeSpikeSol": 40,
+      "reBuyEnabled": true,
+      "reBuyMinProfitPct": 90,
+      "reBuyDipPercent": -30,
+      "confirmationThreshold": 2,
+      "reBuyVolumeIncreasePct": 50,
+      "reBuyMaxPerMint": 2,
+      "postStopReentryEnabled": true,
+      "reEntryMaxPerMint": 2,
+      "reEntryWatchMinutes": 1200,
+      "reEntryMinReclaimPct": 8,
+      "reEntryMinVolumeIncreasePct": 50,
+      "reEntryConfirmationWallets": 3,
+      "reEntrySizeMultiplier": 0.65,
+      "reEntryCooldownMinutes": 8,
+      "reEntryAfterMaxProfitEnabled": true
+    },
+    "risk": {
+      "enabled": true,
+      "useRiskSizing": true,
+      "riskPercentPerTrade": 1.35,
+      "maxTradeSol": 0.9,
+      "minTradeSol": 0.02,
+      "weeklyLossLimitSol": 5,
+      "maxDrawdownPct": 22,
+      "autoPauseOnLimit": true,
+      "tieredSellEnabled": true,
+      "trailingStopPct": 19,
+      "trailingStopPercent": 19,
+      "trailingActivationProfit": 22,
+      "enableDeadVolumeExit": true,
+      "deadVolumeUsdPerHour": 60,
+      "deadVolumeConsecutiveHours": 1,
+      "deadVolumeMinHoldMinutes": 15,
+      "lowConvictionTrailThreshold": 50,
+      "lowConvictionTrailTightenPct": 6,
+      "normal": {
+        "riskPercentPerTrade": 1.35,
+        "trailingStopPct": 19,
+        "hardStopLossPct": -30,
+        "tiers": [
+          {
+            "profitPct": 40,
+            "sellPct": 35
+          },
+          {
+            "profitPct": 80,
+            "sellPct": 30
+          }
+        ]
+      },
+      "migration": {
+        "riskPercentPerTrade": 2,
+        "trailingStopPct": 23,
+        "hardStopLossPct": -34,
+        "sizeMultiplier": 1.2,
+        "tiers": [
+          {
+            "profitPct": 40,
+            "sellPct": 35
+          },
+          {
+            "profitPct": 80,
+            "sellPct": 30
+          }
+        ]
+      }
+    },
+    "profitStrategy": {
+      "enabled": true,
+      "takeInitialPercent": 95,
+      "partialSellAt": 55,
+      "partialSellPercent": 42,
+      "trailingStopAfter": 110,
+      "trailingStopPct": 21,
+      "bagPercent": 28,
+      "riskBasedAdjustment": true,
+      "highRiskScoreThreshold": 55
+    },
+    "selective": {
+      "enabled": true,
+      "minConvictionScore": 45,
+      "requireConvergenceForNormal": true,
+      "allowSingleWalletMigration": true,
+      "minWalletsForTrade": 2,
+      "minVolume24hUsd": 25000,
+      "minHolderCount": 120,
+      "maxTradesPerHour": 16,
+      "minMsBetweenTrades": 25000,
+      "riskScoreSizeCutoff": 50,
+      "minRiskSizeMultiplier": 0.4,
+      "extraConvergenceAboveRisk": 1,
+      "highRiskConvergenceThreshold": 60
+    },
+    "quickScalper": {
+      "enabled": true,
+      "timeLimitMinutes": 3,
+      "takeProfitPct": 25,
+      "stopLossPct": -12,
+      "minVolumeUsd": 8000,
+      "minBuyPressureUsd": 500
+    },
+    "microScalper": {
+      "enabled": true,
+      "timeLimitSeconds": 75,
+      "takeProfitPct": 15,
+      "stopLossPct": -8,
+      "minVolumeUsd": 12000,
+      "minBuyPressureUsd": 800
+    },
+    "momentumBurst": {
+      "enabled": true,
+      "timeLimitSeconds": 200,
+      "timeLimitMinutes": 3,
+      "takeProfitPct": 28,
+      "stopLossPct": -12,
+      "minVolumeUsd": 15000,
+      "minBuyPressureUsd": 1200,
+      "momentumFailDropPct": 6
+    },
+    "postMigrationScalp": {
+      "enabled": true,
+      "timeLimitSeconds": 90,
+      "takeProfitPct": 25,
+      "stopLossPct": -9,
+      "minVolumeUsd": 10000,
+      "minBuyPressureUsd": 600
+    },
+    "reversalScalp": {
+      "enabled": true,
+      "timeLimitSeconds": 75,
+      "takeProfitPct": 18,
+      "stopLossPct": -7,
+      "minVolumeUsd": 8000,
+      "minBuyPressureUsd": 400,
+      "minDropFromPeakPct": 40,
+      "minConvictionScore": 65
+    },
+    "postRunDip": {
+      "enabled": true,
+      "profile": "standard",
+      "sensitivity": "low",
+      "timeLimitMinutes": 90,
+      "setupWatchMinutes": 60,
+      "takeProfitPct": 35,
+      "stopLossPct": -14,
+      "minRunPct": 80,
+      "maxRunPct": 150,
+      "minDipFromPeakPct": 25,
+      "maxDipFromPeakPct": 65,
+      "minTokenAgeHours": 12,
+      "maxTokenAgeHours": 24,
+      "preferNearTechnicals": true,
+      "requireNearTechnicals": false,
+      "preferredFibLevels": [
+        0.5,
+        0.618
+      ],
+      "preferSmartMoney": true,
+      "stronglyPreferSmartMoney": false,
+      "requireSmartMoney": false,
+      "hardRequireSetup": false,
+      "minVolumeUsd": 5000,
+      "minLiquidityUsd": 10000,
+      "minHolders": 60,
+      "boostPoints": 12,
+      "boostPointsMax": 20,
+      "nearTechnicalPct": 2.5,
+      "invalidateOnZoneBreak": true,
+      "invalidateRequireVolume": true,
+      "requireClearVolumeDryUp": true,
+      "flexibleVolumeConfirmation": true,
+      "preferredSessions": [
+        "us",
+        "europe_us"
+      ],
+      "requirePreferredSession": false,
+      "minQualifyScore": 55,
+      "smartWalletDipSensitivity": "low",
+      "smartWalletDipBoostPoints": 8,
+      "hardRequireSmartMoneyInConservative": false
+    },
+    "technicalLevels": {
+      "enabled": true,
+      "sensitivity": "medium",
+      "lookbackHours": 4,
+      "lookbackHoursMin": 2,
+      "lookbackHoursMax": 6,
+      "lookbackBars": 96,
+      "pivotWindow": 2,
+      "clusterPct": 2,
+      "zoneWidthPct": 2,
+      "nearPct": 2,
+      "minImpulsePct": 50,
+      "preferRecentImpulse": true,
+      "minTouchesForValid": 2,
+      "minTouchesForStrong": 2,
+      "maxHistoryPoints": 240,
+      "prioritizeFibLevels": [
+        0.5,
+        0.618
+      ],
+      "secondaryFibLevels": [
+        0.382,
+        0.786
+      ],
+      "hardFilter": false,
+      "srLookbackHours": 2,
+      "srLookbackHoursMin": 1,
+      "srLookbackHoursMax": 4,
+      "srLookbackHoursHardMax": 6,
+      "swingStrength": "medium",
+      "preferRecentSupport": true,
+      "favourVolumeReaction": true,
+      "requireBreakCloseInvalidation": true,
+      "fibTreatAsZones": true
+    },
+    "chartPatterns": {
+      "enabled": true,
+      "sensitivity": "low",
+      "mode": "both",
+      "lookbackBars": 64,
+      "minConfidence": 55,
+      "breakoutPct": 1.2,
+      "pullbackNearPct": 3,
+      "minPoleRunPct": 25,
+      "maxFlagRangePct": 18,
+      "minStructuredDropPct": 8,
+      "maxStructuredDropPct": 35,
+      "volumeDryupRatio": 0.55,
+      "volumeReturnRatio": 1.35,
+      "holderDropPct": 8,
+      "capitulationDropPct": 28,
+      "bearishPenalty": 6,
+      "hardFilter": true,
+      "blockOnBearish": true,
+      "patterns": {
+        "falling_wedge": {
+          "enabled": true
+        },
+        "ascending_triangle": {
+          "enabled": true
+        },
+        "descending_triangle": {
+          "enabled": true
+        },
+        "trend_continuation": {
+          "enabled": true
+        },
+        "structured_pullback": {
+          "enabled": true
+        },
+        "trendline_break": {
+          "enabled": true
+        },
+        "volume_dryup_return": {
+          "enabled": true
+        },
+        "holder_distribution": {
+          "enabled": true
+        },
+        "capitulation": {
+          "enabled": true
+        },
+        "bull_flag": {
+          "enabled": true
+        }
+      }
+    },
+    "bondingCurve": {
+      "cacheTtlMs": 12000,
+      "migrationThresholdSol": 85,
+      "initialRealTokenReserves": 793100000000000,
+      "requireHealthyCurve": true,
+      "minCurveProgress": 0,
+      "maxCurveProgressForEntry": 98,
+      "preferNearMigrationMinPct": 70,
+      "preferNearMigrationMaxPct": 95,
+      "requireRecentCurveActivity": true
+    },
+    "mev": {
+      "enableMEVProtection": true,
+      "useJitoBundles": false,
+      "sandwichProtection": true,
+      "sandwichMaxRecentBuys": 3,
+      "sandwichWindowMs": 12000,
+      "sandwichLookbackTxs": 16,
+      "priorityFeeMultiplier": 1.5,
+      "tipMultiplier": 1.5,
+      "abortOnSandwichRisk": true
+    },
+    "marketScanner": {
+      "enabled": true,
+      "pollIntervalMs": 15000,
+      "lookbackHours": 6,
+      "maxCandidatesPerPoll": 15,
+      "cooldownMs": 2700000,
+      "minRankScore": 42,
+      "requireTaSetup": true,
+      "minPatternConfidence": 55,
+      "preferRealCandles": true,
+      "syntheticPenalty": 8,
+      "minConfluenceScore": 40,
+      "playbookMode": "auto",
+      "pauseScannerOnlyInRiskOff": true,
+      "requireRsForMomentum": true,
+      "requireMtfAligned": false,
+      "minLiquidityUsd": 8000,
+      "minOrganicScore": 0,
+      "preferOrganicVolume": true,
+      "jupiterTrendingEnabled": true,
+      "jupiterCategory": "toptraded",
+      "jupiterPumpFunOnly": true,
+      "jupiterLimit": 100,
+      "jupiterMergeIntervals": true,
+      "minVolumeM5Usd": 1000,
+      "minVolumeH1Usd": 5000,
+      "minVolumeH6Usd": 10000,
+      "minVolumeH24Usd": 15000
+    },
+    "tradeProfiles": {
+      "enabled": true,
+      "smartBotProfiles": true,
+      "profiles": {
+        "default": true,
+        "scalper": true,
+        "dip_buyer": true,
+        "trend_rider": true,
+        "migration_sniper": true,
+        "high_win_rate": true,
+        "momentum_burst": true,
+        "steady_compounder": true,
+        "reversal_scalper": true,
+        "smart_money_mirror": true
+      },
+      "overrides": {
+        "scalper": {
+          "exitRules": {
+            "takeProfitPctMin": 18,
+            "takeProfitPctMax": 30,
+            "stopLossPctMin": 7,
+            "stopLossPctMax": 12,
+            "hardTimeLimitSecMin": 55,
+            "hardTimeLimitSecMax": 220,
+            "sizeMultiplier": 0.65,
+            "maxTradeOverrideSol": 0.15
+          },
+          "match": {
+            "minConviction": 35
+          }
+        },
+        "dip_buyer": {
+          "exitRules": {
+            "takeProfitPctMin": 25,
+            "takeProfitPctMax": 50,
+            "stopLossPctMin": 12,
+            "stopLossPctMax": 18,
+            "sizeMultiplier": 1.1,
+            "maxTradeOverrideSol": 0.75
+          },
+          "match": {
+            "minConviction": 40
+          }
+        },
+        "trend_rider": {
+          "exitRules": {
+            "takeProfitPctMin": 10,
+            "takeProfitPctMax": 22,
+            "stopLossPctMin": 6,
+            "stopLossPctMax": 9,
+            "sizeMultiplier": 1,
+            "maxTradeOverrideSol": 1
+          },
+          "match": {
+            "minConviction": 50
+          }
+        },
+        "migration_sniper": {
+          "exitRules": {
+            "takeProfitPctMin": 25,
+            "takeProfitPctMax": 45,
+            "stopLossPctMin": 10,
+            "stopLossPctMax": 15,
+            "hardTimeLimitSecMin": 90,
+            "hardTimeLimitSecMax": 420,
+            "sizeMultiplier": 1.15,
+            "maxTradeOverrideSol": 0.25
+          },
+          "match": {
+            "minConviction": 35
+          }
+        },
+        "high_win_rate": {
+          "exitRules": {
+            "takeProfitPctMin": 30,
+            "takeProfitPctMax": 70,
+            "stopLossPctMin": 11,
+            "stopLossPctMax": 16,
+            "sizeMultiplier": 0.7,
+            "maxTradeOverrideSol": 1.5
+          },
+          "match": {
+            "minConviction": 65,
+            "qualityFilter": {
+              "enabled": true,
+              "mode": "reject",
+              "minMarketCapUsd": 200000,
+              "preferMarketCapUsd": 400000,
+              "minLiquidityUsd": 12000,
+              "minVolumeH1Usd": 6000,
+              "minHolders": 80,
+              "weakSetupPenalty": 40,
+              "applyToFibSupport": true,
+              "preferFibOrSupport": true,
+              "minPatternConfidence": 68,
+              "cleanSetupBonus": 10
+            }
+          }
+        },
+        "reversal_scalper": {
+          "exitRules": {
+            "takeProfitPctMin": 12,
+            "takeProfitPctMax": 25,
+            "stopLossPctMin": 6,
+            "stopLossPctMax": 10,
+            "hardTimeLimitSecMin": 50,
+            "hardTimeLimitSecMax": 160,
+            "sizeMultiplier": 0.7,
+            "maxTradeOverrideSol": 0.15
+          },
+          "match": {
+            "minConviction": 35
+          }
+        },
+        "smart_money_mirror": {
+          "exitRules": {
+            "takeProfitPctMin": 25,
+            "takeProfitPctMax": 50,
+            "stopLossPctMin": 9,
+            "stopLossPctMax": 14,
+            "sizeMultiplier": 1,
+            "maxTradeOverrideSol": 0.75
+          },
+          "match": {
+            "minConviction": 45
+          }
+        },
+        "steady_compounder": {
+          "exitRules": {
+            "takeProfitPctMin": 8,
+            "takeProfitPctMax": 16,
+            "stopLossPctMin": 4,
+            "stopLossPctMax": 7,
+            "sizeMultiplier": 1,
+            "maxTradeOverrideSol": 1
+          },
+          "match": {
+            "minConviction": 45
+          }
+        },
+        "momentum_burst": {
+          "exitRules": {
+            "takeProfitPctMin": 22,
+            "takeProfitPctMax": 45,
+            "stopLossPctMin": 10,
+            "stopLossPctMax": 14,
+            "hardTimeLimitSecMin": 140,
+            "hardTimeLimitSecMax": 420,
+            "sizeMultiplier": 0.9,
+            "maxTradeOverrideSol": 0.5
+          },
+          "match": {
+            "minConviction": 40
+          }
+        }
+      },
+      "autoScoring": {
+        "enabled": true,
+        "minScore": 45,
+        "skipBelowMin": true,
+        "forceProfileId": null,
+        "weights": {
+          "volume": 20,
+          "smartMoney": 16,
+          "tokenAge": 12,
+          "volatility": 11,
+          "supportFib": 10,
+          "chartPatterns": 10,
+          "migration": 9,
+          "liquidityHolders": 7,
+          "session": 5
+        }
+      }
+    },
+    "tokenMetrics": {
+      "cacheTtlMs": 90000,
+      "devActivityLookbackMs": 172800000
+    },
+    "convergenceWindowMs": 300000
+  }
+}

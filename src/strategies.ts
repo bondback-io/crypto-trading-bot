@@ -20,7 +20,6 @@ import {
   normalizeRiskLevel,
   applyImportedSettingsSnapshot,
   buildPersistedSettingsSnapshot,
-  getCodeDefaultSettings,
   type RiskLevel,
   DEFAULT_QUICK_SCALPER,
   DEFAULT_MICRO_SCALPER,
@@ -4197,10 +4196,39 @@ export function importStrategyModulesBundle(
 }
 
 /**
- * Strategy-scoped reset: restore Control Center settings + Trade Profiles to
- * code/catalog defaults and re-apply Risk On lean module recipe.
+ * Strategy-scoped reset: restore Control Center + Trade Profiles from the baked
+ * default export ([src/defaults/strategyModulesDefault.json]).
  * Does not wipe wallets, paper balance, or backtest history.
  */
+export function getBakedStrategyModulesDefault(): StrategyModulesExport {
+  const fs = require('fs') as typeof import('fs');
+  const path = require('path') as typeof import('path');
+  const candidates = [
+    path.join(__dirname, 'defaults', 'strategyModulesDefault.json'),
+    path.join(__dirname, '..', 'src', 'defaults', 'strategyModulesDefault.json'),
+    path.join(process.cwd(), 'src', 'defaults', 'strategyModulesDefault.json'),
+    path.join(process.cwd(), 'dist', 'defaults', 'strategyModulesDefault.json'),
+  ];
+  let baked: StrategyModulesExport | null = null;
+  let lastErr: string | null = null;
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      baked = JSON.parse(fs.readFileSync(file, 'utf8')) as StrategyModulesExport;
+      break;
+    } catch (err) {
+      lastErr = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (!baked || baked.kind !== STRATEGY_MODULES_KIND) {
+    throw new Error(
+      `Baked strategyModulesDefault.json missing or invalid` +
+        (lastErr ? ` (${lastErr})` : '')
+    );
+  }
+  return JSON.parse(JSON.stringify(baked)) as StrategyModulesExport;
+}
+
 export function resetStrategyModulesToDefaults(options?: {
   persist?: boolean;
 }): {
@@ -4214,86 +4242,29 @@ export function resetStrategyModulesToDefaults(options?: {
   tradeProfilesEnabled: boolean;
   smartBotProfiles: boolean;
 } {
-  const defaults = getCodeDefaultSettings();
-  const snap: PersistedBotSettings = {
-    version: SETTINGS_VERSION,
-    updatedAt: Date.now(),
-  };
-  for (const key of [
-    'trade',
-    'filters',
-    'strategy',
-    'risk',
-    'profitStrategy',
-    'selective',
-    'quickScalper',
-    'microScalper',
-    'momentumBurst',
-    'postMigrationScalp',
-    'reversalScalp',
-    'postRunDip',
-    'technicalLevels',
-    'chartPatterns',
-    'bondingCurve',
-    'mev',
-    'tokenMetrics',
-  ] as const) {
-    const v = defaults[key];
-    if (v != null && typeof v === 'object') {
-      (snap as unknown as Record<string, unknown>)[key] = cloneModuleSettings(v);
-    }
-  }
-  if (typeof defaults.convergenceWindowMs === 'number') {
-    snap.convergenceWindowMs = defaults.convergenceWindowMs;
-  }
-  applyImportedSettingsSnapshot(snap, 'replace');
-
-  if (defaults.marketScanner && typeof defaults.marketScanner === 'object') {
-    config.marketScanner = cloneModuleSettings(
-      defaults.marketScanner
-    ) as unknown as typeof config.marketScanner;
-  }
-
-  config.strategyProfile = 'custom';
-  config.highWinRatePresetActive = false;
-  config.strategyProfileSnapshot = null;
-  config.riskRecipeOptimizations =
-    defaults.riskRecipeOptimizations &&
-    typeof defaults.riskRecipeOptimizations === 'object'
-      ? (cloneModuleSettings(
-          defaults.riskRecipeOptimizations
-        ) as typeof config.riskRecipeOptimizations)
-      : {};
-
-  const { resetTradeProfilesToCatalogDefaults } =
-    require('./tradeProfiles') as typeof import('./tradeProfiles');
-  resetTradeProfilesToCatalogDefaults({ persist: false });
-
-  const { applyRiskLevel } = require('./config') as typeof import('./config');
-  applyRiskLevel('on', { persist: false });
-
-  if (options?.persist !== false) persistUserSettings();
-
-  const toggles = ensureStrategyToggles();
-  const enabledCount = STRATEGY_KEYS.filter((k) => toggles[k]).length;
-  const tradeProfilesEnabled = config.tradeProfiles?.enabled !== false;
-  const smartBotProfiles = config.tradeProfiles?.smartBotProfiles === true;
+  const result = importStrategyModulesBundle(getBakedStrategyModulesDefault(), {
+    persist: options?.persist !== false,
+    label: 'code-default-2026-07-27',
+  });
   const message =
-    `Reset Strategy to code defaults · Risk ON lean · Trade Profiles catalog` +
-    ` · multi-profile ${tradeProfilesEnabled ? 'ON' : 'OFF'}` +
-    ` · smart bot ${smartBotProfiles ? 'ON' : 'OFF'}` +
-    ` · ${enabledCount}/${STRATEGY_KEYS.length} modules ON`;
+    `Reset Strategy to baked defaults (2026-07-27 with Trade Profiles)` +
+    ` · ${result.enabledCount}/${result.totalCount} modules ON` +
+    ` · ${result.appliedProfileOverrides} profile override(s)` +
+    ` · multi-profile ${result.tradeProfilesEnabled ? 'ON' : 'OFF'}` +
+    ` · smart bot ${result.smartBotProfiles ? 'ON' : 'OFF'}` +
+    ` · Risk ${result.riskLevel.toUpperCase()}` +
+    ` · recipe ${result.strategyRecipeMode}`;
   console.log(`[strategies] ${message}`);
   return {
     ok: true,
     message,
-    enabledCount,
-    totalCount: STRATEGY_KEYS.length,
-    riskLevel: normalizeRiskLevel(config.riskLevel),
-    strategyRecipeMode: ensureStrategyRecipeMode(),
-    strategyProfile: (config.strategyProfile || 'custom') as StrategyProfileId,
-    tradeProfilesEnabled,
-    smartBotProfiles,
+    enabledCount: result.enabledCount,
+    totalCount: result.totalCount,
+    riskLevel: result.riskLevel,
+    strategyRecipeMode: result.strategyRecipeMode,
+    strategyProfile: result.strategyProfile,
+    tradeProfilesEnabled: result.tradeProfilesEnabled,
+    smartBotProfiles: result.smartBotProfiles,
   };
 }
 

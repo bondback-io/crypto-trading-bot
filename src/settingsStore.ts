@@ -100,6 +100,8 @@ export interface PersistedBotSettings {
     profitableCloseEnabled?: boolean;
   };
   marketScanner?: Record<string, unknown>;
+  /** Zion micro-bot (KOL scanner + manual trade offers) */
+  zion?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;
   walletDiscovery?: {

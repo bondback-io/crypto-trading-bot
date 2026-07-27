@@ -2216,6 +2216,24 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       `[pump: ${buy.isPumpFun}, migration: ${isMigration}]`
   );
 
+  // Zion observe-only boost — never skips or alters copy path
+  try {
+    if (config.zion?.enabled && config.zion.useTrackedWalletsAsBoost !== false) {
+      const { noteTrackedBuy } =
+        require('./zionKolScanner') as typeof import('./zionKolScanner');
+      noteTrackedBuy({
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        walletAddress: buy.wallet,
+        walletName: buy.walletName,
+        timestamp: buy.timestamp || buy.detectedAt,
+      });
+    }
+  } catch {
+    /* Zion optional */
+  }
+
   // Push to Recent Signals IMMEDIATELY so the feed stays live even when
   // anti-rug / Dex / Birdeye calls are slow or the trade is later skipped.
   if (!recentBuys.has(buy.mint)) {

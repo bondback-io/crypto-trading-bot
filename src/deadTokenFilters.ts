@@ -100,6 +100,8 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('entry age') ||
     r.includes('momentum confirmation failed') ||
     r.includes('wallet quality') ||
+    r.includes('entry quality') ||
+    r.includes('quality score too low') ||
     r.includes('cluster need')
   );
 }

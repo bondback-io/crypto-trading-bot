@@ -1697,6 +1697,217 @@ export function createServer(): express.Application {
     });
   });
 
+  // ——— Zion micro-bot (isolated; no strategy toggle coupling) ———
+  app.get('/api/zion', (_req: Request, res: Response) => {
+    try {
+      const zion = require('./zion') as typeof import('./zion');
+      const scan = require('./zionKolScanner') as typeof import('./zionKolScanner');
+      res.json({
+        ok: true,
+        config: { ...config.zion },
+        status: zion.getZionStatus(),
+        scanner: scan.getZionScannerStatus(),
+        offers: zion.listOffers(40),
+        candidates: scan.getZionScannerFeed(40),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.get('/api/zion/scanner', (_req: Request, res: Response) => {
+    try {
+      const scan = require('./zionKolScanner') as typeof import('./zionKolScanner');
+      res.json({
+        ok: true,
+        status: scan.getZionScannerStatus(),
+        candidates: scan.getZionScannerFeed(40),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/config/zion', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (!config.zion) {
+        res.status(500).json({ ok: false, error: 'zion config missing' });
+        return;
+      }
+      const z = config.zion;
+      if (typeof body.enabled === 'boolean') z.enabled = body.enabled;
+      if (body.scanner && typeof body.scanner === 'object') {
+        const s = body.scanner as Record<string, unknown>;
+        if (typeof s.enabled === 'boolean') z.scanner.enabled = s.enabled;
+        if (s.pollIntervalMs != null && Number.isFinite(Number(s.pollIntervalMs))) {
+          z.scanner.pollIntervalMs = Math.max(
+            30_000,
+            Math.min(600_000, Math.round(Number(s.pollIntervalMs)))
+          );
+        }
+        if (s.universeSize != null && Number.isFinite(Number(s.universeSize))) {
+          z.scanner.universeSize = Math.max(
+            20,
+            Math.min(100, Math.round(Number(s.universeSize)))
+          );
+        }
+        if (
+          s.activityLookbackMinutes != null &&
+          Number.isFinite(Number(s.activityLookbackMinutes))
+        ) {
+          z.scanner.activityLookbackMinutes = Math.max(
+            10,
+            Math.min(240, Math.round(Number(s.activityLookbackMinutes)))
+          );
+        }
+        if (s.batchSize != null && Number.isFinite(Number(s.batchSize))) {
+          z.scanner.batchSize = Math.max(
+            2,
+            Math.min(12, Math.round(Number(s.batchSize)))
+          );
+        }
+      }
+      if (body.minKolWallets != null && Number.isFinite(Number(body.minKolWallets))) {
+        z.minKolWallets = Math.max(1, Math.min(20, Math.round(Number(body.minKolWallets))));
+      }
+      if (body.minWalletQuality != null && Number.isFinite(Number(body.minWalletQuality))) {
+        z.minWalletQuality = Math.max(0, Math.min(100, Math.round(Number(body.minWalletQuality))));
+      }
+      if (body.minMcUsd != null && Number.isFinite(Number(body.minMcUsd))) {
+        z.minMcUsd = Math.max(0, Number(body.minMcUsd));
+      }
+      if (body.maxMcUsd != null && Number.isFinite(Number(body.maxMcUsd))) {
+        z.maxMcUsd = Math.max(0, Number(body.maxMcUsd));
+      }
+      if (body.offerTtlMinutes != null && Number.isFinite(Number(body.offerTtlMinutes))) {
+        z.offerTtlMinutes = Math.max(5, Math.min(240, Math.round(Number(body.offerTtlMinutes))));
+      }
+      if (body.mintCooldownMinutes != null && Number.isFinite(Number(body.mintCooldownMinutes))) {
+        z.mintCooldownMinutes = Math.max(5, Math.min(1440, Math.round(Number(body.mintCooldownMinutes))));
+      }
+      if (typeof body.useTrackedWalletsAsBoost === 'boolean') {
+        z.useTrackedWalletsAsBoost = body.useTrackedWalletsAsBoost;
+      }
+      if (typeof body.autoOfferFromScanner === 'boolean') {
+        z.autoOfferFromScanner = body.autoOfferFromScanner;
+      }
+      if (typeof body.notifyEmailOnOffer === 'boolean') {
+        z.notifyEmailOnOffer = body.notifyEmailOnOffer;
+      }
+      if (typeof body.notifyEmailOnPlaced === 'boolean') {
+        z.notifyEmailOnPlaced = body.notifyEmailOnPlaced;
+      }
+      if (body.defaults && typeof body.defaults === 'object') {
+        const d = body.defaults as Record<string, unknown>;
+        if (d.sizeMode === 'sol' || d.sizeMode === 'usd') z.defaults.sizeMode = d.sizeMode;
+        if (d.solAmount != null && Number.isFinite(Number(d.solAmount))) {
+          z.defaults.solAmount = Math.max(0.01, Math.min(50, Number(d.solAmount)));
+        }
+        if (d.usdAmount != null && Number.isFinite(Number(d.usdAmount))) {
+          z.defaults.usdAmount = Math.max(1, Math.min(50_000, Number(d.usdAmount)));
+        }
+        if (d.takeProfitPct != null && Number.isFinite(Number(d.takeProfitPct))) {
+          z.defaults.takeProfitPct = Math.max(5, Math.min(5000, Number(d.takeProfitPct)));
+        }
+        if (d.stopLossPct != null && Number.isFinite(Number(d.stopLossPct))) {
+          z.defaults.stopLossPct = Math.max(-95, Math.min(-1, Number(d.stopLossPct)));
+        }
+        if (d.trailingStopPct != null && Number.isFinite(Number(d.trailingStopPct))) {
+          z.defaults.trailingStopPct = Math.max(1, Math.min(80, Number(d.trailingStopPct)));
+        }
+        if (
+          d.trailingActivationProfit != null &&
+          Number.isFinite(Number(d.trailingActivationProfit))
+        ) {
+          z.defaults.trailingActivationProfit = Math.max(
+            1,
+            Math.min(500, Number(d.trailingActivationProfit))
+          );
+        }
+        if (typeof d.useExitPresets === 'boolean') {
+          z.defaults.useExitPresets = d.useExitPresets;
+        }
+      }
+
+      persistUserSettings();
+      const scan = require('./zionKolScanner') as typeof import('./zionKolScanner');
+      scan.syncZionKolScannerLifecycle();
+
+      res.json({
+        ok: true,
+        config: { ...config.zion },
+        scanner: scan.getZionScannerStatus(),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/zion/offers/:id/approve', async (req: Request, res: Response) => {
+    try {
+      const { executeApprovedOffer } = require('./zion') as typeof import('./zion');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const result = await executeApprovedOffer(String(req.params.id), {
+        solAmount: body.solAmount != null ? Number(body.solAmount) : undefined,
+        usdAmount: body.usdAmount != null ? Number(body.usdAmount) : undefined,
+        useExitPresets:
+          typeof body.useExitPresets === 'boolean' ? body.useExitPresets : undefined,
+        takeProfitPct:
+          body.takeProfitPct != null ? Number(body.takeProfitPct) : undefined,
+        stopLossPct: body.stopLossPct != null ? Number(body.stopLossPct) : undefined,
+        trailingStopPct:
+          body.trailingStopPct != null ? Number(body.trailingStopPct) : undefined,
+        trailingActivationProfit:
+          body.trailingActivationProfit != null
+            ? Number(body.trailingActivationProfit)
+            : undefined,
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/zion/offers/:id/decline', (req: Request, res: Response) => {
+    try {
+      const { declineOffer } = require('./zion') as typeof import('./zion');
+      const offer = declineOffer(String(req.params.id));
+      if (!offer) {
+        res.status(404).json({ ok: false, error: 'Offer not found or not pending' });
+        return;
+      }
+      res.json({ ok: true, offer });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/zion/offers/:id/open', (req: Request, res: Response) => {
+    try {
+      const { markOfferOpened, getOffer } = require('./zion') as typeof import('./zion');
+      markOfferOpened(String(req.params.id));
+      const offer = getOffer(String(req.params.id));
+      if (!offer) {
+        res.status(404).json({ ok: false, error: 'Offer not found' });
+        return;
+      }
+      res.json({ ok: true, offer });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
   app.get('/api/post-run-dip/smart-wallet', (_req: Request, res: Response) => {
     const { getRecentDipSmartWalletActivity } =
       require('./postRunDip') as typeof import('./postRunDip');

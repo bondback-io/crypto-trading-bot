@@ -5,7 +5,7 @@
   "description": "Solana smart money copy trading bot for Pump.fun launches and migrations",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').mkdirSync('dist/defaults',{recursive:true}); require('fs').copyFileSync('src/defaults/strategyModulesDefault.json','dist/defaults/strategyModulesDefault.json')\"",
     "start": "node dist/index.js",
     "start:prod": "node dist/index.js",
     "prestart": "node -e \"require('fs').accessSync('dist/index.js')\"",

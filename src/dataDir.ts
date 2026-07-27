@@ -51,6 +51,10 @@ export const PERSIST_FILES = {
   tradingWallets: 'trading-wallets.json',
   /** Overview Reset timestamp + session meta */
   dashboardState: 'dashboardState.json',
+  /** Zion micro-bot pending/executed trade offers */
+  zionOffers: 'zion-offers.json',
+  /** Cached KOL universe for Zion scanner (not watch list) */
+  zionKolUniverse: 'zion-kol-universe.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',

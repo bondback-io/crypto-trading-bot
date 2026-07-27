@@ -1595,6 +1595,40 @@ export interface StrategyConfig {
   reEntryAfterMaxProfitEnabled: boolean;
 }
 
+/** Zion micro-bot settings (KOL scanner + manual offers). Isolated from strategy toggles. */
+export interface ZionConfig {
+  enabled: boolean;
+  scanner: {
+    enabled: boolean;
+    pollIntervalMs: number;
+    universeSize: number;
+    activityLookbackMinutes: number;
+    /** Wallets to RPC-scan per poll (rotation) */
+    batchSize: number;
+  };
+  minKolWallets: number;
+  minWalletQuality: number;
+  minMcUsd: number;
+  maxMcUsd: number;
+  offerTtlMinutes: number;
+  mintCooldownMinutes: number;
+  useTrackedWalletsAsBoost: boolean;
+  /** When true, qualifying scanner candidates become pending offers (still manual buy) */
+  autoOfferFromScanner: boolean;
+  defaults: {
+    sizeMode: 'sol' | 'usd';
+    solAmount: number;
+    usdAmount: number;
+    takeProfitPct: number;
+    stopLossPct: number;
+    trailingStopPct: number;
+    trailingActivationProfit: number;
+    useExitPresets: boolean;
+  };
+  notifyEmailOnOffer: boolean;
+  notifyEmailOnPlaced: boolean;
+}
+
 export interface BotConfig {
   mode: TradingMode;
   /** Overall aggression preset — drives recommended trade/filter/risk knobs */
@@ -1914,6 +1948,12 @@ export interface BotConfig {
     /** Alert when a full close finishes in profit */
     profitableCloseEnabled: boolean;
   };
+
+  /**
+   * Zion micro-bot — isolated KOL Token Scanner + manual trade offers.
+   * Disabled by default; does not alter copy trading or Market/Pump scanners.
+   */
+  zion: ZionConfig;
 
   pollIntervalMs: number;
   solMint: string;
@@ -2293,6 +2333,37 @@ export const config: BotConfig = {
     profitableCloseEnabled: process.env.NOTIFY_PROFITABLE_CLOSE !== '0',
   },
 
+  zion: {
+    enabled: false,
+    scanner: {
+      enabled: true,
+      pollIntervalMs: 60_000,
+      universeSize: 60,
+      activityLookbackMinutes: 45,
+      batchSize: 6,
+    },
+    minKolWallets: 2,
+    minWalletQuality: 50,
+    minMcUsd: 50_000,
+    maxMcUsd: 5_000_000,
+    offerTtlMinutes: 30,
+    mintCooldownMinutes: 120,
+    useTrackedWalletsAsBoost: true,
+    autoOfferFromScanner: true,
+    defaults: {
+      sizeMode: 'sol',
+      solAmount: 0.25,
+      usdAmount: 50,
+      takeProfitPct: 80,
+      stopLossPct: -25,
+      trailingStopPct: 18,
+      trailingActivationProfit: 35,
+      useExitPresets: true,
+    },
+    notifyEmailOnOffer: true,
+    notifyEmailOnPlaced: true,
+  },
+
   paper: {
     startingBalanceSol: 10,
     feeBps: 30,
@@ -2439,6 +2510,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     paper: { ...config.paper },
     notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
+    zion: cloneJson(config.zion) as unknown as PersistedBotSettings['zion'],
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
     walletDiscovery: {
@@ -2922,6 +2994,12 @@ function applySettingsSnapshot(
       config.marketScanner = deepMerge(
         config.marketScanner,
         saved.marketScanner as typeof config.marketScanner
+      );
+    }
+    if (saved.zion) {
+      config.zion = deepMerge(
+        config.zion,
+        saved.zion as unknown as typeof config.zion
       );
     }
     if (saved.mev) config.mev = deepMerge(config.mev, saved.mev);
@@ -4631,6 +4709,7 @@ export function getConfigSnapshot() {
     paper: { ...config.paper },
     notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
+    zion: cloneJson(config.zion as unknown as Record<string, unknown>),
     trading: {
       activeId: config.activeTradingWalletId,
       wallets: config.tradingWallets.map((w) => ({

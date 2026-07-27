@@ -190,7 +190,9 @@ export interface BuyOptions {
     | 'post_migration_scalp'
     | 'reversal_scalp'
     | 'post_run_dip';
-  /** Multi-profile assignment stamp */
+  /**
+   * Multi-profile assignment stamp
+   */
   tradeProfileId?: string;
   tradeProfileName?: string;
   tradeProfileIcon?: string;
@@ -212,11 +214,71 @@ export interface BuyOptions {
   /** Aggressive dead-market min-hold (minutes) from profile */
   profileDeadVolumeMinHoldMinutes?: number;
   profileAggressiveDeadMarket?: boolean;
-  /** wallet | scanner | migration | hybrid */
-  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
+  /** wallet | scanner | migration | hybrid | zion */
+  entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
+}
+
+/**
+ * Same 0–100 quality used by Open Positions Reason → More Info.
+ * Prefer trade-profile score; else estimate from conviction / confluence / risk / wallets.
+ */
+export function computeEntryQualityScore(meta?: BuyOptions | null): number | null {
+  if (!meta) return null;
+  if (meta.tradeProfileScore != null && Number.isFinite(Number(meta.tradeProfileScore))) {
+    return Math.round(
+      Math.max(0, Math.min(100, Number(meta.tradeProfileScore)))
+    );
+  }
+  let score = 35;
+  let used = false;
+  if (meta.convictionScore != null && Number.isFinite(Number(meta.convictionScore))) {
+    score += Math.min(30, Number(meta.convictionScore) * 0.3);
+    used = true;
+  }
+  if (
+    meta.scannerConfluence != null &&
+    Number.isFinite(Number(meta.scannerConfluence))
+  ) {
+    score += Math.min(20, Number(meta.scannerConfluence) * 0.2);
+    used = true;
+  }
+  if (
+    meta.antiRug?.riskScore != null &&
+    Number.isFinite(Number(meta.antiRug.riskScore))
+  ) {
+    score += Math.max(0, 15 - Number(meta.antiRug.riskScore) * 0.15);
+    used = true;
+  }
+  const wallets =
+    (meta.sourceNames && meta.sourceNames.length) ||
+    (meta.sourceWallets && meta.sourceWallets.length) ||
+    0;
+  if (wallets > 0) {
+    score += Math.min(10, wallets * 3);
+    used = true;
+  }
+  if (meta.tradeProfileReason || meta.entrySource || meta.scannerPlaybook) {
+    used = true;
+  }
+  if (!used) return null;
+  return Math.round(Math.max(0, Math.min(100, score)));
+}
+
+/** Hard floor matching Reason-column quality — skip buys at 0–4. */
+export const MIN_ENTRY_QUALITY_SCORE = 5;
+
+export function evaluateEntryQualityHardFloor(
+  meta?: BuyOptions | null
+): string | null {
+  const quality = computeEntryQualityScore(meta);
+  if (quality == null) return null;
+  if (quality < MIN_ENTRY_QUALITY_SCORE) {
+    return `Skipped — entry quality score too low (${quality} < ${MIN_ENTRY_QUALITY_SCORE})`;
+  }
+  return null;
 }
 
 /**
@@ -361,6 +423,15 @@ export async function executeBuy(
       `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${pumpFunGate}`
     );
     return { success: false, mode: config.mode, error: pumpFunGate };
+  }
+
+  // Hard floor: Reason-column quality 0–4 never open (matches More Info score).
+  const qualityGate = evaluateEntryQualityHardFloor(meta);
+  if (qualityGate) {
+    console.log(
+      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${qualityGate}`
+    );
+    return { success: false, mode: config.mode, error: qualityGate };
   }
 
   const slippageBps = meta?.slippageBps ?? config.paper.slippageBps;

@@ -11,7 +11,9 @@ import { logger } from './logger';
 export type NotificationKind =
   | 'lowEquity'
   | 'insufficientFunds'
-  | 'profitableClose';
+  | 'profitableClose'
+  | 'zionTradeOffer'
+  | 'zionTradePlaced';
 
 type CooldownMap = Partial<Record<NotificationKind, number>>;
 
@@ -117,6 +119,8 @@ function kindEnabled(kind: NotificationKind): boolean {
   if (kind === 'lowEquity') return n.lowEquityEnabled !== false;
   if (kind === 'insufficientFunds') return n.insufficientFundsEnabled !== false;
   if (kind === 'profitableClose') return n.profitableCloseEnabled !== false;
+  if (kind === 'zionTradeOffer') return config.zion?.notifyEmailOnOffer !== false;
+  if (kind === 'zionTradePlaced') return config.zion?.notifyEmailOnPlaced !== false;
   return false;
 }
 
@@ -374,6 +378,77 @@ export async function notifyProfitableClose(input: {
     .join('\n');
 
   await sendMail({ subject, text, kind: 'profitableClose' });
+}
+
+/** Zion pending trade offer — deep link opens dashboard approval modal. */
+export async function notifyZionTradeOffer(offer: {
+  id: string;
+  mint: string;
+  symbol: string;
+  name?: string;
+  score: number;
+  kolCount: number;
+  mcUsd?: number;
+  reasons?: string[];
+  kolWallets?: Array<{ name: string; address: string }>;
+}): Promise<void> {
+  const { dashboardBaseUrl } =
+    require('./zion') as typeof import('./zion');
+  const label = offer.symbol || offer.name || offer.mint.slice(0, 8);
+  const link = `${dashboardBaseUrl()}/dashboard?tab=zion&offer=${encodeURIComponent(offer.id)}`;
+  const kols = (offer.kolWallets || [])
+    .slice(0, 8)
+    .map((w) => `  - ${w.name} (${w.address.slice(0, 8)}…)`)
+    .join('\n');
+  const subject = `[Zion] Trade offer — ${label} (score ${offer.score})`;
+  const text = [
+    `Zion found a KOL-converging token. Approve manually in the dashboard.`,
+    '',
+    `Token: ${label}`,
+    `Mint: ${offer.mint}`,
+    offer.mcUsd != null ? `Market cap: $${Math.round(offer.mcUsd).toLocaleString()}` : null,
+    `KOL wallets: ${offer.kolCount}`,
+    offer.reasons?.length ? `Reasons: ${offer.reasons.join(' · ')}` : null,
+    kols ? `KOLs:\n${kols}` : null,
+    '',
+    `Open trade request: ${link}`,
+    `Time: ${new Date().toISOString()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  await sendMail({ subject, text, kind: 'zionTradeOffer' });
+}
+
+/** Zion trade placed confirmation. */
+export async function notifyZionTradePlaced(
+  offer: {
+    id: string;
+    mint: string;
+    symbol: string;
+    name?: string;
+    mcUsd?: number;
+  },
+  solAmount: number
+): Promise<void> {
+  const label = offer.symbol || offer.name || offer.mint.slice(0, 8);
+  const subject = `[Zion] Trade placed — ${label} (${solAmount.toFixed(4)} SOL)`;
+  const text = [
+    `Zion Place Trade executed.`,
+    '',
+    `Mode: ${config.mode}`,
+    `Token: ${label}`,
+    `Mint: ${offer.mint}`,
+    `Size: ${solAmount.toFixed(4)} SOL`,
+    offer.mcUsd != null ? `MC at offer: $${Math.round(offer.mcUsd).toLocaleString()}` : null,
+    `Offer id: ${offer.id}`,
+    '',
+    `Time: ${new Date().toISOString()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  await sendMail({ subject, text, kind: 'zionTradePlaced' });
 }
 
 /** Test email from dashboard/API. */
