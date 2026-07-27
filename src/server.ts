@@ -277,6 +277,16 @@ export function createServer(): express.Application {
       usesPaperAccounting() ? null : liveBalance
     );
 
+    let solUsd: number | null = null;
+    try {
+      const { getCachedSolUsdPrice } =
+        require('./marketData') as typeof import('./marketData');
+      const px = getCachedSolUsdPrice();
+      solUsd = Number.isFinite(px) && px > 0 ? px : null;
+    } catch {
+      solUsd = null;
+    }
+
     res.json({
       mode: config.mode,
       modeLabel:
@@ -295,6 +305,8 @@ export function createServer(): express.Application {
       balance: availableBalance,
       equity: portfolio.totalEquitySol,
       portfolio,
+      /** Cached SOL/USD for overview equity USD hints */
+      solUsd,
       winRate: paperTrader.getWinRatePct(),
       stats: paperStats,
       soak: paperTrader.getSoakMetrics(),

@@ -2529,6 +2529,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #94a3b8;
       margin-left: 0.3rem;
     }
+    .ov-usd {
+      font-size: 0.78em;
+      font-weight: 500;
+      color: #64748b !important;
+      margin-left: 0.28rem;
+      letter-spacing: 0;
+    }
+    .ov-equity-value .ov-usd {
+      font-size: 0.38em;
+      font-weight: 500;
+      color: #64748b !important;
+      margin-left: 0.35rem;
+      vertical-align: baseline;
+    }
     .ov-reset-wrap {
       display: flex;
       align-items: flex-end;
@@ -2588,7 +2602,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-weight: 700;
       color: #e2e8f0;
       font-variant-numeric: tabular-nums;
-      white-space: nowrap;
+      white-space: normal;
+      line-height: 1.25;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -10728,6 +10743,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const dig = abs >= 100 ? 2 : abs >= 10 ? 3 : 4;
         return n.toFixed(dig);
       };
+      const solUsdRate =
+        status.solUsd != null && Number(status.solUsd) > 0
+          ? Number(status.solUsd)
+          : null;
+      /** Muted USD in brackets — SOL stays primary. */
+      const fmtUsdBracket = (solAmt, opts) => {
+        const signed = opts && opts.signed;
+        if (solAmt == null || !Number.isFinite(solAmt) || !(solUsdRate > 0)) {
+          return '';
+        }
+        const usd = solAmt * solUsdRate;
+        const abs = Math.abs(usd);
+        let num;
+        if (abs >= 100) num = Math.round(abs).toLocaleString('en-US');
+        else if (abs >= 10) num = abs.toFixed(1);
+        else num = abs.toFixed(2);
+        let sign = '';
+        if (signed) {
+          if (usd > 0) sign = '+';
+          else if (usd < 0) sign = '-';
+        } else if (usd < 0) {
+          sign = '-';
+        }
+        return (
+          '<span class="ov-usd">(' + sign + '$' + num + ' USD)</span>'
+        );
+      };
       const colorPnL = (el, n) => {
         if (!el) return;
         if (n == null || !Number.isFinite(n)) { el.style.color = ''; return; }
@@ -10737,7 +10779,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const eqEl = document.getElementById('ov-equity');
       if (eqEl) {
         eqEl.innerHTML = (equitySol != null ? fmtSolCompact(equitySol) : '—') +
-          '<span class="ov-unit">SOL</span>';
+          '<span class="ov-unit">SOL</span>' +
+          fmtUsdBracket(equitySol);
         colorPnL(eqEl, equitySol != null && port.startingBalanceSol != null
           ? equitySol - Number(port.startingBalanceSol)
           : null);
@@ -10751,9 +10794,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
 
       const availEl = document.getElementById('ov-available');
-      if (availEl) availEl.textContent = availSol != null ? fmtSolCompact(availSol) + ' SOL' : '—';
+      if (availEl) {
+        availEl.innerHTML = availSol != null
+          ? (fmtSolCompact(availSol) + ' SOL' + fmtUsdBracket(availSol))
+          : '—';
+      }
       const posEl = document.getElementById('ov-positions-val');
-      if (posEl) posEl.textContent = posValSol != null ? fmtSolCompact(posValSol) + ' SOL' : '—';
+      if (posEl) {
+        posEl.innerHTML = posValSol != null
+          ? (fmtSolCompact(posValSol) + ' SOL' + fmtUsdBracket(posValSol))
+          : '—';
+      }
       if (document.getElementById('balance') && availSol != null) {
         document.getElementById('balance').textContent = fmtSolCompact(availSol);
       }
@@ -10763,9 +10814,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (_od) {
         const day = status.monitor && status.monitor.dailyPnlSol != null
           ? Number(status.monitor.dailyPnlSol) : null;
-        _od.textContent = day != null
-          ? ((day >= 0 ? '+' : '') + fmtSolCompact(day) + ' SOL')
-          : '—';
+        if (day != null) {
+          _od.innerHTML =
+            (day >= 0 ? '+' : '') +
+            fmtSolCompact(day) +
+            ' SOL' +
+            fmtUsdBracket(day, { signed: true });
+        } else {
+          _od.textContent = '—';
+        }
         colorPnL(_od, day);
       }
       const openCountEl = document.getElementById('open-count');
@@ -10942,14 +10999,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const openNUr = status.portfolio?.openCount ?? ur.openN;
         const markedUr = status.portfolio?.markedCount ?? ur.marked;
         if (openNUr === 0) {
-          urEl.textContent = '+0 SOL';
+          urEl.innerHTML = '+0 SOL' + fmtUsdBracket(0, { signed: true });
           urEl.style.color = 'var(--muted)';
         } else if (markedUr === 0 && !(status.portfolio && status.portfolio.unrealizedPnlSol != null)) {
           urEl.textContent = '—';
           urEl.style.color = 'var(--muted)';
         } else {
           const sign = pfUr > 0 ? '+' : '';
-          urEl.textContent = sign + Number(pfUr).toFixed(4) + ' SOL';
+          urEl.innerHTML =
+            sign +
+            Number(pfUr).toFixed(4) +
+            ' SOL' +
+            fmtUsdBracket(pfUr, { signed: true });
           urEl.style.color = pfUr > 0 ? 'var(--green)' : pfUr < 0 ? 'var(--red)' : 'var(--muted)';
         }
       }
@@ -11018,8 +11079,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? Number(status.portfolio.realizedPnlSol)
         : Number(s.netPnlSol ?? 0);
       const rSign = realized > 0 ? '+' : '';
-      pnlEl.textContent = rSign + realized.toFixed(4) + ' SOL';
-      pnlEl.style.color = realized >= 0 ? 'var(--green)' : 'var(--red)';
+      if (pnlEl) {
+        pnlEl.innerHTML =
+          rSign +
+          realized.toFixed(4) +
+          ' SOL' +
+          fmtUsdBracket(realized, { signed: true });
+        pnlEl.style.color = realized >= 0 ? 'var(--green)' : 'var(--red)';
+      }
       const retEl = document.getElementById('stat-return');
       const retPct = status.portfolio?.returnPct != null
         ? Number(status.portfolio.returnPct)
