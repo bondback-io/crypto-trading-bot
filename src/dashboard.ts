@@ -1815,29 +1815,56 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .zion-offer-stack {
       position: fixed;
-      right: 14px;
-      bottom: 14px;
-      z-index: 95;
+      right: max(10px, env(safe-area-inset-right, 0px));
+      bottom: max(10px, env(safe-area-inset-bottom, 0px));
+      left: auto;
+      top: auto;
+      z-index: 1200;
       display: flex;
-      flex-direction: column-reverse;
+      flex-direction: column;
+      justify-content: flex-end;
       align-items: stretch;
-      gap: 12px;
-      width: min(420px, calc(100vw - 24px));
-      max-height: calc(100vh - 28px);
-      overflow: visible;
+      gap: 10px;
+      width: min(420px, calc(100vw - 20px));
+      max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      max-height: calc(100vh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
       pointer-events: none;
+      padding: 2px 2px 4px;
+      scrollbar-gutter: stable;
+    }
+    .zion-offer-stack[data-count="1"] .zion-offer-card {
+      max-height: min(88dvh, 720px);
+    }
+    .zion-offer-stack[data-count="2"] .zion-offer-card {
+      max-height: min(46dvh, 420px);
+    }
+    .zion-offer-stack[data-count="3"] .zion-offer-card,
+    .zion-offer-stack[data-count="4"] .zion-offer-card,
+    .zion-offer-stack[data-count="5"] .zion-offer-card {
+      max-height: min(32dvh, 340px);
     }
     .zion-offer-card {
       pointer-events: auto;
       position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      box-sizing: border-box;
       background: linear-gradient(160deg, #0b1220 0%, #0f172a 45%, #111827 100%);
       border: 1px solid #2dd4bf66;
       border-radius: 14px;
-      padding: 14px 16px 12px;
+      padding: 12px 14px 10px;
       box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(94,234,212,.08);
       transform-origin: bottom right;
       animation: zion-card-in 0.38s cubic-bezier(.22,1,.36,1) both;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      max-height: min(88dvh, 720px);
     }
     .zion-offer-card.is-leaving {
       animation: zion-card-out 0.28s ease-in forwards;
@@ -1863,32 +1890,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .zion-offer-title {
       color: #f8fafc;
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       font-weight: 700;
       margin-top: 0.15rem;
       line-height: 1.25;
+      word-break: break-word;
     }
     .zion-offer-body {
-      margin: 0.65rem 0 0.75rem;
+      margin: 0.55rem 0 0.65rem;
       color: #cbd5e1;
-      font-size: 0.82rem;
-      line-height: 1.45;
+      font-size: 0.8rem;
+      line-height: 1.4;
     }
     .zion-offer-stats {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0.4rem;
-      margin-bottom: 0.55rem;
+      gap: 0.35rem;
+      margin-bottom: 0.5rem;
     }
     .zion-offer-stat {
       background: #02061799;
       border: 1px solid #1e293b;
       border-radius: 8px;
-      padding: 0.35rem 0.45rem;
+      padding: 0.3rem 0.4rem;
+      min-width: 0;
     }
     .zion-offer-stat .lbl {
       display: block;
-      font-size: 0.62rem;
+      font-size: 0.6rem;
       color: #64748b;
       text-transform: uppercase;
       letter-spacing: 0.04em;
@@ -1896,16 +1925,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .zion-offer-stat .val {
       color: #e2e8f0;
       font-weight: 650;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
+      overflow-wrap: anywhere;
     }
     .zion-countdown {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin: 0.35rem 0 0.55rem;
+      font-size: 0.72rem;
+      color: #94a3b8;
+    }
+    .zion-countdown-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 0.5rem;
-      margin: 0.35rem 0 0.65rem;
-      font-size: 0.72rem;
-      color: #94a3b8;
     }
     .zion-countdown-bar {
       flex: 1;
@@ -1913,6 +1948,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-radius: 999px;
       background: #1e293b;
       overflow: hidden;
+      min-width: 0;
     }
     .zion-countdown-bar > span {
       display: block;
@@ -1927,6 +1963,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       flex-wrap: wrap;
       gap: 0.4rem;
       align-items: center;
+    }
+    .zion-offer-actions .btn {
+      min-height: 2.35rem;
     }
     .zion-offer-actions .btn.is-expired,
     .zion-offer-actions .btn:disabled {
@@ -1945,6 +1984,46 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .zion-cand-card .mint-ca,
     .zion-offer-row .mint-ca {
       margin-top: 0.3rem;
+    }
+    .zion-offer-card .mint-ca {
+      flex-wrap: wrap;
+    }
+    .zion-offer-card .grid.grid-cols-2 {
+      gap: 0.45rem;
+    }
+    @media (max-width: 640px) {
+      .zion-offer-stack {
+        right: max(8px, env(safe-area-inset-right, 0px));
+        left: max(8px, env(safe-area-inset-left, 0px));
+        bottom: max(8px, env(safe-area-inset-bottom, 0px));
+        width: auto;
+        max-width: none;
+      }
+      .zion-offer-card {
+        padding: 11px 12px 10px;
+        border-radius: 12px;
+      }
+      .zion-offer-title {
+        font-size: 1rem;
+      }
+      .zion-offer-stats {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.3rem;
+      }
+      .zion-offer-stat .val {
+        font-size: 0.72rem;
+      }
+      .zion-offer-stack[data-count="1"] .zion-offer-card {
+        max-height: min(84dvh, 680px);
+      }
+      .zion-offer-stack[data-count="2"] .zion-offer-card {
+        max-height: min(42dvh, 380px);
+      }
+      .zion-offer-stack[data-count="3"] .zion-offer-card,
+      .zion-offer-stack[data-count="4"] .zion-offer-card,
+      .zion-offer-stack[data-count="5"] .zion-offer-card {
+        max-height: min(30dvh, 300px);
+      }
     }
     @keyframes zion-card-in {
       from { opacity: 0; transform: translateY(18px) scale(0.96); }
@@ -5246,7 +5325,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
-    <div id="zion-offer-stack" class="zion-offer-stack" aria-live="polite"></div>
+    <div id="zion-offer-stack" class="zion-offer-stack" aria-live="polite" data-count="0"></div>
 
     <!-- ========== TAB: Strategies ========== -->
     <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
@@ -15938,9 +16017,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         stack.id = 'zion-offer-stack';
         stack.className = 'zion-offer-stack';
         stack.setAttribute('aria-live', 'polite');
+        stack.setAttribute('data-count', '0');
+      }
+      // Keep on body so fixed stacking is never clipped by tab/panel overflow.
+      if (stack.parentElement !== document.body) {
         document.body.appendChild(stack);
       }
       return stack;
+    }
+
+    function layoutZionOfferStack(focusCard) {
+      const stack = ensureZionStack();
+      const cards = Array.prototype.slice.call(
+        stack.querySelectorAll('.zion-offer-card:not(.is-leaving)')
+      );
+      const n = cards.length;
+      stack.setAttribute('data-count', String(Math.min(5, Math.max(0, n))));
+      // Prefer newest (last) fully into view; stack itself scrolls if needed.
+      const target = focusCard && focusCard.parentNode === stack ? focusCard : cards[cards.length - 1];
+      if (target) {
+        try {
+          stack.scrollTop = stack.scrollHeight;
+          target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        } catch (_) {
+          stack.scrollTop = stack.scrollHeight;
+        }
+      }
     }
 
     function clearZionPopupTimer(id) {
@@ -15957,11 +16059,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const card = document.getElementById('zion-offer-card-' + id);
       if (!card) {
         if (_zionActiveOfferId === id) _zionActiveOfferId = null;
+        layoutZionOfferStack();
         return;
       }
       const finish = function () {
         if (card.parentNode) card.parentNode.removeChild(card);
         if (_zionActiveOfferId === id) _zionActiveOfferId = null;
+        layoutZionOfferStack();
       };
       if (opts.immediate) {
         finish();
@@ -15987,6 +16091,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function handleZionRefresh(data) {
       _zionCache = data;
+      // Feed UI only when Zion tab is open; popups always fire on any tab.
       const panel = document.querySelector('[data-tab-panel="zion"]');
       const onZion = panel && !panel.classList.contains('hidden');
       if (onZion) {
@@ -15997,6 +16102,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       } else {
         renderZionOpenTrades();
       }
+      ensureZionStack();
       const pending = ((data && data.offers) || []).filter(function (o) {
         return zionOfferDisplayStatus(o).key === 'active';
       });
@@ -16187,7 +16293,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (existing) {
         existing.classList.remove('is-leaving');
         applyZionOfferExpiryUi(existing, o);
-        existing.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        layoutZionOfferStack(existing);
         return;
       }
 
@@ -16227,10 +16333,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '">Close</button>' +
         '</div>' +
         '<div class="zion-countdown">' +
+        '<div class="zion-countdown-row">' +
         '<span data-zion-expire-label>Expires in —</span>' +
         '<div class="zion-countdown-bar"><span data-zion-expire-bar style="transform:scaleX(1)"></span></div>' +
+        '</div>' +
         (opts.auto
-          ? '<div class="mint text-xs mt-1" data-zion-autohide-label>Popup auto-hides in 30s (offer stays Active)</div>'
+          ? '<div class="mint text-xs" data-zion-autohide-label>Popup auto-hides in 30s (offer stays Active)</div>'
           : '') +
         '</div>' +
         '<div class="zion-offer-stats">' +
@@ -16307,6 +16415,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       stack.appendChild(card);
       applyZionOfferExpiryUi(card, o);
+      layoutZionOfferStack(card);
 
       const started = Date.now();
       const hideLabel = card.querySelector('[data-zion-autohide-label]');
@@ -16339,6 +16448,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       _zionPopupTimers.set(o.id, { interval: interval, timeout: timeout });
       tick();
 
+      // Manual open jumps to Zion; auto popups stay on the user's current tab.
       if (!opts.auto) {
         showTab('zion', document.querySelector('[data-tab="zion"]'));
       }
