@@ -95,10 +95,21 @@ export function expireStaleOffers(): number {
   ensureLoaded();
   const now = Date.now();
   let n = 0;
+  const minKol = Math.max(1, Number(config.zion?.minKolWallets) || 2);
   for (const o of offers) {
-    if (o.status === 'pending' && o.expiresAt <= now) {
+    if (o.status !== 'pending') continue;
+    if (o.expiresAt <= now) {
       o.status = 'expired';
       o.updatedAt = now;
+      n++;
+      continue;
+    }
+    // Drop pending offers that no longer meet the hard KOL floor (e.g. created
+    // when tracked boost was incorrectly allowed to satisfy minKolWallets).
+    if ((o.kolCount || 0) < minKol) {
+      o.status = 'expired';
+      o.updatedAt = now;
+      o.error = `Below min KOL wallets (${o.kolCount || 0} < ${minKol})`;
       n++;
     }
   }
@@ -189,9 +200,9 @@ export function maybeCreateOffer(
   const minKol = Math.max(1, Number(config.zion.minKolWallets) || 2);
   const kolCount = input.kolWallets?.length ?? 0;
   const tracked = Math.max(0, Number(input.trackedBoostCount) || 0);
-  // Tracked boost can contribute +1 toward the KOL threshold (secondary signal).
-  const effective = kolCount + (tracked > 0 && config.zion.useTrackedWalletsAsBoost !== false ? 1 : 0);
-  if (effective < minKol) {
+  // Min KOL wallets is a hard floor on real KOL wallets only.
+  // Tracked smart wallets are a secondary score boost — they never satisfy this gate.
+  if (kolCount < minKol) {
     return null;
   }
 

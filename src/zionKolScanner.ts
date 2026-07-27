@@ -386,23 +386,25 @@ function scoreAgg(agg: MintAgg): {
     (w) => (w.quality ?? 50) >= minQ || minQ <= 0
   );
   const tracked = agg.trackedBoost.size;
-  const boost =
-    tracked > 0 && zionCfg().useTrackedWalletsAsBoost !== false ? 1 : 0;
-  const effective = kolWallets.length + (boost && kolWallets.length < minKol ? 1 : 0);
-
-  if (effective < minKol) {
+  // Hard floor: real KOL wallets only. Tracked boost never fills this gap.
+  if (kolWallets.length < minKol) {
     return {
-      score: 0,
+      score: Math.min(40, kolWallets.length * 14),
       reasons,
       source: 'kol_scanner',
       ok: false,
-      skipReason: `Need ${minKol} KOLs (have ${kolWallets.length})`,
+      skipReason: `Need ${minKol} KOLs (have ${kolWallets.length}${
+        tracked > 0 ? `, tracked +${tracked} boost only` : ''
+      })`,
     };
   }
 
   let score = Math.min(40, kolWallets.length * 14);
   reasons.push(`${kolWallets.length} KOL wallet(s)`);
-  if (tracked > 0) {
+  if (
+    tracked > 0 &&
+    zionCfg().useTrackedWalletsAsBoost !== false
+  ) {
     score += Math.min(15, tracked * 8);
     reasons.push(`${tracked} tracked boost`);
   }
@@ -471,7 +473,10 @@ async function rebuildCandidates(): Promise<void> {
     }
 
     const ranked = scoreAgg(agg);
-    const kolWallets = [...agg.wallets.values()];
+    const minQ = Math.max(0, Number(zionCfg().minWalletQuality) || 0);
+    const kolWallets = [...agg.wallets.values()].filter(
+      (w) => (w.quality ?? 50) >= minQ || minQ <= 0
+    );
     const cand: ZionKolCandidate = {
       id: `zion-${agg.mint.slice(0, 12)}`,
       mint: agg.mint,

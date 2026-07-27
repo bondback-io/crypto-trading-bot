@@ -5193,7 +5193,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-auto-offer" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Tracked wallets as boost</span>
+          <span>Tracked wallets as boost <span class="tip" tabindex="0" data-tip="Score boost only. Does NOT count toward Min KOL wallets — you still need that many real KOL wallets before an offer is created."></span></span>
           <label class="switch"><input type="checkbox" id="zion-tracked-boost" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -5210,7 +5210,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-          <label class="ctl ctl-sm"><span>Min KOL wallets</span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Min KOL wallets <span class="tip" tabindex="0" data-tip="Hard floor: requires this many quality-passing KOL wallets. Tracked smart-wallet boost does not count toward this number."></span></span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="40" min="0" max="100" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min MC ($)</span><input type="number" id="zion-min-mc" value="50000" min="0" step="1000" /></label>
           <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="500000000" min="0" step="1000" /></label>
