@@ -342,7 +342,7 @@ export async function executeApprovedOffer(
     tradeProfileId: 'zion',
     tradeProfileName: 'Zion',
     tradeProfileIcon: '◈',
-    tradeProfileColor: '#f8fafc',
+    tradeProfileColor: '#f2ae66',
     tradeProfileScore:
       offer.score != null && Number.isFinite(offer.score)
         ? Math.round(Math.max(0, Math.min(100, offer.score)))

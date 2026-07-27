@@ -1691,12 +1691,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     td .trade-profile-badge {
       margin: 0;
     }
-    /* Zion — inverted near-white badge so it reads as its own profile colour */
+    /* Zion — apricot accent badge (aligned with Zion nav tab) */
     .trade-profile-badge.is-zion {
-      color: #0f172a !important;
-      border-color: #e2e8f0 !important;
-      background: #f8fafc !important;
-      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.35);
+      color: #f2ae66 !important;
+      border-color: rgba(242, 174, 102, 0.7) !important;
+      background: rgba(242, 174, 102, 0.14) !important;
+      box-shadow: none;
     }
     .zion-status-pill {
       display: inline-flex;
@@ -5887,7 +5887,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       steady_compounder: { name: 'Steady Compounder', icon: '◇', color: '#8ba3c7' },
       reversal_scalper: { name: 'Reversal Scalper', icon: '↺', color: '#ff6b3d' },
       smart_money_mirror: { name: 'Smart Money Mirror', icon: '⧉', color: '#fbbf24' },
-      zion: { name: 'Zion', icon: '◈', color: '#f8fafc' },
+      zion: { name: 'Zion', icon: '◈', color: '#f2ae66' },
       legacy: { name: 'Legacy', icon: '·', color: '#64748b' },
       skipped: { name: 'Skipped', icon: '⊘', color: '#64748b' },
     };
@@ -5927,15 +5927,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return PROFILE_LEGEND_IDS.map(function (id) {
         const v = PROFILE_VISUALS[id];
         if (!v) return '';
-        const isZion = id === 'zion';
-        const style = isZion
-          ? 'color:#0f172a;border-color:#e2e8f0;background:#f8fafc'
-          : 'color:' + v.color + ';border-color:' + v.color + '99;background:' + v.color + '1f';
-        const swatch = isZion ? '#0f172a' : v.color;
+        const style =
+          'color:' + v.color + ';border-color:' + v.color + '99;background:' + v.color + '1f';
         return (
           '<span class="profile-colour-legend-item" style="' + style + '" title="' +
           escHtml(v.name) + '">' +
-            '<span class="profile-colour-legend-swatch" style="background:' + swatch + '" aria-hidden="true"></span>' +
+            '<span class="profile-colour-legend-swatch" style="background:' + v.color + '" aria-hidden="true"></span>' +
             '<span class="profile-colour-legend-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
             '<span class="profile-colour-legend-name">' + escHtml(v.name) + '</span>' +
           '</span>'
@@ -8610,13 +8607,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         modulesLine;
       const compact = opts.compact === true;
       const isZion = v.id === 'zion';
-      const badgeStyle = isZion
-        ? ''
-        : 'color:' + v.color + ';border-color:' + v.color + ';background:#0f172a';
+      const badgeStyle =
+        'color:' + v.color + ';border-color:' + v.color + ';background:#0f172a';
       return (
         '<span class="trade-profile-badge' + (isZion ? ' is-zion' : '') +
         '" title="' + escHtml(title) + '"' +
-        (badgeStyle ? ' style="' + badgeStyle + '"' : '') + '>' +
+        ' style="' + badgeStyle + '">' +
         '<span class="tpb-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         '</span>'
