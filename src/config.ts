@@ -2347,7 +2347,7 @@ export const config: BotConfig = {
   },
 
   zion: {
-    enabled: false,
+    enabled: true,
     scanner: {
       enabled: true,
       pollIntervalMs: 60_000,
@@ -2439,6 +2439,8 @@ const TRADING_MODE_LIVE_SIM_DEFAULT_V2 = 'tradingMode_liveSimDefault_v2';
 const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
 /** One-shot: Smart Bot Profiles ON by default (micro-bots). */
 const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
+/** One-shot: Zion micro-bot ON by default (KOL scanner + offers). */
+const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -3383,6 +3385,35 @@ export function applyPersistedSettings(): boolean {
     persistUserSettings();
     console.log(
       '[settings] Applied smartBotDefaultOn_v1 — Smart Bot Profiles ON by default'
+    );
+  }
+
+  if (!settingsMigrations[ZION_DEFAULT_ON_V1]) {
+    if (!config.zion) {
+      // Should already exist from code defaults; keep defensive.
+      (config as { zion?: { enabled?: boolean; scanner?: { enabled?: boolean } } }).zion =
+        { enabled: true, scanner: { enabled: true } };
+    } else {
+      config.zion.enabled = true;
+      if (!config.zion.scanner) {
+        config.zion.scanner = {
+          enabled: true,
+          pollIntervalMs: 60_000,
+          universeSize: 60,
+          activityLookbackMinutes: 45,
+          batchSize: 6,
+        };
+      } else {
+        config.zion.scanner.enabled = true;
+      }
+      if (config.zion.autoOfferFromScanner == null) {
+        config.zion.autoOfferFromScanner = true;
+      }
+    }
+    settingsMigrations[ZION_DEFAULT_ON_V1] = true;
+    persistUserSettings();
+    console.log(
+      '[settings] Applied zionDefaultOn_v1 — Zion + KOL scanner ON by default'
     );
   }
 

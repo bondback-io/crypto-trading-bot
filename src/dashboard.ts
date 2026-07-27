@@ -5042,7 +5042,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </p>
         <div class="toggle-row">
           <span>Enable Zion</span>
-          <label class="switch"><input type="checkbox" id="zion-enabled" onchange="saveZionConfig()" /><span class="slider"></span></label>
+          <label class="switch"><input type="checkbox" id="zion-enabled" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>KOL Token Scanner</span>
