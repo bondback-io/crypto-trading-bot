@@ -1339,6 +1339,25 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       line-height: 1.35;
     }
     #pos-more-info-float.is-open { display: block; }
+    #pos-more-info-float.is-dual {
+      max-width: min(44rem, calc(100vw - 1rem));
+    }
+    #pos-more-info-float .pmi-dual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      align-items: start;
+    }
+    #pos-more-info-float .pmi-col {
+      min-width: 0;
+    }
+    #pos-more-info-float .pmi-col-open {
+      padding-right: 0.65rem;
+      border-right: 1px solid rgba(148, 163, 184, 0.22);
+    }
+    #pos-more-info-float .pmi-col-exit .pmi-title {
+      color: #fda4af;
+    }
     #pos-more-info-float .pmi-title {
       font-size: 0.7rem;
       font-weight: 700;
@@ -1381,6 +1400,50 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     #pos-more-info-float .pmi-empty {
       color: #94a3b8;
       font-style: italic;
+    }
+    .card-closed-trades .pos-more-info,
+    .card-closed-trades .closed-more-info {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15rem;
+      cursor: pointer;
+      user-select: none;
+      max-width: 11rem;
+    }
+    .card-closed-trades .closed-reason-main {
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      line-height: 1.25;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      flex-wrap: wrap;
+    }
+    .card-closed-trades .pos-more-info-label {
+      color: #38bdf8;
+      font-size: 0.68rem;
+      font-weight: 650;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 2px;
+      white-space: nowrap;
+    }
+    .card-closed-trades .pos-more-info-label.is-empty {
+      color: #64748b;
+      font-weight: 500;
+    }
+    @media (max-width: 640px) {
+      #pos-more-info-float .pmi-dual {
+        grid-template-columns: 1fr;
+      }
+      #pos-more-info-float .pmi-col-open {
+        padding-right: 0;
+        padding-bottom: 0.55rem;
+        border-right: none;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+        margin-bottom: 0.35rem;
+      }
     }
     .card-open-positions .open-profile-filter,
     .card-closed-trades .closed-profile-filter,
@@ -8431,7 +8494,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const reason =
         opts.reasonOverride != null
           ? opts.reasonOverride
-          : (p.reason || '—');
+          : fmtClosedReasonCell(p);
       const pnlSol = Number(p.pnlSol || 0);
       const pnlPct = Number(p.pnlPct || 0);
       const solUsd = p.solUsd != null ? Number(p.solUsd) : NaN;
@@ -8635,7 +8698,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         if (!hasKids) {
           return renderClosedTradeRow(p, {
-            reasonOverride: fmtExitStyleHtml(p.reason),
+            reasonOverride: fmtClosedReasonCell(p, {
+              entryPos: p,
+              exitPos: p,
+            }),
             closedHtml:
               (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
               (holdMs != null
@@ -8655,10 +8721,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<span class="trade-group-chevron" aria-hidden="true">▶</span>' +
           '<span class="trade-group-expand-hint">' + (isExpanded ? 'Hide' : 'Details') + '</span>' +
           '</button>';
-        const reasonOverride = g.final
-          ? (partialN + ' partial' + (partialN === 1 ? '' : 's') +
-            ' + ' + fmtExitStyleHtml(g.final.reason))
-          : fmtExitStyleHtml(p.reason);
+        const finalReason = (g.final && g.final.reason) || p.reason;
+        const reasonOverride = fmtClosedReasonCell(p, {
+          entryPos: p,
+          exitPos: g.final || p,
+          partials: g.partials,
+          labelHtml:
+            partialN +
+            ' partial' +
+            (partialN === 1 ? '' : 's') +
+            ' + ' +
+            fmtExitStyleHtml(finalReason),
+        });
         const parentRow = renderClosedTradeRow(p, {
           rowClass: 'trade-group-parent' + (isExpanded ? ' is-expanded' : ''),
           toggleHtml,
@@ -8666,7 +8740,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           reasonOverride,
           exitLabel:
             '<span class="trade-exit-label is-final">' +
-            exitStyleIconHtml(classifyExitStyle((g.final && g.final.reason) || p.reason).key) +
+            exitStyleIconHtml(classifyExitStyle(finalReason).key) +
             'Full trade</span><br/>',
           pnlHtml:
             '<strong style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
@@ -8693,10 +8767,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             hidden: !isExpanded,
             profileSource: p,
             exitLabel: labelClosedExit(c, partialIdx, g.initialCost) + '<br/>',
-            reasonOverride: isFinal
-              ? fmtExitStyleHtml(c.reason)
-              : (exitStyleIconHtml('partial') +
-                escHtml(String(c.reason || '').replace(/^partial:\\s*/i, '') || '—')),
+            reasonOverride: fmtClosedReasonCell(c, {
+              entryPos: p,
+              exitPos: c,
+              isPartialSlice: !isFinal,
+              labelHtml: isFinal
+                ? fmtExitStyleHtml(c.reason)
+                : exitStyleIconHtml('partial') +
+                  escHtml(
+                    String(c.reason || '').replace(/^partial:\\s*/i, '') || '—'
+                  ),
+            }),
             closedHtml:
               (c.closedAt ? fmtTimeAgoCell(c.closedAt) : '—') +
               (cHold != null
@@ -9167,11 +9248,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       };
     }
 
-    function renderOpenReasonPanelHtml(detail) {
+    function renderOpenReasonPanelHtml(detail, opts) {
+      opts = opts || {};
+      const title = opts.title || 'Entry reason';
       if (!detail || !detail.hasInfo) {
-        return '<div class="pmi-empty">No info available</div>';
+        return (
+          '<div class="pmi-title">' +
+          escHtml(title) +
+          '</div><div class="pmi-empty">No info available</div>'
+        );
       }
-      let html = '<div class="pmi-title">Entry reason</div>';
+      let html = '<div class="pmi-title">' + escHtml(title) + '</div>';
       if (detail.quality != null) {
         const q = detail.quality;
         const cls = q >= 70 ? '' : q >= 45 ? ' is-mid' : ' is-low';
@@ -9196,6 +9283,264 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         })
         .join('');
       return html;
+    }
+
+    function explainExitReason(rawReason, style) {
+      const r = String(rawReason || '').trim();
+      const low = r.toLowerCase();
+      const key = (style && style.key) || 'other';
+      if (key === 'manual' || /manual\\s*force\\s*sell|force\\s*sell/i.test(r)) {
+        return 'You manually forced a sell from the dashboard.';
+      }
+      if (key === 'trail' || /trailing\\s*stop|trail\\s*exit|bag exit/i.test(r)) {
+        return 'Price pulled back from the peak enough to hit the trailing stop.';
+      }
+      if (key === 'sl' || /hard\\s*stop|stop-?loss|stop loss/i.test(r)) {
+        return 'Price hit the hard stop-loss level frozen on this position.';
+      }
+      if (/max\\s*profit/i.test(r)) {
+        return 'Hit the max-profit ceiling and fully exited.';
+      }
+      if (key === 'tp' || (/take-?profit|full\\s*tp/i.test(low) && !/partial/i.test(low))) {
+        return 'Reached the take-profit target and closed the remaining size.';
+      }
+      if (key === 'timer' || /timer|time\\s*exit|deadline|scalp.*time|hold\\s*limit/i.test(r)) {
+        return 'Hold-time / scalp timer expired — timed exit fired.';
+      }
+      if (/dead\\s*market|dead.?vol|inactive\\s*market|volume\\s*dead/i.test(r)) {
+        return 'Volume / activity dried up (dead-market exit) after the min-hold window.';
+      }
+      if (/migrat/i.test(r)) {
+        return 'Exit tied to a migration / graduation event rule.';
+      }
+      if (/momentum|signal\\s*fail|invalidate|post.?run.?dip/i.test(r)) {
+        return 'Entry thesis invalidated (momentum fade / signal fail) — exited early.';
+      }
+      if (/bag\\s*to|bag\\s*trim/i.test(r)) {
+        return 'Bag trim / residual size reduced after prior profits.';
+      }
+      if (/recover|initial recovered/i.test(r)) {
+        return 'Initial cost recovered — banked a recovery / breakeven-style scale-out.';
+      }
+      if (/partial\\s*sell|partial\\s*tp|tier\\s*\\d/i.test(r) || key === 'partial') {
+        return 'Partial take-profit / scale-out — only a slice of the position was sold.';
+      }
+      if (/profile\\s*early|adaptive/i.test(r)) {
+        return 'Profile adaptive exit policy closed (or trimmed) this trade.';
+      }
+      if (r) {
+        return 'Closed by the exit engine using the raw reason logged below.';
+      }
+      return 'Exit reason was not recorded on this row.';
+    }
+
+    function buildClosedExitReasonDetail(p, opts) {
+      opts = opts || {};
+      const lines = [];
+      if (!p) {
+        return { hasInfo: false, lines: [] };
+      }
+      const raw = String(p.reason || '').trim();
+      const clean = raw.replace(/^partial:\\s*/i, '').trim();
+      const style = classifyExitStyle(raw);
+      lines.push({ label: 'Exit type', text: style.label });
+      if (opts.isPartialSlice) {
+        lines.push({
+          label: 'Slice',
+          text: 'Partial take-profit / scale-out leg (not the final close)',
+        });
+      }
+      if (clean) {
+        lines.push({ label: 'Logged reason', text: clean });
+      }
+      const why = explainExitReason(clean, style);
+      if (why) lines.push({ label: 'Why', text: why });
+
+      const pnlSol = Number(p.pnlSol);
+      const pnlPct = Number(p.pnlPct);
+      if (Number.isFinite(pnlSol) || Number.isFinite(pnlPct)) {
+        let pnlText = '';
+        if (Number.isFinite(pnlSol)) {
+          pnlText += (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL';
+        }
+        if (Number.isFinite(pnlPct)) {
+          pnlText +=
+            (pnlText ? ' · ' : '') +
+            (pnlPct >= 0 ? '+' : '') +
+            pnlPct.toFixed(1) +
+            '%';
+        }
+        lines.push({ label: 'Result', text: pnlText || '—' });
+      }
+
+      if (p.exitMarketCapUsd != null && Number(p.exitMarketCapUsd) > 0) {
+        let mcText = 'Exited at ' + fmtUsdShort(p.exitMarketCapUsd) + ' MC';
+        if (p.entryMarketCapUsd != null && Number(p.entryMarketCapUsd) > 0) {
+          const entry = Number(p.entryMarketCapUsd);
+          const exit = Number(p.exitMarketCapUsd);
+          const chg = ((exit - entry) / entry) * 100;
+          if (Number.isFinite(chg)) {
+            mcText +=
+              ' (vs buy ' +
+              fmtUsdShort(entry) +
+              ' · ' +
+              (chg >= 0 ? '+' : '') +
+              chg.toFixed(0) +
+              '%)';
+          }
+        }
+        lines.push({ label: 'Exit MC', text: mcText });
+      }
+
+      const openedAt = Number(p.openedAt || 0);
+      const closedAt = Number(p.closedAt || 0);
+      if (openedAt > 0 && closedAt > openedAt) {
+        lines.push({
+          label: 'Hold time',
+          text: fmtHold(closedAt - openedAt),
+        });
+      }
+
+      const rules = [];
+      if (p.takeProfitPct != null && Number.isFinite(Number(p.takeProfitPct))) {
+        rules.push('TP +' + Number(p.takeProfitPct).toFixed(0) + '%');
+      }
+      if (p.stopLossPct != null && Number.isFinite(Number(p.stopLossPct))) {
+        rules.push('SL ' + Number(p.stopLossPct).toFixed(0) + '%');
+      }
+      if (
+        p.trailingStopPct != null &&
+        Number.isFinite(Number(p.trailingStopPct))
+      ) {
+        rules.push('trail ' + Number(p.trailingStopPct).toFixed(0) + '%');
+      }
+      if (
+        p.trailingActivationProfit != null &&
+        Number.isFinite(Number(p.trailingActivationProfit))
+      ) {
+        rules.push(
+          'trail arm @ +' + Number(p.trailingActivationProfit).toFixed(0) + '%'
+        );
+      }
+      if (p.trailingActive === true) {
+        rules.push('trail was armed');
+      }
+      if (rules.length) {
+        lines.push({ label: 'Exit rules', text: rules.join(' · ') });
+      }
+
+      if (p.shortTermStrategyId || p.scalpMode) {
+        lines.push({
+          label: 'Scalp',
+          text: p.shortTermStrategyId
+            ? String(p.shortTermStrategyId).replace(/_/g, ' ')
+            : 'Short-term / scalp mode',
+        });
+      }
+
+      const partials = opts.partials || opts.groupPartials || [];
+      if (partials.length && !opts.isPartialSlice) {
+        const bits = partials.slice(0, 4).map(function (s, i) {
+          const st = classifyExitStyle(s && s.reason);
+          const pct =
+            s && s.pnlPct != null && Number.isFinite(Number(s.pnlPct))
+              ? ' ' +
+                (Number(s.pnlPct) >= 0 ? '+' : '') +
+                Number(s.pnlPct).toFixed(0) +
+                '%'
+              : '';
+          return '#' + (i + 1) + ' ' + st.label + pct;
+        });
+        lines.push({
+          label: 'Earlier partials',
+          text:
+            bits.join(' · ') +
+            (partials.length > 4 ? ' · +' + (partials.length - 4) + ' more' : ''),
+        });
+      }
+
+      return {
+        hasInfo: lines.length > 0,
+        lines: lines,
+        styleKey: style.key,
+        styleLabel: style.label,
+      };
+    }
+
+    function renderExitReasonPanelHtml(detail) {
+      if (!detail || !detail.hasInfo) {
+        return (
+          '<div class="pmi-title pmi-title-exit">Exit</div>' +
+          '<div class="pmi-empty">No exit info available</div>'
+        );
+      }
+      let html = '<div class="pmi-title pmi-title-exit">Exit</div>';
+      html += detail.lines
+        .map(function (line) {
+          return (
+            '<div class="pmi-line"><strong>' +
+            escHtml(line.label) +
+            ':</strong> ' +
+            escHtml(line.text) +
+            '</div>'
+          );
+        })
+        .join('');
+      return html;
+    }
+
+    function renderDualReasonPanelHtml(payload) {
+      return (
+        '<div class="pmi-dual">' +
+        '<div class="pmi-col pmi-col-open">' +
+        renderOpenReasonPanelHtml(payload && payload.open, { title: 'Open' }) +
+        '</div>' +
+        '<div class="pmi-col pmi-col-exit">' +
+        renderExitReasonPanelHtml(payload && payload.exit) +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    function fmtClosedReasonCell(p, opts) {
+      opts = opts || {};
+      const entryPos = opts.entryPos || p;
+      const exitPos = opts.exitPos || p;
+      const openDetail = buildOpenEntryReasonDetail(entryPos);
+      const exitDetail = buildClosedExitReasonDetail(exitPos, {
+        partials: opts.partials,
+        groupPartials: opts.groupPartials,
+        isPartialSlice: opts.isPartialSlice === true,
+      });
+      const hasInfo = !!(openDetail && openDetail.hasInfo) || !!(exitDetail && exitDetail.hasInfo);
+      const labelHtml =
+        opts.labelHtml != null
+          ? opts.labelHtml
+          : fmtExitStyleHtml(exitPos && exitPos.reason);
+      const payload = encodeURIComponent(
+        JSON.stringify({
+          dual: true,
+          open: openDetail,
+          exit: exitDetail,
+        })
+      );
+      return (
+        '<span class="pos-more-info closed-more-info" tabindex="0" role="button" ' +
+        'aria-label="Open vs exit reason details" data-pos-more="' +
+        escAttr(payload) +
+        '" ' +
+        'onmouseenter="showPosMoreInfo(this,event)" ' +
+        'onfocus="showPosMoreInfo(this,event)" ' +
+        'onclick="togglePosMoreInfo(this,event)" ' +
+        'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();togglePosMoreInfo(this,event);}">' +
+        '<span class="closed-reason-main">' +
+        labelHtml +
+        '</span>' +
+        '<span class="pos-more-info-label' +
+        (hasInfo ? '' : ' is-empty') +
+        '">More Info</span>' +
+        '</span>'
+      );
     }
 
     function fmtOpenReasonCell(p) {
@@ -9260,7 +9605,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         detail = { hasInfo: false };
       }
       const floatEl = ensurePosMoreInfoFloat();
-      floatEl.innerHTML = renderOpenReasonPanelHtml(detail);
+      if (detail && detail.dual) {
+        floatEl.classList.add('is-dual');
+        floatEl.innerHTML = renderDualReasonPanelHtml(detail);
+      } else {
+        floatEl.classList.remove('is-dual');
+        floatEl.innerHTML = renderOpenReasonPanelHtml(detail);
+      }
       placePosMoreInfoFloat(anchor, floatEl);
       window._posMoreInfoAnchor = anchor;
     }
@@ -9270,6 +9621,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!floatEl) return;
       if (!force && floatEl.dataset.pinned === '1') return;
       floatEl.classList.remove('is-open');
+      floatEl.classList.remove('is-dual');
       floatEl.setAttribute('aria-hidden', 'true');
       floatEl.dataset.pinned = '0';
       window._posMoreInfoAnchor = null;
