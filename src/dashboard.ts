@@ -8840,7 +8840,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         'onmouseenter="showPosMoreInfo(this,event)" ' +
         'onfocus="showPosMoreInfo(this,event)" ' +
         'onclick="togglePosMoreInfo(this,event)" ' +
-        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();togglePosMoreInfo(this,event);}">' +
+        'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();togglePosMoreInfo(this,event);}">' +
         '<span class="pos-more-info-label' +
         labelCls +
         '">More Info</span>' +
