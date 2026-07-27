@@ -3519,24 +3519,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       scroll-snap-align: start;
       min-height: 2.5rem;
     }
-    /* Zion — always-visible orange accent in the main nav */
+    /* Zion — apricot orange (#f2ae66) matching Cursor "Build Locally" accent */
     .nav-tabs .btn.nav-tab-zion {
-      background: rgba(234, 88, 12, 0.16);
-      color: #fdba74;
-      border: 1px solid rgba(249, 115, 22, 0.42);
+      background: rgba(242, 174, 102, 0.18);
+      color: #f2ae66;
+      border: 1px solid rgba(242, 174, 102, 0.45);
       font-weight: 700;
       letter-spacing: 0.02em;
     }
     .nav-tabs .btn.nav-tab-zion:hover {
-      background: rgba(234, 88, 12, 0.28);
-      color: #ffedd5;
-      border-color: rgba(251, 146, 60, 0.7);
+      background: rgba(242, 174, 102, 0.32);
+      color: #f8d2a8;
+      border-color: rgba(242, 174, 102, 0.75);
     }
     .nav-tabs .btn.nav-tab-zion-active {
-      background: linear-gradient(180deg, #f97316 0%, #ea580c 100%);
-      color: #fff7ed;
-      border-color: #fb923c;
-      box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.35), 0 8px 18px rgba(234, 88, 12, 0.28);
+      background: #f2ae66;
+      color: #1a1208;
+      border-color: #f2ae66;
+      box-shadow: 0 0 0 1px rgba(242, 174, 102, 0.35), 0 8px 18px rgba(242, 174, 102, 0.22);
     }
     .nav-tabs .btn.nav-tab-zion .btn-label-full::before,
     .nav-tabs .btn.nav-tab-zion .btn-label-short::before {
@@ -3550,15 +3550,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     .zion-panel .zion-hero-card {
-      border: 1px solid rgba(249, 115, 22, 0.28);
-      background: linear-gradient(160deg, rgba(67, 20, 7, 0.35) 0%, #0f172a 42%, #111827 100%);
-      box-shadow: inset 0 1px 0 rgba(251, 146, 60, 0.12);
+      border: 1px solid rgba(242, 174, 102, 0.3);
+      background: linear-gradient(160deg, rgba(80, 48, 18, 0.4) 0%, #0f172a 42%, #111827 100%);
+      box-shadow: inset 0 1px 0 rgba(242, 174, 102, 0.14);
     }
     .zion-panel .zion-hero-card .section-title {
-      color: #fdba74;
+      color: #f2ae66;
     }
     .zion-panel .zion-accent {
-      color: #fb923c;
+      color: #f2ae66;
     }
     .overflow-x-auto {
       -webkit-overflow-scrolling: touch;
