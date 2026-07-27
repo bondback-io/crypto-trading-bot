@@ -42,9 +42,11 @@
     "bs58": "^6.0.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "nodemailer": "^9.0.3",
     "typescript": "^5.7.3"
   },
   "devDependencies": {
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.19.2"
   }
 }

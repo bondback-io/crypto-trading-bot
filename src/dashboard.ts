@@ -5111,6 +5111,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
+        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts to your inbox when equity is low, a buy is blocked for insufficient available SOL, or a trade closes in profit. SMTP credentials stay in .env (SMTP_HOST / SMTP_USER / SMTP_PASS). Without SMTP, events still appear in Logs."></span></div>
+        <div class="mint text-xs mb-3">Default recipient is set in config. Configure SMTP in .env to deliver mail.</div>
+        <div class="grid grid-2 gap-3">
+          <label class="ctl"><span>Enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
+          <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="isaacpascua87@gmail.com" placeholder="you@example.com" /></label>
+          <label class="ctl"><span>Low equity threshold (SOL)</span><input type="number" id="notify-low-equity-sol" min="0.1" step="0.1" value="1" /></label>
+          <label class="ctl"><span>Low equity alert</span><input type="checkbox" id="notify-low-equity" checked /></label>
+          <label class="ctl"><span>Insufficient funds alert</span><input type="checkbox" id="notify-insufficient" checked /></label>
+          <label class="ctl"><span>Profitable close alert</span><input type="checkbox" id="notify-profit-close" checked /></label>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-primary" onclick="saveNotificationsConfig()" title="Save notification preferences">Save Notifications</button>
+          <button type="button" class="btn btn-secondary" onclick="testNotificationEmail()" title="Send a test email via SMTP">Send test email</button>
+          <span class="mint text-xs" id="notify-status"></span>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="section-title">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, and backtest history are saved as JSON under the data directory (DATA_DIR). Survives code updates when a disk is mounted."></span></div>
         <div class="mint text-sm mb-3" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
         <div class="flex flex-wrap gap-2 items-center">
@@ -11209,6 +11227,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (btStart && cfg.paper && cfg.paper.startingBalanceSol != null) {
           btStart.value = cfg.paper.startingBalanceSol;
         }
+        if (cfg.notifications) {
+          const n = cfg.notifications;
+          const setChk = (id, v) => {
+            const el = document.getElementById(id);
+            if (el) el.checked = v === true;
+          };
+          const setVal = (id, v) => {
+            const el = document.getElementById(id);
+            if (el && v != null) el.value = v;
+          };
+          setChk('notify-enabled', n.enabled !== false);
+          setVal('notify-email', n.email || 'isaacpascua87@gmail.com');
+          setVal('notify-low-equity-sol', n.lowEquitySol != null ? n.lowEquitySol : 1);
+          setChk('notify-low-equity', n.lowEquityEnabled !== false);
+          setChk('notify-insufficient', n.insufficientFundsEnabled !== false);
+          setChk('notify-profit-close', n.profitableCloseEnabled !== false);
+        }
         syncBtMaxTradesFromRisk(cfg);
         if (btBanner) {
           const rl = (cfg.riskLevel || 'on').toUpperCase();
@@ -14447,6 +14482,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!silent) alert('MEV settings saved');
       refresh();
     }
+
+    async function saveNotificationsConfig() {
+      const status = document.getElementById('notify-status');
+      try {
+        if (status) status.textContent = 'Saving…';
+        await fetchJSON('/api/config/notifications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: !!(document.getElementById('notify-enabled') || {}).checked,
+            email: ((document.getElementById('notify-email') || {}).value || '').trim(),
+            lowEquitySol: Number((document.getElementById('notify-low-equity-sol') || {}).value) || 1,
+            lowEquityEnabled: !!(document.getElementById('notify-low-equity') || {}).checked,
+            insufficientFundsEnabled: !!(document.getElementById('notify-insufficient') || {}).checked,
+            profitableCloseEnabled: !!(document.getElementById('notify-profit-close') || {}).checked,
+          }),
+        });
+        if (status) status.textContent = 'Saved';
+        window._cfgLoaded = false;
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Save failed: ' + (err.message || String(err)));
+      }
+    }
+    window.saveNotificationsConfig = saveNotificationsConfig;
+
+    async function testNotificationEmail() {
+      const status = document.getElementById('notify-status');
+      try {
+        if (status) status.textContent = 'Sending test…';
+        await saveNotificationsConfig();
+        const data = await fetchJSON('/api/notifications/test', { method: 'POST' });
+        if (data && data.ok === false) throw new Error(data.error || 'Test failed');
+        if (status) status.textContent = 'Test email sent';
+        alert('Test email sent (check inbox / spam)');
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Test email failed: ' + (err.message || String(err)) + '\\n\\nSet SMTP_HOST, SMTP_USER, SMTP_PASS in .env');
+      }
+    }
+    window.testNotificationEmail = testNotificationEmail;
 
     async function saveStrategySettings(key) {
       try {

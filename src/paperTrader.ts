@@ -1074,7 +1074,51 @@ export class PaperTrader {
     }
 
     if (spendSol > this.balanceSol) {
-      this.log('error', `Insufficient balance: need ${spendSol} SOL, have ${this.balanceSol.toFixed(4)}`);
+      const port = this.getPortfolioSummary();
+      const reason =
+        `Insufficient available funds: need ${spendSol.toFixed(4)} SOL, have ${this.balanceSol.toFixed(4)} SOL ` +
+        `(equity ${port.totalEquitySol.toFixed(4)}, ${port.openCount} open)`;
+      this.log('error', reason);
+      try {
+        const { logger } = require('./logger') as typeof import('./logger');
+        logger.warn('Trade', reason, {
+          neededSol: spendSol,
+          availableSol: this.balanceSol,
+          totalEquitySol: port.totalEquitySol,
+          positionsCostSol: port.positionsCostSol,
+          openCount: port.openCount,
+          mint,
+          symbol: tokenSymbol,
+          mode: config.mode,
+        });
+        const {
+          notifyInsufficientFunds,
+          notifyLowEquity,
+        } = require('./emailNotifications') as typeof import('./emailNotifications');
+        void notifyInsufficientFunds({
+          neededSol: spendSol,
+          availableSol: this.balanceSol,
+          totalEquitySol: port.totalEquitySol,
+          positionsCostSol: port.positionsCostSol,
+          positionsValueSol: port.positionsValueSol,
+          openCount: port.openCount,
+          mint,
+          symbol: tokenSymbol,
+          mode: config.mode,
+        });
+        const threshold = Number(config.notifications?.lowEquitySol) || 1;
+        if (port.totalEquitySol < threshold) {
+          void notifyLowEquity({
+            totalEquitySol: port.totalEquitySol,
+            availableSol: this.balanceSol,
+            positionsSol: port.positionsValueSol,
+            openCount: port.openCount,
+            mode: config.mode,
+          });
+        }
+      } catch {
+        /* optional notify */
+      }
       return null;
     }
 
@@ -1444,6 +1488,51 @@ export class PaperTrader {
         pnlSol: totalPnl,
       }
     );
+
+    if (totalPnl > 0) {
+      try {
+        const {
+          notifyProfitableClose,
+        } = require('./emailNotifications') as typeof import('./emailNotifications');
+        const day = this.getDailyWinStats();
+        const holdSeconds =
+          position.closedAt && position.openedAt
+            ? (position.closedAt - position.openedAt) / 1000
+            : undefined;
+        const breakdownParts: string[] = [];
+        if (position.tradeProfileName) {
+          breakdownParts.push(`Profile: ${position.tradeProfileName}`);
+        }
+        if (position.shortTermStrategyId) {
+          breakdownParts.push(`Scalp engine: ${position.shortTermStrategyId}`);
+        }
+        if (Math.abs(totalPnl - pnlSol) > 1e-9) {
+          breakdownParts.push(
+            `Final slice ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL; total realized ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)} SOL`
+          );
+        }
+        void notifyProfitableClose({
+          symbol: position.symbol,
+          name: position.name,
+          mint: position.mint,
+          pnlSol: totalPnl,
+          pnlPct: totalPct,
+          costSol: closedCostSol,
+          reason,
+          holdSeconds,
+          mode: config.mode,
+          breakdown:
+            breakdownParts.length > 0 ? breakdownParts.join('\n') : undefined,
+          dailyWinRatePct: day.winRatePct,
+          dailyPnlSol: day.pnlSol,
+          dailyWins: day.wins,
+          dailyLosses: day.losses,
+          allTimeWinRatePct: this.getWinRatePct(),
+        });
+      } catch {
+        /* optional notify */
+      }
+    }
 
     registerExitForReentry({
       mint: position.mint,
@@ -2151,6 +2240,12 @@ export class PaperTrader {
     if (!config.strategy.enableAutoSell) return;
 
     this.evaluateAndMaybeHaltRisk();
+    try {
+      const { maybeWarnLowEquity } = require('./fundGate') as typeof import('./fundGate');
+      maybeWarnLowEquity();
+    } catch {
+      /* optional */
+    }
 
     for (const position of [...this.positions.values()]) {
       const currentPrice = this.priceCache.get(position.mint);
@@ -2826,6 +2921,30 @@ export class PaperTrader {
     return chronologicalRealizedDeltas(this.closedPositions)
       .filter((d) => d.time >= startMs)
       .reduce((sum, d) => sum + d.pnlSol, 0);
+  }
+
+  /** Win/loss + PnL for closes that finished today (UTC). */
+  getDailyWinStats(): {
+    wins: number;
+    losses: number;
+    winRatePct: number;
+    pnlSol: number;
+  } {
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const startMs = startOfDay.getTime();
+    const reps = representativeClosedTrades(this.closedPositions).filter(
+      (p) => (p.closedAt ?? 0) >= startMs
+    );
+    const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
+    const losses = reps.filter((p) => (p.pnlSol ?? 0) <= 0).length;
+    const pnlSol = reps.reduce((s, p) => s + (p.pnlSol ?? 0), 0);
+    return {
+      wins,
+      losses,
+      winRatePct: reps.length > 0 ? (wins / reps.length) * 100 : 0,
+      pnlSol,
+    };
   }
 
   /** Simple win-rate % from closed positions (for filter checks) */

@@ -43,6 +43,10 @@ import {
 } from './bondingCurve';
 import { resolveTop10HoldPctForEntry } from './tokenMetrics';
 import { clampToMaxAllowedTradeSol } from './risk';
+import {
+  evaluateAffordability,
+  reportFundGateFailure,
+} from './fundGate';
 
 const jupiter = createJupiterApiClient();
 
@@ -369,6 +373,20 @@ export async function executeBuy(
     `executeBuy:${strategyKind}`
   );
 
+  // Paper / Live Sim: refuse buys when available SOL or equity cannot fund the size.
+  // Logs a clear warning in the Logs tab instead of opening a trade.
+  if (usesPaperAccounting()) {
+    const gate = evaluateAffordability(solAmount);
+    if (!gate.ok) {
+      void reportFundGateFailure(gate, { mint, symbol });
+      return {
+        success: false,
+        mode: config.mode,
+        error: gate.reason,
+      };
+    }
+  }
+
   if (paperTrader.hasOpenMint(mint)) {
     return {
       success: false,
@@ -553,10 +571,16 @@ export async function executeBuy(
       }
     );
     if (!position) {
+      // simulateBuy already logged; surface a clearer API error when funds were the cause
+      const bal = paperTrader.getBalance();
+      const err =
+        solAmount > bal
+          ? `Insufficient available funds: need ${solAmount.toFixed(4)} SOL, have ${bal.toFixed(4)} SOL`
+          : 'Simulated buy failed';
       return {
         success: false,
         mode: config.mode,
-        error: 'Simulated buy failed',
+        error: err,
       };
     }
     return {

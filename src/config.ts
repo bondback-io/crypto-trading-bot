@@ -1897,6 +1897,24 @@ export interface BotConfig {
     useLiveData: boolean;
   };
 
+  /**
+   * Email notification preferences (SMTP credentials stay in env).
+   * Default recipient: isaacpascua87@gmail.com
+   */
+  notifications: {
+    enabled: boolean;
+    email: string;
+    /** Alert when total equity < this SOL (default 1) */
+    lowEquitySol: number;
+    lowEquityEnabled: boolean;
+    lowEquityCooldownMs: number;
+    /** Alert when a buy is blocked for insufficient available SOL */
+    insufficientFundsEnabled: boolean;
+    insufficientFundsCooldownMs: number;
+    /** Alert when a full close finishes in profit */
+    profitableCloseEnabled: boolean;
+  };
+
   pollIntervalMs: number;
   solMint: string;
   pumpFunProgramId: string;
@@ -2262,6 +2280,19 @@ export const config: BotConfig = {
     minVolumeH24Usd: 15_000,
   },
 
+  notifications: {
+    enabled: true,
+    email:
+      process.env.NOTIFY_EMAIL?.trim() || 'isaacpascua87@gmail.com',
+    lowEquitySol: Number(process.env.NOTIFY_LOW_EQUITY_SOL) || 1,
+    lowEquityEnabled: process.env.NOTIFY_LOW_EQUITY !== '0',
+    lowEquityCooldownMs: Number(process.env.NOTIFY_LOW_EQUITY_COOLDOWN_MS) || 6 * 3600_000,
+    insufficientFundsEnabled: process.env.NOTIFY_INSUFFICIENT_FUNDS !== '0',
+    insufficientFundsCooldownMs:
+      Number(process.env.NOTIFY_INSUFFICIENT_FUNDS_COOLDOWN_MS) || 30 * 60_000,
+    profitableCloseEnabled: process.env.NOTIFY_PROFITABLE_CLOSE !== '0',
+  },
+
   paper: {
     startingBalanceSol: 10,
     feeBps: 30,
@@ -2406,6 +2437,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         }) as PersistedBotSettings['tradeProfiles'])
       : undefined,
     paper: { ...config.paper },
+    notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
@@ -2800,6 +2832,11 @@ function applySettingsSnapshot(
     }
     if (saved.paper)
       config.paper = cloneJson(saved.paper) as unknown as typeof config.paper;
+    if (saved.notifications) {
+      config.notifications = cloneJson(
+        saved.notifications
+      ) as unknown as typeof config.notifications;
+    }
     if (saved.mev)
       config.mev = cloneJson(saved.mev) as unknown as typeof config.mev;
     if (saved.gmgnDiscovery) {
@@ -2875,6 +2912,12 @@ function applySettingsSnapshot(
       config.selective = deepMerge(config.selective, saved.selective);
     }
     if (saved.paper) config.paper = deepMerge(config.paper, saved.paper);
+    if (saved.notifications) {
+      config.notifications = deepMerge(
+        config.notifications,
+        saved.notifications
+      );
+    }
     if (saved.marketScanner) {
       config.marketScanner = deepMerge(
         config.marketScanner,
@@ -4586,6 +4629,7 @@ export function getConfigSnapshot() {
         }) as typeof config.tradeProfiles)
       : undefined,
     paper: { ...config.paper },
+    notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
     trading: {
       activeId: config.activeTradingWalletId,

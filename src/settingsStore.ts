@@ -87,7 +87,18 @@ export interface PersistedBotSettings {
       weights?: Record<string, number>;
     };
   };
-  paper?: Record<string, unknown>;
+    paper?: Record<string, unknown>;
+  /** Email notification preferences (no SMTP secrets) */
+  notifications?: {
+    enabled?: boolean;
+    email?: string;
+    lowEquitySol?: number;
+    lowEquityEnabled?: boolean;
+    lowEquityCooldownMs?: number;
+    insufficientFundsEnabled?: boolean;
+    insufficientFundsCooldownMs?: number;
+    profitableCloseEnabled?: boolean;
+  };
   marketScanner?: Record<string, unknown>;
   mev?: Record<string, unknown>;
   gmgnDiscovery?: Record<string, unknown>;

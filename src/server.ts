@@ -2407,6 +2407,45 @@ export function createServer(): express.Application {
     res.json(config.trade);
   });
 
+  app.post('/api/config/notifications', (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const n = config.notifications;
+    if (typeof body.enabled === 'boolean') n.enabled = body.enabled;
+    if (typeof body.email === 'string' && body.email.trim()) {
+      n.email = body.email.trim().slice(0, 200);
+    }
+    if (body.lowEquitySol != null && Number.isFinite(Number(body.lowEquitySol))) {
+      n.lowEquitySol = Math.max(0.01, Number(body.lowEquitySol));
+    }
+    if (typeof body.lowEquityEnabled === 'boolean') {
+      n.lowEquityEnabled = body.lowEquityEnabled;
+    }
+    if (typeof body.insufficientFundsEnabled === 'boolean') {
+      n.insufficientFundsEnabled = body.insufficientFundsEnabled;
+    }
+    if (typeof body.profitableCloseEnabled === 'boolean') {
+      n.profitableCloseEnabled = body.profitableCloseEnabled;
+    }
+    persistUserSettings();
+    res.json({ ok: true, notifications: { ...config.notifications } });
+  });
+
+  app.post('/api/notifications/test', async (_req: Request, res: Response) => {
+    try {
+      const { sendTestNotificationEmail } =
+        require('./emailNotifications') as typeof import('./emailNotifications');
+      const result = await sendTestNotificationEmail();
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
   app.post('/api/config/technical-levels', (req: Request, res: Response) => {
     if (!config.technicalLevels) {
       const { DEFAULT_TECHNICAL_LEVELS } = require('./config') as typeof import('./config');
