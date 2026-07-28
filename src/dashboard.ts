@@ -7081,6 +7081,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     ? escHtml(String(er.maxTradeOverrideSol))
                     : '') +
                 '" /></label>' +
+                '<label title="Trail arms after this unrealized profit %. Empty = catalog default.">Trail arm %<input type="number" data-k="trailingActivationProfit" step="0.5" min="0" placeholder="default" value="' +
+                  (er.trailingActivationProfit != null && Number(er.trailingActivationProfit) > 0
+                    ? escHtml(String(er.trailingActivationProfit))
+                    : off.trailingActivationProfit != null && Number(off.trailingActivationProfit) > 0
+                      ? escHtml(String(off.trailingActivationProfit))
+                      : '') +
+                '" /></label>' +
+                '<label title="Trailing stop % from peak after arm. Empty = catalog default.">Trail %<input type="number" data-k="trailingStopPct" step="0.5" min="0" placeholder="default" value="' +
+                  (er.trailingStopPct != null && Number(er.trailingStopPct) > 0
+                    ? escHtml(String(er.trailingStopPct))
+                    : off.trailingStopPct != null && Number(off.trailingStopPct) > 0
+                      ? escHtml(String(off.trailingStopPct))
+                      : '') +
+                '" /></label>' +
+                '<label title="Scalp fail-drop from peak %. Empty = catalog default (if any). Raise to give trail room.">Fail drop %<input type="number" data-k="momentumFailDropPct" step="0.5" min="0" placeholder="default" value="' +
+                  (er.momentumFailDropPct != null && Number(er.momentumFailDropPct) > 0
+                    ? escHtml(String(er.momentumFailDropPct))
+                    : off.momentumFailDropPct != null && Number(off.momentumFailDropPct) > 0
+                      ? escHtml(String(off.momentumFailDropPct))
+                      : '') +
+                '" /></label>' +
                 '<label title="Raises this profile’s min market cap above Config Min MC. Empty = use global only. Cannot go below the global Risk On floor.">Min MC Override<input type="number" data-k="minMarketCapUsd" data-match="1" step="1000" min="0" placeholder="global" value="' +
                   (match.minMarketCapUsd != null && Number(match.minMarketCapUsd) > 0
                     ? escHtml(String(match.minMarketCapUsd))
@@ -7109,7 +7130,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       ? escHtml(String(om.maxTop10HoldPct))
                       : '') +
                 '" /></label>' +
+                '<label title="Lane min 5m volume USD (Momentum Burst / Scalper). Empty = catalog default. Raise to require stronger bursts.">Min Vol M5 $<input type="number" data-k="minVolumeM5Usd" data-match="1" step="100" min="0" placeholder="default" value="' +
+                  (match.minVolumeM5Usd != null && Number(match.minVolumeM5Usd) > 0
+                    ? escHtml(String(match.minVolumeM5Usd))
+                    : om.minVolumeM5Usd != null && Number(om.minVolumeM5Usd) > 0
+                      ? escHtml(String(om.minVolumeM5Usd))
+                      : '') +
+                '" /></label>' +
                 '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
+                (p.id === 'momentum_burst'
+                  ? '<p class="mint text-xs" style="margin:0.35rem 0 0;grid-column:1/-1">1-by-1 tune: conviction → Min Vol M5 → holders/MC → TP max ↓ → Fail drop ↑ → trail arm earlier / Size × ↓. Wait ~15 closes each.</p>'
+                  : '') +
                 (p.id === 'high_win_rate'
                   ? (function () {
                       const qf = Object.assign(
@@ -7609,15 +7640,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
         }
-        // Min MC / Max MC / Min holders / Max Top-10: empty / 0 clears → catalog / none
+        // Min MC / Max MC / Min holders / Max Top-10 / Min Vol M5: empty / 0 clears → catalog / none
         if (
           k === 'minMarketCapUsd' ||
           k === 'maxMarketCapUsd' ||
           k === 'minHolders' ||
-          k === 'maxTop10HoldPct'
+          k === 'maxTop10HoldPct' ||
+          k === 'minVolumeM5Usd'
         ) {
           const n = raw === '' || raw == null ? 0 : Number(raw);
           match[k] = Number.isFinite(n) && n > 0 ? n : 0;
+          return;
+        }
+        // Fail drop / trail arm / trail %: empty / 0 clears → catalog default
+        if (
+          k === 'momentumFailDropPct' ||
+          k === 'trailingActivationProfit' ||
+          k === 'trailingStopPct'
+        ) {
+          const n = raw === '' || raw == null ? 0 : Number(raw);
+          exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
         }
         if (raw === '' || raw == null) return;

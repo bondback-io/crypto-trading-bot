@@ -730,7 +730,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Short Momentum',
     rulesSummary: [
       'TP 28–45% · SL 10–14%',
-      'Entry: strong volume acceleration + buy dominance',
+      'Entry: M5 vol ≥ $6k + buy pressure / bull flag · conviction ≥ 50',
       'Max hold ~2.5–7 min · trail after +10%',
       'Exit on fade / stall / trail — timer is backstop',
     ],
@@ -742,8 +742,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       primaryPatternIds: ['bull_flag'],
       patternSensitivity: 'high',
       patternMinConfidence: 48,
-      minVolumeM5Usd: 1_500,
-      minConviction: 40,
+      minVolumeM5Usd: 6_000,
+      minConviction: 50,
     },
     exitRules: {
       forceScalp: true,
@@ -1603,6 +1603,16 @@ export function updateTradeProfileParams(
     ) {
       delete (nextExit as Record<string, unknown>)[k];
     }
+    // Empty / 0 fail-drop / trail → unset (catalog default)
+    if (
+      (k === 'momentumFailDropPct' ||
+        k === 'trailingActivationProfit' ||
+        k === 'trailingStopPct') &&
+      typeof v === 'number' &&
+      v <= 0
+    ) {
+      delete (nextExit as Record<string, unknown>)[k];
+    }
   }
   for (const [k, v] of Object.entries(nextMatch)) {
     if (k === 'qualityFilter') continue;
@@ -1610,12 +1620,13 @@ export function updateTradeProfileParams(
       delete (nextMatch as Record<string, unknown>)[k];
       continue;
     }
-    // Empty / 0 Min MC Override, Max MC, Min holders, Max Top-10 → unset
+    // Empty / 0 Min MC Override, Max MC, Min holders, Max Top-10, Min Vol M5 → unset
     if (
       (k === 'minMarketCapUsd' ||
         k === 'maxMarketCapUsd' ||
         k === 'minHolders' ||
-        k === 'maxTop10HoldPct') &&
+        k === 'maxTop10HoldPct' ||
+        k === 'minVolumeM5Usd') &&
       typeof v === 'number' &&
       v <= 0
     ) {
@@ -2230,7 +2241,8 @@ function scoreProfile(
       score += 95;
       bits.push('momentum_burst armed');
     } else if (isMomentum && !isDip && !isMig) {
-      score += 70;
+      // Softened from +70 so Trend/Compounder (~50–58) can win when both pass
+      score += 58;
       bits.push(
         volM5 != null
           ? `burst vol M5 $${Math.round(volM5)}`
