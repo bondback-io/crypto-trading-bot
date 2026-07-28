@@ -3970,6 +3970,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         padding-right: 0.7rem;
       }
     }
+    @media (prefers-reduced-motion: reduce) {
+      .nav-tabs .btn.nav-tab-microbots,
+      .nav-tabs .btn.nav-tab-microbots::before,
+      .nav-tabs .btn.nav-tab-microbots::after {
+        transition: none;
+      }
+      .nav-tabs .btn.nav-tab-microbots:hover {
+        transform: none;
+      }
+    }
     .zion-panel .zion-hero-card {
       border: 1px solid rgba(242, 174, 102, 0.3);
       background: linear-gradient(160deg, rgba(80, 48, 18, 0.4) 0%, #0f172a 42%, #111827 100%);
