@@ -221,6 +221,8 @@ export interface TradeProfileMatchRules {
   maxTop10HoldPct?: number;
   minVolumeH1Usd?: number;
   minVolumeM5Usd?: number;
+  /** Lane min recent buy pressure USD (known-only gate/bonus) */
+  minBuyPressureUsd?: number;
   /** Dip / reversal: peak drop */
   minDropFromPeakPct?: number;
   maxDropFromPeakPct?: number;
@@ -1620,13 +1622,22 @@ export function updateTradeProfileParams(
       delete (nextMatch as Record<string, unknown>)[k];
       continue;
     }
-    // Empty / 0 Min MC Override, Max MC, Min holders, Max Top-10, Min Vol M5 → unset
+    // Empty / 0 profile entry knobs → unset to official catalog defaults
     if (
       (k === 'minMarketCapUsd' ||
         k === 'maxMarketCapUsd' ||
+        k === 'minTokenAgeHours' ||
+        k === 'maxTokenAgeHours' ||
         k === 'minHolders' ||
         k === 'maxTop10HoldPct' ||
-        k === 'minVolumeM5Usd') &&
+        k === 'minVolumeH1Usd' ||
+        k === 'minVolumeM5Usd' ||
+        k === 'minBuyPressureUsd' ||
+        k === 'minDropFromPeakPct' ||
+        k === 'minPriceChange24hPct' ||
+        k === 'minWalletCount' ||
+        k === 'minWalletQuality' ||
+        k === 'patternMinConfidence') &&
       typeof v === 'number' &&
       v <= 0
     ) {
@@ -2082,6 +2093,17 @@ function scoreProfile(
     }
   }
 
+  if (
+    m.minBuyPressureUsd != null &&
+    buyPressureUsd != null &&
+    buyPressureUsd < m.minBuyPressureUsd
+  ) {
+    return {
+      score: 0,
+      reason: `buy pressure $${Math.round(buyPressureUsd)} < $${m.minBuyPressureUsd}`,
+    };
+  }
+
   if (m.preferDip) {
     if (!isDip) return { score: 0, reason: 'not a dip setup' };
     // Fresh migrations belong to Migration Sniper, not Dip Buyer
@@ -2252,6 +2274,10 @@ function scoreProfile(
       );
       if (buyPressureUsd != null && buyPressureUsd > 0) {
         bits.push(`buy $${Math.round(buyPressureUsd)}`);
+        if (m.minBuyPressureUsd != null && buyPressureUsd >= m.minBuyPressureUsd) {
+          score += 8;
+          bits.push(`pressure ≥ $${Math.round(m.minBuyPressureUsd)}`);
+        }
       }
       if ((ctx.chartPatternIds || []).includes('bull_flag')) {
         bits.push('bull_flag');
@@ -2268,6 +2294,12 @@ function scoreProfile(
     } else if (drop != null && drop >= (m.minDropFromPeakPct ?? 18) && !isMig) {
       score += 72;
       bits.push(`wick/over-extension −${drop.toFixed(0)}%`);
+      if (buyPressureUsd != null && m.minBuyPressureUsd != null) {
+        score += Math.min(
+          10,
+          Math.max(0, Math.round((buyPressureUsd - m.minBuyPressureUsd) / 250))
+        );
+      }
     } else {
       return { score: 0, reason: 'not a reversal / wick setup' };
     }

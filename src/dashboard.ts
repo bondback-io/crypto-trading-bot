@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Wallets / Signals / Scanner / Strategies / Backtester; Config / Logs via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Signals / Scanner / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -2507,10 +2507,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       padding-top: 0.4rem;
       border-top: 1px solid #1e293b;
       display: grid;
+      gap: 0.5rem;
+    }
+    .tp-param-section {
+      display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.3rem 0.45rem;
+      min-width: 0;
     }
-    .tp-params > label {
+    .tp-param-title {
+      grid-column: 1 / -1;
+      margin: 0;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #cbd5e1;
+    }
+    .tp-param-hint {
+      grid-column: 1 / -1;
+      margin: -0.1rem 0 0;
+      color: #94a3b8;
+      font-size: 0.62rem;
+    }
+    .tp-params label {
       display: flex;
       flex-direction: column;
       gap: 0.1rem;
@@ -2518,8 +2536,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #94a3b8;
       min-width: 0;
     }
-    .tp-params > label > input:not([type="checkbox"]),
-    .tp-params > label > select {
+    .tp-params label > input:not([type="checkbox"]),
+    .tp-params label > select {
       width: 100%;
       background: #020617;
       border: 1px solid #334155;
@@ -4057,7 +4075,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Config, Backtester, and Logs" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Config, Backtester, and Logs" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -4065,6 +4083,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <span class="sr-only">Settings</span>
         </button>
         <div id="settings-dropdown" class="settings-dropdown" role="menu" aria-label="Settings">
+          <button type="button" role="menuitem" data-settings-tab="wallets" onclick="showTab('wallets')" title="Discover, search, and manage smart wallets you copy">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+            Smart Wallets
+          </button>
           <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
@@ -4116,11 +4138,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
+      <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
-      <button data-tab="wallets" onclick="showTab('wallets', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Discover, search, and manage smart wallets you copy"><span class="btn-label-short">Wallets</span><span class="btn-label-full">Smart Wallets</span></button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
-      <button data-tab="strategies" onclick="showTab('strategies', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Enable strategy modules and apply selective presets">Strategies</button>
+      <button data-tab="settings" onclick="showTab('settings', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Risk level, module groups, presets, and strategy JSON import/export">Settings</button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -4289,7 +4311,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on the Scanner tab, or toggle via Strategies → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
+          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on the Scanner tab, or toggle via Settings → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
           <div id="scanner-status" data-scanner-status class="mint text-xs mb-2">—</div>
           <div id="scanner-feed" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
@@ -5063,7 +5085,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="flex flex-wrap gap-2 items-center mb-2">
           <button class="btn btn-primary" id="bt-advisor-analyze-btn" onclick="analyzeBacktestAdvisor()" title="Analyze losers and score recommendations">Analyze losers</button>
           <button class="btn btn-secondary" id="bt-advisor-rerun-btn" onclick="rerunBacktestWithAdvisor()" title="Re-run last window with checked tips">Re-run with selected</button>
-          <button class="btn btn-secondary" id="bt-advisor-apply-btn" onclick="applyAdvisorToLive()" title="Persist checked tips to live Strategies">Apply selected to Strategies</button>
+          <button class="btn btn-secondary" id="bt-advisor-apply-btn" onclick="applyAdvisorToLive()" title="Persist checked tips to live Settings">Apply selected to Settings</button>
           <span class="mint text-xs" id="bt-advisor-status">Run a backtest, then Analyze</span>
         </div>
         <div id="bt-advisor-evidence" class="mint text-xs mb-2 hidden"></div>
@@ -5148,7 +5170,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
           Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on.
           Strategy module also lives under
-          <button type="button" class="text-emerald-400 underline" onclick="showTab('strategies', document.querySelector('[data-tab=strategies]'))">Strategies</button>
+          <button type="button" class="text-emerald-400 underline" onclick="showTab('settings', document.querySelector('[data-tab=settings]'))">Settings</button>
           → Market Scanner (TA).
         </p>
         <div id="scanner-status-tab" data-scanner-status class="mint text-xs mb-2">—</div>
@@ -5383,10 +5405,153 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <div id="zion-offer-stack" class="zion-offer-stack" aria-live="polite" data-count="0"></div>
 
-    <!-- ========== TAB: Strategies ========== -->
-    <section data-tab-panel="strategies" class="strategies-panel hidden space-y-4">
+    <!-- ========== TAB: Micro Bots ========== -->
+    <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-microbots" title="Tune who can fight, who wins, and which modules each micro-bot can use.">
+        <div class="active-profile-main">
+          <span class="active-profile-kicker">Micro Bots</span>
+          <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
+            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+            <span class="risk-badge-label">On</span>
+          </span>
+          <span class="tip tip-below" tabindex="0" data-tip="Smart Bot Profiles ON = each trade profile is its own micro-bot lane. Multi-profile ON = lanes compete and the winner stamps the trade."></span>
+        </div>
+        <p class="active-profile-hint">Use this tab to tune micro-bot participation, lane fights, and profile-level modules without mixing it into the main settings page.</p>
+      </div>
+
+      <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
+          <div style="min-width:0;flex:1">
+            <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
+            <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Settings tab = global capability / kill switches. OFF = shared master modules for all profiles.</p>
+          </div>
+          <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
+            <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
+            <span>Smart Bot Profiles</span>
+          </label>
+        </div>
+        <details class="card mt-3 mb-3 tp-tuning-details" id="tp-tuning-checklist-card" style="background:#0f172a;border:1px solid #334155;padding:0.75rem">
+          <summary class="tp-tuning-summary">
+            <span class="tp-tuning-summary-main">
+              <span class="tp-tuning-chevron" aria-hidden="true">▶</span>
+              <span class="text-sm font-semibold text-slate-200">Tuning checklist</span>
+              <span class="mint text-xs font-normal">click to expand</span>
+            </span>
+            <button type="button" class="btn btn-secondary text-xs" onclick="event.preventDefault();event.stopPropagation();resetTuningChecklist()" title="Clear all checklist ticks">Reset checklist</button>
+          </summary>
+          <div class="tp-tuning-body mt-2">
+            <p class="text-xs text-slate-400 mb-2">Follow this for accurate Smart Bot testing. Check items off as you go (saved in this browser).</p>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Before testing</div>
+            <div class="tp-check-list" id="tp-check-before"></div>
+            <div class="text-xs font-semibold text-slate-300 mb-1 mt-3">After ~15–20 closes per busy profile</div>
+            <div class="tp-check-list" id="tp-check-after"></div>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button type="button" class="btn btn-secondary text-xs" onclick="document.getElementById('trade-profiles-overview-card')?.scrollIntoView({behavior:'smooth',block:'start'})">Jump to scoreboard</button>
+            </div>
+          </div>
+        </details>
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
+            <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
+          </div>
+          <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
+            <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
+            <span>Multi-profile ON</span>
+          </label>
+        </div>
+        <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
+          <div class="profile-colour-legend-head">
+            <span class="profile-colour-legend-title">Profile colours</span>
+            <span class="profile-colour-legend-hint">Matches trade badges</span>
+          </div>
+          <div class="profile-colour-legend-items" data-profile-legend-items></div>
+        </div>
+        <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
+        <div class="mt-3 pt-3 border-t border-slate-700/80" id="auto-scoring-panel">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div>
+              <div class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</div>
+              <p class="text-xs text-slate-400 mb-0">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
+            </div>
+            <label class="ctl-check" title="Enable weighted auto-scoring">
+              <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" />
+              <span>Auto-score ON</span>
+            </label>
+          </div>
+          <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
+            <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
+            <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
+              <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
+              <span>Skip below min</span>
+            </label>
+            <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
+              <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
+                <option value="">— none (auto pick) —</option>
+              </select>
+            </label>
+          </div>
+          <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
+            <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
+            <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
+              <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
+                <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
+                <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+              </div>
+              <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
+              <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="card mt-4" id="trade-profiles-overview-card">
+        <div class="section-title">Trade Profiles Overview</div>
+        <p class="text-xs text-slate-400 mb-3">Quick reference for every profile — what it’s for, style, and recommended Risk Level. Active profiles are highlighted. Tap a row to jump to its controls.</p>
+        <div class="tp-overview-wrap">
+          <table class="tp-overview-table" id="trade-profiles-overview">
+            <thead>
+              <tr>
+                <th scope="col">Profile</th>
+                <th scope="col">Description</th>
+                <th scope="col">Style</th>
+                <th scope="col">Recommended Risk</th>
+                <th scope="col">Win %</th>
+                <th scope="col">Net PnL</th>
+                <th scope="col">Avg hold</th>
+                <th scope="col">Trades</th>
+              </tr>
+            </thead>
+            <tbody id="trade-profiles-overview-body">
+              <tr><td colspan="8" class="mint">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="tp-scoreboard-detail" class="mt-3 text-xs text-slate-400"></div>
+        <div id="tp-learning-panel" class="mt-3 hidden"></div>
+        <div class="mt-3">
+          <div class="text-xs font-semibold text-slate-300 mb-1">Lane fight log</div>
+          <p class="text-xs text-slate-500 mb-1">Same live log as Overview — useful while tuning profiles.</p>
+          <div class="tp-decisions lane-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Settings ========== -->
+    <section data-tab-panel="settings" class="strategies-panel hidden space-y-4">
       <div class="card strategy-risk-card">
-        <div class="active-profile-banner tone-medium mb-3" data-active-profile id="active-profile-strategies" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.">
+        <div class="active-profile-banner tone-medium mb-3" data-active-profile id="active-profile-settings" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.">
           <div class="active-profile-main">
             <span class="active-profile-kicker">Active Profile</span>
             <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
@@ -5430,7 +5595,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card strategy-control-card">
         <div class="strategy-control-head">
           <div class="strategy-control-head-main">
-            <div class="section-title">Strategy Control Center</div>
+            <div class="section-title">Settings Control Center</div>
             <div class="strategy-io-btns">
               <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade/trail/fail-drop, Min MC/Max MC/holders/Top-10/Min Vol M5/conviction, Smart Bot) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
@@ -5438,7 +5603,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
-            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. With Smart Bot ON, each Trade Profile’s modules + lane floors (MC / holders / Top-10 / Min Vol M5 / conviction) drive which lane can take a token.</p>
+            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. Trade Profile import/export still lives here even though profile tuning moved to Micro Bots.</p>
           </div>
           <div class="strategy-control-head-meta">
             <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" role="button" aria-expanded="false" title="Click to show which modules are ON">—</div>
@@ -5465,153 +5630,26 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-secondary text-xs" onclick="applyStrategiesAction('disable_all')">Disable All modules</button>
         </div>
 
-        <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
-            <div style="min-width:0;flex:1">
-              <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
-              <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Master Strategies = capability / kill switches. OFF = shared master modules for all profiles.</p>
-            </div>
-            <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
-              <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
-              <span>Smart Bot Profiles</span>
-            </label>
-          </div>
-          <details class="card mt-3 mb-3 tp-tuning-details" id="tp-tuning-checklist-card" style="background:#0f172a;border:1px solid #334155;padding:0.75rem">
-            <summary class="tp-tuning-summary">
-              <span class="tp-tuning-summary-main">
-                <span class="tp-tuning-chevron" aria-hidden="true">▶</span>
-                <span class="text-sm font-semibold text-slate-200">Tuning checklist</span>
-                <span class="mint text-xs font-normal">click to expand</span>
-              </span>
-              <button type="button" class="btn btn-secondary text-xs" onclick="event.preventDefault();event.stopPropagation();resetTuningChecklist()" title="Clear all checklist ticks">Reset checklist</button>
-            </summary>
-            <div class="tp-tuning-body mt-2">
-              <p class="text-xs text-slate-400 mb-2">Follow this for accurate Smart Bot testing. Check items off as you go (saved in this browser).</p>
-              <div class="text-xs font-semibold text-slate-300 mb-1">Before testing</div>
-              <div class="tp-check-list" id="tp-check-before"></div>
-              <div class="text-xs font-semibold text-slate-300 mb-1 mt-3">After ~15–20 closes per busy profile</div>
-              <div class="tp-check-list" id="tp-check-after"></div>
-              <div class="flex flex-wrap gap-2 mt-2">
-                <button type="button" class="btn btn-secondary text-xs" onclick="document.getElementById('trade-profiles-overview-card')?.scrollIntoView({behavior:'smooth',block:'start'})">Jump to scoreboard</button>
-              </div>
-            </div>
-          </details>
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <div style="min-width:0;flex:1">
-              <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
-              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
-            </div>
-            <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
-              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
-              <span>Multi-profile ON</span>
-            </label>
-          </div>
-          <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
-            <div class="profile-colour-legend-head">
-              <span class="profile-colour-legend-title">Profile colours</span>
-              <span class="profile-colour-legend-hint">Matches trade badges</span>
-            </div>
-            <div class="profile-colour-legend-items" data-profile-legend-items></div>
-          </div>
-          <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
-          <div class="mt-3 pt-3 border-t border-slate-700/80" id="auto-scoring-panel">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <div>
-                <div class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</div>
-                <p class="text-xs text-slate-400 mb-0">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
-              </div>
-              <label class="ctl-check" title="Enable weighted auto-scoring">
-                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" />
-                <span>Auto-score ON</span>
-              </label>
-            </div>
-            <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
-              <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
-              <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
-                <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
-                <span>Skip below min</span>
-              </label>
-              <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
-                <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
-                  <option value="">— none (auto pick) —</option>
-                </select>
-              </label>
-            </div>
-            <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
-              <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
-              <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
-                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-                  <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
-                  <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
-                </div>
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
-                  <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                </div>
-                <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
-                <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
-              </div>
-            </details>
-          </div>
-        </div>
-
         <div id="strategies-warning" class="hidden mt-3 p-2 rounded-lg text-amber-200 text-xs" style="background:#422006;border:1px solid #92400e"></div>
       </div>
       <div id="strategies-grid" class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card"><span class="mint">Loading strategies…</span></div>
       </div>
       <div id="strategy-settings-stash" class="hidden" aria-hidden="true"></div>
-      <div class="card mt-4" id="trade-profiles-overview-card">
-        <div class="section-title">Trade Profiles Overview</div>
-        <p class="text-xs text-slate-400 mb-3">Quick reference for every profile — what it’s for, style, and recommended Risk Level. Active profiles are highlighted. Tap a row to jump to its controls.</p>
-        <div class="tp-overview-wrap">
-          <table class="tp-overview-table" id="trade-profiles-overview">
-            <thead>
-              <tr>
-                <th scope="col">Profile</th>
-                <th scope="col">Description</th>
-                <th scope="col">Style</th>
-                <th scope="col">Recommended Risk</th>
-                <th scope="col">Win %</th>
-                <th scope="col">Net PnL</th>
-                <th scope="col">Avg hold</th>
-                <th scope="col">Trades</th>
-              </tr>
-            </thead>
-            <tbody id="trade-profiles-overview-body">
-              <tr><td colspan="8" class="mint">Loading…</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div id="tp-scoreboard-detail" class="mt-3 text-xs text-slate-400"></div>
-        <div id="tp-learning-panel" class="mt-3 hidden"></div>
-        <div class="mt-3">
-          <div class="text-xs font-semibold text-slate-300 mb-1">Lane fight log</div>
-          <p class="text-xs text-slate-500 mb-1">Same live log as Overview — useful while tuning profiles.</p>
-          <div class="tp-decisions lane-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
-        </div>
-      </div>
     </section>
 
     <!-- ========== TAB: Config ========== -->
     <section data-tab-panel="config" class="config-panel hidden space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Strategies tab.">
+      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-config" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Settings tab.">
         <div class="active-profile-main">
           <span class="active-profile-kicker">Active Profile</span>
           <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
             <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
             <span class="risk-badge-label">On</span>
           </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Strategies tab."></span>
+          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. Change Risk on the Settings tab."></span>
         </div>
-        <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('strategies')">Edit on Strategies</button></p>
+        <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('settings')">Edit in Settings</button></p>
       </div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
@@ -5655,7 +5693,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <p class="text-sm text-slate-400 mb-2">
             Flow: <strong>partial</strong> at milestone → <strong>recover initial</strong> → keep a <strong>bag</strong> → <strong>trail</strong> after high profit. Backtester uses the same rules.
           </p>
-          <p class="mint mb-2">Master switch: Strategies → Tiered Profit Taking.</p>
+          <p class="mint mb-2">Master switch: Settings → Tiered Profit Taking.</p>
           <div class="toggle-row"><span title="On high-risk tokens: take profits earlier and use tighter stops/trails">Risk-based adjustment</span><label class="switch"><input type="checkbox" id="ps-risk-adjust" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Partial at +% <span class="tip" tabindex="0" data-tip="First milestone. Example: 80 = sell a chunk when up 80%."></span></span><input type="number" id="ps-partial-at" value="80" min="10" max="500" step="5" /></label>
@@ -5712,7 +5750,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="field"><label title="Min DexScreener h1 buys+sells. Absolute floor 3; default 10.">Min Recent Activity — <span class="val" id="v-minRecentActivity">10</span></label><input type="range" id="minRecentActivity" min="3" max="100" step="1" value="10" /></div>
           </div>
           <div class="mt-2 space-y-0">
-            <p class="mint mb-2">Master safety switches moved to Strategies. Configure their thresholds here.</p>
+            <p class="mint mb-2">Master safety switches moved to Settings. Configure their thresholds here.</p>
             <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
@@ -5730,7 +5768,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         <div class="card" data-strategy-source-card="true">
           <div class="section-title">Selective Trading <span class="tip" tabindex="0" data-tip="High-conviction gating: score signals, limit trade frequency, scale size by risk."></span></div>
-          <p class="mint mb-2">Master switch: Strategies → Multi-Factor Conviction Score.</p>
+          <p class="mint mb-2">Master switch: Settings → Multi-Factor Conviction Score.</p>
           <div class="toggle-row"><span title="Block single-wallet entries unless migration priority">Require convergence (normal)</span><label class="switch"><input type="checkbox" id="sel-require-convergence" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Allow 1-wallet buys on migration / near-migration">Single-wallet migration OK</span><label class="switch"><input type="checkbox" id="sel-allow-single-mig" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
@@ -5746,7 +5784,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
         <div class="card" data-strategy-source-card="true">
           <div class="section-title">Strategy <span class="tip" tabindex="0" data-tip="When and how aggressively to enter: convergence, migrations, early curve, auto-sell, re-buy."></span></div>
-          <p class="mint mb-2">Entry master switches moved to Strategies. Configure their detailed parameters here.</p>
+          <p class="mint mb-2">Entry master switches moved to Settings. Configure their detailed parameters here.</p>
           <div class="toggle-row"><span title="Only trade migration/graduation events">Migration Only</span><label class="switch"><input type="checkbox" id="enableMigrationOnly" /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Automatically sell on TP / SL / trailing rules">Auto-Sell</span><label class="switch"><input type="checkbox" id="enableAutoSell" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Also arm profit-dip watch after max-profit / full runner close (off by default)">Re-Entry After Max Profit</span><label class="switch"><input type="checkbox" id="reEntryAfterMaxProfitEnabled" /><span class="slider"></span></label></div>
@@ -5793,7 +5831,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="mt-3 p-3 rounded-lg" style="background:#0f172a;border:1px solid #334155">
             <div class="text-sm font-semibold text-slate-200 mb-2">Dead market exit <span class="tip" tabindex="0" data-tip="Force-sell when DexScreener 1h volume stays below the USD threshold and/or there are no trades for N consecutive hours. Skips brand-new positions until min hold."></span></div>
-            <p class="mint mb-2">Master switch: Strategies → Dead Market Exit.</p>
+            <p class="mint mb-2">Master switch: Settings → Dead Market Exit.</p>
             <div class="filters-row mt-2">
               <label class="ctl ctl-md"><span>Vol/hr $ &lt; <span class="tip" tabindex="0" data-tip="Rolling 1h USD volume below this counts as dead."></span></span><input type="number" id="deadVolumeUsdPerHour" value="50" min="0" step="10" /></label>
               <label class="ctl ctl-sm"><span>Hours <span class="tip" tabindex="0" data-tip="Consecutive hours of dead samples before force-sell."></span></span><input type="number" id="deadVolumeConsecutiveHours" value="3" min="1" max="48" step="1" /></label>
@@ -5809,7 +5847,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card">
           <div class="section-title">MEV / RPC <span class="tip" tabindex="0" data-tip="Jito tips, sandwich protection, and Solana RPC health for live execution."></span></div>
           <div class="mint mb-2" id="mev-status">—</div>
-          <p class="mint mb-2">Master switch: Strategies → MEV Protection.</p>
+          <p class="mint mb-2">Master switch: Settings → MEV Protection.</p>
           <div class="toggle-row"><span title="Send swaps via Jito bundles when possible">Jito bundles</span><label class="switch"><input type="checkbox" id="useJitoBundles" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Detect recent buy clustering that looks like sandwich setup">Sandwich protection</span><label class="switch"><input type="checkbox" id="sandwichProtection" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Cancel the trade if sandwich risk is high">Abort on sandwich risk</span><label class="switch"><input type="checkbox" id="abortOnSandwichRisk" checked /><span class="slider"></span></label></div>
@@ -6514,6 +6552,115 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.querySelectorAll('#strategies-grid [data-strategy-setting]').forEach(el => stash.appendChild(el));
     }
 
+    const SETTINGS_MODULE_GROUPS = [
+      {
+        label: 'Global & Safety',
+        hint: 'Core copy flow, anti-rug gates, liquidity/holder filters, and execution safety.',
+        keys: [
+          'smart_money_copy',
+          'anti_rug_honeypot',
+          'bonding_curve_health',
+          'min_holders_activity',
+          'volume_liquidity_filters',
+          'sniper_bundler_filters',
+          'mev_protection',
+        ],
+      },
+      {
+        label: 'Smart Wallet & Conviction',
+        hint: 'Wallet clustering, wallet quality, conviction scoring, and copy-quality gates.',
+        keys: [
+          'wallet_convergence',
+          'wallet_quality_scoring',
+          'multi_factor_conviction',
+          'hard_quality_gate',
+          'elite_convergence',
+          'smart_money_flow_weighting',
+          'confirmation_layer',
+        ],
+      },
+      {
+        label: 'TA / Scanner / Patterns',
+        hint: 'Market Scanner, technical levels, chart patterns, and momentum/volume confirmation.',
+        keys: [
+          'ta_market_scanner',
+          'technical_levels',
+          'chart_patterns',
+          'pattern_volume_dryup_return',
+          'pattern_falling_wedge',
+          'pattern_structured_pullback',
+          'pattern_bull_flag',
+          'pattern_trend_continuation',
+          'market_session_filter',
+          'volume_spike_filter',
+          'momentum_confirmation',
+        ],
+      },
+      {
+        label: 'Trade Management & Micro-Bot Engines',
+        hint: 'Position handling, profit/risk management, migrations, timing, and the engine modules used by micro-bots.',
+        keys: [
+          'dynamic_position_sizing',
+          'tiered_profit_taking',
+          'dead_market_exit',
+          'profit_protected',
+          'migration_priority',
+          'near_migration_curve',
+          'early_curve_smart_money',
+          'migration_sniper',
+          'time_based_entry',
+          'early_entry_only',
+          'rebuy_on_dip',
+          'post_run_dip',
+          'quick_scalper',
+          'micro_scalper',
+          'momentum_burst',
+          'post_migration_scalp',
+          'reversal_scalp',
+        ],
+      },
+      {
+        label: 'Optional / Lower Impact',
+        hint: 'Nice-to-have or more experimental modules that are easier to disable or remove later.',
+        keys: [
+          'social_sentiment_filter',
+          'trending_narrative_boost',
+        ],
+      },
+    ];
+
+    function buildSettingsModuleGroups(registry) {
+      const byKey = new Map((registry || []).map(function (s) {
+        return [s.key, s];
+      }));
+      const used = new Set();
+      const groups = [];
+      SETTINGS_MODULE_GROUPS.forEach(function (spec) {
+        const rows = spec.keys
+          .map(function (key) { return byKey.get(key); })
+          .filter(Boolean);
+        rows.forEach(function (row) { used.add(row.key); });
+        if (rows.length) {
+          groups.push({
+            label: spec.label,
+            hint: spec.hint,
+            rows: rows,
+          });
+        }
+      });
+      const leftovers = (registry || []).filter(function (s) {
+        return !used.has(s.key);
+      });
+      if (leftovers.length) {
+        groups.push({
+          label: 'Optional / Lower Impact',
+          hint: 'Additional or less-central modules that are safe to review separately.',
+          rows: leftovers,
+        });
+      }
+      return groups;
+    }
+
     function attachStrategyControls(registry) {
       Object.entries(STRATEGY_SETTING_IDS).forEach(([key, ids]) => {
         const target = document.getElementById('strategy-controls-' + key);
@@ -6637,7 +6784,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           recipeBanner.classList.add('is-custom');
           recipeBanner.classList.remove('is-synced');
           if (recipeBannerTitle) {
-            recipeBannerTitle.textContent = 'Strategies customized — not synced to Risk';
+            recipeBannerTitle.textContent = 'Settings customized — not synced to Risk';
           }
           recipeBannerText.textContent =
             (recipe.divergedFromRecipe
@@ -6732,10 +6879,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!grid) return;
       stashStrategyControls();
       const registry = data.registry || [];
-      grid.innerHTML = (data.groups || []).map(group => {
-        const rows = (group.strategies || []).map(key => registry.find(s => s.key === key)).filter(Boolean);
+      grid.innerHTML = buildSettingsModuleGroups(registry).map(group => {
+        const rows = group.rows || [];
         return '<div class="card strategy-group-card">' +
           '<div class="section-title">' + group.label + '</div>' +
+          (group.hint
+            ? '<p class="text-xs text-slate-400 mb-3">' + group.hint + '</p>'
+            : '') +
           rows.map(s => {
             const safety = s.criticalSafety
               ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
@@ -7115,80 +7265,334 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '</ul></details>'
             : '';
           const editable = p.id !== 'default';
+          const fmtVal = function (v) {
+            return v == null || v === '' ? '' : escHtml(String(v));
+          };
+          const numField = function (cfg) {
+            return (
+              '<label' + (cfg.title ? ' title="' + escHtml(cfg.title) + '"' : '') + '>' +
+                escHtml(cfg.label) +
+                '<input type="number" data-k="' + escHtml(cfg.key) + '"' +
+                  (cfg.match ? ' data-match="1"' : '') +
+                  (cfg.step != null ? ' step="' + escHtml(String(cfg.step)) + '"' : '') +
+                  (cfg.min != null ? ' min="' + escHtml(String(cfg.min)) + '"' : '') +
+                  (cfg.max != null ? ' max="' + escHtml(String(cfg.max)) + '"' : '') +
+                  (cfg.placeholder ? ' placeholder="' + escHtml(cfg.placeholder) + '"' : '') +
+                  ' value="' + fmtVal(cfg.value) + '" />' +
+              '</label>'
+            );
+          };
+          const selectField = function (cfg) {
+            return (
+              '<label' + (cfg.title ? ' title="' + escHtml(cfg.title) + '"' : '') + '>' +
+                escHtml(cfg.label) +
+                '<select data-k="' + escHtml(cfg.key) + '"' +
+                  (cfg.match ? ' data-match="1"' : '') +
+                  (cfg.kind ? ' data-kind="' + escHtml(cfg.kind) + '"' : '') +
+                '>' +
+                  cfg.options.map(function (opt) {
+                    return (
+                      '<option value="' + escHtml(String(opt.value)) + '"' +
+                        (String(cfg.value ?? '') === String(opt.value) ? ' selected' : '') +
+                      '>' + escHtml(opt.label) + '</option>'
+                    );
+                  }).join('') +
+                '</select>' +
+              '</label>'
+            );
+          };
+          const matchValue = function (key) {
+            return match[key] != null ? match[key] : om[key];
+          };
+          const exitValue = function (key) {
+            return er[key] != null ? er[key] : off[key];
+          };
+          const baseEntryFields = [
+            numField({
+              key: 'minConviction',
+              label: 'Min conviction',
+              match: true,
+              step: 1,
+              min: 0,
+              placeholder: 'default',
+              value: matchValue('minConviction'),
+            }),
+            numField({
+              key: 'minMarketCapUsd',
+              label: 'Min MC Override',
+              title: 'Raises this profile’s min market cap above Config Min MC. Empty = use global only.',
+              match: true,
+              step: 1000,
+              min: 0,
+              placeholder: 'global',
+              value: matchValue('minMarketCapUsd'),
+            }),
+            numField({
+              key: 'maxMarketCapUsd',
+              label: 'Max MC $',
+              title: 'Lane max market cap USD. Empty = no lane max.',
+              match: true,
+              step: 1000,
+              min: 0,
+              placeholder: 'default',
+              value: matchValue('maxMarketCapUsd'),
+            }),
+            numField({
+              key: 'minHolders',
+              label: 'Min holders',
+              title: 'Known holders only. Unknown does not fail the lane.',
+              match: true,
+              step: 1,
+              min: 0,
+              placeholder: 'default',
+              value: matchValue('minHolders'),
+            }),
+            numField({
+              key: 'maxTop10HoldPct',
+              label: 'Max Top-10 %',
+              title: 'Known concentration only. Global anti-rug still applies.',
+              match: true,
+              step: 1,
+              min: 0,
+              max: 100,
+              placeholder: 'none',
+              value: matchValue('maxTop10HoldPct'),
+            }),
+          ];
+          const entryFields = baseEntryFields.slice();
+          const qualityFields = [];
+          if (p.id === 'trend_rider' || p.id === 'steady_compounder') {
+            entryFields.push(
+              numField({
+                key: 'minTokenAgeHours',
+                label: 'Min age (h)',
+                match: true,
+                step: 0.5,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minTokenAgeHours'),
+              }),
+              numField({
+                key: 'minVolumeH1Usd',
+                label: 'Min Vol H1 $',
+                match: true,
+                step: 100,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minVolumeH1Usd'),
+              }),
+              selectField({
+                key: 'patternSensitivity',
+                label: 'Pattern sensitivity',
+                match: true,
+                value: match.patternSensitivity != null ? match.patternSensitivity : (om.patternSensitivity || ''),
+                options: [
+                  { value: '', label: 'Default' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                ],
+              }),
+              numField({
+                key: 'patternMinConfidence',
+                label: 'Min pattern conf',
+                match: true,
+                step: 1,
+                min: 0,
+                max: 100,
+                placeholder: 'default',
+                value: matchValue('patternMinConfidence'),
+              })
+            );
+          }
+          if (p.id === 'momentum_burst') {
+            entryFields.push(
+              numField({
+                key: 'minVolumeM5Usd',
+                label: 'Min Vol M5 $',
+                title: 'Raise to require stronger bursts.',
+                match: true,
+                step: 100,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minVolumeM5Usd'),
+              }),
+              numField({
+                key: 'minBuyPressureUsd',
+                label: 'Min buy pressure $',
+                title: 'Known-only lane gate for recent buy pressure.',
+                match: true,
+                step: 100,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minBuyPressureUsd'),
+              })
+            );
+          }
+          if (p.id === 'dip_buyer') {
+            entryFields.push(
+              numField({
+                key: 'minDropFromPeakPct',
+                label: 'Min drop %',
+                match: true,
+                step: 1,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minDropFromPeakPct'),
+              }),
+              numField({
+                key: 'minPriceChange24hPct',
+                label: 'Min 24h run %',
+                match: true,
+                step: 1,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minPriceChange24hPct'),
+              })
+            );
+          }
+          if (p.id === 'high_win_rate' || p.id === 'smart_money_mirror') {
+            entryFields.push(
+              numField({
+                key: 'minWalletCount',
+                label: 'Min wallets',
+                match: true,
+                step: 1,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minWalletCount'),
+              }),
+              numField({
+                key: 'minWalletQuality',
+                label: 'Min wallet quality',
+                match: true,
+                step: 1,
+                min: 0,
+                max: 100,
+                placeholder: 'default',
+                value: matchValue('minWalletQuality'),
+              }),
+              selectField({
+                key: 'requireCluster',
+                label: 'Require cluster',
+                match: true,
+                kind: 'boolean',
+                value:
+                  match.requireCluster != null
+                    ? String(match.requireCluster)
+                    : om.requireCluster != null
+                      ? String(om.requireCluster)
+                      : '',
+                options: [
+                  { value: '', label: 'Default' },
+                  { value: 'true', label: 'Yes' },
+                  { value: 'false', label: 'No' },
+                ],
+              })
+            );
+          }
+          if (p.id === 'migration_sniper') {
+            entryFields.push(
+              numField({
+                key: 'maxTokenAgeHours',
+                label: 'Max age (h)',
+                match: true,
+                step: 0.25,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('maxTokenAgeHours'),
+              }),
+              numField({
+                key: 'minBuyPressureUsd',
+                label: 'Min buy pressure $',
+                match: true,
+                step: 100,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minBuyPressureUsd'),
+              })
+            );
+          }
+          if (p.id === 'reversal_scalper') {
+            entryFields.push(
+              numField({
+                key: 'minDropFromPeakPct',
+                label: 'Min drop %',
+                match: true,
+                step: 1,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minDropFromPeakPct'),
+              }),
+              numField({
+                key: 'minBuyPressureUsd',
+                label: 'Min buy pressure $',
+                match: true,
+                step: 100,
+                min: 0,
+                placeholder: 'default',
+                value: matchValue('minBuyPressureUsd'),
+              })
+            );
+          }
+          if (p.id === 'smart_money_mirror') {
+            entryFields.push(
+              selectField({
+                key: 'patternSensitivity',
+                label: 'Pattern sensitivity',
+                match: true,
+                value: match.patternSensitivity != null ? match.patternSensitivity : (om.patternSensitivity || ''),
+                options: [
+                  { value: '', label: 'Default' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                ],
+              }),
+              numField({
+                key: 'patternMinConfidence',
+                label: 'Min pattern conf',
+                match: true,
+                step: 1,
+                min: 0,
+                max: 100,
+                placeholder: 'default',
+                value: matchValue('patternMinConfidence'),
+              })
+            );
+          }
+          if (p.id === 'high_win_rate') {
+            qualityFields.push(
+              '<p class="mint text-xs" style="margin:0"><strong style="color:#4ade80">Quality / specialty</strong> Keep cluster and wallet thresholds strict; use the filter below for deeper technical quality gating.</p>'
+            );
+          }
           const params = editable
             ? (
               '<div class="tp-params" data-tp-id="' + escHtml(p.id) + '">' +
-                '<label>TP min %<input type="number" data-k="takeProfitPctMin" step="0.5" value="' + escHtml(String(num(er.takeProfitPctMin, off.takeProfitPctMin))) + '" /></label>' +
-                '<label>TP max %<input type="number" data-k="takeProfitPctMax" step="0.5" value="' + escHtml(String(num(er.takeProfitPctMax != null ? er.takeProfitPctMax : er.takeProfitPct, off.takeProfitPctMax != null ? off.takeProfitPctMax : off.takeProfitPct))) + '" /></label>' +
-                '<label>SL min %<input type="number" data-k="stopLossPctMin" step="0.5" value="' + escHtml(String(num(er.stopLossPctMin != null ? er.stopLossPctMin : er.stopLossPct, off.stopLossPctMin != null ? off.stopLossPctMin : off.stopLossPct))) + '" /></label>' +
-                '<label>SL max %<input type="number" data-k="stopLossPctMax" step="0.5" value="' + escHtml(String(num(er.stopLossPctMax != null ? er.stopLossPctMax : er.stopLossPct, off.stopLossPctMax != null ? off.stopLossPctMax : off.stopLossPct))) + '" /></label>' +
-                '<label>Hold min (s)<input type="number" data-k="hardTimeLimitSecMin" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMin, off.hardTimeLimitSecMin))) + '" /></label>' +
-                '<label>Hold max (s)<input type="number" data-k="hardTimeLimitSecMax" step="5" value="' + escHtml(String(num(er.hardTimeLimitSecMax, off.hardTimeLimitSecMax))) + '" /></label>' +
-                '<label>Size ×<input type="number" data-k="sizeMultiplier" step="0.05" min="0.2" max="2" value="' + escHtml(String(num(er.sizeMultiplier, off.sizeMultiplier != null ? off.sizeMultiplier : 1))) + '" /></label>' +
-                '<label title="Fixed SOL size for every trade on this profile. Overrides Config Base Trade SOL and Size ×. Empty = normal sizing. Still capped by Max Allowed Trade.">Max Trade Override<input type="number" data-k="maxTradeOverrideSol" step="0.01" min="0" max="10" placeholder="default" value="' +
-                  (er.maxTradeOverrideSol != null && Number(er.maxTradeOverrideSol) > 0
-                    ? escHtml(String(er.maxTradeOverrideSol))
-                    : '') +
-                '" /></label>' +
-                '<label title="Trail arms after this unrealized profit %. Empty = catalog default.">Trail arm %<input type="number" data-k="trailingActivationProfit" step="0.5" min="0" placeholder="default" value="' +
-                  (er.trailingActivationProfit != null && Number(er.trailingActivationProfit) > 0
-                    ? escHtml(String(er.trailingActivationProfit))
-                    : off.trailingActivationProfit != null && Number(off.trailingActivationProfit) > 0
-                      ? escHtml(String(off.trailingActivationProfit))
-                      : '') +
-                '" /></label>' +
-                '<label title="Trailing stop % from peak after arm. Empty = catalog default.">Trail %<input type="number" data-k="trailingStopPct" step="0.5" min="0" placeholder="default" value="' +
-                  (er.trailingStopPct != null && Number(er.trailingStopPct) > 0
-                    ? escHtml(String(er.trailingStopPct))
-                    : off.trailingStopPct != null && Number(off.trailingStopPct) > 0
-                      ? escHtml(String(off.trailingStopPct))
-                      : '') +
-                '" /></label>' +
-                '<label title="Scalp fail-drop from peak %. Empty = catalog default (if any). Raise to give trail room.">Fail drop %<input type="number" data-k="momentumFailDropPct" step="0.5" min="0" placeholder="default" value="' +
-                  (er.momentumFailDropPct != null && Number(er.momentumFailDropPct) > 0
-                    ? escHtml(String(er.momentumFailDropPct))
-                    : off.momentumFailDropPct != null && Number(off.momentumFailDropPct) > 0
-                      ? escHtml(String(off.momentumFailDropPct))
-                      : '') +
-                '" /></label>' +
-                '<label title="Raises this profile’s min market cap above Config Min MC. Empty = use global only. Cannot go below the global Risk On floor.">Min MC Override<input type="number" data-k="minMarketCapUsd" data-match="1" step="1000" min="0" placeholder="global" value="' +
-                  (match.minMarketCapUsd != null && Number(match.minMarketCapUsd) > 0
-                    ? escHtml(String(match.minMarketCapUsd))
-                    : om.minMarketCapUsd != null && Number(om.minMarketCapUsd) > 0
-                      ? escHtml(String(om.minMarketCapUsd))
-                      : '') +
-                '" /></label>' +
-                '<label title="Lane max market cap USD. Empty = no lane max (catalog default if any). Scalper often uses a low max.">Max MC $<input type="number" data-k="maxMarketCapUsd" data-match="1" step="1000" min="0" placeholder="default" value="' +
-                  (match.maxMarketCapUsd != null && Number(match.maxMarketCapUsd) > 0
-                    ? escHtml(String(match.maxMarketCapUsd))
-                    : om.maxMarketCapUsd != null && Number(om.maxMarketCapUsd) > 0
-                      ? escHtml(String(om.maxMarketCapUsd))
-                      : '') +
-                '" /></label>' +
-                '<label title="Lane min holders. Empty = catalog default (if any). Known holders only — unknown does not fail the lane.">Min holders<input type="number" data-k="minHolders" data-match="1" step="1" min="0" placeholder="default" value="' +
-                  (match.minHolders != null && Number(match.minHolders) > 0
-                    ? escHtml(String(match.minHolders))
-                    : om.minHolders != null && Number(om.minHolders) > 0
-                      ? escHtml(String(om.minHolders))
-                      : '') +
-                '" /></label>' +
-                '<label title="Lane max top-10 holder %. Empty = no lane top-10 floor (global anti-rug still applies). Known only.">Max Top-10 %<input type="number" data-k="maxTop10HoldPct" data-match="1" step="1" min="0" max="100" placeholder="none" value="' +
-                  (match.maxTop10HoldPct != null && Number(match.maxTop10HoldPct) > 0
-                    ? escHtml(String(match.maxTop10HoldPct))
-                    : om.maxTop10HoldPct != null && Number(om.maxTop10HoldPct) > 0
-                      ? escHtml(String(om.maxTop10HoldPct))
-                      : '') +
-                '" /></label>' +
-                '<label title="Lane min 5m volume USD (Momentum Burst / Scalper). Empty = catalog default. Raise to require stronger bursts.">Min Vol M5 $<input type="number" data-k="minVolumeM5Usd" data-match="1" step="100" min="0" placeholder="default" value="' +
-                  (match.minVolumeM5Usd != null && Number(match.minVolumeM5Usd) > 0
-                    ? escHtml(String(match.minVolumeM5Usd))
-                    : om.minVolumeM5Usd != null && Number(om.minVolumeM5Usd) > 0
-                      ? escHtml(String(om.minVolumeM5Usd))
-                      : '') +
-                '" /></label>' +
-                '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
+                '<div class="tp-param-section">' +
+                  '<p class="tp-param-title">Entry / lane fit</p>' +
+                  '<p class="tp-param-hint">Blank fields fall back to the official profile defaults.</p>' +
+                  entryFields.join('') +
+                '</div>' +
+                '<div class="tp-param-section">' +
+                  '<p class="tp-param-title">Exit &amp; sizing</p>' +
+                  numField({ key: 'takeProfitPctMin', label: 'TP min %', step: 0.5, value: num(er.takeProfitPctMin, off.takeProfitPctMin) }) +
+                  numField({ key: 'takeProfitPctMax', label: 'TP max %', step: 0.5, value: num(er.takeProfitPctMax != null ? er.takeProfitPctMax : er.takeProfitPct, off.takeProfitPctMax != null ? off.takeProfitPctMax : off.takeProfitPct) }) +
+                  numField({ key: 'stopLossPctMin', label: 'SL min %', step: 0.5, value: num(er.stopLossPctMin != null ? er.stopLossPctMin : er.stopLossPct, off.stopLossPctMin != null ? off.stopLossPctMin : off.stopLossPct) }) +
+                  numField({ key: 'stopLossPctMax', label: 'SL max %', step: 0.5, value: num(er.stopLossPctMax != null ? er.stopLossPctMax : er.stopLossPct, off.stopLossPctMax != null ? off.stopLossPctMax : off.stopLossPct) }) +
+                  numField({ key: 'hardTimeLimitSecMin', label: 'Hold min (s)', step: 5, value: num(er.hardTimeLimitSecMin, off.hardTimeLimitSecMin) }) +
+                  numField({ key: 'hardTimeLimitSecMax', label: 'Hold max (s)', step: 5, value: num(er.hardTimeLimitSecMax, off.hardTimeLimitSecMax) }) +
+                  numField({ key: 'sizeMultiplier', label: 'Size ×', step: 0.05, min: 0.2, max: 2, value: num(er.sizeMultiplier, off.sizeMultiplier != null ? off.sizeMultiplier : 1) }) +
+                  numField({ key: 'maxTradeOverrideSol', label: 'Max Trade Override', title: 'Fixed SOL size for every trade on this profile. Overrides Config Base Trade SOL and Size ×. Empty = normal sizing.', step: 0.01, min: 0, max: 10, placeholder: 'default', value: er.maxTradeOverrideSol != null && Number(er.maxTradeOverrideSol) > 0 ? er.maxTradeOverrideSol : '' }) +
+                  numField({ key: 'trailingActivationProfit', label: 'Trail arm %', title: 'Trail arms after this unrealized profit %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingActivationProfit') }) +
+                  numField({ key: 'trailingStopPct', label: 'Trail %', title: 'Trailing stop % from peak after arm. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingStopPct') }) +
+                  numField({ key: 'momentumFailDropPct', label: 'Fail drop %', title: 'Scalp fail-drop from peak %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('momentumFailDropPct') }) +
+                '</div>' +
                 (p.id === 'momentum_burst'
                   ? '<p class="mint text-xs" style="margin:0.35rem 0 0;grid-column:1/-1">1-by-1 tune: conviction → Min Vol M5 → holders/MC → TP max ↓ → Fail drop ↑ → trail arm earlier / Size × ↓. Wait ~15 closes each.</p>'
+                  : '') +
+                (qualityFields.length
+                  ? '<div class="tp-param-section"><p class="tp-param-title">Quality / specialty</p>' + qualityFields.join('') + '</div>'
                   : '') +
                 (p.id === 'high_win_rate'
                   ? (function () {
@@ -7688,9 +8092,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (!root) return;
       const exitRules = {};
       const match = {};
-      root.querySelectorAll('input[data-k]').forEach(function (inp) {
+      root.querySelectorAll('[data-k]').forEach(function (inp) {
         const k = inp.getAttribute('data-k');
+        if (!k) return;
         const raw = inp.value;
+        const kind = inp.getAttribute('data-kind');
+        if (inp.tagName === 'SELECT') {
+          if (kind === 'boolean') {
+            if (raw === '') return;
+            const val = raw === 'true';
+            if (inp.getAttribute('data-match') === '1') match[k] = val;
+            else exitRules[k] = val;
+            return;
+          }
+          if (raw === '' || raw == null) return;
+          if (inp.getAttribute('data-match') === '1') match[k] = raw;
+          else exitRules[k] = raw;
+          return;
+        }
         // Max Trade Override: empty / 0 clears → normal sizing
         if (k === 'maxTradeOverrideSol') {
           const n = raw === '' || raw == null ? 0 : Number(raw);
@@ -7698,13 +8117,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
         }
-        // Min MC / Max MC / Min holders / Max Top-10 / Min Vol M5: empty / 0 clears → catalog / none
+        // Entry/lane numeric overrides: empty / 0 clears → catalog / none
         if (
           k === 'minMarketCapUsd' ||
           k === 'maxMarketCapUsd' ||
+          k === 'minTokenAgeHours' ||
+          k === 'maxTokenAgeHours' ||
           k === 'minHolders' ||
           k === 'maxTop10HoldPct' ||
-          k === 'minVolumeM5Usd'
+          k === 'minVolumeH1Usd' ||
+          k === 'minVolumeM5Usd' ||
+          k === 'minBuyPressureUsd' ||
+          k === 'minDropFromPeakPct' ||
+          k === 'minPriceChange24hPct' ||
+          k === 'minWalletCount' ||
+          k === 'minWalletQuality' ||
+          k === 'patternMinConfidence'
         ) {
           const n = raw === '' || raw == null ? 0 : Number(raw);
           match[k] = Number.isFinite(n) && n > 0 ? n : 0;
@@ -7978,7 +8406,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'config' || name === 'logs' || name === 'backtester');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'config' || name === 'logs' || name === 'backtester');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -7994,7 +8422,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }, 80);
       }
       if (name === 'logs') loadSystemLogs();
-      if (name === 'strategies') loadStrategies();
+      if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
@@ -11309,8 +11737,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       if (!confirm(
-        'Apply ' + ids.length + ' recommendation(s) to live Strategies / filters / Trade Profiles?\\n\\n' +
-        'This persists settings. You can undo by toggling modules back on the Strategies tab.'
+        'Apply ' + ids.length + ' recommendation(s) to live Settings / filters / Trade Profiles?\\n\\n' +
+        'This persists settings. You can undo by toggling modules back on the Settings tab.'
       )) {
         return;
       }
@@ -13263,7 +13691,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           scanSt.textContent = statusText;
         });
         const feedHtml = cands.length === 0
-          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on the Scanner tab or Strategies → Market Scanner (TA).</div>'
+          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on the Scanner tab or Settings → Market Scanner (TA).</div>'
           : cands.slice(0, 25).map(function (c) {
               const migBadge = c.migrated
                 ? '<span class="badge" style="background:#7c3aed;color:#fff;margin-right:0.35rem" title="Migration entry">Migration</span>'
@@ -13413,10 +13841,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       ensurePosHoldTicker();
       tickOpenPositionHolds();
       const overviewPanel = document.querySelector('[data-tab-panel="overview"]');
-      const stratPanel = document.querySelector('[data-tab-panel="strategies"]');
+      const settingsPanel = document.querySelector('[data-tab-panel="settings"]');
+      const microBotsPanel = document.querySelector('[data-tab-panel="microbots"]');
       if (
         (overviewPanel && !overviewPanel.classList.contains('hidden')) ||
-        (stratPanel && !stratPanel.classList.contains('hidden'))
+        (settingsPanel && !settingsPanel.classList.contains('hidden')) ||
+        (microBotsPanel && !microBotsPanel.classList.contains('hidden'))
       ) {
         loadLaneDecisions().catch(function () {});
       }
@@ -17226,11 +17656,15 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (document.visibilityState === 'visible') paintDashboardResetTimer();
     });
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
-    const tabNames = ['overview', 'zion', 'trades', 'wallets', 'signals', 'scanner', 'strategies', 'backtester', 'config', 'logs'];
+    const normalizeTabName = function (name) {
+      return name === 'strategies' ? 'settings' : name;
+    };
+    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'signals', 'scanner', 'settings', 'backtester', 'config', 'logs'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
-    const qsTab = qs && qs.get('tab');
+    const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
-    const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(savedTab) ? savedTab : 'overview');
+    const rememberedTab = normalizeTabName(savedTab);
+    const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(rememberedTab) ? rememberedTab : 'overview');
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
     if (qsOffer) {
       setTimeout(function () { openZionOfferModal(qsOffer); }, 400);
