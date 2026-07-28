@@ -1963,6 +1963,12 @@ export interface BotConfig {
     insufficientFundsCooldownMs: number;
     /** Alert when a full close finishes in profit */
     profitableCloseEnabled: boolean;
+    /** In-app notification bell feed (default ON) */
+    dashboardEnabled: boolean;
+    /** Soft chime when a new Zion trade request arrives (default ON) */
+    tradeRequestSound: boolean;
+    /** Auto-popup Zion trade request cards (default ON) */
+    tradeRequestPopups: boolean;
   };
 
   /**
@@ -2348,6 +2354,9 @@ export const config: BotConfig = {
     insufficientFundsCooldownMs:
       Number(process.env.NOTIFY_INSUFFICIENT_FUNDS_COOLDOWN_MS) || 30 * 60_000,
     profitableCloseEnabled: process.env.NOTIFY_PROFITABLE_CLOSE !== '0',
+    dashboardEnabled: true,
+    tradeRequestSound: true,
+    tradeRequestPopups: true,
   },
 
   zion: {

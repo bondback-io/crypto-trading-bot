@@ -79,12 +79,44 @@ async function main(): Promise<void> {
   // Public Solana RPC 429 retries can hang getSlot for minutes otherwise.
   startServer();
 
+  try {
+    const { getAppVersion } = require('./version') as typeof import('./version');
+    const { maybeNotifyAppVersionUpdate } =
+      require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+    const app = getAppVersion();
+    maybeNotifyAppVersionUpdate(app.label || `v${app.version}`);
+  } catch {
+    /* optional */
+  }
+
   // Never let async RPC/WS work take down the process (Render → 502 crash loop).
   process.on('unhandledRejection', (reason) => {
     console.error('[boot] Unhandled rejection (kept alive):', reason);
+    try {
+      const { pushDashboardNotification } =
+        require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      pushDashboardNotification({
+        kind: 'error',
+        title: 'Unhandled rejection',
+        body: String(reason).slice(0, 200),
+      });
+    } catch {
+      /* optional */
+    }
   });
   process.on('uncaughtException', (err) => {
     console.error('[boot] Uncaught exception (kept alive):', err);
+    try {
+      const { pushDashboardNotification } =
+        require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      pushDashboardNotification({
+        kind: 'error',
+        title: 'System error',
+        body: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
+    } catch {
+      /* optional */
+    }
   });
 
   // Heavy I/O after listen — failures here must not take the process down.

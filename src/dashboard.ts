@@ -3578,10 +3578,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-radius: 0.4rem;
     }
     .settings-menu-wrap {
-      grid-area: settings;
       position: relative;
       flex: 0 0 auto;
       z-index: 40;
+    }
+    .header-tools {
+      grid-area: settings;
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 0.35rem;
+      position: relative;
+      z-index: 45;
     }
     .settings-btn {
       display: inline-flex;
@@ -3618,6 +3625,152 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       width: 1.25rem;
       height: 1.25rem;
       display: block;
+    }
+    .notif-bell-wrap {
+      position: relative;
+      flex: 0 0 auto;
+      align-self: start;
+    }
+    .notif-bell-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.35rem;
+      height: 2.35rem;
+      min-width: 40px;
+      min-height: 40px;
+      padding: 0;
+      border-radius: 0.45rem;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .notif-bell-btn:hover {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .notif-bell-btn[aria-expanded="true"] {
+      border-color: #fbbf24;
+      color: #fde68a;
+      box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.25);
+    }
+    .notif-bell-btn svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      display: block;
+    }
+    .notif-bell-badge {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      min-width: 1rem;
+      height: 1rem;
+      padding: 0 0.25rem;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 0.6rem;
+      font-weight: 700;
+      line-height: 1rem;
+      text-align: center;
+      pointer-events: none;
+    }
+    .notif-bell-badge.is-empty { display: none; }
+    .notif-panel {
+      position: absolute;
+      top: calc(100% + 0.4rem);
+      right: 0;
+      width: min(22rem, calc(100vw - 1.25rem));
+      max-height: min(70vh, 26rem);
+      display: none;
+      flex-direction: column;
+      z-index: 80;
+      border: 1px solid #334155;
+      border-radius: 0.65rem;
+      background: #0b1220;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+      overflow: hidden;
+    }
+    .notif-panel.open { display: flex; }
+    .notif-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.55rem 0.7rem;
+      border-bottom: 1px solid #1e293b;
+      background: #0f172a;
+    }
+    .notif-panel-head strong { font-size: 0.8rem; color: #e2e8f0; }
+    .notif-panel-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .notif-panel-actions button {
+      font-size: 0.65rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 0.35rem;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+    .notif-panel-list {
+      overflow-y: auto;
+      flex: 1 1 auto;
+      padding: 0.25rem 0;
+    }
+    .notif-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid #1e293b;
+      background: transparent;
+      color: inherit;
+      padding: 0.55rem 0.7rem;
+      cursor: default;
+    }
+    .notif-item.is-clickable { cursor: pointer; }
+    .notif-item.is-clickable:hover { background: #111827; }
+    .notif-item.is-unread { background: #0f1c2e; }
+    .notif-item-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .notif-item-title {
+      font-size: 0.75rem;
+      font-weight: 650;
+      color: #e2e8f0;
+      line-height: 1.25;
+    }
+    .notif-item-time {
+      flex: 0 0 auto;
+      font-size: 0.62rem;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    .notif-item-body {
+      margin-top: 0.15rem;
+      font-size: 0.68rem;
+      color: #94a3b8;
+      line-height: 1.35;
+    }
+    .notif-item-kind {
+      display: inline-block;
+      margin-top: 0.25rem;
+      font-size: 0.58rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+    }
+    .notif-empty {
+      padding: 1.1rem 0.8rem;
+      text-align: center;
+      color: #64748b;
+      font-size: 0.75rem;
     }
     .settings-dropdown {
       display: none;
@@ -4102,6 +4255,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <p class="text-slate-500 text-xs sm:text-sm mt-0.5">Pump.fun · migrations · anti-rug · snipers</p>
       </div>
+      <div class="header-tools">
+      <div class="notif-bell-wrap" id="notif-bell-wrap">
+        <button type="button" id="notif-bell-btn" class="notif-bell-btn" aria-haspopup="true" aria-expanded="false" aria-controls="notif-panel" title="Notifications" onclick="toggleNotifPanel(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+          </svg>
+          <span class="sr-only">Notifications</span>
+          <span id="notif-bell-badge" class="notif-bell-badge is-empty">0</span>
+        </button>
+        <div id="notif-panel" class="notif-panel" role="dialog" aria-label="Notifications">
+          <div class="notif-panel-head">
+            <strong>Notifications</strong>
+            <div class="notif-panel-actions">
+              <button type="button" onclick="markAllNotificationsRead()">Mark all read</button>
+              <button type="button" onclick="clearDashboardNotificationsUi()">Clear</button>
+            </div>
+          </div>
+          <div id="notif-panel-list" class="notif-panel-list">
+            <div class="notif-empty">No notifications yet</div>
+          </div>
+        </div>
+      </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
         <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Config, Backtester, and Logs" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -4128,6 +4304,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             Logs
           </button>
         </div>
+      </div>
       </div>
       <div class="header-actions card status-bar">
         <div class="status-meta">
@@ -5905,12 +6082,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, a trade closes in profit, or Zion offers fire. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Without a verified domain, Resend’s onboarding@resend.dev sender can ONLY email the address on your Resend account — verify a domain + set RESEND_FROM to email anyone else. Secrets stay in Render env."></span></div>
         <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
         <div class="grid grid-2 gap-3">
-          <label class="ctl"><span>Enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
+          <label class="ctl"><span>Email alerts enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
           <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="isaacpascua87@gmail.com" placeholder="you@example.com" /></label>
           <label class="ctl"><span>Low equity threshold (SOL)</span><input type="number" id="notify-low-equity-sol" min="0.1" step="0.1" value="1" /></label>
           <label class="ctl"><span>Low equity alert</span><input type="checkbox" id="notify-low-equity" checked /></label>
           <label class="ctl"><span>Insufficient funds alert</span><input type="checkbox" id="notify-insufficient" checked /></label>
           <label class="ctl"><span>Profitable close alert</span><input type="checkbox" id="notify-profit-close" checked /></label>
+        </div>
+        <div class="section-title mt-4" style="font-size:0.85rem">In-app notifications</div>
+        <p class="mint text-xs mb-2">Bell feed in the header, Zion popup sound, and auto trade-request popups. All default ON.</p>
+        <div class="grid grid-2 gap-3">
+          <label class="ctl"><span>Notification bell</span><input type="checkbox" id="notify-dashboard" checked title="Show trade requests, emails, profit closes, and system notes in the header bell" /></label>
+          <label class="ctl"><span>Trade request sound</span><input type="checkbox" id="notify-offer-sound" checked title="Soft chime when a new Zion trade request arrives" /></label>
+          <label class="ctl"><span>Trade request popups</span><input type="checkbox" id="notify-offer-popups" checked title="Auto-open Zion trade request cards while browsing" /></label>
         </div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
           <button type="button" class="btn btn-primary" onclick="saveNotificationsConfig()" title="Save notification preferences">Save Notifications</button>
@@ -5996,6 +6180,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function toggleSettingsMenu(event) {
       if (event) event.stopPropagation();
+      closeNotifPanel();
       const btn = document.getElementById('settings-btn');
       const menu = document.getElementById('settings-dropdown');
       if (!btn || !menu) return;
@@ -6004,13 +6189,225 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
 
+    window.__notifyPrefs = window.__notifyPrefs || {
+      dashboardEnabled: true,
+      tradeRequestSound: true,
+      tradeRequestPopups: true,
+    };
+    let _notifCache = { items: [], unread: 0 };
+    let _notifSeenIds = window._notifSeenIds || new Set();
+    window._notifSeenIds = _notifSeenIds;
+
+    function closeNotifPanel() {
+      const panel = document.getElementById('notif-panel');
+      const btn = document.getElementById('notif-bell-btn');
+      if (panel) panel.classList.remove('open');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleNotifPanel(event) {
+      if (event) event.stopPropagation();
+      closeSettingsMenu();
+      const panel = document.getElementById('notif-panel');
+      const btn = document.getElementById('notif-bell-btn');
+      if (!panel || !btn) return;
+      const open = !panel.classList.contains('open');
+      panel.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        renderNotifPanel();
+        markAllNotificationsRead(true);
+      }
+    }
+    window.toggleNotifPanel = toggleNotifPanel;
+
+    function formatRelativeTime(ts) {
+      const t = Number(ts) || 0;
+      if (!t) return '';
+      const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+      if (sec < 5) return 'just now';
+      if (sec < 60) return sec + ' seconds ago';
+      const min = Math.floor(sec / 60);
+      if (min < 60) return min === 1 ? '1 min ago' : min + ' mins ago';
+      const hr = Math.floor(min / 60);
+      if (hr < 48) return hr === 1 ? '1 hour ago' : hr + ' hours ago';
+      const day = Math.floor(hr / 24);
+      return day === 1 ? '1 day ago' : day + ' days ago';
+    }
+
+    function notifKindLabel(kind) {
+      if (kind === 'trade_request') return 'Trade request';
+      if (kind === 'email') return 'Email';
+      if (kind === 'profit_close') return 'Profit';
+      if (kind === 'version') return 'Update';
+      if (kind === 'error') return 'Error';
+      if (kind === 'system') return 'System';
+      return kind || 'Note';
+    }
+
+    /** Soft two-tone chime via Web Audio (no asset file). */
+    function playTradeRequestChime() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.tradeRequestSound === false) return;
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = playTradeRequestChime._ctx || new Ctx();
+        playTradeRequestChime._ctx = ctx;
+        if (ctx.state === 'suspended') ctx.resume();
+        const now = ctx.currentTime;
+        function tone(freq, start, dur, gain) {
+          const osc = ctx.createOscillator();
+          const g = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          g.gain.setValueAtTime(0.0001, now + start);
+          g.gain.exponentialRampToValueAtTime(gain, now + start + 0.04);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+          osc.connect(g);
+          g.connect(ctx.destination);
+          osc.start(now + start);
+          osc.stop(now + start + dur + 0.02);
+        }
+        tone(523.25, 0, 0.55, 0.045);
+        tone(659.25, 0.18, 0.7, 0.035);
+        tone(783.99, 0.38, 0.85, 0.025);
+      } catch (_) {}
+    }
+    window.playTradeRequestChime = playTradeRequestChime;
+
+    function updateNotifBadge(unread) {
+      const badge = document.getElementById('notif-bell-badge');
+      if (!badge) return;
+      const n = Math.max(0, Number(unread) || 0);
+      if (n <= 0) {
+        badge.textContent = '0';
+        badge.classList.add('is-empty');
+      } else {
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.classList.remove('is-empty');
+      }
+    }
+
+    function renderNotifPanel() {
+      const list = document.getElementById('notif-panel-list');
+      if (!list) return;
+      const items = (_notifCache && _notifCache.items) || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
+        return;
+      }
+      list.innerHTML = items.map(function (n) {
+        const clickable = n.kind === 'trade_request' && n.offerId;
+        return (
+          '<button type="button" class="notif-item' +
+          (n.read ? '' : ' is-unread') +
+          (clickable ? ' is-clickable' : '') +
+          '" data-notif-id="' + escAttr(n.id) + '"' +
+          (clickable ? ' data-offer-id="' + escAttr(n.offerId) + '"' : '') +
+          (clickable ? ' onclick="openNotificationItem(\\'' + escAttr(n.id) + '\\', \\'' + escAttr(n.offerId) + '\\')"' : '') +
+          '>' +
+            '<div class="notif-item-top">' +
+              '<span class="notif-item-title">' + escHtml(n.title || '') + '</span>' +
+              '<span class="notif-item-time">' + escHtml(formatRelativeTime(n.at)) + '</span>' +
+            '</div>' +
+            (n.body ? '<div class="notif-item-body">' + escHtml(n.body) + '</div>' : '') +
+            '<span class="notif-item-kind">' + escHtml(notifKindLabel(n.kind)) + '</span>' +
+          '</button>'
+        );
+      }).join('');
+    }
+
+    async function refreshDashboardNotifications() {
+      try {
+        const data = await fetchJSON('/api/dashboard-notifications?limit=40');
+        if (data.tradeRequestSound != null || data.tradeRequestPopups != null || data.enabled != null) {
+          window.__notifyPrefs = {
+            dashboardEnabled: data.enabled !== false,
+            tradeRequestSound: data.tradeRequestSound !== false,
+            tradeRequestPopups: data.tradeRequestPopups !== false,
+          };
+        }
+        const items = data.items || [];
+        for (let i = 0; i < items.length; i++) {
+          if (items[i] && items[i].id) _notifSeenIds.add(items[i].id);
+        }
+        if (_notifSeenIds.size > 300) {
+          _notifSeenIds = new Set(items.map(function (x) { return x.id; }));
+          window._notifSeenIds = _notifSeenIds;
+        }
+        _notifCache = { items: items, unread: data.unread || 0 };
+        updateNotifBadge(_notifCache.unread);
+        const panel = document.getElementById('notif-panel');
+        if (panel && panel.classList.contains('open')) renderNotifPanel();
+      } catch (_) {}
+    }
+    window.refreshDashboardNotifications = refreshDashboardNotifications;
+
+    async function markAllNotificationsRead(silent) {
+      try {
+        const data = await fetchJSON('/api/dashboard-notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true }),
+        });
+        _notifCache = { items: data.items || _notifCache.items, unread: data.unread || 0 };
+        updateNotifBadge(_notifCache.unread);
+        renderNotifPanel();
+      } catch (err) {
+        if (!silent) alert(err.message || String(err));
+      }
+    }
+    window.markAllNotificationsRead = markAllNotificationsRead;
+
+    async function clearDashboardNotificationsUi() {
+      try {
+        await fetchJSON('/api/dashboard-notifications/clear', { method: 'POST' });
+        _notifCache = { items: [], unread: 0 };
+        updateNotifBadge(0);
+        renderNotifPanel();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.clearDashboardNotificationsUi = clearDashboardNotificationsUi;
+
+    function openNotificationItem(id, offerId) {
+      markDashboardNotificationReadOne(id);
+      closeNotifPanel();
+      if (offerId && typeof openZionOfferModal === 'function') {
+        openZionOfferModal(offerId, null, { auto: false });
+      }
+    }
+    window.openNotificationItem = openNotificationItem;
+
+    async function markDashboardNotificationReadOne(id) {
+      try {
+        const data = await fetchJSON('/api/dashboard-notifications/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id }),
+        });
+        _notifCache = { items: data.items || _notifCache.items, unread: data.unread || 0 };
+        updateNotifBadge(_notifCache.unread);
+      } catch (_) {}
+    }
+
     document.addEventListener('click', (e) => {
       const wrap = document.getElementById('settings-menu-wrap');
       if (!wrap || wrap.contains(e.target)) return;
       closeSettingsMenu();
     });
+    document.addEventListener('click', (e) => {
+      const wrap = document.getElementById('notif-bell-wrap');
+      if (!wrap || wrap.contains(e.target)) return;
+      closeNotifPanel();
+    });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeSettingsMenu();
+      if (e.key === 'Escape') {
+        closeSettingsMenu();
+        closeNotifPanel();
+      }
     });
 
     let _strategiesStatus = null;
@@ -12777,6 +13174,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         fetchJSON('/api/zion').catch(() => null),
       ]);
       try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
+      try { refreshDashboardNotifications(); } catch (_) {}
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
@@ -13549,6 +13947,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setChk('notify-low-equity', n.lowEquityEnabled !== false);
           setChk('notify-insufficient', n.insufficientFundsEnabled !== false);
           setChk('notify-profit-close', n.profitableCloseEnabled !== false);
+          setChk('notify-dashboard', n.dashboardEnabled !== false);
+          setChk('notify-offer-sound', n.tradeRequestSound !== false);
+          setChk('notify-offer-popups', n.tradeRequestPopups !== false);
+          window.__notifyPrefs = {
+            dashboardEnabled: n.dashboardEnabled !== false,
+            tradeRequestSound: n.tradeRequestSound !== false,
+            tradeRequestPopups: n.tradeRequestPopups !== false,
+          };
         }
         const deliveryHint = document.getElementById('notify-delivery-hint');
         if (deliveryHint && cfg.emailDelivery) {
@@ -17206,7 +17612,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
         if (_zionShownOffers.has(o.id)) continue;
         _zionShownOffers.add(o.id);
-        openZionOfferModal(o.id, o, { auto: true });
+        const prefs = window.__notifyPrefs || {};
+        const allowPopup = prefs.tradeRequestPopups !== false;
+        if (allowPopup) {
+          openZionOfferModal(o.id, o, { auto: true });
+        } else if (prefs.tradeRequestSound !== false) {
+          playTradeRequestChime();
+        }
       }
     }
 
@@ -17434,6 +17846,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         applyZionOfferExpiryUi(existing, o);
         layoutZionOfferStack(existing);
         return;
+      }
+      if (opts.auto) {
+        playTradeRequestChime();
       }
 
       const stack = ensureZionStack();
@@ -17889,11 +18304,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             lowEquityEnabled: !!(document.getElementById('notify-low-equity') || {}).checked,
             insufficientFundsEnabled: !!(document.getElementById('notify-insufficient') || {}).checked,
             profitableCloseEnabled: !!(document.getElementById('notify-profit-close') || {}).checked,
+            dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
+            tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+            tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
           }),
         });
+        window.__notifyPrefs = {
+          dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
+          tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+          tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
+        };
         if (status) status.textContent = 'Saved';
         window._cfgLoaded = false;
         refresh();
+        refreshDashboardNotifications();
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
         alert('Save failed: ' + (err.message || String(err)));

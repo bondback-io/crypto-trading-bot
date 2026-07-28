@@ -437,6 +437,24 @@ export function maybeCreateOffer(
     { offerId: offer.id, source: offer.source }
   );
 
+  try {
+    const { pushDashboardNotification } =
+      require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+    pushDashboardNotification({
+      kind: 'trade_request',
+      title: `Trade request · ${offer.symbol}`,
+      body:
+        (offer.reasons || []).slice(0, 2).join(' · ') ||
+        `Score ${offer.score} · ${offer.source}`,
+      offerId: offer.id,
+      mint: offer.mint,
+      symbol: offer.symbol,
+      meta: { score: offer.score, source: offer.source },
+    });
+  } catch {
+    /* optional */
+  }
+
   if (config.zion.notifyEmailOnOffer !== false) {
     void notifyOfferEmail(offer);
   }

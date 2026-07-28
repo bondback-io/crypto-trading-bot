@@ -2747,8 +2747,76 @@ export function createServer(): express.Application {
     if (typeof body.profitableCloseEnabled === 'boolean') {
       n.profitableCloseEnabled = body.profitableCloseEnabled;
     }
+    if (typeof body.dashboardEnabled === 'boolean') {
+      n.dashboardEnabled = body.dashboardEnabled;
+    }
+    if (typeof body.tradeRequestSound === 'boolean') {
+      n.tradeRequestSound = body.tradeRequestSound;
+    }
+    if (typeof body.tradeRequestPopups === 'boolean') {
+      n.tradeRequestPopups = body.tradeRequestPopups;
+    }
     persistUserSettings();
     res.json({ ok: true, notifications: { ...config.notifications } });
+  });
+
+  app.get('/api/dashboard-notifications', (req: Request, res: Response) => {
+    try {
+      const {
+        listDashboardNotifications,
+        isDashboardNotifyEnabled,
+        isTradeRequestSoundEnabled,
+        isTradeRequestPopupEnabled,
+      } = require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
+      const feed = listDashboardNotifications(limit);
+      res.json({
+        ok: true,
+        enabled: isDashboardNotifyEnabled(),
+        tradeRequestSound: isTradeRequestSoundEnabled(),
+        tradeRequestPopups: isTradeRequestPopupEnabled(),
+        ...feed,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/dashboard-notifications/read', (req: Request, res: Response) => {
+    try {
+      const { markDashboardNotificationRead, listDashboardNotifications } =
+        require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      const body = (req.body ?? {}) as { id?: string; all?: boolean };
+      const result = markDashboardNotificationRead(
+        body.all ? undefined : body.id
+      );
+      res.json({
+        ...result,
+        ...listDashboardNotifications(40),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/dashboard-notifications/clear', (_req: Request, res: Response) => {
+    try {
+      const { clearDashboardNotifications } =
+        require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      clearDashboardNotifications();
+      res.json({ ok: true, items: [], unread: 0 });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.post('/api/notifications/test', async (_req: Request, res: Response) => {

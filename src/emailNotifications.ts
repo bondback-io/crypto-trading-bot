@@ -275,6 +275,20 @@ async function sendMail(opts: {
       to,
       provider,
     });
+    try {
+      const {
+        pushDashboardNotification,
+        emailKindLabel,
+      } = require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      pushDashboardNotification({
+        kind: 'email',
+        title: emailKindLabel(opts.kind),
+        body: opts.subject,
+        emailKind: opts.kind,
+      });
+    } catch {
+      /* optional */
+    }
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -283,6 +297,18 @@ async function sendMail(opts: {
       to,
       subject: opts.subject,
     });
+    try {
+      const { pushDashboardNotification } =
+        require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      pushDashboardNotification({
+        kind: 'error',
+        title: 'Email delivery failed',
+        body: message.slice(0, 200),
+        emailKind: opts.kind,
+      });
+    } catch {
+      /* optional */
+    }
     return false;
   }
 }
@@ -387,6 +413,22 @@ export async function notifyProfitableClose(input: {
   const label = input.name
     ? `${input.symbol} (${input.name})`
     : input.symbol || input.mint.slice(0, 8);
+
+  try {
+    const { pushDashboardNotification } =
+      require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+    pushDashboardNotification({
+      kind: 'profit_close',
+      title: `Profit · ${label}`,
+      body: `+${input.pnlSol.toFixed(4)} SOL (${input.pnlPct.toFixed(1)}%) · ${input.reason}`,
+      mint: input.mint,
+      symbol: input.symbol,
+      meta: { pnlSol: input.pnlSol, pnlPct: input.pnlPct },
+    });
+  } catch {
+    /* optional */
+  }
+
   const subject = `[Bot] Profit closed — ${label} ${formatSol(input.pnlSol)} (${input.pnlPct.toFixed(1)}%)`;
   const text = [
     `Closed trade in profit.`,

@@ -99,6 +99,9 @@ export interface PersistedBotSettings {
     insufficientFundsEnabled?: boolean;
     insufficientFundsCooldownMs?: number;
     profitableCloseEnabled?: boolean;
+    dashboardEnabled?: boolean;
+    tradeRequestSound?: boolean;
+    tradeRequestPopups?: boolean;
   };
   marketScanner?: Record<string, unknown>;
   /** Zion micro-bot (KOL scanner + manual trade offers) */
