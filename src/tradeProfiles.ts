@@ -1301,12 +1301,23 @@ function ensureState(): TradeProfileRuntimeState {
     (existing as TradeProfileRuntimeState).autoScoring
   );
 
+  // Preserve per-profile self-learning toggles/versions across ensureState rebuilds
+  const selfLearning =
+    existing.selfLearning && typeof existing.selfLearning === 'object'
+      ? ({
+          ...(existing.selfLearning as NonNullable<
+            TradeProfileRuntimeState['selfLearning']
+          >),
+        } as NonNullable<TradeProfileRuntimeState['selfLearning']>)
+      : undefined;
+
   const state: TradeProfileRuntimeState = {
     enabled,
     smartBotProfiles,
     profiles: profiles as Record<TradeProfileId, boolean>,
     overrides,
     autoScoring,
+    ...(selfLearning ? { selfLearning } : {}),
   };
   writeTradeProfilesState(state);
   return state;

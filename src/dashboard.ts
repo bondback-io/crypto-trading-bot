@@ -2680,6 +2680,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .tp-overview-table tbody tr.is-off {
       opacity: 0.55;
     }
+    .tp-overview-rank {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      color: #94a3b8;
+      min-width: 2.5rem;
+    }
+    .tp-overview-rank.is-first {
+      color: #f2ae66;
+    }
     .tp-overview-name {
       display: flex;
       align-items: center;
@@ -5529,11 +5539,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div class="card mt-4" id="trade-profiles-overview-card">
         <div class="section-title">Trade Profiles Overview</div>
-        <p class="text-xs text-slate-400 mb-3">Quick reference for every profile — what it’s for, style, and recommended Risk Level. Active profiles are highlighted. Tap a row to jump to its controls.</p>
+        <p class="text-xs text-slate-400 mb-3">Live ranking by win rate — Zion is always 1st; micro-bots compete for 2nd–10th. Active profiles are highlighted. Tap a row to jump to its controls.</p>
         <div class="tp-overview-wrap">
           <table class="tp-overview-table" id="trade-profiles-overview">
             <thead>
               <tr>
+                <th scope="col">Rank</th>
                 <th scope="col">Profile</th>
                 <th scope="col">Description</th>
                 <th scope="col">Style</th>
@@ -5545,7 +5556,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               </tr>
             </thead>
             <tbody id="trade-profiles-overview-body">
-              <tr><td colspan="8" class="mint">Loading…</td></tr>
+              <tr><td colspan="9" class="mint">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -7646,9 +7657,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       '<button type="button" class="btn btn-secondary text-xs" style="margin-top:0.35rem" onclick="resetProfileSelfLearning(\\'' + p.id + '\\')">Reset learning</button>' +
                     '</div>'
                   : '') +
-                (p.id === 'momentum_burst'
-                  ? '<p class="mint text-xs" style="margin:0.35rem 0 0;grid-column:1/-1">1-by-1 tune: conviction → Min Vol M5 → holders/MC → TP max ↓ → Fail drop ↑ → trail arm earlier / Size × ↓. Wait ~15 closes each.</p>'
-                  : '') +
                 (qualityFields.length
                   ? '<div class="tp-param-section"><p class="tp-param-title">Quality / specialty</p>' + qualityFields.join('') + '</div>'
                   : '') +
@@ -7736,48 +7744,158 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       const overviewBody = document.getElementById('trade-profiles-overview-body');
       if (overviewBody) {
-        const overviewIds = [
-          'scalper',
-          'dip_buyer',
-          'trend_rider',
-          'migration_sniper',
-          'high_win_rate',
-          'momentum_burst',
-          'steady_compounder',
-          'reversal_scalper',
-          'smart_money_mirror',
-        ];
-        const byId = {};
-        (tp.profiles || []).forEach(function (p) { byId[p.id] = p; });
-        const rows = overviewIds.map(function (id) { return byId[id]; }).filter(Boolean);
-        overviewBody.innerHTML = rows.length
-          ? rows.map(function (p) {
-              const on = p.active;
-              const color = profileColorFor(p.id) || p.color || '#e2e8f0';
-              return (
-                '<tr class="' + (on ? 'is-active' : 'is-off') + '" data-tp-score-id="' + escHtml(p.id) + '" tabindex="0" role="button" ' +
-                  'onclick="focusTradeProfileCard(\\'' + p.id + '\\')" ' +
-                  'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();focusTradeProfileCard(\\'' + p.id + '\\')}" ' +
-                  'title="' + (on ? 'Active — jump to controls' : 'Off — jump to controls') + '">' +
-                  '<td><span class="tp-overview-name" style="color:' + color + '">' +
-                    escHtml(p.icon || '') + ' ' + escHtml(p.name) +
-                    (on ? '<span class="tp-overview-active-tag">on</span>' : '') +
-                  '</span></td>' +
-                  '<td class="tp-overview-desc">' + escHtml(p.description || '') + '</td>' +
-                  '<td class="tp-overview-style">' + escHtml(p.style || '—') + '</td>' +
-                  '<td><span class="tp-overview-risk">' + escHtml(p.recommendedRisk || '—') + '</span></td>' +
-                  '<td class="tp-score-win" data-k="win">—</td>' +
-                  '<td class="tp-score-pnl" data-k="pnl">—</td>' +
-                  '<td class="tp-score-hold" data-k="hold">—</td>' +
-                  '<td class="tp-score-n" data-k="n">—</td>' +
-                '</tr>'
-              );
-            }).join('')
-          : '<tr><td colspan="8" class="mint">No profiles</td></tr>';
+        renderTradeProfilesOverview(tp.profiles || [], window.__tpIntelligence);
         loadTradeProfileIntelligence();
         loadLaneDecisions();
       }
       renderAutoScoringUi(tp);
+    }
+
+    function ordinalRank(n) {
+      const v = Math.max(1, Math.round(Number(n) || 1));
+      const mod100 = v % 100;
+      if (mod100 >= 11 && mod100 <= 13) return v + 'th';
+      const mod10 = v % 10;
+      if (mod10 === 1) return v + 'st';
+      if (mod10 === 2) return v + 'nd';
+      if (mod10 === 3) return v + 'rd';
+      return v + 'th';
+    }
+
+    function scoreboardRowFor(id, intelligence) {
+      const rows =
+        (intelligence &&
+          intelligence.scoreboard &&
+          intelligence.scoreboard.rows) ||
+        [];
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].profileId === id) return rows[i];
+      }
+      return null;
+    }
+
+    function renderTradeProfilesOverview(profiles, intelligence) {
+      const overviewBody = document.getElementById('trade-profiles-overview-body');
+      if (!overviewBody) return;
+      const overviewIds = [
+        'scalper',
+        'dip_buyer',
+        'trend_rider',
+        'migration_sniper',
+        'high_win_rate',
+        'momentum_burst',
+        'steady_compounder',
+        'reversal_scalper',
+        'smart_money_mirror',
+      ];
+      const byId = {};
+      (profiles || []).forEach(function (p) { byId[p.id] = p; });
+      const zionScore = scoreboardRowFor('zion', intelligence);
+      const competitors = overviewIds
+        .map(function (id) { return byId[id]; })
+        .filter(Boolean)
+        .map(function (p) {
+          const r = scoreboardRowFor(p.id, intelligence);
+          return {
+            p: p,
+            r: r,
+            winRatePct: r && r.trades > 0 ? Number(r.winRatePct) || 0 : -1,
+            trades: r ? Number(r.trades) || 0 : 0,
+            netPnlSol: r ? Number(r.netPnlSol) || 0 : 0,
+          };
+        })
+        .sort(function (a, b) {
+          if (b.winRatePct !== a.winRatePct) return b.winRatePct - a.winRatePct;
+          if (b.trades !== a.trades) return b.trades - a.trades;
+          if (b.netPnlSol !== a.netPnlSol) return b.netPnlSol - a.netPnlSol;
+          return String(a.p.name || '').localeCompare(String(b.p.name || ''));
+        })
+        .slice(0, 9);
+
+      function fmtScoreCells(r) {
+        if (!r || !r.trades) {
+          return {
+            win: '—',
+            winColor: '',
+            pnl: '—',
+            pnlColor: '',
+            hold: '—',
+            n: '0',
+          };
+        }
+        return {
+          win: r.winRatePct.toFixed(0) + '%' + (r.stabilized ? ' ✓' : ''),
+          winColor: r.winRatePct >= 50 ? 'var(--green)' : (r.winRatePct < 40 ? '#f87171' : ''),
+          pnl: (r.netPnlSol >= 0 ? '+' : '') + r.netPnlSol.toFixed(4) + ' SOL',
+          pnlColor: r.netPnlSol >= 0 ? 'var(--green)' : '#f87171',
+          hold: fmtHoldSec(r.avgHoldSec),
+          n: String(r.trades),
+        };
+      }
+
+      function rowHtml(opts) {
+        const on = opts.on;
+        const color = opts.color;
+        const sc = fmtScoreCells(opts.r);
+        const rankClass = opts.rank === 1 ? ' is-first' : '';
+        const click =
+          opts.id === 'zion'
+            ? 'showTab(\\'zion\\')'
+            : 'focusTradeProfileCard(\\'' + opts.id + '\\')';
+        return (
+          '<tr class="' + (on ? 'is-active' : 'is-off') + '" data-tp-score-id="' + escHtml(opts.id) + '" tabindex="0" role="button" ' +
+            'onclick="' + click + '" ' +
+            'onkeydown="if(event.key===\\'Enter\\'||event.key===\\' \\'){event.preventDefault();' + click + '}" ' +
+            'title="' + (opts.id === 'zion' ? 'Open Zion tab' : (on ? 'Active — jump to controls' : 'Off — jump to controls')) + '">' +
+            '<td class="tp-overview-rank' + rankClass + '">' + escHtml(ordinalRank(opts.rank)) + '</td>' +
+            '<td><span class="tp-overview-name" style="color:' + color + '">' +
+              escHtml(opts.icon || '') + ' ' + escHtml(opts.name) +
+              (on ? '<span class="tp-overview-active-tag">on</span>' : '') +
+            '</span></td>' +
+            '<td class="tp-overview-desc">' + escHtml(opts.description || '') + '</td>' +
+            '<td class="tp-overview-style">' + escHtml(opts.style || '—') + '</td>' +
+            '<td><span class="tp-overview-risk">' + escHtml(opts.recommendedRisk || '—') + '</span></td>' +
+            '<td class="tp-score-win" data-k="win"' + (sc.winColor ? ' style="color:' + sc.winColor + '"' : '') + '>' + escHtml(sc.win) + '</td>' +
+            '<td class="tp-score-pnl" data-k="pnl"' + (sc.pnlColor ? ' style="color:' + sc.pnlColor + '"' : '') + '>' + escHtml(sc.pnl) + '</td>' +
+            '<td class="tp-score-hold" data-k="hold">' + escHtml(sc.hold) + '</td>' +
+            '<td class="tp-score-n" data-k="n">' + escHtml(sc.n) + '</td>' +
+          '</tr>'
+        );
+      }
+
+      const zionRow = rowHtml({
+        id: 'zion',
+        rank: 1,
+        on: true,
+        color: '#f2ae66',
+        icon: '◈',
+        name: 'Zion',
+        description: 'KOL Token Scanner trade requests — manual approve / place from Zion tab',
+        style: 'KOL / Manual',
+        recommendedRisk: 'Medium / High',
+        r: zionScore,
+      });
+
+      const competitorRows = competitors.map(function (c, idx) {
+        const p = c.p;
+        return rowHtml({
+          id: p.id,
+          rank: idx + 2,
+          on: !!p.active,
+          color: profileColorFor(p.id) || p.color || '#e2e8f0',
+          icon: p.icon,
+          name: p.name,
+          description: p.description || '',
+          style: p.style || '—',
+          recommendedRisk: p.recommendedRisk || '—',
+          r: c.r,
+        });
+      });
+
+      overviewBody.innerHTML =
+        zionRow +
+        competitorRows.join('') ||
+        '<tr><td colspan="9" class="mint">No profiles</td></tr>';
     }
 
     function fmtHoldSec(sec) {
@@ -7845,33 +7963,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const data = await fetchJSON('/api/trade-profiles/intelligence');
         window.__tpIntelligence = data;
         const rows = (data.scoreboard && data.scoreboard.rows) || [];
-        const byId = {};
-        rows.forEach(function (r) { byId[r.profileId] = r; });
-        document.querySelectorAll('#trade-profiles-overview-body tr[data-tp-score-id]').forEach(function (tr) {
-          const id = tr.getAttribute('data-tp-score-id');
-          const r = byId[id];
-          const winEl = tr.querySelector('[data-k="win"]');
-          const pnlEl = tr.querySelector('[data-k="pnl"]');
-          const holdEl = tr.querySelector('[data-k="hold"]');
-          const nEl = tr.querySelector('[data-k="n"]');
-          if (!r || r.trades === 0) {
-            if (winEl) winEl.textContent = '—';
-            if (pnlEl) pnlEl.textContent = '—';
-            if (holdEl) holdEl.textContent = '—';
-            if (nEl) nEl.textContent = '0';
-            return;
-          }
-          if (winEl) {
-            winEl.textContent = r.winRatePct.toFixed(0) + '%' + (r.stabilized ? ' ✓' : '');
-            winEl.style.color = r.winRatePct >= 50 ? 'var(--green)' : (r.winRatePct < 40 ? '#f87171' : '');
-          }
-          if (pnlEl) {
-            pnlEl.textContent = (r.netPnlSol >= 0 ? '+' : '') + r.netPnlSol.toFixed(4) + ' SOL';
-            pnlEl.style.color = r.netPnlSol >= 0 ? 'var(--green)' : '#f87171';
-          }
-          if (holdEl) holdEl.textContent = fmtHoldSec(r.avgHoldSec);
-          if (nEl) nEl.textContent = String(r.trades);
-        });
+        const profiles =
+          (window.__tradeProfilesStatus && window.__tradeProfilesStatus.profiles) ||
+          [];
+        renderTradeProfilesOverview(profiles, data);
         if (detail) {
           const mixBits = rows.filter(function (r) { return r.trades > 0; }).slice(0, 4).map(function (r) {
             const top = (r.exitMix || []).slice(0, 3).map(function (m) {
@@ -7883,7 +7978,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             ? '<strong class="text-slate-300">Exit mix</strong> · ' + mixBits.join(' · ')
             : 'Scoreboard fills after closed trades (need ~' +
               ((data.scoreboard && data.scoreboard.minSampleForStabilize) || 12) +
-              ' per profile to stabilize).';
+              ' per profile to stabilize). Ranked live by win % — Zion stays 1st.';
         }
         if (panel) {
           const suggestions = data.suggestions || [];
