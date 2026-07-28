@@ -833,6 +833,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #64748b;
     }
     .strat-adv-pack[open] > summary::after { content: 'Hide'; }
+    #module-tune-card {
+      margin-top: 0.75rem;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+      border-radius: 0.65rem;
+      padding: 0.75rem;
+    }
+    #module-tune-card > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      user-select: none;
+    }
+    #module-tune-card > summary::-webkit-details-marker { display: none; }
+    #module-tune-card .module-tune-summary-main {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-width: 0;
+    }
+    #module-tune-card .module-tune-chevron {
+      display: inline-block;
+      font-size: 0.65rem;
+      color: #94a3b8;
+      transition: transform 0.15s ease;
+    }
+    #module-tune-card[open] .module-tune-chevron {
+      transform: rotate(90deg);
+      color: #34d399;
+    }
+    #module-tune-card[open] .module-tune-summary-main .mint {
+      display: none;
+    }
+    #module-tune-card .module-tune-body {
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #1e293b;
+    }
     .strat-adv-pack .strat-adv-body {
       padding: 0 .75rem .75rem;
       border-top: 1px solid #1e293b;
