@@ -1784,6 +1784,17 @@ export function updateTradeProfileParams(
     modules: Object.keys(nextModules).length > 0 ? nextModules : undefined,
   };
   persistUserSettings();
+  try {
+    const { appendLearningSave } =
+      require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+    appendLearningSave({
+      profileId: id,
+      kind: 'knobs',
+      summary: 'Saved trade profile exit/match knobs',
+    });
+  } catch {
+    /* optional */
+  }
   console.log(`[trade-profiles] Updated params for ${id}`);
   return getTradeProfilesStatus();
 }
@@ -3679,7 +3690,11 @@ export function getProfileSelfLearning(
 
 function writeProfileSelfLearning(
   profileId: TradeProfileId,
-  sl: import('./profileSelfLearning').ProfileSelfLearningState
+  sl: import('./profileSelfLearning').ProfileSelfLearningState,
+  log?: {
+    kind: import('./profileLearningSaveLog').LearningSaveKind;
+    summary: string;
+  }
 ): void {
   const state = ensureState();
   if (!state.selfLearning) state.selfLearning = {};
@@ -3691,6 +3706,20 @@ function writeProfileSelfLearning(
     saveTradeProfilesUserState(serializeTradeProfilesForPersist());
   } catch {
     /* optional second write */
+  }
+  if (log) {
+    try {
+      const { appendLearningSave } =
+        require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+      appendLearningSave({
+        profileId,
+        kind: log.kind,
+        summary: log.summary,
+        version: sl.version,
+      });
+    } catch {
+      /* optional journal */
+    }
   }
 }
 
@@ -3785,7 +3814,10 @@ export function setProfileSelfLearningEnabled(
     enabled: Boolean(enabled),
     mode: mode === 'auto' ? 'auto' : prev.mode || 'shadow',
   });
-  writeProfileSelfLearning(id, next);
+  writeProfileSelfLearning(id, next, {
+    kind: 'toggle',
+    summary: `Self-learning ${next.enabled ? 'ON' : 'OFF'} (${next.mode})`,
+  });
   console.log(
     `[self-learn] ${id} ${next.enabled ? 'ON' : 'OFF'} mode=${next.mode}`
   );
@@ -3809,7 +3841,10 @@ export function setProfileSelfLearningMinTrades(
     ...prev,
     minTrades: Math.max(6, Math.min(40, Math.round(Number(minTrades) || 8))),
   });
-  writeProfileSelfLearning(id, next);
+  writeProfileSelfLearning(id, next, {
+    kind: 'min_trades',
+    summary: `Min trades set to ${next.minTrades}`,
+  });
   return getTradeProfilesStatus();
 }
 
@@ -3834,7 +3869,17 @@ export function applyProfileSelfLearnProposal(
       match?: Record<string, number | boolean>;
     },
   });
-  writeProfileSelfLearning(id, applySelfLearnUpgrade(sl, proposal, prevOv));
+  writeProfileSelfLearning(
+    id,
+    applySelfLearnUpgrade(sl, proposal, prevOv),
+    {
+      kind: 'upgrade',
+      summary: String(proposal.summary || 'Applied self-learn upgrade').slice(
+        0,
+        200
+      ),
+    }
+  );
   return getTradeProfilesStatus();
 }
 
@@ -3871,6 +3916,12 @@ export function resetProfileSelfLearning(
   writeProfileSelfLearning(id, {
     ...DEFAULT_SELF_LEARNING,
     history: [],
+  }, {
+    kind: 'reset',
+    summary:
+      'Reset learning' +
+      (opts?.wipeEpisodes ? ' + wiped episodes' : '') +
+      (opts?.resetParams ? ' + cleared params' : ''),
   });
   return getTradeProfilesStatus();
 }
@@ -3915,8 +3966,10 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
     sl.previousOverrideSnapshot = null;
     sl.tradesSinceUpgrade = 0;
     console.log(`[self-learn] ${id} rolled back to v${sl.version}`);
-    writeProfileSelfLearning(id, sl);
-    persistUserSettings();
+    writeProfileSelfLearning(id, sl, {
+      kind: 'reset',
+      summary: `Rolled back to v${sl.version}`,
+    });
     return;
   }
 
@@ -3936,6 +3989,13 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
     console.log(
       `[self-learn] ${id} auto-upgraded to v${sl.version}: ${sl.history[sl.history.length - 1]?.summary || ''}`
     );
+    writeProfileSelfLearning(id, sl, {
+      kind: 'upgrade',
+      summary:
+        sl.history[sl.history.length - 1]?.summary ||
+        `Auto-upgraded to v${sl.version}`,
+    });
+    return;
   }
 
   writeProfileSelfLearning(id, sl);

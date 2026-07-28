@@ -171,7 +171,7 @@ export function loadPersistedSettings(): PersistedBotSettings | null {
   }
 }
 
-export function savePersistedSettings(settings: PersistedBotSettings): void {
+export function savePersistedSettings(settings: PersistedBotSettings): boolean {
   try {
     ensureDataDir();
     ensureMigrated();
@@ -181,11 +181,13 @@ export function savePersistedSettings(settings: PersistedBotSettings): void {
       updatedAt: Date.now(),
     };
     atomicWriteJson(SETTINGS_FILE, payload);
+    return true;
   } catch (err) {
     console.error(
       '[settings] Failed to save config.json:',
       err instanceof Error ? err.message : err
     );
+    return false;
   }
 }
 

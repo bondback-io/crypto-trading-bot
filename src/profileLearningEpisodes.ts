@@ -173,6 +173,22 @@ export function appendProfileLearningEpisode(
     cache.set(profileId, ring);
   }
   persistProfile(profileId);
+  try {
+    const { appendLearningSave } =
+      require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+    const ring = cache.get(profileId) || [];
+    appendLearningSave({
+      profileId,
+      kind: 'episode',
+      summary: `Closed trade episode · ${row.symbol || row.mint.slice(0, 8)} · ${
+        Number.isFinite(row.pnlPct) ? `${row.pnlPct.toFixed(1)}%` : 'n/a'
+      } · ${row.exitKey}`,
+      episodeCount: ring.length,
+      version: row.paramVersion,
+    });
+  } catch {
+    /* optional journal */
+  }
   return row;
 }
 

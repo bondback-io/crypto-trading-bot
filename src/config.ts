@@ -2593,8 +2593,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
 }
 
 /** Persist current tunable settings without touching wallets or secrets. */
-export function persistUserSettings(): void {
-  savePersistedSettings(buildPersistedSettingsSnapshot());
+export function persistUserSettings(): boolean {
+  const ok = savePersistedSettings(buildPersistedSettingsSnapshot());
   try {
     const { serializeTradeProfilesForPersist } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -2604,6 +2604,7 @@ export function persistUserSettings(): void {
   } catch {
     /* tradeProfiles may not be ready during early bootstrap */
   }
+  return ok;
 }
 
 function cloneJson<T>(v: T): T {

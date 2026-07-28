@@ -6162,9 +6162,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, trade-profile knobs, and learning episodes are saved as JSON under DATA_DIR. Survives code updates when a disk is mounted."></span></div>
         <div class="mint text-sm mb-2" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
         <div id="persist-status-detail" class="text-xs mb-3" style="line-height:1.55;color:#94a3b8">Checking data directory…</div>
-        <div class="flex flex-wrap gap-2 items-center">
+        <div class="flex flex-wrap gap-2 items-center mb-4">
           <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
           <span class="mint text-xs" id="persist-reset-msg"></span>
+        </div>
+        <div class="section-title mt-2" style="font-size:0.85rem">Micro Bots Self-Learning Data</div>
+        <p class="mint text-xs mb-2">Health of durable knobs + episode files. If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
+        <div id="learning-health-status" class="text-xs mb-2" style="line-height:1.5;color:#94a3b8">Checking learning health…</div>
+        <div class="overflow-x-auto mb-2">
+          <table class="w-full text-xs" id="learning-saves-table" style="border-collapse:collapse">
+            <thead>
+              <tr style="color:#94a3b8;text-align:left;border-bottom:1px solid #334155">
+                <th style="padding:0.35rem 0.4rem">When</th>
+                <th style="padding:0.35rem 0.4rem">Bot</th>
+                <th style="padding:0.35rem 0.4rem">Kind</th>
+                <th style="padding:0.35rem 0.4rem">Summary</th>
+              </tr>
+            </thead>
+            <tbody id="learning-saves-body">
+              <tr><td colspan="4" class="mint" style="padding:0.5rem 0.4rem">No saves yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-secondary text-xs" id="learning-saves-more" onclick="loadMoreLearningSaves()" style="display:none">Load 10 more</button>
+          <button type="button" class="btn btn-secondary text-xs" onclick="exportLearningData('json')" title="Download learning knobs, save journal, and recent episodes">Export JSON</button>
+          <button type="button" class="btn btn-secondary text-xs" onclick="exportLearningData('csv')" title="Download save journal + bot summary as CSV">Export CSV</button>
+          <span class="mint text-xs" id="learning-export-status"></span>
         </div>
       </div>
     </section>
@@ -13294,9 +13318,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             '<br>config.json: ' + (p.settingsExists ? 'yes' : 'MISSING') +
             ' · trade-profiles-user.json: ' + (p.tradeProfilesUserExists ? 'yes' : 'none yet') +
             ' · learning episodes: ' + (p.profileLearningExists ? 'yes' : 'none') +
-            '<br>Last saved: ' + last;
+            '<br>Last saved: ' + last +
+            '<br><span style="color:#64748b">Email, micro-bot knobs, and learning episodes all share this DATA_DIR — if email resets on deploy, learning will too until a disk/volume is mounted.</span>';
         }
       }
+      try { refreshLearningHealth({ reset: true }); } catch (_) {}
 
       const runWrap = document.getElementById('run-status');
       const dot = document.getElementById('status-dot');
@@ -18302,12 +18328,175 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         window._cfgLoaded = false;
         refresh();
         refreshDashboardNotifications();
+        try { refreshLearningHealth({ reset: true }); } catch (_) {}
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
         alert('Save failed: ' + (err.message || String(err)));
       }
     }
     window.saveNotificationsConfig = saveNotificationsConfig;
+
+    window.__learningSavesOffset = 0;
+    window.__learningSavesRows = [];
+
+    function learningHealthColor(health) {
+      if (health === 'ok') return '#4ade80';
+      if (health === 'degraded') return '#fbbf24';
+      return '#f87171';
+    }
+
+    function learningKindLabel(kind) {
+      const map = {
+        knobs: 'Knobs',
+        episode: 'Episode',
+        upgrade: 'Upgrade',
+        toggle: 'Toggle',
+        reset: 'Reset',
+        min_trades: 'Min trades',
+      };
+      return map[kind] || kind || '—';
+    }
+
+    function renderLearningSavesRows(rows) {
+      const body = document.getElementById('learning-saves-body');
+      if (!body) return;
+      if (!rows || !rows.length) {
+        body.innerHTML =
+          '<tr><td colspan="4" class="mint" style="padding:0.5rem 0.4rem">No saves recorded yet — toggle learning or close a trade to create the first entry.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows
+        .map(function (r) {
+          return (
+            '<tr style="border-bottom:1px solid #1e293b">' +
+              '<td style="padding:0.35rem 0.4rem;white-space:nowrap;color:#94a3b8">' +
+                escHtml(r.at ? new Date(r.at).toLocaleString() : '—') +
+              '</td>' +
+              '<td style="padding:0.35rem 0.4rem;color:#e2e8f0">' +
+                escHtml(r.botName || r.profileId || '—') +
+              '</td>' +
+              '<td style="padding:0.35rem 0.4rem;color:#94a3b8">' +
+                escHtml(learningKindLabel(r.kind)) +
+              '</td>' +
+              '<td style="padding:0.35rem 0.4rem;color:#cbd5e1">' +
+                escHtml(r.summary || '') +
+              '</td>' +
+            '</tr>'
+          );
+        })
+        .join('');
+    }
+
+    async function refreshLearningHealth(opts) {
+      const statusEl = document.getElementById('learning-health-status');
+      const moreBtn = document.getElementById('learning-saves-more');
+      const reset = !opts || opts.reset !== false;
+      if (reset) {
+        window.__learningSavesOffset = 0;
+        window.__learningSavesRows = [];
+      }
+      const offset = window.__learningSavesOffset || 0;
+      try {
+        const data = await fetchJSON(
+          '/api/microbots/learning-health?offset=' +
+            offset +
+            '&limit=10'
+        );
+        if (statusEl && data) {
+          const color = learningHealthColor(data.health);
+          const label =
+            data.health === 'ok'
+              ? 'Healthy'
+              : data.health === 'degraded'
+                ? 'Degraded'
+                : 'At risk';
+          const last =
+            data.lastSaveAt != null
+              ? new Date(data.lastSaveAt).toLocaleString()
+              : '—';
+          const userAt =
+            data.userFileUpdatedAt != null
+              ? new Date(data.userFileUpdatedAt).toLocaleString()
+              : '—';
+          statusEl.innerHTML =
+            '<span style="color:' +
+            color +
+            ';font-weight:650">' +
+            label +
+            '</span> — ' +
+            escHtml(data.reason || '') +
+            '<br>Learning ON: ' +
+            (data.learningOnCount || 0) +
+            ' · Bots with episodes: ' +
+            (data.profilesWithEpisodes || 0) +
+            ' · Total episodes: ' +
+            (data.totalEpisodes || 0) +
+            '<br>User knobs file: ' +
+            userAt +
+            ' · Last journal save: ' +
+            last;
+        }
+        const page = (data && data.saves && data.saves.items) || [];
+        if (reset) window.__learningSavesRows = page.slice();
+        else
+          window.__learningSavesRows = (window.__learningSavesRows || []).concat(
+            page
+          );
+        renderLearningSavesRows(window.__learningSavesRows);
+        const hasMore = !!(data && data.saves && data.saves.hasMore);
+        window.__learningSavesOffset =
+          (window.__learningSavesRows && window.__learningSavesRows.length) || 0;
+        if (moreBtn) moreBtn.style.display = hasMore ? '' : 'none';
+      } catch (err) {
+        if (statusEl)
+          statusEl.textContent =
+            'Learning health unavailable: ' + (err.message || String(err));
+      }
+    }
+    window.refreshLearningHealth = refreshLearningHealth;
+
+    async function loadMoreLearningSaves() {
+      await refreshLearningHealth({ reset: false });
+    }
+    window.loadMoreLearningSaves = loadMoreLearningSaves;
+
+    async function exportLearningData(format) {
+      const status = document.getElementById('learning-export-status');
+      try {
+        if (status) status.textContent = 'Exporting…';
+        const res = await fetch(
+          '/api/microbots/learning-export?format=' +
+            encodeURIComponent(format === 'csv' ? 'csv' : 'json')
+        );
+        if (!res.ok) {
+          let msg = 'Export failed';
+          try {
+            const j = await res.json();
+            if (j && j.error) msg = j.error;
+          } catch (_) {}
+          throw new Error(msg);
+        }
+        const blob = await res.blob();
+        const disp = res.headers.get('Content-Disposition') || '';
+        const m = /filename="?([^"]+)"?/i.exec(disp);
+        const filename =
+          (m && m[1]) ||
+          'microbot-learning.' + (format === 'csv' ? 'csv' : 'json');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (status) status.textContent = 'Downloaded ' + filename;
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Export failed: ' + (err.message || String(err)));
+      }
+    }
+    window.exportLearningData = exportLearningData;
 
     async function testNotificationEmail() {
       const status = document.getElementById('notify-status');

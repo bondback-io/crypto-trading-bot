@@ -240,6 +240,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.tradingWallets,
     PERSIST_FILES.dashboardState,
     PERSIST_FILES.tradeProfilesUser,
+    'profile-learning-saves.json',
   ];
   const deleted: string[] = [];
   for (const name of names) {
@@ -351,13 +352,13 @@ export function getPersistenceStatus(): PersistenceStatus {
   } else if (onFly && (!settingsExists || !walletsExists)) {
     warning =
       'Fly.io: mount a persistent volume at /data (fly.toml mounts.bot_data) and set DATA_DIR=/data. ' +
-      'Without a volume, settings and wallets reset on every deploy. ' +
+      'Without a volume, settings, notification email, micro-bot knobs, and learning episodes reset on every deploy. ' +
       'Create with: fly volumes create bot_data --region <region> --size 1';
   } else if (onRender && (!settingsExists || !walletsExists)) {
     warning =
       'Render Free has no persistent disk — the filesystem resets on every deploy and after idle spin-down. ' +
-      'Upgrade to Starter (or higher), add a 1GB disk mounted at /opt/render/project/src/data, then re-import wallets and save settings. ' +
-      'This is not a free-tier API limit; it is ephemeral storage.';
+      'Email, micro-bot knobs, and learning episodes all live under DATA_DIR and will wipe together. ' +
+      'Upgrade to Starter (or higher), add a 1GB disk mounted at /opt/render/project/src/data, then re-import wallets and save settings.';
   }
 
   return {

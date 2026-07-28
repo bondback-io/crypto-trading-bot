@@ -335,6 +335,47 @@ export function createServer(): express.Application {
     res.json(getPersistenceStatus());
   });
 
+  app.get('/api/microbots/learning-health', (req: Request, res: Response) => {
+    try {
+      const { getLearningHealthSummary } =
+        require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+      const offset = Number(req.query.offset) || 0;
+      const limit = Number(req.query.limit) || 10;
+      res.json({
+        ok: true,
+        ...getLearningHealthSummary({ offset, limit }),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/microbots/learning-export', (req: Request, res: Response) => {
+    try {
+      const { exportLearningBundle } =
+        require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+      const format =
+        String(req.query.format || 'json').toLowerCase() === 'csv'
+          ? 'csv'
+          : 'json';
+      const bundle = exportLearningBundle(format);
+      res.setHeader('Content-Type', bundle.contentType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${bundle.filename}"`
+      );
+      res.send(bundle.body);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/rpc', (_req: Request, res: Response) => {
     res.json({
       ...getRpcStats(),
@@ -2756,7 +2797,16 @@ export function createServer(): express.Application {
     if (typeof body.tradeRequestPopups === 'boolean') {
       n.tradeRequestPopups = body.tradeRequestPopups;
     }
-    persistUserSettings();
+    const ok = persistUserSettings();
+    if (!ok) {
+      res.status(500).json({
+        ok: false,
+        error:
+          'Failed to write config.json — check DATA_DIR is writable. In-memory values updated but may not survive restart.',
+        notifications: { ...config.notifications },
+      });
+      return;
+    }
     res.json({ ok: true, notifications: { ...config.notifications } });
   });
 
