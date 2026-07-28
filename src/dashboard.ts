@@ -5383,13 +5383,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="strategy-control-head-main">
             <div class="section-title">Strategy Control Center</div>
             <div class="strategy-io-btns">
-              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade Override/Min MC Override/Max MC) as JSON">Export JSON</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade/trail/fail-drop, Min MC/Max MC/holders/Top-10/Min Vol M5/conviction, Smart Bot) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
-              <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to the baked 2026-07-27 defaults (with trade profile overrides). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetStrategyModulesToDefaults()" title="Reset all strategy modules + Trade Profiles to the baked 2026-07-28 defaults (with trade profile overrides). Does not wipe wallets or paper.">Reset Strategy (Defaults)</button>
               <input type="file" id="strategy-import-file" accept=".json,application/json" style="display:none" onchange="importStrategyModulesJson(event)" />
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
-            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. With Smart Bot ON, each Trade Profile’s modules + Min MC Override / Max MC drive which lane can take a token.</p>
+            <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. With Smart Bot ON, each Trade Profile’s modules + lane floors (MC / holders / Top-10 / Min Vol M5 / conviction) drive which lane can take a token.</p>
           </div>
           <div class="strategy-control-head-meta">
             <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" title="Hover to see which modules are ON">—</div>
@@ -7826,7 +7826,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         setStrategyIoStatus('Choose a .json file first', 'err');
         return;
       }
-        if (!confirm('Import strategy modules + Trade Profiles from\\n' + file.name + '?\\n\\nThis applies module toggles, internal settings, and Trade Profile params (TP/SL/hold/Size ×/Max Trade Override/Min MC Override/Max MC, Smart Bot, etc.) from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
+        if (!confirm('Import strategy modules + Trade Profiles from\\n' + file.name + '?\\n\\nThis applies module toggles, internal settings, and Trade Profile params (TP/SL/hold/Size ×/Max Trade/trail/fail-drop, Min MC/Max MC/holders/Top-10/Min Vol M5/conviction, Smart Bot, etc.) from the file. Risk Level field is set without re-running risk presets (so imported knobs are kept).')) {
         input.value = '';
         return;
       }
@@ -7870,7 +7870,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     async function resetStrategyModulesToDefaults() {
       if (!confirm(
-        'Reset Strategy to baked defaults (2026-07-27 with Trade Profiles)?\\n\\n' +
+        'Reset Strategy to baked defaults (2026-07-28 MB + lane floors)?\\n\\n' +
         'Restores strategy modules, filters, scalp engines, and Trade Profile overrides from the shipped default export.\\n\\n' +
         'Does NOT wipe wallets, paper balance, or Overview session.\\n\\nContinue?'
       )) return;

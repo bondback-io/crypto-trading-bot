@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "kind": "strategy-modules",
-  "defaultsId": "2026-07-27-with-trade-profiles",
-  "exportedAt": "2026-07-27T09:41:50.305Z",
+  "defaultsId": "2026-07-28-mb-lane-floors",
+  "exportedAt": "2026-07-28T08:00:00.000Z",
   "riskLevel": "on",
   "strategyRecipeMode": "custom",
   "strategyRecipeRiskLevel": "on",
@@ -992,17 +992,21 @@
       },
       "momentum_burst": {
         "exitRules": {
-          "takeProfitPctMin": 22,
+          "takeProfitPctMin": 28,
           "takeProfitPctMax": 45,
           "stopLossPctMin": 10,
           "stopLossPctMax": 14,
           "hardTimeLimitSecMin": 140,
           "hardTimeLimitSecMax": 420,
+          "trailingStopPct": 9,
+          "trailingActivationProfit": 10,
+          "momentumFailDropPct": 6,
           "sizeMultiplier": 0.9,
           "maxTradeOverrideSol": 0.5
         },
         "match": {
-          "minConviction": 40
+          "minConviction": 50,
+          "minVolumeM5Usd": 6000
         }
       }
     },
@@ -1600,17 +1604,21 @@
         },
         "momentum_burst": {
           "exitRules": {
-            "takeProfitPctMin": 22,
+            "takeProfitPctMin": 28,
             "takeProfitPctMax": 45,
             "stopLossPctMin": 10,
             "stopLossPctMax": 14,
             "hardTimeLimitSecMin": 140,
             "hardTimeLimitSecMax": 420,
+            "trailingStopPct": 9,
+            "trailingActivationProfit": 10,
+            "momentumFailDropPct": 6,
             "sizeMultiplier": 0.9,
             "maxTradeOverrideSol": 0.5
           },
           "match": {
-            "minConviction": 40
+            "minConviction": 50,
+            "minVolumeM5Usd": 6000
           }
         }
       },
