@@ -3862,6 +3862,114 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         padding-right: 0.7rem;
       }
     }
+    /* Micro Bots — brushed steel / arena-bot hover (Battle Bots · Real Steel vibe) */
+    .nav-tabs .btn.nav-tab-microbots {
+      position: relative;
+      isolation: isolate;
+      overflow: hidden;
+      background: linear-gradient(180deg, #2a3548 0%, #1a2332 55%, #151c28 100%);
+      color: #cbd5e1;
+      border: 1px solid #475569;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+      transition:
+        color 0.2s ease,
+        border-color 0.2s ease,
+        box-shadow 0.25s ease,
+        transform 0.2s ease;
+    }
+    .nav-tabs .btn.nav-tab-microbots::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: 0.55;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          112deg,
+          rgba(255, 255, 255, 0.045) 0 1px,
+          transparent 1px 3px
+        ),
+        linear-gradient(
+          165deg,
+          #5b6b7f 0%,
+          #2d3748 28%,
+          #111827 52%,
+          #3f4f63 78%,
+          #94a3b8 100%
+        );
+      transition: opacity 0.25s ease, filter 0.25s ease;
+    }
+    .nav-tabs .btn.nav-tab-microbots::after {
+      content: '';
+      position: absolute;
+      inset: -40% -20%;
+      z-index: -1;
+      opacity: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 22% 35%, rgba(52, 211, 153, 0.38), transparent 38%),
+        radial-gradient(circle at 78% 70%, rgba(251, 146, 60, 0.28), transparent 42%),
+        radial-gradient(circle at 55% 10%, rgba(148, 163, 184, 0.35), transparent 35%);
+      transition: opacity 0.25s ease, transform 0.35s ease;
+    }
+    .nav-tabs .btn.nav-tab-microbots:hover {
+      color: #f8fafc;
+      border-color: #94a3b8;
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.45),
+        0 0 0 1px rgba(52, 211, 153, 0.22),
+        0 8px 18px rgba(15, 23, 42, 0.55),
+        0 0 16px rgba(52, 211, 153, 0.18),
+        0 0 10px rgba(251, 146, 60, 0.12);
+      text-shadow:
+        0 0 10px rgba(52, 211, 153, 0.45),
+        0 1px 0 rgba(0, 0, 0, 0.55);
+    }
+    .nav-tabs .btn.nav-tab-microbots:hover::before {
+      opacity: 1;
+      filter: contrast(1.08) brightness(1.08);
+    }
+    .nav-tabs .btn.nav-tab-microbots:hover::after {
+      opacity: 1;
+      transform: translateX(6%) rotate(2deg);
+    }
+    .nav-tabs .btn.nav-tab-microbots-active {
+      color: #ecfdf5;
+      border-color: #34d399;
+      background: linear-gradient(180deg, #3f4f63 0%, #1e293b 45%, #0f172a 100%);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(52, 211, 153, 0.35),
+        0 8px 18px rgba(16, 185, 129, 0.22);
+      text-shadow: 0 0 8px rgba(52, 211, 153, 0.35);
+    }
+    .nav-tabs .btn.nav-tab-microbots-active::before {
+      opacity: 0.9;
+    }
+    .nav-tabs .btn.nav-tab-microbots-active::after {
+      opacity: 0.75;
+    }
+    .nav-tabs .btn.nav-tab-microbots .btn-label-full::before,
+    .nav-tabs .btn.nav-tab-microbots .btn-label-short::before {
+      content: '⚙ ';
+      opacity: 0.85;
+      font-weight: 400;
+    }
+    @media (max-width: 640px) {
+      .nav-tabs .btn.nav-tab-microbots {
+        padding-left: 0.7rem;
+        padding-right: 0.7rem;
+      }
+    }
     .zion-panel .zion-hero-card {
       border: 1px solid rgba(242, 174, 102, 0.3);
       background: linear-gradient(160deg, rgba(80, 48, 18, 0.4) 0%, #0f172a 42%, #111827 100%);
@@ -4298,7 +4406,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     <nav class="nav-tabs" aria-label="Dashboard sections">
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
-      <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
+      <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
@@ -9033,12 +9141,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       document.querySelectorAll('.nav-tabs [data-tab]').forEach(el => {
         const on = el.getAttribute('data-tab') === name;
         const isZion = el.getAttribute('data-tab') === 'zion';
-        el.classList.toggle('bg-emerald-600', on && !isZion);
-        el.classList.toggle('text-white', on && !isZion);
-        el.classList.toggle('bg-slate-800', !on && !isZion);
-        el.classList.toggle('text-slate-300', !on && !isZion);
+        const isMicro = el.getAttribute('data-tab') === 'microbots';
+        const special = isZion || isMicro;
+        el.classList.toggle('bg-emerald-600', on && !special);
+        el.classList.toggle('text-white', on && !special);
+        el.classList.toggle('bg-slate-800', !on && !special);
+        el.classList.toggle('text-slate-300', !on && !special);
         el.classList.toggle('nav-tab-zion', isZion);
         el.classList.toggle('nav-tab-zion-active', on && isZion);
+        el.classList.toggle('nav-tab-microbots', isMicro);
+        el.classList.toggle('nav-tab-microbots-active', on && isMicro);
       });
       document.querySelectorAll('[data-settings-tab]').forEach(el => {
         el.classList.toggle('active', el.getAttribute('data-settings-tab') === name);
