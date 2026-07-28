@@ -301,17 +301,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
          column layout (mobile) a 14rem basis became ~224px empty vertical gap. */
       flex: 1 1 auto;
       min-width: min(100%, 12rem);
+      max-width: calc(100% - 12rem);
     }
     .strategy-control-head-main > p {
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .strategy-control-head-meta {
-      flex: 0 1 auto;
+      flex: 0 0 auto;
       text-align: right;
       min-width: 0;
-      max-width: 100%;
+      max-width: 12rem;
+      margin-left: auto;
       position: relative;
+      align-self: flex-start;
     }
     .strategy-control-head-meta #strategies-profile {
       overflow-wrap: anywhere;
@@ -340,9 +343,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .strategy-io-status.is-ok { color: #6ee7b7; }
     .strategy-io-status.is-err { color: #fca5a5; }
     .strategies-count-hot {
-      cursor: help;
+      cursor: pointer;
       text-decoration: underline dotted rgba(148,163,184,.55);
       text-underline-offset: 3px;
+    }
+    .strategies-count-hot[aria-expanded="true"] {
+      color: #f8fafc;
+      text-decoration-color: rgba(248,250,252,.9);
     }
     .strategies-on-popover {
       position: absolute;
@@ -5434,7 +5441,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. With Smart Bot ON, each Trade Profile’s modules + lane floors (MC / holders / Top-10 / Min Vol M5 / conviction) drive which lane can take a token.</p>
           </div>
           <div class="strategy-control-head-meta">
-            <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" title="Hover to see which modules are ON">—</div>
+            <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" role="button" aria-expanded="false" title="Click to show which modules are ON">—</div>
             <div id="strategies-on-popover" class="strategies-on-popover hidden" role="tooltip"></div>
             <div id="strategies-profile" class="mint text-xs">Loading…</div>
           </div>
@@ -17157,17 +17164,52 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const pop = document.getElementById('strategies-on-popover');
       if (!count || !pop || count.dataset.onPopoverWired === '1') return;
       count.dataset.onPopoverWired = '1';
-      const show = () => pop.classList.remove('hidden');
-      const hide = () => pop.classList.add('hidden');
-      count.addEventListener('mouseenter', show);
-      count.addEventListener('focus', show);
+      let pinned = false;
+      const show = () => {
+        pop.classList.remove('hidden');
+        count.setAttribute('aria-expanded', 'true');
+      };
+      const hide = () => {
+        pop.classList.add('hidden');
+        count.setAttribute('aria-expanded', 'false');
+      };
+      const toggle = () => {
+        pinned = !pinned;
+        if (pinned) show();
+        else hide();
+      };
+      count.addEventListener('mouseenter', () => { if (!pinned) show(); });
+      count.addEventListener('focus', () => { if (!pinned) show(); });
       count.addEventListener('mouseleave', (e) => {
-        if (pop.contains(e.relatedTarget)) return;
+        if (pinned || pop.contains(e.relatedTarget)) return;
         hide();
       });
-      count.addEventListener('blur', hide);
-      pop.addEventListener('mouseleave', hide);
-      pop.addEventListener('mouseenter', show);
+      count.addEventListener('blur', () => { if (!pinned) hide(); });
+      count.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+      });
+      count.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        } else if (e.key === 'Escape') {
+          pinned = false;
+          hide();
+        }
+      });
+      pop.addEventListener('mouseenter', () => show());
+      pop.addEventListener('mouseleave', () => {
+        if (!pinned) hide();
+      });
+      pop.addEventListener('click', (e) => e.stopPropagation());
+      document.addEventListener('click', (e) => {
+        if (!pinned) return;
+        if (count.contains(e.target) || pop.contains(e.target)) return;
+        pinned = false;
+        hide();
+      });
     }
 
     loadTradingWallets();
