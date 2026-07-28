@@ -7300,12 +7300,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '</span>'
             );
           }).join(' · ');
+          let outcome = !d.winnerId ? 'skip' : (d.opened === true ? 'opened' : (d.opened === false || d.cascadeSkipReason ? 'no buy' : 'win'));
+          const outcomeColor = outcome === 'opened' ? '#34d399' : (outcome === 'no buy' ? '#fbbf24' : winColor);
+          const skipLine = d.cascadeSkipReason
+            ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
+            : '';
           return (
-            '<div class="tp-decision-row' + (!d.winnerId ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
+            '<div class="tp-decision-row' + (!d.winnerId || outcome === 'no buy' ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
               '<span><strong style="color:' + winColor + '">' + winLabel + '</strong></span>' +
               '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
-              '<span class="tp-decision-score" style="color:' + winColor + '">' + (d.winnerId ? 'win' : 'skip') + '</span>' +
+              '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
               '<div class="tp-decision-why">' + lanes + '</div>' +
+              skipLine +
             '</div>'
           );
         }).join('');
@@ -7358,7 +7364,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           detail.innerHTML = mixBits.length
             ? '<strong class="text-slate-300">Exit mix</strong> · ' + mixBits.join(' · ')
             : 'Scoreboard fills after closed trades (need ~' +
-              ((data.scoreboard && data.scoreboard.minSampleForStabilize) || 15) +
+              ((data.scoreboard && data.scoreboard.minSampleForStabilize) || 12) +
               ' per profile to stabilize).';
         }
         if (panel) {

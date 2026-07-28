@@ -178,7 +178,7 @@ export interface TradeProfileScoreboard {
   minSampleForStabilize: number;
 }
 
-const MIN_SAMPLE_STABILIZE = 15;
+const MIN_SAMPLE_STABILIZE = 12;
 
 type ClosedLike = {
   tradeProfileId?: string;

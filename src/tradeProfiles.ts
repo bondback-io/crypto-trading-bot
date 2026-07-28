@@ -1795,15 +1795,17 @@ export function evaluateLaneEntryFloors(
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
-  // Profile Min MC Override — hard lane gate (cannot undercut global min)
-  if (profileMin > 0) {
-    if (mc == null || mc <= 0) {
+  // Hard lane MC floor: always enforce global Min MC when known.
+  // Profile Min MC Override only raises above global (cannot undercut).
+  // Unknown MC soft-passes (metrics often arrive after enrich) — cascade/metrics still gate.
+  if (laneMinMc > 0) {
+    if (profileMin > 0 && (mc == null || mc <= 0)) {
       return {
         ok: false,
         reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
       };
     }
-    if (mc < laneMinMc) {
+    if (mc != null && mc > 0 && mc < laneMinMc) {
       return {
         ok: false,
         reason: `${def.name} MC $${Math.round(mc)} < lane min $${Math.round(laneMinMc)}`,

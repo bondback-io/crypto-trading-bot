@@ -3788,6 +3788,8 @@ const laneDecisionLog: Array<{
   mint: string;
   symbol: string;
   winnerId: string | null;
+  opened?: boolean;
+  cascadeSkipReason?: string;
   lanes: Array<{
     id: string;
     name: string;
@@ -3827,6 +3829,28 @@ function logLaneFightDecisions(
       winnerId: entry.winnerId,
       lanes: entry.lanes,
     });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Mark the latest in-memory + persisted lane fight with cascade buy/skip. */
+function markLaneFightCascadeResult(
+  mint: string,
+  opened: boolean,
+  cascadeSkipReason?: string
+): void {
+  const hit = laneDecisionLog.find((e) => e.mint === mint);
+  if (hit) {
+    hit.opened = opened;
+    if (!opened && cascadeSkipReason) {
+      hit.cascadeSkipReason = String(cascadeSkipReason).slice(0, 280);
+    }
+  }
+  try {
+    const { recordLaneFightCascadeResult } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    recordLaneFightCascadeResult({ mint, opened, cascadeSkipReason });
   } catch {
     /* non-fatal */
   }
@@ -4476,6 +4500,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         console.log(
           `[monitor] Lane cascade win=${passer.name} (${passer.profileId}) · ${signal.symbol}`
         );
+        markLaneFightCascadeResult(signal.mint, true);
         return true;
       }
       const why = lastFilterSkipReason || 'module filters';
@@ -4497,6 +4522,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const cascadeReason =
     cascadeFails.slice(0, 4).join(' · ') ||
     'all lane passers failed modules';
+  markLaneFightCascadeResult(signal.mint, false, cascadeReason);
   recordRejectedSignal(signal, `smart-bot cascade: ${cascadeReason}`);
   console.log(
     `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +

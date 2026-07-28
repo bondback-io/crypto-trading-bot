@@ -22,6 +22,10 @@ export interface LaneOutcomeRecord {
   symbol: string;
   winnerId: string | null;
   lanes: LaneOutcomeLaneSnap[];
+  /** true when cascade stamped a buy; false when cascade skipped */
+  opened?: boolean;
+  /** Why cascade rejected after a lane win (compact) */
+  cascadeSkipReason?: string;
   /** Filled when the stamped position closes */
   closedAt?: number;
   pnlSol?: number;
@@ -92,6 +96,31 @@ export function recordLaneFightOpen(input: {
   });
   if (ring.length > MAX_RING) ring = ring.slice(-MAX_RING);
   persist();
+}
+
+/**
+ * Attach cascade outcome to the newest open lane record for this mint.
+ */
+export function recordLaneFightCascadeResult(input: {
+  mint: string;
+  opened: boolean;
+  cascadeSkipReason?: string;
+}): void {
+  load();
+  const mint = String(input.mint || '').trim();
+  if (!mint) return;
+  for (let i = ring.length - 1; i >= 0; i--) {
+    const row = ring[i];
+    if (row.mint !== mint) continue;
+    if (row.opened != null || row.cascadeSkipReason != null) continue;
+    if (row.closedAt != null) continue;
+    row.opened = input.opened === true;
+    if (!row.opened && input.cascadeSkipReason) {
+      row.cascadeSkipReason = String(input.cascadeSkipReason).slice(0, 280);
+    }
+    persist();
+    return;
+  }
 }
 
 /**
