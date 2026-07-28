@@ -4188,19 +4188,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
-      <div class="card mt-2.5 sm:mt-3" id="soak-metrics-card" title="Post-rebuild soak baseline — entry volume first, then exits/fees">
-        <div class="section-title" style="margin-bottom:0.4rem">Soak / Tuning Baseline</div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <div><div class="stat-label">Opens / hr</div><div class="text-lg font-semibold" id="soak-opens-hr">—</div></div>
-          <div><div class="stat-label">Open / max</div><div class="text-lg font-semibold" id="soak-open-max">—</div></div>
-          <div><div class="stat-label">Avg realized %</div><div class="text-lg font-semibold" id="soak-avg-realized">—</div></div>
-          <div><div class="stat-label">Avg fee drag %</div><div class="text-lg font-semibold" id="soak-fee-drag" title="Mark move minus fee-aware realized — positive = fees ate edge">—</div></div>
-        </div>
-        <div class="mint text-xs mt-2" id="soak-exit-mix">Exit mix: —</div>
-        <div class="mint text-xs mt-1" id="soak-skip-top">Skip reasons: —</div>
+      <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
+        <div class="section-title" style="margin-bottom:0.35rem">Lane fight log</div>
+        <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail. Shows winner, opened vs no-buy after cascade.</p>
+        <div class="tp-decisions lane-decisions" id="lane-decisions-overview"><span class="mint">No lane fights yet</span></div>
       </div>
 
-<div class="card card-open-positions" id="open-positions-panel">
+      <div class="card card-open-positions" id="open-positions-panel">
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
@@ -5406,7 +5400,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="strat-setup-guide mt-3" id="strat-setup-guide">
-          <div class="sg-step"><span class="sg-num">1</span><span><strong>Soak preset (Risk Off)</strong> — prove entries (15–30 opens). Watch soak strip + skip reasons.</span></div>
+          <div class="sg-step"><span class="sg-num">1</span><span><strong>Soak preset (Risk Off)</strong> — prove entries (15–30 opens). Watch Overview lane fight log + opens.</span></div>
           <div class="sg-step"><span class="sg-num">2</span><span><strong>Exits + size</strong> — small base size; concurrent scale-down; dead-market / trail firing.</span></div>
           <div class="sg-step"><span class="sg-num">3</span><span><strong>Risk On lean</strong> — then Enable next module one-by-one; keep only if entry rate stays healthy.</span></div>
         </div>
@@ -5545,8 +5539,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div id="tp-learning-panel" class="mt-3 hidden"></div>
         <div class="mt-3">
           <div class="text-xs font-semibold text-slate-300 mb-1">Lane fight log</div>
-          <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail (in-memory). Winner stamped on entry.</p>
-          <div class="tp-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
+          <p class="text-xs text-slate-500 mb-1">Same live log as Overview — useful while tuning profiles.</p>
+          <div class="tp-decisions lane-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
         </div>
       </div>
     </section>
@@ -7273,50 +7267,53 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     async function loadLaneDecisions() {
-      const el = document.getElementById('lane-decisions');
-      if (!el) return;
+      const els = document.querySelectorAll('.lane-decisions');
+      if (!els.length) return;
       try {
         const data = await fetchJSON('/api/lane-decisions?limit=40');
         const list = data.decisions || [];
+        let html;
         if (!list.length) {
-          el.innerHTML = '<span class="mint">No lane fights yet — appear when Smart Bot profiles evaluate a setup</span>';
-          return;
-        }
-        el.innerHTML = list.slice(0, 30).map(function (d) {
-          const when = d.at ? new Date(d.at).toLocaleTimeString() : '';
-          const winner = (d.lanes || []).find(function (l) { return l.id === d.winnerId; });
-          const winColor = profileColorFor(d.winnerId) || '#e2e8f0';
-          const winLabel = winner
-            ? escHtml(winner.name || d.winnerId)
-            : (d.winnerId ? escHtml(d.winnerId) : 'none');
-          const lanes = (d.lanes || []).map(function (l) {
-            const c = profileColorFor(l.id) || '#94a3b8';
-            const mark = l.passed ? '✓' : '✗';
-            const why = (l.reason || '').slice(0, 48);
+          html = '<span class="mint">No lane fights yet — appear when Smart Bot profiles evaluate a setup</span>';
+        } else {
+          html = list.slice(0, 30).map(function (d) {
+            const when = d.at ? new Date(d.at).toLocaleTimeString() : '';
+            const winner = (d.lanes || []).find(function (l) { return l.id === d.winnerId; });
+            const winColor = profileColorFor(d.winnerId) || '#e2e8f0';
+            const winLabel = winner
+              ? escHtml(winner.name || d.winnerId)
+              : (d.winnerId ? escHtml(d.winnerId) : 'none');
+            const lanes = (d.lanes || []).map(function (l) {
+              const c = profileColorFor(l.id) || '#94a3b8';
+              const mark = l.passed ? '✓' : '✗';
+              const why = (l.reason || '').slice(0, 48);
+              return (
+                '<span style="color:' + c + '" title="' + escHtml(l.reason || '') + '">' +
+                  mark + ' ' + escHtml(l.name || l.id) + ' ' + Number(l.score || 0).toFixed(0) +
+                  (why ? ' <span class="mint">(' + escHtml(why) + ')</span>' : '') +
+                '</span>'
+              );
+            }).join(' · ');
+            let outcome = !d.winnerId ? 'skip' : (d.opened === true ? 'opened' : (d.opened === false || d.cascadeSkipReason ? 'no buy' : 'win'));
+            const outcomeColor = outcome === 'opened' ? '#34d399' : (outcome === 'no buy' ? '#fbbf24' : winColor);
+            const skipLine = d.cascadeSkipReason
+              ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
+              : '';
             return (
-              '<span style="color:' + c + '" title="' + escHtml(l.reason || '') + '">' +
-                mark + ' ' + escHtml(l.name || l.id) + ' ' + Number(l.score || 0).toFixed(0) +
-                (why ? ' <span class="mint">(' + escHtml(why) + ')</span>' : '') +
-              '</span>'
+              '<div class="tp-decision-row' + (!d.winnerId || outcome === 'no buy' ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
+                '<span><strong style="color:' + winColor + '">' + winLabel + '</strong></span>' +
+                '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
+                '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
+                '<div class="tp-decision-why">' + lanes + '</div>' +
+                skipLine +
+              '</div>'
             );
-          }).join(' · ');
-          let outcome = !d.winnerId ? 'skip' : (d.opened === true ? 'opened' : (d.opened === false || d.cascadeSkipReason ? 'no buy' : 'win'));
-          const outcomeColor = outcome === 'opened' ? '#34d399' : (outcome === 'no buy' ? '#fbbf24' : winColor);
-          const skipLine = d.cascadeSkipReason
-            ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
-            : '';
-          return (
-            '<div class="tp-decision-row' + (!d.winnerId || outcome === 'no buy' ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
-              '<span><strong style="color:' + winColor + '">' + winLabel + '</strong></span>' +
-              '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
-              '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
-              '<div class="tp-decision-why">' + lanes + '</div>' +
-              skipLine +
-            '</div>'
-          );
-        }).join('');
+          }).join('');
+        }
+        els.forEach(function (el) { el.innerHTML = html; });
       } catch (err) {
-        el.innerHTML = '<span class="mint">Lane log unavailable: ' + escHtml(err.message || String(err)) + '</span>';
+        const msg = '<span class="mint">Lane log unavailable: ' + escHtml(err.message || String(err)) + '</span>';
+        els.forEach(function (el) { el.innerHTML = msg; });
       }
     }
 
@@ -7943,6 +7940,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       if (name === 'logs') loadSystemLogs();
       if (name === 'strategies') loadStrategies();
+      if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
       if (name === 'overview' || name === 'signals' || name === 'trades' || name === 'scanner') {
@@ -12528,40 +12526,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
           : tr.tradesLastHour + '/hr';
       }
-      const soak = status.soak || s.soak;
-      const soakOpens = document.getElementById('soak-opens-hr');
-      if (soakOpens && soak) {
-        soakOpens.textContent = String(soak.opensLastHour ?? '—');
-        const om = document.getElementById('soak-open-max');
-        if (om) om.textContent = (soak.openCount ?? 0) + ' / ' + (soak.maxConcurrentHint ?? '—');
-        const ar = document.getElementById('soak-avg-realized');
-        if (ar) {
-          const v = Number(soak.avgRealizedPnlPct || 0);
-          ar.textContent = (v > 0 ? '+' : '') + v.toFixed(1) + '%';
-          ar.style.color = v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--muted)';
-        }
-        const fd = document.getElementById('soak-fee-drag');
-        if (fd) {
-          const v = Number(soak.avgFeeDragPct || 0);
-          fd.textContent = (v > 0 ? '+' : '') + v.toFixed(1) + '%';
-          fd.style.color = v > 5 ? 'var(--amber, #fbbf24)' : 'var(--muted)';
-        }
-        const mixEl = document.getElementById('soak-exit-mix');
-        if (mixEl) {
-          const mix = (soak.exitMix || []).slice(0, 5)
-            .map(function (b) { return b.label + ' ' + b.count + ' (' + b.pct + '%)'; })
-            .join(' · ');
-          mixEl.textContent = 'Exit mix: ' + (mix || 'no closes yet');
-        }
-        const skipEl = document.getElementById('soak-skip-top');
-        if (skipEl) {
-          const skips = (status.monitor && status.monitor.skipReasonCounts) || [];
-          const top = skips.slice(0, 5)
-            .map(function (x) { return x.reason + ' ×' + x.count; })
-            .join(' · ');
-          skipEl.textContent = 'Skip reasons: ' + (top || 'none yet');
-        }
-      }
       const pnlEl = document.getElementById('stat-pnl');
       const realized = status.portfolio?.realizedPnlSol != null
         ? Number(status.portfolio.realizedPnlSol)
@@ -13393,8 +13357,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (typeof applyLogFilter === 'function') applyLogFilter();
       ensurePosHoldTicker();
       tickOpenPositionHolds();
+      const overviewPanel = document.querySelector('[data-tab-panel="overview"]');
       const stratPanel = document.querySelector('[data-tab-panel="strategies"]');
-      if (stratPanel && !stratPanel.classList.contains('hidden')) {
+      if (
+        (overviewPanel && !overviewPanel.classList.contains('hidden')) ||
+        (stratPanel && !stratPanel.classList.contains('hidden'))
+      ) {
         loadLaneDecisions().catch(function () {});
       }
       } catch (err) {
