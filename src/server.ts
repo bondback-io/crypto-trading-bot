@@ -62,6 +62,7 @@ import {
   getMonitorStatus,
   getScannerFeed,
   getScannerStatus,
+  getLaneDecisionLog,
   getWalletsWithActivity,
   pauseMonitor,
   resumeMonitor,
@@ -2009,6 +2010,14 @@ export function createServer(): express.Application {
       require('./tradeProfiles') as typeof import('./tradeProfiles');
     ensureTradeProfilesInitialized();
     res.json(getTradeProfilesStatus());
+  });
+
+  app.get('/api/lane-decisions', (req: Request, res: Response) => {
+    const limit = Math.max(
+      1,
+      Math.min(200, Number(req.query.limit) || 40)
+    );
+    res.json({ decisions: getLaneDecisionLog(limit) });
   });
 
   app.get('/api/trade-profiles/intelligence', (_req: Request, res: Response) => {

@@ -417,7 +417,8 @@ export interface ProfileLearningSuggestion {
 }
 
 export function buildProfileLearningSuggestions(
-  scoreboard: TradeProfileScoreboard
+  scoreboard: TradeProfileScoreboard,
+  laneStats?: Record<string, { n: number; wins: number; sumPnl: number }>
 ): ProfileLearningSuggestion[] {
   const out: ProfileLearningSuggestion[] = [];
   for (const row of scoreboard.rows) {
@@ -516,7 +517,113 @@ export function buildProfileLearningSuggestions(
         Object.keys(entryTighten).length > 0 ? entryTighten : undefined,
     });
   }
+
+  mergeLaneFloorSuggestions(out, scoreboard, laneStats);
   return out;
+}
+
+const LANE_FLOOR_MIN_N = 6;
+const LANE_FLOOR_SOFT_WR = 45;
+
+/** Raise-only holders / MC / top-10 floors from soft lane-won closed samples. */
+function mergeLaneFloorSuggestions(
+  out: ProfileLearningSuggestion[],
+  scoreboard: TradeProfileScoreboard,
+  laneStats?: Record<string, { n: number; wins: number; sumPnl: number }>
+): void {
+  if (!laneStats) return;
+  let resolveTradeProfileDefinition: typeof import('./tradeProfiles').resolveTradeProfileDefinition;
+  try {
+    ({ resolveTradeProfileDefinition } = require('./tradeProfiles') as typeof import('./tradeProfiles'));
+  } catch {
+    return;
+  }
+  const nameById = new Map(
+    scoreboard.rows.map((r) => [r.profileId, r.name] as const)
+  );
+
+  for (const [profileId, st] of Object.entries(laneStats)) {
+    if (st.n < LANE_FLOOR_MIN_N) continue;
+    const wr = st.n > 0 ? (st.wins / st.n) * 100 : 0;
+    if (wr >= LANE_FLOOR_SOFT_WR) continue;
+
+    let def: ReturnType<typeof resolveTradeProfileDefinition>;
+    try {
+      def = resolveTradeProfileDefinition(profileId);
+    } catch {
+      continue;
+    }
+    const m = def.match || {};
+    const curHolders =
+      m.minHolders != null && Number(m.minHolders) > 0 ? Number(m.minHolders) : 0;
+    const curMc =
+      m.minMarketCapUsd != null && Number(m.minMarketCapUsd) > 0
+        ? Number(m.minMarketCapUsd)
+        : 0;
+    const curTop10 =
+      m.maxTop10HoldPct != null && Number(m.maxTop10HoldPct) > 0
+        ? Number(m.maxTop10HoldPct)
+        : 0;
+
+    const match: Record<string, number | boolean> = {};
+    const messages: string[] = [];
+    const sampleNote = `Lane-won closes n=${st.n}, WR ${wr.toFixed(0)}%`;
+
+    const nextHolders = Math.min(
+      500,
+      Math.max(curHolders + 20, curHolders > 0 ? Math.round(curHolders * 1.15) : 80)
+    );
+    if (nextHolders > curHolders) {
+      match.minHolders = nextHolders;
+      messages.push(
+        `${sampleNote} — raise Min holders to ${nextHolders} (was ${curHolders || 'default'}).`
+      );
+    }
+
+    const nextMc = Math.round(
+      curMc > 0 ? Math.max(curMc * 1.2, curMc + 5_000) : 25_000
+    );
+    if (nextMc > curMc) {
+      match.minMarketCapUsd = nextMc;
+      messages.push(
+        `${sampleNote} — raise Min MC Override to $${nextMc.toLocaleString()} (was ${
+          curMc > 0 ? '$' + curMc.toLocaleString() : 'none'
+        }).`
+      );
+    }
+
+    // Tighter concentration = lower max top-10 % (never loosen)
+    const nextTop10 =
+      curTop10 > 0 ? Math.max(25, curTop10 - 5) : 45;
+    if (curTop10 <= 0 || nextTop10 < curTop10) {
+      match.maxTop10HoldPct = nextTop10;
+      messages.push(
+        `${sampleNote} — set Max Top-10 % to ${nextTop10} (tighter; was ${
+          curTop10 > 0 ? curTop10 : 'none'
+        }).`
+      );
+    }
+
+    if (messages.length === 0 || Object.keys(match).length === 0) continue;
+
+    const existing = out.find((s) => s.profileId === profileId);
+    if (existing) {
+      existing.messages.push(...messages);
+      existing.patch = existing.patch || {};
+      existing.patch.match = { ...(existing.patch.match || {}), ...match };
+      existing.sampleSize = Math.max(existing.sampleSize, st.n);
+      existing.winRatePct = wr;
+    } else {
+      out.push({
+        profileId,
+        profileName: nameById.get(profileId) || def.name || profileId,
+        sampleSize: st.n,
+        winRatePct: wr,
+        messages,
+        patch: { match },
+      });
+    }
+  }
 }
 
 /** Merge learning patch into existing exit rules with safe clamps. */

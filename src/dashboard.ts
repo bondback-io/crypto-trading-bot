@@ -5543,6 +5543,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <div id="tp-scoreboard-detail" class="mt-3 text-xs text-slate-400"></div>
         <div id="tp-learning-panel" class="mt-3 hidden"></div>
+        <div class="mt-3">
+          <div class="text-xs font-semibold text-slate-300 mb-1">Lane fight log</div>
+          <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail (in-memory). Winner stamped on entry.</p>
+          <div class="tp-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
+        </div>
       </div>
     </section>
 
@@ -7090,6 +7095,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       ? escHtml(String(om.maxMarketCapUsd))
                       : '') +
                 '" /></label>' +
+                '<label title="Lane min holders. Empty = catalog default (if any). Known holders only — unknown does not fail the lane.">Min holders<input type="number" data-k="minHolders" data-match="1" step="1" min="0" placeholder="default" value="' +
+                  (match.minHolders != null && Number(match.minHolders) > 0
+                    ? escHtml(String(match.minHolders))
+                    : om.minHolders != null && Number(om.minHolders) > 0
+                      ? escHtml(String(om.minHolders))
+                      : '') +
+                '" /></label>' +
+                '<label title="Lane max top-10 holder %. Empty = no lane top-10 floor (global anti-rug still applies). Known only.">Max Top-10 %<input type="number" data-k="maxTop10HoldPct" data-match="1" step="1" min="0" max="100" placeholder="none" value="' +
+                  (match.maxTop10HoldPct != null && Number(match.maxTop10HoldPct) > 0
+                    ? escHtml(String(match.maxTop10HoldPct))
+                    : om.maxTop10HoldPct != null && Number(om.maxTop10HoldPct) > 0
+                      ? escHtml(String(om.maxTop10HoldPct))
+                      : '') +
+                '" /></label>' +
                 '<label>Min conviction<input type="number" data-k="minConviction" data-match="1" step="1" value="' + escHtml(String(num(match.minConviction, om.minConviction))) + '" /></label>' +
                 (p.id === 'high_win_rate'
                   ? (function () {
@@ -7210,6 +7229,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             }).join('')
           : '<tr><td colspan="8" class="mint">No profiles</td></tr>';
         loadTradeProfileIntelligence();
+        loadLaneDecisions();
       }
       renderAutoScoringUi(tp);
     }
@@ -7219,6 +7239,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (sec < 60) return Math.round(sec) + 's';
       if (sec < 3600) return Math.floor(sec / 60) + 'm ' + Math.round(sec % 60) + 's';
       return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+    }
+
+    async function loadLaneDecisions() {
+      const el = document.getElementById('lane-decisions');
+      if (!el) return;
+      try {
+        const data = await fetchJSON('/api/lane-decisions?limit=40');
+        const list = data.decisions || [];
+        if (!list.length) {
+          el.innerHTML = '<span class="mint">No lane fights yet — appear when Smart Bot profiles evaluate a setup</span>';
+          return;
+        }
+        el.innerHTML = list.slice(0, 30).map(function (d) {
+          const when = d.at ? new Date(d.at).toLocaleTimeString() : '';
+          const winner = (d.lanes || []).find(function (l) { return l.id === d.winnerId; });
+          const winColor = profileColorFor(d.winnerId) || '#e2e8f0';
+          const winLabel = winner
+            ? escHtml(winner.name || d.winnerId)
+            : (d.winnerId ? escHtml(d.winnerId) : 'none');
+          const lanes = (d.lanes || []).map(function (l) {
+            const c = profileColorFor(l.id) || '#94a3b8';
+            const mark = l.passed ? '✓' : '✗';
+            const why = (l.reason || '').slice(0, 48);
+            return (
+              '<span style="color:' + c + '" title="' + escHtml(l.reason || '') + '">' +
+                mark + ' ' + escHtml(l.name || l.id) + ' ' + Number(l.score || 0).toFixed(0) +
+                (why ? ' <span class="mint">(' + escHtml(why) + ')</span>' : '') +
+              '</span>'
+            );
+          }).join(' · ');
+          return (
+            '<div class="tp-decision-row' + (!d.winnerId ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
+              '<span><strong style="color:' + winColor + '">' + winLabel + '</strong></span>' +
+              '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
+              '<span class="tp-decision-score" style="color:' + winColor + '">' + (d.winnerId ? 'win' : 'skip') + '</span>' +
+              '<div class="tp-decision-why">' + lanes + '</div>' +
+            '</div>'
+          );
+        }).join('');
+      } catch (err) {
+        el.innerHTML = '<span class="mint">Lane log unavailable: ' + escHtml(err.message || String(err)) + '</span>';
+      }
     }
 
     async function loadTradeProfileIntelligence() {
@@ -7547,8 +7609,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           exitRules[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
         }
-        // Min MC Override / Max MC: empty / 0 clears → catalog / global only
-        if (k === 'minMarketCapUsd' || k === 'maxMarketCapUsd') {
+        // Min MC / Max MC / Min holders / Max Top-10: empty / 0 clears → catalog / none
+        if (
+          k === 'minMarketCapUsd' ||
+          k === 'maxMarketCapUsd' ||
+          k === 'minHolders' ||
+          k === 'maxTop10HoldPct'
+        ) {
           const n = raw === '' || raw == null ? 0 : Number(raw);
           match[k] = Number.isFinite(n) && n > 0 ? n : 0;
           return;
@@ -13278,6 +13345,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (typeof applyLogFilter === 'function') applyLogFilter();
       ensurePosHoldTicker();
       tickOpenPositionHolds();
+      const stratPanel = document.querySelector('[data-tab-panel="strategies"]');
+      if (stratPanel && !stratPanel.classList.contains('hidden')) {
+        loadLaneDecisions().catch(function () {});
+      }
       } catch (err) {
         console.error('[dashboard] refresh failed:', err);
         const detail = document.getElementById('stat-detail');

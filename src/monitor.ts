@@ -187,6 +187,7 @@ function buildTradeProfileMatchContext(
     marketCapUsd:
       signal.sourceEntryMcUsd ?? signal.metrics?.marketCapUsd ?? null,
     holderCount: signal.metrics?.holderCountEstimate ?? null,
+    top10HoldPct: signal.metrics?.top10HoldPct ?? null,
     volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
     volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
     recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
@@ -3817,6 +3818,17 @@ function logLaneFightDecisions(
   laneDecisionLog.unshift(entry);
   if (laneDecisionLog.length > LANE_DECISION_LOG_MAX) {
     laneDecisionLog.length = LANE_DECISION_LOG_MAX;
+  }
+  try {
+    const { recordLaneFightOpen } = require('./laneOutcomes') as typeof import('./laneOutcomes');
+    recordLaneFightOpen({
+      mint: entry.mint,
+      symbol: entry.symbol,
+      winnerId: entry.winnerId,
+      lanes: entry.lanes,
+    });
+  } catch {
+    /* non-fatal */
   }
 }
 

@@ -214,6 +214,11 @@ export interface TradeProfileMatchRules {
    */
   maxTokenAgeHours?: number;
   minHolders?: number;
+  /**
+   * Lane max top-10 holder % — hard reject when known concentration is above this.
+   * Empty/0 = no lane top-10 floor (global anti-rug still applies).
+   */
+  maxTop10HoldPct?: number;
   minVolumeH1Usd?: number;
   minVolumeM5Usd?: number;
   /** Dip / reversal: peak drop */
@@ -981,6 +986,8 @@ export interface TradeProfileMatchContext {
   symbol?: string;
   marketCapUsd?: number | null;
   holderCount?: number | null;
+  /** Top-10 holder concentration % when known (lane Max Top-10 floor). */
+  top10HoldPct?: number | null;
   volumeH1Usd?: number | null;
   volumeM5Usd?: number | null;
   recentBuyVolumeUsd?: number | null;
@@ -1603,9 +1610,12 @@ export function updateTradeProfileParams(
       delete (nextMatch as Record<string, unknown>)[k];
       continue;
     }
-    // Empty / 0 Min MC Override or Max MC → unset (use catalog / global only)
+    // Empty / 0 Min MC Override, Max MC, Min holders, Max Top-10 → unset
     if (
-      (k === 'minMarketCapUsd' || k === 'maxMarketCapUsd') &&
+      (k === 'minMarketCapUsd' ||
+        k === 'maxMarketCapUsd' ||
+        k === 'minHolders' ||
+        k === 'maxTop10HoldPct') &&
       typeof v === 'number' &&
       v <= 0
     ) {
@@ -1814,6 +1824,26 @@ export function evaluateLaneEntryFloors(
       return {
         ok: false,
         reason: `${def.name} holders ${holders} < ${m.minHolders}`,
+      };
+    }
+  }
+
+  const maxTop10 =
+    m.maxTop10HoldPct != null &&
+    Number.isFinite(m.maxTop10HoldPct) &&
+    m.maxTop10HoldPct > 0
+      ? Number(m.maxTop10HoldPct)
+      : 0;
+  if (maxTop10 > 0) {
+    const top10 =
+      ctx.top10HoldPct != null && Number.isFinite(ctx.top10HoldPct)
+        ? Number(ctx.top10HoldPct)
+        : null;
+    // Known-only: unknown top-10 does not fail the lane
+    if (top10 != null && top10 > maxTop10) {
+      return {
+        ok: false,
+        reason: `${def.name} top10 ${top10.toFixed(1)}% > max ${maxTop10}%`,
       };
     }
   }

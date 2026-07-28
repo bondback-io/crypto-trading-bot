@@ -240,6 +240,24 @@ function maybeRecordScannerOutcome(
   }
 }
 
+/** Join closed PnL onto the matching Smart Bot lane fight record. */
+function maybeRecordLaneOutcome(
+  position: Position,
+  pnlSol: number
+): void {
+  try {
+    const { recordLaneFightClose } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    recordLaneFightClose({
+      mint: position.mint,
+      profileId: position.tradeProfileId,
+      pnlSol,
+    });
+  } catch {
+    /* non-fatal */
+  }
+}
+
 /** Closed-history row for a partial take (not the final full exit). */
 export function isPartialCloseSlice(p: {
   id?: string;
@@ -1486,6 +1504,7 @@ export class PaperTrader {
     }
 
     maybeRecordScannerOutcome(position, totalPct);
+    maybeRecordLaneOutcome(position, totalPnl);
 
     const perf = this.getStats();
     this.log(
@@ -2923,6 +2942,7 @@ export class PaperTrader {
             { mint: position.mint, symbol: position.symbol, pnlSol: position.pnlSol }
           );
           maybeRecordScannerOutcome(position, pnlPct);
+          maybeRecordLaneOutcome(position, position.pnlSol ?? 0);
           registerExitForReentry({
             mint: position.mint,
             symbol: position.symbol,
@@ -3255,6 +3275,8 @@ export class PaperTrader {
     } = require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
     const { TRADE_PROFILE_CATALOG } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const { getLaneOutcomeStatsByProfile } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
     const catalog = TRADE_PROFILE_CATALOG.map((p) => ({
       id: p.id,
       name: p.name,
@@ -3265,7 +3287,10 @@ export class PaperTrader {
       this.closedPositions,
       catalog
     );
-    const suggestions = buildProfileLearningSuggestions(scoreboard);
+    const suggestions = buildProfileLearningSuggestions(
+      scoreboard,
+      getLaneOutcomeStatsByProfile()
+    );
     return { scoreboard, suggestions };
   }
 

@@ -55,6 +55,8 @@ export const PERSIST_FILES = {
   zionOffers: 'zion-offers.json',
   /** Cached KOL universe for Zion scanner (not watch list) */
   zionKolUniverse: 'zion-kol-universe.json',
+  /** Smart Bot lane fight outcomes + closed PnL join */
+  laneOutcomes: 'lane-outcomes.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',
