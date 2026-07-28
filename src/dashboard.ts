@@ -5401,15 +5401,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mint mt-2" id="risk-status">—</div>
-        <details class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem" id="module-tune-card">
-          <summary class="flex flex-wrap items-center justify-between gap-2 cursor-pointer list-none" style="user-select:none">
-            <span class="text-sm font-semibold text-slate-200">Module A/B tune order</span>
-          </summary>
-          <div class="mt-2 pt-2" style="border-top:1px solid #1e293b">
-            <div class="flex flex-wrap gap-2 mb-1 justify-end">
+        <details id="module-tune-card">
+          <summary>
+            <span class="module-tune-summary-main">
+              <span class="module-tune-chevron" aria-hidden="true">▶</span>
+              <span class="text-sm font-semibold text-slate-200">Module A/B tune order</span>
+              <span class="mint text-xs font-normal">click to expand</span>
+            </span>
+            <span class="flex gap-2" onclick="event.preventDefault();event.stopPropagation()">
               <button type="button" class="btn btn-secondary text-xs" onclick="enableNextTuneModule()" title="Enable the next recommended module">Enable next</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="resetSkipReasonCounts()" title="Clear skip-reason tallies">Clear skips</button>
-            </div>
+            </span>
+          </summary>
+          <div class="module-tune-body">
             <p class="text-xs text-slate-400 mb-1" id="module-tune-hint">Enable one module at a time after soak baseline.</p>
             <ol class="text-xs text-slate-300 m-0 pl-4" id="module-tune-list" style="line-height:1.45"></ol>
           </div>
@@ -5455,12 +5459,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
 
         <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
             <div style="min-width:0;flex:1">
               <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
               <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Master Strategies = capability / kill switches. OFF = shared master modules for all profiles.</p>
             </div>
-              <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
+            <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
               <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
               <span>Smart Bot Profiles</span>
             </label>
