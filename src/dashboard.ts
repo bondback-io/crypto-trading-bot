@@ -8762,13 +8762,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (Object.keys(exitPolicy).length) {
         exitRules.exitPolicy = Object.assign({}, erExitPolicyFromDom(root), exitPolicy);
       }
+      // Dual-save self-learning with card knobs (checkbox also autosaves on change)
+      const slToggle = root.querySelector('[data-selflearn-toggle]');
+      const slMinInp = root.querySelector('[data-selflearn-min]');
+      const selfLearningEnabled = slToggle ? !!slToggle.checked : undefined;
+      const minTrades =
+        slMinInp && slMinInp.value !== '' && Number.isFinite(Number(slMinInp.value))
+          ? Number(slMinInp.value)
+          : undefined;
       try {
         const data = await fetchJSON('/api/trade-profiles', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: id, params: { exitRules: exitRules, match: match } }),
         });
-        renderTradeProfilesUi(data);
+        if (typeof selfLearningEnabled === 'boolean') {
+          const learnBody = {
+            profileId: id,
+            selfLearningEnabled: selfLearningEnabled,
+            selfLearningMode: 'shadow',
+            minTrades: minTrades,
+          };
+          const learnData = await fetchJSON('/api/trade-profiles/learning', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(learnBody),
+          });
+          renderTradeProfilesUi(learnData.tradeProfiles || learnData || data);
+        } else {
+          renderTradeProfilesUi(data);
+        }
       } catch (err) {
         alert(err.message || String(err));
         loadStrategies();

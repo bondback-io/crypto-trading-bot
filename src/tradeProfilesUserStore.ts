@@ -152,6 +152,19 @@ export function applyTradeProfilesUserStateOnBoot(): boolean {
         ` · overrides=${Object.keys(user.overrides || {}).length}` +
         ` · selfLearn=${Object.keys(user.selfLearning || {}).length}`
     );
+
+    try {
+      const { ensureSelfLearningDefaultsForAllProfiles } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const seeded = ensureSelfLearningDefaultsForAllProfiles({ persist: true });
+      if (seeded > 0) {
+        console.log(
+          `[trade-profiles-user] Seeded self-learning ON for ${seeded} profile(s)`
+        );
+      }
+    } catch {
+      /* optional */
+    }
     return true;
   } catch (err) {
     console.warn(

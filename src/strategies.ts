@@ -4302,7 +4302,7 @@ export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
     });
 
     // Restore user-owned micro-bot knobs — bake must never wipe learning / custom cards
-    if (hadUserOverrides || hadSelfLearning || savedProfiles) {
+    {
       const after = serializeTradeProfilesForPersist();
       hydrateTradeProfilesFromSettings({
         tradeProfiles: {
@@ -4311,18 +4311,39 @@ export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
           overrides: hadUserOverrides ? savedOverrides : after.overrides,
           selfLearning: hadSelfLearning
             ? savedSelfLearning
-            : after.selfLearning,
+            : after.selfLearning || savedSelfLearning,
         },
       });
-      console.log(
-        `[settings] Preserved user trade-profile knobs across bake` +
-          ` (overrides=${hadUserOverrides ? Object.keys(savedOverrides!).length : 0}` +
-          `, selfLearn=${hadSelfLearning ? Object.keys(savedSelfLearning!).length : 0})`
-      );
+      if (hadUserOverrides || hadSelfLearning) {
+        console.log(
+          `[settings] Preserved user trade-profile knobs across bake` +
+            ` (overrides=${hadUserOverrides ? Object.keys(savedOverrides!).length : 0}` +
+            `, selfLearn=${hadSelfLearning ? Object.keys(savedSelfLearning!).length : 0})`
+        );
+      }
+    }
+
+    try {
+      const { ensureSelfLearningDefaultsForAllProfiles } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      // Seed unset only — do not override user disables mid-bake; migration handles default-ON
+      ensureSelfLearningDefaultsForAllProfiles({
+        forceEnableUnset: true,
+        persist: false,
+      });
+    } catch {
+      /* optional */
     }
 
     completeSettingsMigration(stamp);
     persistUserSettings();
+    try {
+      const { saveTradeProfilesUserState } =
+        require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+      saveTradeProfilesUserState(serializeTradeProfilesForPersist());
+    } catch {
+      /* persistUserSettings already mirrors; belt-and-suspenders */
+    }
     console.log(
       `[settings] Applied baked strategy defaults (${stamp}) · ` +
         `${result.enabledCount}/${result.totalCount} modules ON · ` +

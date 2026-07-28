@@ -3541,8 +3541,12 @@ export function applyTradeProfileExitRules(
 export function hydrateTradeProfilesFromSettings(
   saved: { tradeProfiles?: Partial<TradeProfileRuntimeState> } | null | undefined
 ): void {
+  const prev = config.tradeProfiles as TradeProfileRuntimeState | undefined;
   const base = defaultRuntimeState();
   if (!saved?.tradeProfiles) {
+    // Keep prior self-learning / overrides if a partial re-hydrate had no payload
+    if (prev?.overrides) base.overrides = prev.overrides;
+    if (prev?.selfLearning) base.selfLearning = prev.selfLearning;
     writeTradeProfilesState(base);
     return;
   }
@@ -3571,6 +3575,8 @@ export function hydrateTradeProfilesFromSettings(
     base.overrides = JSON.parse(JSON.stringify(s.overrides)) as Partial<
       Record<TradeProfileId, TradeProfileParamOverride>
     >;
+  } else if (prev?.overrides) {
+    base.overrides = prev.overrides;
   }
   if (s.autoScoring && typeof s.autoScoring === 'object') {
     base.autoScoring = normalizeAutoScoringConfig(s.autoScoring);
@@ -3586,6 +3592,9 @@ export function hydrateTradeProfilesFromSettings(
         raw as import('./profileSelfLearning').ProfileSelfLearningState
       );
     }
+  } else if (prev?.selfLearning) {
+    // Never drop learning state when caller omits the key (bake/import partials)
+    base.selfLearning = prev.selfLearning;
   }
   base.profiles.default = true;
   writeTradeProfilesState(base);
@@ -3676,6 +3685,85 @@ function writeProfileSelfLearning(
   if (!state.selfLearning) state.selfLearning = {};
   state.selfLearning[profileId] = sl;
   persistUserSettings();
+  try {
+    const { saveTradeProfilesUserState } =
+      require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    saveTradeProfilesUserState(serializeTradeProfilesForPersist());
+  } catch {
+    /* optional second write */
+  }
+}
+
+/**
+ * Seed every micro-bot (except Default) with self-learning ON when missing.
+ * Does not flip profiles the user already explicitly disabled (enabled: false),
+ * unless `forceEnableAll` is set (one-shot migration to default-ON).
+ * Returns how many profiles were newly seeded / turned on.
+ */
+export function ensureSelfLearningDefaultsForAllProfiles(options?: {
+  forceEnableUnset?: boolean;
+  /** One-shot: turn ON even if previously stored as enabled:false (legacy default). */
+  forceEnableAll?: boolean;
+  persist?: boolean;
+}): number {
+  const {
+    normalizeSelfLearning,
+    DEFAULT_SELF_LEARNING,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  if (!state.selfLearning) state.selfLearning = {};
+  let seeded = 0;
+  const forceAll = options?.forceEnableAll === true;
+  const forceUnset = options?.forceEnableUnset !== false;
+  for (const id of ALL_IDS) {
+    if (id === 'default' || id === 'migration') continue;
+    const raw = state.selfLearning[id];
+    const hasExplicit =
+      raw &&
+      typeof raw === 'object' &&
+      Object.prototype.hasOwnProperty.call(raw, 'enabled');
+    if (forceAll) {
+      const wasOff = !hasExplicit || raw.enabled !== true;
+      state.selfLearning[id] = normalizeSelfLearning({
+        ...DEFAULT_SELF_LEARNING,
+        ...(raw && typeof raw === 'object' ? raw : {}),
+        enabled: true,
+        mode:
+          raw && typeof raw === 'object' && raw.mode === 'auto'
+            ? 'auto'
+            : 'shadow',
+      });
+      if (wasOff) seeded += 1;
+      continue;
+    }
+    if (hasExplicit) {
+      // Keep explicit on/off; still normalize shape
+      state.selfLearning[id] = normalizeSelfLearning(raw);
+      continue;
+    }
+    if (!forceUnset && raw) {
+      state.selfLearning[id] = normalizeSelfLearning(raw);
+      continue;
+    }
+    state.selfLearning[id] = normalizeSelfLearning({
+      ...DEFAULT_SELF_LEARNING,
+      ...(raw && typeof raw === 'object' ? raw : {}),
+      enabled: true,
+      mode: 'shadow',
+    });
+    seeded += 1;
+  }
+  if (seeded > 0 && options?.persist !== false) {
+    persistUserSettings();
+    try {
+      const { saveTradeProfilesUserState } =
+        require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+      saveTradeProfilesUserState(serializeTradeProfilesForPersist());
+    } catch {
+      /* optional */
+    }
+  }
+  return seeded;
 }
 
 export function setProfileSelfLearningEnabled(

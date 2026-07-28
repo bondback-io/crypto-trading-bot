@@ -60,7 +60,7 @@ export interface ProfileSelfLearningState {
 }
 
 export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
-  enabled: false,
+  enabled: true,
   mode: 'shadow',
   minTrades: 8,
   upgradeCooldownTrades: 6,
@@ -211,8 +211,10 @@ export function normalizeSelfLearning(
 ): ProfileSelfLearningState {
   const d = DEFAULT_SELF_LEARNING;
   if (!raw || typeof raw !== 'object') return { ...d, history: [] };
+  const hasEnabled = Object.prototype.hasOwnProperty.call(raw, 'enabled');
   return {
-    enabled: raw.enabled === true,
+    // Default ON when unset; only explicit false turns it off
+    enabled: hasEnabled ? raw.enabled === true : d.enabled,
     mode: raw.mode === 'auto' ? 'auto' : 'shadow',
     minTrades: clamp(Number(raw.minTrades) || d.minTrades, 6, 40),
     upgradeCooldownTrades: clamp(

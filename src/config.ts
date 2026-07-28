@@ -2457,6 +2457,7 @@ const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** One-shot: Zion safeguards MC band + quality/poll defaults. */
 const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
+const SELF_LEARNING_DEFAULT_ON_V1 = 'selfLearningDefaultOn_v1';
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -3495,6 +3496,30 @@ export function applyPersistedSettings(): boolean {
     console.log(
       `[settings] Applied zionMinKol_v2 — Min KOL wallets default ${config.zion.minKolWallets}`
     );
+  }
+
+  if (!settingsMigrations[SELF_LEARNING_DEFAULT_ON_V1]) {
+    try {
+      const { ensureSelfLearningDefaultsForAllProfiles, ensureTradeProfilesInitialized } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      ensureTradeProfilesInitialized();
+      // Force ON once: older builds defaulted to off and may have persisted enabled:false
+      const seeded = ensureSelfLearningDefaultsForAllProfiles({
+        forceEnableAll: true,
+        persist: true,
+      });
+      settingsMigrations[SELF_LEARNING_DEFAULT_ON_V1] = true;
+      persistUserSettings();
+      console.log(
+        `[settings] Applied selfLearningDefaultOn_v1 — self-learning ON by default` +
+          (seeded ? ` (seeded ${seeded} profile(s))` : '')
+      );
+    } catch (err) {
+      console.warn(
+        '[settings] selfLearningDefaultOn_v1 failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 
   return true;
