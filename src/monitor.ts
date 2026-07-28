@@ -12,7 +12,7 @@ import {
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole, lanesShareEndpoint } from './connection';
+import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
@@ -827,61 +827,76 @@ async function pollAllWallets(): Promise<void> {
   pollInFlight = true;
   const cycleStarted = Date.now();
   try {
-    // Drain any leftover buys first so copy path stays ahead of scanner/API load
-    if (pendingBuyEvents.length > 0) {
-      await drainBuyEventQueue();
+    // Soft-yield if buy queue already deep — don't block the whole cycle on enrich
+    if (pendingBuyEvents.length > 8) {
+      const startDrain = Date.now();
+      const drainPromise = drainBuyEventQueue();
+      await Promise.race([
+        drainPromise,
+        new Promise<void>((r) => setTimeout(r, 1500)),
+      ]);
+      if (Date.now() - startDrain >= 1500 && pendingBuyEvents.length > 0) {
+        console.log(
+          `[monitor] Proceeding with poll — buy drain still running ` +
+            `(${pendingBuyEvents.length} queued)`
+        );
+      }
+    } else if (pendingBuyEvents.length > 0) {
+      void drainBuyEventQueue();
     }
 
     const wallets = getWalletsForPolling();
     const publicRpc = isPublicRpcUrl(getRpcUrl());
-    const sharedLane = lanesShareEndpoint();
-    // Public: low concurrency. Shared paid: 6. Distinct secondary: 8 for better coverage.
-    const batchSize = publicRpc ? 4 : sharedLane ? 6 : 8;
+    // Paid batch 8 (pre-c92ebf2). Public stays low concurrency.
+    const batchSize = publicRpc ? 4 : 8;
     const batchGapMs = publicRpc ? 200 : 80;
     const n = wallets.length;
     const offset =
       n > 0 ? ((pollRotationOffset % n) + n) % n : 0;
-    // Rotate start so 429 short-circuit does not always skip the same wallets
     const ordered =
       n === 0 || offset === 0
         ? wallets
         : wallets.slice(offset).concat(wallets.slice(0, offset));
-    let rateLimited = false;
+    let hitRateLimit = false;
     let completed = 0;
     lastPollAttempted = n;
     lastPollRateLimited = false;
     for (let i = 0; i < ordered.length; i += batchSize) {
-      if (rateLimited) break;
       const batch = ordered.slice(i, i + batchSize);
       const results = await Promise.allSettled(
         batch.map((wallet) => pollWallet(wallet))
       );
+      let batchHad429 = false;
       for (const r of results) {
         if (r.status === 'fulfilled') completed += 1;
         if (r.status === 'rejected' && isRpcRateLimitError(r.reason)) {
-          rateLimited = true;
-          break;
+          batchHad429 = true;
+          hitRateLimit = true;
         }
       }
-      if (rateLimited) {
+      if (batchHad429) {
+        // Skip remaining wallets in this batch only via the rejects; continue
+        // the cycle after a brief gap (do NOT abort the whole watch list).
         lastPollRateLimited = true;
         console.warn(
-          '[monitor] RPC 429 — skipping rest of poll cycle to protect copy CU'
+          '[monitor] RPC 429 on wallet batch — brief pause, continuing poll cycle'
         );
-        break;
+        await new Promise((r) => setTimeout(r, 200));
       }
       if (i + batchSize < ordered.length) {
         await new Promise((r) => setTimeout(r, batchGapMs));
       }
     }
     lastPollCompleted = completed;
-    // Advance even on early abort so every wallet gets turns under rate limit
     if (n > 0) {
       pollRotationOffset = (offset + batchSize) % n;
     }
+    if (hitRateLimit) {
+      lastPollRateLimited = true;
+    }
 
-    // Drain buy handlers after signature scan so detection isn't blocked by anti-rug
-    await drainBuyEventQueue();
+    // Fire-and-forget drain so enrich/trade does not block the next poll tick
+    void drainBuyEventQueue();
 
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
     if (openMints.length > 0) {
@@ -890,7 +905,6 @@ async function pollAllWallets(): Promise<void> {
       paperTrader.checkPositions();
     }
 
-    // After sells / price updates — evaluate dip re-buy opportunities
     await evaluateReBuyOpportunities();
 
     pruneOldBuys();
@@ -1196,13 +1210,16 @@ export function filterActiveWallets(
     };
   }
 
-  let disabled = 0;
+  let wouldDeprioritize = 0;
+  let reenabled = 0;
 
   for (const wallet of config.smartWallets) {
-    // Skip wallets not yet successfully checked — don't disable blindly
     if (wallet.lastCheckedAt == null) continue;
-    // Never auto-disable freshly imported wallets still in grace
-    if (importGraceActive(wallet) && (wallet.lastTradedAt == null && wallet.lastActive == null)) {
+    if (
+      importGraceActive(wallet) &&
+      wallet.lastTradedAt == null &&
+      wallet.lastActive == null
+    ) {
       continue;
     }
 
@@ -1212,17 +1229,20 @@ export function filterActiveWallets(
       last != null ? (Date.now() - last) / MS_PER_DAY : Infinity;
     const trades = wallet.tradesLast30d ?? 0;
 
+    // Soft filter only — do NOT permanently disable wallets (starves signals).
+    // Explicit pruneInactive / persistActiveOnly still removes inactive below.
     if (!active && wallet.enabled) {
-      wallet.enabled = false;
-      disabled += 1;
-      console.log(
-        `[monitor] Auto-disabled ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
-          `last trade ${daysSince === Infinity ? 'never' : daysSince.toFixed(0) + 'd ago'}, ` +
-          `${trades} txs/30d`
-      );
+      wouldDeprioritize += 1;
+      if (wouldDeprioritize <= 5) {
+        console.log(
+          `[monitor] Deprioritize ${wallet.name} (${wallet.address.slice(0, 8)}…) — ` +
+            `last trade ${daysSince === Infinity ? 'never' : daysSince.toFixed(0) + 'd ago'}, ` +
+            `${trades} txs/30d (still enabled; soft poll filter)`
+        );
+      }
     } else if (active && !wallet.enabled) {
-      // Re-enable if they became active again / were falsely disabled
       wallet.enabled = true;
+      reenabled += 1;
       console.log(
         `[monitor] Re-enabled ${wallet.name} (${wallet.address.slice(0, 8)}…) — activity OK`
       );
@@ -1230,7 +1250,16 @@ export function filterActiveWallets(
   }
 
   let removed = 0;
+  let disabled = 0;
   if (options.pruneInactive || options.persistActiveOnly) {
+    // Explicit operator prune — disable inactive then optionally remove
+    for (const wallet of config.smartWallets) {
+      if (wallet.lastCheckedAt == null) continue;
+      if (!passesActivityRules(wallet) && wallet.enabled) {
+        wallet.enabled = false;
+        disabled += 1;
+      }
+    }
     const before = config.smartWallets.length;
     config.smartWallets = config.smartWallets.filter((w) => w.enabled);
     removed = before - config.smartWallets.length;
@@ -1241,7 +1270,10 @@ export function filterActiveWallets(
 
   const kept = config.smartWallets.filter((w) => w.enabled).length;
   console.log(
-    `[monitor] Activity filter: ${kept} active, ${disabled} disabled, ${removed} pruned`
+    `[monitor] Activity filter: ${kept} enabled, ${wouldDeprioritize} soft-deprioritized` +
+      (disabled ? `, ${disabled} pruned-disabled` : '') +
+      (removed ? `, ${removed} removed` : '') +
+      (reenabled ? `, ${reenabled} re-enabled` : '')
   );
   return { kept, disabled, removed };
 }
@@ -1544,18 +1576,27 @@ function enqueueBuyEvent(buy: WalletBuyEvent): void {
 async function drainBuyEventQueue(): Promise<void> {
   if (buyDrainInFlight) return;
   buyDrainInFlight = true;
+  const CONCURRENCY = 3;
   try {
     while (pendingBuyEvents.length > 0 && !paused) {
-      const buy = pendingBuyEvents.shift();
-      if (!buy) break;
-      try {
-        await handleBuyEvent(buy);
-      } catch (err) {
-        console.error(
-          `[monitor] Buy handler error for ${buy.walletName}/${buy.mint.slice(0, 8)}…:`,
-          err instanceof Error ? err.message : err
-        );
+      const batch: WalletBuyEvent[] = [];
+      while (batch.length < CONCURRENCY && pendingBuyEvents.length > 0) {
+        const buy = pendingBuyEvents.shift();
+        if (buy) batch.push(buy);
       }
+      if (!batch.length) break;
+      await Promise.all(
+        batch.map(async (buy) => {
+          try {
+            await handleBuyEvent(buy);
+          } catch (err) {
+            console.error(
+              `[monitor] Buy handler error for ${buy.walletName}/${buy.mint.slice(0, 8)}…:`,
+              err instanceof Error ? err.message : err
+            );
+          }
+        })
+      );
     }
   } finally {
     buyDrainInFlight = false;
@@ -1793,10 +1834,54 @@ async function handleScannerCandidate(
     markScannerCooldown(candidate.mint, false);
     return;
   }
-  if (tradedMints.has(candidate.mint) || pendingBuys.has(candidate.mint)) {
+
+  // Overview feed early (mirror copy path) — before beginBuy / risk_off / requireTa
+  const feedSig = candidate.id;
+  const earlyTs = Date.now();
+  let launch = candidate.launch;
+  const earlyFeed: WalletBuyEvent = {
+    wallet: MARKET_SCANNER_WALLET,
+    walletName: MARKET_SCANNER_NAME,
+    mint: candidate.mint,
+    symbol: candidate.symbol,
+    name: candidate.name,
+    signature: feedSig,
+    timestamp: earlyTs,
+    detectedAt: earlyTs,
+    isPumpFun: Boolean(launch.isPumpFun),
+    isMigration: Boolean(candidate.migrated || launch.migrated),
+    tradeStatus: 'seen',
+    entrySource: 'scanner',
+  };
+  if (!recentBuys.has(candidate.mint)) recentBuys.set(candidate.mint, []);
+  const alreadyFed = activityFeed.some(
+    (e) => e.mint === candidate.mint && e.signature === feedSig
+  );
+  if (!alreadyFed) {
+    recentBuys.get(candidate.mint)!.push(earlyFeed);
+    pushActivityFeed(earlyFeed);
+  }
+
+  if (tradedMints.has(candidate.mint)) {
     annotateScannerCandidate(candidate.mint, {
       status: 'skipped',
-      skipReason: 'already traded / pending',
+      skipReason: 'already traded',
+    });
+    annotateActivityFeed(candidate.mint, feedSig, {
+      tradeStatus: 'skipped',
+      skipReason: 'already traded',
+    });
+    markScannerCooldown(candidate.mint, false);
+    return;
+  }
+  if (pendingBuys.has(candidate.mint)) {
+    annotateScannerCandidate(candidate.mint, {
+      status: 'skipped',
+      skipReason: 'buy in progress',
+    });
+    annotateActivityFeed(candidate.mint, feedSig, {
+      tradeStatus: 'skipped',
+      skipReason: 'buy in progress',
     });
     markScannerCooldown(candidate.mint, false);
     return;
@@ -1806,11 +1891,14 @@ async function handleScannerCandidate(
       status: 'skipped',
       skipReason: 'buy in progress',
     });
+    annotateActivityFeed(candidate.mint, feedSig, {
+      tradeStatus: 'skipped',
+      skipReason: 'buy in progress',
+    });
     return;
   }
 
   try {
-    let launch = candidate.launch;
     if (launch.candles?.length) {
       seedPriceHistoryFromCandles(candidate.mint, launch.candles);
     }
@@ -1828,6 +1916,12 @@ async function handleScannerCandidate(
       uniqueWallets.push(w);
     }
     const hybrid = uniqueWallets.length > 0;
+    if (hybrid) {
+      annotateActivityFeed(candidate.mint, feedSig, {
+        walletName: `${MARKET_SCANNER_NAME}+wallets`,
+        entrySource: 'hybrid',
+      });
+    }
 
     // Regime: pause scanner-only in risk_off (hybrid still OK)
     try {
@@ -1841,6 +1935,10 @@ async function handleScannerCandidate(
         finishBuy(candidate.mint, false);
         annotateScannerCandidate(candidate.mint, {
           status: 'skipped',
+          skipReason: 'risk_off pause scanner-only',
+        });
+        annotateActivityFeed(candidate.mint, feedSig, {
+          tradeStatus: 'skipped',
           skipReason: 'risk_off pause scanner-only',
         });
         markScannerCooldown(candidate.mint, false);
@@ -1865,6 +1963,10 @@ async function handleScannerCandidate(
           status: 'skipped',
           skipReason: 'no playbook',
         });
+        annotateActivityFeed(candidate.mint, feedSig, {
+          tradeStatus: 'skipped',
+          skipReason: 'no playbook',
+        });
         markScannerCooldown(candidate.mint, false);
         return;
       }
@@ -1873,9 +1975,14 @@ async function handleScannerCandidate(
         candidate.confluence < minConfluence
       ) {
         finishBuy(candidate.mint, false);
+        const reason = `confluence ${candidate.confluence ?? 0}<${minConfluence}`;
         annotateScannerCandidate(candidate.mint, {
           status: 'skipped',
-          skipReason: `confluence ${candidate.confluence ?? 0}<${minConfluence}`,
+          skipReason: reason,
+        });
+        annotateActivityFeed(candidate.mint, feedSig, {
+          tradeStatus: 'skipped',
+          skipReason: reason,
         });
         markScannerCooldown(candidate.mint, false);
         return;
@@ -1992,25 +2099,30 @@ async function handleScannerCandidate(
       /* ignore */
     }
 
-    // Push into activity feed so dashboard shows scanner rows
+    // Upgrade early Overview row (do NOT pushActivityFeed again — would double-count)
     const feedEvent: WalletBuyEvent = {
       wallet: MARKET_SCANNER_WALLET,
       walletName: hybrid ? `${MARKET_SCANNER_NAME}+wallets` : MARKET_SCANNER_NAME,
       mint: candidate.mint,
       symbol: candidate.symbol,
       name: candidate.name,
-      signature: candidate.id,
+      signature: feedSig,
       timestamp: signal.timestamp,
-      detectedAt: signal.timestamp,
+      detectedAt: earlyTs,
       isPumpFun: Boolean(launch.isPumpFun),
       isMigration: signal.isMigration,
       tradeStatus: 'seen',
       metrics: signal.metrics,
       entrySource: hybrid ? 'hybrid' : 'scanner',
     };
-    if (!recentBuys.has(candidate.mint)) recentBuys.set(candidate.mint, []);
-    recentBuys.get(candidate.mint)!.push(feedEvent);
-    pushActivityFeed(feedEvent);
+    annotateActivityFeed(candidate.mint, feedSig, {
+      walletName: feedEvent.walletName,
+      metrics: signal.metrics,
+      entrySource: feedEvent.entrySource,
+      isMigration: signal.isMigration,
+      symbol: candidate.symbol,
+      name: candidate.name,
+    });
 
     console.log(
       `[monitor] 📡 SCANNER ${hybrid ? 'HYBRID' : 'TA'} — ${candidate.symbol} ` +
@@ -2046,12 +2158,10 @@ async function handleScannerCandidate(
     });
     recordSignalSizing(signal, sizing, true);
 
-    // Reuse the shared buy path used by wallet convergence
     const buyEvent: WalletBuyEvent = {
       ...feedEvent,
       tradeStatus: 'seen',
     };
-    // Stamp profile + execute via existing helper path
     await executeSignalBuy(signal, buyEvent, sizing, {
       priority: hybrid || signal.isMigration,
       strategyKind: signal.isMigration ? 'migration' : 'normal',
@@ -2060,6 +2170,10 @@ async function handleScannerCandidate(
     finishBuy(candidate.mint, false);
     annotateScannerCandidate(candidate.mint, {
       status: 'skipped',
+      skipReason: err instanceof Error ? err.message : 'scanner error',
+    });
+    annotateActivityFeed(candidate.mint, feedSig, {
+      tradeStatus: 'skipped',
       skipReason: err instanceof Error ? err.message : 'scanner error',
     });
     markScannerCooldown(candidate.mint, false);
@@ -2537,8 +2651,8 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     }
   }
 
-  // Birdeye fallback if anti-rug didn't attach overview
-  if (!buy.birdeye) {
+  // Birdeye fallback only when anti-rug is ON (otherwise every buy hits Birdeye and stalls drain)
+  if (!buy.birdeye && isStrategyEnabled('anti_rug_honeypot')) {
     try {
       const overview = await getTokenOverview(buy.mint);
       const signal = await getSmartMoneySignal(buy.mint);

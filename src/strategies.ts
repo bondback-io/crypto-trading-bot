@@ -425,7 +425,7 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     name: 'Min Holders + Activity',
     group: 'filters',
     description:
-      'Require minimum holders and source-wallet activity / trade-count filters.',
+      'Token holder floors + soft wallet activity poll filter. Deprioritizes inactive wallets for polling; does not permanently disable them (use explicit prune to remove).',
     defaultEnabled: true,
     criticalSafety: true,
     frequencyWhenOn: 'fewer',
