@@ -98,6 +98,10 @@ export interface ScannerStatus {
   degenRelaxed?: boolean;
   /** True when Risk Off relaxes TA/volume floors for soak testing */
   riskOffRelaxed?: boolean;
+  /** Times poll/enrich was skipped because wallet buy queue exceeded threshold */
+  skippedForBuyQueue?: number;
+  lastSkipReason?: string | null;
+  buyQueueYieldThreshold?: number;
 }
 
 type ScannerHandler = (candidate: ScannerCandidate & { launch: LaunchEvent }) => Promise<void>;
@@ -171,6 +175,12 @@ function scannerCfg() {
 
 /** Optional hook — monitor sets this so scanner yields while wallet buys drain. */
 let pendingBuyQueueDepth: () => number = () => 0;
+/** Soften: only skip whole poll / enrich when wallet buy queue is truly backed up. */
+const SCANNER_YIELD_QUEUE_DEPTH = 12;
+/** Mid-enrich: abort individual enrich when drain is moderately busy. */
+const SCANNER_MID_ENRICH_YIELD_DEPTH = 4;
+let skippedForBuyQueue = 0;
+let lastSkipReason: string | null = null;
 
 export function setScannerBuyQueueDepthFn(fn: () => number): void {
   pendingBuyQueueDepth = fn;
@@ -248,6 +258,9 @@ export function getScannerStatus(): ScannerStatus {
     skipBuckets: getScannerSkipBuckets(8),
     degenRelaxed: false,
     riskOffRelaxed: config.riskLevel === 'off',
+    skippedForBuyQueue,
+    lastSkipReason,
+    buyQueueYieldThreshold: SCANNER_YIELD_QUEUE_DEPTH,
   };
 }
 
@@ -829,10 +842,14 @@ export async function selectScannerCandidates(
     /* ignore */
   }
 
-  // Yield to wallet buy drain if the queue is backed up
-  if (pendingBuyQueueDepth() > 0) {
+  // Yield to wallet buy drain only when the queue is truly backed up
+  const qDepth = pendingBuyQueueDepth();
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
+    skippedForBuyQueue += 1;
+    lastSkipReason = `defer enrich — ${qDepth} wallet buy(s) queued (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`;
     console.log(
-      `[marketScanner] Deferring enrich — ${pendingBuyQueueDepth()} wallet buy(s) queued`
+      `[marketScanner] Deferring enrich — ${qDepth} wallet buy(s) queued ` +
+        `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
     return [];
   }
@@ -854,8 +871,8 @@ export async function selectScannerCandidates(
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
   const enriched = await mapPool(prefiltered, 3, async (raw) => {
-    // Re-check queue mid-enrich so wallet path stays priority
-    if (pendingBuyQueueDepth() > 4) return null;
+    // Re-check queue mid-enrich so wallet path stays priority under real backlog
+    if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return null;
 
     let event: LaunchEvent = raw;
     try {
@@ -944,9 +961,13 @@ export function markScannerCooldown(mint: string, taken: boolean): void {
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabled('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
-  if (pendingBuyQueueDepth() > 0) {
+  const qDepth = pendingBuyQueueDepth();
+  if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
+    skippedForBuyQueue += 1;
+    lastSkipReason = `skip poll — ${qDepth} wallet buy(s) pending (threshold ${SCANNER_YIELD_QUEUE_DEPTH})`;
     console.log(
-      `[marketScanner] Skipping poll — ${pendingBuyQueueDepth()} wallet buy(s) pending`
+      `[marketScanner] Skipping poll — ${qDepth} wallet buy(s) pending ` +
+        `(threshold ${SCANNER_YIELD_QUEUE_DEPTH})`
     );
     return 0;
   }

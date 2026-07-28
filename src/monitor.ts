@@ -12,7 +12,7 @@ import {
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
+import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole, lanesShareEndpoint } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
@@ -600,6 +600,10 @@ let paused = false;
 let pollInFlight = false;
 /** Rotates which wallets are polled first so a mid-cycle 429 cannot starve the same tail forever. */
 let pollRotationOffset = 0;
+/** Last poll-cycle soak counters for /api/status. */
+let lastPollAttempted = 0;
+let lastPollCompleted = 0;
+let lastPollRateLimited = false;
 let onSignalHandler: SignalHandler | null = null;
 
 /** Detect Solana RPC / HTTP 429 rate-limit errors from web3.js or providers. */
@@ -830,8 +834,9 @@ async function pollAllWallets(): Promise<void> {
 
     const wallets = getWalletsForPolling();
     const publicRpc = isPublicRpcUrl(getRpcUrl());
-    // Keep concurrent RPC polls low on public RPCs; paid endpoints can go faster
-    const batchSize = publicRpc ? 4 : 6;
+    const sharedLane = lanesShareEndpoint();
+    // Public: low concurrency. Shared paid: 6. Distinct secondary: 8 for better coverage.
+    const batchSize = publicRpc ? 4 : sharedLane ? 6 : 8;
     const batchGapMs = publicRpc ? 200 : 80;
     const n = wallets.length;
     const offset =
@@ -842,6 +847,9 @@ async function pollAllWallets(): Promise<void> {
         ? wallets
         : wallets.slice(offset).concat(wallets.slice(0, offset));
     let rateLimited = false;
+    let completed = 0;
+    lastPollAttempted = n;
+    lastPollRateLimited = false;
     for (let i = 0; i < ordered.length; i += batchSize) {
       if (rateLimited) break;
       const batch = ordered.slice(i, i + batchSize);
@@ -849,12 +857,14 @@ async function pollAllWallets(): Promise<void> {
         batch.map((wallet) => pollWallet(wallet))
       );
       for (const r of results) {
+        if (r.status === 'fulfilled') completed += 1;
         if (r.status === 'rejected' && isRpcRateLimitError(r.reason)) {
           rateLimited = true;
           break;
         }
       }
       if (rateLimited) {
+        lastPollRateLimited = true;
         console.warn(
           '[monitor] RPC 429 — skipping rest of poll cycle to protect copy CU'
         );
@@ -864,6 +874,7 @@ async function pollAllWallets(): Promise<void> {
         await new Promise((r) => setTimeout(r, batchGapMs));
       }
     }
+    lastPollCompleted = completed;
     // Advance even on early abort so every wallet gets turns under rate limit
     if (n > 0) {
       pollRotationOffset = (offset + batchSize) % n;
@@ -4690,6 +4701,11 @@ export function getMonitorStatus(): {
   recentSizedSignals: number;
   skipReasonCounts: Array<{ reason: string; count: number }>;
   lastFilterSkipReason: string | null;
+  pendingBuyQueueDepth: number;
+  lastPollAttempted: number;
+  lastPollCompleted: number;
+  lastPollRateLimited: boolean;
+  pollRotationOffset: number;
 } {
   const risk = getRiskStatus({
     equitySol: paperTrader.getEquitySol(),
@@ -4734,6 +4750,11 @@ export function getMonitorStatus(): {
     recentSizedSignals: recentSignals.length,
     skipReasonCounts: getSkipReasonCounts(),
     lastFilterSkipReason,
+    pendingBuyQueueDepth: pendingBuyEvents.length,
+    lastPollAttempted,
+    lastPollCompleted,
+    lastPollRateLimited,
+    pollRotationOffset,
   };
 }
 
