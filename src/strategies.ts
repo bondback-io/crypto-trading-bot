@@ -4252,6 +4252,10 @@ export function bakedStrategyModulesDefaultStamp(
  * On boot / deploy: if this build's baked strategy+trade-profile defaults have
  * not been applied yet, import them (once per defaultsId). Does not wipe wallets
  * or paper. Re-runs automatically when defaultsId / exportedAt in the JSON changes.
+ *
+ * User-owned trade profile overrides + self-learning are never overwritten —
+ * they are snapshotted before import and restored afterward (and again from
+ * data/trade-profiles-user.json in initWallets).
  */
 export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
   try {
@@ -4259,7 +4263,13 @@ export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
       hasSettingsMigration,
       completeSettingsMigration,
       clearPriorStrategyModulesDefaultMigrations,
+      persistUserSettings,
     } = require('./config') as typeof import('./config');
+    const {
+      serializeTradeProfilesForPersist,
+      hydrateTradeProfilesFromSettings,
+      ensureTradeProfilesInitialized,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
 
     const baked = getBakedStrategyModulesDefault();
     const stamp = bakedStrategyModulesDefaultStamp(baked);
@@ -4267,12 +4277,52 @@ export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
       return false;
     }
 
+    ensureTradeProfilesInitialized();
+    const before = serializeTradeProfilesForPersist();
+    const savedOverrides = before.overrides
+      ? (JSON.parse(JSON.stringify(before.overrides)) as typeof before.overrides)
+      : undefined;
+    const savedSelfLearning = before.selfLearning
+      ? (JSON.parse(
+          JSON.stringify(before.selfLearning)
+        ) as typeof before.selfLearning)
+      : undefined;
+    const savedProfiles = before.profiles
+      ? (JSON.parse(JSON.stringify(before.profiles)) as typeof before.profiles)
+      : undefined;
+    const hadUserOverrides =
+      !!savedOverrides && Object.keys(savedOverrides).length > 0;
+    const hadSelfLearning =
+      !!savedSelfLearning && Object.keys(savedSelfLearning).length > 0;
+
     clearPriorStrategyModulesDefaultMigrations(stamp);
     const result = importStrategyModulesBundle(baked, {
       persist: false,
       label: 'boot-default',
     });
+
+    // Restore user-owned micro-bot knobs — bake must never wipe learning / custom cards
+    if (hadUserOverrides || hadSelfLearning || savedProfiles) {
+      const after = serializeTradeProfilesForPersist();
+      hydrateTradeProfilesFromSettings({
+        tradeProfiles: {
+          ...after,
+          profiles: savedProfiles || after.profiles,
+          overrides: hadUserOverrides ? savedOverrides : after.overrides,
+          selfLearning: hadSelfLearning
+            ? savedSelfLearning
+            : after.selfLearning,
+        },
+      });
+      console.log(
+        `[settings] Preserved user trade-profile knobs across bake` +
+          ` (overrides=${hadUserOverrides ? Object.keys(savedOverrides!).length : 0}` +
+          `, selfLearn=${hadSelfLearning ? Object.keys(savedSelfLearning!).length : 0})`
+      );
+    }
+
     completeSettingsMigration(stamp);
+    persistUserSettings();
     console.log(
       `[settings] Applied baked strategy defaults (${stamp}) · ` +
         `${result.enabledCount}/${result.totalCount} modules ON · ` +

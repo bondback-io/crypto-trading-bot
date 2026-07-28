@@ -107,7 +107,7 @@ export function expireStaleOffers(): number {
   ensureLoaded();
   const now = Date.now();
   let n = 0;
-  const minKol = Math.max(1, Number(config.zion?.minKolWallets) || 2);
+  const minKol = Math.max(1, Number(config.zion?.minKolWallets) || 5);
   for (const o of offers) {
     if (o.status !== 'pending') continue;
     if (o.expiresAt <= now) {
@@ -377,7 +377,7 @@ export function maybeCreateOffer(
   const open = paperTrader.getOpenPositions().some((p) => p.mint === mint);
   if (open) return null;
 
-  const minKol = Math.max(1, Number(config.zion.minKolWallets) || 2);
+  const minKol = Math.max(1, Number(config.zion.minKolWallets) || 5);
   const kolCount = input.kolWallets?.length ?? 0;
   const tracked = Math.max(0, Number(input.trackedBoostCount) || 0);
   // Min KOL wallets is a hard floor on real KOL wallets only.

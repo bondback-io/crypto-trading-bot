@@ -57,6 +57,11 @@ export const PERSIST_FILES = {
   zionKolUniverse: 'zion-kol-universe.json',
   /** Smart Bot lane fight outcomes + closed PnL join */
   laneOutcomes: 'lane-outcomes.json',
+  /**
+   * User-owned trade profile knobs (enables, overrides, self-learning).
+   * Survives baked-defaults re-import on deploy; always reloaded on boot.
+   */
+  tradeProfilesUser: 'trade-profiles-user.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',
@@ -234,6 +239,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.optimizerLast,
     PERSIST_FILES.tradingWallets,
     PERSIST_FILES.dashboardState,
+    PERSIST_FILES.tradeProfilesUser,
   ];
   const deleted: string[] = [];
   for (const name of names) {
@@ -255,12 +261,24 @@ export interface PersistenceStatus {
   paperBalanceExists: boolean;
   backtestHistoryExists: boolean;
   tradingWalletsExists: boolean;
+  /** Dedicated micro-bot user knobs file */
+  tradeProfilesUserExists: boolean;
+  /** At least one profile-learning episode file */
+  profileLearningExists: boolean;
+  /** Last config.json updatedAt (ms), if present */
+  lastSettingsSavedAt: number | null;
   settingsPath: string;
   walletsPath: string;
   paperBalancePath: string;
   backtestHistoryPath: string;
+  tradeProfilesUserPath: string;
   /** True when cloud host is detected and persisted files are missing — no volume/disk */
   ephemeralLikely: boolean;
+  /**
+   * True when the data dir looks durable enough that saves should survive deploys:
+   * writable, and not flagged ephemeralLikely.
+   */
+  durableLikely: boolean;
   warning: string | null;
 }
 
@@ -271,6 +289,7 @@ export function getPersistenceStatus(): PersistenceStatus {
   const paperBalancePath = dataFile(PERSIST_FILES.paperBalance);
   const backtestHistoryPath = dataFile(PERSIST_FILES.backtestHistory);
   const tradingWalletsPath = dataFile(PERSIST_FILES.tradingWallets);
+  const tradeProfilesUserPath = dataFile(PERSIST_FILES.tradeProfilesUser);
   const onRender = isRunningOnRender();
   const onFly = isRunningOnFly();
 
@@ -294,9 +313,37 @@ export function getPersistenceStatus(): PersistenceStatus {
     fs.existsSync(backtestHistoryPath) ||
     fs.existsSync(dataFile(PERSIST_FILES.legacyBacktest));
   const tradingWalletsExists = fs.existsSync(tradingWalletsPath);
+  const tradeProfilesUserExists = fs.existsSync(tradeProfilesUserPath);
+
+  let profileLearningExists = false;
+  try {
+    const learnDir = dataFile('profile-learning');
+    if (fs.existsSync(learnDir)) {
+      profileLearningExists = fs
+        .readdirSync(learnDir)
+        .some((f) => f.endsWith('.json'));
+    }
+  } catch {
+    profileLearningExists = false;
+  }
+
+  let lastSettingsSavedAt: number | null = null;
+  if (settingsExists) {
+    try {
+      const parsed = readJsonFile<{ updatedAt?: number }>(settingsPath);
+      if (parsed?.updatedAt != null && Number.isFinite(Number(parsed.updatedAt))) {
+        lastSettingsSavedAt = Number(parsed.updatedAt);
+      } else {
+        lastSettingsSavedAt = fs.statSync(settingsPath).mtimeMs;
+      }
+    } catch {
+      lastSettingsSavedAt = null;
+    }
+  }
 
   const ephemeralLikely =
     (onRender || onFly) && (!settingsExists || !walletsExists);
+  const durableLikely = writable && !ephemeralLikely;
 
   let warning: string | null = null;
   if (!writable) {
@@ -323,11 +370,16 @@ export function getPersistenceStatus(): PersistenceStatus {
     paperBalanceExists,
     backtestHistoryExists,
     tradingWalletsExists,
+    tradeProfilesUserExists,
+    profileLearningExists,
+    lastSettingsSavedAt,
     settingsPath,
     walletsPath,
     paperBalancePath,
     backtestHistoryPath,
+    tradeProfilesUserPath,
     ephemeralLikely,
+    durableLikely,
     warning,
   };
 }
@@ -337,13 +389,20 @@ export function logPersistenceStatus(): void {
   const s = getPersistenceStatus();
   console.log(`[persist] data dir: ${s.dataDir}`);
   console.log(
-    `[persist] writable=${s.writable} onRender=${s.onRender} onFly=${s.onFly} ` +
+    `[persist] writable=${s.writable} durableLikely=${s.durableLikely} ` +
+      `onRender=${s.onRender} onFly=${s.onFly} ` +
       `config=${s.settingsExists ? 'yes' : 'MISSING'} ` +
+      `profilesUser=${s.tradeProfilesUserExists ? 'yes' : 'MISSING'} ` +
       `wallets=${s.walletsExists ? 'yes' : 'MISSING'} ` +
       `paper=${s.paperBalanceExists ? 'yes' : 'MISSING'} ` +
+      `learning=${s.profileLearningExists ? 'yes' : 'none'} ` +
       `backtest=${s.backtestHistoryExists ? 'yes' : 'MISSING'}`
   );
   if (s.warning) {
     console.warn(`[persist] ⚠ ${s.warning}`);
+  } else if (s.durableLikely) {
+    console.log(
+      '[persist] Durable data dir OK — saved settings/learning should survive code deploys'
+    );
   }
 }

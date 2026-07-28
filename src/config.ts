@@ -2359,7 +2359,7 @@ export const config: BotConfig = {
       activityLookbackMinutes: 45,
       batchSize: 6,
     },
-    minKolWallets: 2,
+    minKolWallets: 5,
     minWalletQuality: 40,
     minMcUsd: 50_000,
     maxMcUsd: 500_000_000,
@@ -2447,6 +2447,7 @@ const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
 const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** One-shot: Zion safeguards MC band + quality/poll defaults. */
 const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
+const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -2583,6 +2584,15 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
 /** Persist current tunable settings without touching wallets or secrets. */
 export function persistUserSettings(): void {
   savePersistedSettings(buildPersistedSettingsSnapshot());
+  try {
+    const { serializeTradeProfilesForPersist } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const { saveTradeProfilesUserState } =
+      require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    saveTradeProfilesUserState(serializeTradeProfilesForPersist());
+  } catch {
+    /* tradeProfiles may not be ready during early bootstrap */
+  }
 }
 
 function cloneJson<T>(v: T): T {
@@ -3437,7 +3447,7 @@ export function applyPersistedSettings(): boolean {
   }
 
   if (!settingsMigrations[ZION_SAFEGUARDS_V1]) {
-    config.zion.minKolWallets = 2;
+    config.zion.minKolWallets = 5;
     config.zion.minWalletQuality = 40;
     config.zion.minMcUsd = 50_000;
     config.zion.maxMcUsd = 500_000_000;
@@ -3456,9 +3466,25 @@ export function applyPersistedSettings(): boolean {
       config.zion.scanner.universeSize = 60;
     }
     settingsMigrations[ZION_SAFEGUARDS_V1] = true;
+    settingsMigrations[ZION_MIN_KOL_V2] = true;
     persistUserSettings();
     console.log(
-      '[settings] Applied zionSafeguards_v1 — Min MC $50k / Max MC $500M, quality 40, poll 30s'
+      '[settings] Applied zionSafeguards_v1 — Min MC $50k / Max MC $500M, quality 40, min KOLs 5, poll 30s'
+    );
+  }
+
+  if (!settingsMigrations[ZION_MIN_KOL_V2]) {
+    // Raise default floor from legacy 2 → 5 (skip if user already customized above 2)
+    if (
+      config.zion.minKolWallets == null ||
+      Number(config.zion.minKolWallets) <= 2
+    ) {
+      config.zion.minKolWallets = 5;
+    }
+    settingsMigrations[ZION_MIN_KOL_V2] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied zionMinKol_v2 — Min KOL wallets default ${config.zion.minKolWallets}`
     );
   }
 
@@ -4014,6 +4040,17 @@ export function initWallets(): void {
   } catch (err) {
     console.warn(
       '[config] Baked strategy defaults boot hook failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  // User-owned micro-bot knobs always win over bake (separate durable file).
+  try {
+    const { applyTradeProfilesUserStateOnBoot } =
+      require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    applyTradeProfilesUserStateOnBoot();
+  } catch (err) {
+    console.warn(
+      '[config] trade-profiles-user boot restore failed:',
       err instanceof Error ? err.message : err
     );
   }

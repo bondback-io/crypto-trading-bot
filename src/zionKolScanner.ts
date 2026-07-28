@@ -467,7 +467,7 @@ function scoreAgg(agg: MintAgg): {
       skipReason: fakeHolders,
     };
   }
-  const minKol = Math.max(1, Number(zionCfg().minKolWallets) || 2);
+  const minKol = Math.max(1, Number(zionCfg().minKolWallets) || 5);
   const minQ = Math.max(0, Number(zionCfg().minWalletQuality) || 0);
   const kolWallets = [...agg.wallets.values()].filter(
     (w) => (w.quality ?? 50) >= minQ || minQ <= 0

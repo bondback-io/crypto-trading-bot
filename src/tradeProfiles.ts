@@ -3704,6 +3704,27 @@ export function setProfileSelfLearningEnabled(
   return getTradeProfilesStatus();
 }
 
+export function setProfileSelfLearningMinTrades(
+  profileId: TradeProfileId | string,
+  minTrades: number
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') {
+    return getTradeProfilesStatus();
+  }
+  const {
+    normalizeSelfLearning,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  const prev = normalizeSelfLearning(state.selfLearning?.[id]);
+  const next = normalizeSelfLearning({
+    ...prev,
+    minTrades: Math.max(6, Math.min(40, Math.round(Number(minTrades) || 8))),
+  });
+  writeProfileSelfLearning(id, next);
+  return getTradeProfilesStatus();
+}
+
 export function applyProfileSelfLearnProposal(
   profileId: TradeProfileId | string
 ): ReturnType<typeof getTradeProfilesStatus> {

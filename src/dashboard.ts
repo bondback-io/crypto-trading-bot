@@ -2513,6 +2513,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .tp-decision-meta { color: #94a3b8; }
     .tp-decision-why { color: #cbd5e1; grid-column: 1 / -1; }
+    .tp-decision-winner-glove {
+      display: inline-block;
+      margin-right: 0.2rem;
+      font-size: 0.95em;
+      line-height: 1;
+      vertical-align: -0.05em;
+    }
     .tp-params {
       margin-top: 0.45rem;
       padding-top: 0.4rem;
@@ -5388,7 +5395,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-          <label class="ctl ctl-sm"><span>Min KOL wallets <span class="tip" tabindex="0" data-tip="Hard floor: requires this many quality-passing KOL wallets. Tracked smart-wallet boost does not count toward this number."></span></span><input type="number" id="zion-min-kol" value="2" min="1" max="20" step="1" /></label>
+          <label class="ctl ctl-sm"><span>Min KOL wallets <span class="tip" tabindex="0" data-tip="Hard floor: requires this many quality-passing KOL wallets. Tracked smart-wallet boost does not count toward this number."></span></span><input type="number" id="zion-min-kol" value="5" min="1" max="20" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min wallet quality</span><input type="number" id="zion-min-quality" value="40" min="0" max="100" step="1" /></label>
           <label class="ctl ctl-sm"><span>Min MC ($)</span><input type="number" id="zion-min-mc" value="50000" min="0" step="1000" /></label>
           <label class="ctl ctl-sm"><span>Max MC ($)</span><input type="number" id="zion-max-mc" value="500000000" min="0" step="1000" /></label>
@@ -5913,8 +5920,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, and backtest history are saved as JSON under the data directory (DATA_DIR). Survives code updates when a disk is mounted."></span></div>
-        <div class="mint text-sm mb-3" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
+        <div class="section-title">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, trade-profile knobs, and learning episodes are saved as JSON under DATA_DIR. Survives code updates when a disk is mounted."></span></div>
+        <div class="mint text-sm mb-2" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
+        <div id="persist-status-detail" class="text-xs mb-3" style="line-height:1.55;color:#94a3b8">Checking data directory…</div>
         <div class="flex flex-wrap gap-2 items-center">
           <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
           <span class="mint text-xs" id="persist-reset-msg"></span>
@@ -6048,6 +6056,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     const PROFILE_LEGEND_IDS = [
       'scalper',
       'dip_buyer',
+      'trend_rider',
       'migration_sniper',
       'high_win_rate',
       'momentum_burst',
@@ -7641,6 +7650,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                           ' onchange="toggleProfileSelfLearning(\\'' + p.id + '\\', this.checked)" />' +
                         '<span>Self-Learning ' + (sl.mode === 'auto' ? '(auto)' : '(shadow)') + '</span>' +
                       '</label>' +
+                      '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Closed trades needed before proposing an upgrade (6–40). Nudges scale up as more trades feed the bot.">' +
+                        'Min trades' +
+                        '<input type="number" min="6" max="40" step="1" style="width:3.5rem" data-selflearn-min="' +
+                        escAttr(p.id) +
+                        '" value="' +
+                        escHtml(String(sl.minTrades != null ? sl.minTrades : 8)) +
+                        '" onchange="setProfileSelfLearnMinTrades(\\'' +
+                        p.id +
+                        '\\', this.value)" />' +
+                      '</label>' +
                       (slBadge
                         ? '<p class="mint text-xs" style="margin:0.25rem 0;color:#4ade80">' + escHtml(slBadge) +
                           (sl.version ? ' · v' + sl.version : '') + '</p>'
@@ -7922,6 +7941,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             const winLabel = winner
               ? escHtml(winner.name || d.winnerId)
               : (d.winnerId ? escHtml(d.winnerId) : 'none');
+            const winnerBadge = d.winnerId
+              ? '<span class="tp-decision-winner-glove" title="Won the lane fight" aria-label="Winner">🥊</span>'
+              : '';
             const lanes = (d.lanes || []).map(function (l) {
               const c = profileColorFor(l.id) || '#94a3b8';
               const mark = l.passed ? '✓' : '✗';
@@ -7940,7 +7962,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               : '';
             return (
               '<div class="tp-decision-row' + (!d.winnerId || outcome === 'no buy' ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
-                '<span><strong style="color:' + winColor + '">' + winLabel + '</strong></span>' +
+                '<span><strong style="color:' + winColor + '">' + winnerBadge + winLabel + '</strong></span>' +
                 '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
                 '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
                 '<div class="tp-decision-why">' + lanes + '</div>' +
@@ -8387,6 +8409,24 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.toggleProfileSelfLearning = toggleProfileSelfLearning;
+
+    async function setProfileSelfLearnMinTrades(id, value) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: id,
+            minTrades: Number(value),
+          }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.setProfileSelfLearnMinTrades = setProfileSelfLearnMinTrades;
 
     async function applyProfileSelfLearnProposal(id) {
       try {
@@ -12748,17 +12788,36 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
 
       const persistEl = document.getElementById('persist-banner');
-      if (persistEl) {
+      const persistDetail = document.getElementById('persist-status-detail');
+      if (persistEl || persistDetail) {
         const p = status.persistence;
-        if (p && p.warning) {
-          persistEl.style.display = 'block';
-          persistEl.innerHTML =
-            '<strong>Settings / wallets will reset on deploy</strong> — ' +
-            String(p.warning).replace(/</g, '&lt;') +
-            ' <span class="mint">(' + String(p.dataDir || '').replace(/</g, '&lt;') + ')</span>';
-        } else {
-          persistEl.style.display = 'none';
-          persistEl.textContent = '';
+        if (persistEl) {
+          if (p && p.warning) {
+            persistEl.style.display = 'block';
+            persistEl.innerHTML =
+              '<strong>Settings / wallets will reset on deploy</strong> — ' +
+              String(p.warning).replace(/</g, '&lt;') +
+              ' <span class="mint">(' + String(p.dataDir || '').replace(/</g, '&lt;') + ')</span>';
+          } else {
+            persistEl.style.display = 'none';
+            persistEl.textContent = '';
+          }
+        }
+        if (persistDetail && p) {
+          const last =
+            p.lastSettingsSavedAt != null
+              ? new Date(p.lastSettingsSavedAt).toLocaleString()
+              : '—';
+          const durable = p.durableLikely
+            ? '<span style="color:#4ade80">Durable — saves should survive deploys</span>'
+            : '<span style="color:#fbbf24">Not durable — mount DATA_DIR / disk or settings reset on deploy</span>';
+          persistDetail.innerHTML =
+            durable +
+            '<br>Dir: <code>' + String(p.dataDir || '').replace(/</g, '&lt;') + '</code>' +
+            '<br>config.json: ' + (p.settingsExists ? 'yes' : 'MISSING') +
+            ' · trade-profiles-user.json: ' + (p.tradeProfilesUserExists ? 'yes' : 'none yet') +
+            ' · learning episodes: ' + (p.profileLearningExists ? 'yes' : 'none') +
+            '<br>Last saved: ' + last;
         }
       }
 
@@ -17188,7 +17247,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           useTrackedWalletsAsBoost: boostEl ? !!boostEl.checked : true,
           notifyEmailOnOffer: emailOfferEl ? !!emailOfferEl.checked : true,
           notifyEmailOnPlaced: emailPlacedEl ? !!emailPlacedEl.checked : true,
-          minKolWallets: Number(document.getElementById('zion-min-kol') && document.getElementById('zion-min-kol').value) || 2,
+          minKolWallets: Number(document.getElementById('zion-min-kol') && document.getElementById('zion-min-kol').value) || 5,
           minWalletQuality: Number(document.getElementById('zion-min-quality') && document.getElementById('zion-min-quality').value) || 40,
           minMcUsd: Number(document.getElementById('zion-min-mc') && document.getElementById('zion-min-mc').value) || 50000,
           maxMcUsd: Number(document.getElementById('zion-max-mc') && document.getElementById('zion-max-mc').value) || 500000000,

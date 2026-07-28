@@ -62,8 +62,8 @@ export interface ProfileSelfLearningState {
 export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
   enabled: false,
   mode: 'shadow',
-  minTrades: 12,
-  upgradeCooldownTrades: 8,
+  minTrades: 8,
+  upgradeCooldownTrades: 6,
   lastUpgradedAt: null,
   version: 0,
   tradesSinceUpgrade: 0,
@@ -91,6 +91,119 @@ const SCALP_PROFILES = new Set([
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/**
+ * Adaptive confidence from how many closed episodes have fed the bot.
+ * Smaller samples → smaller nudges + harder score bar; 12+ → full strength.
+ */
+export function learningSampleConfidence(episodeCount: number): {
+  n: number;
+  allowExit: boolean;
+  allowEntry: boolean;
+  scoreMargin: number;
+  nudgeScale: number;
+} {
+  const n = Math.max(0, Math.round(Number(episodeCount) || 0));
+  if (n < 6) {
+    return {
+      n,
+      allowExit: false,
+      allowEntry: false,
+      scoreMargin: 99,
+      nudgeScale: 0,
+    };
+  }
+  if (n < 8) {
+    return {
+      n,
+      allowExit: true,
+      allowEntry: false,
+      scoreMargin: 1.5,
+      nudgeScale: 0.5,
+    };
+  }
+  if (n < 12) {
+    return {
+      n,
+      allowExit: true,
+      allowEntry: true,
+      scoreMargin: 1.0,
+      nudgeScale: 0.75,
+    };
+  }
+  return {
+    n,
+    allowExit: true,
+    allowEntry: true,
+    scoreMargin: 0.8,
+    nudgeScale: 1,
+  };
+}
+
+/** Scale numeric deltas in a learning patch toward milder changes. */
+export function scaleLearningPatch(
+  patch: LearningProposalPatch,
+  scale: number
+): LearningProposalPatch {
+  const s = clamp(scale, 0, 1);
+  if (s >= 0.999) return patch;
+  if (s <= 0) return {};
+
+  const scaleNum = (v: unknown, toward = 0): number | undefined => {
+    if (v == null || !Number.isFinite(Number(v))) return undefined;
+    const n = Number(v);
+    return toward + (n - toward) * s;
+  };
+
+  const exitRules: Partial<TradeProfileExitRules> = {};
+  if (patch.exitRules) {
+    for (const [k, v] of Object.entries(patch.exitRules)) {
+      if (k === 'exitPolicy' && v && typeof v === 'object') {
+        const ep: Record<string, number> = {};
+        for (const [pk, pv] of Object.entries(
+          v as Record<string, unknown>
+        )) {
+          if (typeof pv === 'boolean') {
+            if (s >= 0.75) (ep as Record<string, unknown>)[pk] = pv;
+            continue;
+          }
+          const scaled = scaleNum(pv);
+          if (scaled != null) ep[pk] = Math.round(scaled * 10) / 10;
+        }
+        if (Object.keys(ep).length) {
+          exitRules.exitPolicy = ep as TradeProfileExitRules['exitPolicy'];
+        }
+      } else if (typeof v === 'number') {
+        const scaled = scaleNum(v, k === 'sizeMultiplier' ? 1 : 0);
+        if (scaled != null) {
+          (exitRules as Record<string, number>)[k] =
+            Math.round(scaled * 100) / 100;
+        }
+      } else if (typeof v === 'boolean' && s >= 0.75) {
+        (exitRules as Record<string, boolean>)[k] = v;
+      }
+    }
+  }
+
+  const match: Partial<TradeProfileMatchRules> = {};
+  if (patch.match) {
+    for (const [k, v] of Object.entries(patch.match)) {
+      if (typeof v === 'number') {
+        const scaled = scaleNum(v);
+        if (scaled != null) {
+          (match as Record<string, number>)[k] = Math.round(scaled);
+        }
+      } else if (typeof v === 'boolean' && s >= 0.75) {
+        (match as Record<string, boolean>)[k] = v;
+      }
+    }
+  }
+
+  return {
+    exitRules: Object.keys(exitRules).length ? exitRules : undefined,
+    match: Object.keys(match).length ? match : undefined,
+  };
 }
 
 export function normalizeSelfLearning(
@@ -384,7 +497,8 @@ export function buildEntryLearningCandidates(
   currentMatch: Partial<TradeProfileMatchRules>
 ): Array<{ summary: string; patch: LearningProposalPatch }> {
   const out: Array<{ summary: string; patch: LearningProposalPatch }> = [];
-  if (episodes.length < 8) return out;
+  // Soft floor — runSelfLearnTick still gates on minTrades + sample confidence
+  if (episodes.length < 6) return out;
 
   const losers = episodes.filter((e) => (e.pnlPct || 0) <= 0);
   const loserRate = losers.length / episodes.length;
@@ -626,6 +740,11 @@ export function runSelfLearnTick(input: {
     return { state };
   }
 
+  const confidence = learningSampleConfidence(episodes.length);
+  if (!confidence.allowExit && !confidence.allowEntry) {
+    return { state };
+  }
+
   const pol = input.currentExit.exitPolicy || {};
   const currentPolicy = {
     profitLockArmPct: Number(pol.profitLockArmPct) || 40,
@@ -638,33 +757,43 @@ export function runSelfLearnTick(input: {
   };
 
   const candidates = [
-    ...buildExitLearningCandidates(input.profileId, episodes, currentPolicy),
-    ...buildEntryLearningCandidates(
-      input.profileId,
-      episodes,
-      input.currentMatch
-    ),
+    ...(confidence.allowExit
+      ? buildExitLearningCandidates(input.profileId, episodes, currentPolicy)
+      : []),
+    ...(confidence.allowEntry
+      ? buildEntryLearningCandidates(
+          input.profileId,
+          episodes,
+          input.currentMatch
+        )
+      : []),
   ];
 
   const scoreBefore = scoreEpisodesHeuristic(episodes.slice(-40));
   let best: LearningProposal | null = null;
 
   for (const c of candidates) {
+    const scaled = scaleLearningPatch(c.patch, confidence.nudgeScale);
     const clamped = clampLearningPatch(
       input.profileId,
       input.catalogExit,
       input.catalogMatch,
-      c.patch
+      scaled
     );
+    if (!clamped.exitRules && !clamped.match) continue;
     const scoreAfter =
       clamped.exitRules != null
         ? shadowScoreExitCandidate(episodes.slice(-40), clamped)
-        : scoreBefore + 0.8; // mild credit for entry tighten when losing
-    if (scoreAfter > scoreBefore + 1.0) {
+        : scoreBefore + 0.8 * confidence.nudgeScale; // mild credit for entry tighten when losing
+    if (scoreAfter > scoreBefore + confidence.scoreMargin) {
       if (!best || scoreAfter > best.scoreAfter) {
         best = {
           at: Date.now(),
-          summary: c.summary,
+          summary:
+            c.summary +
+            (confidence.nudgeScale < 1
+              ? ` (sample×${confidence.nudgeScale.toFixed(2)})`
+              : ''),
           patch: clamped,
           scoreBefore,
           scoreAfter,
