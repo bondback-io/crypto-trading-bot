@@ -177,6 +177,11 @@ export interface TradeProfileExitRules {
     momentumFadeDropPct?: number;
     aggressiveDeadMarket?: boolean;
     qualityBreakdownExit?: boolean;
+    profitLockArmPct?: number;
+    profitGivebackPts?: number;
+    profitFloorPct?: number;
+    extendHoldIfTaOk?: boolean;
+    cutIfStructureBroken?: boolean;
   };
 }
 
@@ -965,6 +970,13 @@ export interface TradeProfileRuntimeState {
   overrides?: Partial<Record<TradeProfileId, TradeProfileParamOverride>>;
   /** Automatic profile scoring (weights, threshold, force override) */
   autoScoring?: AutoScoringConfig;
+  /** Per-profile self-learning runtime (toggle, version, proposals) */
+  selfLearning?: Partial<
+    Record<
+      TradeProfileId,
+      import('./profileSelfLearning').ProfileSelfLearningState
+    >
+  >;
 }
 
 export interface TradeProfileAssignment {
@@ -1153,7 +1165,14 @@ function mergeExitRules(
   overlay?: Partial<TradeProfileExitRules> | null
 ): TradeProfileExitRules {
   if (!overlay) return { ...base };
-  return { ...base, ...overlay };
+  const merged: TradeProfileExitRules = { ...base, ...overlay };
+  if (base.exitPolicy || overlay.exitPolicy) {
+    merged.exitPolicy = {
+      ...(base.exitPolicy || {}),
+      ...(overlay.exitPolicy || {}),
+    };
+  }
+  return merged;
 }
 
 function mergeMatchRules(
@@ -1485,6 +1504,8 @@ export function getTradeProfilesStatus(): {
       officialMatch: TradeProfileMatchRules;
       officialModules?: TradeProfileModules;
       effectiveModules: ReturnType<typeof listEffectiveModulesForProfile>;
+      selfLearning: import('./profileSelfLearning').ProfileSelfLearningState;
+      selfLearnBadge: string;
     }
   >;
   active: Array<{ id: TradeProfileId; name: string; icon: string; color: string }>;
@@ -1497,8 +1518,17 @@ export function getTradeProfilesStatus(): {
   recentDecisions: TradeProfileDecisionLog[];
 } {
   const state = ensureState();
+  const {
+    normalizeSelfLearning,
+    formatSelfLearnBadge,
+    refreshSelfLearnMetrics,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
   const profiles = TRADE_PROFILE_CATALOG.map((p) => {
     const resolved = resolveTradeProfileDefinition(p.id);
+    let sl = normalizeSelfLearning(state.selfLearning?.[p.id]);
+    if (sl.enabled) {
+      sl = refreshSelfLearnMetrics(sl, p.id);
+    }
     return {
       ...resolved,
       enabled: state.profiles[p.id] !== false,
@@ -1507,6 +1537,8 @@ export function getTradeProfilesStatus(): {
       officialMatch: { ...p.match },
       officialModules: p.modules ? { ...p.modules } : undefined,
       effectiveModules: listEffectiveModulesForProfile(p.id),
+      selfLearning: sl,
+      selfLearnBadge: formatSelfLearnBadge(sl),
     };
   });
   return {
@@ -1665,6 +1697,13 @@ export function updateTradeProfileParams(
     ...(prev.modules || {}),
     ...(patch.modules || {}),
   };
+  // Deep-merge exitPolicy so partial profit-lock saves don't wipe other keys
+  if (patch.exitRules?.exitPolicy || prev.exitRules?.exitPolicy) {
+    nextExit.exitPolicy = {
+      ...(prev.exitRules?.exitPolicy || {}),
+      ...(patch.exitRules?.exitPolicy || {}),
+    };
+  }
   // Deep-merge qualityFilter nested object
   if (patch.match?.qualityFilter || prev.match?.qualityFilter) {
     nextMatch.qualityFilter = normalizeHwrQualityFilter({
@@ -3371,6 +3410,7 @@ export function applyTradeProfileExitRules(
     deadVolumeMinHoldMinutes?: number;
     tradeProfileId?: string;
     profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
+    selfLearnVersion?: number;
   },
   rules: TradeProfileExitRules,
   seedShortTerm?: (
@@ -3402,6 +3442,16 @@ export function applyTradeProfileExitRules(
     }
   } catch {
     /* bootstrap */
+  }
+  // Stamp self-learn version for attribution
+  try {
+    if (position.tradeProfileId) {
+      position.selfLearnVersion = getProfileSelfLearning(
+        position.tradeProfileId
+      ).version;
+    }
+  } catch {
+    position.selfLearnVersion = 0;
   }
 
   if (rules.forceScalp && rules.shortTermStrategyId && seedShortTerm) {
@@ -3514,6 +3564,18 @@ export function hydrateTradeProfilesFromSettings(
   if (s.autoScoring && typeof s.autoScoring === 'object') {
     base.autoScoring = normalizeAutoScoringConfig(s.autoScoring);
   }
+  if (s.selfLearning && typeof s.selfLearning === 'object') {
+    const {
+      normalizeSelfLearning,
+    } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+    base.selfLearning = {};
+    for (const [id, raw] of Object.entries(s.selfLearning)) {
+      if (!ALL_IDS.includes(id as TradeProfileId)) continue;
+      base.selfLearning[id as TradeProfileId] = normalizeSelfLearning(
+        raw as import('./profileSelfLearning').ProfileSelfLearningState
+      );
+    }
+  }
   base.profiles.default = true;
   writeTradeProfilesState(base);
 }
@@ -3578,6 +3640,185 @@ export function applyStabilizedQualityEntryTightenments(
     applied.push(s.profileId);
   }
   return applied;
+}
+
+export function getProfileSelfLearning(
+  profileId: string
+): import('./profileSelfLearning').ProfileSelfLearningState {
+  const {
+    normalizeSelfLearning,
+    refreshSelfLearnMetrics,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  let sl = normalizeSelfLearning(
+    state.selfLearning?.[profileId as TradeProfileId]
+  );
+  if (sl.enabled) sl = refreshSelfLearnMetrics(sl, profileId);
+  return sl;
+}
+
+function writeProfileSelfLearning(
+  profileId: TradeProfileId,
+  sl: import('./profileSelfLearning').ProfileSelfLearningState
+): void {
+  const state = ensureState();
+  if (!state.selfLearning) state.selfLearning = {};
+  state.selfLearning[profileId] = sl;
+  persistUserSettings();
+}
+
+export function setProfileSelfLearningEnabled(
+  profileId: TradeProfileId | string,
+  enabled: boolean,
+  mode?: 'shadow' | 'auto'
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') {
+    return getTradeProfilesStatus();
+  }
+  const {
+    normalizeSelfLearning,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  const prev = normalizeSelfLearning(state.selfLearning?.[id]);
+  const next = normalizeSelfLearning({
+    ...prev,
+    enabled: Boolean(enabled),
+    mode: mode === 'auto' ? 'auto' : prev.mode || 'shadow',
+  });
+  writeProfileSelfLearning(id, next);
+  console.log(
+    `[self-learn] ${id} ${next.enabled ? 'ON' : 'OFF'} mode=${next.mode}`
+  );
+  return getTradeProfilesStatus();
+}
+
+export function applyProfileSelfLearnProposal(
+  profileId: TradeProfileId | string
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  const {
+    normalizeSelfLearning,
+    applySelfLearnUpgrade,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  const sl = normalizeSelfLearning(state.selfLearning?.[id]);
+  const proposal = sl.pendingProposal;
+  if (!proposal) return getTradeProfilesStatus();
+  const prevOv = state.overrides?.[id]
+    ? (JSON.parse(JSON.stringify(state.overrides[id])) as TradeProfileParamOverride)
+    : null;
+  applyTradeProfileLearning(id, {
+    patch: proposal.patch as {
+      exitRules?: Partial<TradeProfileExitRules>;
+      match?: Record<string, number | boolean>;
+    },
+  });
+  writeProfileSelfLearning(id, applySelfLearnUpgrade(sl, proposal, prevOv));
+  return getTradeProfilesStatus();
+}
+
+export function rejectProfileSelfLearnProposal(
+  profileId: TradeProfileId | string
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  const {
+    normalizeSelfLearning,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  const sl = normalizeSelfLearning(state.selfLearning?.[id]);
+  sl.pendingProposal = null;
+  writeProfileSelfLearning(id, sl);
+  return getTradeProfilesStatus();
+}
+
+export function resetProfileSelfLearning(
+  profileId: TradeProfileId | string,
+  opts?: { wipeEpisodes?: boolean; resetParams?: boolean }
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  const {
+    DEFAULT_SELF_LEARNING,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  if (opts?.resetParams) {
+    resetTradeProfileParams(id);
+  }
+  if (opts?.wipeEpisodes) {
+    const { clearProfileLearningEpisodes } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    clearProfileLearningEpisodes(id);
+  }
+  writeProfileSelfLearning(id, {
+    ...DEFAULT_SELF_LEARNING,
+    history: [],
+  });
+  return getTradeProfilesStatus();
+}
+
+/**
+ * After a final close — bump trade counters and run self-learn tick when enabled.
+ */
+export function onProfileTradeClosedForSelfLearn(profileId: string): void {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') return;
+  const {
+    normalizeSelfLearning,
+    runSelfLearnTick,
+    applySelfLearnUpgrade,
+    refreshSelfLearnMetrics,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const state = ensureState();
+  let sl = normalizeSelfLearning(state.selfLearning?.[id]);
+  if (!sl.enabled) return;
+  sl.tradesSinceUpgrade = (sl.tradesSinceUpgrade || 0) + 1;
+  sl = refreshSelfLearnMetrics(sl, id);
+
+  const catalog = getTradeProfileDefinition(id);
+  const resolved = resolveTradeProfileDefinition(id);
+  const tick = runSelfLearnTick({
+    profileId: id,
+    state: sl,
+    catalogExit: catalog.exitRules,
+    catalogMatch: catalog.match,
+    currentExit: resolved.exitRules,
+    currentMatch: resolved.match,
+  });
+  sl = tick.state;
+
+  if (tick.rollback && sl.previousOverrideSnapshot) {
+    // Revert overrides to previous snapshot
+    if (!state.overrides) state.overrides = {};
+    state.overrides[id] = JSON.parse(
+      JSON.stringify(sl.previousOverrideSnapshot)
+    ) as TradeProfileParamOverride;
+    sl.version = Math.max(0, sl.version - 1);
+    sl.previousOverrideSnapshot = null;
+    sl.tradesSinceUpgrade = 0;
+    console.log(`[self-learn] ${id} rolled back to v${sl.version}`);
+    writeProfileSelfLearning(id, sl);
+    persistUserSettings();
+    return;
+  }
+
+  if (tick.applyPatch && sl.pendingProposal) {
+    const prevOv = state.overrides?.[id]
+      ? (JSON.parse(
+          JSON.stringify(state.overrides[id])
+        ) as TradeProfileParamOverride)
+      : null;
+    applyTradeProfileLearning(id, {
+      patch: tick.applyPatch as {
+        exitRules?: Partial<TradeProfileExitRules>;
+        match?: Record<string, number | boolean>;
+      },
+    });
+    sl = applySelfLearnUpgrade(sl, sl.pendingProposal, prevOv);
+    console.log(
+      `[self-learn] ${id} auto-upgraded to v${sl.version}: ${sl.history[sl.history.length - 1]?.summary || ''}`
+    );
+  }
+
+  writeProfileSelfLearning(id, sl);
 }
 
 export function ensureTradeProfilesInitialized(): void {

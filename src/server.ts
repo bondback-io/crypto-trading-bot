@@ -1893,6 +1893,23 @@ export function createServer(): express.Application {
     }
   });
 
+  app.post('/api/zion/offers/:id/dismiss', (req: Request, res: Response) => {
+    try {
+      const { markOfferPopupDismissed, getOffer } =
+        require('./zion') as typeof import('./zion');
+      markOfferPopupDismissed(String(req.params.id));
+      const offer = getOffer(String(req.params.id));
+      if (!offer) {
+        res.status(404).json({ ok: false, error: 'Offer not found' });
+        return;
+      }
+      res.json({ ok: true, offer });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ ok: false, error: message });
+    }
+  });
+
   app.post('/api/zion/offers/:id/open', (req: Request, res: Response) => {
     try {
       const { markOfferOpened, getOffer } = require('./zion') as typeof import('./zion');
@@ -2037,12 +2054,23 @@ export function createServer(): express.Application {
       applyStabilizedQualityEntryTightenments,
       getTradeProfilesStatus,
       ensureTradeProfilesInitialized,
+      setProfileSelfLearningEnabled,
+      applyProfileSelfLearnProposal,
+      rejectProfileSelfLearnProposal,
+      resetProfileSelfLearning,
     } = require('./tradeProfiles') as typeof import('./tradeProfiles');
     ensureTradeProfilesInitialized();
     const body = (req.body ?? {}) as {
       applyAll?: boolean;
       applyStabilizedEntries?: boolean;
       profileId?: string;
+      selfLearningEnabled?: boolean;
+      selfLearningMode?: 'shadow' | 'auto';
+      applySelfLearnProposal?: boolean;
+      rejectSelfLearnProposal?: boolean;
+      resetSelfLearning?: boolean;
+      wipeEpisodes?: boolean;
+      resetParams?: boolean;
       suggestion?: {
         patch?: {
           exitRules?: Record<string, unknown>;
@@ -2052,6 +2080,42 @@ export function createServer(): express.Application {
       };
     };
     try {
+      if (body.profileId && typeof body.selfLearningEnabled === 'boolean') {
+        setProfileSelfLearningEnabled(
+          body.profileId,
+          body.selfLearningEnabled,
+          body.selfLearningMode
+        );
+        res.json({
+          ok: true,
+          tradeProfiles: getTradeProfilesStatus(),
+          intelligence: paperTrader.getTradeProfileIntelligence(),
+        });
+        return;
+      }
+      if (body.profileId && body.applySelfLearnProposal) {
+        applyProfileSelfLearnProposal(body.profileId);
+        res.json({
+          ok: true,
+          tradeProfiles: getTradeProfilesStatus(),
+          intelligence: paperTrader.getTradeProfileIntelligence(),
+        });
+        return;
+      }
+      if (body.profileId && body.rejectSelfLearnProposal) {
+        rejectProfileSelfLearnProposal(body.profileId);
+        res.json({ ok: true, tradeProfiles: getTradeProfilesStatus() });
+        return;
+      }
+      if (body.profileId && body.resetSelfLearning) {
+        resetProfileSelfLearning(body.profileId, {
+          wipeEpisodes: body.wipeEpisodes === true,
+          resetParams: body.resetParams === true,
+        });
+        res.json({ ok: true, tradeProfiles: getTradeProfilesStatus() });
+        return;
+      }
+
       const intel = paperTrader.getTradeProfileIntelligence();
       const applied: string[] = [];
       if (body.applyStabilizedEntries) {

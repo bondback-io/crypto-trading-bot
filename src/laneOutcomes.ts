@@ -29,6 +29,10 @@ export interface LaneOutcomeRecord {
   /** Filled when the stamped position closes */
   closedAt?: number;
   pnlSol?: number;
+  pnlPct?: number;
+  holdSec?: number;
+  exitKey?: string;
+  maxRunupPct?: number;
   win?: boolean;
 }
 
@@ -130,6 +134,10 @@ export function recordLaneFightClose(input: {
   mint: string;
   profileId?: string | null;
   pnlSol: number;
+  pnlPct?: number;
+  holdSec?: number;
+  exitKey?: string;
+  maxRunupPct?: number;
 }): void {
   load();
   const mint = String(input.mint || '').trim();
@@ -142,6 +150,16 @@ export function recordLaneFightClose(input: {
     if (profileId && row.winnerId && row.winnerId !== profileId) continue;
     row.closedAt = Date.now();
     row.pnlSol = Number(input.pnlSol) || 0;
+    if (input.pnlPct != null && Number.isFinite(input.pnlPct)) {
+      row.pnlPct = Number(input.pnlPct);
+    }
+    if (input.holdSec != null && Number.isFinite(input.holdSec)) {
+      row.holdSec = Number(input.holdSec);
+    }
+    if (input.exitKey) row.exitKey = String(input.exitKey).slice(0, 40);
+    if (input.maxRunupPct != null && Number.isFinite(input.maxRunupPct)) {
+      row.maxRunupPct = Number(input.maxRunupPct);
+    }
     row.win = row.pnlSol > 0;
     persist();
     return;

@@ -265,8 +265,8 @@ async function fetchDexMetrics(mint: string): Promise<{
     const created = Number(sol.pairCreatedAt ?? NaN);
     const jup = lookupCachedJupiterToken(mint);
     return {
-      symbol: base?.symbol,
-      name: base?.name,
+      symbol: base?.symbol || jup?.symbol,
+      name: base?.name || jup?.name,
       mcUsd: Number.isFinite(mc) && mc > 0 ? mc : undefined,
       volumeH1Usd:
         vol?.h1 != null && Number.isFinite(Number(vol.h1))
@@ -550,7 +550,14 @@ async function rebuildCandidates(): Promise<void> {
   );
 
   for (const agg of sorted.slice(0, 40)) {
-    if (agg.mcUsd == null || agg.pairCreatedAtMs == null || agg.holders == null) {
+    const needsMeta =
+      agg.mcUsd == null ||
+      agg.pairCreatedAtMs == null ||
+      agg.holders == null ||
+      !agg.symbol ||
+      agg.symbol === agg.mint.slice(0, 6) ||
+      agg.mint.toLowerCase().startsWith(String(agg.symbol || '').toLowerCase());
+    if (needsMeta) {
       const m = await fetchDexMetrics(agg.mint);
       if (m.symbol) agg.symbol = m.symbol;
       if (m.name) agg.name = m.name;
@@ -559,6 +566,29 @@ async function rebuildCandidates(): Promise<void> {
       if (m.liquidityUsd != null) agg.liquidityUsd = m.liquidityUsd;
       if (m.pairCreatedAtMs != null) agg.pairCreatedAtMs = m.pairCreatedAtMs;
       if (m.holders != null) agg.holders = m.holders;
+    }
+    // Prefer Jupiter ticker when Dex still left us with a mint-prefix label
+    try {
+      const { lookupCachedJupiterToken } =
+        require('./jupiterTokens') as typeof import('./jupiterTokens');
+      const jup = lookupCachedJupiterToken(agg.mint);
+      if (jup?.symbol) {
+        const jSym = String(jup.symbol);
+        if (
+          !agg.mint.toLowerCase().startsWith(jSym.toLowerCase()) ||
+          !agg.symbol ||
+          agg.mint.toLowerCase().startsWith(String(agg.symbol).toLowerCase())
+        ) {
+          if (!agg.mint.toLowerCase().startsWith(jSym.toLowerCase())) {
+            agg.symbol = jSym;
+          }
+        }
+        if (jup.name && !agg.mint.toLowerCase().startsWith(String(jup.name).toLowerCase())) {
+          agg.name = String(jup.name);
+        }
+      }
+    } catch {
+      /* optional */
     }
 
     const ranked = scoreAgg(agg);

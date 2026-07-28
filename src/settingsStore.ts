@@ -86,6 +86,7 @@ export interface PersistedBotSettings {
       forceProfileId?: string | null;
       weights?: Record<string, number>;
     };
+    selfLearning?: Record<string, unknown>;
   };
     paper?: Record<string, unknown>;
   /** Email notification preferences (no SMTP secrets) */

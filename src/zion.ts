@@ -46,10 +46,16 @@ export interface ZionOffer {
   createdAt: number;
   expiresAt: number;
   updatedAt: number;
+  /** Snapshot at offer creation (entry / request-time) */
   mcUsd?: number;
   volumeH1Usd?: number;
   liquidityUsd?: number;
   holders?: number;
+  /** Live refresh while offer is pending */
+  liveMcUsd?: number;
+  liveVolumeH1Usd?: number;
+  liveLiquidityUsd?: number;
+  liveHolders?: number;
   score: number;
   reasons: string[];
   kolWallets: ZionKolWalletRef[];
@@ -57,6 +63,10 @@ export interface ZionOffer {
   trackedBoostCount: number;
   skipReason?: string;
   error?: string;
+  /** Set when user explicitly declines (vs TTL expiry) */
+  declinedByUser?: boolean;
+  /** Popup was dismissed by user (offer may still be Active) */
+  popupDismissed?: boolean;
   executedAt?: number;
   solAmount?: number;
 }
@@ -181,6 +191,149 @@ export interface CreateOfferInput {
   holders?: number;
 }
 
+function looksLikeMintPrefix(symbol: string | undefined, mint: string): boolean {
+  const s = String(symbol || '').trim();
+  const m = String(mint || '').trim();
+  if (!s || !m) return true;
+  if (s.length > 12) return false;
+  return m.toLowerCase().startsWith(s.toLowerCase());
+}
+
+/** Prefer a real ticker over a CA prefix fallback. */
+export function pickZionDisplaySymbol(
+  symbol: string | undefined,
+  name: string | undefined,
+  mint: string
+): string {
+  const sym = String(symbol || '').trim();
+  const nm = String(name || '').trim();
+  if (sym && !looksLikeMintPrefix(sym, mint)) return sym;
+  if (nm && !looksLikeMintPrefix(nm, mint)) return nm;
+  return sym || nm || mint.slice(0, 6);
+}
+
+function isConsiderableImprovement(
+  prev: ZionOffer,
+  next: CreateOfferInput
+): boolean {
+  let hits = 0;
+  const prevVol = Number(prev.liveVolumeH1Usd ?? prev.volumeH1Usd) || 0;
+  const nextVol = Number(next.volumeH1Usd) || 0;
+  if (nextVol > 0 && prevVol > 0) {
+    if (nextVol >= prevVol * 1.4 || nextVol - prevVol >= 10_000) hits += 1;
+  } else if (nextVol >= 15_000 && nextVol > prevVol) {
+    hits += 1;
+  }
+
+  const prevMc = Number(prev.liveMcUsd ?? prev.mcUsd) || 0;
+  const nextMc = Number(next.mcUsd) || 0;
+  if (nextMc > 0 && prevMc > 0) {
+    if (nextMc >= prevMc * 1.3 || nextMc - prevMc >= 20_000) hits += 1;
+  }
+
+  const prevHold = Number(prev.liveHolders ?? prev.holders) || 0;
+  const nextHold = Number(next.holders) || 0;
+  if (nextHold > 0 && prevHold > 0) {
+    if (nextHold >= prevHold * 1.25 || nextHold - prevHold >= 50) hits += 1;
+  } else if (nextHold >= prevHold + 40) {
+    hits += 1;
+  }
+
+  const prevKol = Number(prev.kolCount) || 0;
+  const nextKol = next.kolWallets?.length ?? 0;
+  if (nextKol > prevKol) hits += 1;
+
+  const prevScore = Number(prev.score) || 0;
+  const nextScore = Number(next.score) || 0;
+  if (nextScore >= prevScore + 8) hits += 1;
+
+  // Need meaningful multi-signal lift, or a strong single KOL+volume combo
+  if (hits >= 2) return true;
+  if (nextKol > prevKol && nextVol >= prevVol * 1.25 && nextVol - prevVol >= 5_000) {
+    return true;
+  }
+  return false;
+}
+
+function getLatestClosedOfferForMint(mint: string): ZionOffer | null {
+  const m = String(mint || '').trim();
+  if (!m) return null;
+  for (const o of offers) {
+    if (o.mint !== m) continue;
+    if (o.status === 'declined' || o.status === 'expired') return o;
+  }
+  return null;
+}
+
+/**
+ * Refresh live metrics / KOL score on an existing pending offer.
+ * Also upgrades symbol/name when we discover a real ticker.
+ */
+export function refreshPendingOfferLive(
+  mint: string,
+  input: Partial<CreateOfferInput> & { mint?: string }
+): ZionOffer | null {
+  ensureLoaded();
+  const o = getPendingOfferForMint(mint);
+  if (!o) return null;
+  let changed = false;
+  if (input.mcUsd != null && Number.isFinite(input.mcUsd)) {
+    o.liveMcUsd = Number(input.mcUsd);
+    changed = true;
+  }
+  if (input.volumeH1Usd != null && Number.isFinite(input.volumeH1Usd)) {
+    o.liveVolumeH1Usd = Number(input.volumeH1Usd);
+    changed = true;
+  }
+  if (input.liquidityUsd != null && Number.isFinite(input.liquidityUsd)) {
+    o.liveLiquidityUsd = Number(input.liquidityUsd);
+    changed = true;
+  }
+  if (input.holders != null && Number.isFinite(input.holders)) {
+    o.liveHolders = Number(input.holders);
+    changed = true;
+  }
+  if (input.score != null && Number.isFinite(input.score)) {
+    o.score = Number(input.score);
+    changed = true;
+  }
+  if (Array.isArray(input.reasons) && input.reasons.length) {
+    o.reasons = input.reasons;
+    changed = true;
+  }
+  if (Array.isArray(input.kolWallets) && input.kolWallets.length) {
+    o.kolWallets = input.kolWallets;
+    o.kolCount = input.kolWallets.length;
+    changed = true;
+  }
+  if (input.trackedBoostCount != null) {
+    o.trackedBoostCount = Math.max(0, Number(input.trackedBoostCount) || 0);
+    changed = true;
+  }
+  const betterSym = pickZionDisplaySymbol(
+    input.symbol || o.symbol,
+    input.name || o.name,
+    o.mint
+  );
+  if (betterSym && betterSym !== o.symbol) {
+    o.symbol = betterSym;
+    changed = true;
+  }
+  if (
+    input.name &&
+    !looksLikeMintPrefix(input.name, o.mint) &&
+    input.name !== o.name
+  ) {
+    o.name = input.name;
+    changed = true;
+  }
+  if (changed) {
+    o.updatedAt = Date.now();
+    persist();
+  }
+  return o;
+}
+
 export function maybeCreateOffer(
   input: CreateOfferInput
 ): ZionOffer | null {
@@ -196,9 +349,30 @@ export function maybeCreateOffer(
   }
 
   if (hasPendingOfferForMint(mint)) {
-    return getPendingOfferForMint(mint);
+    return refreshPendingOfferLive(mint, input);
   }
-  if (isMintCoolingDown(mint)) return null;
+
+  const closed = getLatestClosedOfferForMint(mint);
+  if (isMintCoolingDown(mint)) {
+    // Allow a fresh request only after decline/expiry AND a considerable lift
+    if (
+      !closed ||
+      (closed.status !== 'declined' && closed.status !== 'expired') ||
+      !isConsiderableImprovement(closed, input)
+    ) {
+      return null;
+    }
+    mintCooldownUntil.delete(mint);
+    logger.info(
+      'Zion',
+      `Re-offer allowed for ${mint.slice(0, 8)}… after considerable improvement`,
+      {
+        prevStatus: closed.status,
+        prevScore: closed.score,
+        nextScore: input.score,
+      }
+    );
+  }
 
   const open = paperTrader.getOpenPositions().some((p) => p.mint === mint);
   if (open) return null;
@@ -219,13 +393,19 @@ export function maybeCreateOffer(
     if (maxMc > 0 && input.mcUsd > maxMc) return null;
   }
 
+  const displaySym = pickZionDisplaySymbol(input.symbol, input.name, mint);
+  const displayName =
+    input.name && !looksLikeMintPrefix(input.name, mint)
+      ? input.name
+      : displaySym;
+
   const ttlMin = Math.max(5, Number(config.zion.offerTtlMinutes) || 60);
   const now = Date.now();
   const offer: ZionOffer = {
     id: randomUUID(),
     mint,
-    symbol: input.symbol || mint.slice(0, 6),
-    name: input.name || input.symbol || mint.slice(0, 6),
+    symbol: displaySym,
+    name: displayName,
     source: input.source,
     status: 'pending',
     createdAt: now,
@@ -235,6 +415,10 @@ export function maybeCreateOffer(
     volumeH1Usd: input.volumeH1Usd,
     liquidityUsd: input.liquidityUsd,
     holders: input.holders,
+    liveMcUsd: input.mcUsd,
+    liveVolumeH1Usd: input.volumeH1Usd,
+    liveLiquidityUsd: input.liquidityUsd,
+    liveHolders: input.holders,
     score: input.score,
     reasons: input.reasons || [],
     kolWallets: input.kolWallets || [],
@@ -275,6 +459,18 @@ export function declineOffer(id: string): ZionOffer | null {
   const o = getOffer(id);
   if (!o || o.status !== 'pending') return null;
   o.status = 'declined';
+  o.declinedByUser = true;
+  o.updatedAt = Date.now();
+  persist();
+  return o;
+}
+
+/** User closed the popup — offer stays Active but should not auto-popup again. */
+export function markOfferPopupDismissed(id: string): ZionOffer | null {
+  ensureLoaded();
+  const o = getOffer(id);
+  if (!o) return null;
+  o.popupDismissed = true;
   o.updatedAt = Date.now();
   persist();
   return o;

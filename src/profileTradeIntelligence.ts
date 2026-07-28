@@ -29,6 +29,25 @@ export interface ProfileExitPolicy {
   aggressiveDeadMarket: boolean;
   /** Exit on sustained quality breakdown while still green (HWR-style) */
   qualityBreakdownExit: boolean;
+  /**
+   * Profit-lock: arm after peak unrealized PnL % reaches this.
+   * 0 = off. Example: 80 means lock logic starts once trade was +80%.
+   */
+  profitLockArmPct: number;
+  /**
+   * Once armed: full exit if unrealized falls this many percentage points
+   * from peak (80% → 50% = 30 pts giveback).
+   */
+  profitGivebackPts: number;
+  /**
+   * Optional absolute floor once armed (never let unrealized fall below this %).
+   * 0 = off.
+   */
+  profitFloorPct: number;
+  /** Swing bots: defer soft timer when Fib/support/pattern still valid */
+  extendHoldIfTaOk: boolean;
+  /** Swing bots: full exit when structure breaks while still green */
+  cutIfStructureBroken: boolean;
 }
 
 export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
@@ -39,6 +58,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 5,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
+    profitLockArmPct: 28,
+    profitGivebackPts: 14,
+    profitFloorPct: 0,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
   reversal_scalper: {
     earlyPartialTpPct: 10,
@@ -47,6 +71,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 5,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
+    profitLockArmPct: 22,
+    profitGivebackPts: 12,
+    profitFloorPct: 0,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
   momentum_burst: {
     earlyPartialTpPct: 18,
@@ -55,6 +84,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 6,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
+    profitLockArmPct: 35,
+    profitGivebackPts: 18,
+    profitFloorPct: 0,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
   dip_buyer: {
     earlyPartialTpPct: 15,
@@ -63,6 +97,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 8,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: false,
+    profitLockArmPct: 40,
+    profitGivebackPts: 22,
+    profitFloorPct: 8,
+    extendHoldIfTaOk: true,
+    cutIfStructureBroken: true,
   },
   trend_rider: {
     earlyPartialTpPct: 0,
@@ -71,6 +110,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 10,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: false,
+    profitLockArmPct: 25,
+    profitGivebackPts: 12,
+    profitFloorPct: 5,
+    extendHoldIfTaOk: true,
+    cutIfStructureBroken: true,
   },
   steady_compounder: {
     earlyPartialTpPct: 6,
@@ -79,6 +123,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 7,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: true,
+    profitLockArmPct: 18,
+    profitGivebackPts: 8,
+    profitFloorPct: 3,
+    extendHoldIfTaOk: true,
+    cutIfStructureBroken: true,
   },
   high_win_rate: {
     earlyPartialTpPct: 20,
@@ -87,6 +136,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 8,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: true,
+    profitLockArmPct: 45,
+    profitGivebackPts: 20,
+    profitFloorPct: 10,
+    extendHoldIfTaOk: true,
+    cutIfStructureBroken: true,
   },
   smart_money_mirror: {
     earlyPartialTpPct: 15,
@@ -95,6 +149,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 9,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: false,
+    profitLockArmPct: 40,
+    profitGivebackPts: 22,
+    profitFloorPct: 8,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
   migration_sniper: {
     earlyPartialTpPct: 14,
@@ -103,6 +162,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 6,
     aggressiveDeadMarket: true,
     qualityBreakdownExit: false,
+    profitLockArmPct: 30,
+    profitGivebackPts: 16,
+    profitFloorPct: 0,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
   default: {
     earlyPartialTpPct: 0,
@@ -111,6 +175,11 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     momentumFadeDropPct: 0,
     aggressiveDeadMarket: false,
     qualityBreakdownExit: false,
+    profitLockArmPct: 0,
+    profitGivebackPts: 0,
+    profitFloorPct: 0,
+    extendHoldIfTaOk: false,
+    cutIfStructureBroken: false,
   },
 };
 
@@ -151,6 +220,27 @@ export function resolveExitPolicy(
       typeof ep.qualityBreakdownExit === 'boolean'
         ? ep.qualityBreakdownExit
         : base.qualityBreakdownExit,
+    profitLockArmPct:
+      ep.profitLockArmPct != null && Number.isFinite(Number(ep.profitLockArmPct))
+        ? Math.max(0, Number(ep.profitLockArmPct))
+        : base.profitLockArmPct,
+    profitGivebackPts:
+      ep.profitGivebackPts != null &&
+      Number.isFinite(Number(ep.profitGivebackPts))
+        ? Math.max(0, Number(ep.profitGivebackPts))
+        : base.profitGivebackPts,
+    profitFloorPct:
+      ep.profitFloorPct != null && Number.isFinite(Number(ep.profitFloorPct))
+        ? Math.max(0, Number(ep.profitFloorPct))
+        : base.profitFloorPct,
+    extendHoldIfTaOk:
+      typeof ep.extendHoldIfTaOk === 'boolean'
+        ? ep.extendHoldIfTaOk
+        : base.extendHoldIfTaOk,
+    cutIfStructureBroken:
+      typeof ep.cutIfStructureBroken === 'boolean'
+        ? ep.cutIfStructureBroken
+        : base.cutIfStructureBroken,
   };
 }
 
@@ -323,12 +413,64 @@ export function evaluateAdaptiveProfileExit(input: {
   convictionScore?: number;
   openedAt: number;
   nowMs?: number;
+  /** Peak unrealized PnL % since entry (from HWM); derived if omitted */
+  peakUnrealizedPct?: number;
+  /** TA structure still intact (Fib/support/pattern) — swing hold extend */
+  taStructureOk?: boolean;
+  /** Structure broken — swing cut */
+  taStructureBroken?: boolean;
+  /** Soft timer would fire — allow defer when extendHoldIfTaOk */
+  softTimerDue?: boolean;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const pol = input.policy;
   const pnl = input.pnlPct;
+  const peakUnrealized =
+    input.peakUnrealizedPct != null && Number.isFinite(input.peakUnrealizedPct)
+      ? Number(input.peakUnrealizedPct)
+      : input.entryPriceSol > 0 && input.highWaterMarkSol > 0
+        ? ((input.highWaterMarkSol - input.entryPriceSol) /
+            input.entryPriceSol) *
+          100
+        : Math.max(0, pnl);
 
-  // Early partial — once, before full TP
+  // 1) Profit-lock giveback / floor (once peak armed) — before partial
+  if (
+    pol.profitLockArmPct > 0 &&
+    (pol.profitGivebackPts > 0 || pol.profitFloorPct > 0) &&
+    peakUnrealized >= pol.profitLockArmPct
+  ) {
+    const givebackPts = peakUnrealized - pnl;
+    if (pol.profitGivebackPts > 0 && givebackPts >= pol.profitGivebackPts) {
+      return {
+        type: 'full',
+        reason: `Profile profit-lock giveback −${givebackPts.toFixed(1)} pts from peak +${peakUnrealized.toFixed(0)}% (policy ${pol.profitGivebackPts} pts)`,
+      };
+    }
+    if (pol.profitFloorPct > 0 && pnl < pol.profitFloorPct) {
+      return {
+        type: 'full',
+        reason: `Profile profit-lock floor +${pnl.toFixed(1)}% < +${pol.profitFloorPct}% (armed @ ${pol.profitLockArmPct}%)`,
+      };
+    }
+  }
+
+  // 2) Swing structure cut while green
+  if (
+    pol.cutIfStructureBroken &&
+    input.taStructureBroken === true &&
+    pnl > 2 &&
+    pnl < input.takeProfitPct * 0.9
+  ) {
+    return {
+      type: 'full',
+      reason: `Profile TA structure broken while +${pnl.toFixed(1)}%`,
+    };
+  }
+
+  // Soft timer deferral is handled by caller when extendHoldIfTaOk + taStructureOk
+
+  // 3) Early partial — once, before full TP
   if (
     pol.earlyPartialTpPct > 0 &&
     pol.earlyPartialFraction > 0 &&
@@ -344,7 +486,7 @@ export function evaluateAdaptiveProfileExit(input: {
     };
   }
 
-  // Tighten trail after armed
+  // 4) Tighten trail after armed
   if (
     input.trailingActive &&
     pol.trailTightenFactor > 0 &&
@@ -364,7 +506,7 @@ export function evaluateAdaptiveProfileExit(input: {
     }
   }
 
-  // Momentum fade from peak while still green
+  // 5) Momentum fade from peak while still green
   if (
     pol.momentumFadeDropPct > 0 &&
     pnl > 2 &&
@@ -383,7 +525,7 @@ export function evaluateAdaptiveProfileExit(input: {
     }
   }
 
-  // Quality breakdown: green but conviction collapsed + held a bit
+  // 6) Quality breakdown: green but conviction collapsed + held a bit
   if (
     pol.qualityBreakdownExit &&
     pnl > 0 &&
@@ -632,6 +774,12 @@ export function mergeLearningExitPatch(
   patch: Partial<TradeProfileExitRules>
 ): TradeProfileExitRules {
   const next = { ...current, ...patch };
+  if (current.exitPolicy || patch.exitPolicy) {
+    next.exitPolicy = {
+      ...(current.exitPolicy || {}),
+      ...(patch.exitPolicy || {}),
+    };
+  }
   if (patch.trailingActivationProfit != null) {
     next.trailingActivationProfit = Math.min(
       80,

@@ -1990,6 +1990,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 0.78rem;
       overflow-wrap: anywhere;
     }
+    .zion-offer-stat .sub {
+      display: block;
+      margin-top: 0.12rem;
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: #94a3b8;
+    }
+    .zion-offer-stat .sub strong {
+      color: #cbd5e1;
+      font-weight: 600;
+    }
     .zion-countdown {
       display: flex;
       flex-direction: column;
@@ -7218,6 +7229,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const match = p.match || {};
           const off = p.officialExitRules || {};
           const om = p.officialMatch || {};
+          const pol = er.exitPolicy || {};
+          const offPol = (off.exitPolicy || {});
+          const sl = p.selfLearning || {};
+          const slBadge = p.selfLearnBadge || '';
           const num = function (v, fallback) {
             if (v == null || v === '') return fallback != null ? fallback : '';
             return v;
@@ -7587,7 +7602,50 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   numField({ key: 'trailingActivationProfit', label: 'Trail arm %', title: 'Trail arms after this unrealized profit %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingActivationProfit') }) +
                   numField({ key: 'trailingStopPct', label: 'Trail %', title: 'Trailing stop % from peak after arm. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingStopPct') }) +
                   numField({ key: 'momentumFailDropPct', label: 'Fail drop %', title: 'Scalp fail-drop from peak %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('momentumFailDropPct') }) +
+                  '<p class="tp-param-title" style="grid-column:1/-1;margin-top:0.5rem">Profit-lock / giveback</p>' +
+                  '<p class="tp-param-hint" style="grid-column:1/-1">Arm after peak unrealized %; force sell if giveback pts from peak (e.g. 80%→50% = 30 pts).</p>' +
+                  '<label title="Arm profit-lock after peak unrealized reaches this %">Lock arm %' +
+                    '<input type="number" data-policy="profitLockArmPct" step="1" min="0" placeholder="default" value="' +
+                    escHtml(String(pol.profitLockArmPct != null ? pol.profitLockArmPct : (offPol.profitLockArmPct != null ? offPol.profitLockArmPct : ''))) +
+                  '" /></label>' +
+                  '<label title="Full exit when unrealized falls this many points from peak">Giveback pts' +
+                    '<input type="number" data-policy="profitGivebackPts" step="1" min="0" placeholder="default" value="' +
+                    escHtml(String(pol.profitGivebackPts != null ? pol.profitGivebackPts : (offPol.profitGivebackPts != null ? offPol.profitGivebackPts : ''))) +
+                  '" /></label>' +
+                  '<label title="Once armed, never let unrealized fall below this % (0 = off)">Profit floor %' +
+                    '<input type="number" data-policy="profitFloorPct" step="1" min="0" placeholder="default" value="' +
+                    escHtml(String(pol.profitFloorPct != null ? pol.profitFloorPct : (offPol.profitFloorPct != null ? offPol.profitFloorPct : ''))) +
+                  '" /></label>' +
+                  '<label title="Early partial take-profit %">Early partial %' +
+                    '<input type="number" data-policy="earlyPartialTpPct" step="1" min="0" placeholder="default" value="' +
+                    escHtml(String(pol.earlyPartialTpPct != null ? pol.earlyPartialTpPct : (offPol.earlyPartialTpPct != null ? offPol.earlyPartialTpPct : ''))) +
+                  '" /></label>' +
                 '</div>' +
+                (editable
+                  ? '<div class="tp-param-section">' +
+                      '<p class="tp-param-title">Self-learning</p>' +
+                      '<label class="tp-check">' +
+                        '<input type="checkbox" data-selflearn-toggle="1"' +
+                          (sl.enabled ? ' checked' : '') +
+                          ' onchange="toggleProfileSelfLearning(\\'' + p.id + '\\', this.checked)" />' +
+                        '<span>Self-Learning ' + (sl.mode === 'auto' ? '(auto)' : '(shadow)') + '</span>' +
+                      '</label>' +
+                      (slBadge
+                        ? '<p class="mint text-xs" style="margin:0.25rem 0;color:#4ade80">' + escHtml(slBadge) +
+                          (sl.version ? ' · v' + sl.version : '') + '</p>'
+                        : '<p class="mint text-xs" style="margin:0.25rem 0">Off — bot stays on fixed card knobs</p>') +
+                      (sl.pendingProposal
+                        ? '<p class="mint text-xs" style="margin:0.35rem 0">Proposal: ' +
+                          escHtml(sl.pendingProposal.summary || '') +
+                          '</p>' +
+                          '<div class="tp-params-actions">' +
+                            '<button type="button" class="btn btn-primary text-xs" onclick="applyProfileSelfLearnProposal(\\'' + p.id + '\\')">Apply upgrade</button>' +
+                            '<button type="button" class="btn btn-secondary text-xs" onclick="rejectProfileSelfLearnProposal(\\'' + p.id + '\\')">Reject</button>' +
+                          '</div>'
+                        : '') +
+                      '<button type="button" class="btn btn-secondary text-xs" style="margin-top:0.35rem" onclick="resetProfileSelfLearning(\\'' + p.id + '\\')">Reset learning</button>' +
+                    '</div>'
+                  : '') +
                 (p.id === 'momentum_burst'
                   ? '<p class="mint text-xs" style="margin:0.35rem 0 0;grid-column:1/-1">1-by-1 tune: conviction → Min Vol M5 → holders/MC → TP max ↓ → Fail drop ↑ → trail arm earlier / Size × ↓. Wait ~15 closes each.</p>'
                   : '') +
@@ -7658,6 +7716,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   escHtml(p.name || '') + ' modules">' +
                   escHtml(p.icon || '') + ' ' + escHtml(p.name) +
                   (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
+                  (sl.enabled && slBadge
+                    ? '<span class="tp-override-badge" style="background:#14532d;color:#86efac" title="Self-learning progress">' +
+                      escHtml(slBadge) + '</span>'
+                    : '') +
                   fmtProfileModulesPopover(p) +
                 '</span>' +
                 '<input type="checkbox"' + checked + disabled +
@@ -8172,6 +8234,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         });
         match.qualityFilter = qf;
       }
+      // Profit-lock / adaptive exit policy nested under exitRules.exitPolicy
+      const exitPolicy = {};
+      root.querySelectorAll('[data-policy]').forEach(function (inp) {
+        const k = inp.getAttribute('data-policy');
+        if (!k) return;
+        const raw = inp.value;
+        if (raw === '' || raw == null) return;
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return;
+        exitPolicy[k] = n;
+      });
+      if (Object.keys(exitPolicy).length) {
+        exitRules.exitPolicy = Object.assign({}, erExitPolicyFromDom(root), exitPolicy);
+      }
       try {
         const data = await fetchJSON('/api/trade-profiles', {
           method: 'POST',
@@ -8184,7 +8260,81 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         loadStrategies();
       }
     }
+    function erExitPolicyFromDom(root) {
+      const out = {};
+      root.querySelectorAll('[data-policy]').forEach(function (inp) {
+        const k = inp.getAttribute('data-policy');
+        if (!k) return;
+        const raw = inp.value;
+        if (raw === '' || raw == null) return;
+        const n = Number(raw);
+        if (Number.isFinite(n)) out[k] = n;
+      });
+      return out;
+    }
     window.saveTradeProfileParams = saveTradeProfileParams;
+
+    async function toggleProfileSelfLearning(id, enabled) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: id,
+            selfLearningEnabled: !!enabled,
+            selfLearningMode: 'shadow',
+          }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.toggleProfileSelfLearning = toggleProfileSelfLearning;
+
+    async function applyProfileSelfLearnProposal(id) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: id, applySelfLearnProposal: true }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.applyProfileSelfLearnProposal = applyProfileSelfLearnProposal;
+
+    async function rejectProfileSelfLearnProposal(id) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: id, rejectSelfLearnProposal: true }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.rejectProfileSelfLearnProposal = rejectProfileSelfLearnProposal;
+
+    async function resetProfileSelfLearning(id) {
+      if (!confirm('Reset self-learning for ' + id + '? Keeps trade memory; clears versions/proposals.')) return;
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: id, resetSelfLearning: true }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.resetProfileSelfLearning = resetProfileSelfLearning;
 
     async function resetTradeProfileParams(id) {
       if (!confirm('Reset ' + id + ' to official defaults?')) return;
@@ -16368,9 +16518,94 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let _zionCache = null;
     let _zionFormHydrated = false;
     let _zionSaveInFlight = false;
+    /** After first /api/zion payload, only NEW offers auto-popup (not refresh/reload). */
+    let _zionOffersBootstrapped = false;
+    const ZION_DISMISSED_KEY = 'zionDismissedOfferIds';
     const ZION_POPUP_TTL_MS = 30_000;
     const _zionPopupTimers = window._zionPopupTimers || new Map();
     window._zionPopupTimers = _zionPopupTimers;
+
+    function loadZionDismissedIds() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(ZION_DISMISSED_KEY) || '[]');
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+      } catch (_) {
+        return new Set();
+      }
+    }
+    function persistZionDismissedIds(set) {
+      try {
+        localStorage.setItem(
+          ZION_DISMISSED_KEY,
+          JSON.stringify(Array.from(set).slice(-200))
+        );
+      } catch (_) {}
+    }
+    let _zionDismissedOffers = loadZionDismissedIds();
+
+    function markZionOfferDismissedLocal(id) {
+      if (!id) return;
+      _zionDismissedOffers.add(String(id));
+      _zionShownOffers.add(String(id));
+      persistZionDismissedIds(_zionDismissedOffers);
+      try {
+        fetchJSON(
+          '/api/zion/offers/' + encodeURIComponent(id) + '/dismiss',
+          { method: 'POST' }
+        ).catch(function () {});
+      } catch (_) {}
+    }
+
+    function zionOfferTitle(o) {
+      if (!o) return '?';
+      const mint = String(o.mint || '');
+      const sym = String(o.symbol || '').trim();
+      const name = String(o.name || '').trim();
+      const looksPrefix =
+        sym &&
+        mint &&
+        mint.toLowerCase().startsWith(sym.toLowerCase()) &&
+        sym.length <= 12;
+      if (sym && !looksPrefix) return sym;
+      if (
+        name &&
+        !(mint && mint.toLowerCase().startsWith(name.toLowerCase()) && name.length <= 12)
+      ) {
+        return name;
+      }
+      return sym || name || (mint ? mint.slice(0, 6) : '?');
+    }
+
+    function zionEntryLiveStatHtml(label, entryVal, liveVal) {
+      const entry = zionFmtUsd(entryVal);
+      const live =
+        liveVal != null && Number.isFinite(Number(liveVal))
+          ? zionFmtUsd(liveVal)
+          : entry;
+      const showBoth =
+        liveVal != null &&
+        Number.isFinite(Number(liveVal)) &&
+        entryVal != null &&
+        Number.isFinite(Number(entryVal)) &&
+        Math.round(Number(liveVal)) !== Math.round(Number(entryVal));
+      return (
+        '<div class="zion-offer-stat" data-zion-stat="' +
+        escAttr(label) +
+        '">' +
+        '<span class="lbl">' +
+        escHtml(label) +
+        '</span>' +
+        '<span class="val" data-zion-live-val>' +
+        live +
+        '</span>' +
+        '<span class="sub">Entry <strong data-zion-entry-val>' +
+        entry +
+        '</strong>' +
+        (showBoth ? '' : '') +
+        '</span>' +
+        '</div>'
+      );
+    }
 
     function fillZionForm(cfg) {
       if (!cfg) return;
@@ -16635,19 +16870,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<div class="flex flex-wrap gap-2 items-center justify-between">' +
                 '<div class="flex flex-wrap gap-2 items-center">' +
                 '<strong style="color:#e2e8f0">' +
-                escHtml(o.symbol) +
+                escHtml(zionOfferTitle(o)) +
                 '</strong>' +
                 '<span class="zion-status-pill is-' +
                 disp.key +
                 '">' +
                 escHtml(disp.label) +
+                (o.declinedByUser && disp.key === 'declined' ? ' (user)' : '') +
                 '</span>' +
                 '<span class="mint">score ' +
                 Math.round(o.score || 0) +
                 '</span>' +
-                (o.mcUsd != null
-                  ? '<span class="mint">MC ' + zionFmtUsd(o.mcUsd) + '</span>'
-                  : '') +
                 '<span class="mint">KOLs ' +
                 (o.kolCount || 0) +
                 '</span>' +
@@ -16656,6 +16889,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 zionFoundAgoHtml(o.createdAt, 'Request created') +
                 '</div>' +
                 fmtMintCa(o.mint) +
+                '<div class="mint text-xs mt-1" style="display:flex;flex-wrap:wrap;gap:0.55rem">' +
+                '<span>MC live ' +
+                zionFmtUsd(o.liveMcUsd != null ? o.liveMcUsd : o.mcUsd) +
+                ' · entry ' +
+                zionFmtUsd(o.mcUsd) +
+                '</span>' +
+                '<span>Vol1h live ' +
+                zionFmtUsd(
+                  o.liveVolumeH1Usd != null ? o.liveVolumeH1Usd : o.volumeH1Usd
+                ) +
+                ' · entry ' +
+                zionFmtUsd(o.volumeH1Usd) +
+                '</span>' +
+                '<span>Liq live ' +
+                zionFmtUsd(
+                  o.liveLiquidityUsd != null ? o.liveLiquidityUsd : o.liquidityUsd
+                ) +
+                ' · entry ' +
+                zionFmtUsd(o.liquidityUsd) +
+                '</span>' +
+                '</div>' +
                 '<div class="mint text-xs mt-1">' +
                 escHtml((o.reasons || []).slice(0, 3).join(' · ') || o.source || '') +
                 '</div>' +
@@ -16716,6 +16970,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function dismissZionOfferCard(id, opts) {
       opts = opts || {};
       clearZionPopupTimer(id);
+      if (opts.remember !== false) {
+        markZionOfferDismissedLocal(id);
+      }
       const card = document.getElementById('zion-offer-card-' + id);
       if (!card) {
         if (_zionActiveOfferId === id) _zionActiveOfferId = null;
@@ -16751,7 +17008,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function handleZionRefresh(data) {
       _zionCache = data;
-      // Feed UI only when Zion tab is open; popups always fire on any tab.
+      // Feed UI only when Zion tab is open; popups only for NEW offers while browsing.
       const panel = document.querySelector('[data-tab-panel="zion"]');
       const onZion = panel && !panel.classList.contains('hidden');
       if (onZion) {
@@ -16766,8 +17023,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const pending = ((data && data.offers) || []).filter(function (o) {
         return zionOfferDisplayStatus(o).key === 'active';
       });
+      // First payload after page load/refresh: seed known IDs — do NOT auto-popup.
+      if (!_zionOffersBootstrapped) {
+        for (let i = 0; i < pending.length; i++) {
+          const o = pending[i];
+          _zionShownOffers.add(o.id);
+          if (o.popupDismissed) _zionDismissedOffers.add(o.id);
+        }
+        persistZionDismissedIds(_zionDismissedOffers);
+        _zionOffersBootstrapped = true;
+        // Still refresh open popup cards' live stats if any are visible
+        pending.forEach(function (o) {
+          const card = document.getElementById('zion-offer-card-' + o.id);
+          if (card) applyZionOfferExpiryUi(card, o);
+        });
+        return;
+      }
       for (let i = 0; i < pending.length; i++) {
         const o = pending[i];
+        const card = document.getElementById('zion-offer-card-' + o.id);
+        if (card) {
+          applyZionOfferExpiryUi(card, o);
+          continue;
+        }
+        if (_zionDismissedOffers.has(o.id) || o.popupDismissed) {
+          _zionShownOffers.add(o.id);
+          continue;
+        }
         if (_zionShownOffers.has(o.id)) continue;
         _zionShownOffers.add(o.id);
         openZionOfferModal(o.id, o, { auto: true });
@@ -16893,6 +17175,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const bar = card.querySelector('[data-zion-expire-bar]');
       const label = card.querySelector('[data-zion-expire-label]');
       const placeBtn = card.querySelector('[data-zion-place]');
+      const declineBtn = card.querySelector('[data-zion-decline]');
       const title = card.querySelector('.zion-offer-title');
       const st = card.querySelector('[data-zion-status]');
       if (bar) bar.style.transform = 'scaleX(' + progress.pct.toFixed(4) + ')';
@@ -16905,7 +17188,43 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       }
       if (title) {
-        title.textContent = (o.symbol || '?') + ' · ' + disp.label;
+        title.textContent = zionOfferTitle(o) + ' · ' + disp.label;
+      }
+      // Live MC / vol / liq + score / KOLs
+      const liveMc = o.liveMcUsd != null ? o.liveMcUsd : o.mcUsd;
+      const liveVol = o.liveVolumeH1Usd != null ? o.liveVolumeH1Usd : o.volumeH1Usd;
+      const liveLiq = o.liveLiquidityUsd != null ? o.liveLiquidityUsd : o.liquidityUsd;
+      const setStat = function (key, live, entry) {
+        const el = card.querySelector('[data-zion-stat="' + key + '"]');
+        if (!el) return;
+        const liveEl = el.querySelector('[data-zion-live-val]');
+        const entryEl = el.querySelector('[data-zion-entry-val]');
+        if (liveEl) liveEl.textContent = zionFmtUsd(live);
+        if (entryEl) entryEl.textContent = zionFmtUsd(entry);
+      };
+      setStat('MC', liveMc, o.mcUsd);
+      setStat('Vol 1h', liveVol, o.volumeH1Usd);
+      setStat('Liq', liveLiq, o.liquidityUsd);
+      const scoreEl = card.querySelector('[data-zion-score]');
+      if (scoreEl) scoreEl.textContent = String(Math.round(o.score || 0));
+      const kolEl = card.querySelector('[data-zion-kol-count]');
+      if (kolEl) kolEl.textContent = String(o.kolCount || 0);
+      const kolList = card.querySelector('[data-zion-kol-list]');
+      if (kolList) {
+        kolList.innerHTML = (o.kolWallets || [])
+          .map(function (w) {
+            return (
+              escHtml(w.name || 'KOL') +
+              ' <span class="mint">(' +
+              escHtml((w.address || '').slice(0, 8)) +
+              '…)</span>'
+            );
+          })
+          .join(' · ') || '—';
+      }
+      const reasonsEl = card.querySelector('[data-zion-reasons]');
+      if (reasonsEl) {
+        reasonsEl.textContent = (o.reasons || []).join(' · ') || '—';
       }
       const canPlace = disp.key === 'active' && !progress.expired;
       if (placeBtn) {
@@ -16921,15 +17240,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           placeBtn.style.display = 'none';
         }
       }
+      if (declineBtn) {
+        declineBtn.disabled = !canPlace;
+        declineBtn.style.display = canPlace ? '' : 'none';
+      }
       if (st && (progress.expired || disp.key !== 'active')) {
         const cur = String(st.textContent || '');
-        if (!/Placed|Placing|fail/i.test(cur)) {
+        if (!/Placed|Placing|fail|Declined/i.test(cur)) {
           st.textContent =
             disp.key === 'executed'
               ? 'Already placed'
-              : 'Offer ' +
-                disp.label.toLowerCase() +
-                ' — Place Trade unavailable';
+              : disp.key === 'declined'
+                ? 'Declined by user'
+                : 'Offer ' +
+                  disp.label.toLowerCase() +
+                  ' — Place Trade unavailable';
         }
       }
       return disp;
@@ -16983,7 +17308,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '<div>' +
         '<div class="zion-offer-kicker"><span aria-hidden="true">◈</span> Zion trade request</div>' +
         '<div class="zion-offer-title">' +
-        escHtml(o.symbol || '?') +
+        escHtml(zionOfferTitle(o)) +
         ' · ' +
         escHtml(disp.label) +
         '</div>' +
@@ -17002,30 +17327,32 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           : '') +
         '</div>' +
         '<div class="zion-offer-stats">' +
-        '<div class="zion-offer-stat"><span class="lbl">MC</span><span class="val">' +
-        zionFmtUsd(o.mcUsd) +
-        '</span></div>' +
-        '<div class="zion-offer-stat"><span class="lbl">Vol 1h</span><span class="val">' +
-        zionFmtUsd(o.volumeH1Usd) +
-        '</span></div>' +
-        '<div class="zion-offer-stat"><span class="lbl">Liq</span><span class="val">' +
-        zionFmtUsd(o.liquidityUsd) +
-        '</span></div>' +
+        zionEntryLiveStatHtml('MC', o.mcUsd, o.liveMcUsd != null ? o.liveMcUsd : o.mcUsd) +
+        zionEntryLiveStatHtml(
+          'Vol 1h',
+          o.volumeH1Usd,
+          o.liveVolumeH1Usd != null ? o.liveVolumeH1Usd : o.volumeH1Usd
+        ) +
+        zionEntryLiveStatHtml(
+          'Liq',
+          o.liquidityUsd,
+          o.liveLiquidityUsd != null ? o.liveLiquidityUsd : o.liquidityUsd
+        ) +
         '</div>' +
         '<div class="zion-offer-body">' +
-        '<div><span class="mint">Score</span> ' +
+        '<div><span class="mint">Score</span> <span data-zion-score>' +
         Math.round(o.score || 0) +
-        ' · <span class="mint">Source</span> ' +
+        '</span> · <span class="mint">Source</span> ' +
         escHtml(o.source || '') +
         '</div>' +
-        '<div class="mt-1"><span class="mint">Reasons</span> ' +
+        '<div class="mt-1"><span class="mint">Reasons</span> <span data-zion-reasons">' +
         escHtml((o.reasons || []).join(' · ') || '—') +
-        '</div>' +
-        '<div class="mt-1"><span class="mint">KOLs (' +
+        '</span></div>' +
+        '<div class="mt-1"><span class="mint">KOLs (<span data-zion-kol-count>' +
         (o.kolCount || 0) +
-        ')</span> ' +
+        '</span>)</span> <span data-zion-kol-list>' +
         (kols || '—') +
-        '</div>' +
+        '</span></div>' +
         '<div class="mt-2">' +
         fmtMintCa(o.mint) +
         '</div>' +
@@ -17064,12 +17391,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         '<button type="button" class="btn btn-secondary" data-zion-decline="' +
         escAttr(o.id) +
         '"' +
-        (canPlace ? '' : ' disabled') +
-        '>Cancel</button>' +
+        (canPlace ? '' : ' disabled style="display:none"') +
+        '>Decline</button>' +
         '</div>' +
         '<div class="mint text-xs mt-2" data-zion-status>' +
         (canPlace
-          ? 'Ready · reopen anytime from Zion feed while Active'
+          ? 'Ready · reopen anytime from Zion feed while Active · Close hides popup only'
           : 'Offer ' + disp.label.toLowerCase() + ' — Place Trade unavailable') +
         '</div>';
 
@@ -17131,7 +17458,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           { method: 'POST' }
         );
       } catch (_) {}
-      dismissZionOfferCard(offerId, { immediate: true });
+      markZionOfferDismissedLocal(offerId);
+      dismissZionOfferCard(offerId, { immediate: true, remember: false });
       loadZion();
     }
 

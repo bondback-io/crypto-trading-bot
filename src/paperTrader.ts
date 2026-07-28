@@ -84,6 +84,12 @@ export interface Position {
   stopLossPct: number;
   /** Peak price since entry (trailing) */
   highWaterMarkSol: number;
+  /** Trough price since entry (MAE tracking for learning) */
+  lowWaterMarkSol?: number;
+  /** Max unrealized % seen (MFE) — updated on mark */
+  maxRunupPct?: number;
+  /** Worst unrealized % seen (MAE, ≤0) */
+  maxDrawdownPct?: number;
   trailingStopPct: number;
   /** True once profit hit trailingActivationProfit */
   trailingActive: boolean;
@@ -174,6 +180,12 @@ export interface Position {
   profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
   /** Trail already tightened once by adaptive policy */
   profileTrailTightened?: boolean;
+  /** Self-learn param version stamped at open */
+  selfLearnVersion?: number;
+  /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
+  nearKeyFib?: boolean;
+  nearSupport?: boolean;
+  chartPatternIds?: string[];
   /** How the entry was discovered */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
   /** Scanner playbook stamp */
@@ -243,16 +255,115 @@ function maybeRecordScannerOutcome(
 /** Join closed PnL onto the matching Smart Bot lane fight record. */
 function maybeRecordLaneOutcome(
   position: Position,
-  pnlSol: number
+  pnlSol: number,
+  pnlPct?: number
 ): void {
   try {
     const { recordLaneFightClose } =
       require('./laneOutcomes') as typeof import('./laneOutcomes');
+    const { classifyExitKey } =
+      require('./soakMetrics') as typeof import('./soakMetrics');
+    const entry = position.entryPriceSol || 0;
+    const hwm = position.highWaterMarkSol || entry;
+    const maxRunupPct =
+      position.maxRunupPct != null
+        ? position.maxRunupPct
+        : entry > 0
+          ? ((hwm - entry) / entry) * 100
+          : 0;
+    const holdSec =
+      position.closedAt && position.openedAt
+        ? (position.closedAt - position.openedAt) / 1000
+        : 0;
     recordLaneFightClose({
       mint: position.mint,
       profileId: position.tradeProfileId,
       pnlSol,
+      pnlPct,
+      holdSec,
+      exitKey: classifyExitKey(position.reason || '').key,
+      maxRunupPct: Math.max(0, maxRunupPct),
     });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Append learning episode + kick self-learn tick (final closes only). */
+function maybeRecordLearningEpisode(
+  position: Position,
+  pnlSol: number,
+  pnlPct: number
+): void {
+  if (/^partial:/i.test(String(position.reason || ''))) return;
+  const profileId = position.tradeProfileId;
+  if (!profileId || profileId === 'default') return;
+  try {
+    const {
+      appendProfileLearningEpisode,
+      deriveEpisodeMetrics,
+    } = require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    const entry = position.entryPriceSol || 0;
+    const exit = position.exitPriceSol || entry;
+    const hwm = position.highWaterMarkSol || entry;
+    const metrics = deriveEpisodeMetrics({
+      entryPriceSol: entry,
+      exitPriceSol: exit,
+      highWaterMarkSol: hwm,
+      lowWaterMarkSol: position.lowWaterMarkSol ?? entry,
+      pnlPct,
+    });
+    if (position.maxRunupPct != null) {
+      metrics.maxRunupPct = Math.max(metrics.maxRunupPct, position.maxRunupPct);
+      metrics.peakUnrealizedPct = Math.max(
+        metrics.peakUnrealizedPct,
+        position.maxRunupPct
+      );
+    }
+    if (position.maxDrawdownPct != null) {
+      metrics.maxDrawdownPct = Math.min(
+        metrics.maxDrawdownPct,
+        position.maxDrawdownPct
+      );
+    }
+    const holdSec =
+      position.closedAt && position.openedAt
+        ? (position.closedAt - position.openedAt) / 1000
+        : 0;
+    let paramVersion = position.selfLearnVersion ?? 0;
+    try {
+      const { getProfileSelfLearning } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      paramVersion =
+        position.selfLearnVersion ??
+        getProfileSelfLearning(profileId).version ??
+        0;
+    } catch {
+      /* ignore */
+    }
+    appendProfileLearningEpisode({
+      profileId,
+      mint: position.mint,
+      symbol: position.symbol,
+      openedAt: position.openedAt,
+      closedAt: position.closedAt || Date.now(),
+      holdSec,
+      pnlPct,
+      pnlSol,
+      exitReason: position.reason || 'unknown',
+      ...metrics,
+      convictionScore: position.convictionScore,
+      walletCount: position.sourceWallets?.length,
+      entryMarketCapUsd: position.entryMarketCapUsd,
+      tradeProfileScore: position.tradeProfileScore,
+      tradeProfileReason: position.tradeProfileReason,
+      paramVersion,
+      entrySource: position.entrySource,
+      scannerPlaybook: position.scannerPlaybook,
+    });
+    const { onProfileTradeClosedForSelfLearn } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    onProfileTradeClosedForSelfLearn(profileId);
   } catch {
     /* non-fatal */
   }
@@ -851,6 +962,9 @@ export class PaperTrader {
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: input.entryPriceSol,
+      lowWaterMarkSol: input.entryPriceSol,
+      maxRunupPct: 0,
+      maxDrawdownPct: 0,
       trailingStopPct:
         isStrategyEnabledForProfile('tiered_profit_taking', input.tradeProfileId) &&
         config.profitStrategy?.enabled
@@ -1194,6 +1308,9 @@ export class PaperTrader {
         : randomTakeProfitPct(),
       stopLossPct: rules.hardStopLossPct ?? config.trade.stopLossPercent,
       highWaterMarkSol: entryPrice,
+      lowWaterMarkSol: entryPrice,
+      maxRunupPct: 0,
+      maxDrawdownPct: 0,
       trailingStopPct:
         isStrategyEnabledForProfile('tiered_profit_taking', meta?.tradeProfileId) &&
         config.profitStrategy?.enabled
@@ -1504,7 +1621,8 @@ export class PaperTrader {
     }
 
     maybeRecordScannerOutcome(position, totalPct);
-    maybeRecordLaneOutcome(position, totalPnl);
+    maybeRecordLaneOutcome(position, totalPnl, totalPct);
+    maybeRecordLearningEpisode(position, totalPnl, totalPct);
 
     const perf = this.getStats();
     this.log(
@@ -1739,9 +1857,29 @@ export class PaperTrader {
     if (markPrice > position.highWaterMarkSol) {
       position.highWaterMarkSol = markPrice;
     }
-
+    if (
+      position.lowWaterMarkSol == null ||
+      !(position.lowWaterMarkSol > 0)
+    ) {
+      position.lowWaterMarkSol = position.entryPriceSol;
+    }
+    if (markPrice < position.lowWaterMarkSol) {
+      position.lowWaterMarkSol = markPrice;
+    }
     const markPnlPct =
       ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+    if (
+      position.maxRunupPct == null ||
+      markPnlPct > position.maxRunupPct
+    ) {
+      position.maxRunupPct = markPnlPct;
+    }
+    if (
+      position.maxDrawdownPct == null ||
+      markPnlPct < position.maxDrawdownPct
+    ) {
+      position.maxDrawdownPct = markPnlPct;
+    }
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // Adaptive profile exit (sync / backtest)
@@ -1754,6 +1892,23 @@ export class PaperTrader {
         const policy =
           position.profileExitPolicy ||
           resolveExitPolicy(position.tradeProfileId, null);
+        const peakUnrealizedPct =
+          position.entryPriceSol > 0
+            ? ((position.highWaterMarkSol - position.entryPriceSol) /
+                position.entryPriceSol) *
+              100
+            : Math.max(0, markPnlPct);
+        const taOk =
+          position.nearKeyFib === true ||
+          position.nearSupport === true ||
+          (Array.isArray(position.chartPatternIds) &&
+            position.chartPatternIds.length > 0) ||
+          (position.convictionScore != null && position.convictionScore >= 45);
+        const taBroken =
+          position.convictionScore != null &&
+          position.convictionScore < 30 &&
+          !position.nearKeyFib &&
+          !position.nearSupport;
         const adapt = evaluateAdaptiveProfileExit({
           policy,
           pnlPct: markPnlPct,
@@ -1768,6 +1923,9 @@ export class PaperTrader {
           convictionScore: position.convictionScore,
           openedAt: position.openedAt,
           nowMs,
+          peakUnrealizedPct,
+          taStructureOk: taOk,
+          taStructureBroken: taBroken,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -1844,6 +2002,30 @@ export class PaperTrader {
       if (scalpAction.type === 'full') {
         const strat =
           position.shortTermStrategyId || 'quick_scalper';
+        // Swing-style: defer soft timer while TA structure still ok
+        if (
+          scalpAction.exitKind === 'scalp_timer' &&
+          position.profileExitPolicy?.extendHoldIfTaOk === true
+        ) {
+          const taOk =
+            position.nearKeyFib === true ||
+            position.nearSupport === true ||
+            (Array.isArray(position.chartPatternIds) &&
+              position.chartPatternIds.length > 0) ||
+            (position.convictionScore != null &&
+              position.convictionScore >= 45);
+          const hardMs =
+            position.scalpHardDeadlineMs != null &&
+            position.scalpHardDeadlineMs > position.scalpDeadlineMs!
+              ? position.scalpHardDeadlineMs
+              : position.openedAt +
+                Math.round(
+                  (position.scalpDeadlineMs! - position.openedAt) * 1.4
+                );
+          if (taOk && nowMs < hardMs && markPnlPct > -2) {
+            return null;
+          }
+        }
         // Soft Timer on green/near-flat MB/migration: prefer trail / defer over dump
         if (
           scalpAction.exitKind === 'scalp_timer' &&
@@ -2361,6 +2543,29 @@ export class PaperTrader {
       if (currentPrice > position.highWaterMarkSol) {
         position.highWaterMarkSol = currentPrice;
       }
+      if (
+        position.lowWaterMarkSol == null ||
+        !(position.lowWaterMarkSol > 0)
+      ) {
+        position.lowWaterMarkSol = position.entryPriceSol;
+      }
+      if (currentPrice < position.lowWaterMarkSol) {
+        position.lowWaterMarkSol = currentPrice;
+      }
+      const markPnlPctAsync =
+        ((currentPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+      if (
+        position.maxRunupPct == null ||
+        markPnlPctAsync > position.maxRunupPct
+      ) {
+        position.maxRunupPct = markPnlPctAsync;
+      }
+      if (
+        position.maxDrawdownPct == null ||
+        markPnlPctAsync < position.maxDrawdownPct
+      ) {
+        position.maxDrawdownPct = markPnlPctAsync;
+      }
 
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
@@ -2376,7 +2581,7 @@ export class PaperTrader {
         continue;
       }
 
-      // Adaptive profile exit brain (early partial / trail tighten / momentum fade)
+      // Adaptive profile exit brain (early partial / trail tighten / momentum fade / profit-lock)
       if (position.profileExitPolicy || position.tradeProfileId) {
         try {
           const {
@@ -2386,9 +2591,24 @@ export class PaperTrader {
           const policy =
             position.profileExitPolicy ||
             resolveExitPolicy(position.tradeProfileId, null);
-          const pnlPct =
-            ((currentPrice - position.entryPriceSol) / position.entryPriceSol) *
-            100;
+          const pnlPct = markPnlPctAsync;
+          const peakUnrealizedPct =
+            position.entryPriceSol > 0
+              ? ((position.highWaterMarkSol - position.entryPriceSol) /
+                  position.entryPriceSol) *
+                100
+              : Math.max(0, pnlPct);
+          const taOk =
+            position.nearKeyFib === true ||
+            position.nearSupport === true ||
+            (Array.isArray(position.chartPatternIds) &&
+              position.chartPatternIds.length > 0) ||
+            (position.convictionScore != null && position.convictionScore >= 45);
+          const taBroken =
+            position.convictionScore != null &&
+            position.convictionScore < 30 &&
+            !position.nearKeyFib &&
+            !position.nearSupport;
           const adapt = evaluateAdaptiveProfileExit({
             policy,
             pnlPct,
@@ -2402,6 +2622,9 @@ export class PaperTrader {
             takeProfitPct: position.takeProfitPct,
             convictionScore: position.convictionScore,
             openedAt: position.openedAt,
+            peakUnrealizedPct,
+            taStructureOk: taOk,
+            taStructureBroken: taBroken,
           });
           if (adapt.type === 'tighten_trail' && adapt.newTrailingStopPct != null) {
             if (!position.profileTrailTightened) {
@@ -2942,7 +3165,8 @@ export class PaperTrader {
             { mint: position.mint, symbol: position.symbol, pnlSol: position.pnlSol }
           );
           maybeRecordScannerOutcome(position, pnlPct);
-          maybeRecordLaneOutcome(position, position.pnlSol ?? 0);
+          maybeRecordLaneOutcome(position, position.pnlSol ?? 0, pnlPct);
+          maybeRecordLearningEpisode(position, position.pnlSol ?? 0, pnlPct);
           registerExitForReentry({
             mint: position.mint,
             symbol: position.symbol,

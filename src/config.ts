@@ -1764,6 +1764,7 @@ export interface BotConfig {
       forceProfileId?: string | null;
       weights?: Record<string, number>;
     };
+    selfLearning?: Record<string, unknown>;
   };
 
   /** GMGN API settings */
@@ -2553,6 +2554,12 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
           autoScoring: config.tradeProfiles.autoScoring
             ? cloneJson(config.tradeProfiles.autoScoring)
             : undefined,
+          selfLearning: (config.tradeProfiles as { selfLearning?: unknown })
+            .selfLearning
+            ? cloneJson(
+                (config.tradeProfiles as { selfLearning?: unknown }).selfLearning
+              )
+            : undefined,
         }) as PersistedBotSettings['tradeProfiles'])
       : undefined,
     paper: { ...config.paper },
@@ -3185,6 +3192,13 @@ function applySettingsSnapshot(
             {}),
         },
       }) as NonNullable<typeof config.tradeProfiles.autoScoring>;
+    }
+    if (
+      (tp as { selfLearning?: unknown }).selfLearning &&
+      typeof (tp as { selfLearning?: unknown }).selfLearning === 'object'
+    ) {
+      (config.tradeProfiles as { selfLearning?: unknown }).selfLearning =
+        cloneJson((tp as { selfLearning: unknown }).selfLearning);
     }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
