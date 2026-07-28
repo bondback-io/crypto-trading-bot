@@ -1,12 +1,41 @@
 /**
  * Effective filter / gate helpers — config + optional quality-module overlays.
  * Used under Risk On; Risk Off bypasses hard floors via hardFilterFloorsActive().
+ *
+ * When Smart Bot Profiles is ON and a specialty micro-bot gate is active,
+ * WQ / cluster / conviction style floors are profile-owned (not max(global, profile)).
  */
 
 import { HARD_FILTER_FLOORS, config, hardFilterFloorsActive } from './config';
 
-/** Min wallet quality — config + quality-module overlays. */
+function activeProfileStyleFloors():
+  | {
+      minWalletQuality: number;
+      minWalletCount: number;
+      minConviction: number;
+      profileOwned: true;
+    }
+  | null {
+  try {
+    const { getActiveCascadeMatchFloors } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const floors = getActiveCascadeMatchFloors();
+    if (!floors.profileOwned) return null;
+    return {
+      minWalletQuality: floors.minWalletQuality,
+      minWalletCount: floors.minWalletCount,
+      minConviction: floors.minConviction,
+      profileOwned: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Min wallet quality — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinWalletQualityScore(): number {
+  const profile = activeProfileStyleFloors();
+  if (profile) return Math.min(85, profile.minWalletQuality);
   const base = config.filters.minWalletQualityScore ?? 55;
   let score = base;
   try {
@@ -20,8 +49,10 @@ export function effectiveMinWalletQualityScore(): number {
   return Math.min(85, score);
 }
 
-/** Min conviction — config + quality-module overlays. */
+/** Min conviction — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinConvictionScore(): number {
+  const profile = activeProfileStyleFloors();
+  if (profile) return Math.min(80, profile.minConviction);
   const base = config.selective?.minConvictionScore ?? 40;
   let score = base;
   try {
@@ -35,8 +66,10 @@ export function effectiveMinConvictionScore(): number {
   return Math.min(80, score);
 }
 
-/** Cluster / convergence wallet floor — config + quality overlays. */
+/** Cluster / convergence wallet floor — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveClusterMinWallets(): number {
+  const profile = activeProfileStyleFloors();
+  if (profile) return Math.min(5, Math.max(1, profile.minWalletCount));
   const base = Math.max(
     1,
     config.filters.clusterMinWallets ?? 1,

@@ -437,6 +437,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferVolumeSpike: true,
       maxMarketCapUsd: 150_000,
       minVolumeM5Usd: 800,
+      minConviction: 35,
+      minWalletQuality: 35,
+      minWalletCount: 1,
+      requireCluster: false,
     },
     exitRules: {
       forceScalp: true,
@@ -489,6 +493,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       ],
       patternSensitivity: 'medium',
       minConviction: 40,
+      minWalletQuality: 40,
+      minWalletCount: 1,
+      requireCluster: false,
       minDropFromPeakPct: 12,
       minPriceChange24hPct: 80,
     },
@@ -554,6 +561,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
       minConviction: 50,
+      minWalletQuality: 50,
+      minWalletCount: 2,
+      requireCluster: true,
       minTokenAgeHours: 6,
       minHolders: 60,
       minVolumeH1Usd: 3_000,
@@ -598,6 +608,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternSensitivity: 'high',
       minVolumeH1Usd: 2_500,
       minConviction: 35,
+      minWalletQuality: 35,
+      minWalletCount: 1,
+      requireCluster: false,
       /** Fresh graduation window — older PumpSwap buys are not snipes */
       maxTokenAgeHours: 2,
       /** Mature / high-holder tokens belong to Trend / HWR / Dip */
@@ -746,6 +759,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternMinConfidence: 48,
       minVolumeM5Usd: 6_000,
       minConviction: 50,
+      minWalletQuality: 35,
+      minWalletCount: 1,
+      requireCluster: false,
     },
     exitRules: {
       forceScalp: true,
@@ -798,6 +814,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternSensitivity: 'medium',
       patternMinConfidence: 58,
       minConviction: 45,
+      minWalletQuality: 50,
+      minWalletCount: 2,
+      requireCluster: true,
       minTokenAgeHours: 18,
       minHolders: 120,
       minVolumeH1Usd: 8_000,
@@ -845,6 +864,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternMinConfidence: 48,
       minDropFromPeakPct: 18,
       minConviction: 35,
+      minWalletQuality: 35,
+      minWalletCount: 1,
+      requireCluster: false,
     },
     exitRules: {
       forceScalp: true,
@@ -1390,6 +1412,65 @@ export async function withStrategyProfileGateAsync<T>(
   } finally {
     popStrategyProfileGate();
   }
+}
+
+/**
+ * Style floors for cascade after a lane win (WQ / cluster / conviction).
+ * When Smart Bot Profiles is ON and a specialty micro-bot gate is active,
+ * these come from that profile's resolved match — not shared Settings.
+ * Default / inherit-all / Smart Bot OFF → profileOwned=false (use global effective*).
+ */
+export type CascadeMatchFloors = {
+  minWalletQuality: number;
+  minWalletCount: number;
+  requireCluster: boolean;
+  minConviction: number;
+  profileId: string | null;
+  profileName: string | null;
+  profileOwned: boolean;
+};
+
+export function getActiveCascadeMatchFloors(
+  profileId?: string | null
+): CascadeMatchFloors {
+  const gate =
+    profileId !== undefined ? profileId : getActiveStrategyProfileGate();
+  if (
+    isSmartBotProfilesEnabled() &&
+    gate != null &&
+    gate !== '' &&
+    gate !== 'default'
+  ) {
+    const def = resolveTradeProfileDefinition(gate);
+    const m = def.match;
+    return {
+      minWalletQuality: Math.max(
+        0,
+        Math.min(100, Number(m.minWalletQuality ?? 40))
+      ),
+      minWalletCount: Math.max(
+        1,
+        Math.min(5, Number(m.minWalletCount ?? 1))
+      ),
+      requireCluster: m.requireCluster === true,
+      minConviction: Math.max(
+        0,
+        Math.min(100, Number(m.minConviction ?? 40))
+      ),
+      profileId: def.id,
+      profileName: def.name,
+      profileOwned: true,
+    };
+  }
+  return {
+    minWalletQuality: 0,
+    minWalletCount: 1,
+    requireCluster: false,
+    minConviction: 0,
+    profileId: gate ?? null,
+    profileName: null,
+    profileOwned: false,
+  };
 }
 
 export function getTradeProfilesStatus(): {

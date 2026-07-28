@@ -885,7 +885,18 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   }
 
   if (score < minRequired) {
-    reasons.push(`conviction ${score} < min ${minRequired}`);
+    let floorLabel = `min ${minRequired}`;
+    try {
+      const { getActiveCascadeMatchFloors } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const floors = getActiveCascadeMatchFloors();
+      if (floors.profileOwned && floors.profileName) {
+        floorLabel = `${floors.profileName} min ${minRequired}`;
+      }
+    } catch {
+      /* ignore bootstrap */
+    }
+    reasons.push(`conviction ${score} < ${floorLabel}`);
   }
 
   const requireHealthyCurve = config.bondingCurve?.requireHealthyCurve === true;

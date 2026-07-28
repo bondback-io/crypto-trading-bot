@@ -590,15 +590,28 @@ export function evaluateDeadTokenHardFloors(
     }
   }
 
-  // Bonding curve dead / stalled
+  // Bonding curve dead / stalled — pre-grad only.
+  // Migrated / PumpSwap tokens often report progress 0% (no active curve); that
+  // is not a dead early-curve signal. Also skip when curve data is unknown.
   const bc = config.bondingCurve;
   const requireHealthy =
     isStrategyEnabled('bonding_curve_health') &&
     bc.requireHealthyCurve === true;
   const progress = snap.bondingCurveProgressPct;
   const curveHealth = snap.curveHealth;
+  const curveUnknown =
+    !curveHealth ||
+    curveHealth.status === 'unknown' ||
+    /no curve data/i.test(curveHealth.detail || '');
+  const looksPostGrad =
+    isMigrated ||
+    (progress != null &&
+      progress <= 0 &&
+      ((snap.liquidityUsd != null &&
+        snap.liquidityUsd >= HARD_FILTER_FLOORS.earlyMinLiquidityUsd) ||
+        curveUnknown));
 
-  if (requireHealthy && !isMigrated) {
+  if (requireHealthy && !looksPostGrad) {
     if (curveHealth?.dead || curveHealth?.stalled) {
       scorePenalty += 28;
       flags.push({
@@ -614,6 +627,7 @@ export function evaluateDeadTokenHardFloors(
       );
     } else if (
       progress != null &&
+      progress > 0 &&
       progress <= (bc.minCurveProgress > 0
         ? bc.minCurveProgress
         : HARD_FILTER_FLOORS.deadBondingCurveMaxPct) &&
@@ -631,7 +645,14 @@ export function evaluateDeadTokenHardFloors(
       );
     }
 
-    if (bc.minCurveProgress > 0 && progress != null && progress < bc.minCurveProgress) {
+    // Only enforce min progress when we have a real early-curve reading (>0).
+    // progress 0 on graduated / missing-curve tokens is meaningless.
+    if (
+      bc.minCurveProgress > 0 &&
+      progress != null &&
+      progress > 0 &&
+      progress < bc.minCurveProgress
+    ) {
       const already = skipReasons.some((r) => /bonding curve/i.test(r));
       if (!already) {
         scorePenalty += 12;
@@ -709,13 +730,16 @@ export function evaluateDeadTokenHardFloors(
     }
   }
 
-  // Jupiter organic / pro-quality proxy — known-only (unknown fail-open for early Pump)
+  // Jupiter organic / pro-quality proxy — known-only (unknown fail-open for early Pump).
+  // Treat score 0 as unavailable/blank (Jupiter often returns 0 when unknown);
+  // hard-reject only trustworthy positive-but-low organic scores.
   const org = snap.organicScore;
   const minOrg = HARD_FILTER_FLOORS.minOrganicScore;
   if (
     minOrg > 0 &&
     org != null &&
     Number.isFinite(org) &&
+    org > 0 &&
     org < minOrg
   ) {
     scorePenalty += 28;

@@ -242,6 +242,17 @@ export function passesWalletQualityGate(wallet: SmartWallet): {
     return { ok: true };
   }
   const min = effectiveMinWalletQualityScore();
+  let floorLabel = `min ${min}`;
+  try {
+    const { getActiveCascadeMatchFloors } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const floors = getActiveCascadeMatchFloors();
+    if (floors.profileOwned && floors.profileName) {
+      floorLabel = `${floors.profileName} min ${min}`;
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
   // Score lazily if missing
   if (wallet.qualityScore == null) {
     applyQualityToWallet(wallet);
@@ -250,7 +261,7 @@ export function passesWalletQualityGate(wallet: SmartWallet): {
   if (score < min) {
     return {
       ok: false,
-      reason: `wallet quality ${score} < min ${min}${
+      reason: `wallet quality ${score} < ${floorLabel}${
         wallet.qualityStatus ? ` (${wallet.qualityStatus})` : ''
       }`,
     };

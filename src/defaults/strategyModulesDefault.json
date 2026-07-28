@@ -878,7 +878,10 @@
           "maxTradeOverrideSol": 0.15
         },
         "match": {
-          "minConviction": 35
+          "minConviction": 35,
+          "minWalletQuality": 35,
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "dip_buyer": {
@@ -891,7 +894,10 @@
           "maxTradeOverrideSol": 0.75
         },
         "match": {
-          "minConviction": 40
+          "minConviction": 40,
+          "minWalletQuality": 40,
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "trend_rider": {
@@ -904,7 +910,10 @@
           "maxTradeOverrideSol": 1
         },
         "match": {
-          "minConviction": 50
+          "minConviction": 50,
+          "minWalletQuality": 50,
+          "minWalletCount": 2,
+          "requireCluster": true
         }
       },
       "migration_sniper": {
@@ -919,7 +928,10 @@
           "maxTradeOverrideSol": 0.25
         },
         "match": {
-          "minConviction": 35
+          "minConviction": 35,
+          "minWalletQuality": 35,
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "high_win_rate": {
@@ -933,6 +945,9 @@
         },
         "match": {
           "minConviction": 65,
+          "minWalletQuality": 65,
+          "minWalletCount": 3,
+          "requireCluster": true,
           "qualityFilter": {
             "enabled": true,
             "mode": "reject",
@@ -961,7 +976,10 @@
           "maxTradeOverrideSol": 0.15
         },
         "match": {
-          "minConviction": 35
+          "minConviction": 35,
+          "minWalletQuality": 35,
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "smart_money_mirror": {
@@ -974,7 +992,10 @@
           "maxTradeOverrideSol": 0.75
         },
         "match": {
-          "minConviction": 45
+          "minConviction": 45,
+          "minWalletQuality": 58,
+          "minWalletCount": 3,
+          "requireCluster": true
         }
       },
       "steady_compounder": {
@@ -987,7 +1008,10 @@
           "maxTradeOverrideSol": 1
         },
         "match": {
-          "minConviction": 45
+          "minConviction": 45,
+          "minWalletQuality": 50,
+          "minWalletCount": 2,
+          "requireCluster": true
         }
       },
       "momentum_burst": {
@@ -1006,7 +1030,10 @@
         },
         "match": {
           "minConviction": 50,
-          "minVolumeM5Usd": 6000
+          "minVolumeM5Usd": 6000,
+          "minWalletQuality": 35,
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       }
     },
@@ -1490,7 +1517,10 @@
             "maxTradeOverrideSol": 0.15
           },
           "match": {
-            "minConviction": 35
+            "minConviction": 35,
+            "minWalletQuality": 35,
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "dip_buyer": {
@@ -1503,7 +1533,10 @@
             "maxTradeOverrideSol": 0.75
           },
           "match": {
-            "minConviction": 40
+            "minConviction": 40,
+            "minWalletQuality": 40,
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "trend_rider": {
@@ -1516,7 +1549,10 @@
             "maxTradeOverrideSol": 1
           },
           "match": {
-            "minConviction": 50
+            "minConviction": 50,
+            "minWalletQuality": 50,
+            "minWalletCount": 2,
+            "requireCluster": true
           }
         },
         "migration_sniper": {
@@ -1531,7 +1567,10 @@
             "maxTradeOverrideSol": 0.25
           },
           "match": {
-            "minConviction": 35
+            "minConviction": 35,
+            "minWalletQuality": 35,
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "high_win_rate": {
@@ -1545,6 +1584,9 @@
           },
           "match": {
             "minConviction": 65,
+            "minWalletQuality": 65,
+            "minWalletCount": 3,
+            "requireCluster": true,
             "qualityFilter": {
               "enabled": true,
               "mode": "reject",
@@ -1573,7 +1615,10 @@
             "maxTradeOverrideSol": 0.15
           },
           "match": {
-            "minConviction": 35
+            "minConviction": 35,
+            "minWalletQuality": 35,
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "smart_money_mirror": {
@@ -1586,7 +1631,10 @@
             "maxTradeOverrideSol": 0.75
           },
           "match": {
-            "minConviction": 45
+            "minConviction": 45,
+            "minWalletQuality": 58,
+            "minWalletCount": 3,
+            "requireCluster": true
           }
         },
         "steady_compounder": {
@@ -1599,7 +1647,10 @@
             "maxTradeOverrideSol": 1
           },
           "match": {
-            "minConviction": 45
+            "minConviction": 45,
+            "minWalletQuality": 50,
+            "minWalletCount": 2,
+            "requireCluster": true
           }
         },
         "momentum_burst": {
@@ -1618,7 +1669,10 @@
           },
           "match": {
             "minConviction": 50,
-            "minVolumeM5Usd": 6000
+            "minVolumeM5Usd": 6000,
+            "minWalletQuality": 35,
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         }
       },

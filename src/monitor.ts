@@ -4077,9 +4077,20 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     signal.wallets.length < clusterMin &&
     !allowSingle
   ) {
+    let botPrefix = '';
+    try {
+      const { getActiveCascadeMatchFloors } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const floors = getActiveCascadeMatchFloors();
+      if (floors.profileOwned && floors.profileName) {
+        botPrefix = `${floors.profileName}: `;
+      }
+    } catch {
+      /* ignore */
+    }
     const msg = isStrategyEnabled('elite_convergence')
-      ? `elite convergence need ${clusterMin} wallets (have ${signal.wallets.length})`
-      : `cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
+      ? `${botPrefix}elite convergence need ${clusterMin} wallets (have ${signal.wallets.length})`
+      : `${botPrefix}cluster need ${clusterMin} wallets (have ${signal.wallets.length})`;
     logStrategyDecision(
       isStrategyEnabled('elite_convergence')
         ? 'elite_convergence'
