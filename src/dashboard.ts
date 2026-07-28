@@ -3695,6 +3695,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-weight: 650;
       color: #e2e8f0;
       line-height: 1.25;
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .notif-item-time {
       flex: 0 0 auto;
@@ -3707,6 +3710,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 0.68rem;
       color: #94a3b8;
       line-height: 1.35;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .notif-item-kind {
       display: inline-block;
@@ -6011,20 +6016,22 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, a trade closes in profit, or Zion offers fire. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Without a verified domain, Resend’s onboarding@resend.dev sender can ONLY email the address on your Resend account — verify a domain + set RESEND_FROM to email anyone else. Secrets stay in Render env."></span></div>
         <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
-        <div class="grid grid-2 gap-3">
-          <label class="ctl"><span>Email alerts enabled</span><input type="checkbox" id="notify-enabled" checked /></label>
-          <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="isaacpascua87@gmail.com" placeholder="you@example.com" /></label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="bondback2026@gmail.com" placeholder="you@example.com" /></label>
           <label class="ctl"><span>Low equity threshold (SOL)</span><input type="number" id="notify-low-equity-sol" min="0.1" step="0.1" value="1" /></label>
-          <label class="ctl"><span>Low equity alert</span><input type="checkbox" id="notify-low-equity" checked /></label>
-          <label class="ctl"><span>Insufficient funds alert</span><input type="checkbox" id="notify-insufficient" checked /></label>
-          <label class="ctl"><span>Profitable close alert</span><input type="checkbox" id="notify-profit-close" checked /></label>
+        </div>
+        <div class="mt-3 space-y-1">
+          <div class="toggle-row"><span>Email alerts enabled</span><label class="switch"><input type="checkbox" id="notify-enabled" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Low equity alert</span><label class="switch"><input type="checkbox" id="notify-low-equity" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Insufficient funds alert</span><label class="switch"><input type="checkbox" id="notify-insufficient" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span>Profitable close alert</span><label class="switch"><input type="checkbox" id="notify-profit-close" checked /><span class="slider"></span></label></div>
         </div>
         <div class="section-title mt-4" style="font-size:0.85rem">In-app notifications</div>
         <p class="mint text-xs mb-2">Bell feed in the header, Zion popup sound, and auto trade-request popups. All default ON.</p>
-        <div class="grid grid-2 gap-3">
-          <label class="ctl"><span>Notification bell</span><input type="checkbox" id="notify-dashboard" checked title="Show trade requests, emails, profit closes, and system notes in the header bell" /></label>
-          <label class="ctl"><span>Trade request sound</span><input type="checkbox" id="notify-offer-sound" checked title="Soft chime when a new Zion trade request arrives" /></label>
-          <label class="ctl"><span>Trade request popups</span><input type="checkbox" id="notify-offer-popups" checked title="Auto-open Zion trade request cards while browsing" /></label>
+        <div class="space-y-1">
+          <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
         </div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
           <button type="button" class="btn btn-primary" onclick="saveNotificationsConfig()" title="Save notification preferences">Save Notifications</button>
@@ -13892,7 +13899,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             if (el && v != null) el.value = v;
           };
           setChk('notify-enabled', n.enabled !== false);
-          setVal('notify-email', n.email || 'isaacpascua87@gmail.com');
+          setVal('notify-email', n.email || 'bondback2026@gmail.com');
           setVal('notify-low-equity-sol', n.lowEquitySol != null ? n.lowEquitySol : 1);
           setChk('notify-low-equity', n.lowEquityEnabled !== false);
           setChk('notify-insufficient', n.insufficientFundsEnabled !== false);

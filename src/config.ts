@@ -1949,7 +1949,7 @@ export interface BotConfig {
 
   /**
    * Email notification preferences (SMTP credentials stay in env).
-   * Default recipient: isaacpascua87@gmail.com
+   * Default recipient: bondback2026@gmail.com
    */
   notifications: {
     enabled: boolean;
@@ -2346,7 +2346,7 @@ export const config: BotConfig = {
   notifications: {
     enabled: true,
     email:
-      process.env.NOTIFY_EMAIL?.trim() || 'isaacpascua87@gmail.com',
+      process.env.NOTIFY_EMAIL?.trim() || 'bondback2026@gmail.com',
     lowEquitySol: Number(process.env.NOTIFY_LOW_EQUITY_SOL) || 1,
     lowEquityEnabled: process.env.NOTIFY_LOW_EQUITY !== '0',
     lowEquityCooldownMs: Number(process.env.NOTIFY_LOW_EQUITY_COOLDOWN_MS) || 6 * 3600_000,
@@ -2458,6 +2458,7 @@ const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
 const SELF_LEARNING_DEFAULT_ON_V1 = 'selfLearningDefaultOn_v1';
+const NOTIFY_EMAIL_BONDBACK_V1 = 'notifyEmailBondback_v1';
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -3520,6 +3521,24 @@ export function applyPersistedSettings(): boolean {
         err instanceof Error ? err.message : err
       );
     }
+  }
+
+  if (!settingsMigrations[NOTIFY_EMAIL_BONDBACK_V1]) {
+    const prev = String(config.notifications?.email || '').trim().toLowerCase();
+    // Migrate only the previous built-in default (or empty) — keep custom addresses
+    if (
+      !prev ||
+      prev === 'isaacpascua87@gmail.com' ||
+      prev === 'bondback2026@gmail.com'
+    ) {
+      config.notifications.email =
+        process.env.NOTIFY_EMAIL?.trim() || 'bondback2026@gmail.com';
+    }
+    settingsMigrations[NOTIFY_EMAIL_BONDBACK_V1] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied notifyEmailBondback_v1 — notify email ${config.notifications.email}`
+    );
   }
 
   return true;
