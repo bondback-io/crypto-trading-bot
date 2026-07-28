@@ -5359,17 +5359,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mint mt-2" id="risk-status">—</div>
-        <div class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem" id="module-tune-card">
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-            <div class="text-sm font-semibold text-slate-200">Module A/B tune order</div>
-            <div class="flex gap-2">
+        <details class="mt-3 card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem" id="module-tune-card">
+          <summary class="flex flex-wrap items-center justify-between gap-2 cursor-pointer list-none" style="user-select:none">
+            <span class="text-sm font-semibold text-slate-200">Module A/B tune order</span>
+          </summary>
+          <div class="mt-2 pt-2" style="border-top:1px solid #1e293b">
+            <div class="flex flex-wrap gap-2 mb-1 justify-end">
               <button type="button" class="btn btn-secondary text-xs" onclick="enableNextTuneModule()" title="Enable the next recommended module">Enable next</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="resetSkipReasonCounts()" title="Clear skip-reason tallies">Clear skips</button>
             </div>
+            <p class="text-xs text-slate-400 mb-1" id="module-tune-hint">Enable one module at a time after soak baseline.</p>
+            <ol class="text-xs text-slate-300 m-0 pl-4" id="module-tune-list" style="line-height:1.45"></ol>
           </div>
-          <p class="text-xs text-slate-400 mb-1" id="module-tune-hint">Enable one module at a time after soak baseline.</p>
-          <ol class="text-xs text-slate-300 m-0 pl-4" id="module-tune-list" style="line-height:1.45"></ol>
-        </div>
+        </details>
       </div>
 
       <div class="card strategy-control-card">
