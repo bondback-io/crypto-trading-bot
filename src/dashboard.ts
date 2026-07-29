@@ -6431,8 +6431,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
           </div>
         </div>
-        <div class="mint text-sm" id="persist-reset-status">Checking save status…</div>
-        <div class="mint text-xs mt-1" id="persist-reset-msg"></div>
+        <div class="mint text-sm mt-1" id="persist-reset-msg"></div>
         <div class="mint text-xs mt-2" id="persist-backup-status">Last backup: —</div>
         <div class="backup-meta" id="persist-status-detail">Checking data directory…</div>
       </div>
