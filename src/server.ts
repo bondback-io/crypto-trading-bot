@@ -2982,6 +2982,12 @@ export function createServer(): express.Application {
     if (typeof body.tradeRequestSound === 'boolean') {
       n.tradeRequestSound = body.tradeRequestSound;
     }
+    if (typeof body.profitCloseSound === 'boolean') {
+      n.profitCloseSound = body.profitCloseSound;
+    }
+    if (typeof body.zionPlaceTradeSound === 'boolean') {
+      n.zionPlaceTradeSound = body.zionPlaceTradeSound;
+    }
     if (typeof body.tradeRequestPopups === 'boolean') {
       n.tradeRequestPopups = body.tradeRequestPopups;
     }
@@ -3005,6 +3011,8 @@ export function createServer(): express.Application {
         isDashboardNotifyEnabled,
         isTradeRequestSoundEnabled,
         isTradeRequestPopupEnabled,
+        isProfitCloseSoundEnabled,
+        isZionPlaceTradeSoundEnabled,
       } = require('./dashboardNotifications') as typeof import('./dashboardNotifications');
       const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 40));
       const feed = listDashboardNotifications(limit);
@@ -3013,6 +3021,8 @@ export function createServer(): express.Application {
         enabled: isDashboardNotifyEnabled(),
         tradeRequestSound: isTradeRequestSoundEnabled(),
         tradeRequestPopups: isTradeRequestPopupEnabled(),
+        profitCloseSound: isProfitCloseSoundEnabled(),
+        zionPlaceTradeSound: isZionPlaceTradeSoundEnabled(),
         ...feed,
       });
     } catch (err) {

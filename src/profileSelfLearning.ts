@@ -40,6 +40,33 @@ export interface SelfLearnHistoryEntry {
   scoreBefore: number;
   scoreAfter: number;
   rolledBack?: boolean;
+  /** Closed episodes counted when this upgrade was applied */
+  episodeCountAtUpgrade?: number;
+  winsAtUpgrade?: number;
+  lossesAtUpgrade?: number;
+}
+
+export const LEARNING_PROGRESS_GOAL = 200;
+
+export interface LearningUpgradeMilestone {
+  level: number;
+  at: number;
+  episodeCount: number;
+  wins: number;
+  losses: number;
+  summary: string;
+  /** Hover / title line */
+  label: string;
+}
+
+export interface LearningProgressSnapshot {
+  episodes: number;
+  wins: number;
+  losses: number;
+  goal: number;
+  pct: number;
+  level: number;
+  upgrades: LearningUpgradeMilestone[];
 }
 
 export interface ProfileSelfLearningState {
@@ -242,12 +269,124 @@ export function normalizeSelfLearning(
       raw.pendingProposal && typeof raw.pendingProposal === 'object'
         ? raw.pendingProposal
         : null,
-    history: Array.isArray(raw.history) ? raw.history.slice(-40) : [],
+    history: Array.isArray(raw.history)
+      ? raw.history.slice(-40).map((h) => normalizeHistoryEntry(h))
+      : [],
     previousOverrideSnapshot:
       raw.previousOverrideSnapshot &&
       typeof raw.previousOverrideSnapshot === 'object'
         ? raw.previousOverrideSnapshot
         : null,
+  };
+}
+
+function normalizeHistoryEntry(
+  raw: Partial<SelfLearnHistoryEntry> | null | undefined
+): SelfLearnHistoryEntry {
+  const h = raw && typeof raw === 'object' ? raw : {};
+  return {
+    version: Math.max(0, Math.round(Number(h.version) || 0)),
+    at: Number(h.at) || 0,
+    summary: String(h.summary || ''),
+    patch: (h.patch && typeof h.patch === 'object' ? h.patch : {}) as LearningProposalPatch,
+    scoreBefore: Number(h.scoreBefore) || 0,
+    scoreAfter: Number(h.scoreAfter) || 0,
+    rolledBack: h.rolledBack === true,
+    episodeCountAtUpgrade:
+      h.episodeCountAtUpgrade != null && Number.isFinite(Number(h.episodeCountAtUpgrade))
+        ? Math.max(0, Math.round(Number(h.episodeCountAtUpgrade)))
+        : undefined,
+    winsAtUpgrade:
+      h.winsAtUpgrade != null && Number.isFinite(Number(h.winsAtUpgrade))
+        ? Math.max(0, Math.round(Number(h.winsAtUpgrade)))
+        : undefined,
+    lossesAtUpgrade:
+      h.lossesAtUpgrade != null && Number.isFinite(Number(h.lossesAtUpgrade))
+        ? Math.max(0, Math.round(Number(h.lossesAtUpgrade)))
+        : undefined,
+  };
+}
+
+/** Win/loss totals for a profile's learning episodes (optionally filtered). */
+export function countEpisodeWinLoss(
+  profileId: string,
+  opts?: { beforeVersion?: number }
+): { episodes: number; wins: number; losses: number } {
+  const eps = getProfileLearningEpisodes(profileId, 500);
+  const filtered =
+    opts?.beforeVersion != null
+      ? eps.filter((e) => (e.paramVersion ?? 0) < opts.beforeVersion!)
+      : eps;
+  let wins = 0;
+  let losses = 0;
+  for (const e of filtered) {
+    if ((e.pnlPct || 0) > 0) wins += 1;
+    else losses += 1;
+  }
+  return { episodes: filtered.length, wins, losses };
+}
+
+function formatUpgradeLabel(
+  profileName: string,
+  level: number,
+  episodeCount: number,
+  wins: number,
+  losses: number
+): string {
+  return (
+    `${profileName} has been upgraded to Level ${level} after ${episodeCount} trade` +
+    (episodeCount === 1 ? '' : 's') +
+    ` (${wins} win${wins === 1 ? '' : 's'} / ${losses} loss${losses === 1 ? '' : 'es'})`
+  );
+}
+
+/**
+ * Visual progress toward the 200-episode learning goal + upgrade milestones.
+ */
+export function getLearningProgressSnapshot(
+  profileId: string,
+  state: ProfileSelfLearningState,
+  profileName?: string
+): LearningProgressSnapshot {
+  const name = profileName || profileId;
+  const totals = countEpisodeWinLoss(profileId);
+  const goal = LEARNING_PROGRESS_GOAL;
+  const pct =
+    goal > 0
+      ? Math.min(100, Math.round((totals.episodes / goal) * 1000) / 10)
+      : 0;
+  const upgrades: LearningUpgradeMilestone[] = [];
+  for (const h of state.history || []) {
+    if (h.rolledBack) continue;
+    let episodeCount = h.episodeCountAtUpgrade;
+    let wins = h.winsAtUpgrade;
+    let losses = h.lossesAtUpgrade;
+    if (episodeCount == null || wins == null || losses == null) {
+      const reconstructed = countEpisodeWinLoss(profileId, {
+        beforeVersion: h.version,
+      });
+      episodeCount = episodeCount ?? reconstructed.episodes;
+      wins = wins ?? reconstructed.wins;
+      losses = losses ?? reconstructed.losses;
+    }
+    upgrades.push({
+      level: h.version,
+      at: h.at,
+      episodeCount,
+      wins,
+      losses,
+      summary: h.summary || '',
+      label: formatUpgradeLabel(name, h.version, episodeCount, wins, losses),
+    });
+  }
+  return {
+    episodes: totals.episodes,
+    wins: totals.wins,
+    losses: totals.losses,
+    goal,
+    pct,
+    level: Math.max(0, state.version || 0),
+    upgrades,
   };
 }
 
@@ -900,9 +1039,19 @@ export function runSelfLearnTick(input: {
 export function applySelfLearnUpgrade(
   state: ProfileSelfLearningState,
   proposal: LearningProposal,
-  previousOverrides: TradeProfileParamOverride | null
+  previousOverrides: TradeProfileParamOverride | null,
+  opts?: { profileId?: string }
 ): ProfileSelfLearningState {
   const nextVersion = state.version + 1;
+  let episodeCountAtUpgrade: number | undefined;
+  let winsAtUpgrade: number | undefined;
+  let lossesAtUpgrade: number | undefined;
+  if (opts?.profileId) {
+    const snap = countEpisodeWinLoss(opts.profileId);
+    episodeCountAtUpgrade = snap.episodes;
+    winsAtUpgrade = snap.wins;
+    lossesAtUpgrade = snap.losses;
+  }
   return normalizeSelfLearning({
     ...state,
     version: nextVersion,
@@ -920,6 +1069,9 @@ export function applySelfLearnUpgrade(
         patch: proposal.patch,
         scoreBefore: proposal.scoreBefore,
         scoreAfter: proposal.scoreAfter,
+        episodeCountAtUpgrade,
+        winsAtUpgrade,
+        lossesAtUpgrade,
       },
     ].slice(-40),
   });

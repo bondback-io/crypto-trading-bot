@@ -94,6 +94,14 @@ export function isTradeRequestSoundEnabled(): boolean {
   return config.notifications?.tradeRequestSound !== false;
 }
 
+export function isProfitCloseSoundEnabled(): boolean {
+  return config.notifications?.profitCloseSound !== false;
+}
+
+export function isZionPlaceTradeSoundEnabled(): boolean {
+  return config.notifications?.zionPlaceTradeSound !== false;
+}
+
 export function isTradeRequestPopupEnabled(): boolean {
   return config.notifications?.tradeRequestPopups !== false;
 }

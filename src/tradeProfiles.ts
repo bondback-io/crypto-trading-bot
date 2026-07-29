@@ -1517,6 +1517,7 @@ export function getTradeProfilesStatus(): {
       effectiveModules: ReturnType<typeof listEffectiveModulesForProfile>;
       selfLearning: import('./profileSelfLearning').ProfileSelfLearningState;
       selfLearnBadge: string;
+      learningProgress: import('./profileSelfLearning').LearningProgressSnapshot;
     }
   >;
   active: Array<{ id: TradeProfileId; name: string; icon: string; color: string }>;
@@ -1533,6 +1534,7 @@ export function getTradeProfilesStatus(): {
     normalizeSelfLearning,
     formatSelfLearnBadge,
     refreshSelfLearnMetrics,
+    getLearningProgressSnapshot,
   } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
   const profiles = TRADE_PROFILE_CATALOG.map((p) => {
     const resolved = resolveTradeProfileDefinition(p.id);
@@ -1550,6 +1552,7 @@ export function getTradeProfilesStatus(): {
       effectiveModules: listEffectiveModulesForProfile(p.id),
       selfLearning: sl,
       selfLearnBadge: formatSelfLearnBadge(sl),
+      learningProgress: getLearningProgressSnapshot(p.id, sl, resolved.name),
     };
   });
   return {
@@ -3871,7 +3874,7 @@ export function applyProfileSelfLearnProposal(
   });
   writeProfileSelfLearning(
     id,
-    applySelfLearnUpgrade(sl, proposal, prevOv),
+    applySelfLearnUpgrade(sl, proposal, prevOv, { profileId: id }),
     {
       kind: 'upgrade',
       summary: String(proposal.summary || 'Applied self-learn upgrade').slice(
@@ -3985,7 +3988,9 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
         match?: Record<string, number | boolean>;
       },
     });
-    sl = applySelfLearnUpgrade(sl, sl.pendingProposal, prevOv);
+    sl = applySelfLearnUpgrade(sl, sl.pendingProposal, prevOv, {
+      profileId: id,
+    });
     console.log(
       `[self-learn] ${id} auto-upgraded to v${sl.version}: ${sl.history[sl.history.length - 1]?.summary || ''}`
     );

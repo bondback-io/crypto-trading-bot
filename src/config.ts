@@ -1967,6 +1967,10 @@ export interface BotConfig {
     dashboardEnabled: boolean;
     /** Soft chime when a new Zion trade request arrives (default ON) */
     tradeRequestSound: boolean;
+    /** Soft cash sound when a profitable close hits the bell (default ON) */
+    profitCloseSound: boolean;
+    /** Soft confirm sound when user clicks Place Trade on a Zion offer (default ON) */
+    zionPlaceTradeSound: boolean;
     /** Auto-popup Zion trade request cards (default ON) */
     tradeRequestPopups: boolean;
   };
@@ -2356,6 +2360,8 @@ export const config: BotConfig = {
     profitableCloseEnabled: process.env.NOTIFY_PROFITABLE_CLOSE !== '0',
     dashboardEnabled: true,
     tradeRequestSound: true,
+    profitCloseSound: true,
+    zionPlaceTradeSound: true,
     tradeRequestPopups: true,
   },
 

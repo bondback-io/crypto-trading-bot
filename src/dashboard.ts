@@ -2644,6 +2644,66 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       color: #fbbf24;
       margin-left: 0.25rem;
     }
+    .tp-learn-progress {
+      margin: 0.45rem 0 0.35rem;
+      padding: 0.4rem 0.45rem;
+      border-radius: 0.4rem;
+      background: #0b1220;
+      border: 1px solid #1e293b;
+    }
+    .tp-learn-progress-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem;
+      margin-bottom: 0.3rem;
+      flex-wrap: wrap;
+    }
+    .tp-learn-progress-label {
+      font-size: 0.62rem;
+      color: #94a3b8;
+      line-height: 1.3;
+      min-width: 0;
+    }
+    .tp-learn-level {
+      display: inline-flex;
+      align-items: center;
+      flex: 0 0 auto;
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.12rem 0.4rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      cursor: help;
+      white-space: nowrap;
+    }
+    .tp-learn-level.has-level {
+      color: #86efac;
+      border-color: rgba(52, 211, 153, 0.45);
+      background: rgba(6, 78, 59, 0.4);
+    }
+    .tp-learn-bar {
+      height: 5px;
+      border-radius: 999px;
+      background: #1e293b;
+      overflow: hidden;
+    }
+    .tp-learn-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      min-width: 0;
+      transition: width 0.25s ease;
+      background: #34d399;
+    }
+    @media (max-width: 639px) {
+      .tp-learn-progress { padding: 0.5rem 0.55rem; }
+      .tp-learn-progress-label { font-size: 0.68rem; }
+      .tp-learn-level { font-size: 0.62rem; min-height: 1.5rem; }
+      .tp-learn-bar { height: 6px; }
+    }
     .tp-overview-wrap {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
@@ -6232,10 +6292,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="toggle-row"><span>Profitable close alert</span><label class="switch"><input type="checkbox" id="notify-profit-close" checked /><span class="slider"></span></label></div>
         </div>
         <div class="section-title mt-4" style="font-size:0.85rem">In-app notifications</div>
-        <p class="mint text-xs mb-2">Bell feed in the header, Zion popup sound, and auto trade-request popups. All default ON.</p>
+        <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion trade-request popups. All default ON.</p>
         <div class="space-y-1">
           <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
           <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row" title="Soft cash sound when a profitable close hits the bell"><span>Profit close sound</span><label class="switch"><input type="checkbox" id="notify-profit-sound" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row" title="Soft confirm sound when you click Place Trade on a Zion offer"><span>Place trade sound</span><label class="switch"><input type="checkbox" id="notify-place-sound" checked /><span class="slider"></span></label></div>
           <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
         </div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
@@ -6362,11 +6424,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.__notifyPrefs = window.__notifyPrefs || {
       dashboardEnabled: true,
       tradeRequestSound: true,
+      profitCloseSound: true,
+      zionPlaceTradeSound: true,
       tradeRequestPopups: true,
     };
     let _notifCache = { items: [], unread: 0 };
     let _notifSeenIds = window._notifSeenIds || new Set();
     window._notifSeenIds = _notifSeenIds;
+    let _notifFeedHydrated = window._notifFeedHydrated === true;
 
     function closeNotifPanel() {
       const panel = document.getElementById('notif-panel');
@@ -6415,36 +6480,63 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return kind || 'Note';
     }
 
+    function getNotifyAudioCtx() {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      if (!window.__notifyAudioCtx) window.__notifyAudioCtx = new Ctx();
+      const ctx = window.__notifyAudioCtx;
+      if (ctx.state === 'suspended') ctx.resume();
+      return ctx;
+    }
+
+    function playSoftTone(freq, start, dur, gain, type) {
+      try {
+        const ctx = getNotifyAudioCtx();
+        if (!ctx) return;
+        const now = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const g = ctx.createGain();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, now + start);
+        g.gain.exponentialRampToValueAtTime(gain, now + start + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.start(now + start);
+        osc.stop(now + start + dur + 0.02);
+      } catch (_) {}
+    }
+
     /** Soft two-tone chime via Web Audio (no asset file). */
     function playTradeRequestChime() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.tradeRequestSound === false) return;
-      try {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-        const ctx = playTradeRequestChime._ctx || new Ctx();
-        playTradeRequestChime._ctx = ctx;
-        if (ctx.state === 'suspended') ctx.resume();
-        const now = ctx.currentTime;
-        function tone(freq, start, dur, gain) {
-          const osc = ctx.createOscillator();
-          const g = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.value = freq;
-          g.gain.setValueAtTime(0.0001, now + start);
-          g.gain.exponentialRampToValueAtTime(gain, now + start + 0.04);
-          g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
-          osc.connect(g);
-          g.connect(ctx.destination);
-          osc.start(now + start);
-          osc.stop(now + start + dur + 0.02);
-        }
-        tone(523.25, 0, 0.55, 0.045);
-        tone(659.25, 0.18, 0.7, 0.035);
-        tone(783.99, 0.38, 0.85, 0.025);
-      } catch (_) {}
+      playSoftTone(523.25, 0, 0.55, 0.045, 'sine');
+      playSoftTone(659.25, 0.18, 0.7, 0.035, 'sine');
+      playSoftTone(783.99, 0.38, 0.85, 0.025, 'sine');
     }
     window.playTradeRequestChime = playTradeRequestChime;
+
+    /** Soft cash / buy ding for profitable closes. */
+    function playProfitCashSound() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.profitCloseSound === false) return;
+      playSoftTone(880, 0, 0.18, 0.028, 'triangle');
+      playSoftTone(1174.66, 0.1, 0.22, 0.032, 'sine');
+      playSoftTone(1567.98, 0.22, 0.35, 0.022, 'sine');
+      playSoftTone(2093, 0.36, 0.45, 0.016, 'triangle');
+    }
+    window.playProfitCashSound = playProfitCashSound;
+
+    /** Soft confirmation blip when placing a Zion trade. */
+    function playZionPlaceConfirmSound() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.zionPlaceTradeSound === false) return;
+      playSoftTone(698.46, 0, 0.16, 0.03, 'sine');
+      playSoftTone(1046.5, 0.09, 0.28, 0.024, 'triangle');
+    }
+    window.playZionPlaceConfirmSound = playZionPlaceConfirmSound;
 
     function updateNotifBadge(unread) {
       const badge = document.getElementById('notif-bell-badge');
@@ -6493,17 +6585,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function refreshDashboardNotifications() {
       try {
         const data = await fetchJSON('/api/dashboard-notifications?limit=40');
-        if (data.tradeRequestSound != null || data.tradeRequestPopups != null || data.enabled != null) {
+        if (
+          data.tradeRequestSound != null ||
+          data.tradeRequestPopups != null ||
+          data.profitCloseSound != null ||
+          data.zionPlaceTradeSound != null ||
+          data.enabled != null
+        ) {
           window.__notifyPrefs = {
             dashboardEnabled: data.enabled !== false,
             tradeRequestSound: data.tradeRequestSound !== false,
+            profitCloseSound: data.profitCloseSound !== false,
+            zionPlaceTradeSound: data.zionPlaceTradeSound !== false,
             tradeRequestPopups: data.tradeRequestPopups !== false,
           };
         }
         const items = data.items || [];
+        let newProfitClose = false;
         for (let i = 0; i < items.length; i++) {
-          if (items[i] && items[i].id) _notifSeenIds.add(items[i].id);
+          const item = items[i];
+          if (!item || !item.id) continue;
+          if (_notifFeedHydrated && !_notifSeenIds.has(item.id) && item.kind === 'profit_close') {
+            newProfitClose = true;
+          }
+          _notifSeenIds.add(item.id);
         }
+        _notifFeedHydrated = true;
+        window._notifFeedHydrated = true;
+        if (newProfitClose) playProfitCashSound();
         if (_notifSeenIds.size > 300) {
           _notifSeenIds = new Set(items.map(function (x) { return x.id; }));
           window._notifSeenIds = _notifSeenIds;
@@ -7819,6 +7928,87 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const offPol = (off.exitPolicy || {});
           const sl = p.selfLearning || {};
           const slBadge = p.selfLearnBadge || '';
+          const lp = p.learningProgress || {};
+          const lpEpisodes = Math.max(0, Number(lp.episodes) || 0);
+          const lpGoal = Math.max(1, Number(lp.goal) || 200);
+          const lpPct = Math.min(100, Math.max(0, Number(lp.pct) || 0));
+          const lpWins = Math.max(0, Number(lp.wins) || 0);
+          const lpLosses = Math.max(0, Number(lp.losses) || 0);
+          const lpLevel = Math.max(0, Math.round(Number(lp.level) || 0));
+          const lpUpgrades = Array.isArray(lp.upgrades) ? lp.upgrades : [];
+          const levelTitleParts = [];
+          if (lpUpgrades.length) {
+            for (let ui = 0; ui < lpUpgrades.length; ui++) {
+              const u = lpUpgrades[ui];
+              if (u && u.label) levelTitleParts.push(u.label);
+              else if (u) {
+                levelTitleParts.push(
+                  'Level ' +
+                    u.level +
+                    ' after ' +
+                    (u.episodeCount != null ? u.episodeCount : '?') +
+                    ' trades (' +
+                    (u.wins != null ? u.wins : '?') +
+                    ' wins / ' +
+                    (u.losses != null ? u.losses : '?') +
+                    ' losses)'
+                );
+              }
+            }
+          } else if (lpLevel > 0) {
+            levelTitleParts.push(
+              (p.name || p.id) + ' is at Level ' + lpLevel + ' (upgrade details not recorded yet)'
+            );
+          } else {
+            levelTitleParts.push(
+              (p.name || p.id) + ' has not upgraded yet — needs more closed trades'
+            );
+          }
+          const levelTitle = levelTitleParts.join('\n');
+          const learnProgressHtml =
+            '<div class="tp-learn-progress" title="' +
+              escAttr(
+                lpEpisodes +
+                  ' / ' +
+                  lpGoal +
+                  ' episodes · ' +
+                  lpWins +
+                  ' wins / ' +
+                  lpLosses +
+                  ' losses · goal 200 closed trades'
+              ) +
+            '">' +
+              '<div class="tp-learn-progress-meta">' +
+                '<span class="tp-learn-progress-label">' +
+                  escHtml(String(lpEpisodes)) +
+                  ' / ' +
+                  escHtml(String(lpGoal)) +
+                  ' episodes · ' +
+                  escHtml(String(lpPct)) +
+                  '%' +
+                '</span>' +
+                '<span class="tp-learn-level' +
+                  (lpLevel > 0 ? ' has-level' : '') +
+                  '" title="' +
+                  escAttr(levelTitle) +
+                  '" tabindex="0">' +
+                  (lpLevel > 0
+                    ? 'Level ' + escHtml(String(lpLevel))
+                    : 'Level 0') +
+                '</span>' +
+              '</div>' +
+              '<div class="tp-learn-bar" role="progressbar" aria-valuemin="0" aria-valuemax="' +
+                escAttr(String(lpGoal)) +
+                '" aria-valuenow="' +
+                escAttr(String(lpEpisodes)) +
+                '" aria-label="Self-learning progress">' +
+                '<div class="tp-learn-bar-fill" style="width:' +
+                  escAttr(String(lpPct)) +
+                  '%;background:' +
+                  escAttr(profileColorFor(p.id) || p.color || '#34d399') +
+                '"></div>' +
+              '</div>' +
+            '</div>';
           const num = function (v, fallback) {
             if (v == null || v === '') return fallback != null ? fallback : '';
             return v;
@@ -8320,6 +8510,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 '<input type="checkbox"' + checked + disabled +
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="' + (p.enabled ? 'Pause' : 'Resume') + ' ' + escHtml(p.name) + '" />' +
               '</div>' +
+              learnProgressHtml +
               blurb +
               patternLine +
               risk +
@@ -14171,10 +14362,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           setChk('notify-profit-close', n.profitableCloseEnabled !== false);
           setChk('notify-dashboard', n.dashboardEnabled !== false);
           setChk('notify-offer-sound', n.tradeRequestSound !== false);
+          setChk('notify-profit-sound', n.profitCloseSound !== false);
+          setChk('notify-place-sound', n.zionPlaceTradeSound !== false);
           setChk('notify-offer-popups', n.tradeRequestPopups !== false);
           window.__notifyPrefs = {
             dashboardEnabled: n.dashboardEnabled !== false,
             tradeRequestSound: n.tradeRequestSound !== false,
+            profitCloseSound: n.profitCloseSound !== false,
+            zionPlaceTradeSound: n.zionPlaceTradeSound !== false,
             tradeRequestPopups: n.tradeRequestPopups !== false,
           };
         }
@@ -18170,6 +18365,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         if (st) st.textContent = 'Offer expired — Place Trade unavailable';
         return;
       }
+      playZionPlaceConfirmSound();
       if (st) st.textContent = 'Placing…';
       const placeBtn = card && card.querySelector('[data-zion-place]');
       if (placeBtn) placeBtn.disabled = true;
@@ -18433,12 +18629,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             profitableCloseEnabled: !!(document.getElementById('notify-profit-close') || {}).checked,
             dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
             tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+            profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
+            zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
             tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
           }),
         });
         window.__notifyPrefs = {
           dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
           tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+          profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
+          zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
           tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
         };
         if (status) status.textContent = 'Saved';

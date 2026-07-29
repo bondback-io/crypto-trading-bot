@@ -101,6 +101,8 @@ export interface PersistedBotSettings {
     profitableCloseEnabled?: boolean;
     dashboardEnabled?: boolean;
     tradeRequestSound?: boolean;
+    profitCloseSound?: boolean;
+    zionPlaceTradeSound?: boolean;
     tradeRequestPopups?: boolean;
   };
   marketScanner?: Record<string, unknown>;
