@@ -4006,6 +4006,140 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
   writeProfileSelfLearning(id, sl);
 }
 
+/**
+ * Manual evaluate against current episodes (e.g. after backup restore).
+ * Shadow: may set pendingProposal only. Auto: may apply upgrade.
+ * Bypasses upgrade cooldown so restored history can be re-checked.
+ */
+export function evaluateProfileSelfLearn(
+  profileId: TradeProfileId | string
+): {
+  status: ReturnType<typeof getTradeProfilesStatus>;
+  result:
+    | 'disabled'
+    | 'need_trades'
+    | 'no_candidate'
+    | 'proposal'
+    | 'upgraded'
+    | 'error';
+  message: string;
+  proposalSummary?: string;
+} {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') {
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'error',
+      message: 'Invalid profile',
+    };
+  }
+  const {
+    normalizeSelfLearning,
+    runSelfLearnTick,
+    applySelfLearnUpgrade,
+    refreshSelfLearnMetrics,
+    humanizeLearningPatch,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const { getProfileLearningEpisodes } =
+    require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+
+  const state = ensureState();
+  let sl = normalizeSelfLearning(state.selfLearning?.[id]);
+  if (!sl.enabled) {
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'disabled',
+      message: 'Self-learning is OFF for this bot',
+    };
+  }
+
+  const episodes = getProfileLearningEpisodes(id, 200);
+  if (episodes.length < sl.minTrades) {
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'need_trades',
+      message: `Need ${sl.minTrades - episodes.length} more closed trade(s) (min ${sl.minTrades}, have ${episodes.length})`,
+    };
+  }
+
+  sl = refreshSelfLearnMetrics(sl, id);
+  // Bypass cooldown for manual checks (restore / user-triggered).
+  const tickState = normalizeSelfLearning({
+    ...sl,
+    tradesSinceUpgrade: Math.max(
+      sl.tradesSinceUpgrade || 0,
+      sl.upgradeCooldownTrades || 0
+    ),
+  });
+
+  const catalog = getTradeProfileDefinition(id);
+  const resolved = resolveTradeProfileDefinition(id);
+  const tick = runSelfLearnTick({
+    profileId: id,
+    state: tickState,
+    catalogExit: catalog.exitRules,
+    catalogMatch: catalog.match,
+    currentExit: resolved.exitRules,
+    currentMatch: resolved.match,
+  });
+  sl = {
+    ...tick.state,
+    // Keep real tradesSinceUpgrade from disk (don't invent closes).
+    tradesSinceUpgrade: sl.tradesSinceUpgrade,
+  };
+
+  if (tick.applyPatch && sl.pendingProposal) {
+    const prevOv = state.overrides?.[id]
+      ? (JSON.parse(
+          JSON.stringify(state.overrides[id])
+        ) as TradeProfileParamOverride)
+      : null;
+    applyTradeProfileLearning(id, {
+      patch: tick.applyPatch as {
+        exitRules?: Partial<TradeProfileExitRules>;
+        match?: Record<string, number | boolean>;
+      },
+    });
+    sl = applySelfLearnUpgrade(sl, sl.pendingProposal, prevOv, {
+      profileId: id,
+    });
+    writeProfileSelfLearning(id, sl, {
+      kind: 'upgrade',
+      summary:
+        sl.history[sl.history.length - 1]?.summary ||
+        `Upgraded to v${sl.version}`,
+    });
+    const last = sl.history[sl.history.length - 1];
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'upgraded',
+      message: last?.summary || `Upgraded to Level ${sl.version}`,
+      proposalSummary: last?.summary,
+    };
+  }
+
+  writeProfileSelfLearning(id, sl);
+  if (sl.pendingProposal) {
+    const changes = humanizeLearningPatch(sl.pendingProposal.patch);
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'proposal',
+      message:
+        sl.pendingProposal.summary +
+        (changes ? ` · ${changes}` : '') +
+        ' — open the card and Apply to raise Level',
+      proposalSummary: sl.pendingProposal.summary,
+    };
+  }
+
+  return {
+    status: getTradeProfilesStatus(),
+    result: 'no_candidate',
+    message:
+      'No upgrade candidate yet — heuristics need a clear pattern that beats the score margin (shadow scoring)',
+  };
+}
+
 export function ensureTradeProfilesInitialized(): void {
   ensureState();
 }

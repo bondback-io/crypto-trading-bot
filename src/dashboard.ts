@@ -2811,6 +2811,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       border-color: rgba(52, 211, 153, 0.45);
       background: rgba(6, 78, 59, 0.4);
     }
+    .tp-learn-chips {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .tp-learn-chip {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.1rem 0.35rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      cursor: help;
+      white-space: nowrap;
+    }
+    .tp-learn-chip.upgraded {
+      color: #86efac;
+      border-color: rgba(52, 211, 153, 0.45);
+      background: rgba(6, 78, 59, 0.35);
+    }
+    .tp-learn-chip.proposal {
+      color: #fcd34d;
+      border-color: rgba(251, 191, 36, 0.45);
+      background: rgba(120, 53, 15, 0.35);
+    }
     .tp-learn-bar {
       height: 5px;
       border-radius: 999px;
@@ -8050,6 +8082,53 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
 
+    function humanizeLearningPatchClient(patch) {
+      if (!patch || typeof patch !== 'object') return '';
+      const labels = {
+        profitLockArmPct: 'profit lock arm %',
+        profitGivebackPts: 'giveback pts',
+        profitFloorPct: 'profit floor %',
+        earlyPartialTpPct: 'early partial TP %',
+        earlyPartialFraction: 'early partial fraction',
+        momentumFadeDropPct: 'momentum fade drop %',
+        hardTimeLimitSecMax: 'hard time limit sec',
+        hardTimeLimitSecMin: 'hard time limit min sec',
+        stopLossPct: 'stop loss %',
+        trailingActivationProfit: 'trail activate %',
+        trailingStopPct: 'trail %',
+        minProfitPercent: 'min profit %',
+        maxProfitPercent: 'max profit %',
+        minConviction: 'min conviction',
+        minWallets: 'min wallets',
+        minMarketCapUsd: 'min MC $',
+        maxMarketCapUsd: 'max MC $',
+        minLiquidityUsd: 'min liq $',
+        sizeMultiplier: 'size ×',
+        requireConvergence: 'require convergence',
+      };
+      const bits = [];
+      function pushObj(obj) {
+        if (!obj || typeof obj !== 'object') return;
+        const keys = Object.keys(obj);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          const v = obj[k];
+          if (v == null) continue;
+          if (typeof v === 'object' && !Array.isArray(v)) {
+            pushObj(v);
+            continue;
+          }
+          const label = labels[k] || k;
+          if (typeof v === 'boolean') bits.push(label + '=' + (v ? 'on' : 'off'));
+          else if (typeof v === 'number' && isFinite(v)) bits.push(label + '=' + v);
+          else if (typeof v === 'string' && v.trim()) bits.push(label + '=' + v.trim());
+        }
+      }
+      if (patch.exitRules) pushObj(patch.exitRules);
+      if (patch.match) pushObj(patch.match);
+      return bits.slice(0, 8).join(', ');
+    }
+
     function renderTradeProfilesUi(tp) {
       const master = document.getElementById('trade-profiles-master');
       const smartBot = document.getElementById('smart-bot-profiles');
@@ -8107,12 +8186,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const lpLosses = Math.max(0, Number(lp.losses) || 0);
           const lpLevel = Math.max(0, Math.round(Number(lp.level) || 0));
           const lpUpgrades = Array.isArray(lp.upgrades) ? lp.upgrades : [];
+          const slMinTrades = Math.max(6, Math.round(Number(sl.minTrades) || 8));
           const levelTitleParts = [];
           if (lpUpgrades.length) {
             for (let ui = 0; ui < lpUpgrades.length; ui++) {
               const u = lpUpgrades[ui];
               if (u && u.label) levelTitleParts.push(u.label);
               else if (u) {
+                const changeBit =
+                  u.changes && String(u.changes).trim()
+                    ? ' — Changed: ' + String(u.changes).trim()
+                    : '';
+                const summaryBit =
+                  u.summary && String(u.summary).trim()
+                    ? ' — ' + String(u.summary).trim()
+                    : '';
                 levelTitleParts.push(
                   'Level ' +
                     u.level +
@@ -8122,7 +8210,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                     (u.wins != null ? u.wins : '?') +
                     ' wins / ' +
                     (u.losses != null ? u.losses : '?') +
-                    ' losses)'
+                    ' losses)' +
+                    summaryBit +
+                    changeBit
                 );
               }
             }
@@ -8130,12 +8220,80 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             levelTitleParts.push(
               (p.name || p.id) + ' is at Level ' + lpLevel + ' (upgrade details not recorded yet)'
             );
-          } else {
+          } else if (!sl.enabled) {
             levelTitleParts.push(
-              (p.name || p.id) + ' has not upgraded yet — needs more closed trades'
+              (p.name || p.id) + ' · Level 0 — self-learning is OFF (Level counts applied upgrades only)'
+            );
+          } else if (sl.pendingProposal) {
+            levelTitleParts.push(
+              (p.name || p.id) +
+                ' · Proposal ready — open card and Apply to raise Level (Level = applied upgrades, not episode count)'
+            );
+          } else if (lpEpisodes >= slMinTrades) {
+            levelTitleParts.push(
+              (p.name || p.id) +
+                ' · No upgrade candidate yet (shadow scoring). Level stays 0 until an upgrade is applied. Use Check for upgrade after restore.'
+            );
+          } else {
+            const need = Math.max(0, slMinTrades - lpEpisodes);
+            levelTitleParts.push(
+              (p.name || p.id) +
+                ' · Need ' +
+                need +
+                ' more closed trade' +
+                (need === 1 ? '' : 's') +
+                ' (min trades = ' +
+                slMinTrades +
+                '). Level = applied upgrades, not episode count.'
             );
           }
           const levelTitle = levelTitleParts.join('\\n');
+          const lastUpgrade = lpUpgrades.length ? lpUpgrades[lpUpgrades.length - 1] : null;
+          let upgradedChipTitle = '';
+          if (lastUpgrade) {
+            upgradedChipTitle =
+              (lastUpgrade.summary && String(lastUpgrade.summary).trim()
+                ? String(lastUpgrade.summary).trim()
+                : 'Level ' + (lastUpgrade.level != null ? lastUpgrade.level : lpLevel)) +
+              (lastUpgrade.changes && String(lastUpgrade.changes).trim()
+                ? '\\nChanged: ' + String(lastUpgrade.changes).trim()
+                : '');
+          } else if (lpLevel > 0) {
+            upgradedChipTitle = 'Upgraded to Level ' + lpLevel;
+          }
+          let proposalChipTitle = '';
+          if (sl.pendingProposal) {
+            const propSummary =
+              (sl.pendingProposal.summary && String(sl.pendingProposal.summary).trim()) ||
+              'Upgrade proposal ready';
+            const propChanges = humanizeLearningPatchClient(sl.pendingProposal.patch);
+            proposalChipTitle =
+              propSummary +
+              (propChanges ? '\\nChanged: ' + propChanges : '') +
+              '\\nOpen card → Apply upgrade to raise Level';
+          }
+          const learnChipsHtml =
+            '<span class="tp-learn-chips">' +
+            '<span class="tp-learn-level' +
+              (lpLevel > 0 ? ' has-level' : '') +
+              '" title="' +
+              escAttr(levelTitle) +
+              '" tabindex="0">' +
+              (lpLevel > 0
+                ? 'Level ' + escHtml(String(lpLevel))
+                : 'Level 0') +
+            '</span>' +
+            (lpLevel > 0
+              ? '<span class="tp-learn-chip upgraded" title="' +
+                escAttr(upgradedChipTitle) +
+                '" tabindex="0">Upgraded</span>'
+              : '') +
+            (sl.pendingProposal
+              ? '<span class="tp-learn-chip proposal" title="' +
+                escAttr(proposalChipTitle) +
+                '" tabindex="0">Proposal</span>'
+              : '') +
+            '</span>';
           const learnProgressHtml =
             '<div class="tp-learn-progress" title="' +
               escAttr(
@@ -8146,7 +8304,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   lpWins +
                   ' wins / ' +
                   lpLosses +
-                  ' losses · goal 200 closed trades'
+                  ' losses · goal 200 closed trades · Level = applied upgrades'
               ) +
             '">' +
               '<div class="tp-learn-progress-meta">' +
@@ -8158,15 +8316,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   escHtml(String(lpPct)) +
                   '%' +
                 '</span>' +
-                '<span class="tp-learn-level' +
-                  (lpLevel > 0 ? ' has-level' : '') +
-                  '" title="' +
-                  escAttr(levelTitle) +
-                  '" tabindex="0">' +
-                  (lpLevel > 0
-                    ? 'Level ' + escHtml(String(lpLevel))
-                    : 'Level 0') +
-                '</span>' +
+                learnChipsHtml +
               '</div>' +
               '<div class="tp-learn-bar" role="progressbar" aria-valuemin="0" aria-valuemax="' +
                 escAttr(String(lpGoal)) +
@@ -8594,13 +8744,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       (sl.pendingProposal
                         ? '<p class="mint text-xs" style="margin:0.35rem 0">Proposal: ' +
                           escHtml(sl.pendingProposal.summary || '') +
+                          (function () {
+                            const ch = humanizeLearningPatchClient(sl.pendingProposal.patch);
+                            return ch
+                              ? '<br/><span style="color:#94a3b8">Changed: ' +
+                                escHtml(ch) +
+                                '</span>'
+                              : '';
+                          })() +
                           '</p>' +
                           '<div class="tp-params-actions">' +
                             '<button type="button" class="btn btn-primary text-xs" onclick="applyProfileSelfLearnProposal(\\'' + p.id + '\\')">Apply upgrade</button>' +
                             '<button type="button" class="btn btn-secondary text-xs" onclick="rejectProfileSelfLearnProposal(\\'' + p.id + '\\')">Reject</button>' +
                           '</div>'
                         : '') +
-                      '<button type="button" class="btn btn-secondary text-xs" style="margin-top:0.35rem" onclick="resetProfileSelfLearning(\\'' + p.id + '\\')">Reset learning</button>' +
+                      '<div class="tp-params-actions" style="margin-top:0.35rem">' +
+                        '<button type="button" class="btn btn-secondary text-xs" onclick="evaluateProfileSelfLearn(\\'' +
+                        p.id +
+                        '\\')" title="Score current episodes for an upgrade (shadow = proposal only; does not wait for a new close)">' +
+                        'Check for upgrade</button>' +
+                        '<button type="button" class="btn btn-secondary text-xs" onclick="resetProfileSelfLearning(\\'' + p.id + '\\')">Reset learning</button>' +
+                      '</div>' +
                     '</div>'
                   : '') +
                 (qualityFields.length
@@ -9386,6 +9550,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.setProfileSelfLearnMinTrades = setProfileSelfLearnMinTrades;
+
+    async function evaluateProfileSelfLearn(id) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: id, evaluateSelfLearn: true }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+        if (data.message) alert(data.message);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.evaluateProfileSelfLearn = evaluateProfileSelfLearn;
 
     async function applyProfileSelfLearnProposal(id) {
       try {

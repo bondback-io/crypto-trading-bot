@@ -2292,6 +2292,7 @@ export function createServer(): express.Application {
       rejectProfileSelfLearnProposal,
       resetProfileSelfLearning,
       setProfileSelfLearningMinTrades,
+      evaluateProfileSelfLearn,
     } = require('./tradeProfiles') as typeof import('./tradeProfiles');
     ensureTradeProfilesInitialized();
     const body = (req.body ?? {}) as {
@@ -2303,6 +2304,7 @@ export function createServer(): express.Application {
       minTrades?: number;
       applySelfLearnProposal?: boolean;
       rejectSelfLearnProposal?: boolean;
+      evaluateSelfLearn?: boolean;
       resetSelfLearning?: boolean;
       wipeEpisodes?: boolean;
       resetParams?: boolean;
@@ -2356,6 +2358,18 @@ export function createServer(): express.Application {
       if (body.profileId && body.rejectSelfLearnProposal) {
         rejectProfileSelfLearnProposal(body.profileId);
         res.json({ ok: true, tradeProfiles: getTradeProfilesStatus() });
+        return;
+      }
+      if (body.profileId && body.evaluateSelfLearn) {
+        const evaluated = evaluateProfileSelfLearn(body.profileId);
+        res.json({
+          ok: true,
+          result: evaluated.result,
+          message: evaluated.message,
+          proposalSummary: evaluated.proposalSummary,
+          tradeProfiles: evaluated.status,
+          intelligence: paperTrader.getTradeProfileIntelligence(),
+        });
         return;
       }
       if (body.profileId && body.resetSelfLearning) {

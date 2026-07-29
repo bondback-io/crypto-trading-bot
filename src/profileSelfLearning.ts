@@ -55,6 +55,8 @@ export interface LearningUpgradeMilestone {
   wins: number;
   losses: number;
   summary: string;
+  /** Short humanized list of knob changes from the patch */
+  changes: string;
   /** Hover / title line */
   label: string;
 }
@@ -331,13 +333,72 @@ function formatUpgradeLabel(
   level: number,
   episodeCount: number,
   wins: number,
-  losses: number
+  losses: number,
+  summary?: string,
+  changes?: string
 ): string {
-  return (
-    `${profileName} has been upgraded to Level ${level} after ${episodeCount} trade` +
+  const base =
+    `${profileName} · Level ${level} after ${episodeCount} trade` +
     (episodeCount === 1 ? '' : 's') +
-    ` (${wins} win${wins === 1 ? '' : 's'} / ${losses} loss${losses === 1 ? '' : 'es'})`
-  );
+    ` (${wins} win${wins === 1 ? '' : 's'} / ${losses} loss${losses === 1 ? '' : 'es'})`;
+  const parts = [base];
+  if (summary && String(summary).trim()) parts.push(String(summary).trim());
+  if (changes && String(changes).trim()) parts.push('Changed: ' + String(changes).trim());
+  return parts.join(' — ');
+}
+
+const PATCH_LABELS: Record<string, string> = {
+  profitLockArmPct: 'profit lock arm %',
+  profitGivebackPts: 'giveback pts',
+  profitFloorPct: 'profit floor %',
+  earlyPartialTpPct: 'early partial TP %',
+  earlyPartialFraction: 'early partial fraction',
+  momentumFadeDropPct: 'momentum fade drop %',
+  hardTimeLimitSecMax: 'hard time limit sec',
+  hardTimeLimitSecMin: 'hard time limit min sec',
+  stopLossPct: 'stop loss %',
+  trailingActivationProfit: 'trail activate %',
+  trailingStopPct: 'trail %',
+  minProfitPercent: 'min profit %',
+  maxProfitPercent: 'max profit %',
+  minConviction: 'min conviction',
+  minWallets: 'min wallets',
+  minMarketCapUsd: 'min MC $',
+  maxMarketCapUsd: 'max MC $',
+  minLiquidityUsd: 'min liq $',
+  sizeMultiplier: 'size ×',
+  requireConvergence: 'require convergence',
+};
+
+/** Flatten a learning patch into a short "knob: value" list for UI hover. */
+export function humanizeLearningPatch(patch: LearningProposalPatch | null | undefined): string {
+  if (!patch || typeof patch !== 'object') return '';
+  const bits: string[] = [];
+  const pushObj = (obj: Record<string, unknown> | null | undefined, prefix = '') => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (v == null) continue;
+      if (typeof v === 'object' && !Array.isArray(v)) {
+        pushObj(v as Record<string, unknown>, prefix);
+        continue;
+      }
+      const label = PATCH_LABELS[k] || k;
+      if (typeof v === 'boolean') {
+        bits.push(`${label}=${v ? 'on' : 'off'}`);
+      } else if (typeof v === 'number' && Number.isFinite(v)) {
+        bits.push(`${label}=${Number(v)}`);
+      } else if (typeof v === 'string' && v.trim()) {
+        bits.push(`${label}=${v.trim()}`);
+      }
+    }
+  };
+  if (patch.exitRules) {
+    pushObj(patch.exitRules as Record<string, unknown>);
+  }
+  if (patch.match) {
+    pushObj(patch.match as Record<string, unknown>);
+  }
+  return bits.slice(0, 8).join(', ');
 }
 
 /**
@@ -369,14 +430,25 @@ export function getLearningProgressSnapshot(
       wins = wins ?? reconstructed.wins;
       losses = losses ?? reconstructed.losses;
     }
+    const changes = humanizeLearningPatch(h.patch);
+    const summary = h.summary || '';
     upgrades.push({
       level: h.version,
       at: h.at,
       episodeCount,
       wins,
       losses,
-      summary: h.summary || '',
-      label: formatUpgradeLabel(name, h.version, episodeCount, wins, losses),
+      summary,
+      changes,
+      label: formatUpgradeLabel(
+        name,
+        h.version,
+        episodeCount,
+        wins,
+        losses,
+        summary,
+        changes
+      ),
     });
   }
   return {
