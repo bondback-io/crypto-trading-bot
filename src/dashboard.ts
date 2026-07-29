@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Signals / Scanner / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Signals / Scanner / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs / Back Up via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -625,13 +625,105 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; padding: 1rem; }
     .config-panel > .grid,
+    .backup-panel > .grid,
     #strategies-grid { align-items: start; gap: 1rem; }
     .config-panel .card,
+    .backup-panel .card,
     .strategies-panel .card { min-width: 0; }
     .config-panel .section-title,
+    .backup-panel .section-title,
     .strategies-panel .section-title { margin-bottom: .7rem; }
     .config-panel .filters-row { row-gap: .7rem; }
     .config-wide-card { grid-column: 1 / -1; }
+    .config-section-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin: 0.15rem 0 0.15rem;
+      padding: 0 0.1rem;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .config-section-label span { color: #475569; font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 0.72rem; }
+    .config-notify-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 720px) {
+      .config-notify-grid { grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+    }
+    .config-notify-col {
+      padding: 0.85rem 0.95rem;
+      border-radius: 0.65rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+    }
+    .config-notify-col h4 {
+      margin: 0 0 0.55rem;
+      font-size: 0.8rem;
+      font-weight: 650;
+      color: #e2e8f0;
+    }
+    .backup-panel .backup-hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.85rem 1.25rem;
+      margin-bottom: 0.85rem;
+    }
+    .backup-panel .backup-hero p {
+      margin: 0.25rem 0 0;
+      max-width: 42rem;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+    .backup-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .backup-meta {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.45rem 1rem;
+      margin: 0.75rem 0 0;
+      padding: 0.75rem 0.85rem;
+      border-radius: 0.65rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: #94a3b8;
+    }
+    @media (min-width: 640px) {
+      .backup-meta { grid-template-columns: 1fr 1fr; }
+    }
+    .backup-meta code {
+      font-size: 0.7rem;
+      color: #cbd5e1;
+      word-break: break-all;
+    }
+    #learning-saves-table th,
+    #learning-saves-table td {
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid #1e293b;
+      vertical-align: top;
+    }
+    #learning-saves-table th {
+      color: #64748b;
+      font-weight: 600;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
     .strategy-risk-card {
       border-color: rgba(16, 185, 129, .42);
       background: linear-gradient(135deg, rgba(16, 185, 129, .09), rgba(30, 41, 59, .98) 42%);
@@ -4499,7 +4591,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Config, Backtester, and Logs" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Config, Backtester, Logs, and Back Up" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -4522,6 +4614,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
             Logs
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="backup" onclick="showTab('backup')" title="Site backup, persistence health, and micro-bot self-learning data">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+            Back Up
           </button>
         </div>
       </div>
@@ -6057,6 +6153,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
         <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually. <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('settings')">Edit in Settings</button></p>
       </div>
+
+      <div class="config-section-label">Sizing &amp; exits <span>Trade size, TP/SL, tiered profit</span></div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Trade Settings <span class="tip" tabindex="0" data-tip="Default buy size and take-profit / stop-loss band applied to new positions."></span></div>
@@ -6090,7 +6188,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <input type="range" id="stopLossPercent" min="-80" max="-5" step="5" value="-30" />
             </div>
           </div>
-          <p class="mint mt-2">Dynamic size = base × risk factor × conviction factor (± migration). High risk → closer to risk multiplier; high conviction → up to conviction multiplier.</p>
+          <p class="mint mt-2">Dynamic size = base × risk × conviction (± migration).</p>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveTradeConfig()" title="Persist trade size and TP/SL settings">Save Trade</button></div>
         </div>
 
@@ -6114,18 +6212,19 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card config-wide-card">
           <div class="section-title">Paper / Live Simulation Prices <span class="tip" tabindex="0" data-tip="When on (or in Live Simulation mode), positions mark-to-market with live Dex/GMGN prices. Live Simulation forces this ON."></span></div>
-          <p class="text-sm text-slate-400 mb-2">Use <strong>Live Sim</strong> in the header for full live-parity filters with virtual fills. Advanced historical sims are in <strong>Backtester</strong> (settings menu).</p>
-          <div class="toggle-row"><span title="Update open paper / Live Sim positions using live price feeds">Live market marks</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
-          <div class="flex flex-wrap gap-2 mt-2">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="toggle-row" style="margin:0;flex:1;min-width:12rem"><span title="Update open paper / Live Sim positions using live price feeds">Live market marks</span><label class="switch"><input type="checkbox" id="paper-live-data" checked /><span class="slider"></span></label></div>
             <button class="btn btn-secondary" onclick="togglePaperLiveData()" title="Save the paper live-prices toggle">Save Live Price</button>
             <button class="btn btn-primary" onclick="showTab('backtester')">Open Backtester</button>
             <span class="mint" id="paper-live-status"></span>
           </div>
+          <p class="mint mt-2 mb-0">Use <strong>Live Sim</strong> in the header for live-parity filters. Historical sims: Backtester (cog menu).</p>
         </div>
       </div>
 
+      <div class="config-section-label">Entry gates <span>Filters, selective trading, strategy params</span></div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card config-wide-card">
           <div class="section-title">Filters &amp; Anti-Rug <span class="tip" tabindex="0" data-tip="Gates that must pass before a buy: convergence, liquidity, holder risk, honeypot, snipers."></span></div>
@@ -6216,6 +6315,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="config-section-label">Risk &amp; execution <span>Position risk, trails, MEV, RPC</span></div>
       <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
         <div class="card">
           <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
@@ -6269,7 +6369,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="mb-2"><strong style="color:#e2e8f0">Primary (RPC_URL)</strong> — Trade profile bots, copy + signal scanner, market scanner entry RPC, Pump.fun migrate scanner, open-trade on-chain needs.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary (RPC_SECONDARY or first RPC_FALLBACKS)</strong> — Zion + Place Trade, KOL Token Scanner, Zion trade requests / open-trade on-chain bits, wallet on-chain activity refresh.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking on the other paid RPC (or any healthy fallback). Recovers to the preferred lane when it is healthy again. Override with RPC_FAILOVER_DOWN_MS (ms). Set RPC_URL + a distinct RPC_SECONDARY (different URL — alias SECONDARY_RPC also accepted) so Zion KOL does not share CU with copy/signals.</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking. Set RPC_URL + a distinct RPC_SECONDARY so Zion KOL does not share CU with copy/signals.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -6278,27 +6378,35 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="config-section-label">Alerts <span>Email + in-app sounds</span></div>
       <div class="card">
-        <div class="section-title">Email Notifications <span class="tip" tabindex="0" data-tip="Alerts when equity is low, a buy is blocked for insufficient available SOL, a trade closes in profit, or Zion offers fire. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Without a verified domain, Resend’s onboarding@resend.dev sender can ONLY email the address on your Resend account — verify a domain + set RESEND_FROM to email anyone else. Secrets stay in Render env."></span></div>
+        <div class="section-title">Notifications <span class="tip" tabindex="0" data-tip="Email alerts and in-app bell / sound preferences. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Secrets stay in Render env."></span></div>
         <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="bondback2026@gmail.com" placeholder="you@example.com" /></label>
-          <label class="ctl"><span>Low equity threshold (SOL)</span><input type="number" id="notify-low-equity-sol" min="0.1" step="0.1" value="1" /></label>
-        </div>
-        <div class="mt-3 space-y-1">
-          <div class="toggle-row"><span>Email alerts enabled</span><label class="switch"><input type="checkbox" id="notify-enabled" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span>Low equity alert</span><label class="switch"><input type="checkbox" id="notify-low-equity" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span>Insufficient funds alert</span><label class="switch"><input type="checkbox" id="notify-insufficient" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span>Profitable close alert</span><label class="switch"><input type="checkbox" id="notify-profit-close" checked /><span class="slider"></span></label></div>
-        </div>
-        <div class="section-title mt-4" style="font-size:0.85rem">In-app notifications</div>
-        <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion trade-request popups. All default ON.</p>
-        <div class="space-y-1">
-          <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row" title="Soft cash sound when a profitable close hits the bell"><span>Profit close sound</span><label class="switch"><input type="checkbox" id="notify-profit-sound" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row" title="Soft confirm sound when you click Place Trade on a Zion offer"><span>Place trade sound</span><label class="switch"><input type="checkbox" id="notify-place-sound" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
+        <div class="config-notify-grid">
+          <div class="config-notify-col">
+            <h4>Email</h4>
+            <div class="grid grid-cols-1 gap-2 mb-2">
+              <label class="ctl"><span>Email</span><input type="email" id="notify-email" value="bondback2026@gmail.com" placeholder="you@example.com" /></label>
+              <label class="ctl"><span>Low equity threshold (SOL)</span><input type="number" id="notify-low-equity-sol" min="0.1" step="0.1" value="1" /></label>
+            </div>
+            <div class="space-y-1">
+              <div class="toggle-row"><span>Email alerts enabled</span><label class="switch"><input type="checkbox" id="notify-enabled" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row"><span>Low equity alert</span><label class="switch"><input type="checkbox" id="notify-low-equity" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row"><span>Insufficient funds alert</span><label class="switch"><input type="checkbox" id="notify-insufficient" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row"><span>Profitable close alert</span><label class="switch"><input type="checkbox" id="notify-profit-close" checked /><span class="slider"></span></label></div>
+            </div>
+          </div>
+          <div class="config-notify-col">
+            <h4>In-app</h4>
+            <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion popups. Default ON.</p>
+            <div class="space-y-1">
+              <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Soft cash sound when a profitable close hits the bell"><span>Profit close sound</span><label class="switch"><input type="checkbox" id="notify-profit-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Soft confirm sound when you click Place Trade on a Zion offer"><span>Place trade sound</span><label class="switch"><input type="checkbox" id="notify-place-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
+            </div>
+          </div>
         </div>
         <div class="mt-3 flex flex-wrap gap-2 items-center">
           <button type="button" class="btn btn-primary" onclick="saveNotificationsConfig()" title="Save notification preferences">Save Notifications</button>
@@ -6306,30 +6414,41 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <span class="mint text-xs" id="notify-status"></span>
         </div>
       </div>
+    </section>
+
+    <!-- ========== TAB: Back Up ========== -->
+    <section data-tab-panel="backup" class="backup-panel hidden space-y-4">
+      <div class="card">
+        <div class="backup-hero">
+          <div>
+            <div class="section-title" style="margin-bottom:0">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, trade-profile knobs, and learning episodes are saved as JSON under DATA_DIR. Survives code updates when a disk is mounted."></span></div>
+            <p>Auto-saves on config changes, wallet import, paper top-up, and backtest runs. Use Backup Site before deploys when DATA_DIR is not on a mounted disk.</p>
+          </div>
+          <div class="backup-actions">
+            <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
+            <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Restore the last server backup, or pick a downloaded backup file if none exists">Load Last Backup</button>
+            <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
+            <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
+          </div>
+        </div>
+        <div class="mint text-sm" id="persist-reset-status">Checking save status…</div>
+        <div class="mint text-xs mt-1" id="persist-reset-msg"></div>
+        <div class="mint text-xs mt-2" id="persist-backup-status">Last backup: —</div>
+        <div class="backup-meta" id="persist-status-detail">Checking data directory…</div>
+      </div>
 
       <div class="card">
-        <div class="section-title">Persistence <span class="tip" tabindex="0" data-tip="Settings, wallets, paper balance, trade-profile knobs, and learning episodes are saved as JSON under DATA_DIR. Survives code updates when a disk is mounted."></span></div>
-        <div class="mint text-sm mb-2" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
-        <div id="persist-status-detail" class="text-xs mb-3" style="line-height:1.55;color:#94a3b8">Checking data directory…</div>
-        <div class="flex flex-wrap gap-2 items-center mb-4">
-          <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
-          <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Restore the last server backup, or pick a downloaded backup file if none exists">Load Last Backup</button>
-          <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
-          <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
-          <span class="mint text-xs" id="persist-reset-msg"></span>
-        </div>
-        <div class="mint text-xs mb-3" id="persist-backup-status">Last backup: —</div>
-        <div class="section-title mt-2" style="font-size:0.85rem">Micro Bots Self-Learning Data</div>
-        <p class="mint text-xs mb-2">Health of durable knobs + episode files. If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
-        <div id="learning-health-status" class="text-xs mb-2" style="line-height:1.5;color:#94a3b8">Checking learning health…</div>
+        <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
+        <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
+        <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
         <div class="overflow-x-auto mb-2">
-          <table class="w-full text-xs" id="learning-saves-table" style="border-collapse:collapse">
+          <table class="w-full text-xs" id="learning-saves-table" style="border-collapse:collapse;width:100%">
             <thead>
-              <tr style="color:#94a3b8;text-align:left;border-bottom:1px solid #334155">
-                <th style="padding:0.35rem 0.4rem">When</th>
-                <th style="padding:0.35rem 0.4rem">Bot</th>
-                <th style="padding:0.35rem 0.4rem">Kind</th>
-                <th style="padding:0.35rem 0.4rem">Summary</th>
+              <tr>
+                <th>When</th>
+                <th>Bot</th>
+                <th>Kind</th>
+                <th>Summary</th>
               </tr>
             </thead>
             <tbody id="learning-saves-body">
@@ -9483,7 +9602,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'config' || name === 'logs' || name === 'backtester');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -9503,6 +9622,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
+      if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} }
       if (name === 'overview' || name === 'signals' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
