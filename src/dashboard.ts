@@ -2481,6 +2481,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         max-width: none;
       }
     }
+    .tp-toggle-card.tp-card-paused {
+      opacity: 0.5;
+    }
     .tp-toggle-card.tp-card-flash {
       outline: 2px solid #38bdf8;
       outline-offset: 2px;
@@ -8213,12 +8216,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             )
             : '';
           const color = profileColorFor(p.id) || p.color || '#94a3b8';
+          const paused = !p.enabled && p.id !== 'default';
           return (
-            '<div class="tp-toggle-card" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="border-color:' + color + '88;box-shadow:inset 3px 0 0 ' + color + '">' +
+            '<div class="tp-toggle-card' + (paused ? ' tp-card-paused' : '') + '" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="border-color:' + color + '88;box-shadow:inset 3px 0 0 ' + color + '">' +
               '<div class="tp-head">' +
                 '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
                   escHtml(p.name || '') + ' modules">' +
                   escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                  (paused ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5">Paused</span>' : '') +
                   (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
                   (sl.enabled && slBadge
                     ? '<span class="tp-override-badge" style="background:#14532d;color:#86efac" title="Self-learning progress">' +
@@ -8227,7 +8232,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   fmtProfileModulesPopover(p) +
                 '</span>' +
                 '<input type="checkbox"' + checked + disabled +
-                  ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="Enable ' + escHtml(p.name) + '" />' +
+                  ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="' + (p.enabled ? 'Pause' : 'Resume') + ' ' + escHtml(p.name) + '" />' +
               '</div>' +
               blurb +
               patternLine +
@@ -8729,6 +8734,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window.toggleSmartBotProfiles = toggleSmartBotProfiles;
 
     async function toggleTradeProfile(id, enabled) {
+      if (!enabled) {
+        if (!confirm('Pause ' + id + '? Learning data will be preserved. The bot will be excluded from lane fights until resumed.')) {
+          loadStrategies();
+          return;
+        }
+      }
       try {
         const data = await fetchJSON('/api/trade-profiles', {
           method: 'POST',

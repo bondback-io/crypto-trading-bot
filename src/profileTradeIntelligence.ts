@@ -396,6 +396,33 @@ export interface AdaptiveExitAction {
 }
 
 /**
+ * Apply quality-tier multipliers so low-conviction trades extract profit fast
+ * and high-conviction trades trail wider for larger runners.
+ */
+function applyQualityTierMultipliers(
+  pol: ProfileExitPolicy,
+  tier: 'low' | 'medium' | 'high'
+): ProfileExitPolicy {
+  if (tier === 'medium') return pol;
+  if (tier === 'low') {
+    pol.profitGivebackPts = Math.max(4, Math.round(pol.profitGivebackPts * 0.6));
+    pol.earlyPartialTpPct = pol.earlyPartialTpPct > 0
+      ? Math.max(4, Math.round(pol.earlyPartialTpPct * 0.7))
+      : pol.earlyPartialTpPct;
+    pol.earlyPartialFraction = Math.min(0.65, pol.earlyPartialFraction * 1.3);
+    pol.profitLockArmPct = pol.profitLockArmPct > 0
+      ? Math.max(8, Math.round(pol.profitLockArmPct * 0.7))
+      : pol.profitLockArmPct;
+    pol.extendHoldIfTaOk = false;
+    return pol;
+  }
+  // high
+  pol.profitGivebackPts = Math.min(60, Math.round(pol.profitGivebackPts * 1.25));
+  pol.extendHoldIfTaOk = true;
+  return pol;
+}
+
+/**
  * Adaptive exit brain for a live position (profile-stamped policy).
  */
 export function evaluateAdaptiveProfileExit(input: {
@@ -421,9 +448,12 @@ export function evaluateAdaptiveProfileExit(input: {
   taStructureBroken?: boolean;
   /** Soft timer would fire — allow defer when extendHoldIfTaOk */
   softTimerDue?: boolean;
+  /** Quality tier from conviction at entry — drives dynamic TP aggression */
+  qualityTier?: 'low' | 'medium' | 'high';
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
-  const pol = input.policy;
+  const tier = input.qualityTier || 'medium';
+  const pol = applyQualityTierMultipliers({ ...input.policy }, tier);
   const pnl = input.pnlPct;
   const peakUnrealized =
     input.peakUnrealizedPct != null && Number.isFinite(input.peakUnrealizedPct)

@@ -369,6 +369,65 @@ export function buildExitLearningCandidates(
     (e) => e.exitKey === 'timer' && (e.pnlPct || 0) <= 0
   ).length;
 
+  // Failure-category-aware candidates
+  const categorised = episodes.filter((e) => e.failureCategory);
+  if (categorised.length >= 6) {
+    const losers = categorised.filter((e) => (e.pnlPct || 0) <= 0);
+    if (losers.length > 0) {
+      const catCount = (cat: string) => losers.filter((e) => e.failureCategory === cat).length;
+      const missedTp = catCount('missed_tp');
+      const fadeAfter = catCount('fade_after_pump');
+      const earlySl = catCount('early_sl');
+
+      if (missedTp / losers.length >= 0.4) {
+        const nextGive = clamp((currentPolicy.profitGivebackPts || 25) - 6, 6, 40);
+        const nextPartial = clamp(
+          Math.round((currentPolicy.earlyPartialTpPct || 15) - 4), 6, 35
+        );
+        out.push({
+          summary: `Missed-TP pattern (${missedTp}/${losers.length} losses) — tighten giveback→${nextGive}, partial→${nextPartial}%`,
+          patch: {
+            exitRules: {
+              exitPolicy: {
+                profitGivebackPts: nextGive,
+                earlyPartialTpPct: nextPartial,
+                earlyPartialFraction: clamp((currentPolicy.earlyPartialFraction || 0.4) + 0.1, 0.25, 0.6),
+              },
+            },
+          },
+        });
+      }
+
+      if (fadeAfter / losers.length >= 0.3) {
+        const nextArm = clamp(Math.round((currentPolicy.profitLockArmPct || 40) * 0.7), 12, 60);
+        out.push({
+          summary: `Fade-after-pump pattern (${fadeAfter}/${losers.length}) — arm profit-lock earlier→${nextArm}%, larger partial`,
+          patch: {
+            exitRules: {
+              exitPolicy: {
+                profitLockArmPct: nextArm,
+                earlyPartialFraction: clamp((currentPolicy.earlyPartialFraction || 0.4) + 0.1, 0.25, 0.6),
+              },
+            },
+          },
+        });
+      }
+
+      if (earlySl / losers.length >= 0.25) {
+        out.push({
+          summary: `Early-SL pattern (${earlySl}/${losers.length}) — raise conviction floor`,
+          patch: {
+            match: {
+              minConviction: clamp(
+                Math.max(Number((episodes[0] as any)?.convictionScore || 40), 40) + 5, 30, 85
+              ),
+            },
+          },
+        });
+      }
+    }
+  }
+
   // Tighten giveback when leaving MFE on table
   if (leftOnTable / episodes.length >= 0.35) {
     const nextGive = clamp(
@@ -505,6 +564,24 @@ export function buildEntryLearningCandidates(
   const losers = episodes.filter((e) => (e.pnlPct || 0) <= 0);
   const loserRate = losers.length / episodes.length;
   if (loserRate < 0.45) return out;
+
+  // Failure-category: weak_entry pattern
+  const weakEntries = losers.filter((e) => e.failureCategory === 'weak_entry');
+  if (weakEntries.length / Math.max(1, losers.length) >= 0.25) {
+    out.push({
+      summary: `Weak-entry pattern (${weakEntries.length}/${losers.length}) — raise conviction + wallet quality`,
+      patch: {
+        match: {
+          minConviction: clamp(
+            Math.max(Number(currentMatch.minConviction) || 40, 40) + 8, 30, 85
+          ),
+          minWalletQuality: clamp(
+            Math.max(Number(currentMatch.minWalletQuality) || 35, 35) + 5, 25, 85
+          ),
+        },
+      },
+    });
+  }
 
   const lowConvLosers = losers.filter(
     (e) => e.convictionScore != null && e.convictionScore < 45

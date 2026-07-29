@@ -180,6 +180,8 @@ export interface Position {
   profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
   /** Trail already tightened once by adaptive policy */
   profileTrailTightened?: boolean;
+  /** Quality tier derived from conviction at entry (drives dynamic TP) */
+  qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
   selfLearnVersion?: number;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
@@ -218,6 +220,40 @@ export interface PaperTraderState {
   positions: Position[];
   closedPositions: Position[];
   logs: TradeLog[];
+}
+
+export type QualityTier = 'low' | 'medium' | 'high';
+
+export function deriveQualityTier(conviction?: number | null): QualityTier {
+  const c = Number(conviction) || 0;
+  if (c < 35) return 'low';
+  if (c > 60) return 'high';
+  return 'medium';
+}
+
+export type FailureCategory =
+  | 'missed_tp'
+  | 'overhold'
+  | 'early_sl'
+  | 'fade_after_pump'
+  | 'weak_entry'
+  | 'normal_sl'
+  | 'profitable';
+
+export function computeFailureCategory(pos: Position): FailureCategory {
+  const pnl = pos.pnlPct ?? 0;
+  if (pnl > 0) return 'profitable';
+
+  const mfe = pos.maxRunupPct ?? 0;
+  const holdMs = (pos.closedAt ?? Date.now()) - pos.openedAt;
+  const tp = pos.takeProfitPct ?? 15;
+
+  if (holdMs < 30_000) return 'early_sl';
+  if (mfe >= tp && pnl <= 0) return 'missed_tp';
+  if (mfe >= 30 && pnl < 0) return 'fade_after_pump';
+  if (mfe >= 20 && pnl < 5) return 'overhold';
+  if ((pos.convictionScore ?? 100) < 30) return 'weak_entry';
+  return 'normal_sl';
 }
 
 let logCounter = 0;
@@ -360,6 +396,8 @@ function maybeRecordLearningEpisode(
       paramVersion,
       entrySource: position.entrySource,
       scannerPlaybook: position.scannerPlaybook,
+      qualityTier: position.qualityTier,
+      failureCategory: computeFailureCategory(position),
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -998,6 +1036,7 @@ export class PaperTrader {
           ? input.sourceEntryMcUsd
           : undefined,
       convictionScore: input.convictionScore,
+      qualityTier: deriveQualityTier(input.convictionScore),
       tradeProfileId: input.tradeProfileId,
       tradeProfileName: input.tradeProfileName,
       tradeProfileIcon: input.tradeProfileIcon,
@@ -1341,6 +1380,7 @@ export class PaperTrader {
           ? meta.sourceEntryMcUsd
           : undefined,
       convictionScore: meta?.convictionScore,
+      qualityTier: deriveQualityTier(meta?.convictionScore),
       tradeProfileId: meta?.tradeProfileId,
       tradeProfileName: meta?.tradeProfileName,
       tradeProfileIcon: meta?.tradeProfileIcon,
@@ -1926,6 +1966,7 @@ export class PaperTrader {
           peakUnrealizedPct,
           taStructureOk: taOk,
           taStructureBroken: taBroken,
+          qualityTier: position.qualityTier,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -2625,6 +2666,7 @@ export class PaperTrader {
             peakUnrealizedPct,
             taStructureOk: taOk,
             taStructureBroken: taBroken,
+            qualityTier: position.qualityTier,
           });
           if (adapt.type === 'tighten_trail' && adapt.newTrailingStopPct != null) {
             if (!position.profileTrailTightened) {

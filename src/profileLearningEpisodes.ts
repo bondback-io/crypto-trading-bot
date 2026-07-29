@@ -39,6 +39,8 @@ export interface ProfileLearningEpisode {
   paramVersion: number;
   entrySource?: string;
   scannerPlaybook?: string;
+  qualityTier?: 'low' | 'medium' | 'high';
+  failureCategory?: string;
 }
 
 interface EpisodesFile {
