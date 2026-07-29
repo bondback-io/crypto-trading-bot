@@ -431,7 +431,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 18–30% · SL 7–12%',
       'Max hold 1–3.5 minutes · trail after +12%',
       'Smaller position size (~65%)',
-      'Focus: small MC + volume spike',
+      'Focus: small MC (≤$180k) + volume spike',
       'Aggressive dead-market exit · early stall cut',
     ],
     priority: 80,
@@ -440,10 +440,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferScalp: true,
       preferSmallMc: true,
       preferVolumeSpike: true,
-      maxMarketCapUsd: 150_000,
-      minVolumeM5Usd: 800,
-      minConviction: 35,
-      minWalletQuality: 35,
+      maxMarketCapUsd: 180_000,
+      minVolumeM5Usd: 600,
+      minConviction: 32,
+      minWalletQuality: 32,
       minWalletCount: 1,
       requireCluster: false,
     },
@@ -481,7 +481,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 35–60% (partial + runner via trail)',
       'SL 12–18%',
       'Key levels: Fib 0.5 & 0.618 or clear support',
-      'Min prior run +80–120% (max age ~12–24h)',
+      'Min prior run +40–80% (max age ~12–24h) · dip ≥8% from peak',
       'Size: normal / slightly larger on high conviction',
     ],
     priority: 85,
@@ -497,12 +497,12 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
         'structured_pullback',
       ],
       patternSensitivity: 'medium',
-      minConviction: 40,
-      minWalletQuality: 40,
+      minConviction: 36,
+      minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
-      minDropFromPeakPct: 12,
-      minPriceChange24hPct: 80,
+      minDropFromPeakPct: 8,
+      minPriceChange24hPct: 40,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -551,6 +551,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Targets smaller consistent gains (5–12%)',
       'Tighter risk controls (~8% SL, ~6% trail)',
       'Allows longer hold times than Scalper (no hard timer)',
+      'Lane floors: age ≥2h · holders ≥35 · 1h vol ≥$1.5k',
     ],
     priority: 55,
     defaultEnabled: true,
@@ -565,13 +566,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['volume_dryup_return'],
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
-      minConviction: 50,
-      minWalletQuality: 50,
-      minWalletCount: 2,
-      requireCluster: true,
-      minTokenAgeHours: 6,
-      minHolders: 60,
-      minVolumeH1Usd: 3_000,
+      minConviction: 45,
+      minWalletQuality: 42,
+      minWalletCount: 1,
+      requireCluster: false,
+      minTokenAgeHours: 2,
+      minHolders: 35,
+      minVolumeH1Usd: 1_500,
     },
     exitRules: {
       forceScalp: false,
@@ -598,7 +599,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Event / Momentum',
     rulesSummary: [
       'TP 25–45% · SL 10–15%',
-      'Only fresh post-grad (≤2h / MC ≤$450K)',
+      'Only fresh post-grad (≤3h / MC ≤$600K)',
       'Not for near-curve, early-buy, or mature DEX tokens',
       'Required: meaningful post-mig volume',
       'Hold: 1.5–7 min timer · trail arms at +15%',
@@ -611,15 +612,15 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferSmartMoney: true,
       primaryPatternIds: ['bull_flag'],
       patternSensitivity: 'high',
-      minVolumeH1Usd: 2_500,
-      minConviction: 35,
-      minWalletQuality: 35,
+      minVolumeH1Usd: 1_800,
+      minConviction: 32,
+      minWalletQuality: 32,
       minWalletCount: 1,
       requireCluster: false,
       /** Fresh graduation window — older PumpSwap buys are not snipes */
-      maxTokenAgeHours: 2,
+      maxTokenAgeHours: 3,
       /** Mature / high-holder tokens belong to Trend / HWR / Dip */
-      maxMarketCapUsd: 450_000,
+      maxMarketCapUsd: 600_000,
     },
     exitRules: {
       takeProfitPctMin: 25,
@@ -670,11 +671,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'High Quality',
     rulesSummary: [
       'TP 40–70%+ · SL 11–16%',
-      'Min conviction 75+',
-      'Min wallet quality 65%+',
-      'Prefer 3+ quality wallets',
+      'Min conviction 62+',
+      'Min wallet quality 55%+',
+      'Prefer 2+ quality wallets',
       'Quality Filter: higher MC / liq / volume / holders on technicals',
-      'Very selective · smaller size',
+      'Selective · smaller size — can compete vs soft volume bursts',
     ],
     priority: 70,
     defaultEnabled: true,
@@ -691,17 +692,17 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       avoidBearishPatterns: true,
       patternSensitivity: 'low',
       patternMinConfidence: DEFAULT_HWR_QUALITY_FILTER.minPatternConfidence,
-      patternRequireBreakout: true,
-      patternRequireFibOrSupport: true,
+      patternRequireBreakout: false,
+      patternRequireFibOrSupport: false,
       patternMinLiquidityUsd: DEFAULT_HWR_QUALITY_FILTER.minLiquidityUsd,
       patternMinHolders: DEFAULT_HWR_QUALITY_FILTER.minHolders,
       patternMinVolumeH1Usd: DEFAULT_HWR_QUALITY_FILTER.minVolumeH1Usd,
       patternMinMarketCapUsd: DEFAULT_HWR_QUALITY_FILTER.minMarketCapUsd,
       qualityFilter: { ...DEFAULT_HWR_QUALITY_FILTER },
-      minConviction: 75,
+      minConviction: 62,
       requireCluster: true,
-      minWalletCount: 3,
-      minWalletQuality: 65,
+      minWalletCount: 2,
+      minWalletQuality: 55,
       preferSmartMoney: true,
     },
     exitRules: {
@@ -750,7 +751,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Short Momentum',
     rulesSummary: [
       'TP 28–45% · SL 10–14%',
-      'Entry: M5 vol ≥ $6k + buy pressure / bull flag · conviction ≥ 50',
+      'Entry: M5 vol ≥ $8k + buy pressure / bull flag · conviction ≥ 48',
       'Max hold ~2.5–7 min · trail after +10%',
       'Exit on fade / stall / trail — timer is backstop',
     ],
@@ -762,8 +763,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       primaryPatternIds: ['bull_flag'],
       patternSensitivity: 'high',
       patternMinConfidence: 48,
-      minVolumeM5Usd: 6_000,
-      minConviction: 50,
+      minVolumeM5Usd: 8_000,
+      minConviction: 48,
       minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
@@ -807,6 +808,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Focus: higher holders + sustained volume',
       'Patient but disciplined · no hard timer',
       'Small consistent gains',
+      'Lane floors: age ≥6h · holders ≥70 · 1h vol ≥$4k',
     ],
     priority: 50,
     defaultEnabled: true,
@@ -817,14 +819,14 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['structured_pullback'],
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
-      patternMinConfidence: 58,
-      minConviction: 45,
-      minWalletQuality: 50,
-      minWalletCount: 2,
-      requireCluster: true,
-      minTokenAgeHours: 18,
-      minHolders: 120,
-      minVolumeH1Usd: 8_000,
+      patternMinConfidence: 55,
+      minConviction: 42,
+      minWalletQuality: 45,
+      minWalletCount: 1,
+      requireCluster: false,
+      minTokenAgeHours: 6,
+      minHolders: 70,
+      minVolumeH1Usd: 4_000,
     },
     exitRules: {
       forceScalp: false,
@@ -856,7 +858,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Mean Reversion',
     rulesSummary: [
       'TP 15–25% · SL 6–10%',
-      'Entry: sharp wick / over-extension',
+      'Entry: wick / over-extension (≥12% from peak)',
       'Max hold 1–2.5 minutes · trail after +10%',
       'Fast mean-reversion · early stall cut',
     ],
@@ -866,10 +868,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferReversal: true,
       primaryPatternIds: ['falling_wedge'],
       patternSensitivity: 'high',
-      patternMinConfidence: 48,
-      minDropFromPeakPct: 18,
-      minConviction: 35,
-      minWalletQuality: 35,
+      patternMinConfidence: 45,
+      minDropFromPeakPct: 12,
+      minConviction: 32,
+      minWalletQuality: 32,
       minWalletCount: 1,
       requireCluster: false,
     },
@@ -910,7 +912,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     rulesSummary: [
       'TP 30–50% · trail arms after modest profit (~10%)',
       'SL 9–14%',
-      'Need 3+ wallets or strong quality + conviction',
+      'Need 2+ wallets or strong quality + conviction',
       'Skip late copies after wallet peak dump',
       'Clean copy style — no scalp timer / no forced 16m exit',
     ],
@@ -922,12 +924,12 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['falling_wedge'],
       preferBullishPatterns: true,
       patternSensitivity: 'medium',
-      patternMinConfidence: 55,
-      minWalletCount: 3,
+      patternMinConfidence: 52,
+      minWalletCount: 2,
       requireCluster: true,
       preferSmartMoney: true,
-      minWalletQuality: 58,
-      minConviction: 52,
+      minWalletQuality: 50,
+      minConviction: 48,
     },
     exitRules: {
       forceScalp: false,
@@ -1836,8 +1838,8 @@ export function resetTradeProfilesToCatalogDefaults(options?: {
 }
 
 /** Default freshness gates for Migration Sniper (pump.fun → DEX grads only). */
-export const FRESH_MIGRATION_MAX_AGE_HOURS = 2;
-export const FRESH_MIGRATION_MAX_MC_USD = 450_000;
+export const FRESH_MIGRATION_MAX_AGE_HOURS = 3;
+export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
  * True only for freshly graduated migrations — not older PumpSwap venue trades,
@@ -2338,26 +2340,26 @@ function scoreProfile(
       return { score: 0, reason: 'defer to fresh migration' };
     }
     if (genericScalp && smallMc) {
-      score += 88;
+      score += 80;
       bits.push(`scalp:${ctx.shortTermStrategyId}`);
       if (
         m.preferVolumeSpike &&
         volM5 != null &&
         volM5 >= (m.minVolumeM5Usd ?? 800)
       ) {
-        score += 12;
+        score += 10;
         bits.push(`vol spike M5 $${Math.round(volM5)}`);
       }
     } else if (smallMc && !isDip && !isMig && !isMomentum && !isReversal) {
       // Untagged small-MC candidate (multi-profile path) — competitive but not automatic winner
-      score += 62;
+      score += 52;
       bits.push(`small-MC scalp candidate $${Math.round(mc!)}`);
       if (
         m.preferVolumeSpike &&
         volM5 != null &&
         volM5 >= (m.minVolumeM5Usd ?? 800)
       ) {
-        score += 14;
+        score += 12;
         bits.push('volume spike');
       } else if (volM5 == null && volH1 != null && volH1 >= 1_500) {
         score += 6;
@@ -2407,11 +2409,11 @@ function scoreProfile(
 
   if (m.preferMomentumBurst) {
     if (ctx.shortTermStrategyId === 'momentum_burst') {
-      score += 95;
+      score += 90;
       bits.push('momentum_burst armed');
     } else if (isMomentum && !isDip && !isMig) {
-      // Softened from +70 so Trend/Compounder (~50–58) can win when both pass
-      score += 58;
+      // Soft volume/pressure match — leave headroom for Trend / HWR / Mirror
+      score += 46;
       bits.push(
         volM5 != null
           ? `burst vol M5 $${Math.round(volM5)}`
@@ -2420,7 +2422,7 @@ function scoreProfile(
       if (buyPressureUsd != null && buyPressureUsd > 0) {
         bits.push(`buy $${Math.round(buyPressureUsd)}`);
         if (m.minBuyPressureUsd != null && buyPressureUsd >= m.minBuyPressureUsd) {
-          score += 8;
+          score += 6;
           bits.push(`pressure ≥ $${Math.round(m.minBuyPressureUsd)}`);
         }
       }
@@ -2436,7 +2438,7 @@ function scoreProfile(
     if (ctx.shortTermStrategyId === 'reversal_scalp') {
       score += 95;
       bits.push('reversal_scalp armed');
-    } else if (drop != null && drop >= (m.minDropFromPeakPct ?? 18) && !isMig) {
+    } else if (drop != null && drop >= (m.minDropFromPeakPct ?? 12) && !isMig) {
       score += 72;
       bits.push(`wick/over-extension −${drop.toFixed(0)}%`);
       if (buyPressureUsd != null && m.minBuyPressureUsd != null) {
@@ -2491,8 +2493,8 @@ function scoreProfile(
       }
     }
     const convPart =
-      conv != null ? Math.min(35, (conv - 50) * 0.7) : 0;
-    score += 50 + convPart + quality * 8;
+      conv != null ? Math.min(35, (conv - 45) * 0.7) : 0;
+    score += 56 + convPart + quality * 8;
     bits.push(
       conv != null ? `trend conviction ${conv}` : 'trend conviction pending'
     );
@@ -2539,8 +2541,8 @@ function scoreProfile(
       bits.push(`1h vol $${Math.round(volH1)}`);
     }
     const convPart =
-      conv != null ? Math.min(25, (conv - 45) * 0.5) : 0;
-    score += 48 + convPart + q * 10;
+      conv != null ? Math.min(25, (conv - 42) * 0.5) : 0;
+    score += 54 + convPart + q * 10;
     bits.push(
       conv != null
         ? `compounder conviction ${conv}`
@@ -2557,10 +2559,16 @@ function scoreProfile(
       return { score: 0, reason: 'scanner-only — prefer TA profiles' };
     }
     if (isMig) return { score: 0, reason: 'defer to fresh migration' };
-    if (isScalp || isDip || isMomentum || isReversal) {
+    // Soft volume "momentum" no longer vetoes Mirror — only hard specialty lanes
+    if (
+      isScalp ||
+      isDip ||
+      isReversal ||
+      ctx.shortTermStrategyId === 'momentum_burst'
+    ) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };
     }
-    if (conv != null && conv < (m.minConviction ?? 52)) {
+    if (conv != null && conv < (m.minConviction ?? 48)) {
       return { score: 0, reason: 'conviction too low for mirror' };
     }
     // Late fill after peak — copy already chasing; Mirror wants fresher entries
@@ -2600,16 +2608,16 @@ function scoreProfile(
     if (
       wq == null &&
       conv != null &&
-      (conv < 58 || (wallets != null && wallets < 3))
+      (conv < 54 || (wallets != null && wallets < 2))
     ) {
       return {
         score: 0,
-        reason: 'mirror needs WQ or 3+ wallets + conviction 58+',
+        reason: 'mirror needs WQ or 2+ wallets + conviction 54+',
       };
     }
     const mirrorConv =
-      conv != null ? Math.min(25, (conv - 52) * 0.6) : 0;
-    score += 58 + mirrorConv;
+      conv != null ? Math.min(25, (conv - 48) * 0.6) : 0;
+    score += 60 + mirrorConv;
     bits.push(
       conv != null ? `mirror conviction ${conv}` : 'mirror conviction pending'
     );
@@ -2640,16 +2648,22 @@ function scoreProfile(
 
   if (m.preferHighWinRate) {
     if (isMig) return { score: 0, reason: 'defer to fresh migration' };
-    if (isScalp || isDip || isMomentum || isReversal) {
+    // Soft volume bursts no longer hard-veto HWR — only armed specialty engines
+    if (
+      isScalp ||
+      isDip ||
+      isReversal ||
+      ctx.shortTermStrategyId === 'momentum_burst'
+    ) {
       return { score: 0, reason: 'not high-win-rate selective' };
     }
-    if (conv != null && conv < (m.minConviction ?? 75)) {
+    if (conv != null && conv < (m.minConviction ?? 62)) {
       return { score: 0, reason: 'conviction too low' };
     }
     if (
       m.requireCluster &&
       wallets != null &&
-      wallets < (m.minWalletCount ?? 3)
+      wallets < (m.minWalletCount ?? 2)
     ) {
       return { score: 0, reason: 'need cluster for high win-rate' };
     }
@@ -2664,14 +2678,14 @@ function scoreProfile(
       };
     }
     const hwrConv =
-      conv != null ? Math.min(35, (conv - 75) * 0.8) : 0;
-    score += 62 + hwrConv;
+      conv != null ? Math.min(35, (conv - 62) * 0.8) : 0;
+    score += 64 + hwrConv;
     bits.push(
       conv != null
         ? `high-quality conviction ${conv}`
         : 'high-quality conviction pending'
     );
-    if (wallets != null && wallets >= (m.minWalletCount ?? 3)) {
+    if (wallets != null && wallets >= (m.minWalletCount ?? 2)) {
       score += 14;
       bits.push(`cluster ${wallets}`);
     }
