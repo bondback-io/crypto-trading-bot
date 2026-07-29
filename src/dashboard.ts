@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Signals / Scanner / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs / Back Up via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs / Back Up via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -4661,8 +4661,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
-      <button data-tab="signals" onclick="showTab('signals', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Pump.fun activity, buy signals, and sizing detail"><span class="btn-label-short">Signals</span><span class="btn-label-full">Signals</span></button>
-      <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Market Scanner live feed and configuration"><span class="btn-label-short">Scanner</span><span class="btn-label-full">Scanner</span></button>
+      <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Feed — market scanner, Pump.fun activity, signals, sizing, and re-entry watches"><span class="btn-label-short">Feed</span><span class="btn-label-full">Live Feed</span></button>
       <button data-tab="settings" onclick="showTab('settings', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Risk level, module groups, presets, and strategy JSON import/export">Settings</button>
     </nav>
 
@@ -4832,7 +4831,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on the Scanner tab, or toggle via Settings → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
+          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on Live Feed, or toggle via Settings → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
           <div id="scanner-status" data-scanner-status class="mint text-xs mb-2">—</div>
           <div id="scanner-feed" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
@@ -5278,118 +5277,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- ========== TAB: Signals & Trades ========== -->
-    <section data-tab-panel="signals" class="hidden space-y-4">
-      <div class="card">
-        <div class="section-title">Pump.fun Smart Activity <span class="tip" tabindex="0" data-tip="Live early-curve buys, near-migration plays, and smart-money scores on Pump.fun launches."></span></div>
-        <div class="filters-row mb-2">
-          <label class="ctl ctl-md">
-            <span>Filter <span class="tip" tabindex="0" data-tip="Show all events, only early buys, near-migration, migrations, or priority signals."></span></span>
-            <select id="pump-act-filter">
-              <option value="all">All</option>
-              <option value="early">Early buys</option>
-              <option value="near">Near migration</option>
-              <option value="migration">Migrations</option>
-              <option value="priority">Priority only</option>
-            </select>
-          </label>
-          <label class="ctl ctl-sm">
-            <span>Min SM <span class="tip" tabindex="0" data-tip="Minimum Birdeye smart-money score (0–100) to show a launch."></span></span>
-            <input type="number" id="pump-act-min-sm" value="0" min="0" max="100" />
-          </label>
-          <button class="btn btn-secondary" onclick="refreshPumpActivity()" title="Reload the activity table">Refresh</button>
-          <button class="btn btn-primary" onclick="discoverPumpSmart()" title="Scan for Pump.fun smart wallets and hot launches">Discover Pump SM</button>
-          <span class="mint self-center" id="pump-act-status">—</span>
-        </div>
-        <div class="overflow-x-auto max-h-72 overflow-y-auto">
-          <table id="pump-activity-table">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th title="early / near-migration / migration">Kind</th>
-                <th title="Bonding curve progress %">Curve</th>
-                <th title="Distinct smart wallets seen">Wallets</th>
-                <th title="Birdeye smart-money score">Birdeye SM</th>
-                <th>Notes</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="7" class="text-slate-500">Waiting for Pump.fun smart wallet activity…</td></tr></tbody>
-          </table>
-        </div>
-        <div class="mint mt-2" id="pump-hot-launches"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Same live scanner feed as Overview. Full settings live on the Scanner tab."></span></div>
-        <div id="scanner-status-signals" data-scanner-status class="mint text-xs mb-2">—</div>
-        <div id="scanner-feed-signals" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">Post-Run Dip · Smart Wallet Activity <span class="tip" tabindex="0" data-tip="Dip-phase confirmation: HQ buys, buybacks, Fib/support clusters, net SM flow. Soft conviction boost; optional hard-require in Conservative."></span></div>
-        <div class="mint mb-2" id="prd-sm-status">—</div>
-        <div class="overflow-x-auto max-h-72 overflow-y-auto">
-          <table id="prd-sm-table">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th title="boost / skip / take">Outcome</th>
-                <th title="Dip SM score 0–100">SM</th>
-                <th title="High-quality wallet buys">HQ</th>
-                <th title="Prior sellers / buyers buying back">Buyback</th>
-                <th title="Cluster near Fib/support">@Level</th>
-                <th title="Net smart-money flow">Flow</th>
-                <th>Detail</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="9" class="text-slate-500">No dip smart-wallet events yet — enable Post-Run Dip</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title">Recent Signals (risk / curve / sniper) <span class="tip" tabindex="0" data-tip="Why buys were taken or skipped: anti-rug, sniper score, curve stage, convergence."></span></div>
-        <div id="activity-signals" class="max-h-80 overflow-y-auto text-sm"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">Dynamic Position Sizing <span class="tip" tabindex="0" data-tip="Calculated buy size for each evaluated signal from base × risk × conviction."></span></div>
-        <div class="mint mb-2" id="sizing-status">—</div>
-        <div class="overflow-x-auto max-h-72 overflow-y-auto">
-          <table id="sizing-signals-table">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th>Size SOL</th>
-                <th>Conviction</th>
-                <th>Risk</th>
-                <th>Status</th>
-                <th>Reason</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="7" class="text-slate-500">No sized signals yet</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title">Re-Entry Watch <span class="tip" tabindex="0" data-tip="Armed watches after TP (dip) or stop-loss (reclaim). Shows mint, stop reason, armed time, and status until confirm or expire."></span></div>
-        <div class="overflow-x-auto">
-          <table id="rebuy-table">
-            <thead><tr><th>Token</th><th>Kind</th><th>Status</th><th title="Dip from peak or reclaim from trough">Move</th><th title="Confirming smart wallets">Wallets</th><th>Volume</th><th>Armed</th><th>Reason</th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title">Recent Migrations <span class="tip" tabindex="0" data-tip="Tokens graduating off Pump.fun bonding curve onto Raydium/PumpSwap — often high-priority entries."></span></div>
-        <div class="mint mb-1" id="mig-live-status-signals">Live feed is on Overview / Trades · open those tabs for WS status</div>
-        <p class="text-sm text-slate-400">Migration events, re-buy watches, and open positions update live from the same APIs. Prefer the <button type="button" class="text-emerald-400 underline" onclick="showTab('trades', document.querySelector('[data-tab=trades]'))">Trades</button> tab on mobile.</p>
-      </div>
-      <div class="card">
-        <div class="section-title">Trade Log Preview <span class="tip" tabindex="0" data-tip="Short feed of recent buys/sells. Full history is on the Logs tab."></span></div>
-        <div id="logs" class="max-h-48 overflow-y-auto"></div>
-      </div>
-    </section>
-
     <!-- ========== TAB: Backtester ========== -->
     <section data-tab-panel="backtester" class="hidden space-y-4">
       <div class="card">
@@ -5683,10 +5570,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- ========== TAB: Market Scanner ========== -->
+    <!-- ========== TAB: Live Feed (scanner) ========== -->
     <section data-tab-panel="scanner" class="hidden space-y-4">
+      <div class="config-section-label">Market scanner <span>Live candidates + settings</span></div>
       <div class="card">
-        <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview and Signals."></span></div>
+        <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview."></span></div>
         <p class="text-sm text-slate-400 mb-2">
           <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
           Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on.
@@ -5831,6 +5719,110 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button class="btn btn-primary" onclick="saveMarketScannerConfig()" title="Save scanner settings and restart the poll loop">Save Scanner Settings</button>
           <button class="btn btn-secondary" onclick="loadMarketScannerConfig()" title="Reload current values from the server">Reload</button>
           <span class="mint" id="ms-save-status">—</span>
+        </div>
+      </div>
+
+      <div class="config-section-label">Activity <span>Pump.fun, dip confirms, signal decisions</span></div>
+      <div class="card">
+        <div class="section-title">Pump.fun Smart Activity <span class="tip" tabindex="0" data-tip="Live early-curve buys, near-migration plays, and smart-money scores on Pump.fun launches."></span></div>
+        <div class="filters-row mb-2">
+          <label class="ctl ctl-md">
+            <span>Filter <span class="tip" tabindex="0" data-tip="Show all events, only early buys, near-migration, migrations, or priority signals."></span></span>
+            <select id="pump-act-filter">
+              <option value="all">All</option>
+              <option value="early">Early buys</option>
+              <option value="near">Near migration</option>
+              <option value="migration">Migrations</option>
+              <option value="priority">Priority only</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Min SM <span class="tip" tabindex="0" data-tip="Minimum Birdeye smart-money score (0–100) to show a launch."></span></span>
+            <input type="number" id="pump-act-min-sm" value="0" min="0" max="100" />
+          </label>
+          <button class="btn btn-secondary" onclick="refreshPumpActivity()" title="Reload the activity table">Refresh</button>
+          <button class="btn btn-primary" onclick="discoverPumpSmart()" title="Scan for Pump.fun smart wallets and hot launches">Discover Pump SM</button>
+          <span class="mint self-center" id="pump-act-status">—</span>
+        </div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="pump-activity-table">
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th title="early / near-migration / migration">Kind</th>
+                <th title="Bonding curve progress %">Curve</th>
+                <th title="Distinct smart wallets seen">Wallets</th>
+                <th title="Birdeye smart-money score">Birdeye SM</th>
+                <th>Notes</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="7" class="text-slate-500">Waiting for Pump.fun smart wallet activity…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="mint mt-2" id="pump-hot-launches"></div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
+        <div class="card">
+          <div class="section-title">Post-Run Dip · Smart Wallet Activity <span class="tip" tabindex="0" data-tip="Dip-phase confirmation: HQ buys, buybacks, Fib/support clusters, net SM flow. Soft conviction boost; optional hard-require in Conservative."></span></div>
+          <div class="mint mb-2" id="prd-sm-status">—</div>
+          <div class="overflow-x-auto max-h-72 overflow-y-auto">
+            <table id="prd-sm-table">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th title="boost / skip / take">Outcome</th>
+                  <th title="Dip SM score 0–100">SM</th>
+                  <th title="High-quality wallet buys">HQ</th>
+                  <th title="Prior sellers / buyers buying back">Buyback</th>
+                  <th title="Cluster near Fib/support">@Level</th>
+                  <th title="Net smart-money flow">Flow</th>
+                  <th>Detail</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="9" class="text-slate-500">No dip smart-wallet events yet — enable Post-Run Dip</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Dynamic Position Sizing <span class="tip" tabindex="0" data-tip="Calculated buy size for each evaluated signal from base × risk × conviction."></span></div>
+          <div class="mint mb-2" id="sizing-status">—</div>
+          <div class="overflow-x-auto max-h-72 overflow-y-auto">
+            <table id="sizing-signals-table">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Size SOL</th>
+                  <th>Conviction</th>
+                  <th>Risk</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="7" class="text-slate-500">No sized signals yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid md:grid-cols-2 gap-3 sm:gap-4">
+        <div class="card">
+          <div class="section-title">Recent Signals <span class="tip" tabindex="0" data-tip="Why buys were taken or skipped: anti-rug, sniper score, curve stage, convergence."></span></div>
+          <div id="activity-signals" class="max-h-80 overflow-y-auto text-sm"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">Re-Entry Watch <span class="tip" tabindex="0" data-tip="Armed watches after TP (dip) or stop-loss (reclaim). Shows mint, stop reason, armed time, and status until confirm or expire."></span></div>
+          <div class="overflow-x-auto max-h-80 overflow-y-auto">
+            <table id="rebuy-table">
+              <thead><tr><th>Token</th><th>Kind</th><th>Status</th><th title="Dip from peak or reclaim from trough">Move</th><th title="Confirming smart wallets">Wallets</th><th>Volume</th><th>Armed</th><th>Reason</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -9649,7 +9641,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} }
-      if (name === 'overview' || name === 'signals' || name === 'trades' || name === 'scanner') {
+      if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
       }
@@ -9658,7 +9650,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function applyLogFilter() {
       const type = (document.getElementById('log-filter-type') || {}).value || 'all';
       const q = ((document.getElementById('log-filter-q') || {}).value || '').toLowerCase();
-      document.querySelectorAll('#logs .log-entry, #logs-full .log-entry').forEach(el => {
+      document.querySelectorAll('#logs-full .log-entry').forEach(el => {
         const t = el.getAttribute('data-type') || '';
         const text = (el.textContent || '').toLowerCase();
         const typeOk = type === 'all' || t === type || (type === 'risk' && /anti-rug|sniper|skipped|risk/i.test(text));
@@ -11756,14 +11748,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     let _posHoldTimer = null;
     function tickOpenPositionHolds() {
       const overview = document.querySelector('[data-tab-panel="overview"]');
-      const signals = document.querySelector('[data-tab-panel="signals"]');
       const trades = document.querySelector('[data-tab-panel="trades"]');
       const scanner = document.querySelector('[data-tab-panel="scanner"]');
       const overviewVisible = overview && !overview.classList.contains('hidden');
-      const signalsVisible = signals && !signals.classList.contains('hidden');
       const tradesVisible = trades && !trades.classList.contains('hidden');
       const scannerVisible = scanner && !scanner.classList.contains('hidden');
-      if (!overviewVisible && !signalsVisible && !tradesVisible && !scannerVisible) return;
+      if (!overviewVisible && !tradesVisible && !scannerVisible) return;
       const now = Date.now();
       if (overviewVisible || tradesVisible) {
         document.querySelectorAll('.pos-hold[data-opened-at]').forEach((el) => {
@@ -14964,7 +14954,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           scanSt.textContent = statusText;
         });
         const feedHtml = cands.length === 0
-          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on the Scanner tab or Settings → Market Scanner (TA).</div>'
+          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on Live Feed or Settings → Market Scanner (TA).</div>'
           : cands.slice(0, 25).map(function (c) {
               const migBadge = c.migrated
                 ? '<span class="badge" style="background:#7c3aed;color:#fff;margin-right:0.35rem" title="Migration entry">Migration</span>'
@@ -19054,7 +19044,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     window.clearLearningSavesFilter = clearLearningSavesFilter;
 
-    async function exportLearningData    async function exportLearningData(format) {
+    async function exportLearningData(format) {
       const status = document.getElementById('learning-export-status');
       try {
         if (status) status.textContent = 'Exporting…';
@@ -19521,9 +19511,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     });
     const savedTab = (() => { try { return localStorage.getItem('botDashboardTab'); } catch (_) { return null; } })();
     const normalizeTabName = function (name) {
-      return name === 'strategies' ? 'settings' : name;
+      if (name === 'strategies') return 'settings';
+      if (name === 'signals') return 'scanner';
+      return name;
     };
-    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'signals', 'scanner', 'settings', 'backtester', 'config', 'logs'];
+    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
