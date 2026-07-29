@@ -35,16 +35,16 @@ export interface HighWinRateQualityFilter {
 export const DEFAULT_HWR_QUALITY_FILTER: HighWinRateQualityFilter = {
   enabled: true,
   mode: 'reject',
-  minMarketCapUsd: 200_000,
-  preferMarketCapUsd: 400_000,
-  minLiquidityUsd: 12_000,
-  minVolumeH1Usd: 6_000,
-  minHolders: 80,
+  minMarketCapUsd: 500_000,
+  preferMarketCapUsd: 1_000_000,
+  minLiquidityUsd: 20_000,
+  minVolumeH1Usd: 15_000,
+  minHolders: 150,
   weakSetupPenalty: 40,
   applyToFibSupport: true,
   preferFibOrSupport: true,
   minPatternConfidence: 68,
-  cleanSetupBonus: 10,
+  cleanSetupBonus: 12,
 };
 
 export interface HwrQualityContext {

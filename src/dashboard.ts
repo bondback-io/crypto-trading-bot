@@ -6003,6 +6003,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
 
+      <div id="dip-watch-strip" class="card text-xs text-slate-300" style="background:#0b1220;border:1px solid #1e293b;padding:0.65rem 0.75rem">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <span class="font-semibold text-slate-200">Dip Buyer watchlist</span>
+          <span id="dip-watch-count" class="mint">—</span>
+        </div>
+        <div id="dip-watch-list" class="text-slate-400">No active dip setups</div>
+      </div>
+
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
           <div style="min-width:0;flex:1">
@@ -8280,6 +8288,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       window.__tradeProfilesStatus = tp;
       if (typeof updateGlobalMicroBotTpUi === 'function') {
         updateGlobalMicroBotTpUi(tp.globalTakeProfit);
+      }
+      const dipCount = document.getElementById('dip-watch-count');
+      const dipList = document.getElementById('dip-watch-list');
+      if (dipCount || dipList) {
+        const dw = tp.dipWatch || { active: 0, entries: [] };
+        if (dipCount) {
+          dipCount.textContent = (dw.active || 0) + ' active';
+        }
+        if (dipList) {
+          const rows = (dw.entries || []).filter(function (e) {
+            return e.status === 'watching' || e.status === 'armed';
+          }).slice(0, 8);
+          dipList.innerHTML = rows.length
+            ? rows.map(function (e) {
+                return (
+                  '<div class="flex justify-between gap-2 border-t border-slate-800 py-1">' +
+                  '<span>' + escHtml(e.symbol || '') + ' · ' + escHtml(e.status) + '</span>' +
+                  '<span class="mint">' +
+                  (e.dropFromPeakPct != null ? ('−' + Number(e.dropFromPeakPct).toFixed(0) + '%') : '—') +
+                  '</span></div>'
+                );
+              }).join('')
+            : 'No active dip setups';
+        }
       }
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;

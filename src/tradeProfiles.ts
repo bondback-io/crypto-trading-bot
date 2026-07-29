@@ -231,12 +231,26 @@ export interface TradeProfileMatchRules {
   /** Dip / reversal: peak drop */
   minDropFromPeakPct?: number;
   maxDropFromPeakPct?: number;
+  /**
+   * Steady Compounder: small pullback band from local high (positive %).
+   * When set with preferSteadyCompounder, require pullback in [min, max] OR volume uptick.
+   */
+  minPullbackPct?: number;
+  maxPullbackPct?: number;
   /** Dip: min prior run % (e.g. 80–120) */
   minPriceChange24hPct?: number;
+  /** Prefer MC at or above this for soft bonus (not a hard floor — use minMarketCapUsd for hard) */
+  preferMarketCapUsd?: number;
   /** Dip: bonus when near Fib 0.5/0.618 or support */
   preferFibOrSupport?: boolean;
   /** Bonus when bullish chart patterns are active */
   preferBullishPatterns?: boolean;
+  /**
+   * High Win-Rate: require pattern + Fib/S + confirmation concurrence.
+   */
+  requireMultiTaConfirm?: boolean;
+  /** Soft-bonus when holder count is rising vs prior snapshot */
+  preferHolderGrowth?: boolean;
   /**
    * @deprecated Prefer primaryPatternIds + secondaryPatternIds.
    * Still honored as primary-tier if primary/secondary unset.
@@ -492,7 +506,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 35–60% (partial + runner via trail)',
       'SL 12–18%',
       'Key levels: Fib 0.5 & 0.618 or clear support',
-      'Min prior run +40–80% (max age ~12–24h) · dip ≥8% from peak',
+      'Established tokens: MC ≥$500k (prefer ≥$1M) · holders + volume',
+      'Dip ≥8% from peak (max ~45%) · watchlist → trigger on Fib/S',
       'Size: normal / slightly larger on high conviction',
     ],
     priority: 85,
@@ -512,8 +527,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
+      minMarketCapUsd: 500_000,
+      preferMarketCapUsd: 1_000_000,
+      minHolders: 80,
+      minVolumeH1Usd: 8_000,
       minDropFromPeakPct: 8,
-      minPriceChange24hPct: 40,
+      maxDropFromPeakPct: 45,
+      minPriceChange24hPct: 25,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
       jupiterCategory: 'toporganicscore',
@@ -561,18 +581,18 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'Low / Medium',
     style: 'Trend Hold',
     rulesSummary: [
-      'Focuses on tokens that have been trading longer',
-      'Prefers higher holders and volume',
-      'Targets smaller consistent gains (5–12%)',
-      'Tighter risk controls (~8% SL, ~6% trail)',
-      'Allows longer hold times than Scalper (no hard timer)',
-      'Lane floors: age ≥2h · holders ≥35 · 1h vol ≥$1.5k',
+      'Quality continuation: age ≥3h · MC ≥$200k preferred',
+      'Holders + KOL presence · 1h vol floor + soft tiers toward $50k/$100k/$500k',
+      'Targets 8–18% · tighter risk (~7–10% SL)',
+      'Patterns: pullback / bull flag / trend continuation',
+      'Lane floors: age ≥3h · holders ≥50 · 1h vol ≥$8k',
     ],
-    priority: 55,
+    priority: 68,
     defaultEnabled: true,
     match: {
       preferTrend: true,
       preferBullishPatterns: true,
+      preferHolderGrowth: true,
       primaryPatternIds: [
         'structured_pullback',
         'bull_flag',
@@ -581,13 +601,15 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['volume_dryup_return'],
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
-      minConviction: 45,
-      minWalletQuality: 42,
+      minConviction: 42,
+      minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
-      minTokenAgeHours: 2,
-      minHolders: 35,
-      minVolumeH1Usd: 1_500,
+      minTokenAgeHours: 3,
+      minMarketCapUsd: 200_000,
+      preferMarketCapUsd: 500_000,
+      minHolders: 50,
+      minVolumeH1Usd: 8_000,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
       jupiterCategory: 'toporganicscore',
@@ -595,12 +617,12 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     },
     exitRules: {
       forceScalp: false,
-      takeProfitPctMin: 5,
-      takeProfitPctMax: 12,
-      stopLossPctMin: 6,
-      stopLossPctMax: 9,
+      takeProfitPctMin: 8,
+      takeProfitPctMax: 18,
+      stopLossPctMin: 7,
+      stopLossPctMax: 10,
       trailingStopPct: 6,
-      trailingActivationProfit: 5,
+      trailingActivationProfit: 6,
       sizeMultiplier: 1.0,
     },
     modules: { ...TREND_STYLE_MODULES },
@@ -690,18 +712,19 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'High Quality',
     rulesSummary: [
       'TP 40–70%+ · SL 11–16%',
-      'Min conviction 62+',
-      'Min wallet quality 55%+',
-      'Prefer 2+ quality wallets',
-      'Quality Filter: higher MC / liq / volume / holders on technicals',
-      'Selective · smaller size — can compete vs soft volume bursts',
+      'Min conviction 55+ · established MC / holders via Quality Filter',
+      'Multi-TA: pattern + Fib/S + confirmation',
+      'KOL / specialty feed preferred for scanner entries',
+      'Selective · smaller size — accuracy over volume',
     ],
-    priority: 70,
+    priority: 72,
     defaultEnabled: true,
     match: {
       preferHighWinRate: true,
       preferBullishPatterns: true,
       preferCleanPatterns: true,
+      preferFibOrSupport: true,
+      requireMultiTaConfirm: true,
       primaryPatternIds: [
         'volume_dryup_return',
         'falling_wedge',
@@ -712,13 +735,17 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternSensitivity: 'low',
       patternMinConfidence: DEFAULT_HWR_QUALITY_FILTER.minPatternConfidence,
       patternRequireBreakout: false,
-      patternRequireFibOrSupport: false,
+      patternRequireFibOrSupport: true,
       patternMinLiquidityUsd: DEFAULT_HWR_QUALITY_FILTER.minLiquidityUsd,
       patternMinHolders: DEFAULT_HWR_QUALITY_FILTER.minHolders,
       patternMinVolumeH1Usd: DEFAULT_HWR_QUALITY_FILTER.minVolumeH1Usd,
       patternMinMarketCapUsd: DEFAULT_HWR_QUALITY_FILTER.minMarketCapUsd,
       qualityFilter: { ...DEFAULT_HWR_QUALITY_FILTER },
-      minConviction: 62,
+      minMarketCapUsd: 500_000,
+      preferMarketCapUsd: 1_000_000,
+      minHolders: 150,
+      minVolumeH1Usd: 15_000,
+      minConviction: 55,
       requireCluster: true,
       minWalletCount: 2,
       minWalletQuality: 55,
@@ -828,12 +855,12 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Steady / Compounding',
     rulesSummary: [
       'TP 5–10% · SL 4–7%',
-      'Focus: higher holders + sustained volume',
+      'Heavy MC (≥$1M) · many holders · decent volume',
+      'Small pullbacks 3–12% or volume uptick — not deep dips',
       'Patient but disciplined · no hard timer',
-      'Small consistent gains',
-      'Lane floors: age ≥6h · holders ≥70 · 1h vol ≥$4k',
+      'Lane floors: age ≥4h · holders ≥120 · 1h vol ≥$8k · MC ≥$1M',
     ],
-    priority: 50,
+    priority: 62,
     defaultEnabled: true,
     match: {
       preferSteadyCompounder: true,
@@ -843,13 +870,17 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
       patternMinConfidence: 55,
-      minConviction: 42,
-      minWalletQuality: 45,
+      minConviction: 40,
+      minWalletQuality: 42,
       minWalletCount: 1,
       requireCluster: false,
-      minTokenAgeHours: 6,
-      minHolders: 70,
-      minVolumeH1Usd: 4_000,
+      minTokenAgeHours: 4,
+      minMarketCapUsd: 1_000_000,
+      preferMarketCapUsd: 2_000_000,
+      minHolders: 120,
+      minVolumeH1Usd: 8_000,
+      minPullbackPct: 3,
+      maxPullbackPct: 12,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
       jupiterCategory: 'toptrending',
@@ -1066,6 +1097,14 @@ export interface TradeProfileMatchContext {
   shortTermStrategyId?: string | null;
   convictionScore?: number | null;
   dropFromPeakPct?: number | null;
+  /** Local pullback % from recent high (often same source as dropFromPeak) */
+  localPullbackPct?: number | null;
+  /** Distinct KOL wallets on mint when known (Zion / specialty Kolscan) */
+  kolCount?: number | null;
+  /** Holder growth % vs prior snapshot when known */
+  holderGrowthPct?: number | null;
+  /** Confirmation layer level when evaluated for HWR multi-TA */
+  confirmationLevel?: 'none' | 'soft' | 'strong' | null;
   strategyKind?: 'migration' | 'normal';
   symbol?: string;
   marketCapUsd?: number | null;
@@ -1606,6 +1645,7 @@ export function getTradeProfilesStatus(): {
   enabled: boolean;
   smartBotProfiles: boolean;
   globalTakeProfit: GlobalMicroBotTakeProfit;
+  dipWatch?: { active: number; entries: unknown[] };
   profiles: Array<
     TradeProfileDefinition & {
       enabled: boolean;
@@ -1659,6 +1699,15 @@ export function getTradeProfilesStatus(): {
     enabled: state.enabled,
     smartBotProfiles: state.smartBotProfiles === true,
     globalTakeProfit: normalizeGlobalMicroBotTakeProfit(state.globalTakeProfit),
+    dipWatch: (() => {
+      try {
+        const { getDipSetupWatchStatus } =
+          require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+        return getDipSetupWatchStatus(12);
+      } catch {
+        return { active: 0, entries: [] };
+      }
+    })(),
     profiles,
     active: profiles
       .filter((p) => p.active)
@@ -1883,6 +1932,10 @@ export function updateTradeProfileParams(
         k === 'minVolumeM5Usd' ||
         k === 'minBuyPressureUsd' ||
         k === 'minDropFromPeakPct' ||
+        k === 'maxDropFromPeakPct' ||
+        k === 'minPullbackPct' ||
+        k === 'maxPullbackPct' ||
+        k === 'preferMarketCapUsd' ||
         k === 'minPriceChange24hPct' ||
         k === 'minWalletCount' ||
         k === 'minWalletQuality' ||
@@ -2301,11 +2354,31 @@ function scoreProfile(
   const drop =
     ctx.dropFromPeakPct != null && Number.isFinite(ctx.dropFromPeakPct)
       ? Number(ctx.dropFromPeakPct)
+      : ctx.localPullbackPct != null && Number.isFinite(ctx.localPullbackPct)
+        ? Number(ctx.localPullbackPct)
+        : null;
+  const pullback =
+    ctx.localPullbackPct != null && Number.isFinite(ctx.localPullbackPct)
+      ? Number(ctx.localPullbackPct)
+      : drop;
+  const kolN =
+    ctx.kolCount != null && Number.isFinite(ctx.kolCount)
+      ? Number(ctx.kolCount)
+      : null;
+  const holderGrowth =
+    ctx.holderGrowthPct != null && Number.isFinite(ctx.holderGrowthPct)
+      ? Number(ctx.holderGrowthPct)
       : null;
   const wallets =
     ctx.walletCount != null && Number.isFinite(ctx.walletCount)
       ? Number(ctx.walletCount)
       : null;
+  const effectiveClusterWallets = Math.max(wallets ?? 0, kolN ?? 0);
+
+  const feedPrefer =
+    Boolean(ctx.preferProfileId) &&
+    ctx.preferProfileId === def.id &&
+    m.kolscanFeedEnabled === true;
 
   const isDip =
     ctx.shortTermStrategyId === 'post_run_dip' ||
@@ -2343,21 +2416,25 @@ function scoreProfile(
       drop != null &&
       drop >= (m.minDropFromPeakPct ?? 18));
 
-  // Specialty engines that should own the mint over Trend/Compounder.
-  // Pattern-inferred "momentum" (e.g. bull_flag) must NOT veto Trend Rider —
-  // bull_flag / structured_pullback / trend_continuation are Trend primary patterns.
-  const specialtyArmed =
+  // Hostile specialty engines that should own the mint over Trend/Compounder.
+  // Soft dip-from-drop alone must NOT veto Trend — lane fight picks the winner.
+  // Pattern-inferred "momentum" must NOT veto Trend Rider.
+  const hostileArmed =
     isScalp ||
-    isDip ||
     isMig ||
     isReversal ||
-    ctx.shortTermStrategyId === 'momentum_burst';
+    ctx.shortTermStrategyId === 'momentum_burst' ||
+    ctx.shortTermStrategyId === 'post_run_dip';
 
   if (m.requireCluster && m.minWalletCount != null) {
-    if (wallets != null && wallets < m.minWalletCount) {
+    // Specialty / KOL-tagged HWR may satisfy cluster via kolCount
+    if (
+      effectiveClusterWallets < m.minWalletCount &&
+      !(feedPrefer && (kolN ?? 0) >= (m.minKolWallets ?? m.minWalletCount))
+    ) {
       return {
         score: 0,
-        reason: `cluster ${wallets} < ${m.minWalletCount} wallets`,
+        reason: `cluster ${effectiveClusterWallets} < ${m.minWalletCount} wallets`,
       };
     }
   }
@@ -2374,18 +2451,42 @@ function scoreProfile(
   }
 
   if (m.preferDip) {
-    if (!isDip) return { score: 0, reason: 'not a dip setup' };
+    const minDrop = m.minDropFromPeakPct ?? 8;
+    const maxDrop = m.maxDropFromPeakPct;
+    const dropOk =
+      drop != null &&
+      drop >= minDrop &&
+      (maxDrop == null || drop <= maxDrop);
+    const structuralDip =
+      dropOk ||
+      ((ctx.nearKeyFib || ctx.nearSupport) &&
+        drop != null &&
+        drop >= Math.min(5, minDrop));
+    const watchOrFeed =
+      feedPrefer ||
+      ctx.shortTermStrategyId === 'post_run_dip' ||
+      Boolean(isDip);
+    if (!structuralDip && !watchOrFeed) {
+      return { score: 0, reason: 'not a dip setup' };
+    }
     // Fresh migrations belong to Migration Sniper, not Dip Buyer
     if (isMig) return { score: 0, reason: 'defer to fresh migration' };
+    // Cascade flush past max dip — invalidate
+    if (maxDrop != null && drop != null && drop > maxDrop) {
+      return {
+        score: 0,
+        reason: `dip flush −${drop.toFixed(0)}% > max ${maxDrop}%`,
+      };
+    }
     score += 100;
-    bits.push('dip setup');
+    bits.push(structuralDip ? 'dip setup' : 'dip feed/watch');
     if (ctx.shortTermStrategyId === 'post_run_dip') {
       score += 25;
       bits.push('post_run_dip');
     }
     const strongRun =
       (chg24 != null && chg24 >= (m.minPriceChange24hPct ?? 12)) ||
-      (drop != null && drop >= (m.minDropFromPeakPct ?? 12));
+      (drop != null && drop >= minDrop);
     if (strongRun) {
       score += 15;
       bits.push('prior strong run');
@@ -2414,9 +2515,13 @@ function scoreProfile(
         bits.push(`patterns ${hits.join('+')}`);
       }
     }
-    if (volH1 != null && volH1 >= 2000) {
+    if (volH1 != null && volH1 >= (m.minVolumeH1Usd ?? 2000)) {
       score += 8;
       bits.push('volume confirm');
+    }
+    if (mc != null && m.preferMarketCapUsd != null && mc >= m.preferMarketCapUsd) {
+      score += 12;
+      bits.push(`prefer MC $${Math.round(mc)}`);
     }
     if (
       m.preferSmartMoney &&
@@ -2575,7 +2680,7 @@ function scoreProfile(
   }
 
   if (m.preferTrend) {
-    if (specialtyArmed) {
+    if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a trend hold setup' };
     }
     if (conv != null && conv < (m.minConviction ?? 50)) {
@@ -2615,8 +2720,8 @@ function scoreProfile(
       }
     }
     const convPart =
-      conv != null ? Math.min(35, (conv - 45) * 0.7) : 0;
-    score += 56 + convPart + quality * 8;
+      conv != null ? Math.min(35, (conv - 42) * 0.7) : 0;
+    score += 58 + convPart + quality * 8;
     bits.push(
       conv != null ? `trend conviction ${conv}` : 'trend conviction pending'
     );
@@ -2624,10 +2729,35 @@ function scoreProfile(
       score += 14;
       bits.push(`established MC $${Math.round(mc)}`);
     }
+    if (mc != null && m.preferMarketCapUsd != null && mc >= m.preferMarketCapUsd) {
+      score += 10;
+      bits.push(`prefer MC $${Math.round(mc)}`);
+    }
+    // Soft H1 volume quality tiers (aspirational $50k / $100k / $500k)
+    if (volH1 != null) {
+      if (volH1 >= 500_000) {
+        score += 22;
+        bits.push('elite 1h vol');
+      } else if (volH1 >= 100_000) {
+        score += 14;
+        bits.push('strong 1h vol');
+      } else if (volH1 >= 50_000) {
+        score += 8;
+        bits.push('good 1h vol');
+      }
+    }
+    if (kolN != null && kolN >= (m.minKolWallets ?? 3)) {
+      score += 12 + Math.min(10, (kolN - 2) * 2);
+      bits.push(`${kolN} KOLs`);
+    }
+    if (m.preferHolderGrowth && holderGrowth != null && holderGrowth > 5) {
+      score += Math.min(16, Math.round(holderGrowth / 2));
+      bits.push(`holder growth +${holderGrowth.toFixed(0)}%`);
+    }
   }
 
   if (m.preferSteadyCompounder) {
-    if (specialtyArmed) {
+    if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a compounder setup' };
     }
     if (conv != null && conv < (m.minConviction ?? 45)) {
@@ -2649,6 +2779,41 @@ function scoreProfile(
         reason: `1h vol $${Math.round(volH1)} < $${m.minVolumeH1Usd}`,
       };
     }
+    // Small pullback band OR volume uptick — not deep dips (leave those to Dip Buyer)
+    const minPb = m.minPullbackPct;
+    const maxPb = m.maxPullbackPct;
+    if (minPb != null || maxPb != null) {
+      const pb = pullback;
+      const inBand =
+        pb != null &&
+        (minPb == null || pb >= minPb) &&
+        (maxPb == null || pb <= maxPb);
+      const volUptick =
+        volM5 != null &&
+        volH1 != null &&
+        volH1 > 0 &&
+        volM5 >= volH1 * 0.08;
+      const deepDip = pb != null && maxPb != null && pb > maxPb;
+      if (deepDip && !feedPrefer) {
+        return {
+          score: 0,
+          reason: `pullback −${pb!.toFixed(0)}% too deep for compounder`,
+        };
+      }
+      if (!inBand && !volUptick && !feedPrefer && pb != null) {
+        return {
+          score: 0,
+          reason: `need small pullback ${minPb ?? 0}–${maxPb ?? 12}% or vol uptick`,
+        };
+      }
+      if (inBand) {
+        score += 18;
+        bits.push(`small pullback −${pb!.toFixed(1)}%`);
+      } else if (volUptick) {
+        score += 12;
+        bits.push('volume uptick');
+      }
+    }
     let q = 0;
     if (ageH != null && m.minTokenAgeHours != null && ageH >= ageFloor) {
       q += 1;
@@ -2663,16 +2828,19 @@ function scoreProfile(
       bits.push(`1h vol $${Math.round(volH1)}`);
     }
     const convPart =
-      conv != null ? Math.min(25, (conv - 42) * 0.5) : 0;
-    score += 54 + convPart + q * 10;
+      conv != null ? Math.min(25, (conv - 40) * 0.5) : 0;
+    score += 56 + convPart + q * 10;
     bits.push(
       conv != null
         ? `compounder conviction ${conv}`
         : 'compounder conviction pending'
     );
-    if (mc != null && mc >= 300_000) {
-      score += 10;
-      bits.push(`established MC $${Math.round(mc)}`);
+    if (mc != null && mc >= 1_000_000) {
+      score += 16;
+      bits.push(`heavy MC $${Math.round(mc)}`);
+    } else if (mc != null && mc >= 300_000) {
+      score += 8;
+      bits.push(`MC $${Math.round(mc)}`);
     }
   }
 
@@ -2771,21 +2939,22 @@ function scoreProfile(
   if (m.preferHighWinRate) {
     if (isMig) return { score: 0, reason: 'defer to fresh migration' };
     // Soft volume bursts no longer hard-veto HWR — only armed specialty engines
+    // Soft isDip-from-drop alone does not veto when specialty feed prefers HWR
     if (
       isScalp ||
-      isDip ||
       isReversal ||
-      ctx.shortTermStrategyId === 'momentum_burst'
+      ctx.shortTermStrategyId === 'momentum_burst' ||
+      (ctx.shortTermStrategyId === 'post_run_dip' && !feedPrefer)
     ) {
       return { score: 0, reason: 'not high-win-rate selective' };
     }
-    if (conv != null && conv < (m.minConviction ?? 62)) {
+    if (conv != null && conv < (m.minConviction ?? 55)) {
       return { score: 0, reason: 'conviction too low' };
     }
     if (
       m.requireCluster &&
-      wallets != null &&
-      wallets < (m.minWalletCount ?? 2)
+      effectiveClusterWallets < (m.minWalletCount ?? 2) &&
+      !(feedPrefer && (kolN ?? 0) >= (m.minKolWallets ?? 2))
     ) {
       return { score: 0, reason: 'need cluster for high win-rate' };
     }
@@ -2800,20 +2969,24 @@ function scoreProfile(
       };
     }
     const hwrConv =
-      conv != null ? Math.min(35, (conv - 62) * 0.8) : 0;
+      conv != null ? Math.min(35, (conv - 55) * 0.8) : 0;
     score += 64 + hwrConv;
     bits.push(
       conv != null
         ? `high-quality conviction ${conv}`
         : 'high-quality conviction pending'
     );
-    if (wallets != null && wallets >= (m.minWalletCount ?? 2)) {
+    if (effectiveClusterWallets >= (m.minWalletCount ?? 2)) {
       score += 14;
-      bits.push(`cluster ${wallets}`);
+      bits.push(`cluster ${effectiveClusterWallets}`);
     }
     if (wq != null && m.minWalletQuality != null && wq >= m.minWalletQuality) {
       score += 12;
       bits.push(`WQ ${wq.toFixed(0)}`);
+    }
+    if (kolN != null && kolN >= (m.minKolWallets ?? 4)) {
+      score += 10;
+      bits.push(`${kolN} KOLs`);
     }
     if (
       m.preferSmartMoney &&
@@ -3065,13 +3238,36 @@ function scoreProfile(
 
   if (score <= 0) return { score: 0, reason: 'no match' };
 
+  // HWR multi-TA concurrence: pattern + Fib/S + confirmation (or specialty feed)
+  if (m.preferHighWinRate && m.requireMultiTaConfirm === true && !feedPrefer) {
+    const hasPattern =
+      patternHits.length > 0 || (ctx.chartPatternIds || []).length > 0;
+    const hasFibSr = ctx.nearKeyFib === true || ctx.nearSupport === true;
+    const conf = ctx.confirmationLevel;
+    const confOk =
+      conf === 'soft' ||
+      conf === 'strong' ||
+      (conv != null && conv >= 62);
+    if (!hasPattern || !hasFibSr || !confOk) {
+      return {
+        score: 0,
+        reason: `HWR multi-TA need pattern+Fib/S+confirm (p=${hasPattern} fib=${hasFibSr} conf=${conf || 'none'})`,
+      };
+    }
+    score += 14;
+    bits.push('multi-TA confirm');
+  } else if (m.preferHighWinRate && m.requireMultiTaConfirm === true && feedPrefer) {
+    bits.push('multi-TA via specialty feed');
+    score += 8;
+  }
+
   // Specialty feed soft prefer — tagged higher-quality tokens for this profile
   if (
     ctx.preferProfileId &&
     ctx.preferProfileId === def.id &&
     m.kolscanFeedEnabled === true
   ) {
-    score += 22;
+    score += 38;
     bits.push(
       ctx.specialtyFeed
         ? `specialty feed ${ctx.specialtyFeed}`

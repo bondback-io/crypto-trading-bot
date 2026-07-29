@@ -56,7 +56,8 @@ function buildCandidate(
   profileId: string,
   feed: 'jupiter' | 'kolscan',
   rankScore: number,
-  reasons: string[]
+  reasons: string[],
+  kolCount?: number
 ): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
   return {
@@ -83,6 +84,7 @@ function buildCandidate(
     organicScore: event.organicScore,
     preferredProfileId: profileId,
     specialtyFeed: feed,
+    kolCount: kolCount != null && kolCount > 0 ? kolCount : undefined,
     candleSource: event.candleSource ?? 'synthetic',
     launch: {
       ...event,
@@ -260,12 +262,31 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           `specialty:${p.id}`,
           `kolscan:${kc.kolCount} KOLs`,
           `WQ ${avgQ.toFixed(0)}`,
-        ]
+        ],
+        kc.kolCount
       );
       if (handOffScannerCandidate(c)) {
         handed += 1;
         profileHanded += 1;
         handedMints.add(kc.mint);
+        try {
+          const { offerDipWatchFromCandidate } =
+            require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+          offerDipWatchFromCandidate({
+            mint: c.mint,
+            symbol: c.symbol,
+            name: c.name,
+            marketCapUsd: c.marketCapUsd,
+            volumeH1Usd: c.volumeH1Usd,
+            holderCount: c.holderCount,
+            priceChangeH1Pct: c.priceChangeH1Pct,
+            kolCount: c.kolCount,
+            specialtyFeed: 'kolscan',
+            preferredProfileId: p.id,
+          });
+        } catch {
+          /* optional */
+        }
       }
     }
   }

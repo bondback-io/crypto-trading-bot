@@ -70,6 +70,8 @@ export interface ScannerCandidate {
   /** Soft prefer this Smart Bot profile when specialty feed tagged the mint */
   preferredProfileId?: string;
   specialtyFeed?: 'jupiter' | 'kolscan';
+  /** Distinct KOL wallets when from Kolscan specialty feed */
+  kolCount?: number;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -1059,6 +1061,33 @@ export async function runScannerPollOnce(): Promise<number> {
         'Specialty feed pass failed',
         errorToMeta(err)
       );
+    }
+    try {
+      const {
+        offerDipWatchFromCandidate,
+        tickDipSetupWatches,
+      } = require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      for (const c of picked) {
+        offerDipWatchFromCandidate({
+          mint: c.mint,
+          symbol: c.symbol,
+          name: c.name,
+          marketCapUsd: c.marketCapUsd,
+          volumeH1Usd: c.volumeH1Usd,
+          holderCount: c.holderCount,
+          priceChangeH1Pct: c.priceChangeH1Pct,
+          nearKeyFib: c.nearKeyFib,
+          nearSupport: c.nearSupport,
+        });
+      }
+      const triggered = await tickDipSetupWatches();
+      if (triggered > 0) {
+        console.log(
+          `[marketScanner] dip-watch triggered ${triggered} candidate(s)`
+        );
+      }
+    } catch (err) {
+      logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
     }
     return handed;
   } catch (err) {

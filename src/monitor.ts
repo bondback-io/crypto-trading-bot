@@ -182,6 +182,10 @@ function buildTradeProfileMatchContext(
     shortTermStrategyId: extras?.shortTermStrategyId,
     convictionScore: signal.convictionScore,
     dropFromPeakPct: signal.dropFromPeakPct,
+    localPullbackPct: signal.localPullbackPct ?? signal.dropFromPeakPct,
+    kolCount: signal.kolCount ?? null,
+    holderGrowthPct: signal.holderGrowthPct ?? null,
+    confirmationLevel: signal.confirmationLevel ?? null,
     strategyKind: extras?.strategyKind,
     symbol: signal.symbol,
     marketCapUsd:
@@ -229,10 +233,55 @@ function buildTradeProfileMatchContext(
 }
 
 /**
- * Best-effort MC / holders / volume before Smart Bot lane fight.
+ * Best-effort MC / holders / volume / dip-pullback before Smart Bot lane fight.
  * Wallet signals often arrive without metrics; without this, minConviction /
  * Min MC Override / Scalper Max MC zero every lane.
  */
+const holderGrowthSnapshots = new Map<
+  string,
+  { holders: number; at: number }
+>();
+
+function noteHolderGrowthPct(
+  mint: string,
+  holders: number | null | undefined
+): number | null {
+  if (holders == null || !Number.isFinite(holders) || holders <= 0) return null;
+  const prev = holderGrowthSnapshots.get(mint);
+  const now = Date.now();
+  holderGrowthSnapshots.set(mint, { holders, at: now });
+  if (!prev || prev.holders <= 0) return null;
+  const hours = (now - prev.at) / 3_600_000;
+  if (hours < 0.08) return null;
+  return ((holders - prev.holders) / prev.holders) * 100;
+}
+
+function estimateDropFromPeakPct(signal: TradeSignal): number | null {
+  if (
+    signal.dropFromPeakPct != null &&
+    Number.isFinite(signal.dropFromPeakPct) &&
+    signal.dropFromPeakPct > 0
+  ) {
+    return Number(signal.dropFromPeakPct);
+  }
+  const h1 = signal.metrics?.priceChangeH1Pct;
+  if (h1 != null && Number.isFinite(h1) && h1 < -1) {
+    return Math.abs(Number(h1));
+  }
+  const candles = signal.candles;
+  if (Array.isArray(candles) && candles.length >= 4) {
+    const prices = candles
+      .map((c) => Number(c.priceSol ?? c.price ?? 0))
+      .filter((p) => p > 0);
+    if (prices.length >= 4) {
+      const peak = Math.max(...prices);
+      const last = prices[prices.length - 1]!;
+      if (peak > last) return ((peak - last) / peak) * 100;
+    }
+  }
+  return null;
+}
+
 async function enrichSignalForLaneFight(signal: TradeSignal): Promise<void> {
   const needsMetrics =
     !signal.metrics ||
@@ -300,11 +349,72 @@ async function enrichSignalForLaneFight(signal: TradeSignal): Promise<void> {
     }
   }
 
+  // Dip / pullback enrich for Dip Buyer + Compounder lane fight
+  const drop = estimateDropFromPeakPct(signal);
+  if (drop != null) {
+    signal.dropFromPeakPct = drop;
+    signal.localPullbackPct = drop;
+  }
+
+  const growth = noteHolderGrowthPct(
+    signal.mint,
+    signal.metrics?.holderCountEstimate
+  );
+  if (growth != null) signal.holderGrowthPct = growth;
+
+  // Soft Fib/S from cached technicals when missing
+  if (signal.nearKeyFib == null && signal.nearSupport == null) {
+    try {
+      const { getTechnicalSnapshot } =
+        require('./technicalLevels') as typeof import('./technicalLevels');
+      const snap = getTechnicalSnapshot(signal.mint);
+      if (snap) {
+        if (snap.nearKeyFib) signal.nearKeyFib = true;
+        if (snap.nearSupport) signal.nearSupport = true;
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  // Lightweight confirmation level for HWR multi-TA (non-blocking)
+  if (signal.confirmationLevel == null) {
+    try {
+      const { resolveConfirmationLayerForSignal } =
+        require('./confirmationLayer') as typeof import('./confirmationLayer');
+      const verdict = resolveConfirmationLayerForSignal(signal as never);
+      const st = verdict?.report?.status;
+      if (st === 'strong' || st === 'very_strong') {
+        signal.confirmationLevel = 'strong';
+      } else if (st === 'moderate') {
+        signal.confirmationLevel = 'soft';
+      } else if (st) {
+        signal.confirmationLevel = 'none';
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  // KOL count from Zion feed when missing
+  if (signal.kolCount == null) {
+    try {
+      const { getZionScannerFeed } =
+        require('./zionKolScanner') as typeof import('./zionKolScanner');
+      const hit = getZionScannerFeed(80).find((c) => c.mint === signal.mint);
+      if (hit?.kolCount != null) signal.kolCount = hit.kolCount;
+    } catch {
+      /* optional */
+    }
+  }
+
   console.log(
     `[monitor] Lane enrich ${signal.symbol}: ` +
       `MC=${signal.sourceEntryMcUsd != null ? `$${Math.round(signal.sourceEntryMcUsd)}` : '?'} · ` +
       `holders=${signal.metrics?.holderCountEstimate ?? '?'} · ` +
-      `vol1h=${signal.metrics?.volumeH1Usd != null ? `$${Math.round(signal.metrics.volumeH1Usd)}` : '?'}`
+      `vol1h=${signal.metrics?.volumeH1Usd != null ? `$${Math.round(signal.metrics.volumeH1Usd)}` : '?'} · ` +
+      `drop=${signal.dropFromPeakPct != null ? `${signal.dropFromPeakPct.toFixed(0)}%` : '?'} · ` +
+      `kol=${signal.kolCount ?? '?'}`
   );
 }
 
@@ -507,6 +617,14 @@ export interface TradeSignal {
   allowSingleWalletException?: boolean;
   /** Drop from recent peak % (positive) when known */
   dropFromPeakPct?: number | null;
+  /** Local pullback % (alias / refined drop) */
+  localPullbackPct?: number | null;
+  /** Distinct KOL wallets on mint when known */
+  kolCount?: number | null;
+  /** Holder growth % vs prior snapshot */
+  holderGrowthPct?: number | null;
+  /** Confirmation layer level for HWR multi-TA */
+  confirmationLevel?: 'none' | 'soft' | 'strong' | null;
   /** Estimated token age in hours when known */
   tokenAgeHours?: number | null;
   /** Soft-scored profile id when Smart Bot Profiles is ON (entry gating) */
@@ -2064,6 +2182,10 @@ async function handleScannerCandidate(
         undefined,
       specialtyFeed:
         candidate.specialtyFeed || launch.specialtyFeed || null,
+      kolCount:
+        candidate.kolCount != null && Number.isFinite(candidate.kolCount)
+          ? candidate.kolCount
+          : undefined,
       organicScore:
         candidate.organicScore != null &&
         Number.isFinite(candidate.organicScore)
