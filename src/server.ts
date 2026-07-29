@@ -212,7 +212,9 @@ function corsMiddleware(
 export function createServer(): express.Application {
   const app = express();
   app.use(corsMiddleware);
-  app.use(express.json());
+  // Site-backup restore posts the full snapshot (~1MB+); default 100kb is too small.
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
   const bootedAt = Date.now();
 
@@ -411,17 +413,24 @@ export function createServer(): express.Application {
         isValidSiteBackup,
         getLatestSiteBackupMeta,
       } = require('./siteBackup') as typeof import('./siteBackup');
-      const body = (req.body ?? {}) as { backup?: unknown };
+      const body = (req.body ?? {}) as { backup?: unknown } & Record<string, unknown>;
       let result;
-      if (body.backup != null) {
-        if (!isValidSiteBackup(body.backup)) {
+      // Accept either { backup: {...} } or the site-backup object at the root.
+      const payload =
+        body.backup != null
+          ? body.backup
+          : body.kind === 'site-backup'
+            ? body
+            : null;
+      if (payload != null) {
+        if (!isValidSiteBackup(payload)) {
           res.status(400).json({
             ok: false,
             error: 'Invalid backup payload (need kind=site-backup version=1)',
           });
           return;
         }
-        result = restoreSiteBackup(body.backup);
+        result = restoreSiteBackup(payload as import('./siteBackup').SiteBackup);
       } else {
         result = restoreSiteBackup('latest');
       }
@@ -437,9 +446,79 @@ export function createServer(): express.Application {
         message: `Restored backup ${result.exportedAt} (${result.fileCount} files)`,
       });
     } catch (err) {
-      res.status(400).json({
+      const msg = err instanceof Error ? err.message : String(err);
+      const tooLarge =
+        /entity too large|request entity too large|payload too large/i.test(msg);
+      res.status(tooLarge ? 413 : 400).json({
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: tooLarge
+          ? 'Backup file too large for server JSON limit — raise limit or use a smaller export'
+          : msg,
+      });
+    }
+  });
+
+  /**
+   * Restore from an uploaded site-backup JSON (body = backup object, or { backup }).
+   * Uses the global 25mb JSON limit so ~1MB+ downloads succeed.
+   */
+  app.post('/api/site-backup/restore-upload', (req: Request, res: Response) => {
+    try {
+      const {
+        restoreSiteBackup,
+        isValidSiteBackup,
+        getLatestSiteBackupMeta,
+      } = require('./siteBackup') as typeof import('./siteBackup');
+      const body = req.body as unknown;
+      let payload: unknown = null;
+      if (Buffer.isBuffer(body)) {
+        try {
+          payload = JSON.parse(body.toString('utf8'));
+        } catch {
+          res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
+          return;
+        }
+      } else if (typeof body === 'string') {
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          res.status(400).json({ ok: false, error: 'Upload is not valid JSON' });
+          return;
+        }
+      } else if (body && typeof body === 'object') {
+        const obj = body as { backup?: unknown; kind?: string };
+        payload = obj.backup != null ? obj.backup : obj;
+      }
+      if (!isValidSiteBackup(payload)) {
+        res.status(400).json({
+          ok: false,
+          error: 'Invalid backup payload (need kind=site-backup version=1)',
+        });
+        return;
+      }
+      const result = restoreSiteBackup(
+        payload as import('./siteBackup').SiteBackup
+      );
+      res.json({
+        ok: true,
+        written: result.written,
+        exportedAt: result.exportedAt,
+        fileCount: result.fileCount,
+        meta: getLatestSiteBackupMeta(),
+        persistence: getPersistenceStatus(),
+        config: getConfigSnapshot(),
+        wallets: getWalletsWithActivity(),
+        message: `Restored backup ${result.exportedAt} (${result.fileCount} files)`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const tooLarge =
+        /entity too large|request entity too large|payload too large/i.test(msg);
+      res.status(tooLarge ? 413 : 400).json({
+        ok: false,
+        error: tooLarge
+          ? 'Backup file too large for server upload limit (25mb)'
+          : msg,
       });
     }
   });

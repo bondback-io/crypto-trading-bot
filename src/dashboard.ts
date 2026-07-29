@@ -613,7 +613,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
-    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip) {
+    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip):not(.notif-item):not(.notif-bell-btn) {
       background: #059669;
       color: white;
       border: 1px solid #059669;
@@ -3646,6 +3646,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       background: #0b1220;
       box-shadow: 0 12px 40px rgba(0,0,0,0.45);
       overflow: hidden;
+      color: #e2e8f0;
     }
     .notif-panel.open { display: flex; }
     .notif-panel-head {
@@ -3656,79 +3657,162 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       padding: 0.55rem 0.7rem;
       border-bottom: 1px solid #1e293b;
       background: #0f172a;
+      flex-shrink: 0;
     }
     .notif-panel-head strong { font-size: 0.8rem; color: #e2e8f0; }
     .notif-panel-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
-    .notif-panel-actions button {
+    .notif-panel-actions button,
+    .notif-panel-actions .btn {
       font-size: 0.65rem;
-      padding: 0.2rem 0.45rem;
+      padding: 0.28rem 0.5rem;
+      min-height: 1.75rem;
       border-radius: 0.35rem;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #cbd5e1;
+      border: 1px solid #334155 !important;
+      background: #1e293b !important;
+      color: #cbd5e1 !important;
       cursor: pointer;
+      font-weight: 600;
+      box-shadow: none;
+    }
+    .notif-panel-actions button:hover,
+    .notif-panel-actions .btn:hover {
+      background: #334155 !important;
+      color: #f1f5f9 !important;
     }
     .notif-panel-list {
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
       flex: 1 1 auto;
-      padding: 0.25rem 0;
+      padding: 0.2rem 0;
+      background: #0b1220;
     }
     .notif-item {
       display: block;
       width: 100%;
       text-align: left;
       border: 0;
+      border-radius: 0;
       border-bottom: 1px solid #1e293b;
-      background: transparent;
-      color: inherit;
-      padding: 0.55rem 0.7rem;
+      border-left: 3px solid #334155;
+      background: #0b1220 !important;
+      color: #e2e8f0 !important;
+      padding: 0.65rem 0.75rem;
       cursor: default;
+      font-weight: 400;
+      box-shadow: none;
     }
     .notif-item.is-clickable { cursor: pointer; }
-    .notif-item.is-clickable:hover { background: #111827; }
-    .notif-item.is-unread { background: #0f1c2e; }
+    .notif-item.is-clickable:hover,
+    .notif-item:hover {
+      background: #111827 !important;
+    }
+    .notif-item.is-unread {
+      background: #0f172a !important;
+    }
+    .notif-item.is-unread:hover {
+      background: #152033 !important;
+    }
+    .notif-item.notif-kind-error { border-left-color: #f87171; }
+    .notif-item.notif-kind-trade_request { border-left-color: #fbbf24; }
+    .notif-item.notif-kind-profit_close { border-left-color: #34d399; }
+    .notif-item.notif-kind-email { border-left-color: #60a5fa; }
+    .notif-item.notif-kind-version { border-left-color: #a78bfa; }
+    .notif-item.notif-kind-system { border-left-color: #64748b; }
     .notif-item-top {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 0.5rem;
+      gap: 0.55rem;
     }
     .notif-item-title {
-      font-size: 0.75rem;
+      font-size: 0.78rem;
       font-weight: 650;
-      color: #e2e8f0;
-      line-height: 1.25;
+      color: #f1f5f9;
+      line-height: 1.3;
       min-width: 0;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .notif-item-time {
       flex: 0 0 auto;
-      font-size: 0.62rem;
-      color: #64748b;
+      font-size: 0.65rem;
+      color: #94a3b8;
       white-space: nowrap;
+      padding-top: 0.1rem;
     }
     .notif-item-body {
-      margin-top: 0.15rem;
-      font-size: 0.68rem;
-      color: #94a3b8;
-      line-height: 1.35;
+      margin-top: 0.2rem;
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      line-height: 1.4;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .notif-item-kind {
       display: inline-block;
-      margin-top: 0.25rem;
+      margin-top: 0.35rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.25rem;
       font-size: 0.58rem;
+      font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      color: #64748b;
+      color: #94a3b8;
+      background: #1e293b;
+      border: 1px solid #334155;
+    }
+    .notif-item.notif-kind-error .notif-item-kind {
+      color: #fecaca;
+      background: rgba(127, 29, 29, 0.45);
+      border-color: rgba(248, 113, 113, 0.35);
+    }
+    .notif-item.notif-kind-trade_request .notif-item-kind {
+      color: #fde68a;
+      background: rgba(120, 53, 15, 0.4);
+      border-color: rgba(251, 191, 36, 0.35);
+    }
+    .notif-item.notif-kind-profit_close .notif-item-kind {
+      color: #a7f3d0;
+      background: rgba(6, 78, 59, 0.4);
+      border-color: rgba(52, 211, 153, 0.35);
     }
     .notif-empty {
       padding: 1.1rem 0.8rem;
       text-align: center;
-      color: #64748b;
+      color: #94a3b8;
       font-size: 0.75rem;
+      background: transparent;
+    }
+    @media (max-width: 639px) {
+      .notif-bell-wrap {
+        position: static;
+      }
+      .notif-panel {
+        position: fixed;
+        top: max(0.65rem, env(safe-area-inset-top, 0px));
+        right: max(0.65rem, env(safe-area-inset-right, 0px));
+        left: max(0.65rem, env(safe-area-inset-left, 0px));
+        width: auto;
+        max-width: none;
+        max-height: min(78vh, 32rem);
+        border-radius: 0.75rem;
+      }
+      .notif-panel-head {
+        padding: 0.7rem 0.85rem;
+        gap: 0.65rem;
+      }
+      .notif-panel-head strong { font-size: 0.9rem; }
+      .notif-panel-actions button {
+        min-height: 2.15rem;
+        padding: 0.35rem 0.65rem;
+        font-size: 0.72rem;
+      }
+      .notif-item {
+        padding: 0.8rem 0.85rem;
+      }
+      .notif-item-title { font-size: 0.85rem; }
+      .notif-item-body { font-size: 0.78rem; }
+      .notif-item-time { font-size: 0.7rem; }
     }
     .settings-dropdown {
       display: none;
@@ -4345,8 +4429,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <div class="notif-panel-head">
             <strong>Notifications</strong>
             <div class="notif-panel-actions">
-              <button type="button" onclick="markAllNotificationsRead()">Mark all read</button>
-              <button type="button" onclick="clearDashboardNotificationsUi()">Clear</button>
+              <button type="button" class="btn btn-secondary" onclick="markAllNotificationsRead()">Mark all read</button>
+              <button type="button" class="btn btn-secondary" onclick="clearDashboardNotificationsUi()">Clear</button>
             </div>
           </div>
           <div id="notif-panel-list" class="notif-panel-list">
@@ -6385,10 +6469,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       list.innerHTML = items.map(function (n) {
         const clickable = n.kind === 'trade_request' && n.offerId;
+        const kindClass = n.kind ? ' notif-kind-' + String(n.kind).replace(/[^a-z0-9_]/gi, '_') : '';
         return (
           '<button type="button" class="notif-item' +
           (n.read ? '' : ' is-unread') +
           (clickable ? ' is-clickable' : '') +
+          kindClass +
           '" data-notif-id="' + escAttr(n.id) + '"' +
           (clickable ? ' data-offer-id="' + escAttr(n.offerId) + '"' : '') +
           (clickable ? ' onclick="openNotificationItem(\\'' + escAttr(n.id) + '\\', \\'' + escAttr(n.offerId) + '\\')"' : '') +
@@ -18684,13 +18770,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function restoreSiteBackupPayload(backup) {
       const msg = document.getElementById('persist-reset-msg');
       if (msg) msg.textContent = 'Restoring…';
-      const data = await fetchJSON('/api/site-backup/restore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          backup ? { backup: backup } : {}
-        ),
-      });
+      // File restores use raw upload (avoids nested JSON + default body limits).
+      const data = backup
+        ? await fetchJSON('/api/site-backup/restore-upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(backup),
+            timeoutMs: 120000,
+          })
+        : await fetchJSON('/api/site-backup/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+            timeoutMs: 120000,
+          });
       if (msg) {
         msg.textContent =
           data.message ||

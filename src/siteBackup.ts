@@ -1,6 +1,10 @@
 /**
  * Full-site backup / restore for dashboard-owned DATA_DIR state.
  * Private keys stay in env and are never included.
+ *
+ * Backup uses denylist auto-discovery: every parseable *.json under DATA_DIR
+ * is included unless excluded (backups/, markers, calibration tooling, temps).
+ * New feature files are picked up automatically without editing this module.
  */
 
 import fs from 'fs';
@@ -11,7 +15,6 @@ import {
   ensureDataDir,
   getDataDir,
   getPersistenceStatus,
-  PERSIST_FILES,
   readJsonFile,
 } from './dataDir';
 
@@ -22,24 +25,31 @@ const BACKUPS_DIR = () => dataFile('backups');
 const LATEST_NAME = 'site-backup-latest.json';
 const MAX_STAMPED = 10;
 
-/** Flat relative paths under DATA_DIR to include when present. */
-const ROOT_BACKUP_FILES = [
-  PERSIST_FILES.config,
-  PERSIST_FILES.wallets,
-  PERSIST_FILES.paperBalance,
-  PERSIST_FILES.backtestHistory,
-  PERSIST_FILES.optimizerLast,
-  PERSIST_FILES.tradingWallets,
-  PERSIST_FILES.dashboardState,
-  PERSIST_FILES.zionOffers,
-  PERSIST_FILES.zionKolUniverse,
-  PERSIST_FILES.laneOutcomes,
-  PERSIST_FILES.tradeProfilesUser,
-  'profile-learning-saves.json',
-  'dashboard-notifications.json',
-  'scanner-outcomes.json',
-  'nansen-wallets-cache.json',
-] as const;
+/**
+ * Relative paths / prefixes / exact names skipped during auto-discovery.
+ * Prefer denylist growth over allowlist — new feature JSON under DATA_DIR
+ * is included by default.
+ */
+const BACKUP_DENY_EXACT = new Set([
+  '.persist-marker.json',
+  '.write-probe',
+  'recipeCalibration48h.json',
+]);
+
+const BACKUP_DENY_PREFIXES = [
+  'backups/',
+];
+
+const BACKUP_DENY_SUFFIXES = [
+  '.log',
+  '.tmp',
+  '.bak',
+];
+
+const BACKUP_DENY_NAME_PARTS = [
+  'calibrateRiskRecipes',
+  'recipeCalibration',
+];
 
 export interface SiteBackup {
   version: typeof SITE_BACKUP_VERSION;
@@ -74,6 +84,38 @@ function stampFilename(ms: number): string {
   return `site-backup-${stamp}.json`;
 }
 
+function toPosixRel(rel: string): string {
+  return String(rel || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+}
+
+/** Whether a relative DATA_DIR path should be excluded from backup. */
+export function isDeniedBackupRelPath(relPath: string): boolean {
+  const cleaned = toPosixRel(relPath);
+  if (!cleaned || cleaned.includes('..')) return true;
+  const base = path.posix.basename(cleaned);
+  if (BACKUP_DENY_EXACT.has(cleaned) || BACKUP_DENY_EXACT.has(base)) {
+    return true;
+  }
+  for (const prefix of BACKUP_DENY_PREFIXES) {
+    if (cleaned === prefix.replace(/\/$/, '') || cleaned.startsWith(prefix)) {
+      return true;
+    }
+  }
+  const lower = cleaned.toLowerCase();
+  for (const suffix of BACKUP_DENY_SUFFIXES) {
+    if (lower.endsWith(suffix)) return true;
+  }
+  for (const part of BACKUP_DENY_NAME_PARTS) {
+    if (lower.includes(part.toLowerCase())) return true;
+  }
+  // Atomic-write leftovers: foo.json.123.456.tmp already caught by .tmp;
+  // also skip hidden probe/dotfiles that are not real app state.
+  if (base.startsWith('.') && base !== '.env.example') return true;
+  return false;
+}
+
 function readJsonIfPresent(relPath: string): unknown | null {
   const full = dataFile(...relPath.split('/'));
   if (!fs.existsSync(full)) return null;
@@ -85,32 +127,47 @@ function readJsonIfPresent(relPath: string): unknown | null {
   }
 }
 
-function collectProfileLearningFiles(
+/**
+ * Recursively collect every parseable *.json under DATA_DIR except denylist.
+ */
+function collectDiscoverableJsonFiles(
   files: Record<string, unknown>
 ): void {
-  try {
-    const dir = dataFile('profile-learning');
-    if (!fs.existsSync(dir)) return;
-    for (const name of fs.readdirSync(dir)) {
-      if (!name.endsWith('.json')) continue;
-      const rel = `profile-learning/${name}`;
-      const data = readJsonIfPresent(rel);
-      if (data != null) files[rel] = data;
+  const root = getDataDir();
+  if (!fs.existsSync(root)) return;
+
+  const walk = (absDir: string, relDir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
     }
-  } catch {
-    /* optional */
-  }
+    for (const ent of entries) {
+      const name = ent.name;
+      const rel = relDir ? `${relDir}/${name}` : name;
+      const abs = path.join(absDir, name);
+      if (ent.isDirectory()) {
+        if (isDeniedBackupRelPath(rel + '/')) continue;
+        walk(abs, rel);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      if (!name.toLowerCase().endsWith('.json')) continue;
+      if (isDeniedBackupRelPath(rel)) continue;
+      const data = readJsonIfPresent(rel);
+      if (data != null) files[toPosixRel(rel)] = data;
+    }
+  };
+
+  walk(root, '');
 }
 
 export function buildSiteBackup(): SiteBackup {
   ensureDataDir();
   const exportedAtMs = Date.now();
   const files: Record<string, unknown> = {};
-  for (const name of ROOT_BACKUP_FILES) {
-    const data = readJsonIfPresent(name);
-    if (data != null) files[name] = data;
-  }
-  collectProfileLearningFiles(files);
+  collectDiscoverableJsonFiles(files);
 
   let appVersion = 'unknown';
   try {
@@ -228,9 +285,7 @@ export function isValidSiteBackup(raw: unknown): raw is SiteBackup {
 }
 
 function safeRelPath(rel: string): string | null {
-  const cleaned = String(rel || '')
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '');
+  const cleaned = toPosixRel(rel);
   if (!cleaned || cleaned.includes('..')) return null;
   if (cleaned.startsWith('backups/')) return null;
   return cleaned;
@@ -242,6 +297,8 @@ function writeBackupFiles(backup: SiteBackup): string[] {
   for (const [rel, data] of Object.entries(backup.files || {})) {
     const safe = safeRelPath(rel);
     if (!safe) continue;
+    // Skip denylisted paths even if present in an older/hand-edited archive
+    if (isDeniedBackupRelPath(safe)) continue;
     const full = dataFile(...safe.split('/'));
     const dir = path.dirname(full);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
