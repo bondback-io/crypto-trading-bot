@@ -295,10 +295,10 @@ export function getLearningHealthSummary(options?: {
     health = 'at_risk';
     reason = 'Data directory is not writable — learning cannot be saved.';
   } else if (persistence.onRender || persistence.onFly) {
-    if (!persistence.durableLikely || persistence.warning) {
+    if (!persistence.volumeMounted || !persistence.durableLikely || persistence.warning) {
       health = 'at_risk';
       reason =
-        'Cloud DATA_DIR looks ephemeral — email, knobs, and learning reset on deploy until a disk/volume is mounted.';
+        'Volume not mounted — email, knobs, and learning wipe on deploy. Attach a Disk at DATA_DIR (/var/data on Render).';
     } else if (!persistence.tradeProfilesUserExists && totalEpisodes === 0) {
       health = 'degraded';
       reason =

@@ -3,6 +3,7 @@
 #
 # IMPORTANT: Persistent disk requires Starter plan or higher.
 # Free tier wipes data/ on every deploy — settings & wallets will reset.
+# Disk mount path MUST match DATA_DIR exactly (prefer /var/data — not under src/).
 services:
   - type: web
     name: solana-copy-bot
@@ -20,7 +21,7 @@ services:
       - key: TRADING_MODE
         value: liveSimulation
       - key: DATA_DIR
-        value: /opt/render/project/src/data
+        value: /var/data
       - key: RPC_URL
         sync: false
       - key: RPC_FALLBACKS
@@ -33,8 +34,8 @@ services:
         sync: false
       - key: TRADING_WALLET_1
         sync: false
-    # Survives deploys — NOT available on Free
+    # Survives deploys — NOT available on Free. Mount path must equal DATA_DIR.
     disk:
       name: bot-data
-      mountPath: /opt/render/project/src/data
+      mountPath: /var/data
       sizeGB: 1

@@ -13310,16 +13310,31 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               ? new Date(p.lastSettingsSavedAt).toLocaleString()
               : '—';
           const durable = p.durableLikely
-            ? '<span style="color:#4ade80">Durable — saves should survive deploys</span>'
-            : '<span style="color:#fbbf24">Not durable — mount DATA_DIR / disk or settings reset on deploy</span>';
+            ? '<span style="color:#4ade80">Durable — volume mounted; saves should survive deploys</span>'
+            : '<span style="color:#f87171">At risk — DATA_DIR is not a mounted disk; next deploy will wipe saves</span>';
+          const vol =
+            p.volumeMounted === true
+              ? '<span style="color:#4ade80">yes</span>'
+              : p.onRender || p.onFly
+                ? '<span style="color:#f87171">NO</span>'
+                : 'n/a (local)';
+          const survived =
+            p.survivedLastDeploy === 'yes'
+              ? '<span style="color:#4ade80">yes</span>'
+              : p.survivedLastDeploy === 'no'
+                ? '<span style="color:#f87171">no</span>'
+                : 'unknown';
           persistDetail.innerHTML =
             durable +
             '<br>Dir: <code>' + String(p.dataDir || '').replace(/</g, '&lt;') + '</code>' +
+            '<br>Volume mounted: ' + vol +
+            ' · Survived last deploy: ' + survived +
             '<br>config.json: ' + (p.settingsExists ? 'yes' : 'MISSING') +
             ' · trade-profiles-user.json: ' + (p.tradeProfilesUserExists ? 'yes' : 'none yet') +
             ' · learning episodes: ' + (p.profileLearningExists ? 'yes' : 'none') +
             '<br>Last saved: ' + last +
-            '<br><span style="color:#64748b">Email, micro-bot knobs, and learning episodes all share this DATA_DIR — if email resets on deploy, learning will too until a disk/volume is mounted.</span>';
+            '<br><span style="color:#64748b">Email, micro-bot knobs, and learning episodes all share this DATA_DIR. ' +
+            'On Render: Disks → mount path must equal DATA_DIR (prefer /var/data). Env alone does not create a volume.</span>';
         }
       }
       try { refreshLearningHealth({ reset: true }); } catch (_) {}

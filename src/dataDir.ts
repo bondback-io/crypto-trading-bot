@@ -5,11 +5,19 @@
  *   config.json, wallets.json, paperBalance.json, backtestHistory.json
  *   (+ trading-wallets.json for live slot metadata)
  *
- * On Render Free the container filesystem is ephemeral — attach a disk or set DATA_DIR.
+ * On Render/Fly the container filesystem is ephemeral unless DATA_DIR is a
+ * real mounted volume (Render Disk at /var/data, Fly volume at /data).
  */
 
 import fs from 'fs';
 import path from 'path';
+
+/** Legacy Render path (pre-/var/data). Used only for one-shot migration. */
+export const LEGACY_RENDER_DATA_DIR = '/opt/render/project/src/data';
+/** Preferred Render disk mount (standalone; safer than under src/). */
+export const PREFERRED_RENDER_DATA_DIR = '/var/data';
+
+const PERSIST_MARKER = '.persist-marker.json';
 
 function resolveDataDir(): string {
   const fromEnv = (
@@ -121,7 +129,7 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
         try {
           fs.renameSync(tmp, filePath);
           return;
-        } catch (renameErr) {
+        } catch {
           // Windows: rename onto existing file often fails
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
@@ -241,6 +249,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.dashboardState,
     PERSIST_FILES.tradeProfilesUser,
     'profile-learning-saves.json',
+    PERSIST_MARKER,
   ];
   const deleted: string[] = [];
   for (const name of names) {
@@ -250,6 +259,171 @@ export function resetAllPersistedData(): {
     `[persist] Reset to defaults — deleted ${deleted.length} file(s): ${deleted.join(', ') || 'none'}`
   );
   return { deleted, dataDir: getDataDir() };
+}
+
+function normalizeFsPath(p: string): string {
+  const resolved = path.resolve(p);
+  const unix = resolved.replace(/\\/g, '/');
+  if (unix.length > 1 && unix.endsWith('/')) return unix.slice(0, -1);
+  return unix;
+}
+
+/**
+ * True when DATA_DIR is on a real mount point (Render Disk / Fly volume).
+ * Local/dev (non-cloud): always true. Linux cloud: parse /proc/self/mountinfo.
+ */
+export function isDataDirVolumeMounted(dataDir = getDataDir()): boolean {
+  if (!isCloudHost()) return true;
+  if (process.platform !== 'linux') {
+    return false;
+  }
+  const target = normalizeFsPath(dataDir);
+  let mountinfo: string;
+  try {
+    mountinfo = fs.readFileSync('/proc/self/mountinfo', 'utf-8');
+  } catch {
+    return false;
+  }
+  const mounts: string[] = [];
+  for (const line of mountinfo.split('\n')) {
+    if (!line.trim()) continue;
+    const sep = line.indexOf(' - ');
+    const left = sep >= 0 ? line.slice(0, sep) : line;
+    const parts = left.split(' ');
+    if (parts.length < 5) continue;
+    const mountPoint = parts[4]?.replace(/\\040/g, ' ');
+    if (!mountPoint) continue;
+    const mp = normalizeFsPath(mountPoint);
+    if (mp === '/') continue;
+    mounts.push(mp);
+  }
+  for (const mp of mounts) {
+    if (target === mp) return true;
+    if (target.startsWith(mp + '/')) return true;
+  }
+  return false;
+}
+
+interface PersistMarker {
+  version: 1;
+  commit: string | null;
+  dataDir: string;
+  updatedAt: number;
+  volumeMounted: boolean;
+}
+
+function currentDeployId(): string | null {
+  return (
+    process.env.RENDER_GIT_COMMIT?.trim() ||
+    process.env.FLY_IMAGE_REF?.trim() ||
+    process.env.GIT_COMMIT?.trim() ||
+    null
+  );
+}
+
+export type SurvivedLastDeploy = 'yes' | 'no' | 'unknown';
+
+let cachedSurvived: SurvivedLastDeploy | null = null;
+
+/**
+ * Read/update cross-deploy marker. Call once early on boot after ensureDataDir.
+ * Returns whether DATA_DIR contents survived a prior deploy (marker from older commit).
+ */
+export function touchPersistMarker(): SurvivedLastDeploy {
+  ensureDataDir();
+  const markerPath = dataFile(PERSIST_MARKER);
+  const commit = currentDeployId();
+  const volumeMounted = isDataDirVolumeMounted();
+  const prev = readJsonFile<PersistMarker>(markerPath);
+
+  let survived: SurvivedLastDeploy = 'unknown';
+  if (prev?.commit && commit && prev.commit !== commit) {
+    survived = 'yes';
+  } else if (isCloudHost() && !volumeMounted) {
+    survived = prev?.commit ? 'unknown' : 'no';
+  }
+
+  const next: PersistMarker = {
+    version: 1,
+    commit: commit || prev?.commit || null,
+    dataDir: getDataDir(),
+    updatedAt: Date.now(),
+    volumeMounted,
+  };
+  try {
+    atomicWriteJson(markerPath, next);
+  } catch (err) {
+    console.warn(
+      '[persist] Failed to write persist marker:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  cachedSurvived = survived;
+  return survived;
+}
+
+export function getSurvivedLastDeploy(): SurvivedLastDeploy {
+  if (cachedSurvived) return cachedSurvived;
+  return touchPersistMarker();
+}
+
+/**
+ * Copy durable files from legacy Render path → current DATA_DIR when upgrading
+ * to /var/data (or any empty new dir) while old src/data still has content.
+ */
+export function migrateLegacyRenderDataDir(): {
+  migrated: boolean;
+  from: string;
+  to: string;
+  copied: string[];
+} {
+  const to = getDataDir();
+  const from = LEGACY_RENDER_DATA_DIR;
+  const copied: string[] = [];
+  const result = { migrated: false, from, to, copied };
+
+  try {
+    if (normalizeFsPath(to) === normalizeFsPath(from)) return result;
+    if (!fs.existsSync(from)) return result;
+    const legacyConfig = path.join(from, PERSIST_FILES.config);
+    if (!fs.existsSync(legacyConfig)) return result;
+
+    ensureDataDir();
+    const destConfig = dataFile(PERSIST_FILES.config);
+    if (fs.existsSync(destConfig)) return result;
+
+    const entries = fs.readdirSync(from, { withFileTypes: true });
+    for (const ent of entries) {
+      const src = path.join(from, ent.name);
+      const dest = path.join(to, ent.name);
+      if (fs.existsSync(dest)) continue;
+      try {
+        if (ent.isDirectory()) {
+          fs.cpSync(src, dest, { recursive: true });
+        } else {
+          fs.copyFileSync(src, dest);
+        }
+        copied.push(ent.name);
+      } catch (err) {
+        console.warn(
+          `[persist] Skip migrate ${ent.name}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+    if (copied.length) {
+      result.migrated = true;
+      console.log(
+        `[persist] Migrated ${copied.length} item(s) from ${from} → ${to}: ${copied.join(', ')}`
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[persist] Legacy Render data migrate failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  return result;
 }
 
 export interface PersistenceStatus {
@@ -273,11 +447,15 @@ export interface PersistenceStatus {
   paperBalancePath: string;
   backtestHistoryPath: string;
   tradeProfilesUserPath: string;
-  /** True when cloud host is detected and persisted files are missing — no volume/disk */
+  /** DATA_DIR is a real mount (Render Disk / Fly volume), or local non-cloud */
+  volumeMounted: boolean;
+  /** Marker from a previous deploy commit was still present */
+  survivedLastDeploy: SurvivedLastDeploy;
+  /** True when cloud host and DATA_DIR is not a mounted volume */
   ephemeralLikely: boolean;
   /**
-   * True when the data dir looks durable enough that saves should survive deploys:
-   * writable, and not flagged ephemeralLikely.
+   * True when saves should survive deploys:
+   * writable, and (local OR volume mounted).
    */
   durableLikely: boolean;
   warning: string | null;
@@ -293,6 +471,7 @@ export function getPersistenceStatus(): PersistenceStatus {
   const tradeProfilesUserPath = dataFile(PERSIST_FILES.tradeProfilesUser);
   const onRender = isRunningOnRender();
   const onFly = isRunningOnFly();
+  const onCloud = onRender || onFly;
 
   let writable = false;
   try {
@@ -342,23 +521,33 @@ export function getPersistenceStatus(): PersistenceStatus {
     }
   }
 
-  const ephemeralLikely =
-    (onRender || onFly) && (!settingsExists || !walletsExists);
-  const durableLikely = writable && !ephemeralLikely;
+  const volumeMounted = isDataDirVolumeMounted(dataDir);
+  const survivedLastDeploy =
+    cachedSurvived ??
+    (() => {
+      const prev = readJsonFile<PersistMarker>(dataFile(PERSIST_MARKER));
+      const commit = currentDeployId();
+      if (prev?.commit && commit && prev.commit !== commit) return 'yes' as const;
+      if (onCloud && !volumeMounted) return 'no' as const;
+      return 'unknown' as const;
+    })();
+
+  const ephemeralLikely = onCloud && !volumeMounted;
+  const durableLikely = writable && (!onCloud || volumeMounted);
 
   let warning: string | null = null;
   if (!writable) {
     warning = `Data directory is not writable (${dataDir}). Settings and wallets cannot be saved.`;
-  } else if (onFly && (!settingsExists || !walletsExists)) {
+  } else if (onFly && !volumeMounted) {
     warning =
-      'Fly.io: mount a persistent volume at /data (fly.toml mounts.bot_data) and set DATA_DIR=/data. ' +
-      'Without a volume, settings, notification email, micro-bot knobs, and learning episodes reset on every deploy. ' +
+      'Fly.io: DATA_DIR is not a mounted volume. Mount bot_data at /data (fly.toml) and set DATA_DIR=/data. ' +
+      'Without a volume, email, config, micro-bot knobs, and learning wipe on every deploy. ' +
       'Create with: fly volumes create bot_data --region <region> --size 1';
-  } else if (onRender && (!settingsExists || !walletsExists)) {
+  } else if (onRender && !volumeMounted) {
     warning =
-      'Render Free has no persistent disk — the filesystem resets on every deploy and after idle spin-down. ' +
-      'Email, micro-bot knobs, and learning episodes all live under DATA_DIR and will wipe together. ' +
-      'Upgrade to Starter (or higher), add a 1GB disk mounted at /opt/render/project/src/data, then re-import wallets and save settings.';
+      'Render: DATA_DIR is not a mounted Disk — saves look fine until the next deploy, then wipe. ' +
+      `Attach a Starter+ Disk with mount path exactly matching DATA_DIR (prefer ${PREFERRED_RENDER_DATA_DIR}). ` +
+      'Dashboard → Disks → Add disk. Env DATA_DIR alone does not create a volume.';
   }
 
   return {
@@ -379,6 +568,8 @@ export function getPersistenceStatus(): PersistenceStatus {
     paperBalancePath,
     backtestHistoryPath,
     tradeProfilesUserPath,
+    volumeMounted,
+    survivedLastDeploy,
     ephemeralLikely,
     durableLikely,
     warning,
@@ -391,6 +582,7 @@ export function logPersistenceStatus(): void {
   console.log(`[persist] data dir: ${s.dataDir}`);
   console.log(
     `[persist] writable=${s.writable} durableLikely=${s.durableLikely} ` +
+      `volumeMounted=${s.volumeMounted} survivedLastDeploy=${s.survivedLastDeploy} ` +
       `onRender=${s.onRender} onFly=${s.onFly} ` +
       `config=${s.settingsExists ? 'yes' : 'MISSING'} ` +
       `profilesUser=${s.tradeProfilesUserExists ? 'yes' : 'MISSING'} ` +
@@ -401,6 +593,12 @@ export function logPersistenceStatus(): void {
   );
   if (s.warning) {
     console.warn(`[persist] ⚠ ${s.warning}`);
+  }
+  if (isCloudHost() && !s.volumeMounted) {
+    console.error(
+      `[persist] AT RISK: DATA_DIR is not a mounted volume — all dashboard saves will wipe on next deploy. ` +
+        `Attach a Render Disk at DATA_DIR (${PREFERRED_RENDER_DATA_DIR}) or Fly volume at /data.`
+    );
   } else if (s.durableLikely) {
     console.log(
       '[persist] Durable data dir OK — saved settings/learning should survive code deploys'

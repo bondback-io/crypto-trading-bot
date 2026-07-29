@@ -5,7 +5,14 @@
 import dotenv from 'dotenv';
 import { config, setMode, initWallets, hasPersistedSettings } from './config';
 import { env, logEnvSummary, validateDeploymentEnv } from './env';
-import { logPersistenceStatus } from './dataDir';
+import {
+  logPersistenceStatus,
+  migrateLegacyRenderDataDir,
+  touchPersistMarker,
+  getPersistenceStatus,
+  isCloudHost,
+  PREFERRED_RENDER_DATA_DIR,
+} from './dataDir';
 import { testConnection } from './connection';
 import { paperTrader } from './paperTrader';
 import { startMonitor, onSignal, TradeSignal } from './monitor';
@@ -44,6 +51,9 @@ async function main(): Promise<void> {
   for (const w of validateDeploymentEnv()) {
     console.warn(`[env] ⚠ ${w}`);
   }
+  // Prefer /var/data: copy from legacy Render src/data if new dir is empty
+  migrateLegacyRenderDataDir();
+  touchPersistMarker();
   logPersistenceStatus();
 
   initWallets();
@@ -81,10 +91,20 @@ async function main(): Promise<void> {
 
   try {
     const { getAppVersion } = require('./version') as typeof import('./version');
-    const { maybeNotifyAppVersionUpdate } =
+    const { maybeNotifyAppVersionUpdate, pushDashboardNotification } =
       require('./dashboardNotifications') as typeof import('./dashboardNotifications');
     const app = getAppVersion();
     maybeNotifyAppVersionUpdate(app.label || `v${app.version}`);
+    const persist = getPersistenceStatus();
+    if (isCloudHost() && !persist.volumeMounted) {
+      pushDashboardNotification({
+        kind: 'system',
+        title: 'Persistence at risk — disk not mounted',
+        body:
+          `DATA_DIR (${persist.dataDir}) is not a volume. All Config / Micro Bots / learning saves wipe on the next deploy. ` +
+          `Attach a Starter+ Disk at ${PREFERRED_RENDER_DATA_DIR} (or Fly /data) matching DATA_DIR.`,
+      });
+    }
   } catch {
     /* optional */
   }

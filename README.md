@@ -448,12 +448,12 @@ The bot *does* hard-save to `data/bot-settings.json` and `data/wallets.json`. Wi
 **Fix:** upgrade to **Starter** (or higher) and attach a **1GB disk** mounted at:
 
 ```text
-/opt/render/project/src/data
+/var/data
 ```
 
 Then re-import wallets and save settings once. They will survive future deploys. `render.yaml` already declares this disk for Blueprint deploys.
 
-Optional env override: `DATA_DIR=/opt/render/project/src/data`
+Optional env override: `DATA_DIR=/var/data`
 
 ### Commands (set in Render Web Service)
 
@@ -476,7 +476,7 @@ Optional env override: `DATA_DIR=/opt/render/project/src/data`
 2. In [Render](https://dashboard.render.com): **New → Web Service** → connect the repo.
 3. Runtime: **Node**. Use the build/start commands above.
 4. **Plan:** Starter+ (not Free) so you can add a disk.
-5. Add a **persistent disk** mounted at `/opt/render/project/src/data` so `data/wallets.json` and `data/bot-settings.json` survive deploys (see `render.yaml`).
+5. Add a **persistent disk** mounted at `/var/data` so `data/wallets.json` and `data/bot-settings.json` survive deploys (see `render.yaml`).
 6. Set environment variables (Environment tab) — see table below.
 7. Deploy. Open `https://<your-service>.onrender.com/dashboard`. Confirm the amber persistence banner is gone after you save settings once.
 
@@ -491,7 +491,7 @@ Or use **New → Blueprint** with the included `render.yaml` (includes the disk)
 | `HOST` | Yes | `0.0.0.0` |
 | `PORT` | Auto | Injected by Render — do not set manually |
 | `TRADING_MODE` | Recommended | `liveSimulation` (default), `paper`, or `live` |
-| `DATA_DIR` | Optional | Override data path (default `./data`; on Render with disk use `/opt/render/project/src/data`) |
+| `DATA_DIR` | Optional | Override data path (default `./data`; on Render with disk use `/var/data`) |
 | `RPC_FALLBACKS` | Optional | Comma-separated backup RPCs |
 | `GMGN_API_KEY` | Optional | Better wallet discovery / activity |
 | `BIRDEYE_API_KEY` | Optional | Token / smart-money signals |
@@ -517,7 +517,7 @@ Persistence status: `GET /api/persistence`
 
 - [ ] Build: `npm install --include=dev && npm run build` · Start: `npm start`
 - [ ] `NODE_ENV=production`, `HOST=0.0.0.0`, paid `RPC_URL`
-- [ ] **Not Free** — Starter+ with disk at `/opt/render/project/src/data`
+- [ ] **Not Free** — Starter+ with disk at `/var/data`
 - [ ] `/health` returns `{ "status": "ok", "uptime": … }`
 - [ ] `/api/persistence` shows `settingsExists` / `walletsExists` true after first save
 - [ ] Start in **paper** mode first
