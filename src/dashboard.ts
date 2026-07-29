@@ -6440,6 +6440,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
         <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
+        <div class="filters-row mb-2" id="learning-saves-filters">
+          <label class="ctl ctl-md" title="Filter by calendar day">
+            <span>Date</span>
+            <input type="date" id="learning-filter-date" onchange="applyLearningSavesFilter()" />
+          </label>
+          <label class="ctl ctl-md" title="Filter by micro bot">
+            <span>Bot</span>
+            <select id="learning-filter-bot" onchange="applyLearningSavesFilter()">
+              <option value="all">All bots</option>
+            </select>
+          </label>
+          <label class="ctl ctl-md" title="Filter by journal entry type">
+            <span>Type</span>
+            <select id="learning-filter-kind" onchange="applyLearningSavesFilter()">
+              <option value="all">All types</option>
+              <option value="episode">Episode</option>
+              <option value="knobs">Knobs</option>
+              <option value="upgrade">Upgrade</option>
+              <option value="toggle">Toggle</option>
+              <option value="reset">Reset</option>
+              <option value="min_trades">Min trades</option>
+            </select>
+          </label>
+          <input type="search" id="learning-filter-q" class="search-q" placeholder="Search summary…" oninput="debounceLearningSavesFilter()" title="Search summary / bot / type" />
+          <button type="button" class="btn btn-secondary text-xs" onclick="clearLearningSavesFilter()" title="Clear date, bot, type, and search">Clear</button>
+        </div>
+        <div class="mint text-xs mb-2" id="learning-saves-filter-meta"></div>
         <div class="overflow-x-auto mb-2">
           <table class="w-full text-xs" id="learning-saves-table" style="border-collapse:collapse;width:100%">
             <thead>
@@ -13749,7 +13776,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       }
       try { refreshSiteBackupStatus(); } catch (_) {}
-      try { refreshLearningHealth({ reset: true }); } catch (_) {}
+      try { refreshLearningHealth({ statusOnly: true }); } catch (_) {}
 
       const runWrap = document.getElementById('run-status');
       const dot = document.getElementById('status-dot');
@@ -18774,6 +18801,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     window.__learningSavesOffset = 0;
     window.__learningSavesRows = [];
+    window.__learningSavesHasMore = false;
+    window.__learningFilterTimer = null;
 
     function learningHealthColor(health) {
       if (health === 'ok') return '#4ade80';
@@ -18793,12 +18822,84 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return map[kind] || kind || '—';
     }
 
+    function getLearningSavesFilters() {
+      return {
+        date: ((document.getElementById('learning-filter-date') || {}).value || '').trim(),
+        bot: ((document.getElementById('learning-filter-bot') || {}).value || 'all').trim() || 'all',
+        kind: ((document.getElementById('learning-filter-kind') || {}).value || 'all').trim() || 'all',
+        q: ((document.getElementById('learning-filter-q') || {}).value || '').trim(),
+      };
+    }
+
+    function learningSavesQuery(offset, limit) {
+      const f = getLearningSavesFilters();
+      let url =
+        '/api/microbots/learning-health?offset=' +
+        encodeURIComponent(String(offset || 0)) +
+        '&limit=' +
+        encodeURIComponent(String(limit || 10));
+      if (f.date) url += '&date=' + encodeURIComponent(f.date);
+      if (f.bot && f.bot !== 'all') url += '&bot=' + encodeURIComponent(f.bot);
+      if (f.kind && f.kind !== 'all') url += '&kind=' + encodeURIComponent(f.kind);
+      if (f.q) url += '&q=' + encodeURIComponent(f.q);
+      return url;
+    }
+
+    function populateLearningBotFilter(bots) {
+      const sel = document.getElementById('learning-filter-bot');
+      if (!sel || !Array.isArray(bots)) return;
+      const prev = sel.value || 'all';
+      const opts = ['<option value="all">All bots</option>'].concat(
+        bots.map(function (b) {
+          return (
+            '<option value="' +
+            escAttr(b.id) +
+            '">' +
+            escHtml(b.name || b.id) +
+            '</option>'
+          );
+        })
+      );
+      sel.innerHTML = opts.join('');
+      if ([...sel.options].some(function (o) { return o.value === prev; })) {
+        sel.value = prev;
+      }
+    }
+
+    function updateLearningFilterMeta(total, shown) {
+      const el = document.getElementById('learning-saves-filter-meta');
+      if (!el) return;
+      const f = getLearningSavesFilters();
+      const active =
+        !!(f.date || (f.bot && f.bot !== 'all') || (f.kind && f.kind !== 'all') || f.q);
+      if (!active) {
+        el.textContent =
+          shown != null && total != null
+            ? 'Showing ' + shown + ' of ' + total + ' journal entries'
+            : '';
+        return;
+      }
+      el.textContent =
+        'Filtered · showing ' +
+        (shown != null ? shown : 0) +
+        ' of ' +
+        (total != null ? total : 0) +
+        ' matching entries';
+    }
+
     function renderLearningSavesRows(rows) {
       const body = document.getElementById('learning-saves-body');
       if (!body) return;
       if (!rows || !rows.length) {
+        const f = getLearningSavesFilters();
+        const active =
+          !!(f.date || (f.bot && f.bot !== 'all') || (f.kind && f.kind !== 'all') || f.q);
         body.innerHTML =
-          '<tr><td colspan="4" class="mint" style="padding:0.5rem 0.4rem">No saves recorded yet — toggle learning or close a trade to create the first entry.</td></tr>';
+          '<tr><td colspan="4" class="mint" style="padding:0.5rem 0.4rem">' +
+          (active
+            ? 'No saves match these filters.'
+            : 'No saves recorded yet — toggle learning or close a trade to create the first entry.') +
+          '</td></tr>';
         return;
       }
       body.innerHTML = rows
@@ -18823,67 +18924,98 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         .join('');
     }
 
-    async function refreshLearningHealth(opts) {
+    function applyLearningHealthStatus(data) {
       const statusEl = document.getElementById('learning-health-status');
+      if (!statusEl || !data) return;
+      const color = learningHealthColor(data.health);
+      const label =
+        data.health === 'ok'
+          ? 'Healthy'
+          : data.health === 'degraded'
+            ? 'Degraded'
+            : 'At risk';
+      const last =
+        data.lastSaveAt != null
+          ? new Date(data.lastSaveAt).toLocaleString()
+          : '—';
+      const userAt =
+        data.userFileUpdatedAt != null
+          ? new Date(data.userFileUpdatedAt).toLocaleString()
+          : '—';
+      statusEl.innerHTML =
+        '<span style="color:' +
+        color +
+        ';font-weight:650">' +
+        label +
+        '</span> — ' +
+        escHtml(data.reason || '') +
+        '<br>Learning ON: ' +
+        (data.learningOnCount || 0) +
+        ' · Bots with episodes: ' +
+        (data.profilesWithEpisodes || 0) +
+        ' · Total episodes: ' +
+        (data.totalEpisodes || 0) +
+        '<br>User knobs file: ' +
+        userAt +
+        ' · Last journal save: ' +
+        last;
+      if (data.filterBots) populateLearningBotFilter(data.filterBots);
+      else if (data.bots) {
+        populateLearningBotFilter(
+          data.bots.map(function (b) {
+            return { id: b.id, name: b.name };
+          })
+        );
+      }
+    }
+
+    async function refreshLearningHealth(opts) {
       const moreBtn = document.getElementById('learning-saves-more');
-      const reset = !opts || opts.reset !== false;
+      const statusOnly = !!(opts && opts.statusOnly);
+      const reset = statusOnly ? false : !opts || opts.reset !== false;
       if (reset) {
         window.__learningSavesOffset = 0;
         window.__learningSavesRows = [];
       }
       const offset = window.__learningSavesOffset || 0;
       try {
-        const data = await fetchJSON(
-          '/api/microbots/learning-health?offset=' +
-            offset +
-            '&limit=10'
-        );
-        if (statusEl && data) {
-          const color = learningHealthColor(data.health);
-          const label =
-            data.health === 'ok'
-              ? 'Healthy'
-              : data.health === 'degraded'
-                ? 'Degraded'
-                : 'At risk';
-          const last =
-            data.lastSaveAt != null
-              ? new Date(data.lastSaveAt).toLocaleString()
-              : '—';
-          const userAt =
-            data.userFileUpdatedAt != null
-              ? new Date(data.userFileUpdatedAt).toLocaleString()
-              : '—';
-          statusEl.innerHTML =
-            '<span style="color:' +
-            color +
-            ';font-weight:650">' +
-            label +
-            '</span> — ' +
-            escHtml(data.reason || '') +
-            '<br>Learning ON: ' +
-            (data.learningOnCount || 0) +
-            ' · Bots with episodes: ' +
-            (data.profilesWithEpisodes || 0) +
-            ' · Total episodes: ' +
-            (data.totalEpisodes || 0) +
-            '<br>User knobs file: ' +
-            userAt +
-            ' · Last journal save: ' +
-            last;
+        const data = await fetchJSON(learningSavesQuery(statusOnly ? 0 : offset, 10));
+        applyLearningHealthStatus(data);
+        if (statusOnly) {
+          if (moreBtn)
+            moreBtn.style.display = window.__learningSavesHasMore ? '' : 'none';
+          updateLearningFilterMeta(
+            data && data.saves ? data.saves.total : null,
+            (window.__learningSavesRows && window.__learningSavesRows.length) || 0
+          );
+          return;
         }
         const page = (data && data.saves && data.saves.items) || [];
         if (reset) window.__learningSavesRows = page.slice();
-        else
-          window.__learningSavesRows = (window.__learningSavesRows || []).concat(
-            page
+        else {
+          const seen = new Set(
+            (window.__learningSavesRows || []).map(function (r) {
+              return r.id;
+            })
           );
+          window.__learningSavesRows = (window.__learningSavesRows || []).concat(
+            page.filter(function (r) {
+              return r && r.id && !seen.has(r.id);
+            })
+          );
+        }
         renderLearningSavesRows(window.__learningSavesRows);
         const hasMore = !!(data && data.saves && data.saves.hasMore);
+        window.__learningSavesHasMore = hasMore;
         window.__learningSavesOffset =
           (window.__learningSavesRows && window.__learningSavesRows.length) || 0;
         if (moreBtn) moreBtn.style.display = hasMore ? '' : 'none';
+        updateLearningFilterMeta(
+          data && data.saves ? data.saves.total : 0,
+          window.__learningSavesOffset
+        );
       } catch (err) {
+        const statusEl = document.getElementById('learning-health-status');
         if (statusEl)
           statusEl.textContent =
             'Learning health unavailable: ' + (err.message || String(err));
@@ -18896,7 +19028,33 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     }
     window.loadMoreLearningSaves = loadMoreLearningSaves;
 
-    async function exportLearningData(format) {
+    function applyLearningSavesFilter() {
+      refreshLearningHealth({ reset: true });
+    }
+    window.applyLearningSavesFilter = applyLearningSavesFilter;
+
+    function debounceLearningSavesFilter() {
+      clearTimeout(window.__learningFilterTimer);
+      window.__learningFilterTimer = setTimeout(function () {
+        applyLearningSavesFilter();
+      }, 250);
+    }
+    window.debounceLearningSavesFilter = debounceLearningSavesFilter;
+
+    function clearLearningSavesFilter() {
+      const dateEl = document.getElementById('learning-filter-date');
+      const botEl = document.getElementById('learning-filter-bot');
+      const kindEl = document.getElementById('learning-filter-kind');
+      const qEl = document.getElementById('learning-filter-q');
+      if (dateEl) dateEl.value = '';
+      if (botEl) botEl.value = 'all';
+      if (kindEl) kindEl.value = 'all';
+      if (qEl) qEl.value = '';
+      applyLearningSavesFilter();
+    }
+    window.clearLearningSavesFilter = clearLearningSavesFilter;
+
+    async function exportLearningData    async function exportLearningData(format) {
       const status = document.getElementById('learning-export-status');
       try {
         if (status) status.textContent = 'Exporting…';

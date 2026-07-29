@@ -529,9 +529,13 @@ export function createServer(): express.Application {
         require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
       const offset = Number(req.query.offset) || 0;
       const limit = Number(req.query.limit) || 10;
+      const bot = String(req.query.bot || '').trim();
+      const kind = String(req.query.kind || '').trim();
+      const date = String(req.query.date || '').trim();
+      const q = String(req.query.q || '').trim();
       res.json({
         ok: true,
-        ...getLearningHealthSummary({ offset, limit }),
+        ...getLearningHealthSummary({ offset, limit, bot, kind, date, q }),
       });
     } catch (err) {
       res.status(500).json({

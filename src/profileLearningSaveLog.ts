@@ -131,6 +131,14 @@ export function appendLearningSave(input: {
 export function listLearningSaves(options?: {
   offset?: number;
   limit?: number;
+  /** Profile id exact match, or bot name substring (case-insensitive) */
+  bot?: string;
+  /** Episode / knobs / upgrade / … */
+  kind?: string;
+  /** YYYY-MM-DD local calendar day (UTC day window from server) */
+  date?: string;
+  /** Free-text match against summary / bot / kind */
+  q?: string;
 }): {
   items: LearningSaveEntry[];
   total: number;
@@ -138,7 +146,58 @@ export function listLearningSaves(options?: {
   limit: number;
   hasMore: boolean;
 } {
-  const all = [...loadEntries()].sort((a, b) => b.at - a.at);
+  let all = [...loadEntries()].sort((a, b) => b.at - a.at);
+
+  const bot = String(options?.bot || '').trim().toLowerCase();
+  if (bot && bot !== 'all') {
+    all = all.filter((e) => {
+      const id = String(e.profileId || '').toLowerCase();
+      const name = String(e.botName || '').toLowerCase();
+      return id === bot || name === bot || name.includes(bot) || id.includes(bot);
+    });
+  }
+
+  const kind = String(options?.kind || '').trim().toLowerCase();
+  if (kind && kind !== 'all') {
+    all = all.filter((e) => String(e.kind || '').toLowerCase() === kind);
+  }
+
+  const date = String(options?.date || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const [y, m, d] = date.split('-').map((x) => Number(x));
+    const start = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+    const end = start + 24 * 60 * 60 * 1000;
+    // Also accept local-day interpretation: match either UTC day or local day for the entry
+    all = all.filter((e) => {
+      const t = Number(e.at) || 0;
+      if (t >= start && t < end) return true;
+      const local = new Date(t);
+      const localKey =
+        local.getFullYear() +
+        '-' +
+        String(local.getMonth() + 1).padStart(2, '0') +
+        '-' +
+        String(local.getDate()).padStart(2, '0');
+      return localKey === date;
+    });
+  }
+
+  const q = String(options?.q || '').trim().toLowerCase();
+  if (q) {
+    all = all.filter((e) => {
+      const hay = [
+        e.summary,
+        e.botName,
+        e.profileId,
+        e.kind,
+        learningKindSearchBlob(e),
+      ]
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
   const offset = Math.max(0, Math.round(Number(options?.offset) || 0));
   const limit = Math.max(1, Math.min(50, Math.round(Number(options?.limit) || 10)));
   const items = all.slice(offset, offset + limit);
@@ -149,6 +208,18 @@ export function listLearningSaves(options?: {
     limit,
     hasMore: offset + items.length < all.length,
   };
+}
+
+function learningKindSearchBlob(e: LearningSaveEntry): string {
+  const map: Record<string, string> = {
+    knobs: 'knobs settings',
+    episode: 'episode trade closed',
+    upgrade: 'upgrade level',
+    toggle: 'toggle learning',
+    reset: 'reset',
+    min_trades: 'min trades',
+  };
+  return map[e.kind] || e.kind || '';
 }
 
 function listEpisodeFiles(): Array<{
@@ -208,6 +279,10 @@ function listEpisodeFiles(): Array<{
 export function getLearningHealthSummary(options?: {
   offset?: number;
   limit?: number;
+  bot?: string;
+  kind?: string;
+  date?: string;
+  q?: string;
 }): {
   health: 'ok' | 'degraded' | 'at_risk';
   reason: string;
@@ -227,12 +302,17 @@ export function getLearningHealthSummary(options?: {
     lastUpgradedAt: number | null;
     tradesSinceUpgrade: number;
   }>;
+  filterBots: Array<{ id: string; name: string }>;
   saves: ReturnType<typeof listLearningSaves>;
 } {
   const persistence = getPersistenceStatus();
   const saves = listLearningSaves({
     offset: options?.offset,
     limit: options?.limit,
+    bot: options?.bot,
+    kind: options?.kind,
+    date: options?.date,
+    q: options?.q,
   });
   const episodeFiles = listEpisodeFiles();
   const episodeById = new Map(episodeFiles.map((e) => [e.profileId, e]));
@@ -292,7 +372,8 @@ export function getLearningHealthSummary(options?: {
     /* optional */
   }
 
-  const lastSaveAt = saves.items[0]?.at ?? null;
+  const lastSaveAt =
+    loadEntries().reduce((max, e) => Math.max(max, Number(e.at) || 0), 0) || null;
 
   let health: 'ok' | 'degraded' | 'at_risk' = 'ok';
   let reason = '';
@@ -320,6 +401,19 @@ export function getLearningHealthSummary(options?: {
     reason = `Local — ${learningOnCount} bots learning ON — ${totalEpisodes} episodes`;
   }
 
+  const filterBotMap = new Map<string, string>();
+  for (const b of bots) {
+    filterBotMap.set(b.id, b.name);
+  }
+  for (const e of loadEntries()) {
+    if (e.profileId && !filterBotMap.has(e.profileId)) {
+      filterBotMap.set(e.profileId, e.botName || e.profileId);
+    }
+  }
+  const filterBots = [...filterBotMap.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   return {
     health,
     reason,
@@ -330,6 +424,7 @@ export function getLearningHealthSummary(options?: {
     userFileUpdatedAt,
     lastSaveAt,
     bots,
+    filterBots,
     saves,
   };
 }
