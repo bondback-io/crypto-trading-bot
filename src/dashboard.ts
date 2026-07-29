@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots / Settings; Smart Wallets / Config / Backtester / Logs / Back Up via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up via settings menu)
  */
 
 export const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -4657,7 +4657,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Config, Backtester, Logs, and Back Up" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Logs, and Back Up" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -4668,6 +4668,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="wallets" onclick="showTab('wallets')" title="Discover, search, and manage smart wallets you copy">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
             Smart Wallets
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="settings" onclick="showTab('settings')" title="Risk level, module groups, presets, and strategy JSON import/export">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+            Settings
           </button>
           <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
@@ -4728,7 +4732,6 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Feed — market scanner, Pump.fun activity, signals, sizing, and re-entry watches"><span class="btn-label-short">Feed</span><span class="btn-label-full">Live Feed</span></button>
-      <button data-tab="settings" onclick="showTab('settings', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Risk level, module groups, presets, and strategy JSON import/export">Settings</button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -5645,7 +5648,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
           Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on.
           Strategy module also lives under
-          <button type="button" class="text-emerald-400 underline" onclick="showTab('settings', document.querySelector('[data-tab=settings]'))">Settings</button>
+          <button type="button" class="text-emerald-400 underline" onclick="showTab('settings')">Settings</button>
           → Market Scanner (TA).
         </p>
         <div id="scanner-status-tab" data-scanner-status class="mint text-xs mb-2">—</div>
@@ -9833,7 +9836,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
