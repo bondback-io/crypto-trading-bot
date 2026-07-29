@@ -46,7 +46,7 @@ export interface SelfLearnHistoryEntry {
   lossesAtUpgrade?: number;
 }
 
-export const LEARNING_PROGRESS_GOAL = 200;
+export const LEARNING_PROGRESS_GOAL = 400;
 
 export interface LearningUpgradeMilestone {
   level: number;

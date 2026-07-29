@@ -8183,7 +8183,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           const slBadge = p.selfLearnBadge || '';
           const lp = p.learningProgress || {};
           const lpEpisodes = Math.max(0, Number(lp.episodes) || 0);
-          const lpGoal = Math.max(1, Number(lp.goal) || 200);
+          const lpGoal = Math.max(1, Number(lp.goal) || 400);
           const lpPct = Math.min(100, Math.max(0, Number(lp.pct) || 0));
           const lpWins = Math.max(0, Number(lp.wins) || 0);
           const lpLosses = Math.max(0, Number(lp.losses) || 0);
@@ -8307,7 +8307,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   lpWins +
                   ' wins / ' +
                   lpLosses +
-                  ' losses · goal 200 closed trades · Level = applied upgrades'
+                  ' losses · goal 400 closed trades · Level = applied upgrades'
               ) +
             '">' +
               '<div class="tp-learn-progress-meta">' +
@@ -19479,6 +19479,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       alert(data.message || 'Backup restored');
       window._cfgLoaded = false;
       await refresh();
+      try {
+        if (typeof loadStrategies === 'function') await loadStrategies();
+      } catch (_) {}
       try {
         refreshSiteBackupStatus();
       } catch (_) {}

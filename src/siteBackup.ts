@@ -346,7 +346,7 @@ export function reloadPersistedRuntimeFromDisk(): void {
   invalidateScannerOutcomesCache();
   reloadZionOffersFromDisk();
 
-  applyPersistedSettings();
+  applyPersistedSettings({ replaceStrategyToggles: true });
   initWallets();
   initTradingWallets();
   ensureTradeProfilesInitialized();

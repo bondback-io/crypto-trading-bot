@@ -2896,6 +2896,15 @@ function syncConfigAliases(): void {
   }
 }
 
+export type ApplySettingsSnapshotOptions = {
+  /**
+   * When true, strategyToggles are replaced from the snapshot (or cleared so
+   * they can be re-derived). Used for site-backup restore so pre-restore
+   * in-memory toggles cannot linger.
+   */
+  replaceStrategyToggles?: boolean;
+};
+
 /**
  * Apply a settings snapshot onto `config`.
  * - merge: saved keys win; missing keys keep current (code updates survive)
@@ -2903,7 +2912,8 @@ function syncConfigAliases(): void {
  */
 function applySettingsSnapshot(
   saved: PersistedBotSettings,
-  mode: 'merge' | 'replace'
+  mode: 'merge' | 'replace',
+  options?: ApplySettingsSnapshotOptions
 ): void {
   if (
     saved.mode === 'paper' ||
@@ -3119,10 +3129,19 @@ function applySettingsSnapshot(
   }
 
   if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {
-    config.strategyToggles = {
-      ...(config.strategyToggles || {}),
-      ...saved.strategyToggles,
-    };
+    if (options?.replaceStrategyToggles) {
+      // Full replace — do not keep pre-restore in-memory keys absent from backup
+      config.strategyToggles = { ...saved.strategyToggles };
+    } else {
+      config.strategyToggles = {
+        ...(config.strategyToggles || {}),
+        ...saved.strategyToggles,
+      };
+    }
+  } else if (options?.replaceStrategyToggles) {
+    // No toggles in snapshot — clear so ensureStrategyToggles can derive from
+    // restored underlying filter/strategy flags.
+    config.strategyToggles = {};
   }
   if (
     saved.strategyProfile === 'balanced' ||
@@ -3265,17 +3284,47 @@ export function applyImportedSettingsSnapshot(
 }
 
 /**
+ * After restore: fill any new module keys from defaults, then push toggles
+ * into underlying filter/strategy enabled flags so Settings + gates agree.
+ */
+function syncStrategyTogglesFromRestoredSettings(): void {
+  try {
+    const {
+      ensureStrategyToggles,
+      syncUnderlyingFlagsFromToggles,
+    } = require('./strategies') as typeof import('./strategies');
+    const toggles = ensureStrategyToggles();
+    syncUnderlyingFlagsFromToggles(toggles);
+    console.log(
+      `[settings] Restored strategy toggles synced (${Object.keys(toggles).filter((k) => toggles[k as keyof typeof toggles]).length} ON)`
+    );
+  } catch (err) {
+    console.warn(
+      '[settings] strategy toggle sync after restore failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/**
  * Apply data/config.json on top of code/env defaults.
  * Saved keys win; new keys from code updates keep their defaults.
+ *
+ * Pass `{ replaceStrategyToggles: true }` after site-backup restore so module
+ * ON/OFF state matches disk (no leftover in-memory toggles).
  */
-export function applyPersistedSettings(): boolean {
+export function applyPersistedSettings(opts?: {
+  replaceStrategyToggles?: boolean;
+}): boolean {
   const saved = loadPersistedSettings();
   if (!saved) {
     console.log('[settings] No config.json — using code/env defaults');
     return false;
   }
 
-  applySettingsSnapshot(saved, 'merge');
+  applySettingsSnapshot(saved, 'merge', {
+    replaceStrategyToggles: opts?.replaceStrategyToggles === true,
+  });
   settingsMigrations = { ...(saved.migrations ?? {}) };
 
   if (applyTradingModeLiveSimMigration()) {
@@ -3546,6 +3595,10 @@ export function applyPersistedSettings(): boolean {
     console.log(
       `[settings] Applied notifyEmailBondback_v1 — notify email ${config.notifications.email}`
     );
+  }
+
+  if (opts?.replaceStrategyToggles) {
+    syncStrategyTogglesFromRestoredSettings();
   }
 
   return true;
