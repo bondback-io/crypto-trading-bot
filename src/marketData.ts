@@ -45,7 +45,7 @@ export interface LaunchEvent {
   isPumpFun?: boolean;
   /** Price path for replay (oldest → newest) */
   candles: MarketCandle[];
-  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'jupiter' | 'synthetic';
+  source: 'dexscreener' | 'gmgn' | 'birdeye' | 'jupiter' | 'kolscan' | 'synthetic';
   url?: string;
   /** SOL/USD used when this event was built (for PnL $ display) */
   solUsd?: number;
@@ -63,6 +63,9 @@ export interface LaunchEvent {
   organicScore?: number;
   priceChangeH1Pct?: number;
   holderCount?: number;
+  /** Per-profile specialty feed tags (additive; global scanner leaves unset) */
+  preferredProfileId?: string;
+  specialtyFeed?: 'jupiter' | 'kolscan';
 }
 
 function isValidMint(m: string): boolean {

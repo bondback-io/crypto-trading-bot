@@ -67,6 +67,9 @@ export interface ScannerCandidate {
   isPumpFun?: boolean;
   organicScore?: number;
   jupiterCategory?: string;
+  /** Soft prefer this Smart Bot profile when specialty feed tagged the mint */
+  preferredProfileId?: string;
+  specialtyFeed?: 'jupiter' | 'kolscan';
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -958,6 +961,42 @@ export function markScannerCooldown(mint: string, taken: boolean): void {
   seenThisSession.add(mint);
 }
 
+/** Whether mint is in scanner cooldown (shared with specialty feed). */
+export function isScannerMintOnCooldown(mint: string): boolean {
+  const cd = cooldowns.get(mint) ?? 0;
+  return cd > Date.now();
+}
+
+/**
+ * Hand a pre-built candidate to the monitor handler (global or specialty feed).
+ * Respects cooldown; does not re-run enrich/rank.
+ */
+export function handOffScannerCandidate(
+  c: ScannerCandidate & { launch: LaunchEvent }
+): boolean {
+  if (!handler) return false;
+  if (!c?.mint) return false;
+  if (isScannerMintOnCooldown(c.mint)) return false;
+  pushFeed({ ...c });
+  c.status = 'queued';
+  annotateScannerCandidate(c.mint, { status: 'queued' });
+  const h = handler;
+  void Promise.resolve()
+    .then(() => h(c))
+    .catch((err) => {
+      annotateScannerCandidate(c.mint, {
+        status: 'skipped',
+        skipReason: err instanceof Error ? err.message : 'handler error',
+      });
+      markScannerCooldown(c.mint, false);
+      logger.warn('MarketScanner', 'Candidate handler failed', {
+        mint: c.mint,
+        ...errorToMeta(err),
+      });
+    });
+  return true;
+}
+
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabled('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
@@ -1007,6 +1046,20 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
         `(handed ${handed}) in ${lastPollMs}ms`
     );
+    try {
+      const { runProfileSpecialtyFeedPass } =
+        require('./profileSpecialtyFeeds') as typeof import('./profileSpecialtyFeeds');
+      const fed = await runProfileSpecialtyFeedPass();
+      if (fed > 0) {
+        console.log(`[marketScanner] specialty feed handed ${fed} candidate(s)`);
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'Specialty feed pass failed',
+        errorToMeta(err)
+      );
+    }
     return handed;
   } catch (err) {
     lastError = err instanceof Error ? err.message : String(err);

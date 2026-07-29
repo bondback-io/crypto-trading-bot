@@ -278,6 +278,17 @@ export interface TradeProfileMatchRules {
   requireCluster?: boolean;
   /** Min average wallet quality score (0–100) */
   minWalletQuality?: number;
+  /**
+   * When true, this profile receives specialty token feed candidates
+   * (Kolscan/KOL mint universe + optional Jupiter category×interval).
+   */
+  kolscanFeedEnabled?: boolean;
+  /** Min distinct KOL wallets on a mint (specialty KOL feed gate). Clamp 1–20. */
+  minKolWallets?: number;
+  /** Jupiter Tokens v2 category for this profile’s specialty Jupiter slice */
+  jupiterCategory?: 'toptraded' | 'toptrending' | 'toporganicscore';
+  /** Jupiter interval / volume window paired with jupiterCategory */
+  jupiterInterval?: '5m' | '1h' | '6h' | '24h';
 }
 
 /** Persisted user edits on top of official catalog defaults */
@@ -503,6 +514,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minDropFromPeakPct: 8,
       minPriceChange24hPct: 40,
+      kolscanFeedEnabled: true,
+      minKolWallets: 3,
+      jupiterCategory: 'toporganicscore',
+      jupiterInterval: '1h',
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -573,6 +588,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minTokenAgeHours: 2,
       minHolders: 35,
       minVolumeH1Usd: 1_500,
+      kolscanFeedEnabled: true,
+      minKolWallets: 3,
+      jupiterCategory: 'toporganicscore',
+      jupiterInterval: '6h',
     },
     exitRules: {
       forceScalp: false,
@@ -704,6 +723,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 2,
       minWalletQuality: 55,
       preferSmartMoney: true,
+      kolscanFeedEnabled: true,
+      minKolWallets: 4,
+      jupiterCategory: 'toporganicscore',
+      jupiterInterval: '6h',
     },
     exitRules: {
       takeProfitPctMin: 40,
@@ -827,6 +850,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minTokenAgeHours: 6,
       minHolders: 70,
       minVolumeH1Usd: 4_000,
+      kolscanFeedEnabled: true,
+      minKolWallets: 3,
+      jupiterCategory: 'toptrending',
+      jupiterInterval: '6h',
     },
     exitRules: {
       forceScalp: false,
@@ -1060,6 +1087,8 @@ export interface TradeProfileMatchContext {
    * (must still pass floors + match).
    */
   preferProfileId?: string | null;
+  /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
+  specialtyFeed?: 'jupiter' | 'kolscan' | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -1773,9 +1802,18 @@ export function updateTradeProfileParams(
         k === 'minPriceChange24hPct' ||
         k === 'minWalletCount' ||
         k === 'minWalletQuality' ||
+        k === 'minKolWallets' ||
         k === 'patternMinConfidence') &&
       typeof v === 'number' &&
       v <= 0
+    ) {
+      delete (nextMatch as Record<string, unknown>)[k];
+    }
+    // Empty string category/interval → unset to catalog default
+    if (
+      (k === 'jupiterCategory' || k === 'jupiterInterval') &&
+      typeof v === 'string' &&
+      !String(v).trim()
     ) {
       delete (nextMatch as Record<string, unknown>)[k];
     }
@@ -2942,6 +2980,21 @@ function scoreProfile(
   }
 
   if (score <= 0) return { score: 0, reason: 'no match' };
+
+  // Specialty feed soft prefer — tagged higher-quality tokens for this profile
+  if (
+    ctx.preferProfileId &&
+    ctx.preferProfileId === def.id &&
+    m.kolscanFeedEnabled === true
+  ) {
+    score += 22;
+    bits.push(
+      ctx.specialtyFeed
+        ? `specialty feed ${ctx.specialtyFeed}`
+        : 'specialty feed prefer'
+    );
+  }
+
   return {
     score: score + def.priority * 0.01,
     reason: bits.join(', ') || def.name,

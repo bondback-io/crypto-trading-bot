@@ -208,6 +208,7 @@ function buildTradeProfileMatchContext(
     scannerOrigin: isMarketScannerSignal(signal),
     entrySource: signal.entrySource,
     preferProfileId: signal.candidateTradeProfileId ?? null,
+    specialtyFeed: signal.specialtyFeed ?? null,
     walletQualityAvg: (() => {
       const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
       if (!addrs.length) return null;
@@ -539,6 +540,8 @@ export interface TradeSignal {
   candleSource?: 'real' | 'synthetic';
   /** Jupiter organicScore when known (scanner / pro-quality proxy) */
   organicScore?: number | null;
+  /** Specialty feed tag when from per-profile Kolscan/Jupiter pass */
+  specialtyFeed?: 'jupiter' | 'kolscan' | null;
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -2055,6 +2058,12 @@ async function handleScannerCandidate(
       scannerPlaybook: candidate.playbook,
       scannerConfluence: candidate.confluence,
       candleSource: candidate.candleSource ?? launch.candleSource,
+      candidateTradeProfileId:
+        candidate.preferredProfileId ||
+        launch.preferredProfileId ||
+        undefined,
+      specialtyFeed:
+        candidate.specialtyFeed || launch.specialtyFeed || null,
       organicScore:
         candidate.organicScore != null &&
         Number.isFinite(candidate.organicScore)

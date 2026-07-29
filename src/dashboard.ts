@@ -8771,6 +8771,75 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               '<p class="mint text-xs" style="margin:0"><strong style="color:#4ade80">Quality / specialty</strong> Keep cluster and wallet thresholds strict; use the filter below for deeper technical quality gating.</p>'
             );
           }
+          const feedOn =
+            matchValue('kolscanFeedEnabled') === true ||
+            matchValue('kolscanFeedEnabled') === 'true';
+          const specialtyFeedHtml =
+            '<div class="tp-param-section">' +
+              '<p class="tp-param-title">Specialty feed</p>' +
+              '<p class="tp-param-hint">Optional Kolscan/KOL + Jupiter token feed for this bot only. Soft-prefers this profile in lane fights on tagged mints. Requires Market Scanner + Smart Bot ON.</p>' +
+              selectField({
+                key: 'kolscanFeedEnabled',
+                label: 'Enable specialty feed',
+                title: 'When ON, this bot receives KOL mint candidates and optional Jupiter category×timeframe slices.',
+                match: true,
+                kind: 'boolean',
+                value: feedOn ? 'true' : 'false',
+                options: [
+                  { value: 'false', label: 'Off' },
+                  { value: 'true', label: 'On' },
+                ],
+              }) +
+              numField({
+                key: 'minKolWallets',
+                label: 'Min KOL wallets',
+                title: 'Minimum distinct KOL wallets on a mint for the Kolscan slice (1–20). Empty = catalog default.',
+                match: true,
+                step: 1,
+                min: 0,
+                max: 20,
+                placeholder: 'default',
+                value: matchValue('minKolWallets'),
+              }) +
+              numField({
+                key: 'minWalletQuality',
+                label: 'Min wallet quality',
+                title: 'Min average KOL wallet quality (0–100) for Kolscan slice. Also used as lane wallet-quality floor when set.',
+                match: true,
+                step: 1,
+                min: 0,
+                max: 100,
+                placeholder: 'default',
+                value: matchValue('minWalletQuality'),
+              }) +
+              selectField({
+                key: 'jupiterCategory',
+                label: 'Jupiter category',
+                title: 'Jupiter Tokens v2 list for this profile’s specialty Jupiter slice.',
+                match: true,
+                value: matchValue('jupiterCategory') || '',
+                options: [
+                  { value: '', label: '— none —' },
+                  { value: 'toptraded', label: 'toptraded' },
+                  { value: 'toptrending', label: 'toptrending' },
+                  { value: 'toporganicscore', label: 'toporganicscore' },
+                ],
+              }) +
+              selectField({
+                key: 'jupiterInterval',
+                label: 'Volume timeframe',
+                title: 'Jupiter interval paired with category (5m / 1h / 6h / 24h).',
+                match: true,
+                value: matchValue('jupiterInterval') || '',
+                options: [
+                  { value: '', label: '— none —' },
+                  { value: '5m', label: '5m' },
+                  { value: '1h', label: '1h' },
+                  { value: '6h', label: '6h' },
+                  { value: '24h', label: '24h' },
+                ],
+              }) +
+            '</div>';
           const params = editable
             ? (
               '<div class="tp-params" data-tp-id="' + escHtml(p.id) + '">' +
@@ -8779,6 +8848,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                   '<p class="tp-param-hint">Blank fields fall back to the official profile defaults.</p>' +
                   entryFields.join('') +
                 '</div>' +
+                specialtyFeedHtml +
                 '<div class="tp-param-section">' +
                   '<p class="tp-param-title">Exit &amp; sizing</p>' +
                   numField({ key: 'takeProfitPctMin', label: 'TP min %', step: 0.5, value: num(er.takeProfitPctMin, off.takeProfitPctMin) }) +
@@ -9477,6 +9547,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             else exitRules[k] = val;
             return;
           }
+          // Empty Jupiter category/interval clears → catalog default
+          if (
+            (k === 'jupiterCategory' || k === 'jupiterInterval') &&
+            (raw === '' || raw == null)
+          ) {
+            match[k] = '';
+            return;
+          }
           if (raw === '' || raw == null) return;
           if (inp.getAttribute('data-match') === '1') match[k] = raw;
           else exitRules[k] = raw;
@@ -9504,6 +9582,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           k === 'minPriceChange24hPct' ||
           k === 'minWalletCount' ||
           k === 'minWalletQuality' ||
+          k === 'minKolWallets' ||
           k === 'patternMinConfidence'
         ) {
           const n = raw === '' || raw == null ? 0 : Number(raw);
