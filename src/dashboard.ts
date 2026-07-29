@@ -8082,7 +8082,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               (p.name || p.id) + ' has not upgraded yet — needs more closed trades'
             );
           }
-          const levelTitle = levelTitleParts.join('\n');
+          const levelTitle = levelTitleParts.join('\\n');
           const learnProgressHtml =
             '<div class="tp-learn-progress" title="' +
               escAttr(
