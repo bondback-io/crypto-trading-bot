@@ -50,7 +50,32 @@ import {
 } from './shortTermStrategies';
 import { shouldInvalidatePostRunDipPosition } from './postRunDip';
 import { recordPriceTick } from './technicalLevels';
-import { applyTradeProfileExitRules } from './tradeProfiles';
+import {
+  applyTradeProfileExitRules,
+  getGlobalMicroBotTakeProfitPct,
+} from './tradeProfiles';
+
+/**
+ * Effective TP% for a position — Global Micro-Bot Take Profit master override
+ * wins for any trade-profile-stamped (micro-bot) position.
+ */
+function effectivePositionTakeProfitPct(position: {
+  takeProfitPct: number;
+  scalpTpPct?: number;
+  tradeProfileId?: string;
+}): number {
+  const g = getGlobalMicroBotTakeProfitPct();
+  if (g != null && position.tradeProfileId) return g;
+  return position.scalpTpPct ?? position.takeProfitPct;
+}
+
+function isGlobalMicroBotTpOverrideActive(position: {
+  tradeProfileId?: string;
+}): boolean {
+  return (
+    getGlobalMicroBotTakeProfitPct() != null && Boolean(position.tradeProfileId)
+  );
+}
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
@@ -1923,7 +1948,11 @@ export class PaperTrader {
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // Adaptive profile exit (sync / backtest)
-    if (position.profileExitPolicy || position.tradeProfileId) {
+    // Skipped when Global Micro-Bot Take Profit master override is ON (fixed % only).
+    if (
+      !isGlobalMicroBotTpOverrideActive(position) &&
+      (position.profileExitPolicy || position.tradeProfileId)
+    ) {
       try {
         const {
           evaluateAdaptiveProfileExit,
@@ -2012,7 +2041,7 @@ export class PaperTrader {
         nowMs,
         deadlineMs: position.scalpDeadlineMs,
         hardDeadlineMs: position.scalpHardDeadlineMs,
-        tpPct: position.scalpTpPct ?? position.takeProfitPct,
+        tpPct: effectivePositionTakeProfitPct(position),
         slPct: position.scalpSlPct ?? position.stopLossPct,
         momentumFailDropPct: position.scalpMomentumFailDropPct,
       });
@@ -2190,7 +2219,9 @@ export class PaperTrader {
     }
 
     // —— Advanced profit strategy (same as applyProfitStrategyTick, sync) ——
+    // Global Micro-Bot Take Profit master override → fixed % only (no tiered/partial)
     if (
+      !isGlobalMicroBotTpOverrideActive(position) &&
       isStrategyEnabledForProfile('tiered_profit_taking', position.tradeProfileId) &&
       config.profitStrategy?.enabled
     ) {
@@ -2338,7 +2369,11 @@ export class PaperTrader {
       };
     }
 
-    if (risk.tieredSellEnabled && rules.tiers?.length) {
+    if (
+      !isGlobalMicroBotTpOverrideActive(position) &&
+      risk.tieredSellEnabled &&
+      rules.tiers?.length
+    ) {
       for (let i = 0; i < rules.tiers.length; i++) {
         if (position.tiersHit.includes(i)) continue;
         const tier = rules.tiers[i];
@@ -2356,8 +2391,9 @@ export class PaperTrader {
           };
         }
       }
-    } else if (markPnlPct >= position.takeProfitPct) {
-      const reason = `take-profit ${position.takeProfitPct.toFixed(0)}%`;
+    } else if (markPnlPct >= effectivePositionTakeProfitPct(position)) {
+      const tp = effectivePositionTakeProfitPct(position);
+      const reason = `take-profit ${tp.toFixed(0)}%`;
       this.simulateSell(position.id, markPrice, reason);
       return {
         kind: 'take_profit',
@@ -2623,7 +2659,11 @@ export class PaperTrader {
       }
 
       // Adaptive profile exit brain (early partial / trail tighten / momentum fade / profit-lock)
-      if (position.profileExitPolicy || position.tradeProfileId) {
+      // Skipped when Global Micro-Bot Take Profit master override is ON (fixed % only).
+      if (
+        !isGlobalMicroBotTpOverrideActive(position) &&
+        (position.profileExitPolicy || position.tradeProfileId)
+      ) {
         try {
           const {
             evaluateAdaptiveProfileExit,
@@ -2705,7 +2745,7 @@ export class PaperTrader {
           nowMs: Date.now(),
           deadlineMs: position.scalpDeadlineMs,
           hardDeadlineMs: position.scalpHardDeadlineMs,
-          tpPct: position.scalpTpPct ?? position.takeProfitPct,
+          tpPct: effectivePositionTakeProfitPct(position),
           slPct: position.scalpSlPct ?? position.stopLossPct,
           momentumFailDropPct: position.scalpMomentumFailDropPct,
         });
@@ -2835,7 +2875,9 @@ export class PaperTrader {
       }
 
       // Advanced profit strategy (paper + live)
+      // Global Micro-Bot Take Profit → skip tiered/partial; use fixed % below
       if (
+        !isGlobalMicroBotTpOverrideActive(position) &&
         isStrategyEnabledForProfile('tiered_profit_taking', position.tradeProfileId) &&
         config.profitStrategy?.enabled
       ) {
@@ -2868,6 +2910,7 @@ export class PaperTrader {
       }
 
       if (
+        !isGlobalMicroBotTpOverrideActive(position) &&
         position.tradeMode !== 'live' &&
         risk.tieredSellEnabled &&
         rules.tiers?.length
@@ -2893,14 +2936,15 @@ export class PaperTrader {
         }
         if (soldTier && !this.positions.has(position.id)) continue;
       } else if (
-        position.tradeMode !== 'live' &&
-        !risk.tieredSellEnabled &&
-        pnlPct >= position.takeProfitPct
+        (isGlobalMicroBotTpOverrideActive(position) ||
+          (position.tradeMode !== 'live' && !risk.tieredSellEnabled)) &&
+        pnlPct >= effectivePositionTakeProfitPct(position)
       ) {
+        const tp = effectivePositionTakeProfitPct(position);
         await this.closePositionByRules(
           position,
           currentPrice,
-          `take-profit ${position.takeProfitPct.toFixed(0)}%`
+          `take-profit ${tp.toFixed(0)}%`
         );
         continue;
       }

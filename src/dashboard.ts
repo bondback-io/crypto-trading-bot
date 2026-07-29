@@ -6001,6 +6001,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="active-profile-hint">Use this tab to tune micro-bot participation, lane fights, and profile-level modules without mixing it into the main settings page.</p>
       </div>
 
+      <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
+
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
           <div style="min-width:0;flex:1">
@@ -7886,11 +7888,54 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const registry = data.registry || [];
       grid.innerHTML = buildSettingsModuleGroups(registry).map(group => {
         const rows = group.rows || [];
+        const isTradeMgmt =
+          group.label === 'Trade Management & Micro-Bot Engines';
+        const gtp = (data.tradeProfiles && data.tradeProfiles.globalTakeProfit) || {};
+        const gtpOn = gtp.enabled === true;
+        const gtpPct =
+          gtp.takeProfitPct != null && Number.isFinite(Number(gtp.takeProfitPct))
+            ? Number(gtp.takeProfitPct)
+            : 25;
+        const globalTpHtml = isTradeMgmt
+          ? '<div class="strategy-row border-b border-amber-700/50 pb-3 mb-1" id="global-microbot-tp-row">' +
+              '<div class="flex items-center justify-between gap-3">' +
+                '<div class="font-medium text-slate-100">Global Micro-Bot Take Profit' +
+                  '<span class="strat-src-badge strat-src-custom" title="Master override for all trade-profile bots">Master</span>' +
+                '</div>' +
+                '<label class="switch"><input type="checkbox" id="global-microbot-tp-enabled" ' +
+                  (gtpOn ? 'checked ' : '') +
+                  'onchange="onGlobalMicroBotTpToggle(this.checked)" /><span class="slider"></span></label>' +
+              '</div>' +
+              '<div class="text-sm text-slate-400 mt-1">Forces every Smart Bot / micro-bot trade to a single fixed take-profit %. Overrides TP min/max, profile exit rules, scalp TP stamps, Tiered Profit Taking, and other profit modules for profile-stamped trades.</div>' +
+              '<div class="strat-fields mt-2" style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-end">' +
+                '<label class="strat-field" style="min-width:7rem">' +
+                  '<span class="text-xs text-slate-400">TP%</span>' +
+                  '<input type="number" id="global-microbot-tp-pct" class="input" min="1" max="5000" step="0.5" value="' +
+                    gtpPct +
+                  '" ' + (gtpOn ? '' : 'disabled ') +
+                  'onchange="saveGlobalMicroBotTakeProfit()" onblur="saveGlobalMicroBotTakeProfit()" />' +
+                '</label>' +
+                '<button type="button" class="btn btn-primary" onclick="saveGlobalMicroBotTakeProfit()">Save</button>' +
+              '</div>' +
+              '<div id="global-microbot-tp-warn" class="text-xs mt-2 rounded-md px-2.5 py-2 border ' +
+                (gtpOn
+                  ? 'border-amber-600/60 bg-amber-950/40 text-amber-200'
+                  : 'hidden border-slate-700 text-slate-400') +
+                '">' +
+                (gtpOn
+                  ? '<strong>MASTER OVERRIDE ACTIVE</strong> — all micro-bot take profits are locked to <strong>+' +
+                    gtpPct +
+                    '%</strong>. Per-bot TP min/max and Settings profit modules are ignored for those trades until you turn this off.'
+                  : '') +
+              '</div>' +
+            '</div>'
+          : '';
         return '<div class="card strategy-group-card">' +
           '<div class="section-title">' + group.label + '</div>' +
           (group.hint
             ? '<p class="text-xs text-slate-400 mb-3">' + group.hint + '</p>'
             : '') +
+          globalTpHtml +
           rows.map(s => {
             const safety = s.criticalSafety
               ? '<span class="text-xs text-amber-300 ml-2">safety</span>'
@@ -8233,6 +8278,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         return;
       }
       window.__tradeProfilesStatus = tp;
+      if (typeof updateGlobalMicroBotTpUi === 'function') {
+        updateGlobalMicroBotTpUi(tp.globalTakeProfit);
+      }
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
@@ -9507,6 +9555,89 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.toggleSmartBotProfiles = toggleSmartBotProfiles;
+
+    async function saveGlobalMicroBotTakeProfit() {
+      const en = document.getElementById('global-microbot-tp-enabled');
+      const pctEl = document.getElementById('global-microbot-tp-pct');
+      const enabled = !!(en && en.checked);
+      let takeProfitPct = Number(pctEl && pctEl.value);
+      if (!Number.isFinite(takeProfitPct) || takeProfitPct <= 0) takeProfitPct = 25;
+      takeProfitPct = Math.max(1, Math.min(5000, takeProfitPct));
+      if (pctEl) pctEl.value = String(takeProfitPct);
+      try {
+        const data = await fetchJSON('/api/trade-profiles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            globalTakeProfit: { enabled: enabled, takeProfitPct: takeProfitPct },
+          }),
+        });
+        if (data && data.tradeProfiles) {
+          // /api/trade-profiles returns status at top level
+        }
+        const g =
+          (data && data.globalTakeProfit) ||
+          (data && data.tradeProfiles && data.tradeProfiles.globalTakeProfit) ||
+          { enabled: enabled, takeProfitPct: takeProfitPct };
+        updateGlobalMicroBotTpUi(g);
+        if (typeof loadStrategies === 'function') loadStrategies();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.saveGlobalMicroBotTakeProfit = saveGlobalMicroBotTakeProfit;
+
+    function onGlobalMicroBotTpToggle(checked) {
+      const pctEl = document.getElementById('global-microbot-tp-pct');
+      if (pctEl) pctEl.disabled = !checked;
+      saveGlobalMicroBotTakeProfit();
+    }
+    window.onGlobalMicroBotTpToggle = onGlobalMicroBotTpToggle;
+
+    function updateGlobalMicroBotTpUi(g) {
+      if (!g) return;
+      const en = document.getElementById('global-microbot-tp-enabled');
+      const pctEl = document.getElementById('global-microbot-tp-pct');
+      const warn = document.getElementById('global-microbot-tp-warn');
+      const on = g.enabled === true;
+      const pct =
+        g.takeProfitPct != null && Number.isFinite(Number(g.takeProfitPct))
+          ? Number(g.takeProfitPct)
+          : 25;
+      if (en) en.checked = on;
+      if (pctEl) {
+        pctEl.value = String(pct);
+        pctEl.disabled = !on;
+      }
+      if (warn) {
+        if (on) {
+          warn.classList.remove('hidden');
+          warn.className =
+            'text-xs mt-2 rounded-md px-2.5 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200';
+          warn.innerHTML =
+            '<strong>MASTER OVERRIDE ACTIVE</strong> — all micro-bot take profits are locked to <strong>+' +
+            pct +
+            '%</strong>. Per-bot TP min/max and Settings profit modules are ignored for those trades until you turn this off.';
+        } else {
+          warn.classList.add('hidden');
+          warn.textContent = '';
+        }
+      }
+      const banner = document.getElementById('global-microbot-tp-banner');
+      if (banner) {
+        if (on) {
+          banner.classList.remove('hidden');
+          banner.innerHTML =
+            '<strong>Global Micro-Bot Take Profit ON</strong> — fixed <strong>+' +
+            pct +
+            '%</strong> master override is active for all trade-profile bots.';
+        } else {
+          banner.classList.add('hidden');
+          banner.innerHTML = '';
+        }
+      }
+    }
+    window.updateGlobalMicroBotTpUi = updateGlobalMicroBotTpUi;
 
     async function toggleTradeProfile(id, enabled) {
       if (!enabled) {

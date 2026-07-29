@@ -2431,6 +2431,7 @@ export function createServer(): express.Application {
       enabled?: boolean;
       smartBotProfiles?: boolean;
       profiles?: Record<string, boolean>;
+      globalTakeProfit?: { enabled?: boolean; takeProfitPct?: number };
       id?: string;
       profileEnabled?: boolean;
       params?: {
@@ -2478,6 +2479,7 @@ export function createServer(): express.Application {
         profiles: body.profiles as
           | Partial<Record<import('./tradeProfiles').TradeProfileId, boolean>>
           | undefined,
+        globalTakeProfit: body.globalTakeProfit,
       });
     }
     res.json({ ok: true, ...getTradeProfilesStatus() });

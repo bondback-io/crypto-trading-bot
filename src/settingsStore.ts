@@ -87,6 +87,10 @@ export interface PersistedBotSettings {
       weights?: Record<string, number>;
     };
     selfLearning?: Record<string, unknown>;
+    globalTakeProfit?: {
+      enabled?: boolean;
+      takeProfitPct?: number;
+    };
   };
     paper?: Record<string, unknown>;
   /** Email notification preferences (no SMTP secrets) */

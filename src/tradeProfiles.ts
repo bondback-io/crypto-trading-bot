@@ -987,6 +987,19 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
   },
 ] as const;
 
+/** Master override: fixed TP% for every micro-bot / trade-profile exit. */
+export interface GlobalMicroBotTakeProfit {
+  /** Default false — profile TP min/max and tiered profit modules remain in control */
+  enabled: boolean;
+  /** Fixed take-profit percent (positive). Used only when enabled. */
+  takeProfitPct: number;
+}
+
+export const DEFAULT_GLOBAL_MICRO_BOT_TAKE_PROFIT: GlobalMicroBotTakeProfit = {
+  enabled: false,
+  takeProfitPct: 25,
+};
+
 export interface TradeProfileRuntimeState {
   enabled: boolean;
   /**
@@ -1006,6 +1019,12 @@ export interface TradeProfileRuntimeState {
       import('./profileSelfLearning').ProfileSelfLearningState
     >
   >;
+  /**
+   * Master override for all trade-profile micro-bots: force a single fixed TP%.
+   * Overrides TP min/max, profile exitRules TP, scalp TP stamps, and tiered
+   * profit-taking / profitStrategy take-profit paths for profile-stamped trades.
+   */
+  globalTakeProfit?: GlobalMicroBotTakeProfit;
 }
 
 export interface TradeProfileAssignment {
@@ -1153,6 +1172,48 @@ export function applyTradeProfileSizing(
   return { sizeSol: currentSizeSol, usedOverride: false };
 }
 
+/** Normalize + clamp global micro-bot TP master override. */
+export function normalizeGlobalMicroBotTakeProfit(
+  raw?: Partial<GlobalMicroBotTakeProfit> | null
+): GlobalMicroBotTakeProfit {
+  const enabled = raw?.enabled === true;
+  const pct = Number(raw?.takeProfitPct);
+  return {
+    enabled,
+    takeProfitPct: Number.isFinite(pct)
+      ? Math.max(1, Math.min(5000, Math.round(pct * 10) / 10))
+      : DEFAULT_GLOBAL_MICRO_BOT_TAKE_PROFIT.takeProfitPct,
+  };
+}
+
+/**
+ * When Global Micro-Bot Take Profit is ON, returns the fixed TP%.
+ * Otherwise null (profile / settings TP paths remain active).
+ */
+export function getGlobalMicroBotTakeProfitPct(): number | null {
+  const g = normalizeGlobalMicroBotTakeProfit(ensureState().globalTakeProfit);
+  if (!g.enabled) return null;
+  return g.takeProfitPct;
+}
+
+export function isGlobalMicroBotTakeProfitActive(): boolean {
+  return getGlobalMicroBotTakeProfitPct() != null;
+}
+
+/** Force fixed TP onto exit rules when the master override is active. */
+export function applyGlobalMicroBotTakeProfitToExitRules(
+  rules: TradeProfileExitRules
+): TradeProfileExitRules {
+  const tp = getGlobalMicroBotTakeProfitPct();
+  if (tp == null) return rules;
+  return {
+    ...rules,
+    takeProfitPct: tp,
+    takeProfitPctMin: tp,
+    takeProfitPctMax: tp,
+  };
+}
+
 /** Turn range fields into concrete frozen values for one trade */
 export function materializeExitRules(
   rules: TradeProfileExitRules
@@ -1188,7 +1249,8 @@ export function materializeExitRules(
       randBetween(out.hardTimeLimitSecMin, out.hardTimeLimitSecMax)
     );
   }
-  return out;
+  // Master override last — wins over TP min/max and any profile TP stamp
+  return applyGlobalMicroBotTakeProfitToExitRules(out);
 }
 
 function mergeExitRules(
@@ -1283,6 +1345,7 @@ function defaultRuntimeState(): TradeProfileRuntimeState {
     profiles,
     overrides: {},
     autoScoring: { ...DEFAULT_AUTO_SCORING, weights: { ...DEFAULT_AUTO_SCORING.weights } },
+    globalTakeProfit: { ...DEFAULT_GLOBAL_MICRO_BOT_TAKE_PROFIT },
   };
 }
 
@@ -1342,12 +1405,17 @@ function ensureState(): TradeProfileRuntimeState {
         } as NonNullable<TradeProfileRuntimeState['selfLearning']>)
       : undefined;
 
+  const globalTakeProfit = normalizeGlobalMicroBotTakeProfit(
+    (existing as TradeProfileRuntimeState).globalTakeProfit
+  );
+
   const state: TradeProfileRuntimeState = {
     enabled,
     smartBotProfiles,
     profiles: profiles as Record<TradeProfileId, boolean>,
     overrides,
     autoScoring,
+    globalTakeProfit,
     ...(selfLearning ? { selfLearning } : {}),
   };
   writeTradeProfilesState(state);
@@ -1537,6 +1605,7 @@ export function getActiveCascadeMatchFloors(
 export function getTradeProfilesStatus(): {
   enabled: boolean;
   smartBotProfiles: boolean;
+  globalTakeProfit: GlobalMicroBotTakeProfit;
   profiles: Array<
     TradeProfileDefinition & {
       enabled: boolean;
@@ -1589,6 +1658,7 @@ export function getTradeProfilesStatus(): {
   return {
     enabled: state.enabled,
     smartBotProfiles: state.smartBotProfiles === true,
+    globalTakeProfit: normalizeGlobalMicroBotTakeProfit(state.globalTakeProfit),
     profiles,
     active: profiles
       .filter((p) => p.active)
@@ -1702,6 +1772,7 @@ export function updateTradeProfilesConfig(partial: {
   enabled?: boolean;
   smartBotProfiles?: boolean;
   profiles?: Partial<Record<TradeProfileId, boolean>>;
+  globalTakeProfit?: Partial<GlobalMicroBotTakeProfit>;
 }): ReturnType<typeof getTradeProfilesStatus> {
   const state = ensureState();
   if (partial.enabled != null) state.enabled = Boolean(partial.enabled);
@@ -1709,6 +1780,19 @@ export function updateTradeProfilesConfig(partial: {
     state.smartBotProfiles = Boolean(partial.smartBotProfiles);
     console.log(
       `[trade-profiles] Smart Bot Profiles ${state.smartBotProfiles ? 'ON (micro-bots)' : 'OFF (legacy shared modules)'}`
+    );
+  }
+  if (partial.globalTakeProfit && typeof partial.globalTakeProfit === 'object') {
+    state.globalTakeProfit = normalizeGlobalMicroBotTakeProfit({
+      ...normalizeGlobalMicroBotTakeProfit(state.globalTakeProfit),
+      ...partial.globalTakeProfit,
+    });
+    console.log(
+      `[trade-profiles] Global Micro-Bot Take Profit ${
+        state.globalTakeProfit.enabled
+          ? `ON @ ${state.globalTakeProfit.takeProfitPct}% (master override)`
+          : 'OFF'
+      }`
     );
   }
   if (partial.profiles) {
@@ -3443,40 +3527,41 @@ export function applyProfileExitRulesToBuyOpts(
   er: TradeProfileExitRules | null | undefined
 ): void {
   if (!er) return;
-  if (er.takeProfitPct != null) buyOpts.profileTakeProfitPct = er.takeProfitPct;
-  if (er.stopLossPct != null) buyOpts.profileStopLossPct = er.stopLossPct;
-  if (er.trailingStopPct != null) {
-    buyOpts.profileTrailingStopPct = er.trailingStopPct;
+  const rules = applyGlobalMicroBotTakeProfitToExitRules(er);
+  if (rules.takeProfitPct != null) buyOpts.profileTakeProfitPct = rules.takeProfitPct;
+  if (rules.stopLossPct != null) buyOpts.profileStopLossPct = rules.stopLossPct;
+  if (rules.trailingStopPct != null) {
+    buyOpts.profileTrailingStopPct = rules.trailingStopPct;
   }
   if (
-    er.trailingActivationProfit != null &&
-    Number.isFinite(er.trailingActivationProfit)
+    rules.trailingActivationProfit != null &&
+    Number.isFinite(rules.trailingActivationProfit)
   ) {
-    buyOpts.profileTrailingActivationProfit = er.trailingActivationProfit;
+    buyOpts.profileTrailingActivationProfit = rules.trailingActivationProfit;
   }
-  if (er.hardTimeLimitSec != null) {
-    buyOpts.profileHardTimeLimitSec = er.hardTimeLimitSec;
+  if (rules.hardTimeLimitSec != null) {
+    buyOpts.profileHardTimeLimitSec = rules.hardTimeLimitSec;
   }
   if (
-    er.momentumFailDropPct != null &&
-    Number.isFinite(er.momentumFailDropPct) &&
-    er.momentumFailDropPct > 0
+    rules.momentumFailDropPct != null &&
+    Number.isFinite(rules.momentumFailDropPct) &&
+    rules.momentumFailDropPct > 0
   ) {
-    buyOpts.profileMomentumFailDropPct = er.momentumFailDropPct;
+    buyOpts.profileMomentumFailDropPct = rules.momentumFailDropPct;
   }
-  if (er.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
+  if (rules.overrideScalpParams) buyOpts.profileOverrideScalpParams = true;
   if (
-    er.deadVolumeMinHoldMinutes != null &&
-    Number.isFinite(er.deadVolumeMinHoldMinutes)
+    rules.deadVolumeMinHoldMinutes != null &&
+    Number.isFinite(rules.deadVolumeMinHoldMinutes)
   ) {
-    buyOpts.profileDeadVolumeMinHoldMinutes = er.deadVolumeMinHoldMinutes;
+    buyOpts.profileDeadVolumeMinHoldMinutes = rules.deadVolumeMinHoldMinutes;
   }
-  if (er.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
-  if (er.forceScalp) {
+  if (rules.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
+  if (rules.forceScalp) {
     buyOpts.profileForceScalp = true;
-    if (er.shortTermStrategyId) {
+    if (rules.shortTermStrategyId) {
       buyOpts.scalpMode = true;
-      buyOpts.shortTermStrategyId = er.shortTermStrategyId;
+      buyOpts.shortTermStrategyId = rules.shortTermStrategyId;
     }
   }
 }
@@ -3562,59 +3647,65 @@ export function applyTradeProfileExitRules(
     }
   }
 
-  if (rules.takeProfitPct != null && Number.isFinite(rules.takeProfitPct)) {
-    position.takeProfitPct = rules.takeProfitPct;
-    if (position.scalpMode || rules.overrideScalpParams) {
-      position.scalpTpPct = rules.takeProfitPct;
+  const exitRules = applyGlobalMicroBotTakeProfitToExitRules(rules);
+
+  if (exitRules.takeProfitPct != null && Number.isFinite(exitRules.takeProfitPct)) {
+    position.takeProfitPct = exitRules.takeProfitPct;
+    if (
+      position.scalpMode ||
+      exitRules.overrideScalpParams ||
+      getGlobalMicroBotTakeProfitPct() != null
+    ) {
+      position.scalpTpPct = exitRules.takeProfitPct;
     }
   }
-  if (rules.stopLossPct != null && Number.isFinite(rules.stopLossPct)) {
-    const sl = normalizeStopLossPct(rules.stopLossPct);
+  if (exitRules.stopLossPct != null && Number.isFinite(exitRules.stopLossPct)) {
+    const sl = normalizeStopLossPct(exitRules.stopLossPct);
     position.stopLossPct = sl;
-    if (position.scalpMode || rules.overrideScalpParams) {
+    if (position.scalpMode || exitRules.overrideScalpParams) {
       position.scalpSlPct = sl;
     }
   }
-  if (rules.trailingStopPct != null && Number.isFinite(rules.trailingStopPct)) {
-    position.trailingStopPct = rules.trailingStopPct;
+  if (exitRules.trailingStopPct != null && Number.isFinite(exitRules.trailingStopPct)) {
+    position.trailingStopPct = exitRules.trailingStopPct;
   }
   if (
-    rules.trailingActivationProfit != null &&
-    Number.isFinite(rules.trailingActivationProfit) &&
-    rules.trailingActivationProfit > 0
+    exitRules.trailingActivationProfit != null &&
+    Number.isFinite(exitRules.trailingActivationProfit) &&
+    exitRules.trailingActivationProfit > 0
   ) {
-    position.trailingActivationProfit = rules.trailingActivationProfit;
+    position.trailingActivationProfit = exitRules.trailingActivationProfit;
   }
   if (
-    rules.momentumFailDropPct != null &&
-    Number.isFinite(rules.momentumFailDropPct) &&
-    rules.momentumFailDropPct > 0
+    exitRules.momentumFailDropPct != null &&
+    Number.isFinite(exitRules.momentumFailDropPct) &&
+    exitRules.momentumFailDropPct > 0
   ) {
     position.scalpMomentumFailDropPct = Math.min(
       40,
-      Number(rules.momentumFailDropPct)
+      Number(exitRules.momentumFailDropPct)
     );
   }
   if (
-    rules.hardTimeLimitSec != null &&
-    Number.isFinite(rules.hardTimeLimitSec) &&
-    rules.hardTimeLimitSec > 0 &&
-    (position.scalpMode || rules.forceScalp)
+    exitRules.hardTimeLimitSec != null &&
+    Number.isFinite(exitRules.hardTimeLimitSec) &&
+    exitRules.hardTimeLimitSec > 0 &&
+    (position.scalpMode || exitRules.forceScalp)
   ) {
     position.scalpMode = true;
-    const holdMs = Math.round(rules.hardTimeLimitSec) * 1000;
+    const holdMs = Math.round(exitRules.hardTimeLimitSec) * 1000;
     position.scalpDeadlineMs = position.openedAt + holdMs;
     // Soft timer may defer a green trade; hard cap at 1.4× primary window
     position.scalpHardDeadlineMs = position.openedAt + Math.round(holdMs * 1.4);
   }
   if (
-    (rules.aggressiveDeadMarket || rules.deadVolumeMinHoldMinutes != null) &&
-    rules.deadVolumeMinHoldMinutes != null &&
-    Number.isFinite(rules.deadVolumeMinHoldMinutes)
+    (exitRules.aggressiveDeadMarket || exitRules.deadVolumeMinHoldMinutes != null) &&
+    exitRules.deadVolumeMinHoldMinutes != null &&
+    Number.isFinite(exitRules.deadVolumeMinHoldMinutes)
   ) {
     position.deadVolumeMinHoldMinutes = Math.max(
       0,
-      Number(rules.deadVolumeMinHoldMinutes)
+      Number(exitRules.deadVolumeMinHoldMinutes)
     );
   }
 }
@@ -3628,6 +3719,11 @@ export function hydrateTradeProfilesFromSettings(
     // Keep prior self-learning / overrides if a partial re-hydrate had no payload
     if (prev?.overrides) base.overrides = prev.overrides;
     if (prev?.selfLearning) base.selfLearning = prev.selfLearning;
+    if (prev?.globalTakeProfit) {
+      base.globalTakeProfit = normalizeGlobalMicroBotTakeProfit(
+        prev.globalTakeProfit
+      );
+    }
     writeTradeProfilesState(base);
     return;
   }
@@ -3661,6 +3757,11 @@ export function hydrateTradeProfilesFromSettings(
   }
   if (s.autoScoring && typeof s.autoScoring === 'object') {
     base.autoScoring = normalizeAutoScoringConfig(s.autoScoring);
+  }
+  if (s.globalTakeProfit && typeof s.globalTakeProfit === 'object') {
+    base.globalTakeProfit = normalizeGlobalMicroBotTakeProfit(s.globalTakeProfit);
+  } else if (prev?.globalTakeProfit) {
+    base.globalTakeProfit = normalizeGlobalMicroBotTakeProfit(prev.globalTakeProfit);
   }
   if (s.selfLearning && typeof s.selfLearning === 'object') {
     const {

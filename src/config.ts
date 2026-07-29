@@ -1765,6 +1765,11 @@ export interface BotConfig {
       weights?: Record<string, number>;
     };
     selfLearning?: Record<string, unknown>;
+    /** Master fixed-TP% override for all micro-bot / trade-profile exits */
+    globalTakeProfit?: {
+      enabled?: boolean;
+      takeProfitPct?: number;
+    };
   };
 
   /** GMGN API settings */
@@ -2155,6 +2160,10 @@ export const config: BotConfig = {
       steady_compounder: true,
       reversal_scalper: true,
       smart_money_mirror: true,
+    },
+    globalTakeProfit: {
+      enabled: false,
+      takeProfitPct: 25,
     },
   },
 
@@ -2578,6 +2587,9 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
                 (config.tradeProfiles as { selfLearning?: unknown }).selfLearning
               )
             : undefined,
+          globalTakeProfit: config.tradeProfiles.globalTakeProfit
+            ? cloneJson(config.tradeProfiles.globalTakeProfit)
+            : { enabled: false, takeProfitPct: 25 },
         }) as PersistedBotSettings['tradeProfiles'])
       : undefined,
     paper: { ...config.paper },
@@ -3246,6 +3258,21 @@ function applySettingsSnapshot(
     ) {
       (config.tradeProfiles as { selfLearning?: unknown }).selfLearning =
         cloneJson((tp as { selfLearning: unknown }).selfLearning);
+    }
+    if (
+      (tp as { globalTakeProfit?: unknown }).globalTakeProfit &&
+      typeof (tp as { globalTakeProfit?: unknown }).globalTakeProfit === 'object'
+    ) {
+      const g = (tp as {
+        globalTakeProfit: { enabled?: boolean; takeProfitPct?: number };
+      }).globalTakeProfit;
+      config.tradeProfiles.globalTakeProfit = {
+        enabled: g.enabled === true,
+        takeProfitPct:
+          g.takeProfitPct != null && Number.isFinite(Number(g.takeProfitPct))
+            ? Math.max(1, Math.min(5000, Number(g.takeProfitPct)))
+            : 25,
+      };
     }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
@@ -4983,6 +5010,10 @@ export function getConfigSnapshot() {
           profiles: config.tradeProfiles.profiles || {},
           overrides: config.tradeProfiles.overrides || {},
           autoScoring: config.tradeProfiles.autoScoring,
+          globalTakeProfit: config.tradeProfiles.globalTakeProfit || {
+            enabled: false,
+            takeProfitPct: 25,
+          },
         }) as typeof config.tradeProfiles)
       : undefined,
     paper: { ...config.paper },
