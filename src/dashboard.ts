@@ -472,6 +472,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     input[type="email"],
     input[type="url"],
     input[type="password"],
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
+    input[type="month"],
     select,
     textarea {
       background: var(--panel);
@@ -485,11 +489,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       min-height: 2.1rem;
       outline: none;
       transition: border-color .15s, box-shadow .15s;
+      color-scheme: dark;
     }
     input:not([type]):focus,
     input[type="text"]:focus,
     input[type="search"]:focus,
     input[type="number"]:focus,
+    input[type="email"]:focus,
+    input[type="date"]:focus,
+    input[type="datetime-local"]:focus,
+    input[type="time"]:focus,
+    input[type="month"]:focus,
     select:focus,
     textarea:focus {
       border-color: #38bdf8;
@@ -506,6 +516,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     input[type="number"]::-webkit-inner-spin-button {
       -webkit-appearance: none;
       margin: 0;
+    }
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
+    input[type="month"] {
+      min-width: 9.5rem;
+      color-scheme: dark;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator,
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+    input[type="time"]::-webkit-calendar-picker-indicator,
+    input[type="month"]::-webkit-calendar-picker-indicator {
+      cursor: pointer;
+      opacity: 0.85;
+      filter: invert(0.85);
+    }
+    input[type="date"]::-webkit-datetime-edit,
+    input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+    input[type="date"]::-webkit-datetime-edit-text,
+    input[type="date"]::-webkit-datetime-edit-month-field,
+    input[type="date"]::-webkit-datetime-edit-day-field,
+    input[type="date"]::-webkit-datetime-edit-year-field {
+      color: var(--text);
     }
     select {
       cursor: pointer;
@@ -561,6 +594,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .ctl-sm { width: 4.75rem; }
     .ctl-md { width: 5.75rem; }
     .ctl-lg { width: 7.5rem; }
+    .ctl-date { width: 10.5rem; }
     .ctl-check {
       display: inline-flex;
       flex-direction: row;
@@ -6433,7 +6467,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
         <div class="filters-row mb-2" id="learning-saves-filters">
-          <label class="ctl ctl-md" title="Filter by calendar day">
+          <label class="ctl ctl-date" title="Filter by calendar day">
             <span>Date</span>
             <input type="date" id="learning-filter-date" onchange="applyLearningSavesFilter()" />
           </label>
