@@ -6459,7 +6459,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="config-notify-col">
             <h4>In-app</h4>
-            <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion popups. Default ON.</p>
+            <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion popups. Default ON. On phones, tap the page once to unlock sound (browser rule).</p>
             <div class="space-y-1">
               <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
@@ -6649,6 +6649,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function toggleNotifPanel(event) {
       if (event) event.stopPropagation();
       closeSettingsMenu();
+      try { unlockNotifyAudio(); } catch (_) {}
       const panel = document.getElementById('notif-panel');
       const btn = document.getElementById('notif-bell-btn');
       if (!panel || !btn) return;
@@ -6690,27 +6691,108 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
       if (!window.__notifyAudioCtx) window.__notifyAudioCtx = new Ctx();
-      const ctx = window.__notifyAudioCtx;
-      if (ctx.state === 'suspended') ctx.resume();
-      return ctx;
+      return window.__notifyAudioCtx;
+    }
+
+    /**
+     * iOS / Android Chrome require a user gesture before Web Audio can play.
+     * Call from touch/click handlers; also re-run when tab becomes visible.
+     */
+    function unlockNotifyAudio() {
+      try {
+        const ctx = getNotifyAudioCtx();
+        if (!ctx) return Promise.resolve(false);
+        const finish = function () {
+          try {
+            // Silent buffer — some mobile browsers need a real start() in the gesture.
+            if (!window.__notifyAudioSilentPlayed) {
+              const buf = ctx.createBuffer(1, 1, ctx.sampleRate || 22050);
+              const src = ctx.createBufferSource();
+              src.buffer = buf;
+              src.connect(ctx.destination);
+              src.start(0);
+              window.__notifyAudioSilentPlayed = true;
+            }
+          } catch (_) {}
+          window.__notifyAudioUnlocked = ctx.state === 'running';
+          return window.__notifyAudioUnlocked === true;
+        };
+        if (ctx.state === 'suspended') {
+          return ctx.resume().then(finish).catch(function () {
+            return false;
+          });
+        }
+        return Promise.resolve(finish());
+      } catch (_) {
+        return Promise.resolve(false);
+      }
+    }
+    window.unlockNotifyAudio = unlockNotifyAudio;
+
+    function installNotifyAudioUnlock() {
+      if (window.__notifyAudioUnlockInstalled) return;
+      window.__notifyAudioUnlockInstalled = true;
+      const onGesture = function () {
+        unlockNotifyAudio();
+      };
+      const opts = { capture: true, passive: true };
+      ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown', 'click'].forEach(
+        function (ev) {
+          document.addEventListener(ev, onGesture, opts);
+        }
+      );
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') unlockNotifyAudio();
+      });
+      window.addEventListener('pageshow', function () {
+        unlockNotifyAudio();
+      });
+      // First paint may still be before any gesture — try once; unlock on tap.
+      unlockNotifyAudio();
+    }
+
+    /** Light haptic when sound prefs are on (helps when ringer is muted). */
+    function notifyHaptic(ms) {
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(ms != null ? ms : 36);
+        }
+      } catch (_) {}
     }
 
     function playSoftTone(freq, start, dur, gain, type) {
+      const run = function (ctx) {
+        try {
+          if (!ctx || ctx.state !== 'running') return;
+          const now = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const g = ctx.createGain();
+          osc.type = type || 'sine';
+          osc.frequency.value = freq;
+          // Slightly louder on coarse pointers (phones) — still soft.
+          const isCoarse =
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(pointer: coarse)').matches;
+          const amp = Math.max(0.0001, (gain || 0.03) * (isCoarse ? 1.35 : 1));
+          g.gain.setValueAtTime(0.0001, now + start);
+          g.gain.exponentialRampToValueAtTime(amp, now + start + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
+          osc.connect(g);
+          g.connect(ctx.destination);
+          osc.start(now + start);
+          osc.stop(now + start + dur + 0.02);
+        } catch (_) {}
+      };
       try {
         const ctx = getNotifyAudioCtx();
         if (!ctx) return;
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const g = ctx.createGain();
-        osc.type = type || 'sine';
-        osc.frequency.value = freq;
-        g.gain.setValueAtTime(0.0001, now + start);
-        g.gain.exponentialRampToValueAtTime(gain, now + start + 0.03);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
-        osc.connect(g);
-        g.connect(ctx.destination);
-        osc.start(now + start);
-        osc.stop(now + start + dur + 0.02);
+        if (ctx.state === 'suspended') {
+          unlockNotifyAudio().then(function (ok) {
+            if (ok) run(getNotifyAudioCtx());
+          });
+          return;
+        }
+        run(ctx);
       } catch (_) {}
     }
 
@@ -6718,9 +6800,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function playTradeRequestChime() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.tradeRequestSound === false) return;
+      unlockNotifyAudio();
       playSoftTone(523.25, 0, 0.55, 0.045, 'sine');
       playSoftTone(659.25, 0.18, 0.7, 0.035, 'sine');
       playSoftTone(783.99, 0.38, 0.85, 0.025, 'sine');
+      notifyHaptic([28, 40, 28]);
     }
     window.playTradeRequestChime = playTradeRequestChime;
 
@@ -6728,10 +6812,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function playProfitCashSound() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.profitCloseSound === false) return;
+      unlockNotifyAudio();
       playSoftTone(880, 0, 0.18, 0.028, 'triangle');
       playSoftTone(1174.66, 0.1, 0.22, 0.032, 'sine');
       playSoftTone(1567.98, 0.22, 0.35, 0.022, 'sine');
       playSoftTone(2093, 0.36, 0.45, 0.016, 'triangle');
+      notifyHaptic([18, 30, 18, 30, 24]);
     }
     window.playProfitCashSound = playProfitCashSound;
 
@@ -6739,10 +6825,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     function playZionPlaceConfirmSound() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.zionPlaceTradeSound === false) return;
+      unlockNotifyAudio();
       playSoftTone(698.46, 0, 0.16, 0.03, 'sine');
       playSoftTone(1046.5, 0.09, 0.28, 0.024, 'triangle');
+      notifyHaptic(40);
     }
     window.playZionPlaceConfirmSound = playZionPlaceConfirmSound;
+
+    installNotifyAudioUnlock();
 
     function updateNotifBadge(unread) {
       const badge = document.getElementById('notif-bell-badge');
