@@ -43,6 +43,11 @@ const FILE = () => dataFile('profile-learning-saves.json');
 
 let cache: LearningSaveEntry[] | null = null;
 
+/** Drop journal cache so next read reloads from disk. */
+export function invalidateLearningSaveCache(): void {
+  cache = null;
+}
+
 function loadEntries(): LearningSaveEntry[] {
   if (cache) return cache;
   try {

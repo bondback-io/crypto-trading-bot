@@ -56,6 +56,11 @@ function load(): void {
   }
 }
 
+export function invalidateScannerOutcomesCache(): void {
+  loaded = false;
+  ring = [];
+}
+
 function persist(): void {
   try {
     ensureDataDir();

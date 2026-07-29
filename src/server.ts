@@ -335,6 +335,115 @@ export function createServer(): express.Application {
     res.json(getPersistenceStatus());
   });
 
+  app.get('/api/site-backup/latest', (_req: Request, res: Response) => {
+    try {
+      const { getLatestSiteBackupMeta } =
+        require('./siteBackup') as typeof import('./siteBackup');
+      res.json({ ok: true, ...getLatestSiteBackupMeta() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/site-backup/download-latest', (_req: Request, res: Response) => {
+    try {
+      const { loadLatestSiteBackup, stampFilename } = (() => {
+        const m = require('./siteBackup') as typeof import('./siteBackup');
+        return {
+          loadLatestSiteBackup: m.loadLatestSiteBackup,
+          stampFilename: (ms: number) => {
+            const d = new Date(ms);
+            const p = (n: number) => String(n).padStart(2, '0');
+            return (
+              `site-backup-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+              `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.json`
+            );
+          },
+        };
+      })();
+      const backup = loadLatestSiteBackup();
+      if (!backup) {
+        res.status(404).json({ ok: false, error: 'No latest backup on server' });
+        return;
+      }
+      const filename = stampFilename(backup.exportedAtMs || Date.now());
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`
+      );
+      res.send(JSON.stringify(backup, null, 2));
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup', (_req: Request, res: Response) => {
+    try {
+      const { createAndSaveSiteBackup } =
+        require('./siteBackup') as typeof import('./siteBackup');
+      const result = createAndSaveSiteBackup();
+      res.json({
+        ok: true,
+        filename: result.filename,
+        backup: result.backup,
+        meta: result.meta,
+        persistence: result.persistence,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/restore', (req: Request, res: Response) => {
+    try {
+      const {
+        restoreSiteBackup,
+        isValidSiteBackup,
+        getLatestSiteBackupMeta,
+      } = require('./siteBackup') as typeof import('./siteBackup');
+      const body = (req.body ?? {}) as { backup?: unknown };
+      let result;
+      if (body.backup != null) {
+        if (!isValidSiteBackup(body.backup)) {
+          res.status(400).json({
+            ok: false,
+            error: 'Invalid backup payload (need kind=site-backup version=1)',
+          });
+          return;
+        }
+        result = restoreSiteBackup(body.backup);
+      } else {
+        result = restoreSiteBackup('latest');
+      }
+      res.json({
+        ok: true,
+        written: result.written,
+        exportedAt: result.exportedAt,
+        fileCount: result.fileCount,
+        meta: getLatestSiteBackupMeta(),
+        persistence: getPersistenceStatus(),
+        config: getConfigSnapshot(),
+        wallets: getWalletsWithActivity(),
+        message: `Restored backup ${result.exportedAt} (${result.fileCount} files)`,
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/microbots/learning-health', (req: Request, res: Response) => {
     try {
       const { getLearningHealthSummary } =

@@ -65,6 +65,11 @@ function ensureLoaded(): StoreFile {
   return cache;
 }
 
+/** Drop in-memory cache so next read reloads from disk (e.g. after site restore). */
+export function invalidateDashboardNotificationsCache(): void {
+  cache = null;
+}
+
 function persist(): void {
   const s = ensureLoaded();
   try {

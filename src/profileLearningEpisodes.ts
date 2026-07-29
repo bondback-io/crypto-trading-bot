@@ -54,6 +54,12 @@ const DIR = () => dataFile('profile-learning');
 const cache = new Map<string, ProfileLearningEpisode[]>();
 const loaded = new Set<string>();
 
+/** Drop episode caches so next read reloads from disk (e.g. after site restore). */
+export function invalidateProfileLearningEpisodeCache(): void {
+  cache.clear();
+  loaded.clear();
+}
+
 function fileFor(profileId: string): string {
   const safe = String(profileId || 'unknown').replace(/[^a-z0-9_-]/gi, '_');
   return path.join(DIR(), `${safe}.json`);

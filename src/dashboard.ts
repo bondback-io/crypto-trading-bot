@@ -6163,9 +6163,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="mint text-sm mb-2" id="persist-reset-status">Auto-saves on every config change, wallet import, paper top-up, and backtest run.</div>
         <div id="persist-status-detail" class="text-xs mb-3" style="line-height:1.55;color:#94a3b8">Checking data directory…</div>
         <div class="flex flex-wrap gap-2 items-center mb-4">
+          <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
+          <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Restore the last server backup, or pick a downloaded backup file if none exists">Load Last Backup</button>
           <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
+          <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
           <span class="mint text-xs" id="persist-reset-msg"></span>
         </div>
+        <div class="mint text-xs mb-3" id="persist-backup-status">Last backup: —</div>
         <div class="section-title mt-2" style="font-size:0.85rem">Micro Bots Self-Learning Data</div>
         <p class="mint text-xs mb-2">Health of durable knobs + episode files. If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="text-xs mb-2" style="line-height:1.5;color:#94a3b8">Checking learning health…</div>
@@ -13337,6 +13341,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             'On Render: Disks → mount path must equal DATA_DIR (prefer /var/data). Env alone does not create a volume.</span>';
         }
       }
+      try { refreshSiteBackupStatus(); } catch (_) {}
       try { refreshLearningHealth({ reset: true }); } catch (_) {}
 
       const runWrap = document.getElementById('run-status');
@@ -18587,6 +18592,191 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         alert('Save failed: ' + (err.message || String(err)));
       }
     }
+
+    async function refreshSiteBackupStatus() {
+      const el = document.getElementById('persist-backup-status');
+      if (!el) return;
+      try {
+        const data = await fetchJSON('/api/site-backup/latest');
+        if (data && data.exists) {
+          const when =
+            data.exportedAtMs != null
+              ? new Date(data.exportedAtMs).toLocaleString()
+              : data.exportedAt || '—';
+          el.textContent =
+            'Last backup: ' +
+            when +
+            ' · ' +
+            (data.fileCount || 0) +
+            ' file(s)' +
+            (data.appVersion ? ' · ' + data.appVersion : '');
+        } else {
+          el.textContent =
+            'Last backup: none yet — click Backup Site to create one';
+        }
+      } catch (_) {
+        el.textContent = 'Last backup: —';
+      }
+    }
+    window.refreshSiteBackupStatus = refreshSiteBackupStatus;
+
+    function downloadSiteBackupJson(backup, filename) {
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || 'site-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function backupSite() {
+      const msg = document.getElementById('persist-reset-msg');
+      if (
+        !confirm(
+          'Create a full site backup?\\n\\n' +
+            'Includes config, tracked wallets, trading wallet slots, paper state, ' +
+            'trade profiles, self-learning, notifications, Zion, and outcome data.\\n\\n' +
+            'Private keys are NOT included (they stay in env).'
+        )
+      )
+        return;
+      if (msg) msg.textContent = 'Backing up…';
+      try {
+        const data = await fetchJSON('/api/site-backup', { method: 'POST' });
+        if (!data || !data.backup) throw new Error('Backup failed');
+        downloadSiteBackupJson(data.backup, data.filename || 'site-backup.json');
+        const when =
+          data.backup.exportedAtMs != null
+            ? new Date(data.backup.exportedAtMs).toLocaleString()
+            : data.backup.exportedAt || '—';
+        if (msg) {
+          msg.textContent =
+            'Backed up ' +
+            when +
+            ' · ' +
+            (data.backup.fileCount || 0) +
+            ' files (downloaded + saved on server)';
+        }
+        refreshSiteBackupStatus();
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('Backup failed: ' + (err.message || String(err)));
+      }
+    }
+    window.backupSite = backupSite;
+
+    async function restoreSiteBackupPayload(backup) {
+      const msg = document.getElementById('persist-reset-msg');
+      if (msg) msg.textContent = 'Restoring…';
+      const data = await fetchJSON('/api/site-backup/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          backup ? { backup: backup } : {}
+        ),
+      });
+      if (msg) {
+        msg.textContent =
+          data.message ||
+          'Restored ' +
+            (data.exportedAt || '') +
+            ' · ' +
+            (data.fileCount || 0) +
+            ' files';
+      }
+      alert(data.message || 'Backup restored');
+      window._cfgLoaded = false;
+      await refresh();
+      try {
+        refreshSiteBackupStatus();
+      } catch (_) {}
+      try {
+        refreshLearningHealth({ reset: true });
+      } catch (_) {}
+      try {
+        refreshDashboardNotifications();
+      } catch (_) {}
+    }
+
+    async function loadLastBackup() {
+      const msg = document.getElementById('persist-reset-msg');
+      try {
+        const meta = await fetchJSON('/api/site-backup/latest');
+        if (meta && meta.exists) {
+          const when =
+            meta.exportedAtMs != null
+              ? new Date(meta.exportedAtMs).toLocaleString()
+              : meta.exportedAt || 'unknown';
+          if (
+            !confirm(
+              'Load last backup from server?\\n\\n' +
+                'Stamp: ' +
+                when +
+                '\\nFiles: ' +
+                (meta.fileCount || 0) +
+                '\\n\\nThis OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
+            )
+          )
+            return;
+          await restoreSiteBackupPayload(null);
+          return;
+        }
+        if (
+          !confirm(
+            'No server backup found (common after a deploy wipe).\\n\\n' +
+              'Pick a previously downloaded site-backup-*.json file to restore?'
+          )
+        )
+          return;
+        const input = document.getElementById('site-backup-file');
+        if (input) {
+          input.value = '';
+          input.click();
+        } else if (msg) {
+          msg.textContent = 'No backup file picker available';
+        }
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('Load backup failed: ' + (err.message || String(err)));
+      }
+    }
+    window.loadLastBackup = loadLastBackup;
+
+    async function importSiteBackupFile(input) {
+      const msg = document.getElementById('persist-reset-msg');
+      const file = input && input.files && input.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+        if (!backup || backup.kind !== 'site-backup') {
+          throw new Error('File is not a site-backup export');
+        }
+        if (
+          !confirm(
+            'Restore uploaded backup?\\n\\n' +
+              'Stamp: ' +
+              (backup.exportedAt || 'unknown') +
+              '\\nFiles: ' +
+              (backup.fileCount || Object.keys(backup.files || {}).length) +
+              '\\n\\nThis OVERWRITES current saved state.'
+          )
+        )
+          return;
+        await restoreSiteBackupPayload(backup);
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('Import failed: ' + (err.message || String(err)));
+      } finally {
+        if (input) input.value = '';
+      }
+    }
+    window.importSiteBackupFile = importSiteBackupFile;
 
     async function resetToDefaults() {
       const msg = document.getElementById('persist-reset-msg');

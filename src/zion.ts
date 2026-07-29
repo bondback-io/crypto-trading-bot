@@ -91,6 +91,14 @@ function ensureLoaded(): void {
   }
 }
 
+/** Reload offers from disk after an external restore. */
+export function reloadZionOffersFromDisk(): void {
+  loaded = false;
+  offers = [];
+  mintCooldownUntil.clear();
+  ensureLoaded();
+}
+
 function persist(): void {
   ensureLoaded();
   try {

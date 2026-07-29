@@ -64,6 +64,11 @@ function load(): void {
   }
 }
 
+export function invalidateLaneOutcomesCache(): void {
+  loaded = false;
+  ring = [];
+}
+
 function persist(): void {
   try {
     ensureDataDir();
