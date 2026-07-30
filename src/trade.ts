@@ -188,6 +188,11 @@ export interface BuyOptions {
    */
   top10HoldPct?: number | null;
   /**
+   * Hours since Pump.fun graduation / Dex pair at signal time.
+   * Stamped on the position for self-learning episodes.
+   */
+  tokenAgeHours?: number | null;
+  /**
    * GMGN insider / rat hold % from anti-rug. Re-checked at executeBuy under Risk On
    * (unknown fail-closed via hard floors).
    */
@@ -756,6 +761,7 @@ export async function executeBuy(
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
         top10HoldPct,
+        tokenAgeHours: meta?.tokenAgeHours,
       }
     );
     if (!position) {
@@ -870,6 +876,7 @@ export async function executeBuy(
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
         top10HoldPct,
+        tokenAgeHours: meta?.tokenAgeHours,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

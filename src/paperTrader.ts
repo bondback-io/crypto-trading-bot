@@ -173,6 +173,10 @@ export interface Position {
   /** Jupiter-style Top 10 Holders % resolved at entry (for audit / UI) */
   top10HoldPct?: number | null;
   /**
+   * Token age hours at entry (post-grad / pair age). Used for learning episodes.
+   */
+  tokenAgeHoursAtEntry?: number | null;
+  /**
    * Wall-clock ms when rolling 1h volume / tx activity first went "dead".
    * Cleared when activity recovers above thresholds.
    */
@@ -468,6 +472,11 @@ function maybeRecordLearningEpisode(
         position.top10HoldPct != null && Number.isFinite(Number(position.top10HoldPct))
           ? Number(position.top10HoldPct)
           : null,
+      tokenAgeHoursAtEntry:
+        position.tokenAgeHoursAtEntry != null &&
+        Number.isFinite(Number(position.tokenAgeHoursAtEntry))
+          ? Number(position.tokenAgeHoursAtEntry)
+          : undefined,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -1041,6 +1050,7 @@ export class PaperTrader {
     scannerConfluence?: number;
     candleSource?: 'real' | 'synthetic';
     top10HoldPct?: number | null;
+    tokenAgeHours?: number | null;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -1121,6 +1131,10 @@ export class PaperTrader {
       top10HoldPct:
         input.top10HoldPct != null && Number.isFinite(input.top10HoldPct)
           ? input.top10HoldPct
+          : undefined,
+      tokenAgeHoursAtEntry:
+        input.tokenAgeHours != null && Number.isFinite(input.tokenAgeHours)
+          ? Math.max(0, Number(input.tokenAgeHours))
           : undefined,
     };
 
@@ -1299,6 +1313,7 @@ export class PaperTrader {
       scannerConfluence?: number;
       candleSource?: 'real' | 'synthetic';
       top10HoldPct?: number | null;
+      tokenAgeHours?: number | null;
     }
   ): Position | null {
     const spendSol = clampToMaxAllowedTradeSol(
@@ -1465,6 +1480,10 @@ export class PaperTrader {
       top10HoldPct:
         meta?.top10HoldPct != null && Number.isFinite(meta.top10HoldPct)
           ? meta.top10HoldPct
+          : undefined,
+      tokenAgeHoursAtEntry:
+        meta?.tokenAgeHours != null && Number.isFinite(meta.tokenAgeHours)
+          ? Math.max(0, Number(meta.tokenAgeHours))
           : undefined,
     };
 

@@ -9130,6 +9130,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               value: matchValue('minConviction'),
             }),
             numField({
+              key: 'minTokenAgeHours',
+              label: 'Min token age (h)',
+              title:
+                'Hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no age gate. High values on Migration Sniper defeat ultra-fresh scalp.',
+              match: true,
+              step: 0.5,
+              min: 0,
+              placeholder: 'none',
+              value: matchValue('minTokenAgeHours'),
+            }),
+            numField({
               key: 'minMarketCapUsd',
               label: 'Min MC Override',
               title: 'Raises this profile’s min market cap above Config Min MC. Empty = use global only.',
@@ -9175,15 +9186,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const qualityFields = [];
           if (p.id === 'trend_rider' || p.id === 'steady_compounder') {
             entryFields.push(
-              numField({
-                key: 'minTokenAgeHours',
-                label: 'Min age (h)',
-                match: true,
-                step: 0.5,
-                min: 0,
-                placeholder: 'default',
-                value: matchValue('minTokenAgeHours'),
-              }),
               numField({
                 key: 'minVolumeH1Usd',
                 label: 'Min Vol H1 $',

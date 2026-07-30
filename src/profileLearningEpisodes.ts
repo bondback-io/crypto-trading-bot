@@ -54,6 +54,8 @@ export interface ProfileLearningEpisode {
   /** Lane fight / auto-score at stamp */
   laneScore?: number;
   top10HoldPct?: number | null;
+  /** Hours since grad/pair at entry (for raise-only min token age learning) */
+  tokenAgeHoursAtEntry?: number;
 }
 
 interface EpisodesFile {

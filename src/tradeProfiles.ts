@@ -211,7 +211,11 @@ export interface TradeProfileMatchRules {
   minMarketCapUsd?: number;
   /** Prefer volume-spike entries (Scalper / Momentum) */
   preferVolumeSpike?: boolean;
-  /** Prefer established tokens */
+  /**
+   * Min token age (hours) — hard lane floor when set (>0).
+   * Clock: hours since Pump.fun graduation when migrationAgeMs is known,
+   * otherwise Dex pairCreated / launch age (tokenAgeHours). Empty/0 = no gate.
+   */
   minTokenAgeHours?: number;
   /**
    * Migration Sniper: max hours since launch/pair for a "fresh" graduation.
@@ -2294,7 +2298,44 @@ export function evaluateLaneEntryFloors(
     }
   }
 
+  const minAgeH =
+    m.minTokenAgeHours != null &&
+    Number.isFinite(m.minTokenAgeHours) &&
+    m.minTokenAgeHours > 0
+      ? Number(m.minTokenAgeHours)
+      : 0;
+  if (minAgeH > 0) {
+    const ageH = resolveTokenAgeHoursForGate(ctx);
+    // Known-only: unknown age does not fail (Dex/grad gaps)
+    if (ageH != null && ageH < minAgeH) {
+      return {
+        ok: false,
+        reason: `${def.name} token age ${ageH.toFixed(1)}h < min ${minAgeH}h`,
+      };
+    }
+  }
+
   return { ok: true };
+}
+
+/**
+ * Hours since Pump.fun graduation when migrationAgeMs is known;
+ * otherwise Dex/launch tokenAgeHours. null if unknown.
+ */
+export function resolveTokenAgeHoursForGate(
+  ctx: Pick<TradeProfileMatchContext, 'migrationAgeMs' | 'tokenAgeHours'>
+): number | null {
+  if (
+    ctx.migrationAgeMs != null &&
+    Number.isFinite(ctx.migrationAgeMs) &&
+    ctx.migrationAgeMs >= 0
+  ) {
+    return Math.max(0, Number(ctx.migrationAgeMs) / 3_600_000);
+  }
+  if (ctx.tokenAgeHours != null && Number.isFinite(ctx.tokenAgeHours)) {
+    return Math.max(0, Number(ctx.tokenAgeHours));
+  }
+  return null;
 }
 
 export interface TradeProfileLaneResult {
@@ -2443,10 +2484,7 @@ function scoreProfile(
     ctx.recentBuyVolumeUsd != null && Number.isFinite(ctx.recentBuyVolumeUsd)
       ? Number(ctx.recentBuyVolumeUsd)
       : null;
-  const ageH =
-    ctx.tokenAgeHours != null && Number.isFinite(ctx.tokenAgeHours)
-      ? Number(ctx.tokenAgeHours)
-      : null;
+  const ageH = resolveTokenAgeHoursForGate(ctx);
   const chg24 =
     ctx.priceChange24hPct != null && Number.isFinite(ctx.priceChange24hPct)
       ? Number(ctx.priceChange24hPct)
@@ -2819,16 +2857,15 @@ function scoreProfile(
     }
     let quality = 0;
     // Established MC tokens can qualify earlier than pure age floors
+    // Soft quality bonus (hard Min token age is in evaluateLaneEntryFloors)
     const ageFloor =
       mc != null && mc >= 300_000
         ? Math.min(m.minTokenAgeHours ?? 6, 1)
         : (m.minTokenAgeHours ?? 6);
-    if (m.minTokenAgeHours != null) {
+    if (m.minTokenAgeHours != null && m.minTokenAgeHours > 0) {
       if (ageH != null && ageH >= ageFloor) {
         quality += 1;
         bits.push(`age ${ageH.toFixed(1)}h`);
-      } else if (ageH != null && ageH < ageFloor) {
-        return { score: 0, reason: `token too young (${ageH.toFixed(1)}h)` };
       }
     }
     if (m.minHolders != null) {
@@ -2898,9 +2935,7 @@ function scoreProfile(
       mc != null && mc >= 300_000
         ? Math.min(m.minTokenAgeHours ?? 8, 1.5)
         : (m.minTokenAgeHours ?? 8);
-    if (m.minTokenAgeHours != null && ageH != null && ageH < ageFloor) {
-      return { score: 0, reason: `token too young (${ageH.toFixed(1)}h)` };
-    }
+    // Hard Min token age is in evaluateLaneEntryFloors; keep soft quality below
     if (m.minHolders != null && holders != null && holders < m.minHolders) {
       return { score: 0, reason: `holders ${holders} < ${m.minHolders}` };
     }

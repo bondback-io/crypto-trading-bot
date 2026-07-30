@@ -2386,6 +2386,13 @@ async function executeSignalBuy(
     scannerConfluence: signal.scannerConfluence,
     candleSource: signal.candleSource,
     ...resolveScalpBuyFlag(signal),
+    tokenAgeHours: (() => {
+      const ev = getMigrationEvent(signal.mint);
+      if (ev?.detectedAt != null) {
+        return Math.max(0, (Date.now() - ev.detectedAt) / 3_600_000);
+      }
+      return signal.tokenAgeHours ?? null;
+    })(),
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -2643,6 +2650,13 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     convictionScore: signal.convictionScore,
     entrySource: signal.entrySource ?? 'migration',
     ...scalpFlag,
+    tokenAgeHours: (() => {
+      const ev = getMigrationEvent(signal.mint);
+      if (ev?.detectedAt != null) {
+        return Math.max(0, (Date.now() - ev.detectedAt) / 3_600_000);
+      }
+      return signal.tokenAgeHours ?? null;
+    })(),
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -3321,6 +3335,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     top10HoldPct?: number | null;
     insiderPct?: number | null;
     convictionScore?: number;
+    tokenAgeHours?: number | null;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
     tradeProfileId?: string;
@@ -3362,6 +3377,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       signal.entrySource ??
       (signal.isMigration || signal.nearMigration ? 'migration' : 'wallet'),
     ...resolveScalpBuyFlag(signal),
+    tokenAgeHours: (() => {
+      const ev = getMigrationEvent(signal.mint);
+      if (ev?.detectedAt != null) {
+        return Math.max(0, (Date.now() - ev.detectedAt) / 3_600_000);
+      }
+      return signal.tokenAgeHours ?? null;
+    })(),
     antiRug: signal.antiRug
       ? {
           riskScore: signal.antiRug.riskScore,
@@ -3728,6 +3750,13 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
         signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
       convictionScore: signal.convictionScore,
       ...scalpFlag,
+      tokenAgeHours: (() => {
+        const ev = getMigrationEvent(mint);
+        if (ev?.detectedAt != null) {
+          return Math.max(0, (Date.now() - ev.detectedAt) / 3_600_000);
+        }
+        return signal.tokenAgeHours ?? null;
+      })(),
       antiRug: signal.antiRug
         ? {
             riskScore: signal.antiRug.riskScore,

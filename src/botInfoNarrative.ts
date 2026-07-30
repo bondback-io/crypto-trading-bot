@@ -98,6 +98,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.profilesGrid}
         <ul>
           <li><strong>Watchlists</strong> — Dip setup watch and Graduation (migration) watch live on the Micro Bots tab.</li>
+          <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
           <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>
           <li>Lane decisions appear on Overview / Micro Bots so you can see why a profile won or skipped.</li>
         </ul>
@@ -106,11 +107,29 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-learning" data-botinfo-section="learning">
         <h3><span class="botinfo-sec-num">05</span> Self-learning &amp; ML</h3>
-        <p>Closed trades become <strong>episodes</strong>. Heuristic learning proposes small knob upgrades from patterns. Optional tabular ML ranks or leads those proposals. Neither system invents new strategies — they nudge existing knobs within clamps.</p>
+        <p>Closed trades become <strong>episodes</strong> (game film). Heuristic learning proposes small knob upgrades from patterns (TP/SL, conviction, min token age raise-only, etc.). Optional tabular ML ranks or leads those proposals. Neither invents new strategies — they nudge existing knobs inside clamps.</p>
+        <div class="botinfo-callout"><strong>Analogy:</strong> like a sports coach reviewing game film and suggesting a slightly tighter defense — not inventing a new sport. Heuristic Mode = head coach. ML = assistant. <code>shadow</code> = advice only; <code>hybrid</code> = both vote; <code>lead</code> = assistant calls first.</div>
         ${slots.learningMatrix}
+        <p class="mint" style="margin:0 0 0.55rem"><strong>Heuristic Mode</strong> (${heuristicModes}):</p>
         <ul>
-          <li><strong>Heuristic mode</strong> — ${heuristicModes}. Level counts applied upgrades.</li>
-          <li><strong>ML mode</strong> — ${mlModes}. Prefer shadow until holdout looks healthy.</li>
+          <li><code>shadow</code> — propose upgrades only; Level stays put until you Apply.</li>
+          <li><code>auto</code> — apply Level upgrades + micro-tweaks when gates pass (rollback still on). Prefer this when you want Level to climb.</li>
+        </ul>
+        <p class="mint" style="margin:0 0 0.55rem"><strong>ML</strong> (${mlModes}):</p>
+        <ul>
+          <li><code>off</code> — heuristics only; no model advice.</li>
+          <li><code>shadow</code> — model watches and advises; does not steer applied upgrades. <strong>Default / safest while soaking.</strong></li>
+          <li><code>hybrid</code> — blend heuristic + ML ranks into applied patches. Use only after Min trades met and holdout looks healthy.</li>
+          <li><code>lead</code> — ML can propose tiny continuous deltas first. Avoid until hybrid has been stable for many upgrades.</li>
+        </ul>
+        <p class="mint" style="margin:0 0 0.55rem"><strong>Per-bot ML recommendation:</strong></p>
+        <ul>
+          <li><strong>Scalper · Migration Sniper · Momentum · Reversal</strong> — stay on ML <code>shadow</code> longer (noisy labels).</li>
+          <li><strong>Trend Rider · Steady Compounder · High Win-Rate · Smart Money Mirror</strong> — try <code>hybrid</code> after enough episodes + healthy holdout; keep Mode <code>auto</code> if you want Level growth.</li>
+          <li>If status shows fewer than Min trades (e.g. 5 / 8), keep ML on <code>shadow</code> even with Mode <code>auto</code>.</li>
+        </ul>
+        <ul>
+          <li>Level = applied upgrades only — not episode count.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
         </ul>
         <div class="botinfo-actions">
@@ -210,7 +229,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Base / Max trade SOL</strong> — hard size caps; risk &amp; conviction multipliers scale within them.</li>
           <li><strong>TP / SL + Profit Strategy</strong> — partial → recover → bag → trail lifecycle.</li>
           <li><strong>Max positions · daily loss · convergence · min conviction / wallet Q</strong>.</li>
-          <li><strong>Hard floors</strong> — min liq / MC / holders / volume; pump.fun-only; anti-rug / honeypot / sniper.</li>
+          <li><strong>Hard floors</strong> — min liq / MC / holders / volume; <strong>Min token age</strong> (per micro-bot); pump.fun-only; anti-rug / honeypot / sniper.</li>
           <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>.</li>
           <li><strong>Smart Bot Profiles / Multi-profile / Global TP override</strong> — ${nProfiles} catalog profiles.</li>
           <li><strong>MEV + Jito tip</strong> (Live only).</li>

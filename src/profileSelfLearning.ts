@@ -522,11 +522,15 @@ const PATCH_LABELS: Record<string, string> = {
   maxProfitPercent: 'max profit %',
   minConviction: 'min conviction',
   minWallets: 'min wallets',
+  minWalletQuality: 'min wallet quality',
+  minWalletCount: 'min wallet count',
+  minTokenAgeHours: 'min token age (h)',
   minMarketCapUsd: 'min MC $',
   maxMarketCapUsd: 'max MC $',
   minLiquidityUsd: 'min liq $',
   sizeMultiplier: 'size ×',
   requireConvergence: 'require convergence',
+  requireCluster: 'require cluster',
 };
 
 /** Flatten a learning patch into a short "knob: value" list for UI hover. */
@@ -1122,6 +1126,48 @@ export function buildEntryLearningCandidates(
     });
   }
 
+  // Raise-only Min token age: young losers vs older winners
+  const aged = episodes.filter(
+    (e) =>
+      e.tokenAgeHoursAtEntry != null &&
+      Number.isFinite(e.tokenAgeHoursAtEntry)
+  );
+  if (aged.length >= 6) {
+    const youngLosers = losers.filter(
+      (e) =>
+        e.tokenAgeHoursAtEntry != null &&
+        Number.isFinite(e.tokenAgeHoursAtEntry) &&
+        Number(e.tokenAgeHoursAtEntry) < 2
+    );
+    const winners = episodes.filter((e) => (e.pnlPct || 0) > 0);
+    const winnerAges = winners
+      .map((e) => Number(e.tokenAgeHoursAtEntry))
+      .filter((n) => Number.isFinite(n));
+    const medianWinAge =
+      winnerAges.length >= 3
+        ? [...winnerAges].sort((a, b) => a - b)[
+            Math.floor(winnerAges.length / 2)
+          ]
+        : null;
+    if (
+      youngLosers.length / Math.max(1, losers.length) >= 0.28 &&
+      (medianWinAge == null || medianWinAge >= 1.5)
+    ) {
+      const cat =
+        currentMatch.minTokenAgeHours != null &&
+        Number.isFinite(Number(currentMatch.minTokenAgeHours))
+          ? Number(currentMatch.minTokenAgeHours)
+          : 0;
+      const next = clamp(Math.max(cat, 2) + (cat >= 2 ? 1 : 0), 0, 24);
+      if (next > cat + 0.01) {
+        out.push({
+          summary: `Raise min token age → ${next}h (young losers ${youngLosers.length}/${losers.length})`,
+          patch: { match: { minTokenAgeHours: next } },
+        });
+      }
+    }
+  }
+
   return out.slice(0, 3);
 }
 
@@ -1195,6 +1241,20 @@ export function clampLearningPatch(
   }
   if (match.minWalletCount != null) {
     match.minWalletCount = clamp(Number(match.minWalletCount), 1, 5);
+  }
+  if (match.minTokenAgeHours != null) {
+    const cat =
+      catalogMatch.minTokenAgeHours != null &&
+      Number.isFinite(catalogMatch.minTokenAgeHours)
+        ? Number(catalogMatch.minTokenAgeHours)
+        : 0;
+    // Raise-only vs catalog: never auto-lower below catalog baseline
+    const n = Number(match.minTokenAgeHours);
+    if (Number.isFinite(n)) {
+      match.minTokenAgeHours = clamp(Math.max(cat, n), 0, 48);
+    } else {
+      delete match.minTokenAgeHours;
+    }
   }
 
   return {
