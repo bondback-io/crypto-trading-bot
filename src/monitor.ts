@@ -71,6 +71,7 @@ import {
 } from './gmgn';
 import {
   isRecentlyMigrated,
+  getMigrationEvent,
   getMigrationStatus,
   onMigrationPriority,
   MigrationEvent,
@@ -173,11 +174,21 @@ function buildTradeProfileMatchContext(
     strategyKind?: 'migration' | 'normal';
   }
 ): TradeProfileMatchContext {
+  const migEv = getMigrationEvent(signal.mint);
+  const migrationAgeMs =
+    migEv?.detectedAt != null ? Date.now() - migEv.detectedAt : null;
   return {
     isMigration: signal.isMigration,
     nearMigration: signal.nearMigration,
     earlyBuy: signal.earlyBuy,
     migrationFresh: isRecentlyMigrated(signal.mint),
+    migrationAgeMs,
+    curveProgressPct:
+      signal.bondingCurve?.progressPct != null &&
+      Number.isFinite(signal.bondingCurve.progressPct)
+        ? Number(signal.bondingCurve.progressPct)
+        : (signal as { curveProgressPct?: number | null }).curveProgressPct ??
+          null,
     scalpMode: extras?.scalpMode,
     shortTermStrategyId: extras?.shortTermStrategyId,
     convictionScore: signal.convictionScore,
@@ -2164,7 +2175,11 @@ async function handleScannerCandidate(
       wallets,
       walletNames,
       isMigration: Boolean(candidate.migrated || launch.migrated),
-      nearMigration: false,
+      nearMigration: Boolean(
+        candidate.nearMigration ||
+          (candidate.curveProgressPct != null &&
+            candidate.curveProgressPct >= 80)
+      ),
       timestamp: Date.now(),
       entrySource: hybrid ? 'hybrid' : 'scanner',
       nearKeyFib: candidate.nearKeyFib,
@@ -2193,6 +2208,19 @@ async function handleScannerCandidate(
           : launch.organicScore != null && Number.isFinite(launch.organicScore)
             ? launch.organicScore
             : null,
+      bondingCurve:
+        candidate.curveProgressPct != null &&
+        Number.isFinite(candidate.curveProgressPct)
+          ? {
+              progressPct: Number(candidate.curveProgressPct),
+              solRaised: 0,
+              tokensInPool: 0,
+              solToMigration: 0,
+              nearMigration: Number(candidate.curveProgressPct) >= 80,
+              proximity: 'near' as const,
+              complete: false,
+            }
+          : undefined,
       metrics: {
         liquidityUsd: candidate.liquidityUsd ?? launch.liquidityUsd ?? null,
         marketCapUsd: candidate.marketCapUsd ?? launch.marketCapUsd ?? null,
@@ -2359,6 +2387,15 @@ async function executeSignalBuy(
     nearMigration: signal.nearMigration,
     earlyBuy: signal.earlyBuy,
     migrationFresh: isRecentlyMigrated(signal.mint),
+    migrationAgeMs: (() => {
+      const ev = getMigrationEvent(signal.mint);
+      return ev?.detectedAt != null ? Date.now() - ev.detectedAt : null;
+    })(),
+    curveProgressPct:
+      signal.bondingCurve?.progressPct != null &&
+      Number.isFinite(signal.bondingCurve.progressPct)
+        ? Number(signal.bondingCurve.progressPct)
+        : null,
     scalpMode: buyOpts.scalpMode,
     shortTermStrategyId: buyOpts.shortTermStrategyId,
     convictionScore: signal.convictionScore,
@@ -2943,6 +2980,19 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       birdeye: buy.birdeye,
       notes: `near-mig ${Number(buy.bondingCurve.progressPct ?? 0).toFixed(0)}%`,
     });
+    try {
+      const { considerMigrationGradWatch } =
+        require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      considerMigrationGradWatch({
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        curveProgressPct: buy.bondingCurve.progressPct,
+        source: 'near-mig-wallet',
+      });
+    } catch {
+      /* ignore */
+    }
   } else if (
     isStrategyEnabled('early_curve_smart_money') &&
     buy.isPumpFun &&
@@ -3071,6 +3121,24 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           birdeye: buy.birdeye,
           notes: earlyGate.reason || 'single_wallet_candidate',
         });
+        if (
+          buy.bondingCurve?.progressPct != null &&
+          buy.bondingCurve.progressPct >= 80
+        ) {
+          try {
+            const { considerMigrationGradWatch } =
+              require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+            considerMigrationGradWatch({
+              mint: buy.mint,
+              symbol: buy.symbol,
+              name: buy.name,
+              curveProgressPct: buy.bondingCurve.progressPct,
+              source: 'pump-wallet',
+            });
+          } catch {
+            /* ignore */
+          }
+        }
       }
     } else {
       signal = {
@@ -3298,6 +3366,15 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     nearMigration: signal.nearMigration,
     earlyBuy: signal.earlyBuy,
     migrationFresh: isRecentlyMigrated(signal.mint),
+    migrationAgeMs: (() => {
+      const ev = getMigrationEvent(signal.mint);
+      return ev?.detectedAt != null ? Date.now() - ev.detectedAt : null;
+    })(),
+    curveProgressPct:
+      signal.bondingCurve?.progressPct != null &&
+      Number.isFinite(signal.bondingCurve.progressPct)
+        ? Number(signal.bondingCurve.progressPct)
+        : null,
     scalpMode: buyOpts.scalpMode,
     shortTermStrategyId: buyOpts.shortTermStrategyId,
     convictionScore: signal.convictionScore,

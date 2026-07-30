@@ -218,6 +218,22 @@ export interface TradeProfileMatchRules {
    * Older PumpSwap buys must not inherit Migration Sniper.
    */
   maxTokenAgeHours?: number;
+  /**
+   * Migration Sniper fire band — bonding curve progress % inclusive.
+   * Default catalog: 95–98 (pre-grad scalp).
+   */
+  minCurveProgressPct?: number;
+  maxCurveProgressPct?: number;
+  /**
+   * Graduation watchlist arm threshold (default 80).
+   * Tokens at/above this % are watched until fire band.
+   */
+  gradWatchPct?: number;
+  /**
+   * Ultra-fresh post-grad fallback window (seconds). Default 30.
+   * Only used when pre-grad 95–98% window was missed.
+   */
+  maxMigrationAgeSec?: number;
   minHolders?: number;
   /**
    * Lane max top-10 holder % — hard reject when known concentration is above this.
@@ -635,44 +651,48 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '🚀',
     color: TRADE_PROFILE_COLORS.migration_sniper,
     description:
-      'Only freshly graduated pump.fun → DEX migrations (not older PumpSwap trades).',
+      'Pre-grad pump.fun sniper: watch ~80% curve, fire at 95–98% for a quick migration scalp.',
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
-      'TP 25–45% · SL 10–15%',
-      'Only fresh post-grad (≤3h / MC ≤$600K)',
-      'Not for near-curve, early-buy, or mature DEX tokens',
-      'Required: meaningful post-mig volume',
-      'Hold: 1.5–7 min timer · trail arms at +15%',
-      'Priority sizing (~1.15×) · early stall / fade exits',
+      'Enter at 95–98% bonding curve (watch from ~80%)',
+      'TP 15–25% · SL 6–10% · hard timer 8–45s',
+      'In/out scalp — catch the graduation pump',
+      'Quality: growing holders + buy pressure',
+      'Fallback: ultra-fresh post-grad ≤30s if curve window missed',
+      'MC cap ~$100k — not mature DEX tokens',
     ],
-    priority: 88,
+    priority: 92,
     defaultEnabled: true,
     match: {
       preferMigration: true,
       preferSmartMoney: true,
+      preferHolderGrowth: true,
       primaryPatternIds: ['bull_flag'],
       patternSensitivity: 'high',
-      minVolumeH1Usd: 1_800,
-      minConviction: 32,
-      minWalletQuality: 32,
+      minVolumeH1Usd: 1_500,
+      minBuyPressureUsd: 400,
+      minConviction: 28,
+      minWalletQuality: 30,
       minWalletCount: 1,
       requireCluster: false,
-      /** Fresh graduation window — older PumpSwap buys are not snipes */
-      maxTokenAgeHours: 3,
-      /** Mature / high-holder tokens belong to Trend / HWR / Dip */
-      maxMarketCapUsd: 600_000,
+      minCurveProgressPct: 95,
+      maxCurveProgressPct: 98,
+      gradWatchPct: 80,
+      maxMigrationAgeSec: 30,
+      maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
+      maxMarketCapUsd: 100_000,
     },
     exitRules: {
-      takeProfitPctMin: 25,
-      takeProfitPctMax: 45,
-      stopLossPctMin: 10,
-      stopLossPctMax: 15,
-      trailingStopPct: 10,
-      trailingActivationProfit: 15,
-      hardTimeLimitSecMin: 90,
-      hardTimeLimitSecMax: 420,
-      momentumFailDropPct: 9,
+      takeProfitPctMin: 15,
+      takeProfitPctMax: 25,
+      stopLossPctMin: 6,
+      stopLossPctMax: 10,
+      trailingStopPct: 8,
+      trailingActivationProfit: 10,
+      hardTimeLimitSecMin: 8,
+      hardTimeLimitSecMax: 45,
+      momentumFailDropPct: 8,
       forceScalp: true,
       shortTermStrategyId: 'post_migration_scalp',
       overrideScalpParams: true,
@@ -1093,6 +1113,10 @@ export interface TradeProfileMatchContext {
    * PumpSwap venue alone does NOT imply freshness.
    */
   migrationFresh?: boolean;
+  /** Ms since migration detected (when known) — ultra-fresh fallback uses ≤30s */
+  migrationAgeMs?: number | null;
+  /** Bonding curve progress 0–100 when known */
+  curveProgressPct?: number | null;
   scalpMode?: boolean;
   shortTermStrategyId?: string | null;
   convictionScore?: number | null;
@@ -1646,6 +1670,7 @@ export function getTradeProfilesStatus(): {
   smartBotProfiles: boolean;
   globalTakeProfit: GlobalMicroBotTakeProfit;
   dipWatch?: { active: number; entries: unknown[] };
+  gradWatch?: { active: number; entries: unknown[] };
   profiles: Array<
     TradeProfileDefinition & {
       enabled: boolean;
@@ -1704,6 +1729,15 @@ export function getTradeProfilesStatus(): {
         const { getDipSetupWatchStatus } =
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
         return getDipSetupWatchStatus(12);
+      } catch {
+        return { active: 0, entries: [] };
+      }
+    })(),
+    gradWatch: (() => {
+      try {
+        const { getMigrationGradWatchStatus } =
+          require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+        return getMigrationGradWatchStatus(12);
       } catch {
         return { active: 0, entries: [] };
       }
@@ -1940,7 +1974,11 @@ export function updateTradeProfileParams(
         k === 'minWalletCount' ||
         k === 'minWalletQuality' ||
         k === 'minKolWallets' ||
-        k === 'patternMinConfidence') &&
+        k === 'patternMinConfidence' ||
+        k === 'gradWatchPct' ||
+        k === 'minCurveProgressPct' ||
+        k === 'maxCurveProgressPct' ||
+        k === 'maxMigrationAgeSec') &&
       typeof v === 'number' &&
       v <= 0
     ) {
@@ -2017,72 +2055,52 @@ export const FRESH_MIGRATION_MAX_AGE_HOURS = 3;
 export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
- * True only for freshly graduated migrations — not older PumpSwap venue trades,
- * not near-curve, not early-buy alone.
+ * Migration Sniper eligibility — primary: pre-grad curve fire band (95–98%);
+ * fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 30s).
  *
- * PumpSwap buys set isMigration on the wire forever. Age/MC alone is NOT enough
- * (young PumpSwap copies were over-assigned to Migration Sniper). Require an
- * explicit migrationFresh signal (listener TTL / backtest fresh-grad proxy),
- * then apply age + MC caps as additional filters.
+ * Near-curve below fire band stays on the graduation watchlist (not a buy).
+ * Mature PumpSwap / stale migrations are rejected.
  */
 export function evaluateFreshMigrationEligibility(
   ctx: TradeProfileMatchContext,
-  rules?: Pick<TradeProfileMatchRules, 'maxTokenAgeHours' | 'maxMarketCapUsd'>
+  rules?: Pick<
+    TradeProfileMatchRules,
+    | 'maxTokenAgeHours'
+    | 'maxMarketCapUsd'
+    | 'minCurveProgressPct'
+    | 'maxCurveProgressPct'
+    | 'maxMigrationAgeSec'
+  >
 ): { ok: boolean; reason: string } {
-  if (ctx.isMigration !== true) {
-    if (ctx.nearMigration === true) {
-      return {
-        ok: false,
-        reason: 'near-migration (pre-DEX) — not Migration Sniper',
-      };
-    }
-    if (ctx.earlyBuy === true) {
-      return {
-        ok: false,
-        reason: 'early curve buy — not a graduated migration',
-      };
-    }
-    if (ctx.strategyKind === 'migration') {
-      return {
-        ok: false,
-        reason: 'migration strategyKind without post-grad flag',
-      };
-    }
-    return { ok: false, reason: 'not a graduated migration' };
-  }
-
-  // Hard gate: venue/isMigration alone never qualifies — need a fresh-grad stamp
-  if (ctx.migrationFresh !== true) {
-    return {
-      ok: false,
-      reason: 'PumpSwap / migrated venue without recent migration event',
-    };
-  }
-
-  const maxAgeH =
-    rules?.maxTokenAgeHours != null && Number.isFinite(rules.maxTokenAgeHours)
-      ? Number(rules.maxTokenAgeHours)
-      : FRESH_MIGRATION_MAX_AGE_HOURS;
+  const minCurve =
+    rules?.minCurveProgressPct != null &&
+    Number.isFinite(rules.minCurveProgressPct)
+      ? Number(rules.minCurveProgressPct)
+      : 95;
+  const maxCurve =
+    rules?.maxCurveProgressPct != null &&
+    Number.isFinite(rules.maxCurveProgressPct)
+      ? Number(rules.maxCurveProgressPct)
+      : 98;
+  const maxPostGradSec =
+    rules?.maxMigrationAgeSec != null &&
+    Number.isFinite(rules.maxMigrationAgeSec)
+      ? Number(rules.maxMigrationAgeSec)
+      : 30;
   const maxMc =
     rules?.maxMarketCapUsd != null && Number.isFinite(rules.maxMarketCapUsd)
       ? Number(rules.maxMarketCapUsd)
-      : FRESH_MIGRATION_MAX_MC_USD;
+      : 100_000;
 
-  const ageH =
-    ctx.tokenAgeHours != null && Number.isFinite(ctx.tokenAgeHours)
-      ? Number(ctx.tokenAgeHours)
+  const progress =
+    ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
+      ? Number(ctx.curveProgressPct)
       : null;
   const mc =
     ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
       ? Number(ctx.marketCapUsd)
       : null;
 
-  if (ageH != null && ageH > maxAgeH) {
-    return {
-      ok: false,
-      reason: `stale migration age ${ageH.toFixed(1)}h > ${maxAgeH}h`,
-    };
-  }
   if (mc != null && mc > maxMc) {
     return {
       ok: false,
@@ -2090,7 +2108,72 @@ export function evaluateFreshMigrationEligibility(
     };
   }
 
-  return { ok: true, reason: 'fresh post-grad migration' };
+  const inFireBand =
+    progress != null && progress >= minCurve && progress <= maxCurve;
+
+  // Primary: pre-grad fire band (still on bonding curve)
+  if (
+    inFireBand &&
+    ctx.isMigration !== true &&
+    (ctx.nearMigration === true || progress != null)
+  ) {
+    return {
+      ok: true,
+      reason: `pre-grad curve ${progress!.toFixed(1)}% (fire ${minCurve}–${maxCurve}%)`,
+    };
+  }
+
+  // Watching band — not yet a sniper buy
+  if (
+    ctx.isMigration !== true &&
+    (ctx.nearMigration === true || (progress != null && progress >= 70))
+  ) {
+    if (progress != null && progress < minCurve) {
+      return {
+        ok: false,
+        reason: `curve ${progress.toFixed(1)}% — watching, fire at ${minCurve}–${maxCurve}%`,
+      };
+    }
+    if (progress != null && progress > maxCurve && !ctx.migrationFresh) {
+      return {
+        ok: false,
+        reason: `curve ${progress.toFixed(1)}% past fire band (max ${maxCurve}%)`,
+      };
+    }
+  }
+
+  // Fallback: ultra-fresh post-grad (≤30s)
+  if (ctx.isMigration === true && ctx.migrationFresh === true) {
+    const ageMs =
+      ctx.migrationAgeMs != null && Number.isFinite(ctx.migrationAgeMs)
+        ? Number(ctx.migrationAgeMs)
+        : null;
+    if (ageMs == null) {
+      return {
+        ok: false,
+        reason: 'post-grad without ≤30s age stamp — not sniper fallback',
+      };
+    }
+    if (ageMs > maxPostGradSec * 1000) {
+      return {
+        ok: false,
+        reason: `post-grad ${Math.round(ageMs / 1000)}s > ${maxPostGradSec}s fallback window`,
+      };
+    }
+    return {
+      ok: true,
+      reason: `ultra-fresh post-grad ${Math.round(ageMs / 1000)}s`,
+    };
+  }
+
+  if (ctx.earlyBuy === true && !inFireBand) {
+    return {
+      ok: false,
+      reason: 'early curve buy — not in sniper fire band',
+    };
+  }
+
+  return { ok: false, reason: 'not a migration sniper setup' };
 }
 
 /** Soft category: fresh mig only — stale DEX tokens must compete as trend/dip/HWR. */
@@ -2389,11 +2472,14 @@ function scoreProfile(
     ctx.scalpMode === true &&
     ctx.shortTermStrategyId != null &&
     ctx.shortTermStrategyId !== 'post_run_dip';
-  // Only FRESH grads count as migration for profile routing.
-  // Older PumpSwap venue trades must not block Trend / HWR / Dip.
+  // Pre-grad fire band (95–98%) or ultra-fresh post-grad — owns Migration Sniper
+  // and makes other lanes defer via isMig / hostileArmed.
   const freshMig = evaluateFreshMigrationEligibility(ctx, {
     maxTokenAgeHours: m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS,
     maxMarketCapUsd: m.maxMarketCapUsd ?? FRESH_MIGRATION_MAX_MC_USD,
+    minCurveProgressPct: m.minCurveProgressPct,
+    maxCurveProgressPct: m.maxCurveProgressPct,
+    maxMigrationAgeSec: m.maxMigrationAgeSec,
   });
   const isMig = freshMig.ok;
   const isMomentum =
@@ -2601,27 +2687,46 @@ function scoreProfile(
     if (!freshMig.ok) {
       return { score: 0, reason: freshMig.reason };
     }
-    score += 90;
-    bits.push('fresh post-grad migration');
-    if (ageH != null) {
-      bits.push(`age ${ageH.toFixed(2)}h`);
+    score += 92;
+    bits.push(freshMig.reason);
+    const curvePct =
+      ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
+        ? Number(ctx.curveProgressPct)
+        : null;
+    if (curvePct != null && curvePct >= 95 && curvePct <= 98) {
+      score += 14;
+      bits.push(`fire-band ${curvePct.toFixed(1)}%`);
     }
     if (mc != null) {
       bits.push(`MC $${Math.round(mc)}`);
     }
-    if (ctx.migrationFresh === true) {
-      score += 8;
-      bits.push('recent migration event');
+    if (
+      m.preferHolderGrowth &&
+      holderGrowth != null &&
+      holderGrowth > 0
+    ) {
+      const hAdd = Math.min(12, Math.round(holderGrowth / 4));
+      if (hAdd > 0) {
+        score += hAdd;
+        bits.push(`holders +${holderGrowth.toFixed(0)}% (+${hAdd})`);
+      }
     }
-    if (volH1 != null && volH1 >= (m.minVolumeH1Usd ?? 2000)) {
-      score += 12;
+    if (buyPressureUsd != null && buyPressureUsd >= (m.minBuyPressureUsd ?? 400)) {
+      const pAdd = Math.min(10, Math.round(buyPressureUsd / 1500));
+      if (pAdd > 0) {
+        score += pAdd;
+        bits.push(`buy $${Math.round(buyPressureUsd)} (+${pAdd})`);
+      }
+    }
+    if (volH1 != null && volH1 >= (m.minVolumeH1Usd ?? 1500)) {
+      score += 10;
       bits.push(`vol $${Math.round(volH1)}`);
     } else if (
       volH1 != null &&
       m.minVolumeH1Usd != null &&
       volH1 < m.minVolumeH1Usd
     ) {
-      score -= 15;
+      score -= 10;
       bits.push('low migration volume');
     }
     if (
@@ -2629,7 +2734,7 @@ function scoreProfile(
       ctx.smartMoneyScore != null &&
       ctx.smartMoneyScore >= 35
     ) {
-      score += 12;
+      score += 10;
       bits.push(`SM ${ctx.smartMoneyScore}`);
     }
   }

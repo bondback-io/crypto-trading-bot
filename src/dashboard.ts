@@ -6003,12 +6003,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
 
-      <div id="dip-watch-strip" class="card text-xs text-slate-300" style="background:#0b1220;border:1px solid #1e293b;padding:0.65rem 0.75rem">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-          <span class="font-semibold text-slate-200">Dip Buyer watchlist</span>
-          <span id="dip-watch-count" class="mint">—</span>
+      <div id="setup-watches-strip" class="card text-xs text-slate-300" style="background:#0b1220;border:1px solid #1e293b;padding:0.65rem 0.75rem">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <span class="font-semibold text-slate-200">Setup watches</span>
+          <span class="mint text-[11px]">Dip + Graduation</span>
         </div>
-        <div id="dip-watch-list" class="text-slate-400">No active dip setups</div>
+        <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+          <div id="dip-watch-strip">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <span class="font-medium text-slate-300">Dip Buyer</span>
+              <span id="dip-watch-count" class="mint">—</span>
+            </div>
+            <div id="dip-watch-list" class="text-slate-400">No active dip setups</div>
+          </div>
+          <div id="grad-watch-strip">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+              <span class="font-medium text-slate-300">Graduation / Migration</span>
+              <span id="grad-watch-count" class="mint">—</span>
+            </div>
+            <div id="grad-watch-list" class="text-slate-400">No active graduation watches</div>
+          </div>
+        </div>
       </div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
@@ -7505,7 +7520,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         elite_convergence:
           '<p class="mint text-xs mb-2">Requires multi-wallet clusters, blocks single-wallet entries, raises conviction/quality floors. (60%+ Win Rate Profile uses cluster ≥3 / quality ≥65 / conviction ≥75.)</p>',
         migration_sniper:
-          '<p class="mint text-xs mb-2">Only <strong>fresh</strong> pump.fun → DEX graduations (≤2h / MC ≤$450K). Older PumpSwap trades go to Trend / Dip / High Win-Rate instead.</p>',
+          '<p class="mint text-xs mb-2">Pre-grad <strong>95–98%</strong> curve sniper (watch from ~80%). TP 15–25% · tight SL · seconds-scale hold. Ultra-fresh post-grad ≤30s fallback if the curve window was missed.</p>',
         profit_protected:
           '<p class="mint text-xs mb-2">Forces tiered profit + aggressive dead-market exit; raises quality/conviction floors.</p>',
         quick_scalper:
@@ -8313,6 +8328,35 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             : 'No active dip setups';
         }
       }
+      const gradCount = document.getElementById('grad-watch-count');
+      const gradList = document.getElementById('grad-watch-list');
+      if (gradCount || gradList) {
+        const gw = tp.gradWatch || { active: 0, entries: [] };
+        if (gradCount) {
+          gradCount.textContent = (gw.active || 0) + ' active';
+        }
+        if (gradList) {
+          const rows = (gw.entries || []).filter(function (e) {
+            return e.status === 'watching' || e.status === 'armed';
+          }).slice(0, 8);
+          gradList.innerHTML = rows.length
+            ? rows.map(function (e) {
+                return (
+                  '<div class="flex justify-between gap-2 border-t border-slate-800 py-1">' +
+                  '<span>' + escHtml(e.symbol || '') + ' · ' + escHtml(e.status) + '</span>' +
+                  '<span class="mint">' +
+                  (e.curveProgressPct != null
+                    ? (Number(e.curveProgressPct).toFixed(0) + '%')
+                    : '—') +
+                  (e.marketCapUsd != null
+                    ? (' · $' + Math.round(Number(e.marketCapUsd)))
+                    : '') +
+                  '</span></div>'
+                );
+              }).join('')
+            : 'No active graduation watches';
+        }
+      }
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
@@ -8779,13 +8823,48 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           if (p.id === 'migration_sniper') {
             entryFields.push(
               numField({
-                key: 'maxTokenAgeHours',
-                label: 'Max age (h)',
+                key: 'gradWatchPct',
+                label: 'Watch %',
+                title: 'Start watching when bonding curve reaches this % (default 80).',
                 match: true,
-                step: 0.25,
-                min: 0,
-                placeholder: 'default',
-                value: matchValue('maxTokenAgeHours'),
+                step: 1,
+                min: 50,
+                max: 95,
+                placeholder: '80',
+                value: matchValue('gradWatchPct'),
+              }),
+              numField({
+                key: 'minCurveProgressPct',
+                label: 'Fire min %',
+                title: 'Sniper fire band lower bound (default 95).',
+                match: true,
+                step: 1,
+                min: 80,
+                max: 99,
+                placeholder: '95',
+                value: matchValue('minCurveProgressPct'),
+              }),
+              numField({
+                key: 'maxCurveProgressPct',
+                label: 'Fire max %',
+                title: 'Sniper fire band upper bound (default 98).',
+                match: true,
+                step: 1,
+                min: 90,
+                max: 100,
+                placeholder: '98',
+                value: matchValue('maxCurveProgressPct'),
+              }),
+              numField({
+                key: 'maxMigrationAgeSec',
+                label: 'Post-grad max (s)',
+                title: 'Ultra-fresh post-grad fallback window in seconds (default 30).',
+                match: true,
+                step: 1,
+                min: 5,
+                max: 120,
+                placeholder: '30',
+                value: matchValue('maxMigrationAgeSec'),
               }),
               numField({
                 key: 'minBuyPressureUsd',
@@ -9746,7 +9825,11 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           k === 'minWalletCount' ||
           k === 'minWalletQuality' ||
           k === 'minKolWallets' ||
-          k === 'patternMinConfidence'
+          k === 'patternMinConfidence' ||
+          k === 'gradWatchPct' ||
+          k === 'minCurveProgressPct' ||
+          k === 'maxCurveProgressPct' ||
+          k === 'maxMigrationAgeSec'
         ) {
           const n = raw === '' || raw == null ? 0 : Number(raw);
           match[k] = Number.isFinite(n) && n > 0 ? n : 0;

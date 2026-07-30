@@ -61,6 +61,11 @@ export interface DeadTokenFloorContext {
   isMigrated?: boolean;
   /** Early pump, near-migration, or bonding-curve smart-money signal */
   earlyEntry?: boolean;
+  /**
+   * Migration Sniper pre-grad fire band — skip maxCurveProgressForEntry soft reject.
+   * Also auto-applied when progress is in 95–100% pre-grad.
+   */
+  allowMigrationSniperCurve?: boolean;
 }
 
 export interface DeadTokenFilterResult {
@@ -668,7 +673,13 @@ export function evaluateDeadTokenHardFloors(
       progress > bc.maxCurveProgressForEntry &&
       !isMigrated
     ) {
-      scorePenalty += 4;
+      // Migration Sniper owns 95–98% (and near-complete) pre-grad — do not soft-penalize
+      const sniperBand =
+        ctx.allowMigrationSniperCurve === true ||
+        (progress >= 95 && progress <= 100);
+      if (!sniperBand) {
+        scorePenalty += 4;
+      }
     }
   }
 

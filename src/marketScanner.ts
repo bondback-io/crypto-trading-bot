@@ -72,6 +72,9 @@ export interface ScannerCandidate {
   specialtyFeed?: 'jupiter' | 'kolscan';
   /** Distinct KOL wallets when from Kolscan specialty feed */
   kolCount?: number;
+  /** Graduation watch / near-mig */
+  nearMigration?: boolean;
+  curveProgressPct?: number | null;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
@@ -931,6 +934,8 @@ export async function selectScannerCandidates(
       organicScore: event.organicScore,
       jupiterCategory:
         event.source === 'jupiter' ? cfg.jupiterCategory : undefined,
+      nearMigration: curve.nearMigration,
+      curveProgressPct: curve.progressPct,
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,
@@ -1088,6 +1093,34 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     } catch (err) {
       logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
+    }
+    try {
+      const {
+        offerMigrationGradWatchFromCandidate,
+        tickMigrationGradWatches,
+      } = require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      for (const c of picked) {
+        offerMigrationGradWatchFromCandidate({
+          mint: c.mint,
+          symbol: c.symbol,
+          name: c.name,
+          marketCapUsd: c.marketCapUsd,
+          volumeH1Usd: c.volumeH1Usd,
+          holderCount: c.holderCount,
+          curveProgressPct: c.curveProgressPct,
+          nearMigration: c.nearMigration,
+          preferredProfileId: c.preferredProfileId,
+          specialtyFeed: c.specialtyFeed,
+        });
+      }
+      const gTriggered = await tickMigrationGradWatches();
+      if (gTriggered > 0) {
+        console.log(
+          `[marketScanner] grad-watch triggered ${gTriggered} candidate(s)`
+        );
+      }
+    } catch (err) {
+      logger.warn('MarketScanner', 'Grad watch tick failed', errorToMeta(err));
     }
     return handed;
   } catch (err) {
