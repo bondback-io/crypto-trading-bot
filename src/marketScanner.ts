@@ -897,6 +897,30 @@ export async function selectScannerCandidates(
       score = Math.min(100, score + 4);
     }
 
+    // Curve-first watch offer — even if TA / rank gates reject this mint below
+    if (
+      !event.migrated &&
+      (curve.nearMigration ||
+        (curve.progressPct != null && curve.progressPct >= 70))
+    ) {
+      try {
+        const { offerMigrationGradWatchFromCandidate } =
+          require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+        offerMigrationGradWatchFromCandidate({
+          mint: event.mint,
+          symbol: event.symbol,
+          name: event.name,
+          marketCapUsd: event.marketCapUsd,
+          volumeH1Usd: event.volumeH1Usd,
+          holderCount: event.holderCount,
+          curveProgressPct: curve.progressPct,
+          nearMigration: curve.nearMigration,
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     if (ranked.veto?.startsWith('bearish:')) return null;
     if (score < minRank) return null;
     if (requireTa && !ranked.taSetup) return null;
@@ -959,6 +983,60 @@ export async function selectScannerCandidates(
       (config.riskLevel === 'off' ? ' (risk-off-relaxed)' : '')
   );
   return out;
+}
+
+/**
+ * Curve-first graduation watch pass — does NOT require TA / Fib / rank gates.
+ * Scans pump.fun (and Jupiter pump) universe mints for bonding-curve ≥ watch %,
+ * so near-mig setups can land on the Micro Bots graduation list even when the
+ * scanner enrich path rejects them for missing playbook/confluence.
+ */
+async function offerGradWatchesCurveFirst(
+  events: LaunchEvent[]
+): Promise<{ scanned: number; offered: number; triggered: number }> {
+  const {
+    considerMigrationGradWatch,
+    tickMigrationGradWatches,
+  } = require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+
+  const pumpish = events.filter((e) => {
+    if (!e?.mint) return false;
+    if (e.migrated) return false;
+    const mint = String(e.mint).toLowerCase();
+    return mint.endsWith('pump') || e.isPumpFun === true;
+  });
+
+  // Broader than TA enrich budget; still capped for RPC health
+  const budget = Math.min(64, Math.max(28, Math.min(pumpish.length, 64)));
+  const sample = [...pumpish]
+    .sort((a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a))
+    .slice(0, budget);
+
+  let offered = 0;
+  await mapPool(sample, 4, async (event) => {
+    if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return;
+    const curve = await enrichCurve(event);
+    const progress = curve.progressPct;
+    // Below useful near-mig band — skip RPC noise
+    if (progress != null && progress < 70 && !curve.nearMigration) return;
+    if (progress == null && !curve.nearMigration) return;
+
+    const entry = considerMigrationGradWatch({
+      mint: event.mint,
+      symbol: event.symbol,
+      name: event.name,
+      marketCapUsd: event.marketCapUsd,
+      volumeH1Usd: event.volumeH1Usd,
+      holderCount: event.holderCount,
+      curveProgressPct:
+        progress ?? (curve.nearMigration ? 80 : null),
+      source: event.source === 'jupiter' ? 'jupiter' : 'curve-first',
+    });
+    if (entry) offered += 1;
+  });
+
+  const triggered = await tickMigrationGradWatches();
+  return { scanned: sample.length, offered, triggered };
 }
 
 export function markScannerCooldown(mint: string, taken: boolean): void {
@@ -1053,6 +1131,23 @@ export async function runScannerPollOnce(): Promise<number> {
       `[marketScanner] poll ${universe.length} launches → ${picked.length} candidates ` +
         `(handed ${handed}) in ${lastPollMs}ms`
     );
+    // Curve-first graduation watches (no TA gate) — pump / Jupiter universe
+    try {
+      const grad = await offerGradWatchesCurveFirst(universe);
+      if (grad.offered > 0 || grad.triggered > 0) {
+        console.log(
+          `[marketScanner] grad-watch curve-first scanned ${grad.scanned} ` +
+            `→ offered ~${grad.offered}` +
+            (grad.triggered > 0 ? ` · triggered ${grad.triggered}` : '')
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'Grad watch curve-first pass failed',
+        errorToMeta(err)
+      );
+    }
     try {
       const { runProfileSpecialtyFeedPass } =
         require('./profileSpecialtyFeeds') as typeof import('./profileSpecialtyFeeds');
