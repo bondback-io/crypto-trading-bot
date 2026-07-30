@@ -175,6 +175,8 @@ export interface ReconcileMarkPriceInput {
   markPriceSol: number;
   entryMarketCapUsd?: number;
   markMarketCapUsd?: number | null;
+  /** Age of the open position (ms) — used to reject early phantom dumps */
+  positionAgeMs?: number;
 }
 
 export interface ReconcileMarkPriceResult {
@@ -192,6 +194,10 @@ export interface ReconcileMarkPriceResult {
  * Prefer MC-implied scale when price ratio disagrees with MC ratio by >10× —
  * but only when the MC ratio itself is within sane bounds. A bogus Dex FDV
  * (e.g. $119B vs $25M entry) must never force a 50× price mark.
+ *
+ * Early after open: if Dex MC is still near entry but the price mark shows a
+ * steep dump, reject the mark (stops Dip Buyer inventing −17% SL exits while
+ * live MC never moved).
  */
 export function reconcileMarkPriceSol(
   input: ReconcileMarkPriceInput
@@ -211,9 +217,39 @@ export function reconcileMarkPriceSol(
   }
 
   const pxRatio = mark / entry;
-  // NOTE: We intentionally do not scale the mark price from Dex MC.
-  // Fresh pumps often have MC that disagrees with fill price; MC-scaling
-  // previously invented fake −40% marks and instant Scalper stops.
+  const ageMs =
+    input.positionAgeMs != null && Number.isFinite(input.positionAgeMs)
+      ? Math.max(0, Number(input.positionAgeMs))
+      : null;
+  const entryMc = input.entryMarketCapUsd;
+  const markMc = input.markMarketCapUsd;
+
+  // Early phantom-dump gate: price says −10%+ but Dex MC is still within ~5% of entry
+  if (
+    ageMs != null &&
+    ageMs < 20_000 &&
+    entryMc != null &&
+    Number.isFinite(entryMc) &&
+    entryMc > 0 &&
+    markMc != null &&
+    Number.isFinite(markMc) &&
+    markMc > 0
+  ) {
+    const pxPnlPct = (pxRatio - 1) * 100;
+    const mcPnlPct = (markMc / entryMc - 1) * 100;
+    if (pxPnlPct <= -10 && mcPnlPct > -5) {
+      return {
+        priceSol: entry,
+        adjusted: true,
+        rejected: true,
+        reason: `early mark/MC disagree (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`,
+      };
+    }
+  }
+
+  // NOTE: We intentionally do not scale the mark price from Dex MC in the
+  // general path. Fresh pumps often have MC that disagrees with fill price;
+  // MC-scaling previously invented fake −40% marks and instant Scalper stops.
 
   if (
     pxRatio > MAX_SANE_MARK_PRICE_RATIO ||
@@ -234,24 +270,34 @@ export function reconcileMarkPriceSol(
 export interface ResolveExitMarketCapInput {
   entryMarketCapUsd?: number | null;
   entryPriceSol: number;
-  /** Same mark used for PnL / fill (post-slippage ok) */
+  /** Same mark used for PnL / fill (prefer pre-slip mark for implied MC) */
   exitPriceSol: number;
   liveMarketCapUsd?: number | null;
 }
 
+export interface ResolvedExitMarketCaps {
+  /** Primary UI MC — prefers sane Dex/live when fill-implied invents a fake dip */
+  displayUsd?: number;
+  /** Fill-scaled MC (entry × exit/entry) — matches PnL direction */
+  impliedFromFillUsd?: number;
+  source: 'live' | 'implied' | 'none';
+}
+
 /**
- * Exit MC must track the PnL mark. Prefer entry×(exit/entry); accept a live
- * Dex MC only when it closely agrees with that move (not just within 10×).
+ * Resolve exit MC for display + audit.
+ * Prefer live Dex MC when it is still near entry MC but the fill-implied MC
+ * claims a large dip (the WENWEN / Jacob-class UI bug). Otherwise keep
+ * fill-implied so BUY/EXIT MC track PnL.
  */
-export function resolveExitMarketCapUsd(
+export function resolveExitMarketCaps(
   input: ResolveExitMarketCapInput
-): number | undefined {
+): ResolvedExitMarketCaps {
   const entry = input.entryPriceSol;
   const exit = input.exitPriceSol;
   const entryMc = input.entryMarketCapUsd;
   const liveMc = input.liveMarketCapUsd;
 
-  const scaled =
+  const impliedFromFillUsd =
     entryMc != null &&
     Number.isFinite(entryMc) &&
     entryMc > 0 &&
@@ -260,9 +306,37 @@ export function resolveExitMarketCapUsd(
       ? marketCapAtPrice(entryMc, entry, exit)
       : undefined;
 
+  const liveSaneVsEntry =
+    liveMc != null &&
+    Number.isFinite(liveMc) &&
+    liveMc > 0 &&
+    entryMc != null &&
+    Number.isFinite(entryMc) &&
+    entryMc > 0 &&
+    liveMc / entryMc <= 1.4 &&
+    liveMc / entryMc >= 1 / 1.4;
+
+  if (
+    liveSaneVsEntry &&
+    impliedFromFillUsd != null &&
+    impliedFromFillUsd > 0 &&
+    liveMc != null &&
+    entryMc != null
+  ) {
+    const impliedChg = impliedFromFillUsd / entryMc - 1;
+    const liveChg = liveMc / entryMc - 1;
+    // Fill invents a ≥8% dump while Dex MC is within ~5% of entry → show Dex
+    if (impliedChg <= -0.08 && liveChg > -0.05) {
+      return {
+        displayUsd: liveMc,
+        impliedFromFillUsd,
+        source: 'live',
+      };
+    }
+  }
+
   // Live Dex MC may use a different supply/pool than entry. Only trust it when
-  // it tracks the fill-price move tightly; otherwise display follows PnL.
-  // 1.25 previously allowed ~+4% EXIT MC with ~−17% fill PnL (Jacob-style bug).
+  // it tracks the fill-price move tightly.
   const MAX_EXIT_MC_DISAGREE = 1.06;
   if (
     liveMc != null &&
@@ -286,12 +360,21 @@ export function resolveExitMarketCapUsd(
       pxRatio / mcRatio <= MAX_EXIT_MC_DISAGREE &&
       mcRatio / pxRatio <= MAX_EXIT_MC_DISAGREE
     ) {
-      return liveMc;
+      return {
+        displayUsd: liveMc,
+        impliedFromFillUsd,
+        source: 'live',
+      };
     }
   }
 
-  // Prefer scaled MC so BUY/EXIT MC always agree with fill PnL direction
-  if (scaled != null && scaled > 0) return scaled;
+  if (impliedFromFillUsd != null && impliedFromFillUsd > 0) {
+    return {
+      displayUsd: impliedFromFillUsd,
+      impliedFromFillUsd,
+      source: 'implied',
+    };
+  }
 
   if (
     liveMc != null &&
@@ -299,10 +382,21 @@ export function resolveExitMarketCapUsd(
     liveMc > 0 &&
     (entryMc == null || !(entryMc > 0))
   ) {
-    return liveMc;
+    return { displayUsd: liveMc, impliedFromFillUsd, source: 'live' };
   }
 
-  return undefined;
+  return { displayUsd: undefined, impliedFromFillUsd, source: 'none' };
+}
+
+/**
+ * Exit MC must track the PnL mark by default. Prefer entry×(exit/entry); accept
+ * a live Dex MC when it agrees — or when live MC is still near entry while
+ * fill-implied invents a large fake dip (see resolveExitMarketCaps).
+ */
+export function resolveExitMarketCapUsd(
+  input: ResolveExitMarketCapInput
+): number | undefined {
+  return resolveExitMarketCaps(input).displayUsd;
 }
 
 /**

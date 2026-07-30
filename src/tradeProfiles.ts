@@ -3471,6 +3471,7 @@ function finalizeExitRulesForWinner(
       delete (exitRules as { shortTermStrategyId?: string }).shortTermStrategyId;
       exitRules.hardTimeLimitSecMin = undefined;
       exitRules.hardTimeLimitSecMax = undefined;
+      (exitRules as { hardTimeLimitSec?: number }).hardTimeLimitSec = undefined;
     }
   }
 
@@ -3485,6 +3486,7 @@ function finalizeExitRulesForWinner(
     delete (exitRules as { shortTermStrategyId?: string }).shortTermStrategyId;
     exitRules.hardTimeLimitSecMin = undefined;
     exitRules.hardTimeLimitSecMax = undefined;
+    (exitRules as { hardTimeLimitSec?: number }).hardTimeLimitSec = undefined;
   }
 
   if (def.id === 'migration_sniper') {
@@ -4020,10 +4022,25 @@ export function applyTradeProfileExitRules(
       position.shortTermStrategyId === 'quick_scalper' ||
       position.shortTermStrategyId === 'micro_scalper' ||
       position.shortTermStrategyId === 'momentum_burst' ||
-      position.shortTermStrategyId === 'reversal_scalp'
+      position.shortTermStrategyId === 'reversal_scalp' ||
+      (position.tradeProfileId === 'dip_buyer' &&
+        String(position.shortTermStrategyId || '') !== 'post_run_dip')
     ) {
       position.shortTermStrategyId = undefined;
     }
+    position.scalpDeadlineMs = undefined;
+    position.scalpHardDeadlineMs = undefined;
+    position.scalpSlPct = undefined;
+    position.scalpTpPct = undefined;
+  }
+
+  // Belt-and-suspenders: Dip swing must never keep a migration scalp timer
+  if (
+    position.tradeProfileId === 'dip_buyer' &&
+    String(position.shortTermStrategyId || '') !== 'post_run_dip'
+  ) {
+    position.scalpMode = false;
+    position.shortTermStrategyId = undefined;
     position.scalpDeadlineMs = undefined;
     position.scalpHardDeadlineMs = undefined;
   }

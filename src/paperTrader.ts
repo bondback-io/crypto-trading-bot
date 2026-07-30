@@ -16,13 +16,16 @@ import {
 import {
   evaluateProfitAction,
   adjustedStopLossPct,
+  SWING_HARD_SL_GRACE_MS,
+  SWING_HARD_SL_GRACE_PROFILES,
+  SWING_HARD_SL_GRACE_RUG_PCT,
   type ProfitPositionView,
 } from './profitStrategy';
 import {
   marketCapAtPrice,
   getCachedSolUsdPrice,
   reconcileMarkPriceSol,
-  resolveExitMarketCapUsd,
+  resolveExitMarketCaps,
   isSaneMarkMarketCapUsd,
 } from './marketData';
 import { recordScannerOutcome } from './scannerOutcomes';
@@ -163,8 +166,10 @@ export interface Position {
   entryMarketCapUsd?: number;
   /** Market cap USD when the copied smart wallet bought (signal-time) */
   sourceEntryMcUsd?: number;
-  /** Market cap USD at exit (live mark MC preferred; else scaled from entry) */
+  /** Market cap USD at exit (Dex/live preferred when fill-implied invents a fake dip) */
   exitMarketCapUsd?: number;
+  /** Fill-scaled exit MC (entry × exitFill/entryFill) for PnL audit */
+  impliedExitMarketCapUsd?: number;
   /** Jupiter-style Top 10 Holders % resolved at entry (for audit / UI) */
   top10HoldPct?: number | null;
   /**
@@ -751,6 +756,7 @@ export class PaperTrader {
         markPriceSol: priceSol,
         entryMarketCapUsd: pos.entryMarketCapUsd,
         markMarketCapUsd: markMcForReconcile,
+        positionAgeMs: Math.max(0, Date.now() - (pos.openedAt || Date.now())),
       });
       if (reconciled.rejected) {
         console.warn(
@@ -1641,12 +1647,15 @@ export class PaperTrader {
 
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
     const liveMc = this.marketCapCache.get(position.mint);
-    const exitMc = resolveExitMarketCapUsd({
+    // Implied MC from pre-slip mark (PnL decision basis); display may prefer Dex
+    const exitCaps = resolveExitMarketCaps({
       entryMarketCapUsd: position.entryMarketCapUsd,
       entryPriceSol: position.entryPriceSol,
-      exitPriceSol: exitPrice,
+      exitPriceSol: safeMark > 0 ? safeMark : exitPrice,
       liveMarketCapUsd: liveMc,
     });
+    const exitMc = exitCaps.displayUsd;
+    const impliedExitMc = exitCaps.impliedFromFillUsd;
 
     if (isPartial && position.amountTokens > 1e-12) {
       position.status = 'partial';
@@ -1679,6 +1688,7 @@ export class PaperTrader {
         closedAt: Date.now(),
         exitPriceSol: exitPrice,
         exitMarketCapUsd: exitMc,
+        impliedExitMarketCapUsd: impliedExitMc,
         pnlSol,
         pnlPct,
         reason: `partial: ${reason}`,
@@ -1708,6 +1718,7 @@ export class PaperTrader {
     position.closedAt = Date.now();
     position.exitPriceSol = exitPrice;
     position.exitMarketCapUsd = exitMc;
+    position.impliedExitMarketCapUsd = impliedExitMc;
     position.pnlSol = totalPnl;
     position.pnlPct = totalPct;
     position.reason = reason;
@@ -2285,6 +2296,9 @@ export class PaperTrader {
         bagTrimDone: position.bagTrimDone,
         riskScore: position.antiRug?.riskScore,
         convictionScore: position.convictionScore,
+        openedAt: position.openedAt,
+        tradeProfileId: position.tradeProfileId,
+        scalpMode: position.scalpMode === true,
       };
 
       const action = evaluateProfitAction(view);
@@ -2394,19 +2408,28 @@ export class PaperTrader {
     if (hardSl > 0) hardSl = -Math.abs(hardSl);
 
     if (markPnlPct <= hardSl) {
-      const reason = `hard stop-loss ${hardSl}%`;
-      this.simulateSell(position.id, markPrice, reason, {
-        minFillPriceSol: hardStopMinFillPriceSol(
-          position.entryPriceSol,
-          hardSl
-        ),
-      });
-      return {
-        kind: 'hard_sl',
-        reason,
-        markPnlPct,
-        stillOpen: this.positions.has(positionId),
-      };
+      const ageMs = Math.max(0, Date.now() - (position.openedAt || Date.now()));
+      const swingGrace =
+        !position.scalpMode &&
+        !!position.tradeProfileId &&
+        SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
+        ageMs < SWING_HARD_SL_GRACE_MS &&
+        markPnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
+      if (!swingGrace) {
+        const reason = `hard stop-loss ${hardSl}%`;
+        this.simulateSell(position.id, markPrice, reason, {
+          minFillPriceSol: hardStopMinFillPriceSol(
+            position.entryPriceSol,
+            hardSl
+          ),
+        });
+        return {
+          kind: 'hard_sl',
+          reason,
+          markPnlPct,
+          stillOpen: this.positions.has(positionId),
+        };
+      }
     }
 
     if (
@@ -2935,18 +2958,27 @@ export class PaperTrader {
       const hardSl =
         hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
       if (pnlPct <= hardSl) {
-        await this.closePositionByRules(
-          position,
-          currentPrice,
-          `hard stop-loss ${hardSl}%`,
-          {
-            minFillPriceSol: hardStopMinFillPriceSol(
-              position.entryPriceSol,
-              hardSl
-            ),
-          }
-        );
-        continue;
+        const ageMs = Math.max(0, Date.now() - (position.openedAt || Date.now()));
+        const swingGrace =
+          !position.scalpMode &&
+          !!position.tradeProfileId &&
+          SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
+          ageMs < SWING_HARD_SL_GRACE_MS &&
+          pnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
+        if (!swingGrace) {
+          await this.closePositionByRules(
+            position,
+            currentPrice,
+            `hard stop-loss ${hardSl}%`,
+            {
+              minFillPriceSol: hardStopMinFillPriceSol(
+                position.entryPriceSol,
+                hardSl
+              ),
+            }
+          );
+          continue;
+        }
       }
 
       if (
@@ -3077,6 +3109,9 @@ export class PaperTrader {
       bagTrimDone: position.bagTrimDone,
       riskScore: position.antiRug?.riskScore,
       convictionScore: position.convictionScore,
+      openedAt: position.openedAt,
+      tradeProfileId: position.tradeProfileId,
+      scalpMode: position.scalpMode === true,
     };
 
     const action = evaluateProfitAction(view);
@@ -3196,7 +3231,7 @@ export class PaperTrader {
               position.status = 'partial';
               // Display/history slice so Closed Trades can group partial TPs
               const liveMc = this.marketCapCache.get(position.mint);
-              const exitMc = resolveExitMarketCapUsd({
+              const exitCaps = resolveExitMarketCaps({
                 entryMarketCapUsd: position.entryMarketCapUsd,
                 entryPriceSol: position.entryPriceSol,
                 exitPriceSol: currentPrice,
@@ -3211,7 +3246,8 @@ export class PaperTrader {
                 status: 'closed',
                 closedAt: Date.now(),
                 exitPriceSol: currentPrice,
-                exitMarketCapUsd: exitMc,
+                exitMarketCapUsd: exitCaps.displayUsd,
+                impliedExitMarketCapUsd: exitCaps.impliedFromFillUsd,
                 pnlSol: slicePnl,
                 pnlPct: slicePct,
                 reason: `partial: ${action.reason}`,
@@ -3272,12 +3308,14 @@ export class PaperTrader {
           position.closedAt = Date.now();
           position.exitPriceSol = currentPriceSol;
           const liveMc = this.marketCapCache.get(position.mint);
-          position.exitMarketCapUsd = resolveExitMarketCapUsd({
+          const exitCaps = resolveExitMarketCaps({
             entryMarketCapUsd: position.entryMarketCapUsd,
             entryPriceSol: position.entryPriceSol,
             exitPriceSol: currentPriceSol,
             liveMarketCapUsd: liveMc,
           });
+          position.exitMarketCapUsd = exitCaps.displayUsd;
+          position.impliedExitMarketCapUsd = exitCaps.impliedFromFillUsd;
           position.reason = reason;
           const pnlPct =
             ((currentPriceSol - position.entryPriceSol) /

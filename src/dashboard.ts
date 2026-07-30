@@ -11771,7 +11771,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td>' + fmtMintCa(p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy fill (scaled to entry price)">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
-          '<td class="mint" title="Market cap at exit fill (tracks PnL price; not a separate Dex snapshot)">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
+          '<td class="mint" title="' +
+            (p.impliedExitMarketCapUsd != null &&
+            p.exitMarketCapUsd != null &&
+            Math.abs(Number(p.impliedExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
+              Math.max(Number(p.exitMarketCapUsd), 1) >
+              0.05
+              ? 'Dex/live exit MC (fill-implied was ' +
+                fmtUsdShort(p.impliedExitMarketCapUsd) +
+                ' from PnL mark — token may not have traded at that MC)'
+              : 'Exit market cap (Dex/live when sane; else fill-scaled from entry)') +
+          '">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
           '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
             fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd) +
           '</td>' +
@@ -12658,6 +12668,18 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               chg.toFixed(0) +
               '%)';
           }
+        }
+        if (
+          p.impliedExitMarketCapUsd != null &&
+          Number(p.impliedExitMarketCapUsd) > 0 &&
+          Math.abs(Number(p.impliedExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
+            Math.max(Number(p.exitMarketCapUsd), 1) >
+            0.05
+        ) {
+          mcText +=
+            ' · fill-implied ' +
+            fmtUsdShort(p.impliedExitMarketCapUsd) +
+            ' (PnL mark; may not match Dex)';
         }
         lines.push({ label: 'Exit MC', text: mcText });
       }

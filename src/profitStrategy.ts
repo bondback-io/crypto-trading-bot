@@ -42,7 +42,23 @@ export interface ProfitPositionView {
   bagTrimDone: boolean;
   riskScore?: number;
   convictionScore?: number;
+  /** Open timestamp — enables swing hard-SL grace */
+  openedAt?: number;
+  tradeProfileId?: string;
+  scalpMode?: boolean;
 }
+
+/** Swing micro-bots that should not hard-SL on the first phantom tick. */
+export const SWING_HARD_SL_GRACE_PROFILES = new Set([
+  'dip_buyer',
+  'trend_rider',
+  'steady_compounder',
+  'high_win_rate',
+]);
+
+export const SWING_HARD_SL_GRACE_MS = 15_000;
+/** Still cut immediately on true rug-speed dumps during grace. */
+export const SWING_HARD_SL_GRACE_RUG_PCT = -35;
 
 export type ProfitAction =
   | { type: 'none' }
@@ -142,6 +158,19 @@ export function evaluateProfitAction(pos: ProfitPositionView): ProfitAction {
 
   // 1) Hard stop-loss (hardSl is negative; e.g. pnl -12 <= -12)
   if (pnlPct <= hardSl) {
+    const ageMs =
+      pos.openedAt != null && Number.isFinite(pos.openedAt)
+        ? Date.now() - Number(pos.openedAt)
+        : Number.POSITIVE_INFINITY;
+    const swingGrace =
+      !pos.scalpMode &&
+      !!pos.tradeProfileId &&
+      SWING_HARD_SL_GRACE_PROFILES.has(pos.tradeProfileId) &&
+      ageMs < SWING_HARD_SL_GRACE_MS &&
+      pnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
+    if (swingGrace) {
+      return { type: 'none' };
+    }
     return {
       type: 'hard_sl',
       reason: `Hard stop-loss ${hardSl.toFixed(0)}% (pnl ${pnlPct.toFixed(1)}%)`,
