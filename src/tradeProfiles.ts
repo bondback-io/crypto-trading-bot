@@ -2215,10 +2215,16 @@ export function evaluateLaneEntryFloors(
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
-  // Hard lane MC floor when MC is known. Unknown MC soft-passes (metrics often
-  // arrive after enrich) — same pattern as holders / Max MC. Profile Min MC
-  // Override only raises above global (cannot undercut).
+  // Hard lane MC floor. Unknown MC + profile Min MC Override → hard fail
+  // (migration / early enrich often lack MC; soft-pass let Trend stamp $19k
+  // mints despite a $1M override). Soft-pass only when no profile min is set.
   if (laneMinMc > 0) {
+    if (profileMin > 0 && (mc == null || mc <= 0)) {
+      return {
+        ok: false,
+        reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
+      };
+    }
     if (mc != null && mc > 0 && mc < laneMinMc) {
       return {
         ok: false,
@@ -2783,6 +2789,15 @@ function scoreProfile(
   }
 
   if (m.preferTrend) {
+    // Fresh / priority migrations belong to Migration Sniper — not Trend Rider.
+    if (
+      (ctx.isMigration === true ||
+        ctx.strategyKind === 'migration' ||
+        ctx.entrySource === 'migration') &&
+      !feedPrefer
+    ) {
+      return { score: 0, reason: 'defer migration to Migration Sniper' };
+    }
     if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a trend hold setup' };
     }
@@ -3444,6 +3459,19 @@ function finalizeExitRulesForWinner(
       exitRules.hardTimeLimitSecMin = undefined;
       exitRules.hardTimeLimitSecMax = undefined;
     }
+  }
+
+  // Quality swing lanes — never keep a migration scalp timer when they win.
+  if (
+    def.id === 'trend_rider' ||
+    def.id === 'steady_compounder' ||
+    def.id === 'high_win_rate'
+  ) {
+    exitRules.forceScalp = false;
+    exitRules.overrideScalpParams = false;
+    delete (exitRules as { shortTermStrategyId?: string }).shortTermStrategyId;
+    exitRules.hardTimeLimitSecMin = undefined;
+    exitRules.hardTimeLimitSecMax = undefined;
   }
 
   if (def.id === 'migration_sniper') {
