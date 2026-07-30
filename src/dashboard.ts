@@ -1,9 +1,16 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up / Bot Info via settings menu)
  */
 
-export const DASHBOARD_HTML = `<!DOCTYPE html>
+import {
+  BOT_INFO_CSS,
+  buildBotInfoMenuItemHtml,
+  buildBotInfoPanelHtml,
+} from './dashboardBotInfo';
+import { getAppVersion } from './version';
+
+const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
@@ -740,6 +747,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     @media (min-width: 640px) {
       .backup-meta { grid-template-columns: 1fr 1fr; }
     }
+    /* BOT_INFO_CSS_PLACEHOLDER */
     .backup-meta code {
       font-size: 0.7rem;
       color: #cbd5e1;
@@ -4811,7 +4819,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         </div>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Logs, and Back Up" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and Bot Info" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -4843,6 +4851,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
             Back Up
           </button>
+          <!-- BOT_INFO_MENU_PLACEHOLDER -->
         </div>
       </div>
       </div>
@@ -6775,6 +6784,8 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- BOT_INFO_PANEL_PLACEHOLDER -->
+
     <!-- ========== TAB: Logs ========== -->
     <section data-tab-panel="logs" class="hidden space-y-4">
       <div class="card">
@@ -6848,6 +6859,50 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       const open = !menu.classList.contains('open');
       menu.classList.toggle('open', open);
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    function syncBotInfoVersionLabels(app) {
+      const ver = app && app.version
+        ? ('v' + app.version)
+        : ((document.getElementById('botinfo-panel-ver') || {}).textContent || '');
+      if (!ver) return;
+      const menuVer = document.getElementById('botinfo-menu-ver');
+      const panelVer = document.getElementById('botinfo-panel-ver');
+      if (menuVer) menuVer.textContent = ver;
+      if (panelVer) panelVer.textContent = ver;
+    }
+
+    function setBotInfoChipActive(secId) {
+      document.querySelectorAll('#botinfo-subnav .botinfo-chip').forEach(function (el) {
+        el.classList.toggle('active', el.getAttribute('data-botinfo-sec') === secId);
+      });
+    }
+
+    function showBotInfoSection(secId) {
+      const el = document.getElementById('botinfo-sec-' + secId);
+      if (!el) return;
+      setBotInfoChipActive(secId);
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    window.showBotInfoSection = showBotInfoSection;
+
+    let _botInfoSpyBound = false;
+    function initBotInfoScrollSpy() {
+      if (_botInfoSpyBound || typeof IntersectionObserver === 'undefined') return;
+      const sections = document.querySelectorAll('[data-botinfo-section]');
+      if (!sections.length) return;
+      _botInfoSpyBound = true;
+      const obs = new IntersectionObserver(function (entries) {
+        const panel = document.querySelector('[data-tab-panel="botinfo"]');
+        if (!panel || panel.classList.contains('hidden')) return;
+        const visible = entries
+          .filter(function (e) { return e.isIntersecting; })
+          .sort(function (a, b) { return b.intersectionRatio - a.intersectionRatio; });
+        if (!visible.length) return;
+        const id = visible[0].target.getAttribute('data-botinfo-section');
+        if (id) setBotInfoChipActive(id);
+      }, { root: null, rootMargin: '-20% 0px -55% 0px', threshold: [0.1, 0.35, 0.6] });
+      sections.forEach(function (s) { obs.observe(s); });
     }
 
     window.__notifyPrefs = window.__notifyPrefs || {
@@ -10867,7 +10922,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup' || name === 'botinfo');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -10888,6 +10943,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} }
+      if (name === 'botinfo') { try { syncBotInfoVersionLabels(); } catch (_) {} try { initBotInfoScrollSpy(); } catch (_) {} }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -15154,6 +15210,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           (when ? ' · updated ' + when : '') +
           (status.app.gitSha ? ' · ' + status.app.gitSha : '');
       }
+      try { syncBotInfoVersionLabels(status.app); } catch (_) {}
 
       const ms = status.marketSession;
       const msBadge = document.getElementById('market-session-badge');
@@ -21033,7 +21090,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'signals') return 'scanner';
       return name;
     };
-    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup'];
+    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup', 'botinfo'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
@@ -21047,3 +21104,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
 </body>
 </html>`;
+
+const _botInfoVer = `v${getAppVersion().version}`;
+export const DASHBOARD_HTML = _DASHBOARD_HTML_RAW
+  .replace('/* BOT_INFO_CSS_PLACEHOLDER */', BOT_INFO_CSS)
+  .replace('<!-- BOT_INFO_MENU_PLACEHOLDER -->', buildBotInfoMenuItemHtml(_botInfoVer))
+  .replace('<!-- BOT_INFO_PANEL_PLACEHOLDER -->', buildBotInfoPanelHtml(_botInfoVer));
