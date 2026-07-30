@@ -69,7 +69,7 @@ export interface ScannerCandidate {
   jupiterCategory?: string;
   /** Soft prefer this Smart Bot profile when specialty feed tagged the mint */
   preferredProfileId?: string;
-  specialtyFeed?: 'jupiter' | 'kolscan';
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan';
   /** Distinct KOL wallets when from Kolscan specialty feed */
   kolCount?: number;
   /** Graduation watch / near-mig */
@@ -879,6 +879,32 @@ export async function collectScannerUniverse(): Promise<LaunchEvent[]> {
     }
   }
 
+  // Optional AlphaScan New soft-merge (default OFF — does not change universe unless enabled)
+  if (config.alphaScan?.enabled && config.alphaScan?.includeNewInScannerUniverse) {
+    try {
+      const { getAlphaScanNewLaunchEvents } =
+        require('./alphaScanFeed') as typeof import('./alphaScanFeed');
+      const neu = getAlphaScanNewLaunchEvents();
+      let added = 0;
+      for (const e of neu) {
+        if (!e?.mint || byMint.has(e.mint)) continue;
+        byMint.set(e.mint, e);
+        added += 1;
+      }
+      if (added > 0) {
+        console.log(
+          `[marketScanner] universe + alphascan new=${added} → ${byMint.size}`
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'AlphaScan new merge failed',
+        errorToMeta(err)
+      );
+    }
+  }
+
   return [...byMint.values()];
 }
 
@@ -1215,6 +1241,20 @@ export async function runScannerPollOnce(): Promise<number> {
       logger.warn(
         'MarketScanner',
         'Specialty feed pass failed',
+        errorToMeta(err)
+      );
+    }
+    try {
+      const { runAlphaScanFeedPass } =
+        require('./alphaScanFeed') as typeof import('./alphaScanFeed');
+      const alpha = await runAlphaScanFeedPass();
+      if (alpha > 0) {
+        console.log(`[marketScanner] AlphaScan feed handed ${alpha} candidate(s)`);
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'AlphaScan feed pass failed',
         errorToMeta(err)
       );
     }

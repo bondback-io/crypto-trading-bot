@@ -1174,7 +1174,7 @@ export interface TradeProfileMatchContext {
    */
   preferProfileId?: string | null;
   /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
-  specialtyFeed?: 'jupiter' | 'kolscan' | null;
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);

@@ -670,7 +670,7 @@ export interface TradeSignal {
   /** Jupiter organicScore when known (scanner / pro-quality proxy) */
   organicScore?: number | null;
   /** Specialty feed tag when from per-profile Kolscan/Jupiter pass */
-  specialtyFeed?: 'jupiter' | 'kolscan' | null;
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
 }

@@ -6050,6 +6050,94 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card">
+        <div class="section-title">AlphaScan <span class="tip" tabindex="0" data-tip="Additive New / Soon / Bonded discovery from Jupiter Tokens API /recent + bonding-curve checks. Default OFF — does not change Jupiter trending or existing scanner gates. Soon → Migration Sniper grad-watch; Bonded → Scalper / Reversal Scalper."></span></div>
+        <p class="mint text-xs mb-3" style="color:#94a3b8;line-height:1.45">
+          Optional feed alongside the Market Scanner. Uses your existing <code>JUPITER_API_KEY</code>. Turn on only when you want extra Soon/Bonded opportunities for Migration Sniper and scalpers.
+        </p>
+        <div class="toggle-row">
+          <span>Enable AlphaScan <span class="tip" tabindex="0" data-tip="Master switch. When off, no AlphaScan polls or handoffs run."></span></span>
+          <label class="switch"><input type="checkbox" id="as-enabled" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Feed New column <span class="tip" tabindex="0" data-tip="Show fresh first-pool tokens in the New tab (display). Soft-merge into scanner universe only if Include New in universe is on."></span></span>
+          <label class="switch"><input type="checkbox" id="as-feed-new" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Feed Soon column <span class="tip" tabindex="0" data-tip="Pre-grad tokens approaching migration (curve ≥ Soon min %)."></span></span>
+          <label class="switch"><input type="checkbox" id="as-feed-soon" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Feed Bonded column <span class="tip" tabindex="0" data-tip="Recently graduated / bonded tokens for scalp profiles."></span></span>
+          <label class="switch"><input type="checkbox" id="as-feed-bonded" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Route Soon → Migration Sniper <span class="tip" tabindex="0" data-tip="Offer Soon mints to Migration Sniper grad-watch (existing 80%→95–98% fire band still applies)."></span></span>
+          <label class="switch"><input type="checkbox" id="as-route-soon" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Route Bonded → Scalper <span class="tip" tabindex="0" data-tip="Soft-prefer Scalper on Bonded handoffs (still must pass filters / lane fight)."></span></span>
+          <label class="switch"><input type="checkbox" id="as-route-scalper" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Route Bonded → Reversal Scalper <span class="tip" tabindex="0" data-tip="Soft-prefer Reversal Scalper on Bonded handoffs."></span></span>
+          <label class="switch"><input type="checkbox" id="as-route-reversal" checked /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Include New in scanner universe <span class="tip" tabindex="0" data-tip="Soft-merge New column into Market Scanner universe. Default off to avoid flooding."></span></span>
+          <label class="switch"><input type="checkbox" id="as-include-new" /><span class="slider"></span></label>
+        </div>
+        <div class="filters-row mb-2 mt-2">
+          <label class="ctl ctl-sm">
+            <span>Poll (ms)</span>
+            <input type="number" id="as-poll-ms" value="45000" min="15000" step="1000" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Soon min curve %</span>
+            <input type="number" id="as-soon-min" value="70" min="50" max="95" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Bonded max age (min)</span>
+            <input type="number" id="as-bonded-age" value="45" min="5" max="360" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Max handoffs / poll</span>
+            <input type="number" id="as-max-handoff" value="8" min="1" max="20" />
+          </label>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-2 items-center">
+          <button class="btn btn-primary" onclick="saveAlphaScanConfig()" title="Save AlphaScan settings">Save AlphaScan</button>
+          <button class="btn btn-secondary" onclick="refreshAlphaScanFeed()" title="Reload New / Soon / Bonded">Refresh feed</button>
+          <span class="mint" id="as-save-status">—</span>
+        </div>
+        <div class="mint text-xs mt-2" id="as-status" style="color:#94a3b8">AlphaScan: off</div>
+        <div class="filters-row mb-2 mt-3">
+          <label class="ctl ctl-md">
+            <span>Column</span>
+            <select id="as-column-filter">
+              <option value="new">New</option>
+              <option value="soon" selected>Soon</option>
+              <option value="bonded">Bonded</option>
+            </select>
+          </label>
+        </div>
+        <div class="overflow-x-auto max-h-72 overflow-y-auto">
+          <table id="alphascan-table">
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th>Col</th>
+                <th title="Bonding curve % or —">Curve</th>
+                <th>MC</th>
+                <th>Age</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="6" class="text-slate-500">Enable AlphaScan and refresh to load New / Soon / Bonded…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="config-section-label">Activity <span>Pump.fun, dip confirms, signal decisions</span></div>
       <div class="card">
         <div class="section-title">Pump.fun Smart Activity <span class="tip" tabindex="0" data-tip="Live early-curve buys, near-migration plays, and smart-money scores on Pump.fun launches."></span></div>
@@ -11075,7 +11163,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'logs') loadSystemLogs();
       if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'overview') loadLaneDecisions().catch(function () {});
-      if (name === 'scanner') loadMarketScannerConfig();
+      if (name === 'scanner') {
+        loadMarketScannerConfig();
+        if (typeof refreshAlphaScanFeed === 'function') refreshAlphaScanFeed();
+      }
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') { try { syncBotInfoVersionLabels(); } catch (_) {} try { initBotInfoScrollSpy(); } catch (_) {} }
@@ -16655,6 +16746,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (ps.enableEarlyCurvePriority === false ? ' · early OFF' : '');
       }
       refreshPumpActivity().catch(() => {});
+      if (typeof refreshAlphaScanFeed === 'function') {
+        refreshAlphaScanFeed().catch(() => {});
+      }
 
       const logHtml = (Array.isArray(logs) ? logs : []).map(l => \`
         <div class="log-entry log-\${l.type}" data-type="\${l.type}">\${fmtTimeAgoCell(l.timestamp)} — \${l.message}</div>\`).join('');
@@ -19091,6 +19185,207 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (!silent) alert(err.message || String(err));
       }
     }
+
+    let _alphaScanCache = null;
+
+    function asChk(id, fallback) {
+      const el = document.getElementById(id);
+      return el ? el.checked : fallback;
+    }
+    function asNum(id, fallback) {
+      const el = document.getElementById(id);
+      const n = el ? Number(el.value) : NaN;
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function fillAlphaScanForm(cfg) {
+      if (!cfg) return;
+      const setChk = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!v;
+      };
+      setChk('as-enabled', cfg.enabled === true);
+      setChk('as-feed-new', cfg.feedNew !== false);
+      setChk('as-feed-soon', cfg.feedSoon !== false);
+      setChk('as-feed-bonded', cfg.feedBonded !== false);
+      setChk('as-route-soon', cfg.routeSoonToMigrationSniper !== false);
+      setChk('as-route-scalper', cfg.routeBondedToScalper !== false);
+      setChk('as-route-reversal', cfg.routeBondedToReversalScalper !== false);
+      setChk('as-include-new', cfg.includeNewInScannerUniverse === true);
+      const setNum = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && v != null && Number.isFinite(Number(v))) el.value = Number(v);
+      };
+      setNum('as-poll-ms', cfg.pollIntervalMs);
+      setNum('as-soon-min', cfg.soonMinCurvePct);
+      setNum('as-bonded-age', cfg.bondedMaxAgeMinutes);
+      setNum('as-max-handoff', cfg.maxHandOffPerPoll);
+    }
+
+    function fmtAlphaAge(ms) {
+      if (ms == null || !Number.isFinite(Number(ms))) return '—';
+      const s = Math.max(0, Math.round(Number(ms) / 1000));
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.round(s / 60) + 'm';
+      return (s / 3600).toFixed(1) + 'h';
+    }
+
+    function renderAlphaScanTable(snap) {
+      const tbody = document.querySelector('#alphascan-table tbody');
+      if (!tbody) return;
+      const col =
+        (document.getElementById('as-column-filter') || {}).value || 'soon';
+      const rows =
+        col === 'bonded'
+          ? snap.bonded || []
+          : col === 'new'
+            ? snap.new || []
+            : snap.soon || [];
+      if (!rows.length) {
+        tbody.innerHTML =
+          '<tr><td colspan="6" class="text-slate-500">No ' +
+          escHtml(col) +
+          ' tokens yet' +
+          (snap.enabled ? '' : ' — enable AlphaScan') +
+          '.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows
+        .map(function (r) {
+          const mint = String(r.mint || '');
+          const sym = escHtml(r.symbol || mint.slice(0, 6));
+          const actions =
+            typeof fmtLaneTokenActions === 'function'
+              ? fmtLaneTokenActions(mint)
+              : mint
+                ? '<span class="mint">' + escHtml(mint.slice(0, 8)) + '…</span>'
+                : '';
+          const curve =
+            r.curveProgressPct != null && Number.isFinite(Number(r.curveProgressPct))
+              ? Number(r.curveProgressPct).toFixed(0) + '%'
+              : '—';
+          const mc =
+            r.marketCapUsd != null
+              ? '$' + Math.round(Number(r.marketCapUsd)).toLocaleString()
+              : '—';
+          const age =
+            r.column === 'bonded' && r.graduatedAtMs
+              ? fmtAlphaAge(Date.now() - Number(r.graduatedAtMs))
+              : fmtAlphaAge(r.ageMs);
+          const notes = escHtml((r.reasons || []).join(' · ') || '—');
+          return (
+            '<tr>' +
+            '<td><strong>' +
+            sym +
+            '</strong> ' +
+            actions +
+            '</td>' +
+            '<td class="mint">' +
+            escHtml(r.column || col) +
+            '</td>' +
+            '<td>' +
+            curve +
+            '</td>' +
+            '<td>' +
+            mc +
+            '</td>' +
+            '<td class="mint">' +
+            age +
+            '</td>' +
+            '<td class="mint">' +
+            notes +
+            '</td>' +
+            '</tr>'
+          );
+        })
+        .join('');
+    }
+
+    function updateAlphaScanStatus(snap) {
+      const st = document.getElementById('as-status');
+      if (!st || !snap) return;
+      const key = snap.hasApiKey ? 'key OK' : 'no JUPITER_API_KEY';
+      const c = snap.counts || {};
+      const poll = snap.lastPollAt
+        ? ' · polled ' + new Date(snap.lastPollAt).toLocaleTimeString()
+        : '';
+      const err = snap.lastError
+        ? ' · ' + String(snap.lastError).slice(0, 80)
+        : '';
+      st.textContent =
+        'AlphaScan: ' +
+        (snap.enabled ? 'ON' : 'off') +
+        ' · ' +
+        key +
+        ' · new ' +
+        (c.new || 0) +
+        ' · soon ' +
+        (c.soon || 0) +
+        ' · bonded ' +
+        (c.bonded || 0) +
+        (snap.lastHanded ? ' · handed ' + snap.lastHanded : '') +
+        poll +
+        err;
+    }
+
+    async function refreshAlphaScanFeed() {
+      try {
+        const data = await fetchJSON('/api/alphascan');
+        _alphaScanCache = data;
+        fillAlphaScanForm(data.config || {});
+        updateAlphaScanStatus(data);
+        renderAlphaScanTable(data);
+        const saveSt = document.getElementById('as-save-status');
+        if (saveSt && !/Saving|Saved/.test(String(saveSt.textContent || ''))) {
+          saveSt.textContent = 'Feed loaded';
+        }
+      } catch (err) {
+        const st = document.getElementById('as-status');
+        if (st) st.textContent = 'AlphaScan: ' + (err.message || String(err));
+      }
+    }
+
+    async function saveAlphaScanConfig() {
+      const st = document.getElementById('as-save-status');
+      if (st) st.textContent = 'Saving…';
+      try {
+        const body = {
+          enabled: asChk('as-enabled', false),
+          feedNew: asChk('as-feed-new', true),
+          feedSoon: asChk('as-feed-soon', true),
+          feedBonded: asChk('as-feed-bonded', true),
+          routeSoonToMigrationSniper: asChk('as-route-soon', true),
+          routeBondedToScalper: asChk('as-route-scalper', true),
+          routeBondedToReversalScalper: asChk('as-route-reversal', true),
+          includeNewInScannerUniverse: asChk('as-include-new', false),
+          pollIntervalMs: asNum('as-poll-ms', 45000),
+          soonMinCurvePct: asNum('as-soon-min', 70),
+          bondedMaxAgeMinutes: asNum('as-bonded-age', 45),
+          maxHandOffPerPoll: asNum('as-max-handoff', 8),
+        };
+        const data = await fetchJSON('/api/config/alphascan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        fillAlphaScanForm(data.config || body);
+        if (data.status) {
+          updateAlphaScanStatus(data.status);
+          renderAlphaScanTable(data.status);
+        }
+        if (st) {
+          st.textContent =
+            'Saved · ' + (data.config && data.config.enabled ? 'ON' : 'off');
+        }
+        await refreshAlphaScanFeed();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    document.getElementById('as-column-filter')?.addEventListener('change', function () {
+      if (_alphaScanCache) renderAlphaScanTable(_alphaScanCache);
+    });
 
     let _zionShownOffers = window._zionShownOffers || new Set();
     window._zionShownOffers = _zionShownOffers;

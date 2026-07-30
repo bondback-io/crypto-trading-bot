@@ -140,9 +140,10 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-scanners" data-botinfo-section="scanners">
         <h3><span class="botinfo-sec-num">06</span> Market scanners &amp; Pump.fun</h3>
-        <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
+        <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
+          <li><strong>AlphaScan</strong> — additive Jupiter <code>/recent</code> + curve buckets: Soon → Migration Sniper grad-watch; Bonded → Scalper / Reversal. Does not replace Jupiter trending.</li>
           <li><strong>Pump.fun</strong> — bonding-curve progress, migration listener, Discover Pump SM for early smart money.</li>
           <li><strong>Regime / session</strong> — scanner can pause in risk-off; UTC Asia/EU/US session filter can block entries.</li>
           <li>Migrations and setup watches also surface on Overview.</li>
@@ -232,7 +233,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>TP / SL + Profit Strategy</strong> — partial → recover → bag → trail lifecycle.</li>
           <li><strong>Max positions · daily loss · convergence · min conviction / wallet Q</strong>.</li>
           <li><strong>Hard floors</strong> — min liq / MC / holders / volume; <strong>Min token age</strong> (per micro-bot); pump.fun-only; anti-rug / honeypot / sniper.</li>
-          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>.</li>
+          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>; optional AlphaScan for Soon/Bonded.</li>
           <li><strong>Smart Bot Profiles / Multi-profile / Global TP override</strong> — ${nProfiles} catalog profiles.</li>
           <li><strong>MEV + Jito tip</strong> (Live only).</li>
         </ul>

@@ -393,6 +393,71 @@ export function jupiterTokenToLaunchEvent(
   return event;
 }
 
+/**
+ * Recently listed tokens (first pool creation) — AlphaScan-style "New" source.
+ * Does not alter trending category fetches.
+ */
+export async function fetchJupiterRecentTokens(
+  limit = 30
+): Promise<JupiterTokenInfo[]> {
+  const key = getJupiterApiKey();
+  if (!key) {
+    lastError = 'No JUPITER_API_KEY';
+    return [];
+  }
+
+  const lim = Math.max(10, Math.min(100, Math.round(limit) || 30));
+  const cacheKey = `recent:${lim}`;
+  const hit = cache.get(cacheKey);
+  if (hit && hit.expiresAt > Date.now()) {
+    return hit.tokens;
+  }
+
+  const url = `https://api.jup.ag/tokens/v2/recent`;
+  try {
+    const res = await loggedFetch(url, {
+      context: 'Jupiter',
+      label: 'tokens recent',
+      timeoutMs: 20_000,
+      headers: {
+        Accept: 'application/json',
+        'x-api-key': key,
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      lastError = `HTTP ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`;
+      logger.warn('Jupiter', 'Recent fetch failed', { status: res.status });
+      return hit?.tokens ?? [];
+    }
+    const data = (await res.json()) as unknown;
+    const list = Array.isArray(data)
+      ? (data as JupiterTokenInfo[])
+      : Array.isArray((data as { tokens?: JupiterTokenInfo[] })?.tokens)
+        ? (data as { tokens: JupiterTokenInfo[] }).tokens
+        : [];
+    let tokens = list.filter((t) => t && typeof t.id === 'string' && t.id);
+    if (tokens.length > lim) tokens = tokens.slice(0, lim);
+    cache.set(cacheKey, {
+      tokens,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+    lastError = null;
+    lastFetchAt = Date.now();
+    lastCount = tokens.length;
+    return tokens;
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
+    logger.warn('Jupiter', 'Recent fetch error', errorToMeta(err));
+    return hit?.tokens ?? [];
+  }
+}
+
+/** Pump.fun / pump launchpad heuristic on a Jupiter token row. */
+export function isJupiterPumpFunToken(token: JupiterTokenInfo): boolean {
+  return isPumpFunToken(token);
+}
+
 export async function fetchJupiterTopTokens(
   category: JupiterCategory,
   interval: JupiterInterval,

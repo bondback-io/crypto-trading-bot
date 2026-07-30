@@ -2131,6 +2131,107 @@ export function createServer(): express.Application {
     });
   });
 
+  // ——— AlphaScan (additive New/Soon/Bonded; default OFF) ———
+  app.get('/api/alphascan', async (_req: Request, res: Response) => {
+    try {
+      const alpha =
+        require('./alphaScanFeed') as typeof import('./alphaScanFeed');
+      // Refresh display cache when enabled (non-blocking handoff still on scanner poll)
+      if (config.alphaScan?.enabled) {
+        await alpha.refreshAlphaScanBuckets().catch(() => null);
+      }
+      res.json({ ok: true, ...alpha.getAlphaScanSnapshot() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/alphascan', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (!config.alphaScan) {
+        config.alphaScan = {
+          enabled: false,
+          pollIntervalMs: 45_000,
+          feedNew: true,
+          feedSoon: true,
+          feedBonded: true,
+          routeSoonToMigrationSniper: true,
+          routeBondedToScalper: true,
+          routeBondedToReversalScalper: true,
+          soonMinCurvePct: 70,
+          bondedMaxAgeMinutes: 45,
+          maxHandOffPerPoll: 8,
+          includeNewInScannerUniverse: false,
+          recentLimit: 40,
+        };
+      }
+      const a = config.alphaScan;
+      if (body.enabled !== undefined) a.enabled = Boolean(body.enabled);
+      if (body.feedNew !== undefined) a.feedNew = Boolean(body.feedNew);
+      if (body.feedSoon !== undefined) a.feedSoon = Boolean(body.feedSoon);
+      if (body.feedBonded !== undefined) a.feedBonded = Boolean(body.feedBonded);
+      if (body.routeSoonToMigrationSniper !== undefined) {
+        a.routeSoonToMigrationSniper = Boolean(body.routeSoonToMigrationSniper);
+      }
+      if (body.routeBondedToScalper !== undefined) {
+        a.routeBondedToScalper = Boolean(body.routeBondedToScalper);
+      }
+      if (body.routeBondedToReversalScalper !== undefined) {
+        a.routeBondedToReversalScalper = Boolean(
+          body.routeBondedToReversalScalper
+        );
+      }
+      if (body.includeNewInScannerUniverse !== undefined) {
+        a.includeNewInScannerUniverse = Boolean(
+          body.includeNewInScannerUniverse
+        );
+      }
+      if (body.pollIntervalMs !== undefined) {
+        const n = Number(body.pollIntervalMs);
+        if (Number.isFinite(n)) {
+          a.pollIntervalMs = Math.max(15_000, Math.min(600_000, Math.round(n)));
+        }
+      }
+      if (body.soonMinCurvePct !== undefined) {
+        const n = Number(body.soonMinCurvePct);
+        if (Number.isFinite(n)) {
+          a.soonMinCurvePct = Math.max(50, Math.min(95, Math.round(n)));
+        }
+      }
+      if (body.bondedMaxAgeMinutes !== undefined) {
+        const n = Number(body.bondedMaxAgeMinutes);
+        if (Number.isFinite(n)) {
+          a.bondedMaxAgeMinutes = Math.max(5, Math.min(360, Math.round(n)));
+        }
+      }
+      if (body.maxHandOffPerPoll !== undefined) {
+        const n = Number(body.maxHandOffPerPoll);
+        if (Number.isFinite(n)) {
+          a.maxHandOffPerPoll = Math.max(1, Math.min(20, Math.round(n)));
+        }
+      }
+      if (body.recentLimit !== undefined) {
+        const n = Number(body.recentLimit);
+        if (Number.isFinite(n)) {
+          a.recentLimit = Math.max(10, Math.min(100, Math.round(n)));
+        }
+      }
+      persistUserSettings();
+      const alpha =
+        require('./alphaScanFeed') as typeof import('./alphaScanFeed');
+      res.json({ ok: true, config: { ...a }, status: alpha.getAlphaScanSnapshot() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   // ——— Zion micro-bot (isolated; no strategy toggle coupling) ———
   app.get('/api/zion', (_req: Request, res: Response) => {
     try {

@@ -110,6 +110,8 @@ export interface PersistedBotSettings {
     tradeRequestPopups?: boolean;
   };
   marketScanner?: Record<string, unknown>;
+  /** AlphaScan-style New/Soon/Bonded discovery (additive) */
+  alphaScan?: Record<string, unknown>;
   /** Zion micro-bot (KOL scanner + manual trade offers) */
   zion?: Record<string, unknown>;
   mev?: Record<string, unknown>;

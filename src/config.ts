@@ -1894,6 +1894,30 @@ export interface BotConfig {
   /** Time window (ms) for convergence detection */
   convergenceWindowMs: number;
 
+  /**
+   * AlphaScan-style New/Soon/Bonded discovery (Jupiter /recent + bonding curve).
+   * Additive specialty feed — default OFF; does not alter Jupiter trending.
+   */
+  alphaScan: {
+    enabled: boolean;
+    pollIntervalMs: number;
+    feedNew: boolean;
+    feedSoon: boolean;
+    feedBonded: boolean;
+    routeSoonToMigrationSniper: boolean;
+    routeBondedToScalper: boolean;
+    routeBondedToReversalScalper: boolean;
+    /** Min bonding-curve % to treat as Soon (default 70) */
+    soonMinCurvePct: number;
+    /** Max age since graduatedAt for Bonded scalp handoffs (minutes) */
+    bondedMaxAgeMinutes: number;
+    maxHandOffPerPoll: number;
+    /** Soft-merge New column into scanner universe (default false) */
+    includeNewInScannerUniverse: boolean;
+    /** Recent list fetch size */
+    recentLimit: number;
+  };
+
   /** Autonomous Market Scanner (TA / Pump.fun / Dex) */
   marketScanner: {
     /** Soft preference when seeding toggles (strategy toggle is source of truth) */
@@ -2326,6 +2350,22 @@ export const config: BotConfig = {
 
   convergenceWindowMs: 5 * 60 * 1000,
 
+  alphaScan: {
+    enabled: false,
+    pollIntervalMs: 45_000,
+    feedNew: true,
+    feedSoon: true,
+    feedBonded: true,
+    routeSoonToMigrationSniper: true,
+    routeBondedToScalper: true,
+    routeBondedToReversalScalper: true,
+    soonMinCurvePct: 70,
+    bondedMaxAgeMinutes: 45,
+    maxHandOffPerPoll: 8,
+    includeNewInScannerUniverse: false,
+    recentLimit: 40,
+  },
+
   marketScanner: {
     enabled: true,
     pollIntervalMs: 15_000,
@@ -2595,6 +2635,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     paper: { ...config.paper },
     notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
+    alphaScan: { ...config.alphaScan },
     zion: cloneJson(config.zion) as unknown as PersistedBotSettings['zion'],
     mev: { ...config.mev },
     gmgnDiscovery: { ...config.gmgn.discovery },
@@ -3099,6 +3140,12 @@ function applySettingsSnapshot(
       config.marketScanner = deepMerge(
         config.marketScanner,
         saved.marketScanner as typeof config.marketScanner
+      );
+    }
+    if (saved.alphaScan) {
+      config.alphaScan = deepMerge(
+        config.alphaScan,
+        saved.alphaScan as typeof config.alphaScan
       );
     }
     if (saved.zion) {
@@ -5019,6 +5066,7 @@ export function getConfigSnapshot() {
     paper: { ...config.paper },
     notifications: { ...config.notifications },
     marketScanner: { ...config.marketScanner },
+    alphaScan: { ...config.alphaScan },
     zion: cloneJson(config.zion as unknown as Record<string, unknown>),
     trading: {
       activeId: config.activeTradingWalletId,

@@ -65,7 +65,7 @@ export interface LaunchEvent {
   holderCount?: number;
   /** Per-profile specialty feed tags (additive; global scanner leaves unset) */
   preferredProfileId?: string;
-  specialtyFeed?: 'jupiter' | 'kolscan';
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan';
 }
 
 function isValidMint(m: string): boolean {
