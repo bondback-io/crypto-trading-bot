@@ -6107,7 +6107,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="mt-2 flex flex-wrap gap-2 items-center">
           <button class="btn btn-primary" onclick="saveAlphaScanConfig()" title="Save AlphaScan settings">Save AlphaScan</button>
-          <button class="btn btn-secondary" onclick="refreshAlphaScanFeed()" title="Reload New / Soon / Bonded">Refresh feed</button>
+          <button class="btn btn-secondary" onclick="refreshAlphaScanFeed({ hydrateForm: true })" title="Reload New / Soon / Bonded and form from server">Refresh feed</button>
           <span class="mint" id="as-save-status">—</span>
         </div>
         <div class="mint text-xs mt-2" id="as-status" style="color:#94a3b8">AlphaScan: off</div>
@@ -11165,7 +11165,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {
         loadMarketScannerConfig();
-        if (typeof refreshAlphaScanFeed === 'function') refreshAlphaScanFeed();
+        if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
       }
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
@@ -16747,7 +16747,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       refreshPumpActivity().catch(() => {});
       if (typeof refreshAlphaScanFeed === 'function') {
-        refreshAlphaScanFeed().catch(() => {});
+        // Status/table only — do not overwrite toggles mid-edit
+        refreshAlphaScanFeed({ hydrateForm: false }).catch(() => {});
       }
 
       const logHtml = (Array.isArray(logs) ? logs : []).map(l => \`
@@ -19187,10 +19188,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     let _alphaScanCache = null;
+    let _alphaScanFormHydrated = false;
 
     function asChk(id, fallback) {
       const el = document.getElementById(id);
-      return el ? el.checked : fallback;
+      return el ? !!el.checked : fallback;
     }
     function asNum(id, fallback) {
       const el = document.getElementById(id);
@@ -19220,6 +19222,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       setNum('as-soon-min', cfg.soonMinCurvePct);
       setNum('as-bonded-age', cfg.bondedMaxAgeMinutes);
       setNum('as-max-handoff', cfg.maxHandOffPerPoll);
+      _alphaScanFormHydrated = true;
     }
 
     function fmtAlphaAge(ms) {
@@ -19328,21 +19331,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         err;
     }
 
-    async function refreshAlphaScanFeed() {
+    /**
+     * @param {{ hydrateForm?: boolean }} [opts]
+     * Background polls must NOT rewrite toggles — that snapped Enable /
+     * Include New back to server defaults (false) before Save could stick.
+     */
+    async function refreshAlphaScanFeed(opts) {
+      opts = opts || {};
+      const hydrateForm = opts.hydrateForm === true;
       try {
         const data = await fetchJSON('/api/alphascan');
         _alphaScanCache = data;
-        fillAlphaScanForm(data.config || {});
+        if (hydrateForm || !_alphaScanFormHydrated) {
+          fillAlphaScanForm(data.config || {});
+        }
         updateAlphaScanStatus(data);
         renderAlphaScanTable(data);
         const saveSt = document.getElementById('as-save-status');
-        if (saveSt && !/Saving|Saved/.test(String(saveSt.textContent || ''))) {
+        if (
+          saveSt &&
+          !/Saving|Saved/.test(String(saveSt.textContent || ''))
+        ) {
           saveSt.textContent = 'Feed loaded';
         }
       } catch (err) {
         const st = document.getElementById('as-status');
         if (st) st.textContent = 'AlphaScan: ' + (err.message || String(err));
       }
+    }
+
+    async function loadAlphaScanConfig() {
+      _alphaScanFormHydrated = false;
+      await refreshAlphaScanFeed({ hydrateForm: true });
     }
 
     async function saveAlphaScanConfig() {
@@ -19368,16 +19388,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        fillAlphaScanForm(data.config || body);
+        const cfg = data.config || body;
+        fillAlphaScanForm(cfg);
         if (data.status) {
-          updateAlphaScanStatus(data.status);
-          renderAlphaScanTable(data.status);
+          // Prefer saved config for enabled flag on status line
+          updateAlphaScanStatus(
+            Object.assign({}, data.status, {
+              enabled: cfg.enabled === true,
+              config: cfg,
+            })
+          );
+          renderAlphaScanTable(
+            Object.assign({}, data.status, { enabled: cfg.enabled === true })
+          );
+        } else {
+          updateAlphaScanStatus({
+            enabled: cfg.enabled === true,
+            hasApiKey: true,
+            counts: { new: 0, soon: 0, bonded: 0 },
+            config: cfg,
+          });
         }
         if (st) {
           st.textContent =
-            'Saved · ' + (data.config && data.config.enabled ? 'ON' : 'off');
+            'Saved · ' + (cfg.enabled ? 'ON' : 'off');
         }
-        await refreshAlphaScanFeed();
+        await refreshAlphaScanFeed({ hydrateForm: true });
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
       }
