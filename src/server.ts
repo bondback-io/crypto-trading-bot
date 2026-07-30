@@ -523,6 +523,110 @@ export function createServer(): express.Application {
     }
   });
 
+  // ── GitHub remote site backup (optional) ─────────────────────────────────
+  app.get('/api/site-backup/github/status', (_req: Request, res: Response) => {
+    try {
+      const { getGithubBackupStatus, ensureGithubBackupSettingsFile } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      ensureGithubBackupSettingsFile();
+      res.json({ ok: true, ...getGithubBackupStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/github/settings', (req: Request, res: Response) => {
+    try {
+      const { updateGithubBackupSettings, GITHUB_BACKUP_INTERVALS } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      const body = (req.body ?? {}) as {
+        interval?: string;
+        owner?: string;
+        repo?: string;
+        path?: string;
+      };
+      if (
+        body.interval != null &&
+        !GITHUB_BACKUP_INTERVALS.includes(
+          body.interval as (typeof GITHUB_BACKUP_INTERVALS)[number]
+        )
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: `interval must be one of: ${GITHUB_BACKUP_INTERVALS.join(', ')}`,
+        });
+        return;
+      }
+      const status = updateGithubBackupSettings({
+        interval: body.interval,
+        owner: body.owner,
+        repo: body.repo,
+        path: body.path,
+      });
+      res.json({ ok: true, ...status });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/github/upload', async (_req: Request, res: Response) => {
+    try {
+      const { uploadSiteBackupToGithub, getGithubBackupStatus } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      const result = await uploadSiteBackupToGithub({ reason: 'manual' });
+      res.json({
+        ok: true,
+        ...result,
+        status: getGithubBackupStatus(),
+        meta: (() => {
+          const { getLatestSiteBackupMeta } =
+            require('./siteBackup') as typeof import('./siteBackup');
+          return getLatestSiteBackupMeta();
+        })(),
+        message: `Uploaded to GitHub (${result.bytes} bytes, ${result.fileCount} files)`,
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/github/restore', async (_req: Request, res: Response) => {
+    try {
+      const { restoreSiteBackupFromGithub, getGithubBackupStatus } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      const { getLatestSiteBackupMeta } =
+        require('./siteBackup') as typeof import('./siteBackup');
+      const result = await restoreSiteBackupFromGithub();
+      res.json({
+        ok: true,
+        written: result.written,
+        exportedAt: result.exportedAt,
+        fileCount: result.fileCount,
+        path: result.path,
+        status: getGithubBackupStatus(),
+        meta: getLatestSiteBackupMeta(),
+        persistence: getPersistenceStatus(),
+        config: getConfigSnapshot(),
+        wallets: getWalletsWithActivity(),
+        message: `Restored from GitHub ${result.exportedAt} (${result.fileCount} files)`,
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/microbots/learning-health', (req: Request, res: Response) => {
     try {
       const { getLearningHealthSummary } =
@@ -5297,6 +5401,19 @@ export function startServer(port?: number, host?: string): void {
   } catch (err) {
     console.warn(
       '[server] Dashboard reset timer ensure failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const {
+      ensureGithubBackupSettingsFile,
+      startGithubSiteBackupScheduler,
+    } = require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+    ensureGithubBackupSettingsFile();
+    startGithubSiteBackupScheduler();
+  } catch (err) {
+    console.warn(
+      '[server] GitHub site-backup scheduler failed to start:',
       err instanceof Error ? err.message : err
     );
   }

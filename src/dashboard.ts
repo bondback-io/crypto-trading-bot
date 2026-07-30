@@ -6663,6 +6663,45 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div class="card">
+        <div class="backup-hero">
+          <div>
+            <div class="section-title" style="margin-bottom:0">GitHub Backup <span class="tip" tabindex="0" data-tip="Pushes the same site-backup JSON to a private GitHub repo (Contents API). Token stays in env (GITHUB_BACKUP_TOKEN) — never in the backup file. Private keys are never included."></span></div>
+            <p>Optional remote copy for deploy wipe recovery. Keep local Backup Site too. Auto-upload overwrites one latest file on GitHub; load is always manual.</p>
+          </div>
+          <div class="backup-actions">
+            <button type="button" class="btn btn-primary" onclick="uploadSiteBackupToGithub()" title="Create a local backup and upload it to GitHub">Upload to GitHub</button>
+            <button type="button" class="btn btn-secondary" onclick="loadSiteBackupFromGithub()" title="Download the latest GitHub backup and restore it">Load backup from GitHub</button>
+          </div>
+        </div>
+        <div class="filters-row mt-3 mb-2" id="github-backup-settings-row">
+          <label class="ctl ctl-md" title="How often the server uploads automatically">
+            <span>Auto upload</span>
+            <select id="github-backup-interval" onchange="saveGithubBackupSettings()">
+              <option value="none">None</option>
+              <option value="1h">Every 1 hour</option>
+              <option value="4h">Every 4 hours</option>
+              <option value="12h">Every 12 hours</option>
+              <option value="24h">Every 24 hours</option>
+            </select>
+          </label>
+          <label class="ctl ctl-md" title="GitHub owner or org (or set GITHUB_BACKUP_OWNER)">
+            <span>Owner</span>
+            <input type="text" id="github-backup-owner" placeholder="org-or-user" onchange="saveGithubBackupSettings()" autocomplete="off" />
+          </label>
+          <label class="ctl ctl-md" title="Private repo name (or set GITHUB_BACKUP_REPO)">
+            <span>Repo</span>
+            <input type="text" id="github-backup-repo" placeholder="my-bot-backups" onchange="saveGithubBackupSettings()" autocomplete="off" />
+          </label>
+          <label class="ctl ctl-lg" title="File path in the repo (default site-backups/site-backup-latest.json)">
+            <span>Path</span>
+            <input type="text" id="github-backup-path" placeholder="site-backups/site-backup-latest.json" onchange="saveGithubBackupSettings()" autocomplete="off" />
+          </label>
+        </div>
+        <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Fly: <code>fly secrets set GITHUB_BACKUP_TOKEN=...</code></p>
+      </div>
+
+      <div class="card">
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
         <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
@@ -10535,7 +10574,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
-      if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} }
+      if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -20285,6 +20324,181 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.importSiteBackupFile = importSiteBackupFile;
+
+    async function refreshGithubBackupStatus() {
+      const el = document.getElementById('github-backup-status');
+      try {
+        const data = await fetchJSON('/api/site-backup/github/status');
+        const intervalEl = document.getElementById('github-backup-interval');
+        const ownerEl = document.getElementById('github-backup-owner');
+        const repoEl = document.getElementById('github-backup-repo');
+        const pathEl = document.getElementById('github-backup-path');
+        if (intervalEl && data.interval) intervalEl.value = data.interval;
+        if (ownerEl && document.activeElement !== ownerEl) {
+          ownerEl.value = data.owner || '';
+        }
+        if (repoEl && document.activeElement !== repoEl) {
+          repoEl.value = data.repo || '';
+        }
+        if (pathEl && document.activeElement !== pathEl) {
+          pathEl.value = data.path || 'site-backups/site-backup-latest.json';
+        }
+        if (!el) return;
+        const parts = [];
+        if (!data.tokenConfigured) {
+          parts.push('token missing (set GITHUB_BACKUP_TOKEN)');
+        } else if (!data.configured) {
+          parts.push('token OK · set owner/repo');
+        } else {
+          parts.push(
+            'ready · ' +
+              (data.owner || '?') +
+              '/' +
+              (data.repo || '?') +
+              '/' +
+              (data.path || '')
+          );
+        }
+        parts.push('auto: ' + (data.interval || 'none'));
+        if (data.lastUploadAtMs) {
+          parts.push(
+            'last upload: ' +
+              new Date(data.lastUploadAtMs).toLocaleString() +
+              (data.lastUploadOk === false ? ' (failed)' : '') +
+              (data.lastUploadBytes != null
+                ? ' · ' + Math.round(data.lastUploadBytes / 1024) + ' KB'
+                : '')
+          );
+        } else {
+          parts.push('last upload: never');
+        }
+        if (data.lastUploadOk === false && data.lastUploadError) {
+          parts.push('error: ' + String(data.lastUploadError).slice(0, 120));
+        }
+        if (data.nextDueAtMs && data.interval && data.interval !== 'none') {
+          parts.push('next due: ' + new Date(data.nextDueAtMs).toLocaleString());
+        }
+        el.textContent = 'GitHub backup: ' + parts.join(' · ');
+      } catch (err) {
+        if (el) {
+          el.textContent =
+            'GitHub backup: — (' + (err.message || String(err)) + ')';
+        }
+      }
+    }
+    window.refreshGithubBackupStatus = refreshGithubBackupStatus;
+
+    async function saveGithubBackupSettings() {
+      const msg = document.getElementById('persist-reset-msg');
+      try {
+        const intervalEl = document.getElementById('github-backup-interval');
+        const ownerEl = document.getElementById('github-backup-owner');
+        const repoEl = document.getElementById('github-backup-repo');
+        const pathEl = document.getElementById('github-backup-path');
+        await fetchJSON('/api/site-backup/github/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            interval: intervalEl ? intervalEl.value : 'none',
+            owner: ownerEl ? ownerEl.value : '',
+            repo: repoEl ? repoEl.value : '',
+            path: pathEl ? pathEl.value : '',
+          }),
+        });
+        await refreshGithubBackupStatus();
+        if (msg) msg.textContent = 'GitHub backup settings saved';
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('Save GitHub backup settings failed: ' + (err.message || String(err)));
+      }
+    }
+    window.saveGithubBackupSettings = saveGithubBackupSettings;
+
+    async function uploadSiteBackupToGithub() {
+      const msg = document.getElementById('persist-reset-msg');
+      if (
+        !confirm(
+          'Upload a full site backup to GitHub?\\n\\n' +
+            'Creates a local stamped backup, then overwrites the configured remote path.\\n' +
+            'Private keys are NOT included.'
+        )
+      )
+        return;
+      if (msg) msg.textContent = 'Uploading to GitHub…';
+      try {
+        const data = await fetchJSON('/api/site-backup/github/upload', {
+          method: 'POST',
+          timeoutMs: 180000,
+        });
+        if (msg) {
+          msg.textContent =
+            data.message ||
+            'Uploaded to GitHub · ' +
+              (data.bytes != null
+                ? Math.round(data.bytes / 1024) + ' KB'
+                : '');
+        }
+        refreshSiteBackupStatus();
+        refreshGithubBackupStatus();
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('GitHub upload failed: ' + (err.message || String(err)));
+      }
+    }
+    window.uploadSiteBackupToGithub = uploadSiteBackupToGithub;
+
+    async function loadSiteBackupFromGithub() {
+      const msg = document.getElementById('persist-reset-msg');
+      try {
+        const st = await fetchJSON('/api/site-backup/github/status');
+        const where =
+          (st.owner || '?') +
+          '/' +
+          (st.repo || '?') +
+          '/' +
+          (st.path || 'site-backups/site-backup-latest.json');
+        if (
+          !confirm(
+            'Load latest backup from GitHub?\\n\\n' +
+              where +
+              '\\n\\nThis OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
+          )
+        )
+          return;
+        if (msg) msg.textContent = 'Loading from GitHub…';
+        const data = await fetchJSON('/api/site-backup/github/restore', {
+          method: 'POST',
+          timeoutMs: 180000,
+        });
+        if (msg) {
+          msg.textContent =
+            data.message ||
+            'Restored from GitHub · ' + (data.fileCount || 0) + ' files';
+        }
+        alert(data.message || 'Backup restored from GitHub');
+        window._cfgLoaded = false;
+        await refresh();
+        try {
+          if (typeof loadStrategies === 'function') await loadStrategies();
+        } catch (_) {}
+        try {
+          refreshSiteBackupStatus();
+        } catch (_) {}
+        try {
+          refreshGithubBackupStatus();
+        } catch (_) {}
+        try {
+          refreshLearningHealth({ reset: true });
+        } catch (_) {}
+        try {
+          refreshDashboardNotifications();
+        } catch (_) {}
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert('Load from GitHub failed: ' + (err.message || String(err)));
+      }
+    }
+    window.loadSiteBackupFromGithub = loadSiteBackupFromGithub;
 
     async function resetToDefaults() {
       const msg = document.getElementById('persist-reset-msg');
