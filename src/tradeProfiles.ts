@@ -597,11 +597,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'Low / Medium',
     style: 'Trend Hold',
     rulesSummary: [
-      'Quality continuation: age ≥3h · MC ≥$200k preferred',
+      'Quality continuation: age ≥2h · MC ≥$100k (prefer $500k)',
       'Holders + KOL presence · 1h vol floor + soft tiers toward $50k/$100k/$500k',
       'Targets 8–18% · tighter risk (~7–10% SL)',
       'Patterns: pullback / bull flag / trend continuation',
-      'Lane floors: age ≥3h · holders ≥50 · 1h vol ≥$8k',
+      'Lane floors: age ≥2h · holders ≥40 · 1h vol ≥$4k',
     ],
     priority: 68,
     defaultEnabled: true,
@@ -617,15 +617,15 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       secondaryPatternIds: ['volume_dryup_return'],
       avoidBearishPatterns: true,
       patternSensitivity: 'medium',
-      minConviction: 42,
+      minConviction: 38,
       minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
-      minTokenAgeHours: 3,
-      minMarketCapUsd: 200_000,
+      minTokenAgeHours: 2,
+      minMarketCapUsd: 100_000,
       preferMarketCapUsd: 500_000,
-      minHolders: 50,
-      minVolumeH1Usd: 8_000,
+      minHolders: 40,
+      minVolumeH1Usd: 4_000,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
       jupiterCategory: 'toporganicscore',
@@ -875,10 +875,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     style: 'Steady / Compounding',
     rulesSummary: [
       'TP 5–10% · SL 4–7%',
-      'Heavy MC (≥$1M) · many holders · decent volume',
-      'Small pullbacks 3–12% or volume uptick — not deep dips',
+      'MC ≥$450k (prefer $1M) · holders ≥80 · decent volume',
+      'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
-      'Lane floors: age ≥4h · holders ≥120 · 1h vol ≥$8k · MC ≥$1M',
+      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
     ],
     priority: 62,
     defaultEnabled: true,
@@ -894,13 +894,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 42,
       minWalletCount: 1,
       requireCluster: false,
-      minTokenAgeHours: 4,
-      minMarketCapUsd: 1_000_000,
-      preferMarketCapUsd: 2_000_000,
-      minHolders: 120,
-      minVolumeH1Usd: 8_000,
-      minPullbackPct: 3,
-      maxPullbackPct: 12,
+      minTokenAgeHours: 3,
+      minMarketCapUsd: 450_000,
+      preferMarketCapUsd: 1_000_000,
+      minHolders: 80,
+      minVolumeH1Usd: 4_000,
+      minPullbackPct: 2,
+      maxPullbackPct: 20,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
       jupiterCategory: 'toptrending',
@@ -2211,16 +2211,10 @@ export function evaluateLaneEntryFloors(
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
-  // Hard lane MC floor: always enforce global Min MC when known.
-  // Profile Min MC Override only raises above global (cannot undercut).
-  // Unknown MC soft-passes (metrics often arrive after enrich) — cascade/metrics still gate.
+  // Hard lane MC floor when MC is known. Unknown MC soft-passes (metrics often
+  // arrive after enrich) — same pattern as holders / Max MC. Profile Min MC
+  // Override only raises above global (cannot undercut).
   if (laneMinMc > 0) {
-    if (profileMin > 0 && (mc == null || mc <= 0)) {
-      return {
-        ok: false,
-        reason: `${def.name} Min MC Override $${Math.round(profileMin)} — MC unknown`,
-      };
-    }
     if (mc != null && mc > 0 && mc < laneMinMc) {
       return {
         ok: false,
@@ -2826,7 +2820,7 @@ function scoreProfile(
     }
     const convPart =
       conv != null ? Math.min(35, (conv - 42) * 0.7) : 0;
-    score += 58 + convPart + quality * 8;
+    score += 74 + convPart + quality * 8;
     bits.push(
       conv != null ? `trend conviction ${conv}` : 'trend conviction pending'
     );
@@ -2884,7 +2878,7 @@ function scoreProfile(
         reason: `1h vol $${Math.round(volH1)} < $${m.minVolumeH1Usd}`,
       };
     }
-    // Small pullback band OR volume uptick — not deep dips (leave those to Dip Buyer)
+    // Small pullback band OR volume uptick — deep knives (>25%) leave to Dip
     const minPb = m.minPullbackPct;
     const maxPb = m.maxPullbackPct;
     if (minPb != null || maxPb != null) {
@@ -2898,17 +2892,11 @@ function scoreProfile(
         volH1 != null &&
         volH1 > 0 &&
         volM5 >= volH1 * 0.08;
-      const deepDip = pb != null && maxPb != null && pb > maxPb;
-      if (deepDip && !feedPrefer) {
+      const knifeDip = pb != null && pb > 25;
+      if (knifeDip && !feedPrefer) {
         return {
           score: 0,
           reason: `pullback −${pb!.toFixed(0)}% too deep for compounder`,
-        };
-      }
-      if (!inBand && !volUptick && !feedPrefer && pb != null) {
-        return {
-          score: 0,
-          reason: `need small pullback ${minPb ?? 0}–${maxPb ?? 12}% or vol uptick`,
         };
       }
       if (inBand) {
@@ -2917,6 +2905,11 @@ function scoreProfile(
       } else if (volUptick) {
         score += 12;
         bits.push('volume uptick');
+      } else if (!feedPrefer && pb != null) {
+        score -= 10;
+        bits.push(
+          `pullback −${pb.toFixed(1)}% outside ${minPb ?? 0}–${maxPb ?? 20}%`
+        );
       }
     }
     let q = 0;
@@ -2934,7 +2927,7 @@ function scoreProfile(
     }
     const convPart =
       conv != null ? Math.min(25, (conv - 40) * 0.5) : 0;
-    score += 56 + convPart + q * 10;
+    score += 72 + convPart + q * 10;
     bits.push(
       conv != null
         ? `compounder conviction ${conv}`
@@ -2946,6 +2939,14 @@ function scoreProfile(
     } else if (mc != null && mc >= 300_000) {
       score += 8;
       bits.push(`MC $${Math.round(mc)}`);
+    }
+    if (mc != null && m.preferMarketCapUsd != null && mc >= m.preferMarketCapUsd) {
+      score += 10;
+      bits.push(`prefer MC $${Math.round(mc)}`);
+    }
+    if (kolN != null && kolN >= (m.minKolWallets ?? 3)) {
+      score += 12 + Math.min(10, (kolN - 2) * 2);
+      bits.push(`${kolN} KOLs`);
     }
   }
 

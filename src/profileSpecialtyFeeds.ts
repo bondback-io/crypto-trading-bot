@@ -30,6 +30,13 @@ import { getZionScannerFeed } from './zionKolScanner';
 const PER_PROFILE_CAP = 6;
 const JUPITER_FETCH_LIMIT = 40;
 
+/** Quality lanes soft-prefer the same mint as Dip / others — don't share-block. */
+const QUALITY_SOFT_PREFER_IDS = new Set<TradeProfileId>([
+  'trend_rider',
+  'high_win_rate',
+  'steady_compounder',
+]);
+
 const VALID_CATEGORIES = new Set<JupiterCategory>([
   'toptraded',
   'toptrending',
@@ -198,6 +205,8 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
   for (const p of profiles) {
     const def = resolveTradeProfileDefinition(p.id);
     const m = def.match;
+    const softPrefer = QUALITY_SOFT_PREFER_IDS.has(p.id);
+    const profileHandedMints = new Set<string>();
     const minKol = Math.max(
       1,
       Math.min(20, Math.round(Number(m.minKolWallets) || 3))
@@ -216,7 +225,14 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
       const events = jupiterByPair.get(key) || [];
       for (const ev of events) {
         if (profileHanded >= PER_PROFILE_CAP) break;
-        if (!ev.mint || handedMints.has(ev.mint)) continue;
+        if (!ev.mint) continue;
+        // Quality lanes only dedupe within-profile so Trend/Compounder can
+        // soft-prefer alongside Dip on overlapping organics.
+        if (softPrefer) {
+          if (profileHandedMints.has(ev.mint)) continue;
+        } else if (handedMints.has(ev.mint)) {
+          continue;
+        }
         if (isScannerMintOnCooldown(ev.mint)) continue;
         const c = buildCandidate(
           ev,
@@ -229,7 +245,8 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
         if (handOffScannerCandidate(c)) {
           handed += 1;
           profileHanded += 1;
-          handedMints.add(ev.mint);
+          profileHandedMints.add(ev.mint);
+          if (!softPrefer) handedMints.add(ev.mint);
         }
       }
       console.log(
@@ -241,7 +258,12 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
     // Kolscan / KOL mint universe
     for (const kc of kolFeed) {
       if (profileHanded >= PER_PROFILE_CAP) break;
-      if (!kc.mint || handedMints.has(kc.mint)) continue;
+      if (!kc.mint) continue;
+      if (softPrefer) {
+        if (profileHandedMints.has(kc.mint)) continue;
+      } else if (handedMints.has(kc.mint)) {
+        continue;
+      }
       if (isScannerMintOnCooldown(kc.mint)) continue;
       if ((kc.kolCount || 0) < minKol) continue;
       const quals = (kc.kolWallets || [])
@@ -268,7 +290,8 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
       if (handOffScannerCandidate(c)) {
         handed += 1;
         profileHanded += 1;
-        handedMints.add(kc.mint);
+        profileHandedMints.add(kc.mint);
+        if (!softPrefer) handedMints.add(kc.mint);
         try {
           const { offerDipWatchFromCandidate } =
             require('./dipSetupWatch') as typeof import('./dipSetupWatch');
