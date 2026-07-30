@@ -627,6 +627,94 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/site-backup/bot-perf-email/status', (_req: Request, res: Response) => {
+    try {
+      const {
+        getBotPerfEmailStatus,
+        ensureBotPerfEmailSettingsFile,
+      } = require('./botPerformanceEmail') as typeof import('./botPerformanceEmail');
+      ensureBotPerfEmailSettingsFile();
+      res.json({ ok: true, ...getBotPerfEmailStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/bot-perf-email/settings', (req: Request, res: Response) => {
+    try {
+      const {
+        updateBotPerfEmailSettings,
+        BOT_PERF_EMAIL_INTERVALS,
+      } = require('./botPerformanceEmail') as typeof import('./botPerformanceEmail');
+      const body = (req.body ?? {}) as {
+        enabled?: boolean;
+        interval?: string;
+        email?: string;
+        sendHour?: number;
+      };
+      if (
+        body.interval != null &&
+        !BOT_PERF_EMAIL_INTERVALS.includes(
+          body.interval as (typeof BOT_PERF_EMAIL_INTERVALS)[number]
+        )
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: `interval must be one of: ${BOT_PERF_EMAIL_INTERVALS.join(', ')}`,
+        });
+        return;
+      }
+      const status = updateBotPerfEmailSettings({
+        enabled: body.enabled,
+        interval: body.interval,
+        email: body.email,
+        sendHour: body.sendHour,
+      });
+      res.json({ ok: true, ...status });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/site-backup/bot-perf-email/send', async (req: Request, res: Response) => {
+    try {
+      const { sendBotPerformanceEmail } =
+        require('./botPerformanceEmail') as typeof import('./botPerformanceEmail');
+      const body = (req.body ?? {}) as { email?: string };
+      const result = await sendBotPerformanceEmail({
+        reason: 'manual',
+        to: body.email,
+      });
+      if (!result.ok) {
+        res.status(400).json({
+          ok: false,
+          error: result.error || 'Send failed',
+          status: result.status,
+        });
+        return;
+      }
+      res.json({
+        ok: true,
+        provider: result.provider,
+        status: result.status,
+        message: `Performance email sent via ${result.provider}`,
+        periodLabel: result.report?.periodLabel,
+        totals: result.report?.totals,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/microbots/learning-health', (req: Request, res: Response) => {
     try {
       const { getLearningHealthSummary } =
@@ -5427,6 +5515,19 @@ export function startServer(port?: number, host?: string): void {
   } catch (err) {
     console.warn(
       '[server] GitHub site-backup scheduler failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const {
+      ensureBotPerfEmailSettingsFile,
+      startBotPerfEmailScheduler,
+    } = require('./botPerformanceEmail') as typeof import('./botPerformanceEmail');
+    ensureBotPerfEmailSettingsFile();
+    startBotPerfEmailScheduler();
+  } catch (err) {
+    console.warn(
+      '[server] Bot performance email scheduler failed to start:',
       err instanceof Error ? err.message : err
     );
   }

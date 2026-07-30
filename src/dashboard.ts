@@ -2062,6 +2062,52 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       overscroll-behavior: contain;
       max-height: min(88dvh, 720px);
     }
+    .zion-offer-card--gold {
+      border-color: #eab308cc;
+      background: linear-gradient(160deg, #1a1408 0%, #1c160a 40%, #0f172a 100%);
+      box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(251,191,36,.18), 0 0 28px rgba(234,179,8,.12);
+    }
+    .zion-offer-card--gold::before {
+      background: linear-gradient(90deg, #eab308, #fbbf24, #fde68a, #eab308);
+      opacity: 1;
+      height: 3px;
+    }
+    .zion-offer-card--gold .zion-offer-kicker {
+      color: #fbbf24;
+    }
+    .zion-offer-card--green {
+      border-color: #34d399aa;
+      background: linear-gradient(160deg, #071a14 0%, #0a1f18 40%, #0f172a 100%);
+      box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(52,211,153,.16), 0 0 24px rgba(16,185,129,.1);
+    }
+    .zion-offer-card--green::before {
+      background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7, #10b981);
+      opacity: 1;
+      height: 3px;
+    }
+    .zion-offer-card--green .zion-offer-kicker {
+      color: #34d399;
+    }
+    .zion-offer-tier-chip {
+      display: inline-block;
+      margin-left: 0.35rem;
+      padding: 0.05rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      vertical-align: middle;
+    }
+    .zion-offer-card--gold .zion-offer-tier-chip {
+      background: #eab30833;
+      color: #fde68a;
+      border: 1px solid #eab30866;
+    }
+    .zion-offer-card--green .zion-offer-tier-chip {
+      background: #10b98133;
+      color: #a7f3d0;
+      border: 1px solid #34d39966;
+    }
     .zion-offer-card.is-leaving {
       animation: zion-card-out 0.28s ease-in forwards;
       pointer-events: none;
@@ -2083,6 +2129,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-weight: 700;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+    }
+    .zion-offer-risk-label {
+      margin: 0.15rem 0 0.35rem;
+      font-size: 0.62rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 650;
     }
     .zion-offer-title {
       color: #f8fafc;
@@ -2649,6 +2703,48 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-variant-numeric: tabular-nums;
     }
     .tp-decision-meta { color: #94a3b8; }
+    .tp-decision-token-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.15rem;
+      margin-left: 0.28rem;
+      vertical-align: -0.05em;
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico {
+      padding: 0.05rem 0.18rem;
+      border-radius: 0.28rem;
+      font-size: 9px;
+      font-weight: 700;
+      line-height: 1;
+      gap: 0;
+      min-width: 0;
+      background: transparent;
+      border-color: transparent;
+      color: #64748b;
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico:hover {
+      color: #7dd3fc;
+      border-color: #334155;
+      background: #1e293b;
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico.ca-jup {
+      color: #4ade80;
+      background: transparent;
+      border-color: transparent;
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico.ca-jup:hover {
+      color: #a7f3d0;
+      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.12);
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico.copied {
+      color: #34d399;
+    }
+    .tp-decision-token-actions .ca-btn.ca-ico svg {
+      width: 0.7rem;
+      height: 0.7rem;
+      display: block;
+    }
     .tp-decision-why { color: #cbd5e1; grid-column: 1 / -1; }
     .tp-decision-winner-glove {
       display: inline-block;
@@ -6729,6 +6825,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
 
       <div class="card">
+        <div class="backup-hero">
+          <div>
+            <div class="section-title" style="margin-bottom:0">Bot performance email <span class="tip" tabindex="0" data-tip="Plain-language digest of each micro-bot: trades this period, wins/losses, period + lifetime profit, upgrade level, what improved / needs work, change since last report, and overall rank. Uses the same Resend/SMTP delivery as other alerts."></span></div>
+            <p>Scheduled summary of how each micro-bot is doing. Default send time is <strong>7:00 pm Australia/Brisbane (QLD)</strong> for the first run; then repeats on your chosen interval.</p>
+          </div>
+          <div class="backup-actions">
+            <div class="toggle-row" style="margin:0" title="Enable scheduled performance emails">
+              <span style="font-size:0.8rem;color:#cbd5e1">Enabled</span>
+              <label class="switch"><input type="checkbox" id="bot-perf-email-enabled" onchange="saveBotPerfEmailSettings()" /><span class="slider"></span></label>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="sendBotPerfEmailNow()" title="Build the digest and email it now">Generate &amp; send now</button>
+          </div>
+        </div>
+        <div class="filters-row mt-3 mb-2" id="bot-perf-email-settings-row">
+          <label class="ctl ctl-md" title="How often to send after the first 7pm QLD send">
+            <span>Send every</span>
+            <select id="bot-perf-email-interval" onchange="saveBotPerfEmailSettings()">
+              <option value="1h">1 hour</option>
+              <option value="6h">6 hours</option>
+              <option value="12h">12 hours</option>
+              <option value="24h" selected>24 hours</option>
+            </select>
+          </label>
+          <label class="ctl ctl-lg" title="Recipient (default bondback2026@gmail.com)">
+            <span>Email</span>
+            <input type="email" id="bot-perf-email-to" placeholder="bondback2026@gmail.com" onchange="saveBotPerfEmailSettings()" autocomplete="email" />
+          </label>
+        </div>
+        <div class="mint text-xs mt-1" id="bot-perf-email-status">Bot performance email: —</div>
+        <p class="mint text-xs mt-2">Needs <code>RESEND_API_KEY</code> or <code>SMTP_*</code> (same as Notifications). Each bot section covers period trades, wins/losses, period &amp; overall profit, level, plain-English improved / needs work, % vs last report, and lifetime rank.</p>
+      </div>
+
+      <div class="card">
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
         <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
@@ -10000,10 +10129,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const skipLine = d.cascadeSkipReason
               ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
               : '';
+            const tokenMeta =
+              escHtml(d.symbol || '') +
+              fmtLaneTokenActions(d.mint) +
+              (when ? ' · ' + escHtml(when) : '');
             return (
               '<div class="tp-decision-row' + (!d.winnerId || outcome === 'no buy' ? ' is-skip' : '') + '" style="border-left:3px solid ' + winColor + '">' +
                 '<span><strong style="color:' + winColor + '">' + winnerBadge + winLabel + '</strong></span>' +
-                '<span class="tp-decision-meta">' + escHtml(d.symbol || '') + ' · ' + escHtml(when) + '</span>' +
+                '<span class="tp-decision-meta">' + tokenMeta + '</span>' +
                 '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
                 '<div class="tp-decision-why">' + lanes + '</div>' +
                 skipLine +
@@ -10944,7 +11077,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') loadMarketScannerConfig();
       if (name === 'zion') loadZion();
-      if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} }
+      if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') { try { syncBotInfoVersionLabels(); } catch (_) {} try { initBotInfoScrollSpy(); } catch (_) {} }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
@@ -14015,6 +14148,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy</button>' +
         '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
       '</span>';
+    }
+
+    /** Tiny Copy CA + Jupiter icons for lane fight rows (same helpers/URLs as mint column). */
+    function fmtLaneTokenActions(mint) {
+      const ca = String(mint || '').trim();
+      if (!ca) return '';
+      const attr = escAttr(ca);
+      const jup = escAttr(jupiterTokenUrl(ca));
+      const copySvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      const jupSvg =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+      return (
+        '<span class="tp-decision-token-actions">' +
+          '<button type="button" class="ca-btn ca-ico" data-mint="' + attr +
+            '" onclick="copyMintFromEl(event)" title="Copy contract address" aria-label="Copy CA">' +
+            copySvg +
+          '</button>' +
+          '<a class="ca-btn ca-jup ca-ico" href="' + jup +
+            '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter" aria-label="Open on Jupiter">' +
+            jupSvg +
+          '</a>' +
+        '</span>'
+      );
     }
 
     function fmtBacktestToken(symbol, name, mint) {
@@ -19028,6 +19187,121 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    function zionFmtPct(v) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      const n = Number(v);
+      return (Math.abs(n - Math.round(n)) < 0.05 ? Math.round(n) : n.toFixed(1)) + '%';
+    }
+
+    function zionFmtCount(v) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      return String(Math.round(Number(v)));
+    }
+
+    function zionLiveOrEntry(live, entry) {
+      if (live != null && Number.isFinite(Number(live))) return Number(live);
+      if (entry != null && Number.isFinite(Number(entry))) return Number(entry);
+      return null;
+    }
+
+    function zionRiskStatHtml(label, key, value) {
+      return (
+        '<div class="zion-offer-stat" data-zion-risk="' +
+        escAttr(key) +
+        '">' +
+        '<span class="lbl">' +
+        escHtml(label) +
+        '</span>' +
+        '<span class="val" data-zion-risk-val>' +
+        escHtml(value) +
+        '</span>' +
+        '</div>'
+      );
+    }
+
+    function zionSniperDisplay(o) {
+      const hold = zionLiveOrEntry(o.liveSniperHoldPct, o.sniperHoldPct);
+      if (hold != null) return zionFmtPct(hold);
+      const cnt = zionLiveOrEntry(o.liveSniperCount, o.sniperCount);
+      if (cnt != null) return zionFmtCount(cnt) + ' wallets';
+      return '—';
+    }
+
+    function resolveZionOfferVisualTier(o) {
+      if (!o) return 'default';
+      const score = Number(o.score) || 0;
+      const kolCount = Number(o.kolCount) || 0;
+      const volRaw =
+        o.liveVolumeH1Usd != null ? o.liveVolumeH1Usd : o.volumeH1Usd;
+      const vol = Number(volRaw);
+      const vol1h = Number.isFinite(vol) ? vol : 0;
+      if (score >= 85 && kolCount >= 8 && vol1h >= 500000) return 'gold';
+      if (score >= 70 && score < 85 && kolCount >= 4 && vol1h >= 250000) {
+        return 'green';
+      }
+      return 'default';
+    }
+
+    function applyZionOfferVisualTier(card, o) {
+      if (!card) return 'default';
+      const tier = resolveZionOfferVisualTier(o);
+      card.classList.remove(
+        'zion-offer-card--gold',
+        'zion-offer-card--green',
+        'zion-offer-card--default'
+      );
+      card.classList.add('zion-offer-card--' + tier);
+      const chip = card.querySelector('[data-zion-tier-chip]');
+      if (chip) {
+        if (tier === 'gold') {
+          chip.textContent = 'GOLD';
+          chip.hidden = false;
+        } else if (tier === 'green') {
+          chip.textContent = 'GREEN';
+          chip.hidden = false;
+        } else {
+          chip.textContent = '';
+          chip.hidden = true;
+        }
+      }
+      return tier;
+    }
+
+    function applyZionOfferRiskUi(card, o) {
+      if (!card || !o) return;
+      const setRisk = function (key, text) {
+        const el = card.querySelector('[data-zion-risk="' + key + '"]');
+        if (!el) return;
+        const val = el.querySelector('[data-zion-risk-val]');
+        if (val) val.textContent = text;
+      };
+      setRisk(
+        'holders',
+        zionFmtCount(zionLiveOrEntry(o.liveHolders, o.holders))
+      );
+      setRisk(
+        'top10',
+        zionFmtPct(zionLiveOrEntry(o.liveTop10HoldPct, o.top10HoldPct))
+      );
+      setRisk(
+        'bundle',
+        zionFmtPct(zionLiveOrEntry(o.liveBundlerPct, o.bundlerPct))
+      );
+      setRisk(
+        'insiders',
+        zionFmtPct(zionLiveOrEntry(o.liveInsiderPct, o.insiderPct))
+      );
+      setRisk(
+        'dev',
+        zionFmtPct(zionLiveOrEntry(o.liveDevHoldPct, o.devHoldPct))
+      );
+      setRisk('snipers', zionSniperDisplay(o));
+      setRisk(
+        'pro',
+        zionFmtPct(zionLiveOrEntry(o.liveProTraderPct, o.proTraderPct))
+      );
+    }
+
     function fillZionForm(cfg) {
       if (!cfg) return;
       const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
@@ -19632,6 +19906,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       setStat('MC', liveMc, o.mcUsd);
       setStat('Vol 1h', liveVol, o.volumeH1Usd);
       setStat('Liq', liveLiq, o.liquidityUsd);
+      applyZionOfferRiskUi(card, o);
+      applyZionOfferVisualTier(card, o);
       const scoreEl = card.querySelector('[data-zion-score]');
       if (scoreEl) scoreEl.textContent = String(Math.round(o.score || 0));
       const kolEl = card.querySelector('[data-zion-kol-count]');
@@ -19728,15 +20004,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         })
         .join(' · ');
       const canPlace = disp.key === 'active';
+      const tier = resolveZionOfferVisualTier(o);
+      const tierChip =
+        tier === 'gold'
+          ? '<span class="zion-offer-tier-chip" data-zion-tier-chip>GOLD</span>'
+          : tier === 'green'
+            ? '<span class="zion-offer-tier-chip" data-zion-tier-chip>GREEN</span>'
+            : '<span class="zion-offer-tier-chip" data-zion-tier-chip hidden></span>';
 
       const card = document.createElement('div');
-      card.className = 'zion-offer-card';
+      card.className = 'zion-offer-card zion-offer-card--' + tier;
       card.id = 'zion-offer-card-' + o.id;
       card.setAttribute('data-offer-id', o.id);
       card.innerHTML =
         '<div class="flex items-start justify-between gap-2">' +
         '<div>' +
-        '<div class="zion-offer-kicker"><span aria-hidden="true">◈</span> Zion trade request</div>' +
+        '<div class="zion-offer-kicker"><span aria-hidden="true">◈</span> Zion trade request' +
+        tierChip +
+        '</div>' +
         '<div class="zion-offer-title">' +
         escHtml(zionOfferTitle(o)) +
         ' · ' +
@@ -19767,6 +20052,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           'Liq',
           o.liquidityUsd,
           o.liveLiquidityUsd != null ? o.liveLiquidityUsd : o.liquidityUsd
+        ) +
+        '</div>' +
+        '<div class="zion-offer-risk-label">Holders &amp; risk</div>' +
+        '<div class="zion-offer-stats">' +
+        zionRiskStatHtml(
+          'Holders',
+          'holders',
+          zionFmtCount(zionLiveOrEntry(o.liveHolders, o.holders))
+        ) +
+        zionRiskStatHtml(
+          'Top 10',
+          'top10',
+          zionFmtPct(zionLiveOrEntry(o.liveTop10HoldPct, o.top10HoldPct))
+        ) +
+        zionRiskStatHtml(
+          'Bundle',
+          'bundle',
+          zionFmtPct(zionLiveOrEntry(o.liveBundlerPct, o.bundlerPct))
+        ) +
+        zionRiskStatHtml(
+          'Insiders',
+          'insiders',
+          zionFmtPct(zionLiveOrEntry(o.liveInsiderPct, o.insiderPct))
+        ) +
+        zionRiskStatHtml(
+          'Dev',
+          'dev',
+          zionFmtPct(zionLiveOrEntry(o.liveDevHoldPct, o.devHoldPct))
+        ) +
+        zionRiskStatHtml('Snipers', 'snipers', zionSniperDisplay(o)) +
+        zionRiskStatHtml(
+          'Pro traders',
+          'pro',
+          zionFmtPct(zionLiveOrEntry(o.liveProTraderPct, o.proTraderPct))
         ) +
         '</div>' +
         '<div class="zion-offer-body">' +
@@ -20861,6 +21180,122 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.saveGithubBackupSettings = saveGithubBackupSettings;
+
+    async function refreshBotPerfEmailStatus() {
+      const el = document.getElementById('bot-perf-email-status');
+      try {
+        const data = await fetchJSON('/api/site-backup/bot-perf-email/status');
+        const en = document.getElementById('bot-perf-email-enabled');
+        const intervalEl = document.getElementById('bot-perf-email-interval');
+        const toEl = document.getElementById('bot-perf-email-to');
+        if (en) en.checked = !!data.enabled;
+        if (intervalEl && data.interval) intervalEl.value = data.interval;
+        if (toEl && document.activeElement !== toEl) {
+          toEl.value = data.email || 'bondback2026@gmail.com';
+        }
+        if (!el) return;
+        const parts = [];
+        parts.push(data.enabled ? 'ON' : 'OFF');
+        parts.push('every ' + (data.interval || '24h'));
+        parts.push('to ' + (data.email || '—'));
+        parts.push(
+          'first/anchor ' +
+            (data.sendHour != null ? data.sendHour : 19) +
+            ':00 ' +
+            (data.timezone || 'Australia/Brisbane')
+        );
+        if (!data.emailDeliveryConfigured) {
+          parts.push('delivery not configured (RESEND_API_KEY or SMTP_*)');
+        }
+        if (data.lastSentAtMs) {
+          parts.push(
+            'last sent: ' +
+              new Date(data.lastSentAtMs).toLocaleString() +
+              (data.lastSentOk === false ? ' (failed)' : '')
+          );
+        } else {
+          parts.push('last sent: never');
+        }
+        if (data.lastSentOk === false && data.lastSentError) {
+          parts.push('error: ' + String(data.lastSentError).slice(0, 120));
+        }
+        if (data.enabled && data.nextDueLabel) {
+          parts.push('next: ' + data.nextDueLabel);
+        } else if (data.enabled && data.nextDueAtMs) {
+          parts.push('next: ' + new Date(data.nextDueAtMs).toLocaleString());
+        }
+        el.textContent = 'Bot performance email: ' + parts.join(' · ');
+      } catch (err) {
+        if (el) {
+          el.textContent =
+            'Bot performance email: — (' + (err.message || String(err)) + ')';
+        }
+      }
+    }
+    window.refreshBotPerfEmailStatus = refreshBotPerfEmailStatus;
+
+    async function saveBotPerfEmailSettings() {
+      const msg = document.getElementById('persist-reset-msg');
+      try {
+        const en = document.getElementById('bot-perf-email-enabled');
+        const intervalEl = document.getElementById('bot-perf-email-interval');
+        const toEl = document.getElementById('bot-perf-email-to');
+        await fetchJSON('/api/site-backup/bot-perf-email/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: en ? !!en.checked : false,
+            interval: intervalEl ? intervalEl.value : '24h',
+            email: toEl ? toEl.value : 'bondback2026@gmail.com',
+          }),
+        });
+        await refreshBotPerfEmailStatus();
+        if (msg) msg.textContent = 'Bot performance email settings saved';
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert(
+          'Save bot performance email settings failed: ' +
+            (err.message || String(err))
+        );
+      }
+    }
+    window.saveBotPerfEmailSettings = saveBotPerfEmailSettings;
+
+    async function sendBotPerfEmailNow() {
+      const msg = document.getElementById('persist-reset-msg');
+      const toEl = document.getElementById('bot-perf-email-to');
+      const to = toEl && toEl.value ? String(toEl.value).trim() : 'bondback2026@gmail.com';
+      if (
+        !confirm(
+          'Generate and send the bot performance digest now to:\\n\\n' +
+            to +
+            '\\n\\nUses Resend/SMTP from Notifications.'
+        )
+      )
+        return;
+      if (msg) msg.textContent = 'Sending bot performance email…';
+      try {
+        const data = await fetchJSON('/api/site-backup/bot-perf-email/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: to }),
+          timeoutMs: 120000,
+        });
+        if (msg) {
+          msg.textContent =
+            data.message ||
+            'Bot performance email sent' +
+              (data.provider ? ' via ' + data.provider : '');
+        }
+        await refreshBotPerfEmailStatus();
+      } catch (err) {
+        if (msg) msg.textContent = err.message || String(err);
+        alert(
+          'Send bot performance email failed: ' + (err.message || String(err))
+        );
+      }
+    }
+    window.sendBotPerfEmailNow = sendBotPerfEmailNow;
 
     async function uploadSiteBackupToGithub() {
       const msg = document.getElementById('persist-reset-msg');

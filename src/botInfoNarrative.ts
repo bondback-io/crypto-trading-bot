@@ -166,6 +166,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong>. It never auto-buys. You Place Trade from the offer modal (with optional email / sound).</p>
         <ul>
           <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer.</li>
+          <li>Popup tiers: <strong>Gold</strong> (score ≥85, ≥8 KOLs, ≥$500k vol 1h) · <strong>Green</strong> (score 70–84, ≥4 KOLs, ≥$250k vol) · else default teal. Holders &amp; risk row shows top10 / bundle / insider / dev / snipers / pro traders when known.</li>
           <li>Uses the secondary RPC lane so KOL scanning does not starve copy/trading.</li>
           <li>Separate from copy-monitor and market scanner entry paths.</li>
         </ul>
@@ -215,6 +216,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li><strong>Backup Site / Load</strong> — download or restore a stamped full-site JSON.</li>
           <li><strong>GitHub Backup</strong> — optional Contents API upload (<code>GITHUB_BACKUP_TOKEN</code>); auto interval; load is always manual.</li>
+          <li><strong>Bot performance email</strong> — optional digest (1h / 6h / 12h / 24h); first send anchors to 7pm Australia/Brisbane; Generate &amp; send now on Back Ups.</li>
           <li><strong>Learning journal</strong> — episode / knobs / upgrade / micro saves with export CSV/JSON.</li>
           <li>Private keys are never included in backups.</li>
         </ul>

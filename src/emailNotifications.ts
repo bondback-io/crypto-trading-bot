@@ -556,3 +556,37 @@ export async function sendTestNotificationEmail(): Promise<{
     return { ok: false, error: message };
   }
 }
+
+/**
+ * Send an arbitrary email (performance digests, etc.) without notification
+ * kind toggles / cooldowns. Uses Resend or SMTP like other alerts.
+ */
+export async function sendCustomEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<{ ok: boolean; error?: string; provider?: string }> {
+  const to = String(opts.to || '').trim();
+  if (!to || !to.includes('@')) {
+    return { ok: false, error: 'No valid recipient email' };
+  }
+  if (!emailDeliveryConfigured()) {
+    return { ok: false, error: emailDeliveryStatus().hint };
+  }
+  try {
+    const provider = await deliverEmail({
+      to,
+      subject: opts.subject,
+      text: opts.text,
+    });
+    logger.info('Notify', `Custom email sent via ${provider}: ${opts.subject}`, {
+      to,
+      provider,
+    });
+    return { ok: true, provider };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error('Notify', `Custom email failed: ${message}`, { to });
+    return { ok: false, error: message };
+  }
+}

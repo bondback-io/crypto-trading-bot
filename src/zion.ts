@@ -36,6 +36,8 @@ export interface ZionKolWalletRef {
   source?: string;
 }
 
+export type ZionOfferVisualTier = 'gold' | 'green' | 'default';
+
 export interface ZionOffer {
   id: string;
   mint: string;
@@ -51,11 +53,27 @@ export interface ZionOffer {
   volumeH1Usd?: number;
   liquidityUsd?: number;
   holders?: number;
+  top10HoldPct?: number;
+  bundlerPct?: number;
+  insiderPct?: number;
+  devHoldPct?: number;
+  /** Prefer top-70 sniper hold % from GMGN */
+  sniperHoldPct?: number;
+  sniperCount?: number;
+  /** Best-available GMGN/security pro / bluechip hold % */
+  proTraderPct?: number;
   /** Live refresh while offer is pending */
   liveMcUsd?: number;
   liveVolumeH1Usd?: number;
   liveLiquidityUsd?: number;
   liveHolders?: number;
+  liveTop10HoldPct?: number;
+  liveBundlerPct?: number;
+  liveInsiderPct?: number;
+  liveDevHoldPct?: number;
+  liveSniperHoldPct?: number;
+  liveSniperCount?: number;
+  liveProTraderPct?: number;
   score: number;
   reasons: string[];
   kolWallets: ZionKolWalletRef[];
@@ -69,6 +87,149 @@ export interface ZionOffer {
   popupDismissed?: boolean;
   executedAt?: number;
   solAmount?: number;
+}
+
+/** Gold first, then green; else default. Uses live vol when present. */
+export function resolveZionOfferVisualTier(
+  offer: Pick<
+    ZionOffer,
+    'score' | 'kolCount' | 'volumeH1Usd' | 'liveVolumeH1Usd'
+  >
+): ZionOfferVisualTier {
+  const score = Number(offer.score) || 0;
+  const kolCount = Number(offer.kolCount) || 0;
+  const vol1h = Number(
+    offer.liveVolumeH1Usd != null ? offer.liveVolumeH1Usd : offer.volumeH1Usd
+  );
+  const vol = Number.isFinite(vol1h) ? vol1h : 0;
+  if (score >= 85 && kolCount >= 8 && vol >= 500_000) return 'gold';
+  if (score >= 70 && score < 85 && kolCount >= 4 && vol >= 250_000) {
+    return 'green';
+  }
+  return 'default';
+}
+
+/**
+ * Best-effort holders / concentration / GMGN sniper risk for Zion popups.
+ * Missing metrics stay undefined (UI shows —).
+ */
+export async function enrichZionOfferRiskMetrics(
+  mint: string
+): Promise<Partial<CreateOfferInput>> {
+  const m = String(mint || '').trim();
+  if (!m) return {};
+  const out: Partial<CreateOfferInput> = {};
+  try {
+    const {
+      getCachedTokenMetrics,
+      resolveTop10HoldPctForEntry,
+    } = require('./tokenMetrics') as typeof import('./tokenMetrics');
+    const top10 = await resolveTop10HoldPctForEntry(m).catch(() => null);
+    if (top10 != null && Number.isFinite(top10)) out.top10HoldPct = top10;
+    const cached = getCachedTokenMetrics(m, { allowStale: true });
+    if (
+      out.top10HoldPct == null &&
+      cached?.top10HoldPct != null &&
+      Number.isFinite(cached.top10HoldPct)
+    ) {
+      out.top10HoldPct = cached.top10HoldPct;
+    }
+    if (cached?.devHoldPct != null && Number.isFinite(cached.devHoldPct)) {
+      out.devHoldPct = cached.devHoldPct;
+    }
+    if (
+      cached?.holderCountEstimate != null &&
+      Number.isFinite(cached.holderCountEstimate)
+    ) {
+      out.holders = cached.holderCountEstimate;
+    }
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getTokenSniperActivity } =
+      require('./gmgn') as typeof import('./gmgn');
+    const sniper = await getTokenSniperActivity(m);
+    if (sniper.bundlerPct != null && Number.isFinite(sniper.bundlerPct)) {
+      out.bundlerPct = sniper.bundlerPct;
+    }
+    if (sniper.insiderPct != null && Number.isFinite(sniper.insiderPct)) {
+      out.insiderPct = sniper.insiderPct;
+    }
+    if (
+      sniper.top70SniperHoldPct != null &&
+      Number.isFinite(sniper.top70SniperHoldPct)
+    ) {
+      out.sniperHoldPct = sniper.top70SniperHoldPct;
+    }
+    if (sniper.sniperCount != null && Number.isFinite(sniper.sniperCount)) {
+      out.sniperCount = sniper.sniperCount;
+    }
+    if (sniper.proTraderPct != null && Number.isFinite(sniper.proTraderPct)) {
+      out.proTraderPct = sniper.proTraderPct;
+    }
+  } catch {
+    /* optional */
+  }
+  return out;
+}
+
+function applyRiskFieldsToOffer(
+  o: ZionOffer,
+  input: Partial<CreateOfferInput>,
+  mode: 'live' | 'snapshot'
+): boolean {
+  let changed = false;
+  const setLive = (
+    liveKey:
+      | 'liveTop10HoldPct'
+      | 'liveBundlerPct'
+      | 'liveInsiderPct'
+      | 'liveDevHoldPct'
+      | 'liveSniperHoldPct'
+      | 'liveSniperCount'
+      | 'liveProTraderPct'
+      | 'liveHolders',
+    snapKey:
+      | 'top10HoldPct'
+      | 'bundlerPct'
+      | 'insiderPct'
+      | 'devHoldPct'
+      | 'sniperHoldPct'
+      | 'sniperCount'
+      | 'proTraderPct'
+      | 'holders',
+    value: number | undefined
+  ): void => {
+    if (value == null || !Number.isFinite(value)) return;
+    const n = Number(value);
+    if (mode === 'live') {
+      if (o[liveKey] !== n) {
+        o[liveKey] = n;
+        changed = true;
+      }
+    } else {
+      if (o[snapKey] !== n) {
+        o[snapKey] = n;
+        changed = true;
+      }
+      if (o[liveKey] !== n) {
+        o[liveKey] = n;
+        changed = true;
+      }
+    }
+  };
+  setLive('liveTop10HoldPct', 'top10HoldPct', input.top10HoldPct);
+  setLive('liveBundlerPct', 'bundlerPct', input.bundlerPct);
+  setLive('liveInsiderPct', 'insiderPct', input.insiderPct);
+  setLive('liveDevHoldPct', 'devHoldPct', input.devHoldPct);
+  setLive('liveSniperHoldPct', 'sniperHoldPct', input.sniperHoldPct);
+  setLive('liveSniperCount', 'sniperCount', input.sniperCount);
+  setLive('liveProTraderPct', 'proTraderPct', input.proTraderPct);
+  if (mode === 'live' && input.holders != null && Number.isFinite(input.holders)) {
+    setLive('liveHolders', 'holders', input.holders);
+  }
+  return changed;
 }
 
 const OFFERS_FILE = dataFile(PERSIST_FILES.zionOffers);
@@ -197,6 +358,13 @@ export interface CreateOfferInput {
   volumeH1Usd?: number;
   liquidityUsd?: number;
   holders?: number;
+  top10HoldPct?: number;
+  bundlerPct?: number;
+  insiderPct?: number;
+  devHoldPct?: number;
+  sniperHoldPct?: number;
+  sniperCount?: number;
+  proTraderPct?: number;
 }
 
 function looksLikeMintPrefix(symbol: string | undefined, mint: string): boolean {
@@ -301,6 +469,7 @@ export function refreshPendingOfferLive(
     o.liveHolders = Number(input.holders);
     changed = true;
   }
+  if (applyRiskFieldsToOffer(o, input, 'live')) changed = true;
   if (input.score != null && Number.isFinite(input.score)) {
     o.score = Number(input.score);
     changed = true;
@@ -423,10 +592,24 @@ export function maybeCreateOffer(
     volumeH1Usd: input.volumeH1Usd,
     liquidityUsd: input.liquidityUsd,
     holders: input.holders,
+    top10HoldPct: input.top10HoldPct,
+    bundlerPct: input.bundlerPct,
+    insiderPct: input.insiderPct,
+    devHoldPct: input.devHoldPct,
+    sniperHoldPct: input.sniperHoldPct,
+    sniperCount: input.sniperCount,
+    proTraderPct: input.proTraderPct,
     liveMcUsd: input.mcUsd,
     liveVolumeH1Usd: input.volumeH1Usd,
     liveLiquidityUsd: input.liquidityUsd,
     liveHolders: input.holders,
+    liveTop10HoldPct: input.top10HoldPct,
+    liveBundlerPct: input.bundlerPct,
+    liveInsiderPct: input.insiderPct,
+    liveDevHoldPct: input.devHoldPct,
+    liveSniperHoldPct: input.sniperHoldPct,
+    liveSniperCount: input.sniperCount,
+    liveProTraderPct: input.proTraderPct,
     score: input.score,
     reasons: input.reasons || [],
     kolWallets: input.kolWallets || [],

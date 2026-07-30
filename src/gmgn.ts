@@ -520,6 +520,8 @@ export interface GmgnSniperReport {
   top70SniperHoldPct: number | null;
   suspectedInsiderHoldPct: number | null;
   freshWalletPct: number | null;
+  /** Best-available bluechip / smart-degen hold % when GMGN reports it */
+  proTraderPct: number | null;
   washTrading: boolean | null;
   /** Composite sniper/bundler risk 0–100 */
   sniperScore: number;
@@ -2116,6 +2118,7 @@ function emptySniper(mint: string, error?: string): GmgnSniperReport {
     top70SniperHoldPct: null,
     suspectedInsiderHoldPct: null,
     freshWalletPct: null,
+    proTraderPct: null,
     washTrading: null,
     sniperScore: 0,
     warnings: error ? [error] : [],
@@ -2240,6 +2243,16 @@ function parseSniperFromRow(
   const freshWalletPct =
     asPct(stat.fresh_wallet_rate) ?? asPct(row.fresh_wallet_rate);
 
+  const proTraderPct =
+    asPct(stat.bluechip_owner_percentage) ??
+    asPct(security.bluechip_owner_percentage) ??
+    asPct(row.bluechip_owner_percentage) ??
+    asPct(stat.smart_degen_holder_rate) ??
+    asPct(security.smart_degen_holder_rate) ??
+    asPct(row.smart_degen_holder_rate) ??
+    asPct(stat.top_smart_wallet_hold_rate) ??
+    asPct(row.top_smart_wallet_hold_rate);
+
   const washTrading =
     asBool(stat.is_wash_trading) ??
     asBool(security.is_wash_trading) ??
@@ -2263,6 +2276,7 @@ function parseSniperFromRow(
     top70SniperHoldPct,
     suspectedInsiderHoldPct: asPct(stat.suspected_insider_hold_rate),
     freshWalletPct,
+    proTraderPct,
     washTrading,
     sniperScore,
     warnings: [],

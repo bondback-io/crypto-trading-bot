@@ -20,6 +20,7 @@ import { isDeniedCopyMint } from './deniedMints';
 import {
   maybeCreateOffer,
   getPendingOfferForMint,
+  enrichZionOfferRiskMetrics,
   type ZionKolWalletRef,
   type ZionOfferSource,
 } from './zion';
@@ -620,6 +621,12 @@ async function rebuildCandidates(): Promise<void> {
       zionCfg().autoOfferFromScanner !== false &&
       zionCfg().enabled
     ) {
+      let risk: Awaited<ReturnType<typeof enrichZionOfferRiskMetrics>> = {};
+      try {
+        risk = await enrichZionOfferRiskMetrics(agg.mint);
+      } catch {
+        risk = {};
+      }
       const offer = maybeCreateOffer({
         mint: agg.mint,
         symbol: agg.symbol,
@@ -632,7 +639,14 @@ async function rebuildCandidates(): Promise<void> {
         mcUsd: agg.mcUsd,
         volumeH1Usd: agg.volumeH1Usd,
         liquidityUsd: agg.liquidityUsd,
-        holders: agg.holders,
+        holders: risk.holders ?? agg.holders,
+        top10HoldPct: risk.top10HoldPct,
+        bundlerPct: risk.bundlerPct,
+        insiderPct: risk.insiderPct,
+        devHoldPct: risk.devHoldPct,
+        sniperHoldPct: risk.sniperHoldPct,
+        sniperCount: risk.sniperCount,
+        proTraderPct: risk.proTraderPct,
       });
       if (offer) {
         cand.status = 'offered';
