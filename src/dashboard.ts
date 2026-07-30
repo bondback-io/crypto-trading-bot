@@ -6683,7 +6683,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         <div class="backup-hero">
           <div>
             <div class="section-title" style="margin-bottom:0">GitHub Backup <span class="tip" tabindex="0" data-tip="Pushes the same site-backup JSON to a private GitHub repo (Contents API). Token stays in env (GITHUB_BACKUP_TOKEN) — never in the backup file. Private keys are never included."></span></div>
-            <p>Optional remote copy for deploy wipe recovery. Keep local Backup Site too. Auto-upload overwrites one latest file on GitHub; load is always manual.</p>
+            <p>Optional remote copy for deploy wipe recovery. Prefer a <strong>separate private backups repo</strong> (not this deploy repo). Auto-upload overwrites one latest file; load is always manual and does not push to GitHub.</p>
           </div>
           <div class="backup-actions">
             <button type="button" class="btn btn-primary" onclick="uploadSiteBackupToGithub()" title="Create a local backup and upload it to GitHub">Upload to GitHub</button>
@@ -6715,7 +6715,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
-        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Fly: <code>fly secrets set GITHUB_BACKUP_TOKEN=...</code></p>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo. Render: dashboard env vars · Fly: <code>fly secrets set GITHUB_BACKUP_TOKEN=...</code></p>
       </div>
 
       <div class="card">

@@ -328,7 +328,9 @@ export async function uploadSiteBackupToGithub(opts?: {
       content?: { sha?: string };
       message?: string;
     }>('PUT', `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}/contents/${enc}`, target.token, {
-      message: `site-backup ${created.backup.exportedAt} (${reason})`,
+      // [skip render] / [skip ci] prevent Render (and similar) auto-deploys when
+      // backups land in the same repo as the web service.
+      message: `[skip render] [skip ci] site-backup ${created.backup.exportedAt} (${reason})`,
       content,
       ...(sha ? { sha } : {}),
     });

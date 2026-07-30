@@ -39,3 +39,11 @@ services:
       name: bot-data
       mountPath: /var/data
       sizeGB: 1
+    # Don't redeploy when only GitHub site-backup JSON changes.
+    # (Also use [skip render] in backup commit messages — see githubSiteBackup.ts.)
+    # If this service was created outside Blueprint, set the same ignore in
+    # Dashboard → Settings → Build & Deploy → Build Filters → Ignored Paths.
+    buildFilter:
+      ignoredPaths:
+        - site-backups/**
+        - '**/site-backup*.json'
