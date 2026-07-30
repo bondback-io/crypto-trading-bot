@@ -6669,7 +6669,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <div class="backup-actions">
             <button type="button" class="btn btn-primary" onclick="backupSite()" title="Export a stamped full-site backup (settings, wallets, profiles, learning, notifications)">Backup Site</button>
-            <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Restore the last server backup, or pick a downloaded backup file if none exists">Load Last Backup</button>
+            <button type="button" class="btn btn-secondary" onclick="loadLastBackup()" title="Pick a downloaded site-backup-*.json file from your computer to restore">Load Backup</button>
             <button type="button" class="btn btn-danger" onclick="resetToDefaults()" title="Delete saved JSON files and reload code defaults">Reset to Defaults</button>
             <input type="file" id="site-backup-file" accept="application/json,.json" style="display:none" onchange="importSiteBackupFile(this)" />
           </div>
