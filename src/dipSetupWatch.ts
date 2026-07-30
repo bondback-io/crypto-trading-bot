@@ -48,8 +48,21 @@ const MAX_WATCHES = 24;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 const ARM_NEAR_DROP_MIN = 6;
 const TRIGGER_RECLAIM_PCT = 1.5; // reclaim % off trough / bounce
+/** Manual unwatch — bots may re-add only after this cooldown */
+const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 
 const watches = new Map<string, DipWatchEntry>();
+/** mint → earliest time bots may re-add after manual unwatch */
+const unwatchCooldownUntil = new Map<string, number>();
+
+function isManualUnwatchCooldown(mint: string): boolean {
+  const until = unwatchCooldownUntil.get(mint) ?? 0;
+  if (until <= Date.now()) {
+    if (until > 0) unwatchCooldownUntil.delete(mint);
+    return false;
+  }
+  return true;
+}
 
 function dipMatch() {
   return resolveTradeProfileDefinition('dip_buyer').match;
@@ -106,6 +119,7 @@ export function considerDipWatchSetup(input: {
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
+  if (isManualUnwatchCooldown(input.mint)) return null;
 
   const m = dipMatch();
   const minMc = m.minMarketCapUsd ?? 500_000;
@@ -340,6 +354,30 @@ export async function tickDipSetupWatches(opts?: {
   }
 
   return handed;
+}
+
+/**
+ * Manual unwatch — removes active watch and blocks bot re-add for 15 minutes.
+ */
+export function unwatchDipSetup(mint: string): {
+  ok: boolean;
+  error?: string;
+  cooldownMs?: number;
+} {
+  const key = String(mint || '').trim();
+  if (!key) return { ok: false, error: 'mint required' };
+  const existing = watches.get(key);
+  if (existing) {
+    existing.status = 'invalidated';
+    existing.updatedAt = Date.now();
+    existing.lastReason = 'unwatched by user';
+    watches.delete(key);
+  }
+  unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
+  console.log(
+    `[dip-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
+  );
+  return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
 }
 
 export function getDipSetupWatchStatus(limit = 20): {

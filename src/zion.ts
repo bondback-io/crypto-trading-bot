@@ -520,7 +520,13 @@ export interface ApproveOfferOverrides {
 export async function executeApprovedOffer(
   id: string,
   overrides: ApproveOfferOverrides = {}
-): Promise<{ ok: boolean; offer?: ZionOffer; error?: string }> {
+): Promise<{
+  ok: boolean;
+  offer?: ZionOffer;
+  error?: string;
+  positionId?: string;
+  open?: ReturnType<typeof paperTrader.getOpenPositions>;
+}> {
   ensureLoaded();
   expireStaleOffers();
   const offer = getOffer(id);
@@ -618,17 +624,25 @@ export async function executeApprovedOffer(
     offer.error = undefined;
     persist();
 
+    // Don't block Place Trade response on email — fire and forget
     if (config.zion.notifyEmailOnPlaced !== false) {
-      try {
-        const { notifyZionTradePlaced } =
-          require('./emailNotifications') as typeof import('./emailNotifications');
-        await notifyZionTradePlaced(offer, solAmount);
-      } catch (err) {
-        logger.warn('Zion', 'Placed email failed', errorToMeta(err));
-      }
+      void Promise.resolve()
+        .then(() => {
+          const { notifyZionTradePlaced } =
+            require('./emailNotifications') as typeof import('./emailNotifications');
+          return notifyZionTradePlaced(offer, solAmount);
+        })
+        .catch((err) => {
+          logger.warn('Zion', 'Placed email failed', errorToMeta(err));
+        });
     }
 
-    return { ok: true, offer };
+    return {
+      ok: true,
+      offer,
+      positionId: result.positionId,
+      open: paperTrader.getOpenPositions(),
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     offer.status = 'failed';

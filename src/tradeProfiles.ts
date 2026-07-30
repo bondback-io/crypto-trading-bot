@@ -1728,7 +1728,7 @@ export function getTradeProfilesStatus(): {
       try {
         const { getDipSetupWatchStatus } =
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-        return getDipSetupWatchStatus(12);
+        return getDipSetupWatchStatus(16);
       } catch {
         return { active: 0, entries: [] };
       }
@@ -1737,7 +1737,7 @@ export function getTradeProfilesStatus(): {
       try {
         const { getMigrationGradWatchStatus } =
           require('./migrationGradWatch') as typeof import('./migrationGradWatch');
-        return getMigrationGradWatchStatus(12);
+        return getMigrationGradWatchStatus(16);
       } catch {
         return { active: 0, entries: [] };
       }

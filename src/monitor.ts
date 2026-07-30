@@ -2424,6 +2424,11 @@ async function executeSignalBuy(
 
   if (profileAssignment.skipped) {
     finishBuy(buy.mint, false);
+    markLaneFightCascadeResult(
+      signal.mint,
+      false,
+      profileAssignment.skipReason || 'No trade profile scored high enough'
+    );
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'skipped',
       skipReason:
@@ -2459,6 +2464,7 @@ async function executeSignalBuy(
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
   if (result.success) {
+    markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'taken',
@@ -2471,6 +2477,11 @@ async function executeSignalBuy(
         `@ ${(buyOpts.solAmount ?? sizing.sizeSol).toFixed(3)} SOL · ${profileAssignment.name}`
     );
   } else {
+    markLaneFightCascadeResult(
+      signal.mint,
+      false,
+      result.error || 'executeBuy failed'
+    );
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'skipped',
       skipReason: result.error || 'executeBuy failed',
@@ -2661,6 +2672,7 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(event.mint, result.success);
   if (result.success) {
+    markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
     annotateActivityFeedByMint(event.mint, {
       tradeStatus: 'taken',
@@ -2672,6 +2684,11 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
         (profileAssignment.skipped ? '' : ` · ${profileAssignment.name}`)
     );
   } else {
+    markLaneFightCascadeResult(
+      signal.mint,
+      false,
+      result.error || 'migration executeBuy failed'
+    );
     annotateActivityFeedByMint(event.mint, {
       tradeStatus: 'skipped',
       skipReason: result.error || 'migration executeBuy failed',
@@ -3435,6 +3452,11 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
 
   if (profileAssignment.skipped) {
     finishBuy(buy.mint, false);
+    markLaneFightCascadeResult(
+      signal.mint,
+      false,
+      profileAssignment.skipReason || 'No trade profile scored high enough'
+    );
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'skipped',
       skipReason:
@@ -3494,6 +3516,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   finishBuy(buy.mint, result.success);
 
   if (result.success) {
+    markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'taken',
@@ -3505,6 +3528,11 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
         ` · ${sizing.sizeSol.toFixed(4)} SOL`
     );
   } else {
+    markLaneFightCascadeResult(
+      signal.mint,
+      false,
+      result.error || 'executeBuy failed'
+    );
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'skipped',
       skipReason: result.error || 'executeBuy failed',
@@ -4719,7 +4747,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         console.log(
           `[monitor] Lane cascade win=${passer.name} (${passer.profileId}) · ${signal.symbol}`
         );
-        markLaneFightCascadeResult(signal.mint, true);
+        // Do not mark opened yet — buy still pending. Fight log shows "win" until fill.
         return true;
       }
       const why = lastFilterSkipReason || 'module filters';

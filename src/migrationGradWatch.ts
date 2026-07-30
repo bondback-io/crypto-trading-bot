@@ -46,10 +46,23 @@ const MAX_WATCHES = 32;
 const DEFAULT_TTL_MS = 60 * 60_000; // 60 min
 const FAST_POLL_MS = 1_500;
 const REGRESS_INVALIDATE_PCT = 8; // hard dump from peak watched progress
+/** Manual unwatch — bots may re-add only after this cooldown */
+const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 
 const watches = new Map<string, GradWatchEntry>();
 let peakProgress = new Map<string, number>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** mint → earliest time bots may re-add after manual unwatch */
+const unwatchCooldownUntil = new Map<string, number>();
+
+function isManualUnwatchCooldown(mint: string): boolean {
+  const until = unwatchCooldownUntil.get(mint) ?? 0;
+  if (until <= Date.now()) {
+    if (until > 0) unwatchCooldownUntil.delete(mint);
+    return false;
+  }
+  return true;
+}
 
 function migMatch() {
   return resolveTradeProfileDefinition('migration_sniper').match;
@@ -154,6 +167,7 @@ export function considerMigrationGradWatch(input: {
 }): GradWatchEntry | null {
   if (!isMigProfileEnabled()) return null;
   if (!input.mint) return null;
+  if (isManualUnwatchCooldown(input.mint)) return null;
   // Pump.fun mint heuristic
   if (!String(input.mint).toLowerCase().endsWith('pump')) return null;
 
@@ -404,6 +418,31 @@ function stopFastPoll(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+}
+
+/**
+ * Manual unwatch — removes active watch and blocks bot re-add for 15 minutes.
+ */
+export function unwatchMigrationGrad(mint: string): {
+  ok: boolean;
+  error?: string;
+  cooldownMs?: number;
+} {
+  const key = String(mint || '').trim();
+  if (!key) return { ok: false, error: 'mint required' };
+  const existing = watches.get(key);
+  if (existing) {
+    existing.status = 'invalidated';
+    existing.updatedAt = Date.now();
+    existing.lastReason = 'unwatched by user';
+    watches.delete(key);
+  }
+  peakProgress.delete(key);
+  unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
+  console.log(
+    `[grad-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
+  );
+  return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
 }
 
 export function getMigrationGradWatchStatus(limit = 20): {

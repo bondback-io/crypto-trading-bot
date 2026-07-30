@@ -1568,12 +1568,30 @@ export function createServer(): express.Application {
 
   // --- Positions & logs ---
 
-  app.get('/api/positions', (_req: Request, res: Response) => {
+  app.get('/api/positions', (req: Request, res: Response) => {
+    const fast =
+      req.query.fast === '1' ||
+      req.query.fast === 'true' ||
+      req.query.lite === '1';
+    const openRaw = paperTrader.getOpenPositions();
+    if (fast) {
+      res.json({
+        open: openRaw,
+        closed: paperTrader.getClosedPositions(),
+        sellHistory: getSellHistory(),
+        rebuy: {
+          status: getReBuyStatus(),
+          candidates: getReBuyCandidates(),
+        },
+        fast: true,
+      });
+      return;
+    }
     const {
       getTechnicalSnapshot,
       technicalLevelsPublic,
     } = require('./technicalLevels') as typeof import('./technicalLevels');
-    const open = paperTrader.getOpenPositions().map((p) => {
+    const open = openRaw.map((p) => {
       const priceSol = paperTrader.getTokenPrice(p.mint);
       const snap = getTechnicalSnapshot(p.mint, {
         priceSol,
@@ -2260,6 +2278,63 @@ export function createServer(): express.Application {
       require('./tradeProfiles') as typeof import('./tradeProfiles');
     ensureTradeProfilesInitialized();
     res.json(getTradeProfilesStatus());
+  });
+
+  /** Lightweight dip + graduation watchlist status for Micro Bots UI. */
+  app.get('/api/setup-watches', (_req: Request, res: Response) => {
+    try {
+      const { getDipSetupWatchStatus } =
+        require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      const { getMigrationGradWatchStatus } =
+        require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      res.json({
+        dipWatch: getDipSetupWatchStatus(16),
+        gradWatch: getMigrationGradWatchStatus(16),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        dipWatch: { active: 0, entries: [] },
+        gradWatch: { active: 0, entries: [] },
+      });
+    }
+  });
+
+  /** Manual unwatch from Micro Bots setup watchlists (15m bot re-add cooldown). */
+  app.post('/api/setup-watches/unwatch', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const kind = String(body.kind || '').trim().toLowerCase();
+      const mint = String(body.mint || '').trim();
+      if (!mint) {
+        res.status(400).json({ ok: false, error: 'mint required' });
+        return;
+      }
+      if (kind === 'dip' || kind === 'dip_buyer') {
+        const { unwatchDipSetup } =
+          require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+        res.json(unwatchDipSetup(mint));
+        return;
+      }
+      if (
+        kind === 'grad' ||
+        kind === 'graduation' ||
+        kind === 'migration' ||
+        kind === 'migration_sniper'
+      ) {
+        const { unwatchMigrationGrad } =
+          require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+        res.json(unwatchMigrationGrad(mint));
+        return;
+      }
+      res.status(400).json({ ok: false, error: 'kind must be dip or grad' });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.get('/api/lane-decisions', (req: Request, res: Response) => {

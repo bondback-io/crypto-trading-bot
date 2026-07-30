@@ -3558,6 +3558,143 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       padding: 0.12rem 0.4rem;
       font-size: 10px;
     }
+    .setup-watches-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .setup-watch-card {
+      background: #0b1220;
+      border: 1px solid #1e293b;
+      padding: 0.85rem 0.95rem;
+    }
+    .setup-watch-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.65rem;
+      margin-bottom: 0.65rem;
+      padding-bottom: 0.65rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .setup-watch-kicker {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #64748b;
+      margin-bottom: 0.15rem;
+    }
+    .setup-watch-title {
+      display: block;
+      font-size: 0.95rem;
+      font-weight: 650;
+      color: #e2e8f0;
+    }
+    .setup-watch-sub {
+      margin-top: 0.2rem;
+      color: #94a3b8;
+      max-width: 36rem;
+      line-height: 1.35;
+    }
+    .setup-watch-count {
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid #334155;
+      background: #111827;
+    }
+    .setup-watch-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .setup-watch-empty {
+      color: #64748b;
+      padding: 0.35rem 0;
+    }
+    .setup-watch-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) auto auto;
+      gap: 0.55rem 0.75rem;
+      align-items: center;
+      padding: 0.45rem 0.35rem;
+      border-radius: 0.45rem;
+      border: 1px solid transparent;
+    }
+    .setup-watch-row:hover {
+      background: rgba(15, 23, 42, 0.85);
+      border-color: #1e293b;
+    }
+    .setup-watch-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .setup-watch-sym {
+      font-weight: 650;
+      color: #f1f5f9;
+    }
+    .setup-watch-status {
+      color: #94a3b8;
+      font-weight: 500;
+      text-transform: lowercase;
+    }
+    .setup-watch-status.is-armed {
+      color: #fbbf24;
+    }
+    .setup-watch-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .setup-watch-pct {
+      font-weight: 700;
+      color: #67e8f9;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .setup-watch-pct.is-drop {
+      color: #fb7185;
+    }
+    .setup-watch-mc {
+      color: #64748b;
+      font-size: 10px;
+    }
+    .setup-watch-actions {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.3rem;
+      justify-content: flex-end;
+    }
+    .setup-watch-actions .ca-btn {
+      padding: 0.14rem 0.42rem;
+      font-size: 10px;
+    }
+    .setup-watch-actions .ca-btn.ca-unwatch {
+      border-color: rgba(248, 113, 113, 0.4);
+      background: rgba(127, 29, 29, 0.25);
+      color: #fca5a5;
+    }
+    .setup-watch-actions .ca-btn.ca-unwatch:hover {
+      border-color: #f87171;
+      color: #fecaca;
+    }
+    @media (max-width: 720px) {
+      .setup-watch-row {
+        grid-template-columns: 1fr;
+        gap: 0.35rem;
+      }
+      .setup-watch-actions {
+        justify-content: flex-start;
+      }
+    }
     .wallet-addr {
       display: inline-flex;
       align-items: center;
@@ -6003,26 +6140,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
 
-      <div id="setup-watches-strip" class="card text-xs text-slate-300" style="background:#0b1220;border:1px solid #1e293b;padding:0.65rem 0.75rem">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <span class="font-semibold text-slate-200">Setup watches</span>
-          <span class="mint text-[11px]">Dip + Graduation</span>
+      <div class="setup-watches-stack space-y-3">
+        <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Dip Buyer</span>
+              <span class="setup-watch-title">Dip setup watchlist</span>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Unwatch cools out for 15 minutes.</p>
+            </div>
+            <span id="dip-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
         </div>
-        <div class="grid gap-3" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
-          <div id="dip-watch-strip">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <span class="font-medium text-slate-300">Dip Buyer</span>
-              <span id="dip-watch-count" class="mint">—</span>
+
+        <div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Migration Sniper</span>
+              <span class="setup-watch-title">Graduation watchlist</span>
+              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at 95–98%. Unwatch cools out for 15 minutes.</p>
             </div>
-            <div id="dip-watch-list" class="text-slate-400">No active dip setups</div>
+            <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
-          <div id="grad-watch-strip">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <span class="font-medium text-slate-300">Graduation / Migration</span>
-              <span id="grad-watch-count" class="mint">—</span>
-            </div>
-            <div id="grad-watch-list" class="text-slate-400">No active graduation watches</div>
-          </div>
+          <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
         </div>
       </div>
 
@@ -8290,6 +8430,182 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       return bits.slice(0, 8).join(', ');
     }
 
+    function renderSetupWatchLists(tp) {
+      const data = tp || {};
+      const dipCount = document.getElementById('dip-watch-count');
+      const dipList = document.getElementById('dip-watch-list');
+      const gradCount = document.getElementById('grad-watch-count');
+      const gradList = document.getElementById('grad-watch-list');
+
+      function fmtWatchPct(kind, e) {
+        if (kind === 'dip') {
+          if (e.dropFromPeakPct == null || !isFinite(Number(e.dropFromPeakPct))) {
+            return '<span class="setup-watch-pct is-drop" data-watch-pct="1">—</span>';
+          }
+          return (
+            '<span class="setup-watch-pct is-drop" data-watch-pct="1">−' +
+            Number(e.dropFromPeakPct).toFixed(0) +
+            '%</span>'
+          );
+        }
+        if (e.curveProgressPct == null || !isFinite(Number(e.curveProgressPct))) {
+          return '<span class="setup-watch-pct" data-watch-pct="1">—</span>';
+        }
+        return (
+          '<span class="setup-watch-pct" data-watch-pct="1">' +
+          Number(e.curveProgressPct).toFixed(1) +
+          '%</span>'
+        );
+      }
+
+      function watchRowHtml(kind, e) {
+        const mint = String(e.mint || '').trim();
+        const sym = escHtml(e.symbol || mint.slice(0, 6) || '?');
+        const status = String(e.status || 'watching');
+        const statusCls =
+          'setup-watch-status' + (status === 'armed' ? ' is-armed' : '');
+        const jup = escAttr(jupiterTokenUrl(mint));
+        const mintAttr = escAttr(mint);
+        const mc =
+          e.marketCapUsd != null && isFinite(Number(e.marketCapUsd))
+            ? '<span class="setup-watch-mc">MC $' +
+              Math.round(Number(e.marketCapUsd)).toLocaleString() +
+              '</span>'
+            : '';
+        const holders =
+          e.holderCount != null && isFinite(Number(e.holderCount))
+            ? '<span class="setup-watch-mc">' +
+              Math.round(Number(e.holderCount)) +
+              ' holders</span>'
+            : '';
+        return (
+          '<div class="setup-watch-row" data-watch-kind="' +
+          escAttr(kind) +
+          '" data-mint="' +
+          mintAttr +
+          '">' +
+          '<div class="setup-watch-main">' +
+          '<div><span class="setup-watch-sym">' +
+          sym +
+          '</span> · <span class="' +
+          statusCls +
+          '">' +
+          escHtml(status) +
+          '</span></div>' +
+          '<div class="setup-watch-meta">' +
+          fmtWatchPct(kind, e) +
+          mc +
+          holders +
+          '</div>' +
+          '</div>' +
+          '<div class="setup-watch-actions">' +
+          '<button type="button" class="ca-btn" data-mint="' +
+          mintAttr +
+          '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy CA</button>' +
+          '<a class="ca-btn ca-jup" href="' +
+          jup +
+          '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
+          (kind === 'grad'
+            ? '<a class="ca-btn" href="https://pump.fun/coin/' +
+              encodeURIComponent(mint) +
+              '" target="_blank" rel="noopener noreferrer" title="Open on Pump.fun">Pump</a>'
+            : '') +
+          '<button type="button" class="ca-btn ca-unwatch" data-watch-unwatch="' +
+          escAttr(kind) +
+          '" data-mint="' +
+          mintAttr +
+          '" title="Remove from watchlist (15m cooldown before bots can re-add)">Unwatch</button>' +
+          '</div>' +
+          '</div>'
+        );
+      }
+
+      if (dipCount || dipList) {
+        const dw = data.dipWatch || { active: 0, entries: [] };
+        if (dipCount) dipCount.textContent = (dw.active || 0) + ' active';
+        if (dipList) {
+          const rows = (dw.entries || [])
+            .filter(function (e) {
+              return e.status === 'watching' || e.status === 'armed';
+            })
+            .slice(0, 16);
+          dipList.innerHTML = rows.length
+            ? rows.map(function (e) {
+                return watchRowHtml('dip', e);
+              }).join('')
+            : '<div class="setup-watch-empty">No active dip setups</div>';
+        }
+      }
+
+      if (gradCount || gradList) {
+        const gw = data.gradWatch || { active: 0, entries: [] };
+        if (gradCount) gradCount.textContent = (gw.active || 0) + ' active';
+        if (gradList) {
+          const rows = (gw.entries || [])
+            .filter(function (e) {
+              return e.status === 'watching' || e.status === 'armed';
+            })
+            .slice(0, 16);
+          gradList.innerHTML = rows.length
+            ? rows.map(function (e) {
+                return watchRowHtml('grad', e);
+              }).join('')
+            : '<div class="setup-watch-empty">No active graduation watches</div>';
+        }
+      }
+    }
+    window.renderSetupWatchLists = renderSetupWatchLists;
+
+    async function refreshSetupWatches() {
+      try {
+        const data = await fetchJSON('/api/setup-watches');
+        if (data) renderSetupWatchLists(data);
+      } catch (_) {}
+    }
+    window.refreshSetupWatches = refreshSetupWatches;
+
+    async function unwatchSetupToken(kind, mint) {
+      const k = String(kind || '').trim();
+      const m = String(mint || '').trim();
+      if (!k || !m) return;
+      try {
+        const res = await fetchJSON('/api/setup-watches/unwatch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: k, mint: m }),
+        });
+        if (!res || res.ok === false) {
+          throw new Error((res && res.error) || 'Unwatch failed');
+        }
+        await refreshSetupWatches();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.unwatchSetupToken = unwatchSetupToken;
+
+    document.addEventListener('click', function (ev) {
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      const btn = t.closest('[data-watch-unwatch]');
+      if (!btn) return;
+      ev.preventDefault();
+      const kind = btn.getAttribute('data-watch-unwatch');
+      const mint = btn.getAttribute('data-mint');
+      if (!kind || !mint) return;
+      const label = kind === 'grad' ? 'graduation' : 'dip';
+      if (
+        !confirm(
+          'Unwatch this ' +
+            label +
+            ' setup?\\nBots can re-add it only after a 15 minute cooldown.'
+        )
+      ) {
+        return;
+      }
+      unwatchSetupToken(kind, mint);
+    });
+
     function renderTradeProfilesUi(tp) {
       const master = document.getElementById('trade-profiles-master');
       const smartBot = document.getElementById('smart-bot-profiles');
@@ -8304,59 +8620,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       if (typeof updateGlobalMicroBotTpUi === 'function') {
         updateGlobalMicroBotTpUi(tp.globalTakeProfit);
       }
-      const dipCount = document.getElementById('dip-watch-count');
-      const dipList = document.getElementById('dip-watch-list');
-      if (dipCount || dipList) {
-        const dw = tp.dipWatch || { active: 0, entries: [] };
-        if (dipCount) {
-          dipCount.textContent = (dw.active || 0) + ' active';
-        }
-        if (dipList) {
-          const rows = (dw.entries || []).filter(function (e) {
-            return e.status === 'watching' || e.status === 'armed';
-          }).slice(0, 8);
-          dipList.innerHTML = rows.length
-            ? rows.map(function (e) {
-                return (
-                  '<div class="flex justify-between gap-2 border-t border-slate-800 py-1">' +
-                  '<span>' + escHtml(e.symbol || '') + ' · ' + escHtml(e.status) + '</span>' +
-                  '<span class="mint">' +
-                  (e.dropFromPeakPct != null ? ('−' + Number(e.dropFromPeakPct).toFixed(0) + '%') : '—') +
-                  '</span></div>'
-                );
-              }).join('')
-            : 'No active dip setups';
-        }
-      }
-      const gradCount = document.getElementById('grad-watch-count');
-      const gradList = document.getElementById('grad-watch-list');
-      if (gradCount || gradList) {
-        const gw = tp.gradWatch || { active: 0, entries: [] };
-        if (gradCount) {
-          gradCount.textContent = (gw.active || 0) + ' active';
-        }
-        if (gradList) {
-          const rows = (gw.entries || []).filter(function (e) {
-            return e.status === 'watching' || e.status === 'armed';
-          }).slice(0, 8);
-          gradList.innerHTML = rows.length
-            ? rows.map(function (e) {
-                return (
-                  '<div class="flex justify-between gap-2 border-t border-slate-800 py-1">' +
-                  '<span>' + escHtml(e.symbol || '') + ' · ' + escHtml(e.status) + '</span>' +
-                  '<span class="mint">' +
-                  (e.curveProgressPct != null
-                    ? (Number(e.curveProgressPct).toFixed(0) + '%')
-                    : '—') +
-                  (e.marketCapUsd != null
-                    ? (' · $' + Math.round(Number(e.marketCapUsd)))
-                    : '') +
-                  '</span></div>'
-                );
-              }).join('')
-            : 'No active graduation watches';
-        }
-      }
+      renderSetupWatchLists(tp);
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
       if (statusEl) {
@@ -11200,6 +11464,38 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     window._closedTradeGroups = window._closedTradeGroups || [];
     window._expandedClosedTradeGroups = window._expandedClosedTradeGroups || {};
     window._lastOpenPositions = window._lastOpenPositions || [];
+    /** Bumped when a known fill paints positions — blocks stale in-flight refresh overwrites */
+    window._openPositionsGen = window._openPositionsGen || 0;
+
+    function applyOpenPositionsList(list, opts) {
+      const fromFill = opts && opts.fromFill === true;
+      if (fromFill) {
+        window._openPositionsGen = (window._openPositionsGen || 0) + 1;
+      }
+      window._lastOpenPositions = Array.isArray(list) ? list : [];
+      if (typeof paintOpenPositionsTables === 'function') {
+        paintOpenPositionsTables();
+      }
+      if (typeof renderZionOpenTrades === 'function') {
+        renderZionOpenTrades();
+      }
+    }
+
+    async function refreshOpenPositionsFast(opts) {
+      const fromFill = opts && opts.fromFill === true;
+      const genAtStart = window._openPositionsGen || 0;
+      try {
+        const posData = await fetchJSON('/api/positions?fast=1');
+        if (!fromFill && (window._openPositionsGen || 0) !== genAtStart) {
+          return; // a fill paint won while we were fetching
+        }
+        applyOpenPositionsList((posData && posData.open) || [], {
+          fromFill: fromFill,
+        });
+      } catch (_) {}
+    }
+    window.refreshOpenPositionsFast = refreshOpenPositionsFast;
+    window.applyOpenPositionsList = applyOpenPositionsList;
 
     function syncClosedTradesFilterButtons(filter) {
       document.querySelectorAll('[data-closed-filter]').forEach((btn) => {
@@ -14320,6 +14616,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     async function refresh() {
       if (window._refreshInFlight) return;
       window._refreshInFlight = true;
+      const positionsGenAtStart = window._openPositionsGen || 0;
       try {
       const [status, positions, logs, activity, cfg, walletsRaw, migrations, paper, sized, dipSm, scanner, zionData] = await Promise.all([
         fetchJSON('/api/status'),
@@ -15311,7 +15608,10 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         ? cfg.risk.trailingActivationProfit
         : 30;
       window._trailArmAt = trailArmAt;
-      window._lastOpenPositions = positions.open || [];
+      // Skip stale positions if Place Trade / fast fill painted while this refresh was in-flight
+      if ((window._openPositionsGen || 0) === positionsGenAtStart) {
+        window._lastOpenPositions = positions.open || [];
+      }
       window._renderOpenPositionsHtml = function renderOpenPositionsHtml(list) {
         const armAt = window._trailArmAt != null ? window._trailArmAt : 30;
         if (!list || list.length === 0) {
@@ -15421,7 +15721,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           </tr>\`;
         }).join('');
       };
-      const posOpenN = (positions.open || []).length;
+      const posOpenN = (window._lastOpenPositions || positions.open || []).length;
       ['sell-all-open', 'trades-sell-all-open'].forEach((id) => {
         const btn = document.getElementById(id);
         if (!btn) return;
@@ -15438,7 +15738,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
       window._closedTradeGroups = buildClosedTradeGroups(
         positions.closed || [],
-        positions.open || []
+        window._lastOpenPositions || positions.open || []
       ).slice(0, 40);
       paintClosedTradesTables();
 
@@ -19162,31 +19462,34 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           }
         );
         if (!res.ok) throw new Error(res.error || 'Place trade failed');
-        if (st) st.textContent = 'Placed — refreshing…';
-        // Force-pull open positions so Overview / Zion Open Trades update even if
-        // a background refresh() is in-flight and would otherwise no-op.
+        if (st) st.textContent = 'Placed';
+        // Paint immediately from approve payload (includes open positions) so
+        // Overview / Zion Open Trades update before the next poll — and bump
+        // generation so any in-flight refresh cannot wipe the new row.
         try {
-          const posData = await fetchJSON('/api/positions');
-          window._lastOpenPositions = (posData && posData.open) || [];
-          if (typeof paintOpenPositionsTables === 'function') {
-            paintOpenPositionsTables();
+          if (Array.isArray(res.open) && res.open.length) {
+            applyOpenPositionsList(res.open, { fromFill: true });
+          } else {
+            await refreshOpenPositionsFast({ fromFill: true });
           }
-          renderZionOpenTrades();
-        } catch (_) {}
+        } catch (_) {
+          try {
+            await refreshOpenPositionsFast({ fromFill: true });
+          } catch (__) {}
+        }
         try {
           await loadZion();
         } catch (_) {}
-        if (st) st.textContent = 'Placed';
         setTimeout(function () {
           dismissZionOfferCard(offerId);
         }, 600);
-        // Kick a full dashboard refresh after the in-flight lock clears.
+        // Background full refresh after a short delay (positions gen protects the fill)
         setTimeout(function () {
           try {
             window._refreshInFlight = false;
             refresh();
           } catch (_) {}
-        }, 750);
+        }, 400);
       } catch (err) {
         if (st) st.textContent = err.message || String(err);
         if (placeBtn) placeBtn.disabled = false;
@@ -20139,6 +20442,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     try { loadLastOptimizerResult(); } catch (_) {}
     refresh();
     setInterval(refresh, 5000);
+    // Lightweight open-positions poll so fight-log / wallet fills appear quickly
+    // without waiting for the full 5s dashboard refresh.
+    setInterval(function () {
+      try {
+        if (document.hidden) return;
+        void refreshOpenPositionsFast({ fromFill: false });
+      } catch (_) {}
+    }, 2000);
+    // Live % updates for Dip / Graduation watchlists while Micro Bots is open
+    setInterval(function () {
+      try {
+        if (document.hidden) return;
+        const panel = document.querySelector('[data-tab-panel="microbots"]');
+        if (!panel || panel.classList.contains('hidden')) return;
+        void refreshSetupWatches();
+      } catch (_) {}
+    }, 2000);
     setInterval(tickDashboardResetTimer, 1000);
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') paintDashboardResetTimer();
