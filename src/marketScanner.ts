@@ -81,6 +81,9 @@ export interface ScannerCandidate {
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
   supportPriceSol?: number | null;
   lastPriceSol?: number | null;
+  /** Key Fib retracement prices (SOL) for Target Dip Entry MC */
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
   chartPatternIds?: string[];
   indicatorSummary?: string;
   candleSource?: 'real' | 'synthetic';
@@ -419,6 +422,8 @@ export interface RankLaunchResult {
   veto?: string;
   supportPriceSol?: number | null;
   lastPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
 }
 
 /** Rank a launch for scanner entry — higher is better. */
@@ -511,6 +516,8 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   let nearSupport = false;
   let nearResistance = false;
   let supportPriceSol: number | null = null;
+  let fib05PriceSol: number | null = null;
+  let fib618PriceSol: number | null = null;
   const lastPriceSol =
     event.lastPriceSol > 0
       ? event.lastPriceSol
@@ -543,11 +550,33 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       res.distancePct != null &&
       Math.abs(res.distancePct) <= 4;
     const supPx = techSnap.nearestSupport?.mid;
-    const fibPx = techSnap.fibZones?.[0]?.price;
     if (supPx != null && Number.isFinite(supPx) && supPx > 0) {
       supportPriceSol = Number(supPx);
-    } else if (fibPx != null && Number.isFinite(fibPx) && fibPx > 0) {
-      supportPriceSol = Number(fibPx);
+    }
+    for (const z of techSnap.fibZones || []) {
+      const ratio = Number(z.ratio);
+      const px = Number(z.price);
+      if (!Number.isFinite(px) || px <= 0) continue;
+      if (Math.abs(ratio - 0.5) < 0.001) fib05PriceSol = px;
+      if (Math.abs(ratio - 0.618) < 0.02) fib618PriceSol = px;
+    }
+    // Also scan full fib ladder if zones filtered out non-key levels
+    for (const z of techSnap.snapshot?.fib?.levels || []) {
+      const ratio = Number(z.ratio);
+      const px = Number(z.price);
+      if (!Number.isFinite(px) || px <= 0) continue;
+      if (fib05PriceSol == null && Math.abs(ratio - 0.5) < 0.001) {
+        fib05PriceSol = px;
+      }
+      if (fib618PriceSol == null && Math.abs(ratio - 0.618) < 0.02) {
+        fib618PriceSol = px;
+      }
+    }
+    if (supportPriceSol == null) {
+      const fibPx = fib05PriceSol ?? fib618PriceSol ?? techSnap.fibZones?.[0]?.price;
+      if (fibPx != null && Number.isFinite(fibPx) && fibPx > 0) {
+        supportPriceSol = Number(fibPx);
+      }
     }
     if (nearKeyFib) {
       score += 12;
@@ -777,6 +806,8 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     veto,
     supportPriceSol,
     lastPriceSol,
+    fib05PriceSol,
+    fib618PriceSol,
   };
 }
 
@@ -986,6 +1017,8 @@ export async function selectScannerCandidates(
       nearResistance: ranked.nearResistance,
       supportPriceSol: ranked.supportPriceSol ?? null,
       lastPriceSol: ranked.lastPriceSol ?? null,
+      fib05PriceSol: ranked.fib05PriceSol ?? null,
+      fib618PriceSol: ranked.fib618PriceSol ?? null,
       chartPatternIds: ranked.chartPatternIds,
       indicatorSummary: ranked.indicatorSummary,
       candleSource: ranked.candleSource,
@@ -1203,6 +1236,8 @@ export async function runScannerPollOnce(): Promise<number> {
           nearSupport: c.nearSupport,
           lastPriceSol: c.lastPriceSol ?? null,
           supportPriceSol: c.supportPriceSol ?? null,
+          fib05PriceSol: c.fib05PriceSol ?? null,
+          fib618PriceSol: c.fib618PriceSol ?? null,
           kolCount: c.kolCount,
         });
       }

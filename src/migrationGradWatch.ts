@@ -236,13 +236,13 @@ export function considerMigrationGradWatch(input: {
   if (progress == null || progress < watchPct()) return null;
 
   const m = migMatch();
-  const maxMc = m.maxMarketCapUsd ?? 100_000;
-  // Soft MC gate for *watching* only — Dex MC is often noisy on late curve.
-  // Hard MC still applies at Migration Sniper buy / lane eligibility.
+  const maxMc = m.maxMarketCapUsd ?? 200_000;
+  // Align soft watch admit with hard buy max so the list does not trigger
+  // tokens Migration Sniper cannot buy (Dex MC is still noisy near curve).
   if (
     input.marketCapUsd != null &&
     input.marketCapUsd > 0 &&
-    input.marketCapUsd > Math.max(maxMc * 2.5, 250_000)
+    input.marketCapUsd > maxMc
   ) {
     return null;
   }

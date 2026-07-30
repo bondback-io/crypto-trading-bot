@@ -23,6 +23,12 @@ export type DipWatchStatus =
   | 'expired'
   | 'invalidated';
 
+export interface DipTargetEntry {
+  label: string;
+  priceSol: number;
+  mcUsd: number;
+}
+
 export interface DipWatchEntry {
   mint: string;
   symbol: string;
@@ -40,12 +46,13 @@ export interface DipWatchEntry {
   nearSupport?: boolean;
   supportPriceSol?: number | null;
   lastPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
   lastReason?: string;
   kolCount?: number;
   source?: string;
-  /** Profile floors for UI (resolved at status time too) */
-  targetMinMcUsd?: number;
-  targetPreferMcUsd?: number | null;
+  /** Fib / Support → approx MC at reclaim entry */
+  targetDipEntries?: DipTargetEntry[];
 }
 
 const MAX_WATCHES = 24;
@@ -75,18 +82,61 @@ function dipMatch() {
   return resolveTradeProfileDefinition('dip_buyer').match;
 }
 
-function targetMcFields(): {
-  targetMinMcUsd: number;
-  targetPreferMcUsd: number | null;
-} {
-  const m = dipMatch();
-  return {
-    targetMinMcUsd: m.minMarketCapUsd ?? 500_000,
-    targetPreferMcUsd:
-      m.preferMarketCapUsd != null && Number.isFinite(m.preferMarketCapUsd)
-        ? Number(m.preferMarketCapUsd)
-        : null,
+/** MC at a price level assuming constant supply: MC_now * (P_level / P_now). */
+function mcAtPrice(
+  marketCapUsd: number | undefined,
+  lastPriceSol: number | null | undefined,
+  levelPriceSol: number | null | undefined
+): number | null {
+  if (
+    marketCapUsd == null ||
+    !Number.isFinite(marketCapUsd) ||
+    marketCapUsd <= 0
+  ) {
+    return null;
+  }
+  if (
+    lastPriceSol == null ||
+    !Number.isFinite(lastPriceSol) ||
+    lastPriceSol <= 0
+  ) {
+    return null;
+  }
+  if (
+    levelPriceSol == null ||
+    !Number.isFinite(levelPriceSol) ||
+    levelPriceSol <= 0
+  ) {
+    return null;
+  }
+  return marketCapUsd * (levelPriceSol / lastPriceSol);
+}
+
+function buildTargetDipEntries(w: {
+  marketCapUsd?: number;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+}): DipTargetEntry[] {
+  const out: DipTargetEntry[] = [];
+  const push = (label: string, priceSol: number | null | undefined) => {
+    const mc = mcAtPrice(w.marketCapUsd, w.lastPriceSol, priceSol);
+    if (mc == null || priceSol == null) return;
+    // Dedupe near-identical prices
+    if (
+      out.some(
+        (e) => Math.abs(e.priceSol - priceSol) / Math.max(e.priceSol, 1e-18) < 0.005
+      )
+    ) {
+      return;
+    }
+    out.push({ label, priceSol, mcUsd: mc });
   };
+  push('Fib 0.5', w.fib05PriceSol);
+  push('Fib 0.618', w.fib618PriceSol);
+  push('Support', w.supportPriceSol);
+  return out;
 }
 
 function isDipProfileEnabled(): boolean {
@@ -160,6 +210,8 @@ export function considerDipWatchSetup(input: {
   nearSupport?: boolean;
   lastPriceSol?: number | null;
   supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
   kolCount?: number;
   source?: string;
 }): DipWatchEntry | null {
@@ -168,8 +220,7 @@ export function considerDipWatchSetup(input: {
   if (isManualUnwatchCooldown(input.mint)) return null;
 
   const m = dipMatch();
-  const targets = targetMcFields();
-  const minMc = targets.targetMinMcUsd;
+  const minMc = m.minMarketCapUsd ?? 500_000;
   const minHolders = m.minHolders ?? 80;
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
@@ -189,12 +240,13 @@ export function considerDipWatchSetup(input: {
     existing.lastPriceSol = input.lastPriceSol ?? existing.lastPriceSol;
     existing.supportPriceSol =
       input.supportPriceSol ?? existing.supportPriceSol;
+    existing.fib05PriceSol = input.fib05PriceSol ?? existing.fib05PriceSol;
+    existing.fib618PriceSol = input.fib618PriceSol ?? existing.fib618PriceSol;
     existing.marketCapUsd = input.marketCapUsd ?? existing.marketCapUsd;
     existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
     existing.holderCount = input.holderCount ?? existing.holderCount;
     existing.kolCount = input.kolCount ?? existing.kolCount;
-    existing.targetMinMcUsd = targets.targetMinMcUsd;
-    existing.targetPreferMcUsd = targets.targetPreferMcUsd;
+    existing.targetDipEntries = buildTargetDipEntries(existing);
     return existing;
   }
 
@@ -240,12 +292,13 @@ export function considerDipWatchSetup(input: {
     nearSupport: input.nearSupport,
     supportPriceSol: input.supportPriceSol ?? null,
     lastPriceSol: input.lastPriceSol ?? null,
+    fib05PriceSol: input.fib05PriceSol ?? null,
+    fib618PriceSol: input.fib618PriceSol ?? null,
     kolCount: input.kolCount,
     source: input.source,
-    targetMinMcUsd: targets.targetMinMcUsd,
-    targetPreferMcUsd: targets.targetPreferMcUsd,
     lastReason: nearTa ? 'near Fib/S' : 'watching for setup',
   };
+  entry.targetDipEntries = buildTargetDipEntries(entry);
   watches.set(input.mint, entry);
   console.log(
     `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
@@ -315,7 +368,6 @@ export async function tickDipSetupWatches(opts?: {
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
   const m = dipMatch();
-  const targets = targetMcFields();
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
   const now = Date.now();
@@ -323,9 +375,6 @@ export async function tickDipSetupWatches(opts?: {
 
   for (const w of watches.values()) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
-
-    w.targetMinMcUsd = targets.targetMinMcUsd;
-    w.targetPreferMcUsd = targets.targetPreferMcUsd;
 
     if (now >= w.expiresAt) {
       w.status = 'expired';
@@ -339,6 +388,7 @@ export async function tickDipSetupWatches(opts?: {
 
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
+    w.targetDipEntries = buildTargetDipEntries(w);
 
     // Invalidate: flush past max dip
     if (w.dropFromPeakPct != null && w.dropFromPeakPct > maxDrop) {
@@ -445,16 +495,12 @@ export function getDipSetupWatchStatus(limit = 20): {
   active: number;
   entries: DipWatchEntry[];
   recentTerminal: DipWatchEntry[];
-  targetMinMcUsd: number;
-  targetPreferMcUsd: number | null;
 } {
   pruneTerminal();
-  const targets = targetMcFields();
   const now = Date.now();
   const all = [...watches.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   for (const e of all) {
-    e.targetMinMcUsd = targets.targetMinMcUsd;
-    e.targetPreferMcUsd = targets.targetPreferMcUsd;
+    e.targetDipEntries = buildTargetDipEntries(e);
   }
   const entries = all.slice(0, limit);
   const recentTerminal = all
@@ -472,8 +518,6 @@ export function getDipSetupWatchStatus(limit = 20): {
     ).length,
     entries,
     recentTerminal,
-    targetMinMcUsd: targets.targetMinMcUsd,
-    targetPreferMcUsd: targets.targetPreferMcUsd,
   };
 }
 
@@ -490,6 +534,8 @@ export function offerDipWatchFromCandidate(c: {
   nearSupport?: boolean;
   lastPriceSol?: number | null;
   supportPriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
   kolCount?: number;
   specialtyFeed?: string;
   preferredProfileId?: string;
@@ -518,6 +564,8 @@ export function offerDipWatchFromCandidate(c: {
     nearSupport: c.nearSupport,
     lastPriceSol: c.lastPriceSol ?? null,
     supportPriceSol: c.supportPriceSol ?? null,
+    fib05PriceSol: c.fib05PriceSol ?? null,
+    fib618PriceSol: c.fib618PriceSol ?? null,
     kolCount: c.kolCount,
     source: c.specialtyFeed || 'scanner',
   });

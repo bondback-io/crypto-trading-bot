@@ -660,7 +660,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'In/out scalp — catch the graduation pump',
       'Quality: growing holders + buy pressure',
       'Fallback: ultra-fresh post-grad ≤30s if curve window missed',
-      'MC cap ~$100k — not mature DEX tokens',
+      'MC cap ~$200k — not mature DEX tokens',
     ],
     priority: 92,
     defaultEnabled: true,
@@ -681,7 +681,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       gradWatchPct: 80,
       maxMigrationAgeSec: 30,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
-      maxMarketCapUsd: 100_000,
+      maxMarketCapUsd: 200_000,
     },
     exitRules: {
       takeProfitPctMin: 15,
@@ -1734,8 +1734,6 @@ export function getTradeProfilesStatus(): {
           active: 0,
           entries: [],
           recentTerminal: [],
-          targetMinMcUsd: 500_000,
-          targetPreferMcUsd: 1_000_000,
         };
       }
     })(),
@@ -3438,7 +3436,13 @@ function finalizeExitRulesForWinner(
       exitRules.shortTermStrategyId = 'post_run_dip';
       exitRules.overrideScalpParams = true;
     } else {
+      // Dip is a swing — clear any seeded post_migration_scalp / other scalp
+      // so short migration timers cannot stick on a Dip Buyer winner.
       exitRules.forceScalp = false;
+      exitRules.overrideScalpParams = false;
+      delete (exitRules as { shortTermStrategyId?: string }).shortTermStrategyId;
+      exitRules.hardTimeLimitSecMin = undefined;
+      exitRules.hardTimeLimitSecMax = undefined;
     }
   }
 
@@ -3871,6 +3875,20 @@ export function applyProfileExitRulesToBuyOpts(
       buyOpts.scalpMode = true;
       buyOpts.shortTermStrategyId = rules.shortTermStrategyId;
     }
+  } else if (rules.forceScalp === false) {
+    // Explicit clear — stop resolveScalpBuyFlag pollution (e.g. Dip Buyer
+    // winning after post_migration_scalp was pre-tagged).
+    buyOpts.profileForceScalp = false;
+    buyOpts.scalpMode = false;
+    if (
+      buyOpts.shortTermStrategyId === 'post_migration_scalp' ||
+      buyOpts.shortTermStrategyId === 'quick_scalper' ||
+      buyOpts.shortTermStrategyId === 'micro_scalper' ||
+      buyOpts.shortTermStrategyId === 'momentum_burst' ||
+      buyOpts.shortTermStrategyId === 'reversal_scalp'
+    ) {
+      buyOpts.shortTermStrategyId = undefined;
+    }
   }
 }
 
@@ -3953,6 +3971,20 @@ export function applyTradeProfileExitRules(
         seedShortTerm(rules.shortTermStrategyId, position.openedAt)
       );
     }
+  } else if (rules.forceScalp === false) {
+    // Dip Buyer / swing winners: strip polluted short scalp engines + timers
+    position.scalpMode = false;
+    if (
+      position.shortTermStrategyId === 'post_migration_scalp' ||
+      position.shortTermStrategyId === 'quick_scalper' ||
+      position.shortTermStrategyId === 'micro_scalper' ||
+      position.shortTermStrategyId === 'momentum_burst' ||
+      position.shortTermStrategyId === 'reversal_scalp'
+    ) {
+      position.shortTermStrategyId = undefined;
+    }
+    position.scalpDeadlineMs = undefined;
+    position.scalpHardDeadlineMs = undefined;
   }
 
   const exitRules = applyGlobalMicroBotTakeProfitToExitRules(rules);

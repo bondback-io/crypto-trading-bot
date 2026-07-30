@@ -6163,7 +6163,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target = Dip Min/Prefer MC. Unwatch cools out for 15 minutes.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. Unwatch cools out for 15 minutes.</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8543,22 +8543,29 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             : '';
         let target = '';
         if (kind === 'dip') {
-          const minT =
-            e.targetMinMcUsd != null && isFinite(Number(e.targetMinMcUsd))
-              ? Number(e.targetMinMcUsd)
-              : null;
-          const prefT =
-            e.targetPreferMcUsd != null && isFinite(Number(e.targetPreferMcUsd))
-              ? Number(e.targetPreferMcUsd)
-              : null;
-          if (minT != null) {
-            target =
-              '<span class="setup-watch-mc setup-watch-target" title="Dip Buyer Min / Prefer MC">Target ≥ $' +
-              Math.round(minT).toLocaleString() +
-              (prefT != null
-                ? ' (prefer $' + Math.round(prefT).toLocaleString() + ')'
-                : '') +
-              '</span>';
+          const entries = Array.isArray(e.targetDipEntries)
+            ? e.targetDipEntries
+            : [];
+          if (entries.length) {
+            const bits = entries
+              .slice(0, 3)
+              .map(function (t) {
+                const label = escHtml(String(t.label || 'Level'));
+                const mcN = Number(t.mcUsd);
+                if (!isFinite(mcN) || mcN <= 0) return '';
+                return (
+                  label +
+                  ' ~$' +
+                  Math.round(mcN).toLocaleString()
+                );
+              })
+              .filter(Boolean);
+            if (bits.length) {
+              target =
+                '<span class="setup-watch-mc setup-watch-target" title="Approx MC at Fib / Support reclaim (MC × level/price)">Target Dip Entry: ' +
+                bits.join(' · ') +
+                '</span>';
+            }
           }
         }
         const reason =

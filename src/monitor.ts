@@ -671,6 +671,8 @@ export interface TradeSignal {
   organicScore?: number | null;
   /** Specialty feed tag when from per-profile Kolscan/Jupiter pass */
   specialtyFeed?: 'jupiter' | 'kolscan' | null;
+  /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
+  scannerReasons?: string[];
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -2211,6 +2213,9 @@ async function handleScannerCandidate(
         undefined,
       specialtyFeed:
         candidate.specialtyFeed || launch.specialtyFeed || null,
+      scannerReasons: Array.isArray(candidate.reasons)
+        ? candidate.reasons.map(String)
+        : undefined,
       kolCount:
         candidate.kolCount != null && Number.isFinite(candidate.kolCount)
           ? candidate.kolCount
@@ -4705,11 +4710,20 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
   // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
+  // Setup-watch handoffs are synthetic (no Fib/candles) — lane floors still apply.
+  const reasonBits = (signal.scannerReasons || []).join(' ');
+  const setupWatchHandoff =
+    /grad-watch:triggered|dip-watch:triggered/i.test(reasonBits) ||
+    (signal.candidateTradeProfileId === 'migration_sniper' &&
+      /grad-watch/i.test(reasonBits)) ||
+    (signal.candidateTradeProfileId === 'dip_buyer' &&
+      /dip-watch/i.test(reasonBits));
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&
     config.riskLevel !== 'off' &&
-    config.marketScanner?.requireTaSetup !== false
+    config.marketScanner?.requireTaSetup !== false &&
+    !setupWatchHandoff
   ) {
     const ind = evaluateIndicators({
       mint: signal.mint,
