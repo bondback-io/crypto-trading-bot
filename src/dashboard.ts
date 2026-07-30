@@ -9493,6 +9493,30 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                           '>shadow</option>' +
                         '</select>' +
                       '</label>' +
+                      '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="ML advisor: shadow = advice only; hybrid = blend with heuristics; lead = ML deltas + heuristic backup; off = heuristics only.">' +
+                        'ML' +
+                        '<select data-selflearn-mlmode="' +
+                        escAttr(p.id) +
+                        '" onchange="setProfileSelfLearnMlMode(\\'' +
+                        p.id +
+                        '\\', this.value)" style="width:auto;min-width:6.5rem">' +
+                          '<option value="off"' +
+                          (sl.mlMode === 'off' ? ' selected' : '') +
+                          '>off</option>' +
+                          '<option value="shadow"' +
+                          (!sl.mlMode || sl.mlMode === 'shadow' ? ' selected' : '') +
+                          '>shadow</option>' +
+                          '<option value="hybrid"' +
+                          (sl.mlMode === 'hybrid' ? ' selected' : '') +
+                          '>hybrid</option>' +
+                          '<option value="lead"' +
+                          (sl.mlMode === 'lead' ? ' selected' : '') +
+                          '>lead</option>' +
+                        '</select>' +
+                        (sl.mlValidatedInPaper
+                          ? ' <span style="color:#86efac" title="Holdout metrics look healthy">validated</span>'
+                          : '') +
+                      '</label>' +
                       '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Closed trades needed before proposing an upgrade (6–40). Nudges scale up as more trades feed the bot.">' +
                         'Min trades' +
                         '<input type="number" min="6" max="40" step="1" style="width:3.5rem" data-selflearn-min="' +
@@ -9507,6 +9531,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                         ? '<p class="mint text-xs" style="margin:0.25rem 0;color:#4ade80">' + escHtml(slBadge) +
                           (sl.version ? ' · Level ' + sl.version : ' · Level 0') +
                           (sl.microVersion ? ' · micro m' + sl.microVersion : '') +
+                          ' · ML ' + escHtml(String(sl.mlMode || 'shadow')) +
                           '</p>'
                         : '<p class="mint text-xs" style="margin:0.25rem 0">Off — bot stays on fixed card knobs</p>') +
                       (function () {
@@ -9517,8 +9542,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                             ' / ' +
                             escHtml(String(slMinTrades)) +
                             ' min trades · mode ' +
-                            escHtml(String(sl.mode || 'auto'))
+                            escHtml(String(sl.mode || 'auto')) +
+                            ' · ML ' +
+                            escHtml(String(sl.mlMode || 'shadow'))
                         );
+                        if (sl.mlAdvice && sl.mlAdvice.summary) {
+                          bits.push(
+                            '<br/><span style="color:#93c5fd">ML: ' +
+                              escHtml(String(sl.mlAdvice.summary).slice(0, 180)) +
+                              '</span>'
+                          );
+                        }
                         if (sl.nearMiss && Number.isFinite(Number(sl.nearMiss.scoreDelta))) {
                           const d = Number(sl.nearMiss.scoreDelta);
                           const m = Number(sl.nearMiss.scoreMargin) || 0;
@@ -9551,6 +9585,9 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                           bits.push(
                             '<br/><span style="color:#86efac">Last ' +
                               escHtml(String(sl.lastMutation.kind || 'tweak')) +
+                              (sl.lastMutation.source
+                                ? ' (' + escHtml(String(sl.lastMutation.source)) + ')'
+                                : '') +
                               ': ' +
                               escHtml(String(sl.lastMutation.summary).slice(0, 100)) +
                               (sl.lastMutation.changes
@@ -9567,6 +9604,17 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                               nextIn +
                               ' close' +
                               (nextIn === 1 ? '' : 's') +
+                              '</span>'
+                          );
+                        }
+                        const hints = Array.isArray(p.laneFloorHints) ? p.laneFloorHints : [];
+                        if (hints.length) {
+                          bits.push(
+                            '<br/><span style="color:#fcd34d">Lane hint: ' +
+                              escHtml(String(hints[0].summary || '').slice(0, 140)) +
+                              (hints[0].suggested != null
+                                ? ' → ' + escHtml(String(hints[0].field)) + '=' + escHtml(String(hints[0].suggested))
+                                : '') +
                               '</span>'
                           );
                         }
@@ -10497,6 +10545,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.setProfileSelfLearnMode = setProfileSelfLearnMode;
+
+    async function setProfileSelfLearnMlMode(id, mlMode) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: id,
+            selfLearningMlMode:
+              mlMode === 'hybrid' || mlMode === 'lead' || mlMode === 'off'
+                ? mlMode
+                : 'shadow',
+          }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.setProfileSelfLearnMlMode = setProfileSelfLearnMlMode;
 
     async function setProfileSelfLearnMinTrades(id, value) {
       try {

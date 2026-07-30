@@ -15,8 +15,11 @@ import type {
   TradeProfileMatchRules,
   TradeProfileParamOverride,
 } from './tradeProfiles';
+import type { MlAdvice, MlLearnMode } from './profileLearningMl';
 
 export type SelfLearnMode = 'shadow' | 'auto';
+export type { MlLearnMode };
+export type MutationSource = 'heuristic' | 'hybrid' | 'ml';
 
 export interface LearningProposalPatch {
   exitRules?: Partial<TradeProfileExitRules>;
@@ -30,6 +33,10 @@ export interface LearningProposal {
   scoreBefore: number;
   scoreAfter: number;
   kind: 'exit' | 'entry' | 'mixed';
+  source?: MutationSource;
+  heuristicDelta?: number;
+  mlDelta?: number;
+  blendWeight?: number;
 }
 
 export interface SelfLearnHistoryEntry {
@@ -67,6 +74,7 @@ export interface SelfLearnLastMutation {
   scoreAfter?: number;
   version?: number;
   microVersion?: number;
+  source?: MutationSource;
 }
 
 /** Score window for upgrade / near-miss evaluation (episodes ring still larger). */
@@ -100,6 +108,8 @@ export interface LearningProgressSnapshot {
 export interface ProfileSelfLearningState {
   enabled: boolean;
   mode: SelfLearnMode;
+  /** ML advisor: off | shadow advice | hybrid blend | lead deltas */
+  mlMode: MlLearnMode;
   minTrades: number;
   upgradeCooldownTrades: number;
   lastUpgradedAt: number | null;
@@ -121,11 +131,16 @@ export interface ProfileSelfLearningState {
   nearMiss: SelfLearnNearMiss | null;
   /** Closes until next micro eligibility (0 = eligible now) */
   nextEligibleIn: number;
+  /** Latest ML advisor snapshot for UI */
+  mlAdvice: MlAdvice | null;
+  /** True when paper soak validated ML enough to recommend hybrid */
+  mlValidatedInPaper: boolean;
 }
 
 export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
   enabled: true,
   mode: 'auto',
+  mlMode: 'shadow',
   minTrades: 8,
   upgradeCooldownTrades: 6,
   lastUpgradedAt: null,
@@ -143,6 +158,8 @@ export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
   lastMutation: null,
   nearMiss: null,
   nextEligibleIn: 0,
+  mlAdvice: null,
+  mlValidatedInPaper: false,
 };
 
 const SWING_PROFILES = new Set([
@@ -286,10 +303,21 @@ export function normalizeSelfLearning(
       history: [],
       lastMutation: null,
       nearMiss: null,
+      mlAdvice: null,
     };
   }
   const hasEnabled = Object.prototype.hasOwnProperty.call(raw, 'enabled');
   const hasMode = Object.prototype.hasOwnProperty.call(raw, 'mode');
+  let normalizeMlMode: (v: unknown) => MlLearnMode = (v) =>
+    v === 'hybrid' || v === 'lead' || v === 'off' || v === 'shadow'
+      ? v
+      : 'shadow';
+  try {
+    const ml = require('./profileLearningMl') as typeof import('./profileLearningMl');
+    normalizeMlMode = ml.normalizeMlMode;
+  } catch {
+    /* bootstrap */
+  }
   return {
     // Default ON when unset; only explicit false turns it off
     enabled: hasEnabled ? raw.enabled === true : d.enabled,
@@ -299,6 +327,7 @@ export function normalizeSelfLearning(
         ? 'auto'
         : 'shadow'
       : d.mode,
+    mlMode: normalizeMlMode(raw.mlMode),
     minTrades: clamp(Number(raw.minTrades) || d.minTrades, 6, 40),
     upgradeCooldownTrades: clamp(
       Number(raw.upgradeCooldownTrades) || d.upgradeCooldownTrades,
@@ -346,6 +375,11 @@ export function normalizeSelfLearning(
     lastMutation: normalizeLastMutation(raw.lastMutation),
     nearMiss: normalizeNearMiss(raw.nearMiss),
     nextEligibleIn: Math.max(0, Math.round(Number(raw.nextEligibleIn) || 0)),
+    mlAdvice:
+      raw.mlAdvice && typeof raw.mlAdvice === 'object'
+        ? (raw.mlAdvice as MlAdvice)
+        : null,
+    mlValidatedInPaper: raw.mlValidatedInPaper === true,
   };
 }
 
@@ -378,6 +412,10 @@ function normalizeLastMutation(
 ): SelfLearnLastMutation | null {
   if (!raw || typeof raw !== 'object') return null;
   const kind = raw.kind === 'micro' ? 'micro' : 'upgrade';
+  const source: MutationSource | undefined =
+    raw.source === 'ml' || raw.source === 'hybrid' || raw.source === 'heuristic'
+      ? raw.source
+      : undefined;
   return {
     at: Number(raw.at) || 0,
     kind,
@@ -399,6 +437,7 @@ function normalizeLastMutation(
       raw.microVersion != null && Number.isFinite(Number(raw.microVersion))
         ? Math.max(0, Math.round(Number(raw.microVersion)))
         : undefined,
+    source,
   };
 }
 
@@ -1244,7 +1283,10 @@ export function runSelfLearnTick(input: {
       );
       if (recent.length >= Math.max(5, Math.floor(state.upgradeCooldownTrades * 0.75))) {
         const after = scoreEpisodesHeuristic(recent);
-        if (after < last.scoreBefore - 2.5) {
+        const lastSource = state.lastMutation?.source;
+        const margin =
+          lastSource === 'ml' || lastSource === 'hybrid' ? 1.5 : 2.5;
+        if (after < last.scoreBefore - margin) {
           state.pendingProposal = null;
           return {
             state: {
@@ -1296,16 +1338,66 @@ export function runSelfLearnTick(input: {
           input.currentMatch
         )
       : []),
-  ];
+  ] as Array<{ summary: string; patch: LearningProposalPatch }>;
+
+  // ML lead mode: add tiny continuous delta candidates (still clamped)
+  try {
+    const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
+    if (state.mlMode === 'lead' && confidence.allowExit) {
+      candidates.push(
+        ...mlMod.buildMlLedCandidates(episodes, {
+          ...currentPolicy,
+          minConviction: Number(input.currentMatch.minConviction) || 40,
+        })
+      );
+    }
+    mlMod.maybeRetrainProfileMl(input.profileId);
+  } catch {
+    /* ML optional */
+  }
 
   const window = episodes.slice(-LEARNING_SCORE_WINDOW);
   const scoreBefore = scoreEpisodesHeuristic(window);
+  const mlCurrent = {
+    profitGivebackPts: currentPolicy.profitGivebackPts,
+    profitLockArmPct: currentPolicy.profitLockArmPct,
+    earlyPartialTpPct: currentPolicy.earlyPartialTpPct,
+    minConviction: Number(input.currentMatch.minConviction) || 40,
+    hardTimeLimitSecMax: currentPolicy.hardTimeLimitSecMax,
+  };
+
+  let mlAdvice: import('./profileLearningMl').MlAdvice | null = null;
+  try {
+    const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
+    mlAdvice = mlMod.buildMlAdvice(input.profileId, window, candidates, {
+      mlMode: state.mlMode,
+      current: mlCurrent,
+    });
+  } catch {
+    mlAdvice = null;
+  }
+  state.mlAdvice = mlAdvice;
+  if (
+    mlAdvice &&
+    !mlAdvice.stale &&
+    mlAdvice.holdoutAuc >= 0.58 &&
+    mlAdvice.nTrain >= 80
+  ) {
+    state.mlValidatedInPaper = true;
+  }
+
   let best: LearningProposal | null = null;
   let nearMiss: SelfLearnNearMiss | null = null;
   let bestNearProposal: LearningProposal | null = null;
 
   for (const c of candidates) {
-    const scaled = scaleLearningPatch(c.patch, confidence.nudgeScale);
+    const isMlLed = /^ML-led:/i.test(c.summary);
+    let nudge = confidence.nudgeScale;
+    // Source-aware tighter scale for ML/hybrid until large sample
+    if (isMlLed || state.mlMode === 'hybrid' || state.mlMode === 'lead') {
+      if (episodes.length < 150) nudge = Math.min(nudge, confidence.nudgeScale * 0.5);
+    }
+    const scaled = scaleLearningPatch(c.patch, nudge);
     const clamped = clampLearningPatch(
       input.profileId,
       input.catalogExit,
@@ -1313,15 +1405,41 @@ export function runSelfLearnTick(input: {
       scaled
     );
     if (!clamped.exitRules && !clamped.match) continue;
-    const scoreAfter = shadowScoreCandidate(window, clamped, scoreBefore);
-    const scoreDelta = scoreAfter - scoreBefore;
+
+    const hAfter = shadowScoreCandidate(window, clamped, scoreBefore);
+    const hDelta = hAfter - scoreBefore;
+
+    let mDelta = 0;
+    let w = 0;
+    let source: MutationSource = isMlLed ? 'ml' : 'heuristic';
+    try {
+      const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
+      const scored = mlMod.scorePatchWithMl(
+        input.profileId,
+        window,
+        clamped,
+        { mlMode: state.mlMode, current: mlCurrent }
+      );
+      mDelta = scored.predictedDelta;
+      w = scored.weight;
+      if (w > 0.05 && !isMlLed) source = 'hybrid';
+      if (isMlLed) source = 'ml';
+    } catch {
+      /* heuristic only */
+    }
+
+    const blendDelta = (1 - w) * hDelta + w * mDelta;
+    const scoreAfter = scoreBefore + blendDelta;
+    const scoreDelta = blendDelta;
+
     const proposal: LearningProposal = {
       at: Date.now(),
       summary:
         c.summary +
         (confidence.nudgeScale < 1
           ? ` (sample×${confidence.nudgeScale.toFixed(2)})`
-          : ''),
+          : '') +
+        (w > 0.05 ? ` [blend w=${w.toFixed(2)}]` : ''),
       patch: clamped,
       scoreBefore,
       scoreAfter,
@@ -1331,13 +1449,13 @@ export function runSelfLearnTick(input: {
           : clamped.exitRules
             ? 'exit'
             : 'entry',
+      source,
+      heuristicDelta: hDelta,
+      mlDelta: mDelta,
+      blendWeight: w,
     };
 
-    // Track strongest near-miss (including those that pass — overwritten by best)
-    if (
-      !nearMiss ||
-      scoreDelta > nearMiss.scoreDelta
-    ) {
+    if (!nearMiss || scoreDelta > nearMiss.scoreDelta) {
       nearMiss = {
         summary: proposal.summary,
         scoreBefore,
@@ -1350,8 +1468,25 @@ export function runSelfLearnTick(input: {
       bestNearProposal = proposal;
     }
 
-    // Soft pass: allow equality at the margin
+    // Soft pass on blended score
     if (scoreAfter >= scoreBefore + confidence.scoreMargin) {
+      // Holdout gate for Level upgrades
+      let holdoutOk = true;
+      try {
+        const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
+        const gate = mlMod.holdoutPatchPasses(
+          window,
+          (eps) => scoreEpisodesHeuristic(eps),
+          (eps) => shadowScoreCandidate(eps, clamped, scoreEpisodesHeuristic(eps))
+        );
+        holdoutOk = gate.ok;
+      } catch {
+        holdoutOk = true;
+      }
+      if (!holdoutOk) {
+        // Keep as near-miss only — refuse Level++
+        continue;
+      }
       if (!best || scoreAfter > best.scoreAfter) {
         best = proposal;
       }
@@ -1387,6 +1522,8 @@ export function runSelfLearnTick(input: {
     let microPatch: LearningProposalPatch | null = null;
     let microSummary = '';
     let microScoreAfter = scoreBefore;
+    let microSource: MutationSource =
+      bestNearProposal?.source || 'heuristic';
 
     if (bestNearProposal) {
       const microScaled = scaleLearningPatch(
@@ -1404,6 +1541,7 @@ export function runSelfLearnTick(input: {
         : `Micro: ${bestNearProposal.summary}`;
       if (microPatch.exitRules || microPatch.match) {
         microScoreAfter = shadowScoreCandidate(window, microPatch, scoreBefore);
+        microSource = bestNearProposal.source || 'heuristic';
       } else {
         microPatch = null;
       }
@@ -1430,12 +1568,12 @@ export function runSelfLearnTick(input: {
           microPatch = clamped;
           microSummary = `Micro: ${mild.summary}`;
           microScoreAfter = shadowScoreCandidate(window, clamped, scoreBefore);
+          microSource = 'heuristic';
         }
       }
     }
 
     if (microPatch) {
-      // Stash proposal-shaped fields on state for applySelfLearnMicro via caller
       state.pendingProposal = {
         at: Date.now(),
         summary: microSummary,
@@ -1448,6 +1586,7 @@ export function runSelfLearnTick(input: {
             : microPatch.exitRules
               ? 'exit'
               : 'entry',
+        source: microSource,
       };
       state.nextEligibleIn = 0;
       return {
@@ -1482,6 +1621,7 @@ export function applySelfLearnMicro(
       scoreAfter: proposal.scoreAfter,
       microVersion,
       version: state.version,
+      source: proposal.source || 'heuristic',
     },
   });
 }
@@ -1521,6 +1661,7 @@ export function applySelfLearnUpgrade(
       scoreAfter: proposal.scoreAfter,
       version: nextVersion,
       microVersion: state.microVersion,
+      source: proposal.source || 'heuristic',
     },
     history: [
       ...state.history,

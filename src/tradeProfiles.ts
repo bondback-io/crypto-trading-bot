@@ -1683,6 +1683,12 @@ export function getTradeProfilesStatus(): {
       selfLearning: import('./profileSelfLearning').ProfileSelfLearningState;
       selfLearnBadge: string;
       learningProgress: import('./profileSelfLearning').LearningProgressSnapshot;
+      laneFloorHints: Array<{
+        summary: string;
+        field: string;
+        current: number | null;
+        suggested: number;
+      }>;
     }
   >;
   active: Array<{ id: TradeProfileId; name: string; icon: string; color: string }>;
@@ -1707,6 +1713,12 @@ export function getTradeProfilesStatus(): {
     if (sl.enabled) {
       sl = refreshSelfLearnMetrics(sl, p.id);
     }
+    let laneFloorHints: ReturnType<typeof buildLaneFloorLearningHints> = [];
+    try {
+      laneFloorHints = buildLaneFloorLearningHints(p.id);
+    } catch {
+      laneFloorHints = [];
+    }
     return {
       ...resolved,
       enabled: state.profiles[p.id] !== false,
@@ -1718,6 +1730,7 @@ export function getTradeProfilesStatus(): {
       selfLearning: sl,
       selfLearnBadge: formatSelfLearnBadge(sl),
       learningProgress: getLearningProgressSnapshot(p.id, sl, resolved.name),
+      laneFloorHints,
     };
   });
   return {
@@ -4366,6 +4379,116 @@ export function setProfileSelfLearningEnabled(
   return getTradeProfilesStatus();
 }
 
+export function setProfileSelfLearningMlMode(
+  profileId: TradeProfileId | string,
+  mlMode: 'off' | 'shadow' | 'hybrid' | 'lead'
+): ReturnType<typeof getTradeProfilesStatus> {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') {
+    return getTradeProfilesStatus();
+  }
+  const {
+    normalizeSelfLearning,
+  } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
+  const { normalizeMlMode } =
+    require('./profileLearningMl') as typeof import('./profileLearningMl');
+  const state = ensureState();
+  const prev = normalizeSelfLearning(state.selfLearning?.[id]);
+  const next = normalizeSelfLearning({
+    ...prev,
+    mlMode: normalizeMlMode(mlMode),
+  });
+  writeProfileSelfLearning(id, next, {
+    kind: 'toggle',
+    summary: `ML mode → ${next.mlMode}`,
+  });
+  return getTradeProfilesStatus();
+}
+
+/**
+ * Raise-only lane floor suggestions from recent episode losers (soft hints for UI).
+ * Never lowers floors automatically.
+ */
+export function buildLaneFloorLearningHints(
+  profileId: TradeProfileId | string
+): Array<{
+  summary: string;
+  field: string;
+  current: number | null;
+  suggested: number;
+}> {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') return [];
+  const { getProfileLearningEpisodes } =
+    require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+  const eps = getProfileLearningEpisodes(id, 80);
+  if (eps.length < 12) return [];
+  const losers = eps.filter((e) => (e.pnlPct || 0) <= 0);
+  if (losers.length < 5) return [];
+  const def = resolveTradeProfileDefinition(id);
+  const out: Array<{
+    summary: string;
+    field: string;
+    current: number | null;
+    suggested: number;
+  }> = [];
+
+  const lowMcLosers = losers.filter(
+    (e) =>
+      e.entryMarketCapUsd != null &&
+      Number.isFinite(e.entryMarketCapUsd) &&
+      e.entryMarketCapUsd > 0 &&
+      e.entryMarketCapUsd < (def.match.minMarketCapUsd || def.match.preferMarketCapUsd || 50_000)
+  );
+  if (lowMcLosers.length / losers.length >= 0.4) {
+    const cur = def.match.minMarketCapUsd || 0;
+    const prefer = def.match.preferMarketCapUsd || cur;
+    const suggested = Math.round(Math.max(cur, prefer * 0.85) * 1.15);
+    if (suggested > cur) {
+      out.push({
+        summary: `${Math.round((lowMcLosers.length / losers.length) * 100)}% of losers below lane MC soft/hard — consider raising Min MC (raise-only)`,
+        field: 'minMarketCapUsd',
+        current: cur || null,
+        suggested,
+      });
+    }
+  }
+
+  const lowConv = losers.filter(
+    (e) => e.convictionScore != null && e.convictionScore < 45
+  );
+  if (lowConv.length / losers.length >= 0.4) {
+    const cur = Number(def.match.minConviction) || 0;
+    const suggested = Math.min(85, Math.max(cur + 5, 45));
+    if (suggested > cur) {
+      out.push({
+        summary: `Weak-conviction losers (${lowConv.length}/${losers.length}) — raise min conviction (raise-only)`,
+        field: 'minConviction',
+        current: cur || null,
+        suggested,
+      });
+    }
+  }
+
+  const lowWallets = losers.filter(
+    (e) => e.walletCount != null && e.walletCount <= 1
+  );
+  if (lowWallets.length / losers.length >= 0.35) {
+    const cur = Number(def.match.minWalletCount) || 1;
+    const suggested = Math.min(5, Math.max(cur + 1, 2));
+    if (suggested > cur) {
+      out.push({
+        summary: `Single-wallet losers (${lowWallets.length}/${losers.length}) — raise min wallet count (raise-only)`,
+        field: 'minWalletCount',
+        current: cur,
+        suggested,
+      });
+    }
+  }
+
+  return out.slice(0, 3);
+}
+
 export function setProfileSelfLearningMinTrades(
   profileId: TradeProfileId | string,
   minTrades: number
@@ -4598,6 +4721,8 @@ export function evaluateProfileSelfLearn(
   nearMiss?: import('./profileSelfLearning').SelfLearnNearMiss | null;
   lastMutation?: import('./profileSelfLearning').SelfLearnLastMutation | null;
   nextEligibleIn?: number;
+  mlAdvice?: import('./profileLearningMl').MlAdvice | null;
+  mlMode?: import('./profileLearningMl').MlLearnMode;
 } {
   const id = profileId as TradeProfileId;
   if (!ALL_IDS.includes(id) || id === 'default') {
@@ -4620,6 +4745,10 @@ export function evaluateProfileSelfLearn(
 
   const state = ensureState();
   let sl = normalizeSelfLearning(state.selfLearning?.[id]);
+  const mlMeta = () => ({
+    mlAdvice: sl.mlAdvice ?? null,
+    mlMode: sl.mlMode || 'shadow',
+  });
   if (!sl.enabled) {
     return {
       status: getTradeProfilesStatus(),
@@ -4628,6 +4757,7 @@ export function evaluateProfileSelfLearn(
       nearMiss: sl.nearMiss,
       lastMutation: sl.lastMutation,
       nextEligibleIn: sl.nextEligibleIn,
+      ...mlMeta(),
     };
   }
 
@@ -4640,6 +4770,7 @@ export function evaluateProfileSelfLearn(
       nearMiss: sl.nearMiss,
       lastMutation: sl.lastMutation,
       nextEligibleIn: sl.nextEligibleIn,
+      ...mlMeta(),
     };
   }
 
@@ -4696,6 +4827,7 @@ export function evaluateProfileSelfLearn(
       nearMiss: sl.nearMiss,
       lastMutation: sl.lastMutation,
       nextEligibleIn: sl.nextEligibleIn,
+      ...mlMeta(),
     };
   }
 
@@ -4729,6 +4861,7 @@ export function evaluateProfileSelfLearn(
       nearMiss: null,
       lastMutation: sl.lastMutation,
       nextEligibleIn: sl.nextEligibleIn,
+      ...mlMeta(),
     };
   }
 
@@ -4749,6 +4882,7 @@ export function evaluateProfileSelfLearn(
       nearMiss: sl.nearMiss,
       lastMutation: sl.lastMutation,
       nextEligibleIn: sl.nextEligibleIn,
+      ...mlMeta(),
     };
   }
 
@@ -4757,12 +4891,13 @@ export function evaluateProfileSelfLearn(
     ? ` Near-miss: Δscore ${nm.scoreDelta >= 0 ? '+' : ''}${nm.scoreDelta.toFixed(2)} vs margin ${nm.scoreMargin.toFixed(2)} (need ${nm.needed.toFixed(2)} more) — ${nm.patternHint || nm.summary}`
     : ' No pattern cleared the softer score margin yet.';
   const lastLine = sl.lastMutation
-    ? ` Last tweak (${sl.lastMutation.kind}): ${sl.lastMutation.summary}`
+    ? ` Last tweak (${sl.lastMutation.kind}${sl.lastMutation.source ? '/' + sl.lastMutation.source : ''}): ${sl.lastMutation.summary}`
     : '';
   const nextLine =
     sl.mode === 'auto'
       ? ` Next micro check in ${sl.nextEligibleIn} close(s).`
       : ' Mode is shadow — switch to auto for continuous micro-tweaks, or Apply proposals manually.';
+  const mlLine = sl.mlAdvice?.summary ? ` ML: ${sl.mlAdvice.summary}` : '';
 
   return {
     status: getTradeProfilesStatus(),
@@ -4772,10 +4907,12 @@ export function evaluateProfileSelfLearn(
       nearLine +
       lastLine +
       nextLine +
+      mlLine +
       ' Level counts applied upgrades — not episode count.',
     nearMiss: sl.nearMiss,
     lastMutation: sl.lastMutation,
     nextEligibleIn: sl.nextEligibleIn,
+    ...mlMeta(),
   };
 }
 

@@ -41,6 +41,19 @@ export interface ProfileLearningEpisode {
   scannerPlaybook?: string;
   qualityTier?: 'low' | 'medium' | 'high';
   failureCategory?: string;
+  /** Tabular ML features (optional — denser than path replay) */
+  entryLiquidityUsd?: number;
+  holdMinAtEntry?: number;
+  trailStopPctAtOpen?: number;
+  trailingActivationProfitAtOpen?: number;
+  profitLockArmAtOpen?: number;
+  givebackPtsAtOpen?: number;
+  /** UTC hour 0–23 at open */
+  hourUtc?: number;
+  microVersion?: number;
+  /** Lane fight / auto-score at stamp */
+  laneScore?: number;
+  top10HoldPct?: number | null;
 }
 
 interface EpisodesFile {

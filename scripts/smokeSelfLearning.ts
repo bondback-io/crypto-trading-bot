@@ -260,6 +260,68 @@ const badge = formatSelfLearnBadge({
 });
 check('badge shows improvement', /\+60%/.test(badge) && /Upgraded/.test(badge), badge);
 
+// ML trainer on synthetic episodes
+{
+  const {
+    trainProfileMlModel,
+    scorePatchWithMl,
+    mlWeight,
+    buildMlAdvice,
+  } = require('../src/profileLearningMl') as typeof import('../src/profileLearningMl');
+  const {
+    clearProfileLearningEpisodes,
+    appendProfileLearningEpisode,
+  } = require('../src/profileLearningEpisodes') as typeof import('../src/profileLearningEpisodes');
+  clearProfileLearningEpisodes('scalper');
+  for (let i = 0; i < 48; i++) {
+    appendProfileLearningEpisode({
+      profileId: 'scalper',
+      mint: `Ml${i}`,
+      symbol: `M${i}`,
+      openedAt: Date.now() - 60_000,
+      closedAt: Date.now(),
+      holdSec: 90,
+      pnlPct: i % 3 === 0 ? -10 : 8,
+      pnlSol: i % 3 === 0 ? -0.01 : 0.02,
+      exitReason: i % 3 === 0 ? 'stop loss' : 'trail',
+      maxRunupPct: 40,
+      maxDrawdownPct: -8,
+      givebackFromPeakPct: 20,
+      peakUnrealizedPct: 40,
+      exitUnrealizedPct: i % 3 === 0 ? -10 : 8,
+      paramVersion: 0,
+      convictionScore: 40 + (i % 20),
+      walletCount: 1 + (i % 3),
+      hourUtc: i % 24,
+    });
+  }
+  const model = trainProfileMlModel('scalper');
+  check('ML trains at ≥40 episodes', !!model && (model?.nTrain || 0) >= 20, model ? `n=${model.nTrain} auc=${model.holdoutAuc.toFixed(2)}` : 'null');
+  const w = mlWeight(48, model?.holdoutAuc || 0.5, 'hybrid');
+  check('ML hybrid weight is 0 below 50 eps', w === 0, `w=${w}`);
+  const w2 = mlWeight(120, 0.62, 'hybrid');
+  check('ML hybrid weight rises with n+auc', w2 > 0.1 && w2 <= 0.55, `w=${w2.toFixed(3)}`);
+  const advice = buildMlAdvice(
+    'scalper',
+    require('../src/profileLearningEpisodes').getProfileLearningEpisodes('scalper', 80),
+    [
+      {
+        summary: 'Tighten giveback',
+        patch: { exitRules: { exitPolicy: { profitGivebackPts: 18 } } },
+      },
+    ],
+    { mlMode: 'shadow' }
+  );
+  check('ML shadow advice produced', !!advice && !!advice.summary, advice?.summary);
+  const scored = scorePatchWithMl(
+    'scalper',
+    require('../src/profileLearningEpisodes').getProfileLearningEpisodes('scalper', 80),
+    { exitRules: { exitPolicy: { profitGivebackPts: 18 } } },
+    { mlMode: 'shadow' }
+  );
+  check('ML shadow score weight is 0', scored.weight === 0, `w=${scored.weight}`);
+}
+
 void scoreEpisodesHeuristic;
 
 console.log(failed === 0 ? '\nAll smoke checks passed.' : `\n${failed} failed.`);

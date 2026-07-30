@@ -392,16 +392,22 @@ function maybeRecordLearningEpisode(
         ? (position.closedAt - position.openedAt) / 1000
         : 0;
     let paramVersion = position.selfLearnVersion ?? 0;
+    let microVersion = 0;
     try {
       const { getProfileSelfLearning } =
         require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const sl = getProfileSelfLearning(profileId);
+      microVersion = sl.microVersion || 0;
       paramVersion =
-        position.selfLearnVersion ??
-        getProfileSelfLearning(profileId).version ??
-        0;
+        position.selfLearnVersion ?? sl.version ?? paramVersion;
     } catch {
       /* ignore */
     }
+    const pol = (position.profileExitPolicy || {}) as {
+      profitLockArmPct?: number;
+      profitGivebackPts?: number;
+    };
+    const opened = position.openedAt || Date.now();
     appendProfileLearningEpisode({
       profileId,
       mint: position.mint,
@@ -423,6 +429,40 @@ function maybeRecordLearningEpisode(
       scannerPlaybook: position.scannerPlaybook,
       qualityTier: position.qualityTier,
       failureCategory: computeFailureCategory(position),
+      trailStopPctAtOpen:
+        position.trailingStopPct != null && Number.isFinite(position.trailingStopPct)
+          ? Number(position.trailingStopPct)
+          : undefined,
+      trailingActivationProfitAtOpen:
+        position.trailingActivationProfit != null &&
+        Number.isFinite(position.trailingActivationProfit)
+          ? Number(position.trailingActivationProfit)
+          : undefined,
+      profitLockArmAtOpen:
+        pol.profitLockArmPct != null && Number.isFinite(Number(pol.profitLockArmPct))
+          ? Number(pol.profitLockArmPct)
+          : undefined,
+      givebackPtsAtOpen:
+        pol.profitGivebackPts != null &&
+        Number.isFinite(Number(pol.profitGivebackPts))
+          ? Number(pol.profitGivebackPts)
+          : undefined,
+      holdMinAtEntry:
+        position.deadVolumeMinHoldMinutes != null &&
+        Number.isFinite(position.deadVolumeMinHoldMinutes)
+          ? Number(position.deadVolumeMinHoldMinutes)
+          : undefined,
+      hourUtc: new Date(opened).getUTCHours(),
+      microVersion,
+      laneScore:
+        position.tradeProfileScore != null &&
+        Number.isFinite(position.tradeProfileScore)
+          ? Number(position.tradeProfileScore)
+          : undefined,
+      top10HoldPct:
+        position.top10HoldPct != null && Number.isFinite(Number(position.top10HoldPct))
+          ? Number(position.top10HoldPct)
+          : null,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');

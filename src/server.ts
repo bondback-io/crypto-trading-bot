@@ -2472,6 +2472,7 @@ export function createServer(): express.Application {
       resetProfileSelfLearning,
       setProfileSelfLearningMinTrades,
       evaluateProfileSelfLearn,
+      setProfileSelfLearningMlMode,
     } = require('./tradeProfiles') as typeof import('./tradeProfiles');
     ensureTradeProfilesInitialized();
     const body = (req.body ?? {}) as {
@@ -2480,6 +2481,7 @@ export function createServer(): express.Application {
       profileId?: string;
       selfLearningEnabled?: boolean;
       selfLearningMode?: 'shadow' | 'auto';
+      selfLearningMlMode?: 'off' | 'shadow' | 'hybrid' | 'lead';
       minTrades?: number;
       applySelfLearnProposal?: boolean;
       rejectSelfLearnProposal?: boolean;
@@ -2496,12 +2498,28 @@ export function createServer(): express.Application {
       };
     };
     try {
+      if (
+        body.profileId &&
+        body.selfLearningMlMode &&
+        typeof body.selfLearningEnabled !== 'boolean'
+      ) {
+        setProfileSelfLearningMlMode(body.profileId, body.selfLearningMlMode);
+        res.json({
+          ok: true,
+          tradeProfiles: getTradeProfilesStatus(),
+          intelligence: paperTrader.getTradeProfileIntelligence(),
+        });
+        return;
+      }
       if (body.profileId && typeof body.selfLearningEnabled === 'boolean') {
         setProfileSelfLearningEnabled(
           body.profileId,
           body.selfLearningEnabled,
           body.selfLearningMode
         );
+        if (body.selfLearningMlMode) {
+          setProfileSelfLearningMlMode(body.profileId, body.selfLearningMlMode);
+        }
         if (body.minTrades != null && Number.isFinite(Number(body.minTrades))) {
           setProfileSelfLearningMinTrades(body.profileId, Number(body.minTrades));
         }
@@ -2549,6 +2567,8 @@ export function createServer(): express.Application {
           nearMiss: evaluated.nearMiss ?? null,
           lastMutation: evaluated.lastMutation ?? null,
           nextEligibleIn: evaluated.nextEligibleIn ?? 0,
+          mlAdvice: evaluated.mlAdvice ?? null,
+          mlMode: evaluated.mlMode ?? 'shadow',
           tradeProfiles: evaluated.status,
           intelligence: paperTrader.getTradeProfileIntelligence(),
         });

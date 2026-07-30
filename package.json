@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "calibrate:recipes": "tsx scripts/calibrateRiskRecipes.ts",
     "calibrate:recipes:verify": "tsx scripts/calibrateRiskRecipes.ts --phase=verify",
+    "export:learning": "tsx scripts/exportLearningDataset.ts",
     "fly:launch": "fly launch --no-deploy",
     "fly:deploy": "fly deploy",
     "fly:logs": "fly logs",
