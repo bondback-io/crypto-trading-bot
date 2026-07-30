@@ -581,8 +581,8 @@ export function createServer(): express.Application {
         require('./githubSiteBackup') as typeof import('./githubSiteBackup');
       const result = await uploadSiteBackupToGithub({ reason: 'manual' });
       res.json({
-        ok: true,
         ...result,
+        ok: true,
         status: getGithubBackupStatus(),
         meta: (() => {
           const { getLatestSiteBackupMeta } =
