@@ -11885,12 +11885,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /** Bumped when a known fill paints positions — blocks stale in-flight refresh overwrites */
     window._openPositionsGen = window._openPositionsGen || 0;
 
+    /** Keep enrichment the fast poll used to omit (e.g. technicalLevels) so rows don't grow/shrink. */
+    function mergeOpenPositionsPreserve(prev, next) {
+      const prevList = Array.isArray(prev) ? prev : [];
+      const nextList = Array.isArray(next) ? next : [];
+      if (!prevList.length) return nextList;
+      const byId = new Map();
+      prevList.forEach((p) => {
+        if (p && p.id != null) byId.set(String(p.id), p);
+      });
+      return nextList.map((p) => {
+        if (!p || p.id == null) return p;
+        const old = byId.get(String(p.id));
+        if (!old) return p;
+        let out = p;
+        if (p.technicalLevels == null && old.technicalLevels != null) {
+          out = Object.assign({}, out, { technicalLevels: old.technicalLevels });
+        }
+        if ((p.name == null || p.name === '') && old.name) {
+          out = out === p ? Object.assign({}, out, { name: old.name }) : Object.assign(out, { name: old.name });
+        }
+        return out;
+      });
+    }
+
     function applyOpenPositionsList(list, opts) {
       const fromFill = opts && opts.fromFill === true;
       if (fromFill) {
         window._openPositionsGen = (window._openPositionsGen || 0) + 1;
       }
-      window._lastOpenPositions = Array.isArray(list) ? list : [];
+      const incoming = Array.isArray(list) ? list : [];
+      window._lastOpenPositions = mergeOpenPositionsPreserve(
+        window._lastOpenPositions,
+        incoming
+      );
       if (typeof paintOpenPositionsTables === 'function') {
         paintOpenPositionsTables();
       }
@@ -11988,7 +12016,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._openProfileFilter || 'all',
         ids
       );
-      els.forEach((el) => { el.innerHTML = html; });
+      // Avoid rewriting identical filter chrome on every 2s poll (layout flicker).
+      els.forEach((el) => {
+        if (el.getAttribute('data-filter-html') === html) return;
+        el.setAttribute('data-filter-html', html);
+        el.innerHTML = html;
+      });
     }
 
     function filterClosedTradeGroups(groups, filter) {
@@ -12164,6 +12197,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (typeof window._renderOpenPositionsHtml === 'function') {
         const html = window._renderOpenPositionsHtml(list);
         document.querySelectorAll('#positions-table tbody, #trades-positions-table tbody').forEach((ptbody) => {
+          // Skip no-op repaints — identical HTML still forced reflow/flicker every poll.
+          if (ptbody.getAttribute('data-pos-html') === html) return;
+          ptbody.setAttribute('data-pos-html', html);
           ptbody.innerHTML = html;
         });
         ensurePosHoldTicker();
@@ -16041,7 +16077,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._trailArmAt = trailArmAt;
       // Skip stale positions if Place Trade / fast fill painted while this refresh was in-flight
       if ((window._openPositionsGen || 0) === positionsGenAtStart) {
-        window._lastOpenPositions = positions.open || [];
+        window._lastOpenPositions = mergeOpenPositionsPreserve(
+          window._lastOpenPositions,
+          positions.open || []
+        );
       }
       window._renderOpenPositionsHtml = function renderOpenPositionsHtml(list) {
         const armAt = window._trailArmAt != null ? window._trailArmAt : 30;

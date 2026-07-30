@@ -1678,19 +1678,8 @@ export function createServer(): express.Application {
       req.query.fast === 'true' ||
       req.query.lite === '1';
     const openRaw = paperTrader.getOpenPositions();
-    if (fast) {
-      res.json({
-        open: openRaw,
-        closed: paperTrader.getClosedPositions(),
-        sellHistory: getSellHistory(),
-        rebuy: {
-          status: getReBuyStatus(),
-          candidates: getReBuyCandidates(),
-        },
-        fast: true,
-      });
-      return;
-    }
+    // Always attach technicalLevels so fast (2s) and full (5s) polls paint
+    // the same TOKEN meta height — omitting it caused open-row flicker/resize.
     const {
       getTechnicalSnapshot,
       technicalLevelsPublic,
@@ -1713,6 +1702,7 @@ export function createServer(): express.Application {
         status: getReBuyStatus(),
         candidates: getReBuyCandidates(),
       },
+      ...(fast ? { fast: true } : {}),
     });
   });
 

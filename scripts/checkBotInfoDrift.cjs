@@ -1,11 +1,25 @@
 /**
  * Fail if Bot Info snapshot drifts from live catalogs.
- * Run: npm run check:botinfo
+ * Runs against compiled dist/ (no tsx) — safe for Render production builds.
+ *
+ * Run: npm run check:botinfo   (after tsc)
+ * Or:  npm run build           (tsc then this)
  */
-import {
+const path = require('path');
+const fs = require('fs');
+
+const distFile = path.join(__dirname, '..', 'dist', 'botInfoSnapshot.js');
+if (!fs.existsSync(distFile)) {
+  console.error(
+    'Bot Info drift check: dist/botInfoSnapshot.js missing. Run tsc first.'
+  );
+  process.exit(1);
+}
+
+const {
   buildBotInfoSnapshot,
   collectBotInfoDriftErrors,
-} from '../src/botInfoSnapshot';
+} = require(distFile);
 
 const snap = buildBotInfoSnapshot();
 const errors = collectBotInfoDriftErrors(snap);
