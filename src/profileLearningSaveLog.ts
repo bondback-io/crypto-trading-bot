@@ -17,6 +17,7 @@ export type LearningSaveKind =
   | 'knobs'
   | 'episode'
   | 'upgrade'
+  | 'micro'
   | 'toggle'
   | 'reset'
   | 'min_trades';
@@ -215,6 +216,7 @@ function learningKindSearchBlob(e: LearningSaveEntry): string {
     knobs: 'knobs settings',
     episode: 'episode trade closed',
     upgrade: 'upgrade level',
+    micro: 'micro tweak mutation',
     toggle: 'toggle learning',
     reset: 'reset',
     min_trades: 'min trades',
@@ -292,6 +294,9 @@ export function getLearningHealthSummary(options?: {
   totalEpisodes: number;
   userFileUpdatedAt: number | null;
   lastSaveAt: number | null;
+  /** Journal remembers learning but episode files are empty/gone */
+  episodesDroppedLikely: boolean;
+  learningFilesMissing: boolean;
   bots: Array<{
     id: string;
     name: string;
@@ -372,14 +377,40 @@ export function getLearningHealthSummary(options?: {
     /* optional */
   }
 
+  const journal = loadEntries();
   const lastSaveAt =
-    loadEntries().reduce((max, e) => Math.max(max, Number(e.at) || 0), 0) || null;
+    journal.reduce((max, e) => Math.max(max, Number(e.at) || 0), 0) || null;
+  const journalHadLearning = journal.some(
+    (e) =>
+      e.kind === 'episode' ||
+      e.kind === 'upgrade' ||
+      e.kind === 'micro' ||
+      (e.episodeCount != null && e.episodeCount > 0)
+  );
+  const journalMaxEpisodes = journal.reduce(
+    (max, e) => Math.max(max, Number(e.episodeCount) || 0),
+    0
+  );
+  /** Episodes vanished after boot/deploy while journal still remembers prior learning */
+  const episodesDroppedLikely =
+    journalHadLearning &&
+    totalEpisodes === 0 &&
+    (journalMaxEpisodes > 0 ||
+      journal.some((e) => e.kind === 'episode' || e.kind === 'upgrade'));
+  const learningFilesMissing =
+    !persistence.profileLearningExists &&
+    (learningOnCount > 0 || journalHadLearning);
 
   let health: 'ok' | 'degraded' | 'at_risk' = 'ok';
   let reason = '';
   if (!persistence.writable) {
     health = 'at_risk';
     reason = 'Data directory is not writable — learning cannot be saved.';
+  } else if (episodesDroppedLikely || learningFilesMissing) {
+    health = 'at_risk';
+    reason = episodesDroppedLikely
+      ? 'Learning episodes missing after boot — prior journal exists but episode files are empty/gone. Mount DATA_DIR on a durable disk and restore a backup.'
+      : 'Learning episode files missing — self-learning progress will not persist. Attach a Disk at DATA_DIR.';
   } else if (persistence.onRender || persistence.onFly) {
     if (!persistence.volumeMounted || !persistence.durableLikely || persistence.warning) {
       health = 'at_risk';
@@ -405,7 +436,7 @@ export function getLearningHealthSummary(options?: {
   for (const b of bots) {
     filterBotMap.set(b.id, b.name);
   }
-  for (const e of loadEntries()) {
+  for (const e of journal) {
     if (e.profileId && !filterBotMap.has(e.profileId)) {
       filterBotMap.set(e.profileId, e.botName || e.profileId);
     }
@@ -423,6 +454,8 @@ export function getLearningHealthSummary(options?: {
     totalEpisodes,
     userFileUpdatedAt,
     lastSaveAt,
+    episodesDroppedLikely,
+    learningFilesMissing,
     bots,
     filterBots,
     saves,

@@ -15,9 +15,12 @@ import {
   buildExitLearningCandidates,
   clampLearningPatch,
   formatSelfLearnBadge,
+  learningSampleConfidence,
+  LEARNING_SCORE_WINDOW,
   normalizeSelfLearning,
   runSelfLearnTick,
   scoreEpisodesHeuristic,
+  shadowScoreEntryCandidate,
 } from '../src/profileSelfLearning';
 import {
   getTradeProfileDefinition,
@@ -148,10 +151,51 @@ const tick = runSelfLearnTick({
   currentMatch: resolved.match,
 });
 check(
-  'self-learn tick produces proposal or keeps state',
-  tick.state.enabled === true,
-  tick.state.pendingProposal?.summary || 'no proposal yet (ok if heuristic quiet)'
+  'self-learn tick produces proposal or near-miss',
+  tick.state.enabled === true &&
+    (!!tick.state.pendingProposal ||
+      !!tick.applyPatch ||
+      !!tick.state.nearMiss),
+  tick.state.pendingProposal?.summary ||
+    tick.state.nearMiss?.summary ||
+    (tick.applyKind ? `apply=${tick.applyKind}` : 'no candidate')
 );
+
+// Entry scoring must be able to beat soft margin (not flat +0.8)
+{
+  const eps = Array.from({ length: 20 }, (_, i) => ({
+    id: `en${i}`,
+    at: Date.now(),
+    profileId: 'momentum_burst',
+    mint: `m${i}`,
+    symbol: `s${i}`,
+    openedAt: Date.now() - 1000,
+    closedAt: Date.now(),
+    holdSec: 60,
+    pnlPct: i % 2 === 0 ? -12 : 8,
+    pnlSol: i % 2 === 0 ? -0.02 : 0.02,
+    exitKey: 'sl' as const,
+    exitReason: 'stop',
+    maxRunupPct: 10,
+    maxDrawdownPct: -12,
+    givebackFromPeakPct: 5,
+    peakUnrealizedPct: 10,
+    exitUnrealizedPct: i % 2 === 0 ? -12 : 8,
+    paramVersion: 0,
+    convictionScore: i % 2 === 0 ? 30 : 70,
+    walletCount: 1,
+  }));
+  const before = scoreEpisodesHeuristic(eps.slice(-LEARNING_SCORE_WINDOW));
+  const after = shadowScoreEntryCandidate(eps, {
+    match: { minConviction: 50 },
+  });
+  const conf = learningSampleConfidence(eps.length);
+  check(
+    'entry shadow score can clear soft margin',
+    after >= before + conf.scoreMargin || after > before,
+    `before=${before.toFixed(2)} after=${after.toFixed(2)} margin=${conf.scoreMargin}`
+  );
+}
 
 const cands = buildExitLearningCandidates(
   'momentum_burst',

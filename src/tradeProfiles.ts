@@ -4297,9 +4297,9 @@ export function ensureSelfLearningDefaultsForAllProfiles(options?: {
         ...(raw && typeof raw === 'object' ? raw : {}),
         enabled: true,
         mode:
-          raw && typeof raw === 'object' && raw.mode === 'auto'
-            ? 'auto'
-            : 'shadow',
+          raw && typeof raw === 'object' && raw.mode === 'shadow'
+            ? 'shadow'
+            : 'auto',
       });
       if (wasOff) seeded += 1;
       continue;
@@ -4317,7 +4317,7 @@ export function ensureSelfLearningDefaultsForAllProfiles(options?: {
       ...DEFAULT_SELF_LEARNING,
       ...(raw && typeof raw === 'object' ? raw : {}),
       enabled: true,
-      mode: 'shadow',
+      mode: 'auto',
     });
     seeded += 1;
   }
@@ -4351,7 +4351,10 @@ export function setProfileSelfLearningEnabled(
   const next = normalizeSelfLearning({
     ...prev,
     enabled: Boolean(enabled),
-    mode: mode === 'auto' ? 'auto' : prev.mode || 'shadow',
+    mode:
+      mode === 'auto' || mode === 'shadow'
+        ? mode
+        : prev.mode || 'auto',
   });
   writeProfileSelfLearning(id, next, {
     kind: 'toggle',
@@ -4475,12 +4478,14 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
     normalizeSelfLearning,
     runSelfLearnTick,
     applySelfLearnUpgrade,
+    applySelfLearnMicro,
     refreshSelfLearnMetrics,
   } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
   const state = ensureState();
   let sl = normalizeSelfLearning(state.selfLearning?.[id]);
   if (!sl.enabled) return;
   sl.tradesSinceUpgrade = (sl.tradesSinceUpgrade || 0) + 1;
+  sl.tradesSinceMicro = (sl.tradesSinceMicro || 0) + 1;
   sl = refreshSelfLearnMetrics(sl, id);
 
   const catalog = getTradeProfileDefinition(id);
@@ -4508,6 +4513,35 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
     writeProfileSelfLearning(id, sl, {
       kind: 'reset',
       summary: `Rolled back to v${sl.version}`,
+    });
+    return;
+  }
+
+  if (tick.applyPatch && tick.applyKind === 'micro') {
+    const proposal = sl.pendingProposal || {
+      at: Date.now(),
+      summary: 'Micro tweak',
+      patch: tick.applyPatch,
+      scoreBefore: 0,
+      scoreAfter: 0,
+      kind: 'exit' as const,
+    };
+    applyTradeProfileLearning(id, {
+      patch: tick.applyPatch as {
+        exitRules?: Partial<TradeProfileExitRules>;
+        match?: Record<string, number | boolean>;
+      },
+    });
+    sl = applySelfLearnMicro(sl, {
+      ...proposal,
+      patch: tick.applyPatch,
+    });
+    console.log(
+      `[self-learn] ${id} micro v${sl.microVersion}: ${sl.lastMutation?.summary || ''}`
+    );
+    writeProfileSelfLearning(id, sl, {
+      kind: 'micro',
+      summary: sl.lastMutation?.summary || `Micro tweak m${sl.microVersion}`,
     });
     return;
   }
@@ -4557,9 +4591,13 @@ export function evaluateProfileSelfLearn(
     | 'no_candidate'
     | 'proposal'
     | 'upgraded'
+    | 'micro'
     | 'error';
   message: string;
   proposalSummary?: string;
+  nearMiss?: import('./profileSelfLearning').SelfLearnNearMiss | null;
+  lastMutation?: import('./profileSelfLearning').SelfLearnLastMutation | null;
+  nextEligibleIn?: number;
 } {
   const id = profileId as TradeProfileId;
   if (!ALL_IDS.includes(id) || id === 'default') {
@@ -4573,6 +4611,7 @@ export function evaluateProfileSelfLearn(
     normalizeSelfLearning,
     runSelfLearnTick,
     applySelfLearnUpgrade,
+    applySelfLearnMicro,
     refreshSelfLearnMetrics,
     humanizeLearningPatch,
   } = require('./profileSelfLearning') as typeof import('./profileSelfLearning');
@@ -4586,6 +4625,9 @@ export function evaluateProfileSelfLearn(
       status: getTradeProfilesStatus(),
       result: 'disabled',
       message: 'Self-learning is OFF for this bot',
+      nearMiss: sl.nearMiss,
+      lastMutation: sl.lastMutation,
+      nextEligibleIn: sl.nextEligibleIn,
     };
   }
 
@@ -4594,12 +4636,16 @@ export function evaluateProfileSelfLearn(
     return {
       status: getTradeProfilesStatus(),
       result: 'need_trades',
-      message: `Need ${sl.minTrades - episodes.length} more closed trade(s) (min ${sl.minTrades}, have ${episodes.length})`,
+      message: `Need ${sl.minTrades - episodes.length} more closed trade(s) (min ${sl.minTrades}, have ${episodes.length}). Level counts applied upgrades — not episodes.`,
+      nearMiss: sl.nearMiss,
+      lastMutation: sl.lastMutation,
+      nextEligibleIn: sl.nextEligibleIn,
     };
   }
 
   sl = refreshSelfLearnMetrics(sl, id);
-  // Bypass cooldown for manual checks (restore / user-triggered).
+  // Bypass upgrade cooldown for manual checks (restore / user-triggered).
+  // Do not force micro eligibility — micros apply on closes in auto mode.
   const tickState = normalizeSelfLearning({
     ...sl,
     tradesSinceUpgrade: Math.max(
@@ -4620,11 +4666,40 @@ export function evaluateProfileSelfLearn(
   });
   sl = {
     ...tick.state,
-    // Keep real tradesSinceUpgrade from disk (don't invent closes).
+    // Keep real counters from disk (don't invent closes).
     tradesSinceUpgrade: sl.tradesSinceUpgrade,
+    tradesSinceMicro: sl.tradesSinceMicro,
   };
 
-  if (tick.applyPatch && sl.pendingProposal) {
+  if (tick.applyPatch && tick.applyKind === 'micro' && sl.pendingProposal) {
+    applyTradeProfileLearning(id, {
+      patch: tick.applyPatch as {
+        exitRules?: Partial<TradeProfileExitRules>;
+        match?: Record<string, number | boolean>;
+      },
+    });
+    sl = applySelfLearnMicro(sl, {
+      ...sl.pendingProposal,
+      patch: tick.applyPatch,
+    });
+    writeProfileSelfLearning(id, sl, {
+      kind: 'micro',
+      summary: sl.lastMutation?.summary || `Micro tweak m${sl.microVersion}`,
+    });
+    return {
+      status: getTradeProfilesStatus(),
+      result: 'micro',
+      message:
+        sl.lastMutation?.summary ||
+        `Applied micro tweak m${sl.microVersion} (Level unchanged)`,
+      proposalSummary: sl.lastMutation?.summary,
+      nearMiss: sl.nearMiss,
+      lastMutation: sl.lastMutation,
+      nextEligibleIn: sl.nextEligibleIn,
+    };
+  }
+
+  if (tick.applyPatch && sl.pendingProposal && tick.applyKind !== 'micro') {
     const prevOv = state.overrides?.[id]
       ? (JSON.parse(
           JSON.stringify(state.overrides[id])
@@ -4651,28 +4726,56 @@ export function evaluateProfileSelfLearn(
       result: 'upgraded',
       message: last?.summary || `Upgraded to Level ${sl.version}`,
       proposalSummary: last?.summary,
+      nearMiss: null,
+      lastMutation: sl.lastMutation,
+      nextEligibleIn: sl.nextEligibleIn,
     };
   }
 
   writeProfileSelfLearning(id, sl);
   if (sl.pendingProposal) {
     const changes = humanizeLearningPatch(sl.pendingProposal.patch);
+    const delta =
+      (sl.pendingProposal.scoreAfter || 0) - (sl.pendingProposal.scoreBefore || 0);
     return {
       status: getTradeProfilesStatus(),
       result: 'proposal',
       message:
         sl.pendingProposal.summary +
         (changes ? ` · ${changes}` : '') +
-        ' — open the card and Apply to raise Level',
+        ` · Δscore ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}` +
+        ' — open the card and Apply to raise Level (Level = applied upgrades, not episodes)',
       proposalSummary: sl.pendingProposal.summary,
+      nearMiss: sl.nearMiss,
+      lastMutation: sl.lastMutation,
+      nextEligibleIn: sl.nextEligibleIn,
     };
   }
+
+  const nm = sl.nearMiss;
+  const nearLine = nm
+    ? ` Near-miss: Δscore ${nm.scoreDelta >= 0 ? '+' : ''}${nm.scoreDelta.toFixed(2)} vs margin ${nm.scoreMargin.toFixed(2)} (need ${nm.needed.toFixed(2)} more) — ${nm.patternHint || nm.summary}`
+    : ' No pattern cleared the softer score margin yet.';
+  const lastLine = sl.lastMutation
+    ? ` Last tweak (${sl.lastMutation.kind}): ${sl.lastMutation.summary}`
+    : '';
+  const nextLine =
+    sl.mode === 'auto'
+      ? ` Next micro check in ${sl.nextEligibleIn} close(s).`
+      : ' Mode is shadow — switch to auto for continuous micro-tweaks, or Apply proposals manually.';
 
   return {
     status: getTradeProfilesStatus(),
     result: 'no_candidate',
     message:
-      'No upgrade candidate yet — heuristics need a clear pattern that beats the score margin (shadow scoring)',
+      'No Level upgrade yet.' +
+      nearLine +
+      lastLine +
+      nextLine +
+      ' Level counts applied upgrades — not episode count.',
+    nearMiss: sl.nearMiss,
+    lastMutation: sl.lastMutation,
+    nextEligibleIn: sl.nextEligibleIn,
   };
 }
 

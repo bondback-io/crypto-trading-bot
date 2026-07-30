@@ -2546,6 +2546,9 @@ export function createServer(): express.Application {
           result: evaluated.result,
           message: evaluated.message,
           proposalSummary: evaluated.proposalSummary,
+          nearMiss: evaluated.nearMiss ?? null,
+          lastMutation: evaluated.lastMutation ?? null,
+          nextEligibleIn: evaluated.nextEligibleIn ?? 0,
           tradeProfiles: evaluated.status,
           intelligence: paperTrader.getTradeProfileIntelligence(),
         });

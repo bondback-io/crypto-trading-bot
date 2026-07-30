@@ -6156,6 +6156,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       </div>
 
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
+      <div id="learning-durability-banner" class="hidden text-xs rounded-md px-3 py-2 border border-red-600/70 bg-red-950/50 text-red-100" role="alert"></div>
 
       <div class="setup-watches-stack space-y-3">
         <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
@@ -6740,6 +6741,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               <option value="episode">Episode</option>
               <option value="knobs">Knobs</option>
               <option value="upgrade">Upgrade</option>
+              <option value="micro">Micro</option>
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
               <option value="min_trades">Min trades</option>
@@ -8841,10 +8843,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 ' · Proposal ready — open card and Apply to raise Level (Level = applied upgrades, not episode count)'
             );
           } else if (lpEpisodes >= slMinTrades) {
-            levelTitleParts.push(
-              (p.name || p.id) +
-                ' · No upgrade candidate yet (shadow scoring). Level stays 0 until an upgrade is applied. Use Check for upgrade after restore.'
-            );
+            const nm = sl.nearMiss;
+            if (nm && Number.isFinite(Number(nm.scoreDelta))) {
+              const d = Number(nm.scoreDelta);
+              const m = Number(nm.scoreMargin) || 0;
+              const need = Number(nm.needed);
+              levelTitleParts.push(
+                (p.name || p.id) +
+                  ' · Near-miss Δscore ' +
+                  (d >= 0 ? '+' : '') +
+                  d.toFixed(2) +
+                  ' vs margin ' +
+                  m.toFixed(2) +
+                  (need > 0 ? ' (need +' + need.toFixed(2) + ')' : '') +
+                  (nm.patternHint ? ' — ' + String(nm.patternHint) : '') +
+                  '. Level stays until an upgrade is applied. Use Check for upgrade.'
+              );
+            } else {
+              levelTitleParts.push(
+                (p.name || p.id) +
+                  ' · No upgrade candidate yet. Level stays 0 until an upgrade is applied (Level ≠ episodes). Use Check for upgrade after restore.'
+              );
+            }
           } else {
             const need = Math.max(0, slMinTrades - lpEpisodes);
             levelTitleParts.push(
@@ -8903,6 +8923,20 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               ? '<span class="tp-learn-chip proposal" title="' +
                 escAttr(proposalChipTitle) +
                 '" tabindex="0">Proposal</span>'
+              : '') +
+            (sl.microVersion > 0
+              ? '<span class="tp-learn-chip" style="background:#1e3a5f;color:#93c5fd;border-color:#3b82f680" title="' +
+                escAttr(
+                  'Micro tweaks applied: m' +
+                    sl.microVersion +
+                    (sl.lastMutation && sl.lastMutation.kind === 'micro'
+                      ? '\\nLast: ' + String(sl.lastMutation.summary || '')
+                      : '') +
+                    '\\nMicros do not raise Level'
+                ) +
+                '" tabindex="0">m' +
+                escHtml(String(sl.microVersion)) +
+                '</span>'
               : '') +
             '</span>';
           const learnProgressHtml =
@@ -9437,11 +9471,27 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                 (editable
                   ? '<div class="tp-param-section">' +
                       '<p class="tp-param-title">Self-learning</p>' +
+                      '<p class="mint text-xs" style="margin:0 0 0.35rem;color:#94a3b8">Level = applied upgrades only — not episode count. Prefer <strong style="color:#86efac">auto</strong> for frequent micro-tweaks + Level upgrades (rollback still on).</p>' +
                       '<label class="tp-check">' +
                         '<input type="checkbox" data-selflearn-toggle="1"' +
                           (sl.enabled ? ' checked' : '') +
                           ' onchange="toggleProfileSelfLearning(\\'' + p.id + '\\', this.checked)" />' +
-                        '<span>Self-Learning ' + (sl.mode === 'auto' ? '(auto)' : '(shadow)') + '</span>' +
+                        '<span>Self-Learning ON</span>' +
+                      '</label>' +
+                      '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Auto applies upgrades and micro-tweaks. Shadow only proposes Level upgrades until you Apply.">' +
+                        'Mode' +
+                        '<select data-selflearn-mode="' +
+                        escAttr(p.id) +
+                        '" onchange="setProfileSelfLearnMode(\\'' +
+                        p.id +
+                        '\\', this.value)" style="width:auto;min-width:6rem">' +
+                          '<option value="auto"' +
+                          (sl.mode !== 'shadow' ? ' selected' : '') +
+                          '>auto</option>' +
+                          '<option value="shadow"' +
+                          (sl.mode === 'shadow' ? ' selected' : '') +
+                          '>shadow</option>' +
+                        '</select>' +
                       '</label>' +
                       '<label class="mint text-xs" style="display:flex;align-items:center;gap:0.35rem;margin:0.35rem 0" title="Closed trades needed before proposing an upgrade (6–40). Nudges scale up as more trades feed the bot.">' +
                         'Min trades' +
@@ -9455,18 +9505,93 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       '</label>' +
                       (slBadge
                         ? '<p class="mint text-xs" style="margin:0.25rem 0;color:#4ade80">' + escHtml(slBadge) +
-                          (sl.version ? ' · v' + sl.version : '') + '</p>'
+                          (sl.version ? ' · Level ' + sl.version : ' · Level 0') +
+                          (sl.microVersion ? ' · micro m' + sl.microVersion : '') +
+                          '</p>'
                         : '<p class="mint text-xs" style="margin:0.25rem 0">Off — bot stays on fixed card knobs</p>') +
+                      (function () {
+                        const bits = [];
+                        bits.push(
+                          '<p class="mint text-xs" style="margin:0.35rem 0;line-height:1.45;color:#94a3b8">' +
+                            escHtml(String(lpEpisodes)) +
+                            ' / ' +
+                            escHtml(String(slMinTrades)) +
+                            ' min trades · mode ' +
+                            escHtml(String(sl.mode || 'auto'))
+                        );
+                        if (sl.nearMiss && Number.isFinite(Number(sl.nearMiss.scoreDelta))) {
+                          const d = Number(sl.nearMiss.scoreDelta);
+                          const m = Number(sl.nearMiss.scoreMargin) || 0;
+                          const need = Number(sl.nearMiss.needed);
+                          bits.push(
+                            '<br/><span style="color:#fbbf24">Near-miss Δscore ' +
+                              (d >= 0 ? '+' : '') +
+                              d.toFixed(2) +
+                              ' vs ' +
+                              m.toFixed(2) +
+                              (need > 0 ? ' (need +' + need.toFixed(2) + ')' : ' — at margin') +
+                              '</span>'
+                          );
+                          if (sl.nearMiss.patternHint) {
+                            bits.push(
+                              '<br/><span style="color:#64748b">' +
+                                escHtml(String(sl.nearMiss.patternHint).slice(0, 120)) +
+                                '</span>'
+                            );
+                          }
+                        } else if (sl.enabled && lpEpisodes >= slMinTrades && !sl.pendingProposal) {
+                          bits.push(
+                            '<br/><span style="color:#64748b">No near-miss scored yet — Check for upgrade after more pattern diversity</span>'
+                          );
+                        }
+                        if (sl.lastMutation && sl.lastMutation.summary) {
+                          const when = sl.lastMutation.at
+                            ? new Date(sl.lastMutation.at).toLocaleString()
+                            : '';
+                          bits.push(
+                            '<br/><span style="color:#86efac">Last ' +
+                              escHtml(String(sl.lastMutation.kind || 'tweak')) +
+                              ': ' +
+                              escHtml(String(sl.lastMutation.summary).slice(0, 100)) +
+                              (sl.lastMutation.changes
+                                ? ' · ' + escHtml(String(sl.lastMutation.changes).slice(0, 80))
+                                : '') +
+                              (when ? ' · ' + escHtml(when) : '') +
+                              '</span>'
+                          );
+                        }
+                        if (sl.mode === 'auto' && sl.enabled) {
+                          const nextIn = Math.max(0, Number(sl.nextEligibleIn) || 0);
+                          bits.push(
+                            '<br/><span style="color:#64748b">Next micro eligible in ' +
+                              nextIn +
+                              ' close' +
+                              (nextIn === 1 ? '' : 's') +
+                              '</span>'
+                          );
+                        }
+                        bits.push('</p>');
+                        return bits.join('');
+                      })() +
                       (sl.pendingProposal
                         ? '<p class="mint text-xs" style="margin:0.35rem 0">Proposal: ' +
                           escHtml(sl.pendingProposal.summary || '') +
                           (function () {
                             const ch = humanizeLearningPatchClient(sl.pendingProposal.patch);
-                            return ch
-                              ? '<br/><span style="color:#94a3b8">Changed: ' +
-                                escHtml(ch) +
-                                '</span>'
-                              : '';
+                            const d =
+                              (Number(sl.pendingProposal.scoreAfter) || 0) -
+                              (Number(sl.pendingProposal.scoreBefore) || 0);
+                            return (
+                              (ch
+                                ? '<br/><span style="color:#94a3b8">Changed: ' +
+                                  escHtml(ch) +
+                                  '</span>'
+                                : '') +
+                              '<br/><span style="color:#94a3b8">Δscore ' +
+                              (d >= 0 ? '+' : '') +
+                              d.toFixed(2) +
+                              '</span>'
+                            );
                           })() +
                           '</p>' +
                           '<div class="tp-params-actions">' +
@@ -9477,7 +9602,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
                       '<div class="tp-params-actions" style="margin-top:0.35rem">' +
                         '<button type="button" class="btn btn-secondary text-xs" onclick="evaluateProfileSelfLearn(\\'' +
                         p.id +
-                        '\\')" title="Score current episodes for an upgrade (shadow = proposal only; does not wait for a new close)">' +
+                        '\\')" title="Score current episodes for an upgrade (shadow = proposal only; auto may apply Level upgrade). Does not wait for a new close.">' +
                         'Check for upgrade</button>' +
                         '<button type="button" class="btn btn-secondary text-xs" onclick="resetProfileSelfLearning(\\'' + p.id + '\\')">Reset learning</button>' +
                       '</div>' +
@@ -10292,10 +10417,13 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           body: JSON.stringify({ id: id, params: { exitRules: exitRules, match: match } }),
         });
         if (typeof selfLearningEnabled === 'boolean') {
+          const modeSel = root.querySelector('[data-selflearn-mode]');
+          const mode =
+            modeSel && modeSel.value === 'shadow' ? 'shadow' : 'auto';
           const learnBody = {
             profileId: id,
             selfLearningEnabled: selfLearningEnabled,
-            selfLearningMode: 'shadow',
+            selfLearningMode: mode,
             minTrades: minTrades,
           };
           const learnData = await fetchJSON('/api/trade-profiles/learning', {
@@ -10328,13 +10456,16 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function toggleProfileSelfLearning(id, enabled) {
       try {
+        const card = document.getElementById('tp-card-' + id);
+        const modeSel = card && card.querySelector('[data-selflearn-mode]');
+        const mode = modeSel && modeSel.value === 'shadow' ? 'shadow' : 'auto';
         const data = await fetchJSON('/api/trade-profiles/learning', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             profileId: id,
             selfLearningEnabled: !!enabled,
-            selfLearningMode: 'shadow',
+            selfLearningMode: mode,
           }),
         });
         renderTradeProfilesUi(data.tradeProfiles || data);
@@ -10344,6 +10475,28 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
       }
     }
     window.toggleProfileSelfLearning = toggleProfileSelfLearning;
+
+    async function setProfileSelfLearnMode(id, mode) {
+      try {
+        const card = document.getElementById('tp-card-' + id);
+        const toggle = card && card.querySelector('[data-selflearn-toggle]');
+        const enabled = toggle ? !!toggle.checked : true;
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: id,
+            selfLearningEnabled: enabled,
+            selfLearningMode: mode === 'shadow' ? 'shadow' : 'auto',
+          }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.setProfileSelfLearnMode = setProfileSelfLearnMode;
 
     async function setProfileSelfLearnMinTrades(id, value) {
       try {
@@ -19869,6 +20022,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         knobs: 'Knobs',
         episode: 'Episode',
         upgrade: 'Upgrade',
+        micro: 'Micro',
         toggle: 'Toggle',
         reset: 'Reset',
         min_trades: 'Min trades',
@@ -19980,6 +20134,44 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     function applyLearningHealthStatus(data) {
       const statusEl = document.getElementById('learning-health-status');
+      const banner = document.getElementById('learning-durability-banner');
+      if (banner && data) {
+        const p = data.persistence || {};
+        const show =
+          data.health === 'at_risk' ||
+          data.episodesDroppedLikely ||
+          data.learningFilesMissing ||
+          ((p.onRender || p.onFly) && !p.durableLikely);
+        if (show) {
+          banner.classList.remove('hidden');
+          banner.innerHTML =
+            '<strong style="color:#fecaca">Self-learning may not persist</strong> — ' +
+            escHtml(data.reason || p.warning || 'Mount DATA_DIR on a durable disk.') +
+            ' <span style="color:#fca5a5">Episodes: ' +
+            escHtml(String(data.totalEpisodes || 0)) +
+            (data.episodesDroppedLikely
+              ? ' · count dropped vs journal'
+              : '') +
+            '</span>';
+        } else {
+          banner.classList.add('hidden');
+          banner.textContent = '';
+        }
+        try {
+          const prev = Number(sessionStorage.getItem('tpLearnEpisodesPeak') || 0);
+          const cur = Number(data.totalEpisodes) || 0;
+          if (cur > prev) sessionStorage.setItem('tpLearnEpisodesPeak', String(cur));
+          else if (prev >= 8 && cur < Math.floor(prev * 0.35)) {
+            banner.classList.remove('hidden');
+            banner.innerHTML =
+              '<strong style="color:#fecaca">Episode count dropped after boot</strong> — was ~' +
+              escHtml(String(prev)) +
+              ', now ' +
+              escHtml(String(cur)) +
+              '. Learning files may have wiped — check Disk / DATA_DIR and restore a backup.';
+          }
+        } catch (_) {}
+      }
       if (!statusEl || !data) return;
       const color = learningHealthColor(data.health);
       const label =
