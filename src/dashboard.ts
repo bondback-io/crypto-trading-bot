@@ -3647,6 +3647,23 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
     .setup-watch-status.is-armed {
       color: #fbbf24;
     }
+    .setup-watch-status.is-terminal {
+      color: #94a3b8;
+      font-style: italic;
+    }
+    .setup-watch-row.is-terminal {
+      opacity: 0.72;
+    }
+    .setup-watch-target {
+      color: #a5b4fc !important;
+    }
+    .setup-watch-reason {
+      color: #64748b;
+      max-width: 14rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .setup-watch-meta {
       display: flex;
       flex-wrap: wrap;
@@ -6146,7 +6163,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Unwatch cools out for 15 minutes.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target = Dip Min/Prefer MC. Unwatch cools out for 15 minutes.</p>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -6158,7 +6175,7 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at 95–98%. Unwatch cools out for 15 minutes.</p>
+              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at 95–98%. Keeps volatile MC (only drops if &lt;$8k for 5m). Rows leave on trigger / curve dump / TTL — not a $25k MC purge. Unwatch cools 15m.</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -8502,7 +8519,14 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
         const sym = escHtml(e.symbol || mint.slice(0, 6) || '?');
         const status = String(e.status || 'watching');
         const statusCls =
-          'setup-watch-status' + (status === 'armed' ? ' is-armed' : '');
+          'setup-watch-status' +
+          (status === 'armed'
+            ? ' is-armed'
+            : status === 'triggered' ||
+                status === 'expired' ||
+                status === 'invalidated'
+              ? ' is-terminal'
+              : '');
         const jup = escAttr(jupiterTokenUrl(mint));
         const mintAttr = escAttr(mint);
         const mc =
@@ -8517,8 +8541,63 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               Math.round(Number(e.holderCount)) +
               ' holders</span>'
             : '';
+        let target = '';
+        if (kind === 'dip') {
+          const minT =
+            e.targetMinMcUsd != null && isFinite(Number(e.targetMinMcUsd))
+              ? Number(e.targetMinMcUsd)
+              : null;
+          const prefT =
+            e.targetPreferMcUsd != null && isFinite(Number(e.targetPreferMcUsd))
+              ? Number(e.targetPreferMcUsd)
+              : null;
+          if (minT != null) {
+            target =
+              '<span class="setup-watch-mc setup-watch-target" title="Dip Buyer Min / Prefer MC">Target ≥ $' +
+              Math.round(minT).toLocaleString() +
+              (prefT != null
+                ? ' (prefer $' + Math.round(prefT).toLocaleString() + ')'
+                : '') +
+              '</span>';
+          }
+        }
+        const reason =
+          e.lastReason
+            ? '<span class="setup-watch-mc setup-watch-reason" title="' +
+              escAttr(String(e.lastReason)) +
+              '">' +
+              escHtml(String(e.lastReason).slice(0, 48)) +
+              '</span>'
+            : '';
+        const actions =
+          status === 'watching' || status === 'armed'
+            ? '<div class="setup-watch-actions">' +
+              '<button type="button" class="ca-btn" data-mint="' +
+              mintAttr +
+              '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy CA</button>' +
+              '<a class="ca-btn ca-jup" href="' +
+              jup +
+              '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
+              (kind === 'grad'
+                ? '<a class="ca-btn" href="https://pump.fun/coin/' +
+                  encodeURIComponent(mint) +
+                  '" target="_blank" rel="noopener noreferrer" title="Open on Pump.fun">Pump</a>'
+                : '') +
+              '<button type="button" class="ca-btn ca-unwatch" data-watch-unwatch="' +
+              escAttr(kind) +
+              '" data-mint="' +
+              mintAttr +
+              '" title="Remove from watchlist (15m cooldown before bots can re-add)">Unwatch</button>' +
+              '</div>'
+            : '';
         return (
-          '<div class="setup-watch-row" data-watch-kind="' +
+          '<div class="setup-watch-row' +
+          (status === 'triggered' ||
+          status === 'expired' ||
+          status === 'invalidated'
+            ? ' is-terminal'
+            : '') +
+          '" data-watch-kind="' +
           escAttr(kind) +
           '" data-mint="' +
           mintAttr +
@@ -8534,27 +8613,12 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
           '<div class="setup-watch-meta">' +
           fmtWatchPct(kind, e) +
           mc +
+          target +
           holders +
+          reason +
           '</div>' +
           '</div>' +
-          '<div class="setup-watch-actions">' +
-          '<button type="button" class="ca-btn" data-mint="' +
-          mintAttr +
-          '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy CA</button>' +
-          '<a class="ca-btn ca-jup" href="' +
-          jup +
-          '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
-          (kind === 'grad'
-            ? '<a class="ca-btn" href="https://pump.fun/coin/' +
-              encodeURIComponent(mint) +
-              '" target="_blank" rel="noopener noreferrer" title="Open on Pump.fun">Pump</a>'
-            : '') +
-          '<button type="button" class="ca-btn ca-unwatch" data-watch-unwatch="' +
-          escAttr(kind) +
-          '" data-mint="' +
-          mintAttr +
-          '" title="Remove from watchlist (15m cooldown before bots can re-add)">Unwatch</button>' +
-          '</div>' +
+          actions +
           '</div>'
         );
       }
@@ -8568,11 +8632,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               return e.status === 'watching' || e.status === 'armed';
             })
             .slice(0, 16);
-          dipList.innerHTML = rows.length
-            ? rows.map(function (e) {
-                return watchRowHtml('dip', e);
-              }).join('')
-            : '<div class="setup-watch-empty">No active dip setups</div>';
+          const terminal = (dw.recentTerminal || []).slice(0, 2);
+          const htmlParts = [];
+          if (rows.length) {
+            rows.forEach(function (e) {
+              htmlParts.push(watchRowHtml('dip', e));
+            });
+          } else {
+            htmlParts.push(
+              '<div class="setup-watch-empty">No active dip setups</div>'
+            );
+          }
+          terminal.forEach(function (e) {
+            htmlParts.push(watchRowHtml('dip', e));
+          });
+          dipList.innerHTML = htmlParts.join('');
         }
       }
 
@@ -8585,11 +8659,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
               return e.status === 'watching' || e.status === 'armed';
             })
             .slice(0, 16);
-          gradList.innerHTML = rows.length
-            ? rows.map(function (e) {
-                return watchRowHtml('grad', e);
-              }).join('')
-            : '<div class="setup-watch-empty">No active graduation watches</div>';
+          const terminal = (gw.recentTerminal || []).slice(0, 2);
+          const htmlParts = [];
+          if (rows.length) {
+            rows.forEach(function (e) {
+              htmlParts.push(watchRowHtml('grad', e));
+            });
+          } else {
+            htmlParts.push(
+              '<div class="setup-watch-empty">No active graduation watches</div>'
+            );
+          }
+          terminal.forEach(function (e) {
+            htmlParts.push(watchRowHtml('grad', e));
+          });
+          gradList.innerHTML = htmlParts.join('');
         }
       }
     }

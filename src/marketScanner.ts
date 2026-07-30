@@ -78,6 +78,9 @@ export interface ScannerCandidate {
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
+  /** Nearest support / Fib price (SOL) when known — for dip reclaim */
+  supportPriceSol?: number | null;
+  lastPriceSol?: number | null;
   chartPatternIds?: string[];
   indicatorSummary?: string;
   candleSource?: 'real' | 'synthetic';
@@ -414,6 +417,8 @@ export interface RankLaunchResult {
   confluence?: number;
   mtfAligned?: boolean;
   veto?: string;
+  supportPriceSol?: number | null;
+  lastPriceSol?: number | null;
 }
 
 /** Rank a launch for scanner entry — higher is better. */
@@ -505,6 +510,13 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   let nearKeyFib = false;
   let nearSupport = false;
   let nearResistance = false;
+  let supportPriceSol: number | null = null;
+  const lastPriceSol =
+    event.lastPriceSol > 0
+      ? event.lastPriceSol
+      : event.entryPriceSol > 0
+        ? event.entryPriceSol
+        : null;
   const chartPatternIds: string[] = [];
   let indicatorSummary: string | undefined;
   let taSetup = false;
@@ -530,6 +542,13 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       res != null &&
       res.distancePct != null &&
       Math.abs(res.distancePct) <= 4;
+    const supPx = techSnap.nearestSupport?.mid;
+    const fibPx = techSnap.fibZones?.[0]?.price;
+    if (supPx != null && Number.isFinite(supPx) && supPx > 0) {
+      supportPriceSol = Number(supPx);
+    } else if (fibPx != null && Number.isFinite(fibPx) && fibPx > 0) {
+      supportPriceSol = Number(fibPx);
+    }
     if (nearKeyFib) {
       score += 12;
       reasons.push('near Fib');
@@ -756,6 +775,8 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     confluence: pb.confluence,
     mtfAligned: mtf.mtfAligned,
     veto,
+    supportPriceSol,
+    lastPriceSol,
   };
 }
 
@@ -963,6 +984,8 @@ export async function selectScannerCandidates(
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,
+      supportPriceSol: ranked.supportPriceSol ?? null,
+      lastPriceSol: ranked.lastPriceSol ?? null,
       chartPatternIds: ranked.chartPatternIds,
       indicatorSummary: ranked.indicatorSummary,
       candleSource: ranked.candleSource,
@@ -1178,6 +1201,9 @@ export async function runScannerPollOnce(): Promise<number> {
           priceChangeH1Pct: c.priceChangeH1Pct,
           nearKeyFib: c.nearKeyFib,
           nearSupport: c.nearSupport,
+          lastPriceSol: c.lastPriceSol ?? null,
+          supportPriceSol: c.supportPriceSol ?? null,
+          kolCount: c.kolCount,
         });
       }
       const triggered = await tickDipSetupWatches();

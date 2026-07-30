@@ -4,6 +4,7 @@
  */
 
 import type { LaunchEvent } from './marketData';
+import { fetchLiveTokenSnapshot } from './marketData';
 import {
   handOffScannerCandidate,
   isScannerMintOnCooldown,
@@ -42,6 +43,9 @@ export interface DipWatchEntry {
   lastReason?: string;
   kolCount?: number;
   source?: string;
+  /** Profile floors for UI (resolved at status time too) */
+  targetMinMcUsd?: number;
+  targetPreferMcUsd?: number | null;
 }
 
 const MAX_WATCHES = 24;
@@ -50,8 +54,11 @@ const ARM_NEAR_DROP_MIN = 6;
 const TRIGGER_RECLAIM_PCT = 1.5; // reclaim % off trough / bounce
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
+const MC_REFRESH_MIN_MS = 15_000;
+const TERMINAL_UI_MS = 60_000;
 
 const watches = new Map<string, DipWatchEntry>();
+let lastMcRefreshAt = new Map<string, number>();
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
 
@@ -66,6 +73,20 @@ function isManualUnwatchCooldown(mint: string): boolean {
 
 function dipMatch() {
   return resolveTradeProfileDefinition('dip_buyer').match;
+}
+
+function targetMcFields(): {
+  targetMinMcUsd: number;
+  targetPreferMcUsd: number | null;
+} {
+  const m = dipMatch();
+  return {
+    targetMinMcUsd: m.minMarketCapUsd ?? 500_000,
+    targetPreferMcUsd:
+      m.preferMarketCapUsd != null && Number.isFinite(m.preferMarketCapUsd)
+        ? Number(m.preferMarketCapUsd)
+        : null,
+  };
 }
 
 function isDipProfileEnabled(): boolean {
@@ -85,7 +106,10 @@ function pruneTerminal(): void {
       w.status === 'expired' ||
       w.status === 'invalidated'
     ) {
-      if (now - w.updatedAt > 30 * 60_000) watches.delete(mint);
+      if (now - w.updatedAt > 30 * 60_000) {
+        watches.delete(mint);
+        lastMcRefreshAt.delete(mint);
+      }
     }
   }
   // Cap active watches
@@ -96,6 +120,28 @@ function pruneTerminal(): void {
     const oldest = active.shift();
     if (!oldest) break;
     watches.delete(oldest.mint);
+    lastMcRefreshAt.delete(oldest.mint);
+  }
+}
+
+async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> {
+  const last = lastMcRefreshAt.get(w.mint) ?? 0;
+  if (now - last < MC_REFRESH_MIN_MS) return;
+  lastMcRefreshAt.set(w.mint, now);
+  try {
+    const snap = await fetchLiveTokenSnapshot(w.mint);
+    if (!snap) return;
+    if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+      w.marketCapUsd = snap.marketCapUsd;
+    }
+    if (snap.volumeH1Usd != null && snap.volumeH1Usd > 0) {
+      w.volumeH1Usd = snap.volumeH1Usd;
+    }
+    if (snap.priceSol != null && snap.priceSol > 0) {
+      w.lastPriceSol = snap.priceSol;
+    }
+  } catch {
+    /* keep last */
   }
 }
 
@@ -122,11 +168,35 @@ export function considerDipWatchSetup(input: {
   if (isManualUnwatchCooldown(input.mint)) return null;
 
   const m = dipMatch();
-  const minMc = m.minMarketCapUsd ?? 500_000;
+  const targets = targetMcFields();
+  const minMc = targets.targetMinMcUsd;
   const minHolders = m.minHolders ?? 80;
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
+
+  pruneTerminal();
+  const existing = watches.get(input.mint);
+  if (
+    existing &&
+    (existing.status === 'watching' || existing.status === 'armed')
+  ) {
+    // Already admitted — refresh metrics even if MC dipped under admit floor
+    existing.updatedAt = Date.now();
+    existing.dropFromPeakPct = input.dropFromPeakPct ?? existing.dropFromPeakPct;
+    existing.nearKeyFib = input.nearKeyFib ?? existing.nearKeyFib;
+    existing.nearSupport = input.nearSupport ?? existing.nearSupport;
+    existing.lastPriceSol = input.lastPriceSol ?? existing.lastPriceSol;
+    existing.supportPriceSol =
+      input.supportPriceSol ?? existing.supportPriceSol;
+    existing.marketCapUsd = input.marketCapUsd ?? existing.marketCapUsd;
+    existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
+    existing.holderCount = input.holderCount ?? existing.holderCount;
+    existing.kolCount = input.kolCount ?? existing.kolCount;
+    existing.targetMinMcUsd = targets.targetMinMcUsd;
+    existing.targetPreferMcUsd = targets.targetPreferMcUsd;
+    return existing;
+  }
 
   const mc = input.marketCapUsd;
   if (mc != null && mc > 0 && mc < minMc) return null;
@@ -152,24 +222,6 @@ export function considerDipWatchSetup(input: {
   if (!dropStarted && !nearTa) return null;
   if (drop != null && drop > maxDrop) return null;
 
-  pruneTerminal();
-  const existing = watches.get(input.mint);
-  if (
-    existing &&
-    (existing.status === 'watching' || existing.status === 'armed')
-  ) {
-    existing.updatedAt = Date.now();
-    existing.dropFromPeakPct = drop ?? existing.dropFromPeakPct;
-    existing.nearKeyFib = input.nearKeyFib ?? existing.nearKeyFib;
-    existing.nearSupport = input.nearSupport ?? existing.nearSupport;
-    existing.lastPriceSol = input.lastPriceSol ?? existing.lastPriceSol;
-    existing.marketCapUsd = mc ?? existing.marketCapUsd;
-    existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
-    existing.holderCount = input.holderCount ?? existing.holderCount;
-    existing.kolCount = input.kolCount ?? existing.kolCount;
-    return existing;
-  }
-
   const now = Date.now();
   const entry: DipWatchEntry = {
     mint: input.mint,
@@ -190,6 +242,8 @@ export function considerDipWatchSetup(input: {
     lastPriceSol: input.lastPriceSol ?? null,
     kolCount: input.kolCount,
     source: input.source,
+    targetMinMcUsd: targets.targetMinMcUsd,
+    targetPreferMcUsd: targets.targetPreferMcUsd,
     lastReason: nearTa ? 'near Fib/S' : 'watching for setup',
   };
   watches.set(input.mint, entry);
@@ -261,6 +315,7 @@ export async function tickDipSetupWatches(opts?: {
   if (!isDipProfileEnabled()) return 0;
   pruneTerminal();
   const m = dipMatch();
+  const targets = targetMcFields();
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
   const now = Date.now();
@@ -269,6 +324,9 @@ export async function tickDipSetupWatches(opts?: {
   for (const w of watches.values()) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
 
+    w.targetMinMcUsd = targets.targetMinMcUsd;
+    w.targetPreferMcUsd = targets.targetPreferMcUsd;
+
     if (now >= w.expiresAt) {
       w.status = 'expired';
       w.updatedAt = now;
@@ -276,6 +334,8 @@ export async function tickDipSetupWatches(opts?: {
       console.log(`[dip-watch] EXPIRED ${w.symbol}`);
       continue;
     }
+
+    await refreshWatchMarket(w, now);
 
     const px = opts?.priceByMint?.get(w.mint) ?? w.lastPriceSol ?? null;
     if (px != null) w.lastPriceSol = px;
@@ -373,6 +433,7 @@ export function unwatchDipSetup(mint: string): {
     existing.lastReason = 'unwatched by user';
     watches.delete(key);
   }
+  lastMcRefreshAt.delete(key);
   unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
   console.log(
     `[dip-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
@@ -383,16 +444,36 @@ export function unwatchDipSetup(mint: string): {
 export function getDipSetupWatchStatus(limit = 20): {
   active: number;
   entries: DipWatchEntry[];
+  recentTerminal: DipWatchEntry[];
+  targetMinMcUsd: number;
+  targetPreferMcUsd: number | null;
 } {
   pruneTerminal();
-  const entries = [...watches.values()]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, limit);
+  const targets = targetMcFields();
+  const now = Date.now();
+  const all = [...watches.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const e of all) {
+    e.targetMinMcUsd = targets.targetMinMcUsd;
+    e.targetPreferMcUsd = targets.targetPreferMcUsd;
+  }
+  const entries = all.slice(0, limit);
+  const recentTerminal = all
+    .filter(
+      (e) =>
+        (e.status === 'triggered' ||
+          e.status === 'expired' ||
+          e.status === 'invalidated') &&
+        now - e.updatedAt <= TERMINAL_UI_MS
+    )
+    .slice(0, 4);
   return {
     active: entries.filter(
       (e) => e.status === 'watching' || e.status === 'armed'
     ).length,
     entries,
+    recentTerminal,
+    targetMinMcUsd: targets.targetMinMcUsd,
+    targetPreferMcUsd: targets.targetPreferMcUsd,
   };
 }
 
@@ -407,6 +488,8 @@ export function offerDipWatchFromCandidate(c: {
   priceChangeH1Pct?: number;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
+  lastPriceSol?: number | null;
+  supportPriceSol?: number | null;
   kolCount?: number;
   specialtyFeed?: string;
   preferredProfileId?: string;
@@ -433,6 +516,8 @@ export function offerDipWatchFromCandidate(c: {
     dropFromPeakPct: drop,
     nearKeyFib: c.nearKeyFib,
     nearSupport: c.nearSupport,
+    lastPriceSol: c.lastPriceSol ?? null,
+    supportPriceSol: c.supportPriceSol ?? null,
     kolCount: c.kolCount,
     source: c.specialtyFeed || 'scanner',
   });

@@ -1730,7 +1730,13 @@ export function getTradeProfilesStatus(): {
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
         return getDipSetupWatchStatus(16);
       } catch {
-        return { active: 0, entries: [] };
+        return {
+          active: 0,
+          entries: [],
+          recentTerminal: [],
+          targetMinMcUsd: 500_000,
+          targetPreferMcUsd: 1_000_000,
+        };
       }
     })(),
     gradWatch: (() => {
@@ -1739,7 +1745,7 @@ export function getTradeProfilesStatus(): {
           require('./migrationGradWatch') as typeof import('./migrationGradWatch');
         return getMigrationGradWatchStatus(16);
       } catch {
-        return { active: 0, entries: [] };
+        return { active: 0, entries: [], recentTerminal: [] };
       }
     })(),
     profiles,

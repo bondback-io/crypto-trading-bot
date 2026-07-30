@@ -2,10 +2,14 @@
  * Migration Sniper graduation watchlist: watch (≥80%) → arm → trigger (95–98%) →
  * expire / invalidate. Hands triggered setups to the Market Scanner with
  * preferredProfileId: migration_sniper. Fast-polls bonding curve on active watches.
+ *
+ * Low-MC grace: once watching, keep through volatile 25k↔10k swings; only
+ * invalidate for MC after continuous < $8k for 5 minutes (curve rules still apply).
  */
 
 import { fetchBondingCurve, summarizeBondingCurve } from './bondingCurve';
 import type { LaunchEvent } from './marketData';
+import { fetchLiveTokenSnapshot } from './marketData';
 import {
   handOffScannerCandidate,
   isScannerMintOnCooldown,
@@ -40,6 +44,8 @@ export interface GradWatchEntry {
   buyPressureUsd?: number | null;
   lastReason?: string;
   source?: string;
+  /** Wall-clock when known MC first went below LOW_MC_USD (cleared when recovered) */
+  belowLowMcSinceMs?: number | null;
 }
 
 const MAX_WATCHES = 32;
@@ -48,9 +54,16 @@ const FAST_POLL_MS = 1_500;
 const REGRESS_INVALIDATE_PCT = 8; // hard dump from peak watched progress
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
+/** Soft MC death — only after continuous time under this floor */
+const LOW_MC_USD = 8_000;
+const LOW_MC_GRACE_MS = 5 * 60_000;
+const MC_REFRESH_MIN_MS = 15_000;
+/** Terminal rows kept for UI breadcrumb */
+const TERMINAL_UI_MS = 60_000;
 
 const watches = new Map<string, GradWatchEntry>();
 let peakProgress = new Map<string, number>();
+let lastMcRefreshAt = new Map<string, number>();
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
@@ -101,6 +114,49 @@ function ttlMs(): number {
   return DEFAULT_TTL_MS;
 }
 
+function applyMcGrace(w: GradWatchEntry, now: number): boolean {
+  const mc = w.marketCapUsd;
+  if (mc == null || !Number.isFinite(mc) || mc <= 0) {
+    // Unknown MC — do not start / advance low-MC clock
+    return false;
+  }
+  if (mc >= LOW_MC_USD) {
+    w.belowLowMcSinceMs = null;
+    return false;
+  }
+  if (w.belowLowMcSinceMs == null || w.belowLowMcSinceMs <= 0) {
+    w.belowLowMcSinceMs = now;
+    w.lastReason = `MC $${Math.round(mc)} < $${LOW_MC_USD} — grace ${LOW_MC_GRACE_MS / 60_000}m`;
+    return false;
+  }
+  if (now - w.belowLowMcSinceMs >= LOW_MC_GRACE_MS) {
+    w.status = 'invalidated';
+    w.updatedAt = now;
+    w.lastReason = `MC < $${LOW_MC_USD} for ${LOW_MC_GRACE_MS / 60_000}m`;
+    console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
+    return true;
+  }
+  return false;
+}
+
+async function refreshWatchMarket(w: GradWatchEntry, now: number): Promise<void> {
+  const last = lastMcRefreshAt.get(w.mint) ?? 0;
+  if (now - last < MC_REFRESH_MIN_MS) return;
+  lastMcRefreshAt.set(w.mint, now);
+  try {
+    const snap = await fetchLiveTokenSnapshot(w.mint);
+    if (!snap) return;
+    if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+      w.marketCapUsd = snap.marketCapUsd;
+    }
+    if (snap.volumeH1Usd != null && snap.volumeH1Usd > 0) {
+      w.volumeH1Usd = snap.volumeH1Usd;
+    }
+  } catch {
+    /* keep last */
+  }
+}
+
 function pruneTerminal(): void {
   const now = Date.now();
   for (const [mint, w] of watches) {
@@ -112,6 +168,7 @@ function pruneTerminal(): void {
       if (now - w.updatedAt > 20 * 60_000) {
         watches.delete(mint);
         peakProgress.delete(mint);
+        lastMcRefreshAt.delete(mint);
       }
     }
   }
@@ -123,6 +180,7 @@ function pruneTerminal(): void {
     if (!oldest) break;
     watches.delete(oldest.mint);
     peakProgress.delete(oldest.mint);
+    lastMcRefreshAt.delete(oldest.mint);
   }
 }
 
@@ -189,7 +247,7 @@ export function considerMigrationGradWatch(input: {
     return null;
   }
 
-  // Already in fire band — still watch so tick can trigger immediately
+  // Already active — refresh metrics (keep through MC volatility)
   pruneTerminal();
   const existing = watches.get(input.mint);
   if (
@@ -209,10 +267,15 @@ export function considerMigrationGradWatch(input: {
     return existing;
   }
 
+  // Replacing a terminal row (trigger / invalidate / expire) — fresh watch
+  if (existing) {
+    watches.delete(input.mint);
+    peakProgress.delete(input.mint);
+    lastMcRefreshAt.delete(input.mint);
+  }
   const now = Date.now();
   const quality = qualitySoftOk(input);
-  const inFire =
-    progress >= fireMin() && progress <= fireMax();
+  const inFire = progress >= fireMin() && progress <= fireMax();
   const entry: GradWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -229,6 +292,7 @@ export function considerMigrationGradWatch(input: {
     holderGrowthPct: input.holderGrowthPct ?? null,
     buyPressureUsd: input.buyPressureUsd ?? null,
     source: input.source,
+    belowLowMcSinceMs: null,
     lastReason: inFire
       ? `in fire band ${progress.toFixed(0)}%`
       : quality
@@ -321,6 +385,9 @@ export async function tickMigrationGradWatches(): Promise<number> {
       continue;
     }
 
+    await refreshWatchMarket(w, now);
+    if (applyMcGrace(w, now)) continue;
+
     let progress = w.curveProgressPct;
     try {
       const curve = await fetchBondingCurve(w.mint, { force: true });
@@ -333,7 +400,9 @@ export async function tickMigrationGradWatches(): Promise<number> {
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = 'curve complete — post-grad fallback';
-          console.log(`[grad-watch] COMPLETE ${w.symbol} — use post-grad fallback`);
+          console.log(
+            `[grad-watch] COMPLETE ${w.symbol} — use post-grad fallback`
+          );
           continue;
         }
       }
@@ -440,6 +509,7 @@ export function unwatchMigrationGrad(mint: string): {
     watches.delete(key);
   }
   peakProgress.delete(key);
+  lastMcRefreshAt.delete(key);
   unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
   console.log(
     `[grad-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
@@ -450,16 +520,27 @@ export function unwatchMigrationGrad(mint: string): {
 export function getMigrationGradWatchStatus(limit = 20): {
   active: number;
   entries: GradWatchEntry[];
+  recentTerminal: GradWatchEntry[];
 } {
   pruneTerminal();
-  const entries = [...watches.values()]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, limit);
+  const now = Date.now();
+  const all = [...watches.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  const entries = all.slice(0, limit);
+  const recentTerminal = all
+    .filter(
+      (e) =>
+        (e.status === 'triggered' ||
+          e.status === 'expired' ||
+          e.status === 'invalidated') &&
+        now - e.updatedAt <= TERMINAL_UI_MS
+    )
+    .slice(0, 4);
   return {
     active: entries.filter(
       (e) => e.status === 'watching' || e.status === 'armed'
     ).length,
     entries,
+    recentTerminal,
   };
 }
 

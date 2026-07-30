@@ -2087,9 +2087,23 @@ async function handleScannerCandidate(
       config.riskLevel === 'off'
         ? false
         : config.marketScanner?.requireTaSetup !== false;
+    // Setup-watch handoffs are synthetic (no TA playbook) — lane floors still apply.
+    const preferId =
+      candidate.preferredProfileId ||
+      (candidate as { launch?: { preferredProfileId?: string } }).launch
+        ?.preferredProfileId ||
+      '';
+    const reasonBits = Array.isArray(candidate.reasons)
+      ? candidate.reasons.join(' ')
+      : '';
+    const setupWatchHandoff =
+      preferId === 'migration_sniper' ||
+      preferId === 'dip_buyer' ||
+      reasonBits.includes('grad-watch:triggered') ||
+      reasonBits.includes('dip-watch:triggered');
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
-    if (!hybrid && requireTa) {
+    if (!hybrid && requireTa && !setupWatchHandoff) {
       if (!candidate.playbook) {
         finishBuy(candidate.mint, false);
         annotateScannerCandidate(candidate.mint, {
