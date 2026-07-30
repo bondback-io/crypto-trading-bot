@@ -20336,45 +20336,21 @@ export const DASHBOARD_HTML = `<!DOCTYPE html>
 
     async function loadLastBackup() {
       const msg = document.getElementById('persist-reset-msg');
-      try {
-        const meta = await fetchJSON('/api/site-backup/latest');
-        if (meta && meta.exists) {
-          const when =
-            meta.exportedAtMs != null
-              ? new Date(meta.exportedAtMs).toLocaleString()
-              : meta.exportedAt || 'unknown';
-          if (
-            !confirm(
-              'Load last backup from server?\\n\\n' +
-                'Stamp: ' +
-                when +
-                '\\nFiles: ' +
-                (meta.fileCount || 0) +
-                '\\n\\nThis OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
-            )
-          )
-            return;
-          await restoreSiteBackupPayload(null);
-          return;
-        }
-        if (
-          !confirm(
-            'No server backup found (common after a deploy wipe).\\n\\n' +
-              'Pick a previously downloaded site-backup-*.json file to restore?'
-          )
-        )
-          return;
-        const input = document.getElementById('site-backup-file');
-        if (input) {
-          input.value = '';
-          input.click();
-        } else if (msg) {
-          msg.textContent = 'No backup file picker available';
-        }
-      } catch (err) {
-        if (msg) msg.textContent = err.message || String(err);
-        alert('Load backup failed: ' + (err.message || String(err)));
+      const input = document.getElementById('site-backup-file');
+      if (!input) {
+        if (msg) msg.textContent = 'No backup file picker available';
+        return;
       }
+      if (
+        !confirm(
+          'Load a site backup from your computer?\\n\\n' +
+            'Pick a previously downloaded site-backup-*.json file.\\n' +
+            'This OVERWRITES current config, wallets, profiles, learning, and notifications on disk.'
+        )
+      )
+        return;
+      input.value = '';
+      input.click();
     }
     window.loadLastBackup = loadLastBackup;
 
