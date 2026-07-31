@@ -48,6 +48,8 @@ export interface RpcEndpointStats {
   role: RpcLaneRole;
   healthy: boolean;
   latencyMs: number | null;
+  /** Latest single-call sample (may spike); UI prefers latencyMs EWMA */
+  lastCallLatencyMs?: number | null;
   successCount: number;
   failureCount: number;
   successRate: number;
@@ -63,7 +65,10 @@ interface EndpointState {
   endpoint: RpcEndpoint;
   connection: Connection;
   healthy: boolean;
+  /** Smoothed latency (EWMA) — used for UI + latency soft-failover */
   latencyMs: number | null;
+  /** Most recent single call latency (spikes included) */
+  lastCallLatencyMs: number | null;
   successCount: number;
   failureCount: number;
   lastError?: string;
@@ -75,6 +80,10 @@ interface EndpointState {
   rateLimitedUntil: number;
   /** Last time we logged "marked unhealthy" for this endpoint. */
   lastUnhealthyLogAt: number;
+  /** When EWMA first crossed LATENCY_STRESS_MS (null when not stressed). */
+  latencyStressedSince: number | null;
+  /** Last time we logged latency soft-failover. */
+  lastLatencyFailoverLogAt: number;
 }
 
 let endpoints: EndpointState[] = [];
@@ -259,6 +268,16 @@ const MIN_FAILOVER_DOWN_MS = 5_000;
 const RATE_LIMIT_COOLDOWN_MS = 60_000;
 /** Don't re-log "marked unhealthy" more often than this. */
 const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
+/** EWMA weight for new samples — dampens single getTransaction spikes in the UI. */
+const LATENCY_EWMA_ALPHA = 0.22;
+/** EWMA above this → start latency-stress timer (matches rpcDiagnostic). */
+const LATENCY_STRESS_MS = 500;
+/** EWMA below this → clear latency stress (hysteresis). */
+const LATENCY_RECOVER_MS = 320;
+/** Prefer piggyback after preferred stays latency-stressed this long. */
+const LATENCY_STRESS_GRACE_MS = 15_000;
+/** Don't re-log latency piggyback more often than this. */
+const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
 
 function isRpcRateLimitMessage(error: string): boolean {
   return (
@@ -350,6 +369,7 @@ function ensureEndpoints(): void {
       }),
       healthy: true,
       latencyMs: null,
+      lastCallLatencyMs: null,
       successCount: 0,
       failureCount: 0,
       lastCheckedAt: null,
@@ -358,6 +378,8 @@ function ensureEndpoints(): void {
       role,
       rateLimitedUntil: 0,
       lastUnhealthyLogAt: 0,
+      latencyStressedSince: null,
+      lastLatencyFailoverLogAt: 0,
     };
   });
 
@@ -498,14 +520,21 @@ function resolveIndexForRole(role: RpcRole): number {
   ensureEndpoints();
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
-  if (pref?.healthy && !isEndpointRateLimited(pref)) {
+  const latencySoft = latencyFailoverReady(pref);
+  if (pref?.healthy && !isEndpointRateLimited(pref) && !latencySoft) {
     setActiveForRole(role, preferred);
     return preferred;
   }
 
   const downMs = downForMs(pref);
   const rateLimited = isEndpointRateLimited(pref);
-  if (!rateLimited && downMs > 0 && downMs < failoverDownMs()) {
+  // Sticky grace for hard failures only — latency soft-failover skips this wait.
+  if (
+    !latencySoft &&
+    !rateLimited &&
+    downMs > 0 &&
+    downMs < failoverDownMs()
+  ) {
     return preferred;
   }
 
@@ -518,16 +547,52 @@ function resolveIndexForRole(role: RpcRole): number {
     const other = endpoints[otherPreferred];
     if (!other?.healthy || isEndpointRateLimited(other)) continue;
     if (avoidPublicForCritical && isPublicRpcUrl(other.endpoint.url)) continue;
+    if (latencySoft && pref && !isFasterAlternate(pref, other)) continue;
     if (
       (role === 'primary' ? activePrimary : role === 'secondary' ? activeSecondary : activeUtility) !==
       otherPreferred
     ) {
-      console.warn(
-        `[rpc] ${role} lane piggybacking on ${other.endpoint.label} ` +
-          `(preferred down ${Math.round(downMs / 1000)}s` +
-          (rateLimited ? ', rate-limited' : ` ≥ ${Math.round(failoverDownMs() / 1000)}s`) +
-          `)`
-      );
+      const reason = rateLimited
+        ? 'rate-limited'
+        : latencySoft
+          ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(LATENCY_STRESS_GRACE_MS / 1000)}s`
+          : `preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s`;
+      const now = Date.now();
+      if (
+        !latencySoft ||
+        now - (pref?.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS
+      ) {
+        if (pref && latencySoft) pref.lastLatencyFailoverLogAt = now;
+        console.warn(
+          `[rpc] ${role} lane piggybacking on ${other.endpoint.label} (${reason})`
+        );
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          runId: 'helius-latency',
+          hypothesisId: 'D',
+          location: 'connection.ts:resolveIndexForRole',
+          message: 'latency/hard piggyback',
+          data: {
+            role,
+            from: pref?.endpoint.label,
+            to: other.endpoint.label,
+            latencySoft,
+            prefEwma: pref?.latencyMs,
+            otherEwma: other.latencyMs,
+            reason,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     }
     setActiveForRole(role, otherPreferred);
     return otherPreferred;
@@ -536,6 +601,9 @@ function resolveIndexForRole(role: RpcRole): number {
   for (let i = 0; i < endpoints.length; i++) {
     if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
     if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
+      continue;
+    }
+    if (latencySoft && pref && i !== preferred && !isFasterAlternate(pref, endpoints[i]!)) {
       continue;
     }
     setActiveForRole(role, i);
@@ -578,7 +646,16 @@ function recordSuccess(index: number, latencyMs: number): void {
   const state = endpoints[index];
   if (!state) return;
   state.successCount += 1;
-  state.latencyMs = latencyMs;
+  const sample = Math.max(0, latencyMs);
+  state.lastCallLatencyMs = sample;
+  // EWMA so a single slow getTransaction does not paint the whole endpoint as 800ms+.
+  state.latencyMs =
+    state.latencyMs == null
+      ? sample
+      : Math.round(
+          LATENCY_EWMA_ALPHA * sample + (1 - LATENCY_EWMA_ALPHA) * state.latencyMs
+        );
+  updateLatencyStress(state);
   state.healthy = true;
   state.consecutiveFailures = 0;
   state.unhealthySince = null;
@@ -588,6 +665,90 @@ function recordSuccess(index: number, latencyMs: number): void {
   if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
     state.rateLimitedUntil = 0;
   }
+}
+
+function updateLatencyStress(state: EndpointState): void {
+  const ewma = state.latencyMs;
+  if (ewma == null) {
+    state.latencyStressedSince = null;
+    return;
+  }
+  if (ewma < LATENCY_RECOVER_MS) {
+    if (state.latencyStressedSince != null) {
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          runId: 'helius-latency',
+          hypothesisId: 'A',
+          location: 'connection.ts:updateLatencyStress',
+          message: 'latency stress cleared',
+          data: {
+            label: state.endpoint.label,
+            ewma,
+            lastCall: state.lastCallLatencyMs,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+    }
+    state.latencyStressedSince = null;
+    return;
+  }
+  if (ewma >= LATENCY_STRESS_MS) {
+    if (state.latencyStressedSince == null) {
+      state.latencyStressedSince = Date.now();
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          runId: 'helius-latency',
+          hypothesisId: 'B',
+          location: 'connection.ts:updateLatencyStress',
+          message: 'latency stress started',
+          data: {
+            label: state.endpoint.label,
+            ewma,
+            lastCall: state.lastCallLatencyMs,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      console.warn(
+        `[rpc] ${state.endpoint.label} latency stressed (EWMA ${ewma}ms, last ${state.lastCallLatencyMs ?? '—'}ms) — soft failover in ${LATENCY_STRESS_GRACE_MS / 1000}s if it stays high`
+      );
+    }
+  }
+}
+
+/** Preferred is OK on errors but EWMA has stayed hot long enough to piggyback. */
+function latencyFailoverReady(state: EndpointState | undefined): boolean {
+  if (!state?.latencyStressedSince) return false;
+  if (state.latencyMs == null || state.latencyMs < LATENCY_STRESS_MS) return false;
+  return Date.now() - state.latencyStressedSince >= LATENCY_STRESS_GRACE_MS;
+}
+
+function isFasterAlternate(
+  preferred: EndpointState,
+  other: EndpointState
+): boolean {
+  const prefMs = preferred.latencyMs;
+  const otherMs = other.latencyMs;
+  if (prefMs == null) return false;
+  if (otherMs == null) return other.healthy;
+  return otherMs <= LATENCY_RECOVER_MS || otherMs < prefMs * 0.65;
 }
 
 function recordFailure(index: number, error: string): void {
@@ -934,6 +1095,7 @@ export function getRpcStats(): {
         role: s.role,
         healthy: s.healthy,
         latencyMs: s.latencyMs,
+        lastCallLatencyMs: s.lastCallLatencyMs,
         successCount: s.successCount,
         failureCount: s.failureCount,
         successRate: total === 0 ? 100 : (s.successCount / total) * 100,

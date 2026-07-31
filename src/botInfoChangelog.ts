@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.64',
+    title: 'Helius latency EWMA + soft failover',
+    sections: ['execution', 'copy'],
+    items: [
+      'RPC endpoint latency uses a smoothed average so one slow migration getTransaction no longer paints Helius as 800ms+.',
+      'If primary EWMA stays above 500ms for 15s, critical traffic soft-fails over to a faster healthy lane (usually Alchemy) until Helius recovers.',
+    ],
+  },
+  {
     version: '1.2.63',
     title: 'Soft-watch rotate + Clear list labeling',
     sections: ['copy', 'overview', 'execution'],
