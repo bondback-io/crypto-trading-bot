@@ -105,6 +105,23 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
   );
 }
 
+/**
+ * Free / metered providers that look "private" but rate-limit hard under burst
+ * (Helius free, Alchemy free, public Solana). Use soft poll concurrency.
+ */
+export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
+  if (isPublicRpcUrl(url)) return true;
+  const u = (url || '').toLowerCase();
+  if (!u) return true;
+  if (u.includes('helius-rpc.com')) return true;
+  if (u.includes('g.alchemy.com')) return true;
+  // Explicit override for paid dedicated URLs that still need gentle polling
+  if (process.env.RPC_SOFT_THROTTLE === '1') return true;
+  // Paid / custom RPC_URL — allow higher concurrency unless forced soft
+  if (process.env.RPC_SOFT_THROTTLE === '0') return false;
+  return false;
+}
+
 export type RpcLaneRole = 'primary' | 'secondary' | 'fallback';
 
 export interface NormalizedRpcEndpoint {

@@ -18,7 +18,7 @@ import {
 import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcUrl, noteActiveRpcFailure } from './connection';
-import { isPublicRpcUrl } from './rpcUrl';
+import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
 
 /** Raydium AMM v4 — common post-migration venue */
 const RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -437,7 +437,7 @@ async function pollMigrations(): Promise<void> {
 
   try {
     const conn = getConnection();
-    const publicRpc = isPublicRpcUrl(conn.rpcEndpoint);
+    const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
     // Poll both PumpSwap (post-migrate venue) and Pump.fun (migrate ix)
     const targets = [
       { id: config.pumpSwapProgramId, label: 'pumpswap' as const },
@@ -448,7 +448,7 @@ async function pollMigrations(): Promise<void> {
       if (Date.now() < rateLimitedUntil) break;
       const signatures = await conn.getSignaturesForAddress(
         new PublicKey(target.id),
-        { limit: publicRpc ? 8 : 15 }
+        { limit: softRpc ? 8 : 15 }
       );
       if (signatures.length === 0) continue;
 
@@ -475,8 +475,8 @@ async function pollMigrations(): Promise<void> {
 
       if (newSigs.length === 0) continue;
 
-      // Newest first for latency; tighter cap on public RPCs to avoid 429 storms
-      const parseCap = publicRpc ? 2 : 5;
+      // Newest first for latency; tighter cap on free/public RPCs to avoid 429 storms
+      const parseCap = softRpc ? 2 : 5;
       for (const sig of newSigs.slice(0, parseCap)) {
         if (Date.now() < rateLimitedUntil) break;
         const ok = await processMigrationTx(sig, 'poll', target.label);

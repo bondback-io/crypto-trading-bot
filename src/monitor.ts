@@ -13,7 +13,7 @@ import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperS
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
-import { isPublicRpcUrl } from './rpcUrl';
+import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
 import { logger } from './logger';
@@ -738,11 +738,14 @@ let paused = false;
 let pollInFlight = false;
 /** Rotates which wallets are polled first so a mid-cycle 429 cannot starve the same tail forever. */
 let pollRotationOffset = 0;
+/** After a free-tier 429, skip poll cycles until this time (keeps /health responsive). */
+let pollRateLimitedUntil = 0;
 /** Last poll-cycle soak counters for /api/status. */
 let lastPollAttempted = 0;
 let lastPollCompleted = 0;
 let lastPollRateLimited = false;
 let onSignalHandler: SignalHandler | null = null;
+let lastSoftThrottleLogAt = 0;
 
 /** Detect Solana RPC / HTTP 429 rate-limit errors from web3.js or providers. */
 function isRpcRateLimitError(err: unknown): boolean {
@@ -753,8 +756,46 @@ function isRpcRateLimitError(err: unknown): boolean {
   return (
     /\b429\b/i.test(msg) ||
     /too many requests/i.test(msg) ||
-    /rate.?limit/i.test(msg)
+    /rate.?limit/i.test(msg) ||
+    /-32429/.test(msg)
   );
+}
+
+/** Free Helius/Alchemy/public — gentle concurrency so boot seeding cannot crash Render. */
+function getWalletPollThrottle(rpcUrl: string): {
+  soft: boolean;
+  batchSize: number;
+  batchGapMs: number;
+  sigLimit: number;
+  maxParse: number;
+  pause429Ms: number;
+  /** Max wallets touched per cycle (rotate remainder next tick). */
+  maxWalletsPerCycle: number;
+  abortCycleOn429: boolean;
+} {
+  const soft = isSoftThrottleRpcUrl(rpcUrl);
+  if (soft) {
+    return {
+      soft: true,
+      batchSize: 2,
+      batchGapMs: 400,
+      sigLimit: 8,
+      maxParse: 2,
+      pause429Ms: 5_000,
+      maxWalletsPerCycle: 20,
+      abortCycleOn429: true,
+    };
+  }
+  return {
+    soft: false,
+    batchSize: 8,
+    batchGapMs: 80,
+    sigLimit: 20,
+    maxParse: 10,
+    pause429Ms: 200,
+    maxWalletsPerCycle: Number.POSITIVE_INFINITY,
+    abortCycleOn429: false,
+  };
 }
 
 /**
@@ -866,10 +907,12 @@ export function startMonitor(): void {
   }
 
   // Start polling after a short delay so /health stays responsive on boot.
-  // Activity refresh is deferred further — scanning 80+ wallets at once OOMs free RPC hosts.
+  // Soft-throttle RPCs (free Helius/Alchemy): wait longer so Render health passes
+  // before we seed wallets in small rotating batches.
+  const firstPollDelayMs = isSoftThrottleRpcUrl(getRpcUrl()) ? 12_000 : 5_000;
   setTimeout(() => {
     void pollAllWallets();
-  }, 5_000);
+  }, firstPollDelayMs);
 
   void (async () => {
     await new Promise((r) => setTimeout(r, 30_000));
@@ -958,6 +1001,7 @@ export function isMonitorPaused(): boolean {
 
 async function pollAllWallets(): Promise<void> {
   if (paused) return;
+  if (Date.now() < pollRateLimitedUntil) return;
   if (pollInFlight) {
     console.log('[monitor] Skipping poll — previous cycle still running');
     return;
@@ -984,25 +1028,37 @@ async function pollAllWallets(): Promise<void> {
     }
 
     const wallets = getWalletsForPolling();
-    const publicRpc = isPublicRpcUrl(getRpcUrl());
-    // Paid batch 8 (pre-c92ebf2). Public stays low concurrency.
-    const batchSize = publicRpc ? 4 : 8;
-    const batchGapMs = publicRpc ? 200 : 80;
+    const rpcUrl = getRpcUrl();
+    const throttle = getWalletPollThrottle(rpcUrl);
+    const { batchSize, batchGapMs, maxWalletsPerCycle, abortCycleOn429, pause429Ms } =
+      throttle;
+    if (throttle.soft && Date.now() - lastSoftThrottleLogAt > 120_000) {
+      lastSoftThrottleLogAt = Date.now();
+      console.log(
+        `[monitor] Soft RPC throttle on (${batchSize}/batch, gap ${batchGapMs}ms, ` +
+          `≤${maxWalletsPerCycle}/cycle) — free Helius/Alchemy/public stay under rate limits`
+      );
+    }
     const n = wallets.length;
     const offset =
       n > 0 ? ((pollRotationOffset % n) + n) % n : 0;
-    const ordered =
+    const orderedFull =
       n === 0 || offset === 0
         ? wallets
         : wallets.slice(offset).concat(wallets.slice(0, offset));
+    const ordered = orderedFull.slice(
+      0,
+      Math.min(orderedFull.length, maxWalletsPerCycle)
+    );
     let hitRateLimit = false;
     let completed = 0;
-    lastPollAttempted = n;
+    lastPollAttempted = ordered.length;
     lastPollRateLimited = false;
     for (let i = 0; i < ordered.length; i += batchSize) {
+      if (Date.now() < pollRateLimitedUntil) break;
       const batch = ordered.slice(i, i + batchSize);
       const results = await Promise.allSettled(
-        batch.map((wallet) => pollWallet(wallet))
+        batch.map((wallet) => pollWallet(wallet, throttle))
       );
       let batchHad429 = false;
       for (const r of results) {
@@ -1013,13 +1069,18 @@ async function pollAllWallets(): Promise<void> {
         }
       }
       if (batchHad429) {
-        // Skip remaining wallets in this batch only via the rejects; continue
-        // the cycle after a brief gap (do NOT abort the whole watch list).
         lastPollRateLimited = true;
+        pollRateLimitedUntil = Date.now() + Math.max(pause429Ms, 15_000);
         console.warn(
-          '[monitor] RPC 429 on wallet batch — brief pause, continuing poll cycle'
+          `[monitor] RPC 429 on wallet batch — pausing polls ${Math.round(
+            (pollRateLimitedUntil - Date.now()) / 1000
+          )}s` +
+            (abortCycleOn429
+              ? ' (aborting rest of cycle to protect free RPC /health)'
+              : '')
         );
-        await new Promise((r) => setTimeout(r, 200));
+        await new Promise((r) => setTimeout(r, Math.min(pause429Ms, 2_000)));
+        if (abortCycleOn429) break;
       }
       if (i + batchSize < ordered.length) {
         await new Promise((r) => setTimeout(r, batchGapMs));
@@ -1027,7 +1088,8 @@ async function pollAllWallets(): Promise<void> {
     }
     lastPollCompleted = completed;
     if (n > 0) {
-      pollRotationOffset = (offset + batchSize) % n;
+      // Advance by how many we actually attempted so seeding rotates across cycles
+      pollRotationOffset = (offset + ordered.length) % n;
     }
     if (hitRateLimit) {
       lastPollRateLimited = true;
@@ -1050,8 +1112,9 @@ async function pollAllWallets(): Promise<void> {
     const elapsed = Date.now() - cycleStarted;
     if (elapsed > config.pollIntervalMs * 1.5) {
       console.warn(
-        `[monitor] Poll cycle slow: ${elapsed}ms for ${wallets.length} wallet(s) ` +
-          `(interval ${config.pollIntervalMs}ms) — consider a paid RPC_URL`
+        `[monitor] Poll cycle slow: ${elapsed}ms for ${ordered.length}/${wallets.length} wallet(s) ` +
+          `(interval ${config.pollIntervalMs}ms)` +
+          (throttle.soft ? ' — soft throttle active' : ' — consider a paid RPC_URL')
       );
     }
   } finally {
@@ -1767,7 +1830,10 @@ async function fetchParsedTx(
   }
 }
 
-async function pollWallet(wallet: SmartWallet): Promise<void> {
+async function pollWallet(
+  wallet: SmartWallet,
+  throttle?: ReturnType<typeof getWalletPollThrottle>
+): Promise<void> {
   try {
     let pubkey: PublicKey;
     try {
@@ -1778,8 +1844,8 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
     }
 
     const conn = getConnection();
-    const publicRpc = isPublicRpcUrl(getRpcUrl());
-    const sigLimit = publicRpc ? 12 : 20;
+    const t = throttle ?? getWalletPollThrottle(getRpcUrl());
+    const sigLimit = t.sigLimit;
     const signatures = await conn.getSignaturesForAddress(pubkey, {
       limit: sigLimit,
     });
@@ -1821,7 +1887,7 @@ async function pollWallet(wallet: SmartWallet): Promise<void> {
 
     // Oldest → newest so we can advance the cursor safely through successes
     const chronological = newSigs.reverse();
-    const maxParse = publicRpc ? 4 : 10;
+    const maxParse = t.maxParse;
     const toParse = chronological.slice(0, maxParse);
 
     let lastFullyProcessed: string | null = null;
