@@ -739,6 +739,11 @@ let paused = false;
 let pollInFlight = false;
 /** Rotates which wallets are polled first so a mid-cycle 429 cannot starve the same tail forever. */
 let pollRotationOffset = 0;
+/**
+ * When soft-watch caps the poll set below enabled count, rotate colder wallets
+ * through the non-sticky slots so Quiet wallets are not permanently ignored.
+ */
+let softWatchRotateOffset = 0;
 /** After a free-tier 429, skip poll cycles until this time (keeps /health responsive). */
 let pollRateLimitedUntil = 0;
 /** Last poll-cycle soak counters for /api/status. */
@@ -1542,6 +1547,7 @@ export function getWalletsForPolling(): SmartWallet[] {
   });
 
   // Free Helius/Alchemy/public — rotate a capped watch set (Share: public utility lane default 50).
+  // Keep ~60% sticky-hot (recent activity); rotate the rest so colder wallets still get cycles.
   const softCapDefault = Boolean(config.rpc?.shareLoad) ? 50 : 40;
   const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || softCapDefault);
   if (
@@ -1550,7 +1556,53 @@ export function getWalletsForPolling(): SmartWallet[] {
     softCap > 0 &&
     sorted.length > softCap
   ) {
-    return sorted.slice(0, softCap);
+    const stickyN = Math.max(1, Math.floor(softCap * 0.6));
+    const rotateN = softCap - stickyN;
+    const hot = sorted.slice(0, stickyN);
+    const cold = sorted.slice(stickyN);
+    const rotated: typeof sorted = [];
+    if (cold.length > 0 && rotateN > 0) {
+      const start =
+        ((softWatchRotateOffset % cold.length) + cold.length) % cold.length;
+      const take = Math.min(rotateN, cold.length);
+      for (let i = 0; i < take; i++) {
+        rotated.push(cold[(start + i) % cold.length]!);
+      }
+      softWatchRotateOffset = (start + Math.max(take, 1)) % cold.length;
+    }
+    const capped = hot.concat(rotated);
+    // #region agent log
+    if (!(globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt ||
+      Date.now() - ((globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt || 0) > 60_000) {
+      (globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt = Date.now();
+      console.log(
+        `[debug-8695ba] softWatchCap rotate ${capped.length}/${sorted.length} sticky=${hot.length} rotated=${rotated.length} shareLoad=${Boolean(config.rpc?.shareLoad)}`
+      );
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          runId: 'post-fix',
+          hypothesisId: 'C',
+          location: 'monitor.ts:getWalletsForPolling',
+          message: 'softWatchCap rotate applied',
+          data: {
+            softCap,
+            sortedLen: sorted.length,
+            sticky: hot.length,
+            rotated: rotated.length,
+            shareLoad: Boolean(config.rpc?.shareLoad),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+    return capped;
   }
   return sorted;
 }
@@ -4575,6 +4627,31 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       console.log(
         `[monitor] Signal rejected (${signalKind}) — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
       );
+      // #region agent log
+      console.log(
+        `[debug-8695ba] winRateGate block wr=${winRate.toFixed(1)} min=${filters.minWinRate} closedN=${paperTrader.getClosedPositions().length}`
+      );
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          hypothesisId: 'B',
+          location: 'monitor.ts:passesFilters',
+          message: 'winRate gate blocked entry',
+          data: {
+            winRate,
+            minWinRate: filters.minWinRate,
+            closedN: paperTrader.getClosedPositions().length,
+            symbol: signal.symbol,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       recordRejectedSignal(signal, `win rate ${winRate.toFixed(0)}%`);
       return false;
     }

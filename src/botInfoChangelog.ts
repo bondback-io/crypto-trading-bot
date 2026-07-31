@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.63',
+    title: 'Soft-watch rotate + Clear list labeling',
+    sections: ['copy', 'overview', 'execution'],
+    items: [
+      'Soft-watch cap (50) keeps hot wallets sticky and rotates colder wallets through remaining slots so Favourites are not permanently ignored.',
+      'Closed Trades control relabeled Clear list with a stronger confirm — distinct from Overview Reset / Full Reset (which wipe opens).',
+    ],
+  },
+  {
     version: '1.2.62',
     title: 'Utility soft watch RPC cap 50',
     sections: ['copy', 'execution'],

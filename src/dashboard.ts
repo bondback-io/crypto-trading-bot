@@ -5511,7 +5511,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <div class="ov-reset-elapsed" id="ov-reset-elapsed">—</div>
               <div class="ov-reset-at" id="ov-reset-at">Never reset</div>
             </div>
-            <button type="button" class="btn btn-secondary text-xs" id="btn-dashboard-reset" onclick="resetDashboardSession()" title="Clear balance, trades, PnL, signals, and soak stats for a fresh module test. Does not change Risk or modules.">Reset</button>
+            <button type="button" class="btn btn-secondary text-xs" id="btn-dashboard-reset" onclick="resetDashboardSession()" title="Overview Reset: restore starting SOL and wipe open/closed trades, PnL, signals, and soak stats for a fresh module test. Does not change Risk or modules. Not the same as Closed Trades → Clear list.">Reset</button>
           </div>
         </div>
         <div class="ov-equity-rows">
@@ -5622,7 +5622,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
-            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear closed trades from this session view. Does not delete micro-bot learning episodes.">Clear</button>
+            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear the closed-trades list only. Open positions and balance stay. Does not delete micro-bot learning episodes. Not Overview Reset.">Clear list</button>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
@@ -5725,7 +5725,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
-            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear closed trades from this session view. Does not delete micro-bot learning episodes.">Clear</button>
+            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear the closed-trades list only. Open positions and balance stay. Does not delete micro-bot learning episodes. Not Overview Reset.">Clear list</button>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
@@ -13428,21 +13428,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.setClosedTradesFilter = setClosedTradesFilter;
 
     async function clearClosedTradesSession() {
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear button clicked (pre-confirm)',data:{openCached:(window._lastOpenPositions||[]).length,closedGroups:(window._closedTradeGroups||[]).length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (
         !confirm(
-          'Clear closed trades from this session view only?\\n\\n' +
+          'Clear closed-trades LIST only?\\n\\n' +
             'Open positions and balance stay as they are.\\n' +
-            'Micro-bot learning episodes and self-learning data are kept.'
+            'This is NOT Overview Reset / Full Reset.\\n' +
+            'Micro-bot learning episodes are kept.'
         )
       ) {
         return;
       }
       try {
-        await fetchJSON('/api/paper/clear-closed', {
+        // #region agent log
+        fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear confirmed — POSTing /api/paper/clear-closed',data:{openCached:(window._lastOpenPositions||[]).length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        const clearRes = await fetchJSON('/api/paper/clear-closed', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear API response',data:{ok:!!clearRes&&clearRes.ok,cleared:clearRes&&clearRes.cleared,statsOpen:clearRes&&clearRes.stats&&clearRes.stats.openTrades,statsClosed:clearRes&&clearRes.stats&&clearRes.stats.closedTrades},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         refresh();
       } catch (err) {
         alert('Clear closed trades failed: ' + (err.message || err));
@@ -16135,6 +16145,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function paperReset(clearHistory) {
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:paperReset',message:'paperReset clicked',data:{clearHistory:!!clearHistory},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const msg = clearHistory
         ? 'Full reset: restore starting balance, clear open positions, AND wipe closed history + logs?'
         : 'Reset paper balance to starting SOL and clear open positions? (closed history kept)';
@@ -16218,6 +16231,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function resetDashboardSession() {
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:resetDashboardSession',message:'Overview Reset clicked',data:{openCached:(window._lastOpenPositions||[]).length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!confirm(
         'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons.\\n\\nKeeps: Risk On/Off and strategy modules.\\n\\nContinue?'
       )) return;
@@ -17582,6 +17598,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       });
       paintOpenPositionsTables();
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'E',location:'dashboard.ts:refresh',message:'refresh painted positions',data:{apiOpen:(positions.open||[]).length,apiClosed:(positions.closed||[]).length,cachedOpen:(window._lastOpenPositions||[]).length,openFilter:window._openProfileFilter||'all',watching:status&&status.monitor&&status.monitor.watchingLabel,paused:status&&status.monitor&&status.monitor.paused,winRate:status&&status.winRate},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
       window._closedTradeGroups = buildClosedTradeGroups(
