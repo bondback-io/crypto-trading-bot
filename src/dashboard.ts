@@ -4246,22 +4246,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .header-actions .open-trades-badge {
       position: absolute;
       top: -0.45rem;
-      right: -0.4rem;
       z-index: 2;
       min-width: 1.15rem;
       height: 1.15rem;
       padding: 0 0.28rem;
       border-radius: 9999px;
-      background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
       border: 1.5px solid #0f172a;
       color: #fff;
       font-size: 9px;
       font-weight: 800;
       line-height: 1.15rem;
       text-align: center;
-      box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45);
       pointer-events: none;
       font-variant-numeric: tabular-nums;
+    }
+    .header-actions .open-trades-badge-profit {
+      left: -0.4rem;
+      right: auto;
+      background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%);
+      box-shadow: 0 2px 8px rgba(22, 163, 74, 0.45);
+    }
+    .header-actions .open-trades-badge-loss {
+      right: -0.4rem;
+      left: auto;
+      background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+      box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45);
     }
     .header-actions .open-trades-badge[hidden] {
       display: none !important;
@@ -4927,7 +4936,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       .header-actions .open-trades-badge {
         top: -0.35rem;
+      }
+      .header-actions .open-trades-badge-profit {
+        left: 0.15rem;
+        right: auto;
+      }
+      .header-actions .open-trades-badge-loss {
         right: 0.15rem;
+        left: auto;
       }
       .nav-tabs {
         scroll-snap-type: none;
@@ -5274,8 +5290,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="status-controls">
           <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
           <button id="mode-paper" onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
-          <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds. Badge = open trades.">
-            <span id="open-trades-badge" class="open-trades-badge" hidden aria-live="polite">0</span>
+          <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds. Green badge (left) = open trades in profit. Red badge (right) = open trades not in profit.">
+            <span id="open-trades-badge-profit" class="open-trades-badge open-trades-badge-profit" hidden aria-live="polite">0</span>
+            <span id="open-trades-badge" class="open-trades-badge open-trades-badge-loss" hidden aria-live="polite">0</span>
             Live Sim
           </button>
           <button id="mode-live" onclick="setMode('live')" class="btn btn-secondary" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
@@ -5403,8 +5420,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
-        <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
-          <div class="signal-light mt-1" id="entry-path-light" title="Green = path clear. Amber = soft limit. Red = abnormal blocker.">
+        <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Large number = currently open trades. Below: Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
+          <div class="text-lg font-semibold" id="entries-open-count">—</div>
+          <div class="signal-light mt-1.5" id="entry-path-light" title="Green = path clear. Amber = soft limit. Red = abnormal blocker.">
             <span class="dot dot-quiet" id="entry-path-light-dot"></span>
             <span id="entry-path-light-label">—</span>
           </div>
@@ -6730,48 +6748,50 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
         <div class="mt-3 pt-3 border-t border-slate-700/80" id="auto-scoring-panel">
-          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <div>
-              <div class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</div>
-              <p class="text-xs text-slate-400 mb-0">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
-            </div>
-            <label class="ctl-check" title="Enable weighted auto-scoring">
-              <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" />
-              <span>Auto-score ON</span>
-            </label>
-          </div>
-          <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
-            <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
-            <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
-              <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
-              <span>Skip below min</span>
-            </label>
-            <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
-              <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
-                <option value="">— none (auto pick) —</option>
-              </select>
-            </label>
-          </div>
-          <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
-            <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
-            <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
-              <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-                <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
-                <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
+          <details class="strat-adv-pack" id="auto-scoring-details" style="margin-top:0">
+            <summary>
+              <span class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</span>
+              <label class="ctl-check" title="Enable weighted auto-scoring" onclick="event.stopPropagation()">
+                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" onclick="event.stopPropagation()" />
+                <span>Auto-score ON</span>
+              </label>
+            </summary>
+            <div class="strat-adv-body">
+              <p class="text-xs text-slate-400 mb-2">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
+              <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
+                <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
+                <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
+                  <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
+                  <span>Skip below min</span>
+                </label>
+                <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
+                  <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
+                    <option value="">— none (auto pick) —</option>
+                  </select>
+                </label>
               </div>
-              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
-                <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-              </div>
-              <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
-              <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
+              <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
+                <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
+                <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
+                  <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                    <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
+                    <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
+                  </div>
+                  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
+                    <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                  </div>
+                  <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
+                  <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
+                </div>
+              </details>
             </div>
           </details>
         </div>
@@ -12712,6 +12732,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._lastOpenPositions,
         incoming
       );
+      const openN = (window._lastOpenPositions || []).length;
+      const openCountEl = document.getElementById('open-count');
+      if (openCountEl) openCountEl.textContent = String(openN);
+      if (typeof updateOpenTradesBadge === 'function') {
+        updateOpenTradesBadge(openN);
+      }
       if (typeof paintOpenPositionsTables === 'function') {
         paintOpenPositionsTables();
       }
@@ -16973,6 +16999,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           positions.open || []
         );
       }
+      updateOpenTradesBadge(
+        (window._lastOpenPositions || positions.open || []).length
+      );
       window._renderOpenPositionsHtml = function renderOpenPositionsHtml(list) {
         const armAt = window._trailArmAt != null ? window._trailArmAt : 30;
         if (!list || list.length === 0) {
@@ -18959,22 +18988,77 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       strictHigh: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
     };
 
-    function updateOpenTradesBadge(n) {
-      const el = document.getElementById('open-trades-badge');
+    function syncEntriesOpenCount(n) {
+      const el = document.getElementById('entries-open-count');
       if (!el) return;
       const count = Number(n);
-      if (!Number.isFinite(count) || count <= 0) {
-        el.hidden = true;
-        el.textContent = '0';
-        el.setAttribute('aria-label', 'No open trades');
+      if (!Number.isFinite(count) || count < 0) {
+        el.textContent = '—';
         return;
       }
+      el.textContent = String(Math.round(count));
+    }
+
+    function splitOpenTradesByProfit(open) {
+      let profit = 0;
+      let notProfit = 0;
+      for (const p of open || []) {
+        const pct = p && p.pnlPct != null ? Number(p.pnlPct) : NaN;
+        if (Number.isFinite(pct) && pct > 0) profit += 1;
+        else notProfit += 1;
+      }
+      return { profit, notProfit, total: profit + notProfit };
+    }
+
+    function setOpenTradesCornerBadge(el, count, kind) {
+      if (!el) return;
+      const n = Number(count);
+      if (!Number.isFinite(n) || n <= 0) {
+        el.hidden = true;
+        el.textContent = '0';
+        el.removeAttribute('aria-label');
+        return;
+      }
+      const rounded = Math.round(n);
       el.hidden = false;
-      el.textContent = count > 99 ? '99+' : String(Math.round(count));
+      el.textContent = rounded > 99 ? '99+' : String(rounded);
       el.setAttribute(
         'aria-label',
-        Math.round(count) + ' open trade' + (count === 1 ? '' : 's')
+        rounded +
+          ' open trade' +
+          (rounded === 1 ? '' : 's') +
+          (kind === 'profit' ? ' in profit' : ' not in profit')
       );
+    }
+
+    function updateOpenTradesBadge(n) {
+      const profitEl = document.getElementById('open-trades-badge-profit');
+      const lossEl = document.getElementById('open-trades-badge');
+      const list = window._lastOpenPositions || [];
+      const argCount = Number(n);
+      const total = Number.isFinite(argCount) && argCount >= 0
+        ? Math.round(argCount)
+        : list.length;
+      syncEntriesOpenCount(total);
+
+      let profit = 0;
+      let notProfit = 0;
+      if (total <= 0) {
+        setOpenTradesCornerBadge(profitEl, 0, 'profit');
+        setOpenTradesCornerBadge(lossEl, 0, 'loss');
+        if (lossEl) lossEl.setAttribute('aria-label', 'No open trades');
+        return;
+      }
+      if (list.length === total) {
+        const split = splitOpenTradesByProfit(list);
+        profit = split.profit;
+        notProfit = split.notProfit;
+      } else {
+        // Count-only update before marks sync — show total on red until PnL split is known.
+        notProfit = total;
+      }
+      setOpenTradesCornerBadge(profitEl, profit, 'profit');
+      setOpenTradesCornerBadge(lossEl, notProfit, 'loss');
     }
 
     function setStatusIcon(svgEl, key) {
