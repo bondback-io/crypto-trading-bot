@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.69',
+    title: 'Utility prefers Triton api.mainnet.solana.com',
+    sections: ['execution', 'copy'],
+    items: [
+      'Utility sticky preferred is now api.mainnet.solana.com (Triton) when set as RPC_URL or RPC_SECONDARY, then publicnode.',
+      'Official api.mainnet-beta.solana.com is no longer chosen as a Utility soft-failover target (probe latency looked fake-fast).',
+    ],
+  },
+  {
     version: '1.2.68',
     title: 'Utility soft-failover to QuickNode under load',
     sections: ['execution', 'copy'],

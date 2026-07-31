@@ -25,6 +25,7 @@ import {
   RPC_SHARE_LOAD_SUPPORTS,
   isPublicRpcUrl,
   isQuicknodeRpcUrl,
+  isOfficialMainnetBetaRpcUrl,
   type RpcLaneRole,
 } from './rpcUrl';
 
@@ -137,6 +138,14 @@ const callMeter = new Map<
 >();
 let callMeterStartedAt = Date.now();
 
+// #region agent log
+const utilityDebugRing: Array<Record<string, unknown>> = [];
+function pushUtilityDebug(entry: Record<string, unknown>): void {
+  utilityDebugRing.push({ ...entry, t: Date.now() });
+  if (utilityDebugRing.length > 40) utilityDebugRing.shift();
+}
+// #endregion
+
 function callMeterKey(
   endpoint: string,
   feature: string,
@@ -247,6 +256,32 @@ function meteredFetch(endpointLabel: string) {
           latencyMs,
         });
       }
+      // #region agent log
+      {
+        const feat = rpcFeatureAls.getStore() || 'ungated';
+        if (
+          (feat === 'wallet_poll' || feat === 'activity') &&
+          (endpointLabel === 'publicnode' ||
+            endpointLabel === 'rpc-url' ||
+            endpointLabel === 'mainnet-beta' ||
+            endpointLabel === 'quicknode')
+        ) {
+          const ep = endpoints.find((e) => e.endpoint.label === endpointLabel);
+          if (Math.random() < 0.08) {
+            fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',runId:'pre-fix',hypothesisId:'C',location:'connection.ts:meteredFetch',message:'utility-ish HTTP sample vs EWMA',data:{endpointLabel,feat,method:methods[0],httpMs:latencyMs,ewmaMs:ep?.latencyMs??null,successCount:ep?.successCount??null},timestamp:Date.now()})}).catch(()=>{});
+            pushUtilityDebug({
+              hypothesisId: 'C',
+              message: 'http_vs_ewma',
+              endpointLabel,
+              feat,
+              method: methods[0],
+              httpMs: latencyMs,
+              ewmaMs: ep?.latencyMs ?? null,
+            });
+          }
+        }
+      }
+      // #endregion
       return res;
     } catch (err) {
       const latencyMs = Date.now() - t0;
@@ -637,6 +672,11 @@ function resolveIndexForRole(role: RpcRole): number {
   if (latencySoft && role === 'utility' && pref) {
     let bestIdx = -1;
     let bestMs = Number.POSITIVE_INFINITY;
+    const altCandidates: Array<{
+      label: string;
+      ms: number | null;
+      skippedQn: boolean;
+    }> = [];
     for (let i = 0; i < endpoints.length; i++) {
       if (i === preferred) continue;
       const e = endpoints[i];
@@ -645,6 +685,20 @@ function resolveIndexForRole(role: RpcRole): number {
         e.endpoint.label === 'quicknode' ||
         isQuicknodeRpcUrl(e.endpoint.url)
       ) {
+        altCandidates.push({
+          label: e.endpoint.label,
+          ms: e.latencyMs,
+          skippedQn: true,
+        });
+        continue;
+      }
+      // Official mainnet-beta getSlot looks fast but wallet polls stay slow — never soft-pick it.
+      if (isOfficialMainnetBetaRpcUrl(e.endpoint.url)) {
+        altCandidates.push({
+          label: e.endpoint.label,
+          ms: e.latencyMs,
+          skippedQn: false,
+        });
         continue;
       }
       const isAltPublic =
@@ -654,11 +708,54 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!isAltPublic) continue;
       if (!isFasterAlternate(pref, e)) continue;
       const ms = e.latencyMs ?? Number.POSITIVE_INFINITY;
+      altCandidates.push({
+        label: e.endpoint.label,
+        ms: e.latencyMs,
+        skippedQn: false,
+      });
       if (ms < bestMs) {
         bestMs = ms;
         bestIdx = i;
       }
     }
+    // #region agent log
+    {
+      const nowDbg = Date.now();
+      if (
+        !(globalThis as { __utilSoftDbgAt?: number }).__utilSoftDbgAt ||
+        nowDbg - ((globalThis as { __utilSoftDbgAt?: number }).__utilSoftDbgAt || 0) >
+          8_000
+      ) {
+        (globalThis as { __utilSoftDbgAt?: number }).__utilSoftDbgAt = nowDbg;
+        const qn = preferredQuicknode >= 0 ? endpoints[preferredQuicknode] : null;
+        const payload = {
+          sessionId: '8695ba',
+          runId: 'post-fix',
+          hypothesisId: 'A,B,E',
+          location: 'connection.ts:resolveIndexForRole:utilitySoft',
+          message: 'utility soft-failover decision',
+          data: {
+            prefLabel: pref.endpoint.label,
+            prefEwma: pref.latencyMs,
+            stressedForMs: pref.latencyStressedSince
+              ? nowDbg - pref.latencyStressedSince
+              : null,
+            bestIdx,
+            bestLabel: bestIdx >= 0 ? endpoints[bestIdx]?.endpoint.label : null,
+            bestMs: bestIdx >= 0 ? endpoints[bestIdx]?.latencyMs : null,
+            qnBusy: isQuicknodeBusyAsPaidFailover(),
+            qnMay: utilityMayUseQuicknodeSoft(pref),
+            qnEwma: qn?.latencyMs ?? null,
+            activeUtilityLabel: endpoints[activeUtility]?.endpoint.label,
+            altCandidates: altCandidates.slice(0, 8),
+          },
+          timestamp: nowDbg,
+        };
+        fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify(payload)}).catch(()=>{});
+        pushUtilityDebug({ hypothesisId: 'A,B', message: 'utility_soft', ...payload.data });
+      }
+    }
+    // #endregion
     if (bestIdx >= 0) {
       const other = endpoints[bestIdx]!;
       const now = Date.now();
@@ -1101,6 +1198,9 @@ export function getRpcStats(): {
   warning: string | null;
   /** Real HTTP JSON-RPC call traffic (includes getConnection path). */
   callTraffic: ReturnType<typeof getRpcCallTraffic>;
+  // #region agent log
+  debugUtilityFailover?: Array<Record<string, unknown>>;
+  // #endregion
 } {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
@@ -1222,6 +1322,9 @@ export function getRpcStats(): {
     ok: anyHealthy,
     warning,
     callTraffic: getRpcCallTraffic(40),
+    // #region agent log
+    debugUtilityFailover: utilityDebugRing.slice(-12),
+    // #endregion
   };
 }
 

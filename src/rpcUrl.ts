@@ -5,16 +5,16 @@
  *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
  *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
  *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
- *   4. RPC_URL / RPC_PRIMARY             — legacy / extra paid endpoint
- *   5. Public Solana (utility)           — https://solana-rpc.publicnode.com
- *   6. Official public fallback          — https://api.mainnet-beta.solana.com
+ *   4. RPC_URL / RPC_PRIMARY             — Triton api.mainnet.solana.com preferred for Utility
+ *   5. Public Solana                     — https://solana-rpc.publicnode.com
+ *   6. Official public fallback          — https://api.mainnet-beta.solana.com (last resort)
  *   7. RPC_SECONDARY                     — extra fallback (+ Zion lane when Alchemy unset)
  *   8. remaining RPC_FALLBACKS
  *
  * Triple-lane layout (Share RPC load ON):
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
- *   Utility → Publicnode (not official mainnet-beta — often 1s+ from cloud hosts)
+ *   Utility → api.mainnet.solana.com (Triton) when set as RPC_URL/RPC_SECONDARY, else publicnode
  * Paid-lane failover: preferred → other paid → QuickNode → public (bypass QuickNode if unset).
  * Health monitor + piggyback failover live in connection.ts.
  */
@@ -24,7 +24,13 @@ export const PUBLIC_SOLANA_RPC_OFFICIAL =
   'https://api.mainnet-beta.solana.com';
 
 /**
- * Preferred free public endpoint for the Utility lane.
+ * Triton-operated public mainnet — preferred Utility host when configured.
+ * @see https://api.mainnet.solana.com
+ */
+export const PUBLIC_SOLANA_RPC_TRITON = 'https://api.mainnet.solana.com';
+
+/**
+ * Fallback free public endpoint for the Utility lane when Triton is unset.
  * publicnode is typically much faster from cloud hosts than official mainnet-beta.
  */
 export const PUBLIC_SOLANA_RPC = 'https://solana-rpc.publicnode.com';
@@ -111,6 +117,21 @@ export function buildQuicknodeRpcUrl(
   ).trim();
   if (!raw || !isUsableRpcUrl(raw)) return null;
   return raw;
+}
+
+/** Official Solana Labs public mainnet-beta (often slow from cloud). */
+export function isOfficialMainnetBetaRpcUrl(
+  url: string | null | undefined
+): boolean {
+  return (url || '').toLowerCase().includes('mainnet-beta.solana.com');
+}
+
+/** Triton public mainnet host (api.mainnet.solana.com). */
+export function isTritonMainnetRpcUrl(url: string | null | undefined): boolean {
+  const u = (url || '').toLowerCase();
+  return (
+    u.includes('api.mainnet.solana.com') && !u.includes('mainnet-beta.solana.com')
+  );
 }
 
 /** True for free/public endpoints that rate-limit and cannot sustain program log WS. */
@@ -358,12 +379,15 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers publicnode (fast from cloud). Skip official mainnet-beta
-  // and any RPC_URL that is also official public — those stay as fallbacks only.
+  // Utility lane prefers Triton api.mainnet.solana.com (RPC_URL / RPC_SECONDARY),
+  // then publicnode. Never sticky official mainnet-beta.
   let utilityUrl = '';
-  const utilityPrefs = [PUBLIC_SOLANA_RPC, rpcSecondary].filter(
-    (u) => u && isUsableRpcUrl(u)
-  );
+  const utilityPrefs = [
+    rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
+    rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
+    PUBLIC_SOLANA_RPC,
+    rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
+  ].filter((u) => u && isUsableRpcUrl(u));
   for (const u of utilityPrefs) {
     if (u !== primaryUrl && u !== secondaryUrl) {
       utilityUrl = u;
@@ -374,8 +398,8 @@ export function rpcEndpointsFromEnv(
     for (const c of pool) {
       if (c.url === primaryUrl || c.url === secondaryUrl) continue;
       // Never prefer official mainnet-beta as sticky utility when alternatives exist
-      if (c.url === PUBLIC_SOLANA_RPC_OFFICIAL) continue;
-      if (c.url === rpcUrl && isPublicRpcUrl(rpcUrl)) continue;
+      if (isOfficialMainnetBetaRpcUrl(c.url)) continue;
+      if (c.url === rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl)) continue;
       utilityUrl = c.url;
       break;
     }
@@ -414,6 +438,7 @@ export function rpcEndpointsFromEnv(
     if (url === rpcSecondary) return 'rpc-secondary';
     if (url === PUBLIC_SOLANA_RPC) return 'publicnode';
     if (url === PUBLIC_SOLANA_RPC_OFFICIAL) return 'mainnet-beta';
+    if (isTritonMainnetRpcUrl(url)) return 'mainnet-triton';
     return fallback;
   };
 
@@ -438,9 +463,11 @@ export function rpcEndpointsFromEnv(
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
       (quicknode ? ' (QuickNode mid-tier)' : '') +
-      (utilityUrl === PUBLIC_SOLANA_RPC || utilityUrl === rpcSecondary
-        ? ' (publicnode utility)'
-        : '')
+      (utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
+        ? ' (Triton api.mainnet.solana.com utility)'
+        : utilityUrl === PUBLIC_SOLANA_RPC
+          ? ' (publicnode utility)'
+          : '')
   );
   if (!helius && !alchemy) {
     console.warn(
@@ -470,7 +497,7 @@ export const RPC_LANE_SUPPORTS = {
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: publicnode (solana-rpc.publicnode.com) → official mainnet-beta last',
+    'Preferred: api.mainnet.solana.com (Triton) → publicnode → official mainnet-beta last',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -488,6 +515,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'publicnode — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'api.mainnet.solana.com (Triton) — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;
