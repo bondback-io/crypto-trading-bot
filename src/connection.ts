@@ -511,7 +511,7 @@ export function getRpcStats(): {
     /mainnet-beta\.solana\.com|publicnode\.com/i.test(pActive?.endpoint.url || '')
   ) {
     warning =
-      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Prefer a paid Helius/QuickNode RPC_URL.';
+      'Using a public Solana RPC on the primary lane — fine for paper, but rate limits can miss buys. Set HELIUS_API_KEY (+ ALCHEMY_API_KEY) for free faster failover.';
   } else if (pIdx !== preferredPrimary) {
     warning = `Primary lane piggybacking on ${pActive?.endpoint.label} (preferred primary down >${formatFailoverGrace(failoverDownMs())}).`;
   } else if (
@@ -855,7 +855,11 @@ export function startRpcHealthMonitor(): void {
     })();
   }, interval);
 
-  console.log(`[rpc] Health monitor started (every ${interval}ms)`);
+  console.log(
+    `[rpc] Health monitor started (every ${interval}ms) — endpoints: ` +
+      endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +
+      ` · active primary=${getActiveEndpointLabel('primary')} secondary=${getActiveEndpointLabel('secondary')}`
+  );
 }
 
 export function stopRpcHealthMonitor(): void {

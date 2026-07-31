@@ -6846,10 +6846,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
           <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Dual-lane Solana RPC: Primary for trading/copy/migrate; Secondary for Zion/KOL. If a lane is down ≥30 seconds, traffic piggybacks on the other (or any healthy fallback), then returns to the preferred lane when it recovers."></span></div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary (RPC_URL)</strong> — Trade profile bots, copy + signal scanner, market scanner entry RPC, Pump.fun migrate scanner, open-trade on-chain needs.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary (RPC_SECONDARY or first RPC_FALLBACKS)</strong> — Zion + Place Trade, KOL Token Scanner, Zion trade requests / open-trade on-chain bits, wallet on-chain activity refresh.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary lane</strong> — Trade profile bots, copy + signal scanner, market scanner, Pump.fun migrate, open-trade on-chain needs. Prefers Helius.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary lane</strong> — Zion + Place Trade, KOL scanner, wallet activity. Prefers Alchemy (keeps CU off the copy lane).</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking. Set RPC_URL + a distinct RPC_SECONDARY so Zion KOL does not share CU with copy/signals.</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking. Set distinct Helius + Alchemy keys so Zion does not share CU with copy/signals.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>

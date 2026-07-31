@@ -1,18 +1,25 @@
 /**
- * RPC URL sanitization — reject .env.example placeholders and ensure a
- * working public fallback when fewer than two usable endpoints are configured.
+ * RPC URL sanitization + free-tier multi-RPC manager.
  *
- * Dual-lane layout (when two paid RPCs are configured):
- *   RPC_URL / RPC_PRIMARY     → primary lane
- *   RPC_SECONDARY (or first RPC_FALLBACKS entry) → secondary lane
- *   remaining RPC_FALLBACKS → extra fallbacks (no auto public-3/4/5)
+ * Priority order (failover pool):
+ *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
+ *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
+ *   3. RPC_URL / RPC_PRIMARY             — legacy / extra paid endpoint
+ *   4. Public Solana                     — https://api.mainnet-beta.solana.com
+ *   5. RPC_SECONDARY                     — final fallback (+ Zion lane when Alchemy unset)
+ *   6. remaining RPC_FALLBACKS
+ *
+ * Dual-lane layout (unchanged callers):
+ *   Primary lane   → preferred = Helius (else first usable in chain)
+ *   Secondary lane → preferred = Alchemy (else RPC_SECONDARY / next distinct)
+ * Health monitor + piggyback failover live in connection.ts.
  */
 
 export const PUBLIC_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
 
 /**
- * @deprecated No longer auto-appended (avoid probing dead free hosts).
- * Kept for reference / isPublicRpcUrl detection only.
+ * @deprecated Extra free hosts are no longer auto-registered (noisy / often dead).
+ * Kept for isPublicRpcUrl detection only.
  */
 export const PUBLIC_RPC_FALLBACKS = [
   'https://solana-rpc.publicnode.com',
@@ -22,7 +29,10 @@ export const PUBLIC_RPC_FALLBACKS = [
 ] as const;
 
 const PLACEHOLDER_RE =
-  /your-helius|your-quicknode|example\.com|changeme|replace.?me|TODO|xxx+|<.*>|localhost:8899/i;
+  /your-helius|your-quicknode|your-alchemy|example\.com|changeme|replace.?me|TODO|xxx+|<.*>|localhost:8899/i;
+
+const KEY_PLACEHOLDER_RE =
+  /^(your[-_]?|changeme|replace.?me|todo|xxx+|<.*>|demo)$/i;
 
 export function isPlaceholderRpcUrl(url: string | null | undefined): boolean {
   const u = (url || '').trim();
@@ -33,6 +43,8 @@ export function isPlaceholderRpcUrl(url: string | null | undefined): boolean {
     const parsed = new URL(u);
     if (!parsed.hostname || parsed.hostname === 'localhost') return true;
     if (/^your[-.]/i.test(parsed.hostname)) return true;
+    // Reject bare Alchemy demo path
+    if (/\/v2\/demo$/i.test(parsed.pathname)) return true;
   } catch {
     return true;
   }
@@ -43,10 +55,42 @@ export function isUsableRpcUrl(url: string | null | undefined): boolean {
   return !isPlaceholderRpcUrl(url);
 }
 
+function isUsableApiKey(key: string | null | undefined): boolean {
+  const k = (key || '').trim();
+  if (!k || k.length < 8) return false;
+  if (KEY_PLACEHOLDER_RE.test(k)) return false;
+  if (PLACEHOLDER_RE.test(k)) return false;
+  return true;
+}
+
+/** Build Helius mainnet HTTP RPC URL from API key (null if unset/placeholder). */
+export function buildHeliusRpcUrl(apiKey?: string | null): string | null {
+  const key = (apiKey ?? process.env.HELIUS_API_KEY)?.trim();
+  if (!isUsableApiKey(key)) return null;
+  return `https://mainnet.helius-rpc.com/?api-key=${key}`;
+}
+
+/** Build Alchemy Solana mainnet HTTP RPC URL from API key (null if unset/placeholder). */
+export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
+  const key = (apiKey ?? process.env.ALCHEMY_API_KEY)?.trim();
+  if (!isUsableApiKey(key)) return null;
+  return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
+}
+
 /** True for free/public endpoints that rate-limit and cannot sustain program log WS. */
 export function isPublicRpcUrl(url: string | null | undefined): boolean {
   const u = (url || '').toLowerCase();
   if (!u) return true;
+  // Free-tier Helius / Alchemy with a real key are not "public Solana RPC"
+  if (u.includes('helius-rpc.com') && u.includes('api-key=')) {
+    const key = u.split('api-key=')[1]?.split('&')[0] || '';
+    if (isUsableApiKey(key)) return false;
+  }
+  if (u.includes('g.alchemy.com/v2/') && !u.endsWith('/demo')) {
+    const parts = u.split('/v2/');
+    const key = parts[1]?.split(/[/?#]/)[0] || '';
+    if (isUsableApiKey(key)) return false;
+  }
   return (
     u.includes('mainnet-beta.solana.com') ||
     u.includes('api.mainnet.solana.com') ||
@@ -72,8 +116,8 @@ export interface NormalizedRpcEndpoint {
 
 /**
  * Build a sanitized endpoint list from env/config candidates.
- * Drops placeholders, dedupes. Appends a single public last-resort only when
- * fewer than 2 usable endpoints are configured (primary+secondary setups stay clean).
+ * Drops placeholders, dedupes. Ensures public Solana is present as last resort
+ * when not already in the list.
  */
 export function normalizeRpcEndpoints(
   candidates: Array<{
@@ -130,9 +174,11 @@ export function normalizeRpcEndpoints(
     );
   }
 
-  // Last-resort public only when we lack a dual-lane setup (avoids probing
-  // dead public-fallback-3/4/5 every health tick when primary+secondary exist).
-  if (out.length < 2) {
+  // Always keep public Solana as last-resort if missing
+  const hasPublic = out.some((e) =>
+    e.url.toLowerCase().includes('mainnet-beta.solana.com')
+  );
+  if (!hasPublic) {
     push(
       PUBLIC_SOLANA_RPC,
       out.length === 0 ? 'primary' : 'public-fallback',
@@ -142,7 +188,7 @@ export function normalizeRpcEndpoints(
 
   if (droppedPlaceholder && out.length > 0) {
     console.warn(
-      `[rpc] Using ${out[0].label} (${out[0].url}) — set a real Helius/QuickNode RPC_URL on Render for reliability`
+      `[rpc] Using ${out[0].label} — set HELIUS_API_KEY / ALCHEMY_API_KEY (or RPC_URL) for reliability`
     );
   }
 
@@ -150,27 +196,31 @@ export function normalizeRpcEndpoints(
 }
 
 /**
- * Resolve dual-lane RPC list from env.
- * - RPC_URL / RPC_PRIMARY → primary
- * - RPC_SECONDARY (or SECONDARY_RPC alias), else first RPC_FALLBACKS entry → secondary
- * - remaining RPC_FALLBACKS → extra fallbacks
+ * Resolve dual-lane + free-tier multi-RPC list from env.
+ *
+ * Preferred primary:  Helius → else RPC_URL → else Alchemy → else public
+ * Preferred secondary: Alchemy (if ≠ primary) → else RPC_SECONDARY → else next distinct
+ * Failover scan order follows the candidate array (see module header).
  */
 export function rpcEndpointsFromEnv(
   primaryEnv?: string | null,
   fallbacksEnv?: string | null,
   secondaryEnv?: string | null
 ): NormalizedRpcEndpoint[] {
-  const primary =
-    (primaryEnv ?? process.env.RPC_PRIMARY ?? process.env.RPC_URL)?.trim() ||
-    PUBLIC_SOLANA_RPC;
-  const fallbacks = (fallbacksEnv ?? process.env.RPC_FALLBACKS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const helius = buildHeliusRpcUrl();
+  const alchemy = buildAlchemyRpcUrl();
+
+  const rpcUrlRaw = (
+    primaryEnv ??
+    process.env.RPC_PRIMARY ??
+    process.env.RPC_URL ??
+    ''
+  ).trim();
+  const rpcUrl = isUsableRpcUrl(rpcUrlRaw) ? rpcUrlRaw : '';
 
   const fromRpcSecondary = process.env.RPC_SECONDARY?.trim() || '';
   const fromAlias = process.env.SECONDARY_RPC?.trim() || '';
-  let secondary =
+  let rpcSecondary =
     secondaryEnv != null
       ? String(secondaryEnv).trim()
       : fromRpcSecondary || fromAlias;
@@ -179,41 +229,120 @@ export function rpcEndpointsFromEnv(
       '[rpc] Using SECONDARY_RPC as secondary lane — prefer renaming to RPC_SECONDARY'
     );
   }
-  if (!secondary && fallbacks.length > 0) {
-    secondary = fallbacks[0];
-  }
-  const rest = fallbacks.filter((u) => u !== secondary && u !== primary);
-
-  if (secondary && secondary === primary) {
-    console.warn(
-      '[rpc] RPC_SECONDARY matches RPC_URL — both lanes share one endpoint. ' +
-        'Set a distinct paid secondary URL so Zion/activity do not starve copy signals.'
-    );
+  if (rpcSecondary && !isUsableRpcUrl(rpcSecondary)) {
+    rpcSecondary = '';
   }
 
-  const candidates: Array<{
-    url: string;
-    label: string;
-    role: RpcLaneRole;
-  }> = [{ url: primary, label: 'primary', role: 'primary' }];
+  const fallbacks = (fallbacksEnv ?? process.env.RPC_FALLBACKS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((u) => u && isUsableRpcUrl(u));
 
-  if (secondary && secondary !== primary) {
-    candidates.push({
-      url: secondary,
-      label: 'secondary',
-      role: 'secondary',
+  // Failover priority pool (deduped later by normalizeRpcEndpoints)
+  type Cand = { url: string; label: string; role: RpcLaneRole };
+  const pool: Cand[] = [];
+
+  if (helius) pool.push({ url: helius, label: 'helius', role: 'fallback' });
+  if (alchemy) pool.push({ url: alchemy, label: 'alchemy', role: 'fallback' });
+  if (rpcUrl) pool.push({ url: rpcUrl, label: 'rpc-url', role: 'fallback' });
+  pool.push({
+    url: PUBLIC_SOLANA_RPC,
+    label: 'public-fallback',
+    role: 'fallback',
+  });
+  if (rpcSecondary) {
+    pool.push({
+      url: rpcSecondary,
+      label: 'rpc-secondary',
+      role: 'fallback',
     });
   }
-
-  for (let i = 0; i < rest.length; i++) {
-    candidates.push({
-      url: rest[i],
+  for (let i = 0; i < fallbacks.length; i++) {
+    pool.push({
+      url: fallbacks[i],
       label: `fallback-${i + 1}`,
       role: 'fallback',
     });
   }
 
-  return normalizeRpcEndpoints(candidates);
+  // Pick preferred primary / secondary URLs
+  const primaryUrl =
+    helius || rpcUrl || alchemy || PUBLIC_SOLANA_RPC;
+  let secondaryUrl = '';
+  if (alchemy && alchemy !== primaryUrl) {
+    secondaryUrl = alchemy;
+  } else if (rpcSecondary && rpcSecondary !== primaryUrl) {
+    secondaryUrl = rpcSecondary;
+  } else {
+    for (const c of pool) {
+      if (c.url !== primaryUrl) {
+        secondaryUrl = c.url;
+        break;
+      }
+    }
+  }
+
+  if (secondaryUrl && secondaryUrl === primaryUrl) {
+    console.warn(
+      '[rpc] Primary and secondary resolve to the same URL — Zion shares CU with copy/signals.'
+    );
+  }
+
+  const candidates: Cand[] = [];
+  const seen = new Set<string>();
+  const add = (url: string, label: string, role: RpcLaneRole) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    candidates.push({ url, label, role });
+  };
+
+  // Preferred lanes first (sticky until unhealthy), then remaining failover order
+  const primaryLabel =
+    primaryUrl === helius
+      ? 'helius'
+      : primaryUrl === alchemy
+        ? 'alchemy'
+        : primaryUrl === rpcUrl
+          ? 'primary'
+          : primaryUrl === PUBLIC_SOLANA_RPC
+            ? 'public-fallback'
+            : 'primary';
+  add(primaryUrl, primaryLabel, 'primary');
+
+  if (secondaryUrl) {
+    const secondaryLabel =
+      secondaryUrl === alchemy
+        ? 'alchemy'
+        : secondaryUrl === rpcSecondary
+          ? 'secondary'
+          : secondaryUrl === helius
+            ? 'helius'
+            : secondaryUrl === PUBLIC_SOLANA_RPC
+              ? 'public-fallback'
+              : 'secondary';
+    add(secondaryUrl, secondaryLabel, 'secondary');
+  }
+
+  for (const c of pool) {
+    add(c.url, c.label, 'fallback');
+  }
+
+  const out = normalizeRpcEndpoints(candidates);
+
+  const chain = out.map((e) => e.label).join(' → ');
+  console.log(
+    `[rpc] Multi-RPC chain: ${chain}` +
+      (helius ? ' (Helius free primary)' : '') +
+      (alchemy ? ' (Alchemy free secondary)' : '')
+  );
+  if (!helius && !alchemy) {
+    console.warn(
+      '[rpc] HELIUS_API_KEY / ALCHEMY_API_KEY unset — using RPC_URL / public. ' +
+        'Set free Helius + Alchemy keys for better speed and automatic failover.'
+    );
+  }
+
+  return out;
 }
 
 /** Human-readable lane assignments for Config > RPC UI. */
@@ -224,6 +353,7 @@ export const RPC_LANE_SUPPORTS = {
     'Main market scanner entry RPC (filters / metrics)',
     'Pump.fun migrate scanner',
     'Open trades (on-chain needs; marks still use Dex HTTP)',
+    'Preferred: Helius Free (HELIUS_API_KEY) → failover Alchemy / RPC_URL / public',
   ],
   secondary: [
     'Zion micro-bot + Place Trade',
@@ -231,6 +361,7 @@ export const RPC_LANE_SUPPORTS = {
     'Zion open trades / trade requests (on-chain bits)',
     'Wallet on-chain activity refresh',
     'Non-critical enrichment',
+    'Preferred: Alchemy Free (ALCHEMY_API_KEY) → else RPC_SECONDARY',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
