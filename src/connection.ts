@@ -69,6 +69,10 @@ interface EndpointState {
   consecutiveFailures: number;
   unhealthySince: number | null;
   role: RpcLaneRole;
+  /** Skip this endpoint until this time after a 429 (immediate failover). */
+  rateLimitedUntil: number;
+  /** Last time we logged "marked unhealthy" for this endpoint. */
+  lastUnhealthyLogAt: number;
 }
 
 let endpoints: EndpointState[] = [];
@@ -92,6 +96,18 @@ let started = false;
 const DEFAULT_FAILOVER_DOWN_MS = 30_000;
 /** Floor so env typos cannot collapse failover to zero. */
 const MIN_FAILOVER_DOWN_MS = 5_000;
+/** After a 429, leave the hot endpoint alone so failover can breathe. */
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+/** Don't re-log "marked unhealthy" more often than this. */
+const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
+
+function isRpcRateLimitMessage(error: string): boolean {
+  return /429|rate.?limit|-32429/i.test(error);
+}
+
+function isEndpointRateLimited(state: EndpointState | undefined): boolean {
+  return Boolean(state && state.rateLimitedUntil > Date.now());
+}
 
 function failoverDownMs(): number {
   const fromEnv = Number(process.env.RPC_FAILOVER_DOWN_MS);
@@ -154,6 +170,8 @@ function ensureEndpoints(): void {
       consecutiveFailures: 0,
       unhealthySince: null,
       role,
+      rateLimitedUntil: 0,
+      lastUnhealthyLogAt: 0,
     };
   });
 
@@ -235,12 +253,14 @@ function downForMs(state: EndpointState | undefined): number {
  * Resolve which endpoint index should serve a lane.
  * Preferred stays sticky until unhealthy for failoverDownMs, then piggybacks
  * on the other lane (or any healthy fallback).
+ * Rate-limited preferred endpoints skip grace and fail over immediately —
+ * otherwise we keep hammering a 429 host and flood the event loop / kill /health.
  */
 function resolveIndexForRole(role: RpcRole): number {
   ensureEndpoints();
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
-  if (pref?.healthy) {
+  if (pref?.healthy && !isEndpointRateLimited(pref)) {
     if (role === 'primary') activePrimary = preferred;
     else activeSecondary = preferred;
     if (role === 'primary') activeIndex = preferred;
@@ -248,8 +268,9 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   const downMs = downForMs(pref);
-  if (downMs > 0 && downMs < failoverDownMs()) {
-    // Still within grace — keep hammering preferred (health monitor will recover).
+  const rateLimited = isEndpointRateLimited(pref);
+  // Transient errors: sticky grace. Rate limits: leave immediately.
+  if (!rateLimited && downMs > 0 && downMs < failoverDownMs()) {
     return preferred;
   }
 
@@ -258,14 +279,17 @@ function resolveIndexForRole(role: RpcRole): number {
   );
   if (
     otherPreferred !== preferred &&
-    endpoints[otherPreferred]?.healthy
+    endpoints[otherPreferred]?.healthy &&
+    !isEndpointRateLimited(endpoints[otherPreferred])
   ) {
     if (
       (role === 'primary' ? activePrimary : activeSecondary) !== otherPreferred
     ) {
       console.warn(
         `[rpc] ${role} lane piggybacking on ${endpoints[otherPreferred].endpoint.label} ` +
-          `(preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s)`
+          `(preferred down ${Math.round(downMs / 1000)}s` +
+          (rateLimited ? ', rate-limited' : ` ≥ ${Math.round(failoverDownMs() / 1000)}s`) +
+          `)`
       );
     }
     if (role === 'primary') {
@@ -278,7 +302,7 @@ function resolveIndexForRole(role: RpcRole): number {
   }
 
   for (let i = 0; i < endpoints.length; i++) {
-    if (endpoints[i]?.healthy) {
+    if (endpoints[i]?.healthy && !isEndpointRateLimited(endpoints[i])) {
       if (role === 'primary') {
         activePrimary = i;
         activeIndex = i;
@@ -323,31 +347,60 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.unhealthySince = null;
   state.lastCheckedAt = Date.now();
   state.lastError = undefined;
+  // Clear cooldown only after a real success (probe after cooldown window).
+  if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
+    state.rateLimitedUntil = 0;
+  }
 }
 
 function recordFailure(index: number, error: string): void {
   const state = endpoints[index];
   if (!state) return;
+
+  const isRateLimit = isRpcRateLimitMessage(error);
+  const alreadyCooling = isEndpointRateLimited(state);
+
+  // Already in 429 cooldown — count quietly, never re-log / re-switch thrash.
+  if (isRateLimit && alreadyCooling) {
+    state.failureCount += 1;
+    state.consecutiveFailures += 1;
+    state.lastError = error;
+    state.lastCheckedAt = Date.now();
+    state.healthy = false;
+    return;
+  }
+
   state.failureCount += 1;
   state.consecutiveFailures += 1;
   state.lastError = error;
   state.lastCheckedAt = Date.now();
 
-  const isRateLimit = /429|rate.?limit|-32429/i.test(error);
-  const threshold = isRateLimit
-    ? 1
-    : config.rpc?.failureThreshold ?? 3;
-  if (state.consecutiveFailures >= threshold) {
-    if (state.healthy) {
-      state.unhealthySince = Date.now();
-    }
-    state.healthy = false;
+  if (isRateLimit) {
+    state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+  }
+
+  const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
+  if (state.consecutiveFailures < threshold) return;
+
+  const wasHealthy = state.healthy;
+  if (wasHealthy) {
+    state.unhealthySince = Date.now();
+  }
+  state.healthy = false;
+
+  const now = Date.now();
+  const shouldLog =
+    wasHealthy || now - state.lastUnhealthyLogAt >= UNHEALTHY_LOG_THROTTLE_MS;
+  if (shouldLog) {
+    state.lastUnhealthyLogAt = now;
     console.warn(
       `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures` +
-        (isRateLimit ? ' (rate limited)' : '')
+        (isRateLimit
+          ? ` (rate limited — cooling ${RATE_LIMIT_COOLDOWN_MS / 1000}s, failing over)`
+          : '')
     );
-    void maybeSwitchEndpoints();
   }
+  void maybeSwitchEndpoints();
 }
 
 /**
@@ -375,6 +428,13 @@ async function maybeSwitchEndpoints(): Promise<void> {
 async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
   const state = endpoints[index];
   if (!state) return false;
+
+  // Don't probe a rate-limited endpoint — burns CU and re-triggers 429 storms.
+  if (isEndpointRateLimited(state)) {
+    state.healthy = false;
+    state.lastCheckedAt = Date.now();
+    return false;
+  }
 
   const start = Date.now();
   try {
@@ -427,19 +487,23 @@ export async function withRpc<T>(
     const state = endpoints[index];
     if (!state) continue;
 
-    // Before failover grace, stay on preferred even if flaky (first attempt only).
-    const pref = preferredIndexFor(r);
+    // Skip cooling 429 hosts when another endpoint can take the call.
     if (
-      attempt > 0 &&
-      index !== pref &&
-      downForMs(endpoints[pref]) < failoverDownMs() &&
-      endpoints[pref] &&
-      !endpoints[pref].healthy
+      isEndpointRateLimited(state) &&
+      endpoints.some((e, i) => i !== index && !isEndpointRateLimited(e))
     ) {
-      // Prefer not to jump early — but if preferred is hard-failing this call, allow next.
+      continue;
     }
-    if (!state.healthy && attempt > 0 && downForMs(endpoints[pref]) < failoverDownMs()) {
-      // Skip known-unhealthy others until preferred has been down long enough
+
+    const pref = preferredIndexFor(r);
+    const prefRateLimited = isEndpointRateLimited(endpoints[pref]);
+    // Sticky grace only for transient errors — not 429 cooldowns.
+    if (
+      !prefRateLimited &&
+      !state.healthy &&
+      attempt > 0 &&
+      downForMs(endpoints[pref]) < failoverDownMs()
+    ) {
       if (index !== pref) continue;
     }
 
@@ -518,7 +582,9 @@ export function getRpcStats(): {
   const sPref = endpoints[preferredSecondary];
   const pActive = endpoints[pIdx];
   const sActive = endpoints[sIdx];
-  const anyHealthy = endpoints.some((e) => e.healthy);
+  const anyHealthy = endpoints.some(
+    (e) => e.healthy && !isEndpointRateLimited(e)
+  );
   const share = lanesShareEndpoint();
   let warning: string | null = null;
   if (!anyHealthy) {
