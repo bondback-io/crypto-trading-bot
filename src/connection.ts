@@ -581,29 +581,6 @@ function resolveIndexForRole(role: RpcRole): number {
             `(public rpc-url EWMA ${pref.latencyMs ?? '—'}ms — prefer faster public/fallback before paid)`
         );
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          runId: 'rpc-url-latency',
-          hypothesisId: 'C',
-          location: 'connection.ts:resolveIndexForRole',
-          message: 'utility prefer faster public fallback',
-          data: {
-            from: pref.endpoint.label,
-            to: other.endpoint.label,
-            prefEwma: pref.latencyMs,
-            otherEwma: other.latencyMs,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setActiveForRole(role, bestIdx);
       return bestIdx;
     }
@@ -635,32 +612,6 @@ function resolveIndexForRole(role: RpcRole): number {
           `[rpc] ${role} lane piggybacking on ${other.endpoint.label} (${reason})`
         );
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          runId: 'helius-latency',
-          hypothesisId: 'D',
-          location: 'connection.ts:resolveIndexForRole',
-          message: 'latency/hard piggyback',
-          data: {
-            role,
-            from: pref?.endpoint.label,
-            to: other.endpoint.label,
-            latencySoft,
-            prefEwma: pref?.latencyMs,
-            otherEwma: other.latencyMs,
-            reason,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     }
     setActiveForRole(role, otherPreferred);
     return otherPreferred;
@@ -742,58 +693,12 @@ function updateLatencyStress(state: EndpointState): void {
     return;
   }
   if (ewma < LATENCY_RECOVER_MS) {
-    if (state.latencyStressedSince != null) {
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          runId: 'helius-latency',
-          hypothesisId: 'A',
-          location: 'connection.ts:updateLatencyStress',
-          message: 'latency stress cleared',
-          data: {
-            label: state.endpoint.label,
-            ewma,
-            lastCall: state.lastCallLatencyMs,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-    }
     state.latencyStressedSince = null;
     return;
   }
   if (ewma >= LATENCY_STRESS_MS) {
     if (state.latencyStressedSince == null) {
       state.latencyStressedSince = Date.now();
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          runId: 'helius-latency',
-          hypothesisId: 'B',
-          location: 'connection.ts:updateLatencyStress',
-          message: 'latency stress started',
-          data: {
-            label: state.endpoint.label,
-            ewma,
-            lastCall: state.lastCallLatencyMs,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       console.warn(
         `[rpc] ${state.endpoint.label} latency stressed (EWMA ${ewma}ms, last ${state.lastCallLatencyMs ?? '—'}ms) — soft failover in ${latencyStressGraceMs(state) / 1000}s if it stays high`
       );
