@@ -40,6 +40,23 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.62',
+    title: 'Utility soft watch RPC cap 50',
+    sections: ['copy', 'execution'],
+    items: [
+      'With Share RPC load ON, the public utility soft-watch wallet cap defaults to 50 (was 75) to ease public RPC pressure.',
+    ],
+  },
+  {
+    version: '1.2.61',
+    title: 'Clear closed trades (session only)',
+    sections: ['overview', 'microbots'],
+    items: [
+      'Closed Trades panels (Overview + Trades) have a subtle Clear button that wipes session closed history only.',
+      'Micro-bot learning episodes and self-learning data are preserved — Clear does not call any learning reset.',
+    ],
+  },
+  {
     version: '1.2.60',
     title: 'Steady Compounder / HWR rug concentration harden',
     sections: ['microbots', 'execution'],
