@@ -6072,7 +6072,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="as-feed-bonded" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Route Soon → Migration Sniper <span class="tip" tabindex="0" data-tip="Offer Soon mints to Migration Sniper grad-watch (existing 80%→95–98% fire band still applies)."></span></span>
+          <span>Route Soon → Migration Sniper <span class="tip" tabindex="0" data-tip="Offer Soon mints to Migration Sniper grad-watch (watch ~80%, fire ≥95% until complete, then post-grad handoff)."></span></span>
           <label class="switch"><input type="checkbox" id="as-route-soon" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -6369,11 +6369,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at 95–98%. Keeps volatile MC (only drops if &lt;$8k for 5m). Rows leave on trigger / curve dump / TTL — not a $25k MC purge. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at ≥95% until complete · post-grad handoff within Post-grad max (s). Keeps volatile MC (only drops if &lt;$8k for 5m). Triggered rows stay visible briefly; expired/invalidated breadcrumb ~5m. Unwatch cools 15m.</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
+        </div>
+        <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Diagnostics</span>
+              <span class="setup-watch-title">Top entry skip reasons</span>
+              <p class="setup-watch-sub mb-0">Live tallies from FILTER_SKIP / lane fight — see what is blocking opens.</p>
+            </div>
+            <button type="button" class="btn btn-secondary text-xs" onclick="refreshEntrySkipDiag()">Refresh</button>
+          </div>
+          <div id="entry-skip-diag" class="mint text-xs mt-1">—</div>
         </div>
       </div>
 
@@ -7990,7 +8001,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         elite_convergence:
           '<p class="mint text-xs mb-2">Requires multi-wallet clusters, blocks single-wallet entries, raises conviction/quality floors. (60%+ Win Rate Profile uses cluster ≥3 / quality ≥65 / conviction ≥75.)</p>',
         migration_sniper:
-          '<p class="mint text-xs mb-2">Pre-grad <strong>95–98%</strong> curve sniper (watch from ~80%). TP 15–25% · tight SL · seconds-scale hold. Ultra-fresh post-grad ≤30s fallback if the curve window was missed.</p>',
+          '<p class="mint text-xs mb-2">Pre-grad <strong>≥95%</strong> curve sniper (watch from ~80%, fires until complete). TP 15–25% · tight SL · seconds-scale hold. Post-grad handoff ≤120s when curve completes so armed watches still open.</p>',
         profit_protected:
           '<p class="mint text-xs mb-2">Forces tiered profit + aggressive dead-market exit; raises quality/conviction floors.</p>',
         quick_scalper:
@@ -8937,10 +8948,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (gradList) {
           const rows = (gw.entries || [])
             .filter(function (e) {
-              return e.status === 'watching' || e.status === 'armed';
+              return (
+                e.status === 'watching' ||
+                e.status === 'armed' ||
+                e.status === 'triggered'
+              );
             })
             .slice(0, 16);
-          const terminal = (gw.recentTerminal || []).slice(0, 2);
+          const terminal = (gw.recentTerminal || [])
+            .filter(function (e) {
+              return e.status === 'expired' || e.status === 'invalidated';
+            })
+            .slice(0, 4);
           const htmlParts = [];
           if (rows.length) {
             rows.forEach(function (e) {
@@ -8965,8 +8984,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const data = await fetchJSON('/api/setup-watches');
         if (data) renderSetupWatchLists(data);
       } catch (_) {}
+      if (typeof refreshEntrySkipDiag === 'function') {
+        refreshEntrySkipDiag().catch(function () {});
+      }
     }
     window.refreshSetupWatches = refreshSetupWatches;
+
+    async function refreshEntrySkipDiag() {
+      const el = document.getElementById('entry-skip-diag');
+      if (!el) return;
+      try {
+        const data = await fetchJSON('/api/tuning/status');
+        const counts = data.skipReasonCounts || [];
+        if (!counts.length) {
+          el.textContent = 'No skip tallies yet — wait for rejected signals.';
+          return;
+        }
+        const top = counts.slice(0, 8);
+        el.innerHTML = top
+          .map(function (row) {
+            const reason = escHtml(String(row.reason || row.key || '—'));
+            const n = row.count != null ? row.count : row.n;
+            return (
+              '<div class="flex justify-between gap-2"><span>' +
+              reason +
+              '</span><strong>' +
+              escHtml(String(n ?? 0)) +
+              '</strong></div>'
+            );
+          })
+          .join('');
+      } catch (err) {
+        el.textContent = err.message || String(err);
+      }
+    }
+    window.refreshEntrySkipDiag = refreshEntrySkipDiag;
 
     async function unwatchSetupToken(kind, mint) {
       const k = String(kind || '').trim();
@@ -9538,7 +9590,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               numField({
                 key: 'minCurveProgressPct',
                 label: 'Fire min %',
-                title: 'Sniper fire band lower bound (default 95).',
+                title: 'Sniper fire band lower bound (default 95). Fires from this % until curve completes.',
                 match: true,
                 step: 1,
                 min: 80,
@@ -9549,23 +9601,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               numField({
                 key: 'maxCurveProgressPct',
                 label: 'Fire max %',
-                title: 'Sniper fire band upper bound (default 98).',
+                title: 'Sniper fire band upper bound (default 99). Pre-grad still fires from Fire min until complete.',
                 match: true,
                 step: 1,
                 min: 90,
                 max: 100,
-                placeholder: '98',
+                placeholder: '99',
                 value: matchValue('maxCurveProgressPct'),
               }),
               numField({
                 key: 'maxMigrationAgeSec',
                 label: 'Post-grad max (s)',
-                title: 'Ultra-fresh post-grad fallback window in seconds (default 30).',
+                title: 'Post-grad handoff window after curve complete (default 120).',
                 match: true,
                 step: 1,
                 min: 5,
-                max: 120,
-                placeholder: '30',
+                max: 300,
+                placeholder: '120',
                 value: matchValue('maxMigrationAgeSec'),
               }),
               numField({

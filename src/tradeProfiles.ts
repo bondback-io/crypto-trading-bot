@@ -681,9 +681,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 1,
       requireCluster: false,
       minCurveProgressPct: 95,
-      maxCurveProgressPct: 98,
+      maxCurveProgressPct: 99,
       gradWatchPct: 80,
-      maxMigrationAgeSec: 30,
+      maxMigrationAgeSec: 120,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
       maxMarketCapUsd: 200_000,
     },
@@ -2076,8 +2076,8 @@ export const FRESH_MIGRATION_MAX_AGE_HOURS = 3;
 export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
- * Migration Sniper eligibility — primary: pre-grad curve fire band (95–98%);
- * fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 30s).
+ * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
+ * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 120s).
  *
  * Near-curve below fire band stays on the graduation watchlist (not a buy).
  * Mature PumpSwap / stale migrations are rejected.
@@ -2098,16 +2098,11 @@ export function evaluateFreshMigrationEligibility(
     Number.isFinite(rules.minCurveProgressPct)
       ? Number(rules.minCurveProgressPct)
       : 95;
-  const maxCurve =
-    rules?.maxCurveProgressPct != null &&
-    Number.isFinite(rules.maxCurveProgressPct)
-      ? Number(rules.maxCurveProgressPct)
-      : 98;
   const maxPostGradSec =
     rules?.maxMigrationAgeSec != null &&
     Number.isFinite(rules.maxMigrationAgeSec)
       ? Number(rules.maxMigrationAgeSec)
-      : 30;
+      : 120;
   const maxMc =
     rules?.maxMarketCapUsd != null && Number.isFinite(rules.maxMarketCapUsd)
       ? Number(rules.maxMarketCapUsd)
@@ -2129,18 +2124,17 @@ export function evaluateFreshMigrationEligibility(
     };
   }
 
+  // Primary: pre-grad fire — ≥ minCurve while not yet migrated (no upper miss)
   const inFireBand =
-    progress != null && progress >= minCurve && progress <= maxCurve;
+    progress != null &&
+    progress >= minCurve &&
+    progress < 100 &&
+    ctx.isMigration !== true;
 
-  // Primary: pre-grad fire band (still on bonding curve)
-  if (
-    inFireBand &&
-    ctx.isMigration !== true &&
-    (ctx.nearMigration === true || progress != null)
-  ) {
+  if (inFireBand && (ctx.nearMigration === true || progress != null)) {
     return {
       ok: true,
-      reason: `pre-grad curve ${progress!.toFixed(1)}% (fire ${minCurve}–${maxCurve}%)`,
+      reason: `pre-grad curve ${progress!.toFixed(1)}% (fire ≥${minCurve}%)`,
     };
   }
 
@@ -2152,18 +2146,12 @@ export function evaluateFreshMigrationEligibility(
     if (progress != null && progress < minCurve) {
       return {
         ok: false,
-        reason: `curve ${progress.toFixed(1)}% — watching, fire at ${minCurve}–${maxCurve}%`,
-      };
-    }
-    if (progress != null && progress > maxCurve && !ctx.migrationFresh) {
-      return {
-        ok: false,
-        reason: `curve ${progress.toFixed(1)}% past fire band (max ${maxCurve}%)`,
+        reason: `curve ${progress.toFixed(1)}% — watching, fire at ≥${minCurve}%`,
       };
     }
   }
 
-  // Fallback: ultra-fresh post-grad (≤30s)
+  // Fallback: ultra-fresh post-grad
   if (ctx.isMigration === true && ctx.migrationFresh === true) {
     const ageMs =
       ctx.migrationAgeMs != null && Number.isFinite(ctx.migrationAgeMs)
@@ -2172,7 +2160,7 @@ export function evaluateFreshMigrationEligibility(
     if (ageMs == null) {
       return {
         ok: false,
-        reason: 'post-grad without ≤30s age stamp — not sniper fallback',
+        reason: `post-grad without ≤${maxPostGradSec}s age stamp — not sniper fallback`,
       };
     }
     if (ageMs > maxPostGradSec * 1000) {
@@ -2421,6 +2409,41 @@ export function evaluateTradeProfileLanes(
       b.score - a.score ||
       b.priority - a.priority
   );
+
+  // Grad-watch / preferred Migration Sniper: if stamped preferred and eligibility
+  // would pass under post-grad / fire context, ensure the lane is a passer.
+  if (ctx.preferProfileId === 'migration_sniper') {
+    const migRow = results.find((r) => r.profileId === 'migration_sniper');
+    if (migRow && !migRow.passed) {
+      const def = resolveTradeProfileDefinition('migration_sniper');
+      const fresh = evaluateFreshMigrationEligibility(ctx, {
+        maxTokenAgeHours: def.match.maxTokenAgeHours,
+        maxMarketCapUsd: def.match.maxMarketCapUsd,
+        minCurveProgressPct: def.match.minCurveProgressPct,
+        maxCurveProgressPct: def.match.maxCurveProgressPct,
+        maxMigrationAgeSec: def.match.maxMigrationAgeSec,
+      });
+      if (fresh.ok) {
+        const assignment = buildAssignmentFromDef(def, ctx, {
+          score: 95,
+          reason: `grad-watch force · ${fresh.reason}`,
+          autoScored: false,
+        });
+        migRow.passed = true;
+        migRow.score = assignment.score;
+        migRow.reason = assignment.reason;
+        migRow.failReason = undefined;
+        migRow.assignment = assignment;
+        results.sort(
+          (a, b) =>
+            Number(b.passed) - Number(a.passed) ||
+            b.score - a.score ||
+            b.priority - a.priority
+        );
+      }
+    }
+  }
+
   if (!opts?.silent && results.length) {
     const bits = results
       .slice(0, 8)
@@ -2516,7 +2539,7 @@ function scoreProfile(
   const feedPrefer =
     Boolean(ctx.preferProfileId) &&
     ctx.preferProfileId === def.id &&
-    m.kolscanFeedEnabled === true;
+    (m.kolscanFeedEnabled === true || def.id === 'migration_sniper');
 
   const isDip =
     ctx.shortTermStrategyId === 'post_run_dip' ||
@@ -2748,7 +2771,7 @@ function scoreProfile(
       ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
         ? Number(ctx.curveProgressPct)
         : null;
-    if (curvePct != null && curvePct >= 95 && curvePct <= 98) {
+    if (curvePct != null && curvePct >= 95 && curvePct < 100) {
       score += 14;
       bits.push(`fire-band ${curvePct.toFixed(1)}%`);
     }
@@ -3434,17 +3457,19 @@ function scoreProfile(
     score += 8;
   }
 
-  // Specialty feed soft prefer — tagged higher-quality tokens for this profile
+  // Specialty feed / grad-watch soft prefer — tagged higher-quality tokens
   if (
     ctx.preferProfileId &&
     ctx.preferProfileId === def.id &&
-    m.kolscanFeedEnabled === true
+    (m.kolscanFeedEnabled === true || def.id === 'migration_sniper')
   ) {
     score += 38;
     bits.push(
       ctx.specialtyFeed
         ? `specialty feed ${ctx.specialtyFeed}`
-        : 'specialty feed prefer'
+        : def.id === 'migration_sniper'
+          ? 'grad-watch prefer'
+          : 'specialty feed prefer'
     );
   }
 

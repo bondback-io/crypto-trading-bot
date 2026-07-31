@@ -2237,7 +2237,7 @@ async function handleScannerCandidate(
               solToMigration: 0,
               nearMigration: Number(candidate.curveProgressPct) >= 80,
               proximity: 'near' as const,
-              complete: false,
+              complete: Boolean(candidate.migrated || launch.migrated),
             }
           : undefined,
       metrics: {
@@ -4244,6 +4244,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   const runModuleFilters = async (): Promise<boolean> => {
+  const reasonBitsEarly = (signal.scannerReasons || []).join(' ');
+  const setupWatchHandoff =
+    /grad-watch:triggered|dip-watch:triggered/i.test(reasonBitsEarly) ||
+    (signal.candidateTradeProfileId === 'migration_sniper' &&
+      /grad-watch/i.test(reasonBitsEarly)) ||
+    (signal.candidateTradeProfileId === 'dip_buyer' &&
+      /dip-watch/i.test(reasonBitsEarly));
+
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
   if (
     (isStrategyEnabled('wallet_quality_scoring') ||
@@ -4683,6 +4691,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     const postDipHit = conviction.reasons.some((r) =>
       /post-run dip/i.test(r)
     );
+    const chartOrVolHard =
+      volSpikeHit ||
+      conviction.reasons.some((r) =>
+        /chart|pattern|bull.?flag|fib|technical/i.test(r)
+      );
+    // Grad-watch / dip-watch handoffs are synthetic — soft-pass chart/vol hard vetoes
+    if (setupWatchHandoff && chartOrVolHard && !socialHit && !sessionHit) {
+      console.log(
+        `[monitor] Setup-watch soft-pass conviction chart/vol for ${signal.symbol}: ${detail}`
+      );
+    } else {
     logStrategyDecision(
       postDipHit
         ? 'post_run_dip'
@@ -4712,6 +4731,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `conviction ${conviction.score}/${conviction.minRequired}: ${detail}`
     );
     return false;
+    }
   }
   if (
     !isStrategyEnabled('multi_factor_conviction') &&
@@ -4740,13 +4760,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
   // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
   // Setup-watch handoffs are synthetic (no Fib/candles) — lane floors still apply.
-  const reasonBits = (signal.scannerReasons || []).join(' ');
-  const setupWatchHandoff =
-    /grad-watch:triggered|dip-watch:triggered/i.test(reasonBits) ||
-    (signal.candidateTradeProfileId === 'migration_sniper' &&
-      /grad-watch/i.test(reasonBits)) ||
-    (signal.candidateTradeProfileId === 'dip_buyer' &&
-      /dip-watch/i.test(reasonBits));
+  const reasonBits = reasonBitsEarly;
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&

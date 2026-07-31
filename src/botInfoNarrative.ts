@@ -98,6 +98,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.profilesGrid}
         <ul>
           <li><strong>Watchlists</strong> — Dip setup watch and Graduation (migration) watch live on the Micro Bots tab.</li>
+          <li><strong>Migration Sniper</strong> — watch ~80% → fire ≥95% until complete → post-grad handoff (default ≤120s). Armed watches no longer vanish without a buy attempt on curve complete.</li>
           <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
           <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>
           <li>Lane decisions appear on Overview / Micro Bots so you can see why a profile won or skipped.</li>

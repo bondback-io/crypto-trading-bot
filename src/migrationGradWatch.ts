@@ -1,7 +1,8 @@
 /**
- * Migration Sniper graduation watchlist: watch (≥80%) → arm → trigger (95–98%) →
- * expire / invalidate. Hands triggered setups to the Market Scanner with
- * preferredProfileId: migration_sniper. Fast-polls bonding curve on active watches.
+ * Migration Sniper graduation watchlist: watch (≥80%) → arm → trigger (≥95% until
+ * complete) → post-grad handoff on curve complete. Hands setups to the Market
+ * Scanner with preferredProfileId: migration_sniper. Fast-polls bonding curve
+ * on active watches.
  *
  * Low-MC grace: once watching, keep through volatile 25k↔10k swings; only
  * invalidate for MC after continuous < $8k for 5 minutes (curve rules still apply).
@@ -10,6 +11,7 @@
 import { fetchBondingCurve, summarizeBondingCurve } from './bondingCurve';
 import type { LaunchEvent } from './marketData';
 import { fetchLiveTokenSnapshot } from './marketData';
+import { markAsMigrated, getMigrationEvent } from './migrationListener';
 import {
   handOffScannerCandidate,
   isScannerMintOnCooldown,
@@ -46,6 +48,8 @@ export interface GradWatchEntry {
   source?: string;
   /** Wall-clock when known MC first went below LOW_MC_USD (cleared when recovered) */
   belowLowMcSinceMs?: number | null;
+  /** First time we observed curve complete (post-grad retry window) */
+  completeSeenAtMs?: number | null;
 }
 
 const MAX_WATCHES = 32;
@@ -58,8 +62,8 @@ const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const LOW_MC_USD = 8_000;
 const LOW_MC_GRACE_MS = 5 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
-/** Terminal rows kept for UI breadcrumb */
-const TERMINAL_UI_MS = 60_000;
+/** Terminal rows kept for UI breadcrumb (5 min) */
+const TERMINAL_UI_MS = 5 * 60_000;
 
 const watches = new Map<string, GradWatchEntry>();
 let peakProgress = new Map<string, number>();
@@ -107,7 +111,14 @@ function fireMax(): number {
   const m = migMatch();
   return m.maxCurveProgressPct != null && Number.isFinite(m.maxCurveProgressPct)
     ? Number(m.maxCurveProgressPct)
-    : 98;
+    : 99;
+}
+
+function maxPostGradSec(): number {
+  const m = migMatch();
+  return m.maxMigrationAgeSec != null && Number.isFinite(m.maxMigrationAgeSec)
+    ? Number(m.maxMigrationAgeSec)
+    : 120;
 }
 
 function ttlMs(): number {
@@ -310,16 +321,18 @@ export function considerMigrationGradWatch(input: {
 }
 
 function buildHandoff(
-  w: GradWatchEntry
+  w: GradWatchEntry,
+  opts?: { postGrad?: boolean }
 ): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
-  const progress = w.curveProgressPct ?? fireMin();
+  const postGrad = opts?.postGrad === true;
+  const progress = w.curveProgressPct ?? (postGrad ? 100 : fireMin());
   const launch: LaunchEvent = {
     mint: w.mint,
     symbol: w.symbol,
     name: w.name,
     launchedAt: w.createdAt,
-    migrated: false,
+    migrated: postGrad,
     entryPriceSol: 0,
     lastPriceSol: 0,
     priceChangePct: 0,
@@ -334,6 +347,17 @@ function buildHandoff(
     preferredProfileId: 'migration_sniper',
     specialtyFeed: 'kolscan',
   };
+  const reasons = postGrad
+    ? [
+        'grad-watch:triggered',
+        'grad-watch:post-grad',
+        `curve ${progress.toFixed(1)}% complete`,
+      ]
+    : [
+        'grad-watch:triggered',
+        `curve ${progress.toFixed(1)}%`,
+        `fire ≥${fireMin()}%`,
+      ];
   return {
     id: `grad-watch-${w.mint.slice(0, 8)}-${now}`,
     mint: w.mint,
@@ -341,30 +365,59 @@ function buildHandoff(
     name: w.name,
     timestamp: now,
     status: 'seen',
-    rankScore: 94,
-    reasons: [
-      'grad-watch:triggered',
-      `curve ${progress.toFixed(1)}%`,
-      `fire ${fireMin()}–${fireMax()}%`,
-    ],
+    rankScore: postGrad ? 96 : 94,
+    reasons,
     source: 'kolscan',
-    migrated: false,
+    migrated: postGrad,
     isPumpFun: true,
     marketCapUsd: w.marketCapUsd,
     volumeH1Usd: w.volumeH1Usd,
     holderCount: w.holderCount,
     preferredProfileId: 'migration_sniper',
     specialtyFeed: 'kolscan',
-    nearMigration: true,
+    nearMigration: !postGrad,
     curveProgressPct: progress,
     candleSource: 'synthetic',
     launch,
   };
 }
 
+function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
+  markAsMigrated(w.mint, 'grad-watch-complete');
+  const migEv = getMigrationEvent(w.mint);
+  const ageMs =
+    migEv?.detectedAt != null ? now - migEv.detectedAt : now - (w.completeSeenAtMs || now);
+  const maxMs = maxPostGradSec() * 1000;
+  if (ageMs > maxMs) {
+    w.status = 'expired';
+    w.updatedAt = now;
+    w.lastReason = `expired — no buy (post-grad ${Math.round(ageMs / 1000)}s > ${maxPostGradSec()}s)`;
+    console.log(`[grad-watch] EXPIRED ${w.symbol} — ${w.lastReason}`);
+    return false;
+  }
+  if (isScannerMintOnCooldown(w.mint)) {
+    w.lastReason = 'post-grad cooldown — retrying';
+    w.updatedAt = now;
+    return false;
+  }
+  const c = buildHandoff(w, { postGrad: true });
+  if (handOffScannerCandidate(c)) {
+    w.status = 'triggered';
+    w.updatedAt = now;
+    w.lastReason = `post-grad handoff ${Math.round(ageMs / 1000)}s`;
+    console.log(
+      `[grad-watch] TRIGGERED ${w.symbol} → migration_sniper post-grad @ ${Math.round(ageMs / 1000)}s`
+    );
+    return true;
+  }
+  w.lastReason = 'post-grad handoff failed — retrying';
+  w.updatedAt = now;
+  return false;
+}
+
 /**
- * Tick watches: refresh curve (force), arm on quality, trigger in fire band.
- * Returns number of triggered handoffs.
+ * Tick watches: refresh curve (force), arm on quality, trigger from fire min
+ * until complete, then post-grad handoff. Returns number of triggered handoffs.
  */
 export async function tickMigrationGradWatches(): Promise<number> {
   if (!isMigProfileEnabled()) return 0;
@@ -372,7 +425,6 @@ export async function tickMigrationGradWatches(): Promise<number> {
   const now = Date.now();
   let handed = 0;
   const fMin = fireMin();
-  const fMax = fireMax();
 
   for (const w of watches.values()) {
     if (w.status !== 'watching' && w.status !== 'armed') continue;
@@ -389,25 +441,24 @@ export async function tickMigrationGradWatches(): Promise<number> {
     if (applyMcGrace(w, now)) continue;
 
     let progress = w.curveProgressPct;
+    let complete = false;
     try {
       const curve = await fetchBondingCurve(w.mint, { force: true });
       if (curve) {
         const sum = summarizeBondingCurve(curve);
         progress = sum.progressPct;
         w.curveProgressPct = progress;
-        if (sum.complete) {
-          // Missed fire band — leave for ≤30s post-grad fallback via migration listener
-          w.status = 'expired';
-          w.updatedAt = now;
-          w.lastReason = 'curve complete — post-grad fallback';
-          console.log(
-            `[grad-watch] COMPLETE ${w.symbol} — use post-grad fallback`
-          );
-          continue;
-        }
+        complete = sum.complete === true;
       }
     } catch {
       /* keep last progress */
+    }
+
+    if (complete) {
+      if (w.completeSeenAtMs == null) w.completeSeenAtMs = now;
+      w.curveProgressPct = progress ?? 100;
+      if (tryPostGradHandoff(w, now)) handed += 1;
+      continue;
     }
 
     if (progress == null || !Number.isFinite(progress)) continue;
@@ -442,13 +493,13 @@ export async function tickMigrationGradWatches(): Promise<number> {
       console.log(`[grad-watch] ARMED ${w.symbol}`);
     }
 
-    const inFire = progress >= fMin && progress <= fMax;
+    // Fire: ≥ fireMin while still on curve (no upper-band miss before complete)
+    const inFire = progress >= fMin;
     if (!inFire) {
       w.updatedAt = now;
       continue;
     }
 
-    // Fire: watching or armed in band → trigger
     if (isScannerMintOnCooldown(w.mint)) {
       w.lastReason = 'cooldown';
       continue;
@@ -534,7 +585,7 @@ export function getMigrationGradWatchStatus(limit = 20): {
           e.status === 'invalidated') &&
         now - e.updatedAt <= TERMINAL_UI_MS
     )
-    .slice(0, 4);
+    .slice(0, 8);
   return {
     active: entries.filter(
       (e) => e.status === 'watching' || e.status === 'armed'
