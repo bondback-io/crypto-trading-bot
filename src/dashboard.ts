@@ -2556,6 +2556,63 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       gap: 0.35rem;
       align-items: center;
     }
+    .ov-active-profiles-details {
+      margin: 0;
+    }
+    .ov-active-profiles-summary {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem 0.75rem;
+      cursor: default;
+      user-select: none;
+    }
+    .ov-active-profiles-summary::-webkit-details-marker { display: none; }
+    .ov-active-profiles-summary .ov-ap-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+    .ov-active-profiles-summary .ov-ap-chevron {
+      display: none;
+      color: #64748b;
+      font-size: 0.65rem;
+      transition: transform 0.15s ease;
+    }
+    .ov-active-profiles-details[open] > .ov-active-profiles-summary .ov-ap-chevron {
+      transform: rotate(90deg);
+    }
+    .ov-active-profiles-summary #trade-profiles-master-status {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      white-space: nowrap;
+    }
+    .ov-active-profiles-details > .trade-profiles-active {
+      margin-top: 0.45rem;
+    }
+    @media (max-width: 639px) {
+      .ov-active-profiles-summary {
+        cursor: pointer;
+      }
+      .ov-active-profiles-summary .ov-ap-chevron {
+        display: inline;
+      }
+      .ov-active-profiles-details:not([open]) > .trade-profiles-active {
+        display: none;
+      }
+    }
+    @media (min-width: 640px) {
+      /* Always show chips on desktop even if details lacks [open]. */
+      .ov-active-profiles-details > .trade-profiles-active {
+        display: flex !important;
+      }
+    }
     .trade-profiles-active .tp-chip {
       display: inline-flex;
       align-items: center;
@@ -5413,11 +5470,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- ========== TAB: Overview ========== -->
     <section data-tab-panel="overview" class="space-y-4">
       <div class="card" style="padding:0.65rem 0.85rem">
-        <div class="flex flex-wrap gap-2 items-center justify-between mb-1">
-          <div class="mint text-xs uppercase tracking-wide" style="color:#94a3b8">Active trade profiles</div>
-          <span class="mint text-xs" id="trade-profiles-master-status">—</span>
-        </div>
-        <div class="trade-profiles-active" id="trade-profiles-active-chips">Loading…</div>
+        <details class="ov-active-profiles-details" id="ov-active-profiles-details">
+          <summary class="ov-active-profiles-summary">
+            <span class="ov-ap-title"><span class="ov-ap-chevron" aria-hidden="true">▸</span> Active trade profiles</span>
+            <span class="mint text-xs" id="trade-profiles-master-status">—</span>
+          </summary>
+          <div class="trade-profiles-active" id="trade-profiles-active-chips">Loading…</div>
+        </details>
       </div>
       <div class="ov-equity-panel" id="ov-equity-panel" title="Available moves into Positions when you open a trade; marks update Unrealized continuously; closes credit Available and Realized.">
         <div class="ov-equity-main" style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem">

@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.59',
+    title: 'Overview Active Profiles collapse on mobile',
+    sections: ['overview', 'microbots'],
+    items: [
+      'On mobile, Active Trade Profiles collapses to the header + status line; tap to expand the profile chips.',
+    ],
+  },
+  {
     version: '1.2.58',
     title: 'Settings Control Center mobile layout',
     sections: ['risk', 'knobs'],
