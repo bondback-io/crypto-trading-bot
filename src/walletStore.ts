@@ -16,6 +16,7 @@ import {
 const WALLETS_FILE = dataFile(PERSIST_FILES.wallets);
 /** Suppress repeated load logs during favourites import (persist → load each add). */
 let lastLoadedWalletCountLog = -1;
+let lastLoadedWalletLogAt = 0;
 
 export type WalletCategory = 'smart' | 'scalper' | 'sniper' | 'kol';
 
@@ -114,10 +115,16 @@ export function loadWalletsFromDisk(): WalletRecord[] {
     return initial;
   }
 
-  // Favourites import calls load on every add via persistWallets — log once per count.
-  if (lastLoadedWalletCountLog !== parsed.length) {
+  // Favourites import calls load on every add via persistWallets — throttle logs.
+  if (
+    lastLoadedWalletCountLog !== parsed.length &&
+    Date.now() - lastLoadedWalletLogAt > 5_000
+  ) {
     lastLoadedWalletCountLog = parsed.length;
+    lastLoadedWalletLogAt = Date.now();
     console.log(`[wallets] Loaded ${parsed.length} wallet(s) from disk`);
+  } else {
+    lastLoadedWalletCountLog = parsed.length;
   }
   return parsed.map(normalizeWalletRecord);
 }

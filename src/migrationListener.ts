@@ -91,6 +91,9 @@ const HEALTH_CHECK_MS = 45_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
 /** After RPC 429, pause migration polls so we don't amplify rate limits */
 const RATE_LIMIT_BACKOFF_MS = 45_000;
+/** At most one getParsedTransaction from WS at a time on free RPCs */
+let migrationParseInFlight = 0;
+const MAX_WS_PARSE_IN_FLIGHT = 1;
 
 /** Programs whose signature cursors have been seeded (no historical replay) */
 const seededPollPrograms = new Set<string>();
@@ -99,7 +102,10 @@ let lastRateLimitLogAt = 0;
 
 function isRpcRateLimitError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /429|rate.?limit|-32429/i.test(msg);
+  return (
+    /429|rate.?limit|-32429|too many requests/i.test(msg) ||
+    /connect.?timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|fetch failed/i.test(msg)
+  );
 }
 
 function armRateLimitBackoff(err: unknown): void {
@@ -386,6 +392,7 @@ async function handleLogsNotification(
   // Free-tier 429 cooldown — skip WS parses so we don't burn the failover RPC too
   if (Date.now() < rateLimitedUntil) return;
   if (shouldDeferHeavyRpc()) return;
+  if (migrationParseInFlight >= MAX_WS_PARSE_IN_FLIGHT) return;
 
   const signature = logs.signature;
   if (!signature || processedSigs.has(signature)) return;
@@ -393,7 +400,12 @@ async function handleLogsNotification(
   const logText = (logs.logs ?? []).join('\n').toLowerCase();
   if (!looksLikeMigrationLogs(logText, program)) return;
 
-  await processMigrationTx(signature, 'websocket', program);
+  migrationParseInFlight += 1;
+  try {
+    await processMigrationTx(signature, 'websocket', program);
+  } finally {
+    migrationParseInFlight -= 1;
+  }
 }
 
 function looksLikeMigrationLogs(
@@ -433,12 +445,13 @@ function looksLikeMigrationLogs(
     );
   }
 
-  // Raydium — only pool init style logs (high volume otherwise)
+  // Raydium — only clear pool-init / migrate (ray_log alone is every swap)
   return (
-    logText.includes('initialize') ||
-    logText.includes('init_pc_amount') ||
     logText.includes('migrat') ||
-    logText.includes('ray_log')
+    logText.includes('init_pc_amount') ||
+    logText.includes('initialize2') ||
+    (logText.includes('initialize') &&
+      (logText.includes('pool') || logText.includes('amm')))
   );
 }
 

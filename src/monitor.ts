@@ -778,15 +778,15 @@ function getWalletPollThrottle(rpcUrl: string): {
   if (soft) {
     return {
       soft: true,
-      batchSize: 2,
-      batchGapMs: 450,
-      sigLimit: 8,
-      maxParse: 2,
-      pause429Ms: 8_000,
-      maxWalletsPerCycle: 12,
+      batchSize: 1,
+      batchGapMs: 600,
+      sigLimit: 5,
+      maxParse: 1,
+      pause429Ms: 20_000,
+      maxWalletsPerCycle: 8,
       abortCycleOn429: true,
       /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
-      cycleBudgetMs: 6_000,
+      cycleBudgetMs: 5_000,
     };
   }
   return {
@@ -910,28 +910,36 @@ export function startMonitor(): void {
     );
   }
 
-  // Start polling after a short delay so /health stays responsive on boot.
   // Soft-throttle RPCs (free Helius/Alchemy): wait longer so Render health passes
   // before we seed wallets in small rotating batches.
-  const firstPollDelayMs = isSoftThrottleRpcUrl(getRpcUrl()) ? 12_000 : 5_000;
+  const softBoot = isSoftThrottleRpcUrl(getRpcUrl());
+  const firstPollDelayMs = softBoot ? 15_000 : 5_000;
   setTimeout(() => {
     void pollAllWallets();
   }, firstPollDelayMs);
 
+  // Activity refresh hits GMGN/RPC per wallet — defer heavily on free RPC or skip
+  // the first pass entirely (import grace keeps wallets eligible without a scan).
   void (async () => {
-    await new Promise((r) => setTimeout(r, 30_000));
+    await new Promise((r) => setTimeout(r, softBoot ? 180_000 : 30_000));
     if (!running || paused) return;
-    if (config.filters.enableActivityFilter) {
-      await refreshAllWalletActivity();
-      filterActiveWallets({ persistActiveOnly: false });
-      const watching = getWalletsForPolling().length;
-      if (watching === 0 && config.smartWallets.length > 0) {
-        console.warn(
-          `[monitor] ⚠ 0 wallets eligible to poll after activity refresh — ` +
-            `recovering recently-active disabled wallets`
-        );
-        recoverDisabledWallets();
-      }
+    if (!config.filters.enableActivityFilter) return;
+    if (softBoot) {
+      console.log(
+        '[monitor] Soft RPC — skipping heavy activity refresh for all wallets ' +
+          '(keeps free Helius/Alchemy alive; import grace still watches wallets)'
+      );
+      return;
+    }
+    await refreshAllWalletActivity();
+    filterActiveWallets({ persistActiveOnly: false });
+    const watching = getWalletsForPolling().length;
+    if (watching === 0 && config.smartWallets.length > 0) {
+      console.warn(
+        `[monitor] ⚠ 0 wallets eligible to poll after activity refresh — ` +
+          `recovering recently-active disabled wallets`
+      );
+      recoverDisabledWallets();
     }
   })();
 
@@ -941,6 +949,7 @@ export function startMonitor(): void {
 
   activityTimer = setInterval(() => {
     if (paused || !config.filters.enableActivityFilter) return;
+    if (isSoftThrottleRpcUrl(getRpcUrl())) return;
     void (async () => {
       await refreshAllWalletActivity();
       filterActiveWallets({ persistActiveOnly: false });
@@ -1514,11 +1523,23 @@ export function getWalletsForPolling(): SmartWallet[] {
   }
 
   // Recent activity first so monitor polls hot wallets sooner
-  return list.slice().sort((a, b) => {
+  const sorted = list.slice().sort((a, b) => {
     const aT = a.lastTradedAt ?? a.lastActive ?? 0;
     const bT = b.lastTradedAt ?? b.lastActive ?? 0;
     return bT - aT;
   });
+
+  // Free Helius/Alchemy cannot sustain 100+ wallet watches — rotate a capped set.
+  const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || 40);
+  if (
+    isSoftThrottleRpcUrl(getRpcUrl()) &&
+    Number.isFinite(softCap) &&
+    softCap > 0 &&
+    sorted.length > softCap
+  ) {
+    return sorted.slice(0, softCap);
+  }
+  return sorted;
 }
 
 /**

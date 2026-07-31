@@ -102,7 +102,12 @@ const RATE_LIMIT_COOLDOWN_MS = 60_000;
 const UNHEALTHY_LOG_THROTTLE_MS = 15_000;
 
 function isRpcRateLimitMessage(error: string): boolean {
-  return /429|rate.?limit|-32429/i.test(error);
+  return (
+    /429|rate.?limit|-32429|too many requests/i.test(error) ||
+    /connect.?timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|fetch failed/i.test(
+      error
+    )
+  );
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {

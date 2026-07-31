@@ -108,6 +108,9 @@ export function validateDeploymentEnv(): string[] {
     }
   }
   const rawRpc = process.env.RPC_URL?.trim() || '';
+  const hasFreeProvider =
+    Boolean(process.env.HELIUS_API_KEY?.trim()) ||
+    Boolean(process.env.ALCHEMY_API_KEY?.trim());
   if (
     rawRpc &&
     /your-helius|your-quicknode|example\.com|changeme/i.test(rawRpc)
@@ -115,9 +118,13 @@ export function validateDeploymentEnv(): string[] {
     warnings.push(
       `RPC_URL looks like a placeholder (${rawRpc.slice(0, 48)}) — using public Solana RPC until you set a real Helius/QuickNode URL`
     );
-  } else if (env.isProduction && env.rpcUrl.includes('mainnet-beta.solana.com')) {
+  } else if (
+    env.isProduction &&
+    env.rpcUrl.includes('mainnet-beta.solana.com') &&
+    !hasFreeProvider
+  ) {
     warnings.push(
-      'Using public Solana RPC in production — set RPC_URL to a paid endpoint (Helius/QuickNode) for reliable wallet polling'
+      'Using public Solana RPC in production — set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for reliable wallet polling'
     );
   }
   return warnings;
