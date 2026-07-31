@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.67',
+    title: 'QuickNode mid-tier RPC failover',
+    sections: ['execution', 'copy'],
+    items: [
+      'Optional QuickNode sits between Helius/Alchemy and public endpoints for Critical and Scanners failover.',
+      'When preferred lanes recover, traffic returns sticky; Utility stays on publicnode so Favourites soft-watch does not burn QuickNode CU.',
+    ],
+  },
+  {
     version: '1.2.66',
     title: 'Utility prefers publicnode over mainnet-beta',
     sections: ['execution', 'copy'],

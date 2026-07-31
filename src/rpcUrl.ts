@@ -4,16 +4,18 @@
  * Priority order (failover pool):
  *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
  *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
- *   3. RPC_URL / RPC_PRIMARY             — legacy / extra paid endpoint
- *   4. Public Solana (utility)           — https://solana-rpc.publicnode.com
- *   5. Official public fallback          — https://api.mainnet-beta.solana.com
- *   6. RPC_SECONDARY                     — extra fallback (+ Zion lane when Alchemy unset)
- *   7. remaining RPC_FALLBACKS
+ *   3. QuickNode       — QUICKNODE_RPC_URL (mid-tier paid failover for Critical/Scanners)
+ *   4. RPC_URL / RPC_PRIMARY             — legacy / extra paid endpoint
+ *   5. Public Solana (utility)           — https://solana-rpc.publicnode.com
+ *   6. Official public fallback          — https://api.mainnet-beta.solana.com
+ *   7. RPC_SECONDARY                     — extra fallback (+ Zion lane when Alchemy unset)
+ *   8. remaining RPC_FALLBACKS
  *
  * Triple-lane layout (Share RPC load ON):
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
  *   Utility → Publicnode (not official mainnet-beta — often 1s+ from cloud hosts)
+ * Paid-lane failover: preferred → other paid → QuickNode → public (bypass QuickNode if unset).
  * Health monitor + piggyback failover live in connection.ts.
  */
 
@@ -88,10 +90,35 @@ export function buildAlchemyRpcUrl(apiKey?: string | null): string | null {
   return `https://solana-mainnet.g.alchemy.com/v2/${key}`;
 }
 
+/** True for QuickNode hosted Solana HTTP endpoints. */
+export function isQuicknodeRpcUrl(url: string | null | undefined): boolean {
+  const u = (url || '').toLowerCase();
+  return u.includes('quiknode.pro') || u.includes('quicknode.com');
+}
+
+/**
+ * Paid mid-tier failover endpoint (full HTTPS URL from QuickNode dashboard).
+ * Env: QUICKNODE_RPC_URL or QUICKNODE_HTTP_URL.
+ */
+export function buildQuicknodeRpcUrl(
+  explicit?: string | null
+): string | null {
+  const raw = (
+    explicit ??
+    process.env.QUICKNODE_RPC_URL ??
+    process.env.QUICKNODE_HTTP_URL ??
+    ''
+  ).trim();
+  if (!raw || !isUsableRpcUrl(raw)) return null;
+  return raw;
+}
+
 /** True for free/public endpoints that rate-limit and cannot sustain program log WS. */
 export function isPublicRpcUrl(url: string | null | undefined): boolean {
   const u = (url || '').toLowerCase();
   if (!u) return true;
+  // Paid QuickNode is never "public"
+  if (isQuicknodeRpcUrl(u)) return false;
   // Free-tier Helius / Alchemy with a real key are not "public Solana RPC"
   if (u.includes('helius-rpc.com') && u.includes('api-key=')) {
     const key = u.split('api-key=')[1]?.split('&')[0] || '';
@@ -119,11 +146,15 @@ export function isPublicRpcUrl(url: string | null | undefined): boolean {
 /**
  * Free / metered providers that look "private" but rate-limit hard under burst
  * (Helius free, Alchemy free, public Solana). Use soft poll concurrency.
+ * QuickNode is paid mid-tier — not soft-throttled unless RPC_SOFT_THROTTLE=1.
  */
 export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
   if (isPublicRpcUrl(url)) return true;
   const u = (url || '').toLowerCase();
   if (!u) return true;
+  if (isQuicknodeRpcUrl(u)) {
+    return process.env.RPC_SOFT_THROTTLE === '1';
+  }
   if (u.includes('helius-rpc.com')) return true;
   if (u.includes('g.alchemy.com')) return true;
   // Explicit override for paid dedicated URLs that still need gentle polling
@@ -239,6 +270,7 @@ export function rpcEndpointsFromEnv(
 ): NormalizedRpcEndpoint[] {
   const helius = buildHeliusRpcUrl();
   const alchemy = buildAlchemyRpcUrl();
+  const quicknode = buildQuicknodeRpcUrl();
 
   const rpcUrlRaw = (
     primaryEnv ??
@@ -269,11 +301,20 @@ export function rpcEndpointsFromEnv(
     .filter((u) => u && isUsableRpcUrl(u));
 
   // Failover priority pool (deduped later by normalizeRpcEndpoints)
-  type Cand = { url: string; label: string; role: RpcLaneRole };
+  type Cand = { url: string; label: string; role: RpcLaneRole; wsUrl?: string };
   const pool: Cand[] = [];
 
   if (helius) pool.push({ url: helius, label: 'helius', role: 'fallback' });
   if (alchemy) pool.push({ url: alchemy, label: 'alchemy', role: 'fallback' });
+  if (quicknode) {
+    const qnWs = process.env.QUICKNODE_WSS_URL?.trim();
+    pool.push({
+      url: quicknode,
+      label: 'quicknode',
+      role: 'fallback',
+      wsUrl: qnWs && isUsableRpcUrl(qnWs) ? qnWs : undefined,
+    });
+  }
   if (rpcUrl) pool.push({ url: rpcUrl, label: 'rpc-url', role: 'fallback' });
   pool.push({
     url: PUBLIC_SOLANA_RPC,
@@ -354,15 +395,21 @@ export function rpcEndpointsFromEnv(
 
   const candidates: Cand[] = [];
   const seen = new Set<string>();
-  const add = (url: string, label: string, role: RpcLaneRole) => {
+  const add = (
+    url: string,
+    label: string,
+    role: RpcLaneRole,
+    wsUrl?: string
+  ) => {
     if (!url || seen.has(url)) return;
     seen.add(url);
-    candidates.push({ url, label, role });
+    candidates.push({ url, label, role, wsUrl });
   };
 
   const labelFor = (url: string, fallback: string): string => {
     if (url === helius) return 'helius';
     if (url === alchemy) return 'alchemy';
+    if (url === quicknode) return 'quicknode';
     if (url === rpcUrl) return 'rpc-url';
     if (url === rpcSecondary) return 'rpc-secondary';
     if (url === PUBLIC_SOLANA_RPC) return 'publicnode';
@@ -380,7 +427,7 @@ export function rpcEndpointsFromEnv(
   }
 
   for (const c of pool) {
-    add(c.url, c.label, 'fallback');
+    add(c.url, c.label, 'fallback', c.wsUrl);
   }
 
   const out = normalizeRpcEndpoints(candidates);
@@ -390,6 +437,7 @@ export function rpcEndpointsFromEnv(
     `[rpc] Multi-RPC chain: ${chain}` +
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
+      (quicknode ? ' (QuickNode mid-tier)' : '') +
       (utilityUrl === PUBLIC_SOLANA_RPC || utilityUrl === rpcSecondary
         ? ' (publicnode utility)'
         : '')
@@ -410,13 +458,13 @@ export const RPC_LANE_SUPPORTS = {
     'Critical: trade entries / turbo / migration sniper / copy buys',
     'Wallet buy detection (signal poll)',
     'Migration listener parses',
-    'Preferred: Helius Free (HELIUS_API_KEY) → failover Alchemy → public',
+    'Preferred: Helius → Alchemy → QuickNode → public',
   ],
   secondary: [
     'Market Scanner + AlphaScan (Share ON)',
     'Zion micro-bot + KOL Token Scanner',
     'Zion Place Trade on-chain bits',
-    'Preferred: Alchemy Free (ALCHEMY_API_KEY) → else RPC_SECONDARY',
+    'Preferred: Alchemy → Helius → QuickNode → public',
   ],
   utility: [
     'Wallet favourites / import on-chain checks (Share ON)',
