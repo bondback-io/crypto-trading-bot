@@ -2543,36 +2543,174 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .tp-toggle-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: 0.65rem;
       align-items: stretch;
       overflow: visible;
+      position: relative;
     }
     .tp-toggle-card {
+      --tp-accent: #94a3b8;
       flex: 1 1 16rem;
       min-width: 14rem;
       max-width: 22rem;
-      padding: 0.55rem 0.65rem;
-      border: 1px solid #334155;
-      border-radius: 0.5rem;
-      background: #0f172a;
+      padding: 0.65rem 0.7rem 0.7rem;
+      border: 1px solid color-mix(in srgb, var(--tp-accent) 45%, #334155);
+      border-radius: 0.75rem;
+      background:
+        linear-gradient(165deg, rgba(15, 23, 42, 0.98) 0%, rgba(30, 41, 59, 0.88) 55%, rgba(15, 23, 42, 0.96) 100%);
+      box-shadow:
+        inset 3px 0 0 var(--tp-accent),
+        0 0 0 1px rgba(15, 23, 42, 0.4),
+        0 10px 28px rgba(0, 0, 0, 0.32),
+        0 0 24px color-mix(in srgb, var(--tp-accent) 12%, transparent);
       overflow: visible;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+    .tp-toggle-card:hover,
+    .tp-toggle-card:focus-within {
+      transform: translateY(-2px);
+      box-shadow:
+        inset 3px 0 0 var(--tp-accent),
+        0 0 0 1px color-mix(in srgb, var(--tp-accent) 28%, transparent),
+        0 14px 36px rgba(0, 0, 0, 0.4),
+        0 0 32px color-mix(in srgb, var(--tp-accent) 22%, transparent);
     }
     .tp-toggle-card .tp-head {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 0.4rem;
-      margin-bottom: 0.25rem;
+      gap: 0.5rem;
+      margin-bottom: 0.35rem;
       overflow: visible;
     }
+    .tp-toggle-card .tp-head-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .tp-bot-avatar {
+      flex: 0 0 auto;
+      width: 2.65rem;
+      height: 2.65rem;
+      border-radius: 0.7rem;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--tp-accent) 28%, transparent), transparent 62%),
+        rgba(2, 6, 23, 0.65);
+      border: 1px solid color-mix(in srgb, var(--tp-accent) 55%, #334155);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 0 14px color-mix(in srgb, var(--tp-accent) 25%, transparent);
+      animation: tp-avatar-idle 3.2s ease-in-out infinite;
+    }
+    .tp-bot-avatar svg {
+      width: 1.85rem;
+      height: 1.85rem;
+      display: block;
+      overflow: visible;
+    }
+    @keyframes tp-avatar-idle {
+      0%, 100% { transform: translateY(0); filter: drop-shadow(0 0 2px transparent); }
+      50% { transform: translateY(-1px); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--tp-accent) 45%, transparent)); }
+    }
     .tp-toggle-card .tp-head input[type="checkbox"] {
-      width: 1rem;
-      height: 1rem;
-      min-width: 1rem;
+      width: 1.05rem;
+      height: 1.05rem;
+      min-width: 1.05rem;
       flex-shrink: 0;
+      margin-top: 0.35rem;
       accent-color: #10b981;
     }
-    .tp-toggle-card .tp-name { font-weight: 600; font-size: 0.8rem; }
+    .tp-toggle-card .tp-name {
+      font-weight: 700;
+      font-size: 0.82rem;
+      line-height: 1.25;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25rem 0.35rem;
+    }
+    .tp-details {
+      margin-top: 0.45rem;
+      border-radius: 0.55rem;
+      border: 1px solid color-mix(in srgb, var(--tp-accent) 28%, #1e293b);
+      background: rgba(2, 6, 23, 0.45);
+      overflow: hidden;
+    }
+    .tp-details > summary {
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.45rem 0.55rem;
+      font-size: 0.68rem;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      color: #cbd5e1;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--tp-accent) 12%, transparent), transparent 70%);
+    }
+    .tp-details > summary::-webkit-details-marker { display: none; }
+    .tp-details > summary::after {
+      content: '▸';
+      color: var(--tp-accent);
+      font-size: 0.75rem;
+      transition: transform 0.15s ease;
+    }
+    .tp-details[open] > summary {
+      color: #e2e8f0;
+      border-bottom: 1px solid #1e293b;
+    }
+    .tp-details[open] > summary::after {
+      transform: rotate(90deg);
+    }
+    .tp-details .tp-params {
+      padding: 0.5rem 0.55rem 0.6rem;
+      margin: 0;
+      border: none;
+      background: transparent;
+    }
+    @media (max-width: 640px) {
+      .tp-toggle-row {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: visible;
+        gap: 0.75rem;
+        padding: 0.15rem 0.15rem 0.65rem;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        mask-image: linear-gradient(90deg, transparent 0, #000 0.6rem, #000 calc(100% - 1.1rem), transparent);
+      }
+      .tp-toggle-row::-webkit-scrollbar { height: 4px; }
+      .tp-toggle-row::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 999px;
+      }
+      .tp-toggle-card {
+        flex: 0 0 88%;
+        min-width: 88%;
+        max-width: 88%;
+        scroll-snap-align: center;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .tp-toggle-card,
+      .tp-bot-avatar,
+      .tp-details > summary::after {
+        transition: none !important;
+        animation: none !important;
+      }
+      .tp-toggle-card:hover,
+      .tp-toggle-card:focus-within {
+        transform: none;
+      }
+    }
     /* Profile module allowlist popover (chip / card name hover) */
     .tp-mod-tip {
       position: relative;
@@ -2725,15 +2863,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .tp-toggle-card details.tp-rules > summary::-webkit-details-marker { display: none; }
     .tp-toggle-card details.tp-rules[open] > summary { color: #94a3b8; margin-bottom: 0.2rem; }
-    @media (max-width: 640px) {
-      .tp-toggle-card {
-        flex: 1 1 100%;
-        min-width: 0;
-        max-width: none;
-      }
-    }
     .tp-toggle-card.tp-card-paused {
-      opacity: 0.5;
+      opacity: 0.55;
+      filter: grayscale(0.15);
     }
     .tp-toggle-card.tp-card-flash {
       outline: 2px solid #38bdf8;
@@ -7719,6 +7851,141 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       'zion',
     ];
 
+    /** Transparent SVG battle-bot avatars (no plate background). */
+    function profileBotAvatarSvg(id, color) {
+      const c = color || '#94a3b8';
+      const stroke = c;
+      const fill = c;
+      const common =
+        'xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" aria-hidden="true"';
+      const bots = {
+        default:
+          '<svg ' + common + '>' +
+            '<rect x="18" y="14" width="28" height="22" rx="4" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="26" cy="24" r="2.5" fill="' + fill + '"/>' +
+            '<circle cx="38" cy="24" r="2.5" fill="' + fill + '"/>' +
+            '<path d="M26 31h12" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M24 36v10M40 36v10M20 46h24" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M32 8v6" stroke="' + stroke + '" stroke-width="2"/><circle cx="32" cy="7" r="2" fill="' + fill + '"/>' +
+          '</svg>',
+        scalper:
+          '<svg ' + common + '>' +
+            '<path d="M20 40 L32 12 L44 40 Z" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
+            '<path d="M26 28h12" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="28" cy="22" r="1.8" fill="' + fill + '"/><circle cx="36" cy="22" r="1.8" fill="' + fill + '"/>' +
+            '<path d="M22 44h20M24 50h16" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M14 30l6 4M50 30l-6 4" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>',
+        dip_buyer:
+          '<svg ' + common + '>' +
+            '<path d="M16 28c0-8 7-14 16-14s16 6 16 14v6H16v-6z" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="26" cy="26" r="2.2" fill="' + fill + '"/><circle cx="38" cy="26" r="2.2" fill="' + fill + '"/>' +
+            '<path d="M24 34h16" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M20 40h24v8H20z" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M12 48c6 6 14 8 20 8s14-2 20-8" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>',
+        trend_rider:
+          '<svg ' + common + '>' +
+            '<path d="M18 38 L32 10 L46 38" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
+            '<rect x="24" y="28" width="16" height="12" rx="3" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="28" cy="34" r="1.6" fill="' + fill + '"/><circle cx="36" cy="34" r="1.6" fill="' + fill + '"/>' +
+            '<path d="M22 50h20M18 44l-6 4M46 44l6 4" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M32 46v6" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        migration_sniper:
+          '<svg ' + common + '>' +
+            '<circle cx="32" cy="26" r="12" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="32" cy="26" r="5" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="32" cy="26" r="1.8" fill="' + fill + '"/>' +
+            '<path d="M32 14v-4M32 42v4M20 26h-4M48 26h4" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M22 46h20v6H22z" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        high_win_rate:
+          '<svg ' + common + '>' +
+            '<path d="M32 8l16 6v12c0 12-8 20-16 24-8-4-16-12-16-24V14z" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
+            '<circle cx="32" cy="26" r="6" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M29 26l2.2 2.2L37 22.5" stroke="' + fill + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+          '</svg>',
+        momentum_burst:
+          '<svg ' + common + '>' +
+            '<circle cx="32" cy="28" r="10" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="28" cy="26" r="1.8" fill="' + fill + '"/><circle cx="36" cy="26" r="1.8" fill="' + fill + '"/>' +
+            '<path d="M26 33h12" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M32 8l2 6M20 16l4 4M44 16l-4 4M14 30h6M44 30h6M22 44l4-3M42 44l-4-3" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M24 48h16" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        steady_compounder:
+          '<svg ' + common + '>' +
+            '<rect x="16" y="18" width="32" height="28" rx="5" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<rect x="22" y="24" width="20" height="10" rx="2" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M26 29h12M24 42h16" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<circle cx="32" cy="12" r="3" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M20 50h24" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        reversal_scalper:
+          '<svg ' + common + '>' +
+            '<path d="M18 32c0-8 6-14 14-14s14 6 14 14-6 14-14 14" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M32 46c-6 0-10-3-12-7" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M18 40l-4 2 3 4" stroke="' + stroke + '" stroke-width="2" stroke-linejoin="round"/>' +
+            '<circle cx="28" cy="30" r="2" fill="' + fill + '"/><circle cx="36" cy="30" r="2" fill="' + fill + '"/>' +
+            '<path d="M26 36h12" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        smart_money_mirror:
+          '<svg ' + common + '>' +
+            '<rect x="10" y="16" width="18" height="26" rx="4" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<rect x="36" y="16" width="18" height="26" rx="4" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="19" cy="26" r="2" fill="' + fill + '"/><circle cx="45" cy="26" r="2" fill="' + fill + '"/>' +
+            '<path d="M15 34h8M41 34h8M28 29h8" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+            '<path d="M32 12v6M32 42v6" stroke="' + stroke + '" stroke-width="2"/>' +
+          '</svg>',
+        zion:
+          '<svg ' + common + '>' +
+            '<path d="M32 10l14 8v14c0 10-7 16-14 20-7-4-14-10-14-20V18z" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<path d="M24 28h16v8H24z" stroke="' + stroke + '" stroke-width="2"/>' +
+            '<circle cx="28" cy="32" r="1.6" fill="' + fill + '"/><circle cx="36" cy="32" r="1.6" fill="' + fill + '"/>' +
+            '<path d="M32 18v6M20 22l4 3M44 22l-4 3" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/>' +
+          '</svg>',
+      };
+      if (id === 'migration') return bots.migration_sniper;
+      return bots[id] || bots.default;
+    }
+
+    function profileBotAvatarHtml(id, color) {
+      const resolved = id === 'migration' ? 'migration_sniper' : id;
+      return (
+        '<span class="tp-bot-avatar" aria-hidden="true">' +
+          profileBotAvatarSvg(resolved, color) +
+        '</span>'
+      );
+    }
+
+    function isTpDetailsOpen(id) {
+      try {
+        return sessionStorage.getItem('tp-details-open') === String(id);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function bindTpDetailsPersistence() {
+      const row = document.getElementById('trade-profiles-toggles');
+      if (!row || row.dataset.tpDetailsBound === '1') return;
+      row.dataset.tpDetailsBound = '1';
+      row.addEventListener('toggle', function (ev) {
+        const t = ev.target;
+        if (!t || !t.classList || !t.classList.contains('tp-details')) return;
+        const card = t.closest('[data-tp-card]');
+        const id = card && card.getAttribute('data-tp-card');
+        if (!id) return;
+        try {
+          if (t.open) sessionStorage.setItem('tp-details-open', id);
+          else if (sessionStorage.getItem('tp-details-open') === id) {
+            sessionStorage.removeItem('tp-details-open');
+          }
+        } catch (_) { /* ignore */ }
+      }, true);
+    }
+
     function buildProfileColourLegendHtml() {
       return PROFILE_LEGEND_IDS.map(function (id) {
         const v = PROFILE_VISUALS[id];
@@ -9937,6 +10204,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</div>';
           const params = editable
             ? (
+              '<details class="tp-details"' + (isTpDetailsOpen(p.id) ? ' open' : '') + '>' +
+              '<summary>Details · Params &amp; rules</summary>' +
               '<div class="tp-params" data-tp-id="' + escHtml(p.id) + '">' +
                 '<div class="tp-param-section">' +
                   '<p class="tp-param-title">Entry / lane fit</p>' +
@@ -10236,25 +10505,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   '<button type="button" class="btn btn-secondary" onclick="resetTradeProfileParams(\\'' + p.id + '\\')">Reset defaults</button>' +
                   (p.hasOverrides ? '<span class="tp-override-badge">customised</span>' : '<span class="mint text-xs">official defaults</span>') +
                 '</div>' +
-              '</div>'
+              '</div>' +
+              '</details>'
             )
             : '';
           const color = profileColorFor(p.id) || p.color || '#94a3b8';
           const paused = !p.enabled && p.id !== 'default';
           return (
-            '<div class="tp-toggle-card' + (paused ? ' tp-card-paused' : '') + '" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="border-color:' + color + '88;box-shadow:inset 3px 0 0 ' + color + '">' +
+            '<div class="tp-toggle-card' + (paused ? ' tp-card-paused' : '') + '" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="--tp-accent:' + color + ';border-color:' + color + '88">' +
               '<div class="tp-head">' +
-                '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
-                  escHtml(p.name || '') + ' modules">' +
-                  escHtml(p.icon || '') + ' ' + escHtml(p.name) +
-                  (paused ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5">Paused</span>' : '') +
-                  (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
-                  (sl.enabled && slBadge
-                    ? '<span class="tp-override-badge" style="background:#14532d;color:#86efac" title="Self-learning progress">' +
-                      escHtml(slBadge) + '</span>'
-                    : '') +
-                  fmtProfileModulesPopover(p) +
-                '</span>' +
+                '<div class="tp-head-main">' +
+                  profileBotAvatarHtml(p.id, color) +
+                  '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
+                    escHtml(p.name || '') + ' modules">' +
+                    escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                    (paused ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5">Paused</span>' : '') +
+                    (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
+                    (sl.enabled && slBadge
+                      ? '<span class="tp-override-badge" style="background:#14532d;color:#86efac" title="Self-learning progress">' +
+                        escHtml(slBadge) + '</span>'
+                      : '') +
+                    fmtProfileModulesPopover(p) +
+                  '</span>' +
+                '</div>' +
                 '<input type="checkbox"' + checked + disabled +
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="' + (p.enabled ? 'Pause' : 'Resume') + ' ' + escHtml(p.name) + '" />' +
               '</div>' +
@@ -10267,6 +10540,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</div>'
           );
         }).join('');
+        bindTpDetailsPersistence();
       }
       const overviewBody = document.getElementById('trade-profiles-overview-body');
       if (overviewBody) {
