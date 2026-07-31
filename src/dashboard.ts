@@ -13428,9 +13428,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.setClosedTradesFilter = setClosedTradesFilter;
 
     async function clearClosedTradesSession() {
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear button clicked (pre-confirm)',data:{openCached:(window._lastOpenPositions||[]).length,closedGroups:(window._closedTradeGroups||[]).length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (
         !confirm(
           'Clear closed-trades LIST only?\\n\\n' +
@@ -13442,17 +13439,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         return;
       }
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear confirmed — POSTing /api/paper/clear-closed',data:{openCached:(window._lastOpenPositions||[]).length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        const clearRes = await fetchJSON('/api/paper/clear-closed', {
+        await fetchJSON('/api/paper/clear-closed', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         });
-        // #region agent log
-        fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:clearClosedTradesSession',message:'Clear API response',data:{ok:!!clearRes&&clearRes.ok,cleared:clearRes&&clearRes.cleared,statsOpen:clearRes&&clearRes.stats&&clearRes.stats.openTrades,statsClosed:clearRes&&clearRes.stats&&clearRes.stats.closedTrades},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         refresh();
       } catch (err) {
         alert('Clear closed trades failed: ' + (err.message || err));
@@ -16145,9 +16136,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function paperReset(clearHistory) {
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:paperReset',message:'paperReset clicked',data:{clearHistory:!!clearHistory},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const msg = clearHistory
         ? 'Full reset: restore starting balance, clear open positions, AND wipe closed history + logs?'
         : 'Reset paper balance to starting SOL and clear open positions? (closed history kept)';
@@ -16231,9 +16219,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function resetDashboardSession() {
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'A',location:'dashboard.ts:resetDashboardSession',message:'Overview Reset clicked',data:{openCached:(window._lastOpenPositions||[]).length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (!confirm(
         'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons.\\n\\nKeeps: Risk On/Off and strategy modules.\\n\\nContinue?'
       )) return;
@@ -17598,9 +17583,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       });
       paintOpenPositionsTables();
-      // #region agent log
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'8695ba'},body:JSON.stringify({sessionId:'8695ba',hypothesisId:'E',location:'dashboard.ts:refresh',message:'refresh painted positions',data:{apiOpen:(positions.open||[]).length,apiClosed:(positions.closed||[]).length,cachedOpen:(window._lastOpenPositions||[]).length,openFilter:window._openProfileFilter||'all',watching:status&&status.monitor&&status.monitor.watchingLabel,paused:status&&status.monitor&&status.monitor.paused,winRate:status&&status.winRate},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
       window._closedTradeGroups = buildClosedTradeGroups(

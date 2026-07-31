@@ -1571,37 +1571,6 @@ export function getWalletsForPolling(): SmartWallet[] {
       softWatchRotateOffset = (start + Math.max(take, 1)) % cold.length;
     }
     const capped = hot.concat(rotated);
-    // #region agent log
-    if (!(globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt ||
-      Date.now() - ((globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt || 0) > 60_000) {
-      (globalThis as { __dbgSoftCapLogAt?: number }).__dbgSoftCapLogAt = Date.now();
-      console.log(
-        `[debug-8695ba] softWatchCap rotate ${capped.length}/${sorted.length} sticky=${hot.length} rotated=${rotated.length} shareLoad=${Boolean(config.rpc?.shareLoad)}`
-      );
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          runId: 'post-fix',
-          hypothesisId: 'C',
-          location: 'monitor.ts:getWalletsForPolling',
-          message: 'softWatchCap rotate applied',
-          data: {
-            softCap,
-            sortedLen: sorted.length,
-            sticky: hot.length,
-            rotated: rotated.length,
-            shareLoad: Boolean(config.rpc?.shareLoad),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     return capped;
   }
   return sorted;
@@ -4627,31 +4596,6 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       console.log(
         `[monitor] Signal rejected (${signalKind}) — win rate ${winRate.toFixed(1)}% < ${filters.minWinRate}%`
       );
-      // #region agent log
-      console.log(
-        `[debug-8695ba] winRateGate block wr=${winRate.toFixed(1)} min=${filters.minWinRate} closedN=${paperTrader.getClosedPositions().length}`
-      );
-      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '8695ba',
-        },
-        body: JSON.stringify({
-          sessionId: '8695ba',
-          hypothesisId: 'B',
-          location: 'monitor.ts:passesFilters',
-          message: 'winRate gate blocked entry',
-          data: {
-            winRate,
-            minWinRate: filters.minWinRate,
-            closedN: paperTrader.getClosedPositions().length,
-            symbol: signal.symbol,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       recordRejectedSignal(signal, `win rate ${winRate.toFixed(0)}%`);
       return false;
     }

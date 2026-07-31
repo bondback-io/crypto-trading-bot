@@ -1931,38 +1931,9 @@ export class PaperTrader {
    */
   clearClosedHistory(): { cleared: number } {
     const cleared = this.closedPositions.length;
-    const openBefore = this.positions.size;
-    const balBefore = this.balanceSol;
     this.closedPositions = [];
     this.persistState();
     this.log('info', 'Closed trade history cleared (session)');
-    // #region agent log
-    this.log(
-      'info',
-      `[debug-8695ba] clearClosedHistory clearedClosed=${cleared} openKept=${this.positions.size} (was ${openBefore}) bal=${this.balanceSol.toFixed(4)} (was ${balBefore.toFixed(4)})`
-    );
-    fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '8695ba',
-      },
-      body: JSON.stringify({
-        sessionId: '8695ba',
-        hypothesisId: 'A',
-        location: 'paperTrader.ts:clearClosedHistory',
-        message: 'clearClosedHistory invoked',
-        data: {
-          clearedClosed: cleared,
-          openBefore,
-          openAfter: this.positions.size,
-          balBefore,
-          balAfter: this.balanceSol,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return { cleared };
   }
 
@@ -1976,7 +1947,6 @@ export class PaperTrader {
     clearedHistory: boolean;
   } {
     const clearedOpen = this.positions.size;
-    const closedBefore = this.closedPositions.length;
     this.positions.clear();
     this.balanceSol = config.paper.startingBalanceSol;
     this.startingBalanceSol = config.paper.startingBalanceSol;
@@ -1995,27 +1965,6 @@ export class PaperTrader {
         (clearedOpen ? ` (closed ${clearedOpen} open position(s))` : '') +
         (clearHistory ? ' · history cleared' : ' · closed history kept')
     );
-    // #region agent log
-    this.log(
-      'info',
-      `[debug-8695ba] paperReset clearHistory=${clearHistory} clearedOpen=${clearedOpen} closedBefore=${closedBefore}`
-    );
-    fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '8695ba',
-      },
-      body: JSON.stringify({
-        sessionId: '8695ba',
-        hypothesisId: 'A',
-        location: 'paperTrader.ts:reset',
-        message: 'paperReset invoked',
-        data: { clearHistory, clearedOpen, closedBefore },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     this.persistState();
 
