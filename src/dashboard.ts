@@ -2531,9 +2531,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       border-radius: 999px;
       border: 1px solid;
       opacity: 0.95;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
     }
     .trade-profiles-active .tp-chip.is-off {
-      /* Avoid opacity — it greys the modules popover too */
       filter: grayscale(0.55);
       opacity: 1;
       color: #94a3b8 !important;
@@ -9575,14 +9577,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         chips.innerHTML = list.length
           ? list.map(function (p) {
               const on = p.active;
+              const enabled = p.enabled !== false;
               const color = profileColorFor(p.id) || p.color || '#94a3b8';
+              const name = p.name || p.id || '';
+              const tip =
+                p.id === 'default'
+                  ? escHtml(name)
+                  : 'Double-click to ' + (enabled ? 'pause' : 'resume') + ' ' + escHtml(name);
               return (
-                '<span class="tp-chip tp-mod-tip' + (on ? '' : ' is-off') +
-                '" tabindex="0" style="color:' + color +
-                ';border-color:' + color + '99;background:' + color + '22" aria-label="' +
-                escHtml(p.name || '') + ' modules">' +
-                escHtml(p.icon || '') + ' ' + escHtml(p.name) + (on ? '' : ' (off)') +
-                fmtProfileModulesPopover(p) +
+                '<span class="tp-chip' + (on ? '' : ' is-off') +
+                '" data-tp-chip-id="' + escHtml(p.id || '') +
+                '" data-tp-chip-name="' + escHtml(name) +
+                '" data-tp-chip-enabled="' + (enabled ? '1' : '0') +
+                '" style="color:' + color +
+                ';border-color:' + color + '99;background:' + color + '22" title="' + tip +
+                '" aria-label="' + escHtml(name) + (on ? '' : ' (off)') + '">' +
+                escHtml(p.icon || '') + ' ' + escHtml(name) + (on ? '' : ' (off)') +
                 '</span>'
               );
             }).join('')
@@ -11174,8 +11184,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.updateGlobalMicroBotTpUi = updateGlobalMicroBotTpUi;
 
-    async function toggleTradeProfile(id, enabled) {
-      if (!enabled) {
+    async function toggleTradeProfile(id, enabled, skipConfirm) {
+      if (!enabled && !skipConfirm) {
         if (!confirm('Pause ' + id + '? Learning data will be preserved. The bot will be excluded from lane fights until resumed.')) {
           loadStrategies();
           return;
@@ -11194,6 +11204,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.toggleTradeProfile = toggleTradeProfile;
+
+    (function bindOverviewTpChipDblclick() {
+      const root = document.getElementById('trade-profiles-active-chips');
+      if (!root || root.dataset.tpChipDblBound === '1') return;
+      root.dataset.tpChipDblBound = '1';
+      root.addEventListener('dblclick', function (e) {
+        const chip = e.target && e.target.closest
+          ? e.target.closest('[data-tp-chip-id]')
+          : null;
+        if (!chip || !root.contains(chip)) return;
+        e.preventDefault();
+        if (window.getSelection) {
+          const sel = window.getSelection();
+          if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        }
+        const id = chip.getAttribute('data-tp-chip-id');
+        if (!id || id === 'default') return;
+        const name = chip.getAttribute('data-tp-chip-name') || id;
+        const enabled = chip.getAttribute('data-tp-chip-enabled') !== '0';
+        const msg = enabled
+          ? 'Pause the ' + name + ' bot?'
+          : 'Resume the ' + name + ' bot?';
+        if (!confirm(msg)) return;
+        toggleTradeProfile(id, !enabled, true);
+      });
+    })();
 
     async function saveTradeProfileParams(id) {
       const root = document.querySelector('.tp-params[data-tp-id="' + id + '"]');
