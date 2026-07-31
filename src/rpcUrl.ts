@@ -14,7 +14,7 @@
  * Triple-lane layout (Share RPC load ON):
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
- *   Utility → api.mainnet.solana.com (Triton) when set as RPC_URL/RPC_SECONDARY, else publicnode
+ *   Utility → official mainnet-beta (api.mainnet-beta.solana.com), then publicnode / Triton
  * Paid-lane failover: preferred → other paid → QuickNode → public (bypass QuickNode if unset).
  * Health monitor + piggyback failover live in connection.ts.
  */
@@ -379,10 +379,11 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers publicnode (fast from Render), then Triton
-  // api.mainnet.solana.com. Never sticky official mainnet-beta (probe-fast / poll-slow).
+  // Utility lane prefers official mainnet-beta, then publicnode / Triton.
   let utilityUrl = '';
   const utilityPrefs = [
+    PUBLIC_SOLANA_RPC_OFFICIAL,
+    rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl) ? rpcUrl : '',
     PUBLIC_SOLANA_RPC,
     rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
     rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
@@ -397,18 +398,18 @@ export function rpcEndpointsFromEnv(
   if (!utilityUrl) {
     for (const c of pool) {
       if (c.url === primaryUrl || c.url === secondaryUrl) continue;
-      // Never prefer official mainnet-beta as sticky utility when alternatives exist
-      if (isOfficialMainnetBetaRpcUrl(c.url)) continue;
-      if (c.url === rpcUrl && isOfficialMainnetBetaRpcUrl(rpcUrl)) continue;
       utilityUrl = c.url;
       break;
     }
   }
   if (!utilityUrl) {
     utilityUrl =
-      PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
-        ? PUBLIC_SOLANA_RPC
-        : secondaryUrl || primaryUrl;
+      PUBLIC_SOLANA_RPC_OFFICIAL !== primaryUrl &&
+      PUBLIC_SOLANA_RPC_OFFICIAL !== secondaryUrl
+        ? PUBLIC_SOLANA_RPC_OFFICIAL
+        : PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
+          ? PUBLIC_SOLANA_RPC
+          : secondaryUrl || primaryUrl;
   }
 
   if (secondaryUrl && secondaryUrl === primaryUrl) {
@@ -463,11 +464,13 @@ export function rpcEndpointsFromEnv(
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
       (quicknode ? ' (QuickNode mid-tier)' : '') +
-      (utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
-        ? ' (Triton api.mainnet.solana.com utility)'
-        : utilityUrl === PUBLIC_SOLANA_RPC
-          ? ' (publicnode utility)'
-          : '')
+      (utilityUrl && isOfficialMainnetBetaRpcUrl(utilityUrl)
+        ? ' (mainnet-beta utility)'
+        : utilityUrl && isTritonMainnetRpcUrl(utilityUrl)
+          ? ' (Triton api.mainnet.solana.com utility)'
+          : utilityUrl === PUBLIC_SOLANA_RPC
+            ? ' (publicnode utility)'
+            : '')
   );
   if (!helius && !alchemy) {
     console.warn(
@@ -497,7 +500,7 @@ export const RPC_LANE_SUPPORTS = {
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: publicnode → api.mainnet.solana.com (Triton) → official mainnet-beta last',
+    'Preferred: official mainnet-beta → publicnode → Triton → last-resort fallbacks',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -515,6 +518,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'publicnode — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'mainnet-beta — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;

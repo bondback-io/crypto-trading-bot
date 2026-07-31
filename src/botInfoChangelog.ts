@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.73',
+    title: 'Utility prefers official mainnet-beta',
+    sections: ['execution', 'copy'],
+    items: [
+      'Utility sticky preferred is now api.mainnet-beta.solana.com; publicnode and Triton remain failover options under Share load.',
+    ],
+  },
+  {
     version: '1.2.72',
     title: 'No baked favourites on fresh deploy',
     sections: ['copy', 'execution'],
