@@ -7485,13 +7485,117 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
     }
 
+    const BOTINFO_SEEN_KEY = 'botinfoChangelogSeenIds';
+
+    function loadBotInfoChangelogPayload() {
+      try {
+        const el = document.getElementById('botinfo-changelog-json');
+        if (!el || !el.textContent) return { items: [] };
+        return JSON.parse(el.textContent);
+      } catch (_) {
+        return { items: [] };
+      }
+    }
+
+    function currentBotInfoAppVersion() {
+      try {
+        const label =
+          ((document.getElementById('botinfo-panel-ver') || {}).textContent || '') ||
+          ((document.getElementById('app-version') || {}).textContent || '');
+        return String(label).replace(/^v/i, '').trim();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    /**
+     * First visit: mark older changelog items as seen so only the current
+     * package version (and later adds) show blue chip counts.
+     */
+    function ensureBotInfoSeenBaseline() {
+      try {
+        if (localStorage.getItem(BOTINFO_SEEN_KEY) != null) return;
+        const payload = loadBotInfoChangelogPayload();
+        const items = (payload && payload.items) || [];
+        const ver = currentBotInfoAppVersion();
+        const seen = new Set();
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (!it || !it.id) continue;
+          if (ver && it.version === ver) continue;
+          seen.add(String(it.id));
+        }
+        localStorage.setItem(BOTINFO_SEEN_KEY, JSON.stringify(Array.from(seen)));
+      } catch (_) {}
+    }
+
+    function loadBotInfoSeenIds() {
+      ensureBotInfoSeenBaseline();
+      try {
+        const raw = localStorage.getItem(BOTINFO_SEEN_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(arr) ? arr.map(String) : []);
+      } catch (_) {
+        return new Set();
+      }
+    }
+
+    function saveBotInfoSeenIds(seen) {
+      try {
+        localStorage.setItem(BOTINFO_SEEN_KEY, JSON.stringify(Array.from(seen)));
+      } catch (_) {}
+    }
+
+    function updateBotInfoSectionBadges() {
+      const payload = loadBotInfoChangelogPayload();
+      const items = (payload && payload.items) || [];
+      const seen = loadBotInfoSeenIds();
+      const counts = {};
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (!it || !it.section || !it.id) continue;
+        if (seen.has(it.id)) continue;
+        counts[it.section] = (counts[it.section] || 0) + 1;
+      }
+      document.querySelectorAll('[data-botinfo-badge]').forEach(function (badge) {
+        const sec = badge.getAttribute('data-botinfo-badge');
+        const n = (sec && counts[sec]) || 0;
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.classList.toggle('is-on', n > 0);
+        badge.setAttribute('aria-hidden', n > 0 ? 'false' : 'true');
+        if (n > 0) badge.setAttribute('title', n + ' new update' + (n === 1 ? '' : 's'));
+        else badge.removeAttribute('title');
+      });
+    }
+
+    function markBotInfoSectionSeen(secId) {
+      if (!secId) return;
+      const payload = loadBotInfoChangelogPayload();
+      const items = (payload && payload.items) || [];
+      const seen = loadBotInfoSeenIds();
+      let changed = false;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it && it.section === secId && it.id && !seen.has(it.id)) {
+          seen.add(it.id);
+          changed = true;
+        }
+      }
+      if (changed) {
+        saveBotInfoSeenIds(seen);
+        updateBotInfoSectionBadges();
+      }
+    }
+
     function showBotInfoSection(secId) {
       const el = document.getElementById('botinfo-sec-' + secId);
       if (!el) return;
       setBotInfoChipActive(secId);
+      markBotInfoSectionSeen(secId);
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     window.showBotInfoSection = showBotInfoSection;
+    window.updateBotInfoSectionBadges = updateBotInfoSectionBadges;
 
     let _botInfoSpyBound = false;
     function initBotInfoScrollSpy() {
@@ -7507,7 +7611,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           .sort(function (a, b) { return b.intersectionRatio - a.intersectionRatio; });
         if (!visible.length) return;
         const id = visible[0].target.getAttribute('data-botinfo-section');
-        if (id) setBotInfoChipActive(id);
+        if (id) {
+          setBotInfoChipActive(id);
+          markBotInfoSectionSeen(id);
+        }
       }, { root: null, rootMargin: '-20% 0px -55% 0px', threshold: [0.1, 0.35, 0.6] });
       sections.forEach(function (s) { obs.observe(s); });
     }
@@ -11955,7 +12062,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'zion') loadZion();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
-      if (name === 'botinfo') { try { syncBotInfoVersionLabels(); } catch (_) {} try { initBotInfoScrollSpy(); } catch (_) {} }
+      if (name === 'botinfo') {
+        try { syncBotInfoVersionLabels(); } catch (_) {}
+        try { ensureBotInfoSeenBaseline(); } catch (_) {}
+        try { initBotInfoScrollSpy(); } catch (_) {}
+        try { updateBotInfoSectionBadges(); } catch (_) {}
+      }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -23153,6 +23265,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const rememberedTab = normalizeTabName(savedTab);
     const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(rememberedTab) ? rememberedTab : 'overview');
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
+    try { updateBotInfoSectionBadges(); } catch (_) {}
     if (qsOffer) {
       setTimeout(function () { openZionOfferModal(qsOffer); }, 400);
     }

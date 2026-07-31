@@ -5,6 +5,10 @@
 
 import { renderBotInfoSectionArticles } from './botInfoNarrative';
 import {
+  botInfoChangelogClientPayload,
+  BOT_INFO_CHANGELOG,
+} from './botInfoChangelog';
+import {
   buildBotInfoSnapshot,
   type BotInfoSnapshot,
 } from './botInfoSnapshot';
@@ -36,11 +40,13 @@ export const BOT_INFO_CSS = `
     }
     .botinfo-subnav::-webkit-scrollbar { height: 4px; }
     .botinfo-chip {
+      position: relative;
       flex: 0 0 auto; border: 1px solid #334155; background: #1e293b; color: #cbd5e1;
       font-size: 0.7rem; font-weight: 600; letter-spacing: 0.01em;
       padding: 0.4rem 0.7rem; border-radius: 9999px; cursor: pointer;
       transition: background .15s, border-color .15s, color .15s;
       min-height: 2rem;
+      display: inline-flex; align-items: center; gap: 0.35rem;
     }
     .botinfo-chip:hover { border-color: #64748b; color: #f1f5f9; }
     .botinfo-chip.active {
@@ -48,6 +54,37 @@ export const BOT_INFO_CSS = `
     }
     .botinfo-chip:focus-visible {
       outline: 2px solid #34d399; outline-offset: 2px;
+    }
+    .botinfo-chip-badge {
+      display: none;
+      min-width: 1.05rem;
+      height: 1.05rem;
+      padding: 0 0.28rem;
+      border-radius: 999px;
+      background: #3b82f6;
+      color: #eff6ff;
+      font-size: 0.58rem;
+      font-weight: 800;
+      line-height: 1.05rem;
+      text-align: center;
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.45);
+    }
+    .botinfo-chip-badge.is-on { display: inline-block; }
+    .botinfo-whatsnew {
+      margin: 0.65rem 0 0.2rem; padding: 0.65rem 0.75rem; border-radius: 10px;
+      background: #0f172a; border: 1px solid #1e293b;
+    }
+    .botinfo-whatsnew h4 {
+      margin: 0 0 0.4rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+      text-transform: uppercase; color: #60a5fa;
+    }
+    .botinfo-whatsnew ul {
+      margin: 0; padding-left: 1.05rem; font-size: 0.78rem; color: #94a3b8; line-height: 1.45;
+    }
+    .botinfo-whatsnew li { margin-bottom: 0.22rem; }
+    .botinfo-whatsnew .botinfo-wn-ver {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.68rem; color: #93c5fd; margin-right: 0.25rem;
     }
     .botinfo-card {
       background: #1e293b; border: 1px solid #334155; border-radius: 12px;
@@ -216,8 +253,29 @@ function esc(s: string): string {
 function chipNav(): string {
   return SECTIONS.map(
     (s, i) =>
-      `<button type="button" class="botinfo-chip${i === 0 ? ' active' : ''}" data-botinfo-sec="${s.id}" onclick="showBotInfoSection('${s.id}')">${esc(s.label)}</button>`
+      `<button type="button" class="botinfo-chip${i === 0 ? ' active' : ''}" data-botinfo-sec="${s.id}" onclick="showBotInfoSection('${s.id}')">` +
+      `<span class="botinfo-chip-label">${esc(s.label)}</span>` +
+      `<span class="botinfo-chip-badge" data-botinfo-badge="${s.id}" aria-hidden="true">0</span>` +
+      `</button>`
   ).join('\n          ');
+}
+
+function whatsNewBlock(): string {
+  const recent = BOT_INFO_CHANGELOG.slice(0, 4);
+  if (!recent.length) return '';
+  const lis = recent
+    .map((e) => {
+      const bullets = e.items
+        .slice(0, 2)
+        .map((t) => `<li><span class="botinfo-wn-ver">v${esc(e.version)}</span>${esc(t)}</li>`)
+        .join('');
+      return bullets;
+    })
+    .join('');
+  return `<div class="botinfo-whatsnew" id="botinfo-whatsnew">
+        <h4>What’s New</h4>
+        <ul>${lis}</ul>
+      </div>`;
 }
 
 function openBtn(tab: string, label: string): string {
@@ -393,17 +451,24 @@ export function buildBotInfoPanelHtml(
     durabilityCards: durabilityCards(),
     overviewSvg: overviewSvg(),
     pipelineFlow: pipelineFlow(),
+    whatsNew: whatsNewBlock(),
     openBtn,
   });
+
+  const changelogJson = JSON.stringify(botInfoChangelogClientPayload()).replace(
+    /</g,
+    '\\u003c'
+  );
 
   return `
     <!-- ========== TAB: Bot Info ========== -->
     <section data-tab-panel="botinfo" class="botinfo-panel hidden space-y-4" aria-label="Bot Info manual">
+      <script type="application/json" id="botinfo-changelog-json">${changelogJson}</script>
       <div class="card" style="padding:1rem 1.1rem 0.5rem">
         <div class="botinfo-hero">
           <div>
             <h2>Bot Info <span class="sr-only">${esc(label)}</span></h2>
-            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. Lists sync from code catalogs; use chips to jump.</p>
+            <p class="botinfo-lede">Operator manual for this dashboard — ${snap.counts.profiles} micro-bots, ${snap.counts.modules} modules, ${snap.counts.presets} presets. Lists sync from code catalogs; use chips to jump. Blue chip counts mark unread What’s New items for that section.</p>
           </div>
           <span class="botinfo-ver" id="botinfo-panel-ver">${esc(label)}</span>
         </div>

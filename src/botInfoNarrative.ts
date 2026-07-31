@@ -20,6 +20,7 @@ export interface BotInfoSlots {
   durabilityCards: string;
   overviewSvg: string;
   pipelineFlow: string;
+  whatsNew?: string;
   openBtn: (tab: string, label: string) => string;
 }
 
@@ -46,6 +47,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>This bot combines <strong>copy trading</strong> (tracked smart wallets), <strong>market scanners</strong> (Dex/GMGN/Birdeye + Pump.fun), and <strong>${nProfiles} micro-bot trade profiles</strong> that compete for each entry. Risk recipes and <strong>${nModules} strategy modules</strong> set global floors; profiles refine entry/exit style.</p>
         ${slots.overviewSvg}
         ${slots.pipelineFlow}
+        ${slots.whatsNew || ''}
         <ul>
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
           <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
