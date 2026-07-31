@@ -83,6 +83,17 @@ export function effectiveTipLamports(): number {
   return Math.max(1_000, Math.floor(base * mult));
 }
 
+/** Tip for Turbo Mode (base × turbo tip multiplier; ignores MEV tipMult). */
+export function turboTipLamports(turboTipMultiplier?: number): number {
+  const mult =
+    turboTipMultiplier != null &&
+    Number.isFinite(turboTipMultiplier) &&
+    turboTipMultiplier > 0
+      ? turboTipMultiplier
+      : 2.0;
+  return Math.max(1_000, Math.floor(baseTipLamports() * mult));
+}
+
 function pickTipAccount(): PublicKey {
   const idx = Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length);
   return new PublicKey(JITO_TIP_ACCOUNTS[idx]);
@@ -139,7 +150,8 @@ export interface JitoSendResult {
  */
 export async function sendJitoBundle(
   signedTransactions: VersionedTransaction[],
-  payer: Keypair
+  payer: Keypair,
+  opts?: { tipLamports?: number }
 ): Promise<JitoSendResult> {
   if (!jitoEnabled()) {
     return { success: false, method: 'jito', error: 'Jito disabled' };
@@ -149,7 +161,12 @@ export async function sendJitoBundle(
     return { success: false, method: 'jito', error: 'No transactions' };
   }
 
-  const tip = effectiveTipLamports();
+  const tip =
+    opts?.tipLamports != null &&
+    Number.isFinite(opts.tipLamports) &&
+    opts.tipLamports > 0
+      ? Math.floor(opts.tipLamports)
+      : effectiveTipLamports();
   stats.bundlesAttempted += 1;
   stats.lastAttemptAt = Date.now();
   stats.lastTipLamports = tip;
@@ -243,20 +260,25 @@ export async function sendJitoBundle(
 
 /**
  * High-level: try Jito bundle first; return bundle id or null for RPC fallback.
+ * Optional tipLamports overrides effectiveTipLamports (Turbo Mode).
  */
 export async function trySendViaJito(
   signedTx: VersionedTransaction,
-  payer: Keypair
+  payer: Keypair,
+  opts?: { tipLamports?: number }
 ): Promise<{ bundleId: string; tipLamports: number } | null> {
   if (!jitoEnabled()) return null;
 
   await estimatePriorityFeeMicroLamports(payer.publicKey).catch(() => undefined);
 
-  const result = await sendJitoBundle([signedTx], payer);
+  const result = await sendJitoBundle([signedTx], payer, opts);
   if (result.success && result.bundleId) {
     return {
       bundleId: result.bundleId,
-      tipLamports: result.tipLamports ?? effectiveTipLamports(),
+      tipLamports:
+        result.tipLamports ??
+        opts?.tipLamports ??
+        effectiveTipLamports(),
     };
   }
   return null;

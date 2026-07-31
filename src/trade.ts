@@ -31,7 +31,7 @@ import {
   sendAndConfirmLegacyTx,
   getActiveEndpointLabel,
 } from './connection';
-import { trySendViaJito, effectiveTipLamports } from './jito';
+import { trySendViaJito, effectiveTipLamports, turboTipLamports } from './jito';
 import {
   checkSandwichRisk,
   isMevProtectionEnabled,
@@ -39,6 +39,10 @@ import {
 } from './mev';
 import { paperTrader } from './paperTrader';
 import { logger, errorToMeta } from './logger';
+import {
+  resolveTurboSlippageBps,
+  TURBO_DEFAULT_PRIORITY_FEE_MULT,
+} from './tradeProfiles';
 import {
   fetchLiveTokenSnapshot,
   getCachedSolUsdPrice,
@@ -233,6 +237,11 @@ export interface BuyOptions {
   /** Aggressive dead-market min-hold (minutes) from profile */
   profileDeadVolumeMinHoldMinutes?: number;
   profileAggressiveDeadMarket?: boolean;
+  /** Turbo Mode from profile exitRules — speed over cost */
+  profileTurboMode?: boolean;
+  turboPriorityFeeMultiplier?: number;
+  turboTipMultiplier?: number;
+  turboSlippageBps?: number;
   /** wallet | scanner | migration | hybrid | zion */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
   scannerPlaybook?: string;
@@ -473,7 +482,12 @@ export async function executeBuy(
     return { success: false, mode: config.mode, error: qualityGate };
   }
 
-  const slippageBps = meta?.slippageBps ?? config.paper.slippageBps;
+  const baseSlippageBps = meta?.slippageBps ?? config.paper.slippageBps;
+  const turboOn = meta?.profileTurboMode === true;
+  const slippageBps = resolveTurboSlippageBps(baseSlippageBps, {
+    turboMode: turboOn,
+    turboSlippageBps: meta?.turboSlippageBps,
+  });
   const strategyKind =
     meta?.strategyKind ?? (meta?.priority ? 'migration' : 'normal');
   const solAmount = clampToMaxAllowedTradeSol(
@@ -512,6 +526,12 @@ export async function executeBuy(
   if (meta?.priority) {
     console.log(
       `[trade] Priority buy sizing: ${solAmount} SOL @ ${slippageBps} bps slip (${strategyKind})`
+    );
+  }
+  if (turboOn && slippageBps > baseSlippageBps) {
+    console.log(
+      `[trade] TURBO slip floor ${baseSlippageBps}→${slippageBps} bps ` +
+        `(profile=${meta?.tradeProfileId || '?'})`
     );
   }
 
@@ -723,6 +743,32 @@ export async function executeBuy(
   }
 
   if (usesPaperAccounting()) {
+    if (turboOn) {
+      const tipWould = turboTipLamports(meta?.turboTipMultiplier);
+      const prioMult =
+        meta?.turboPriorityFeeMultiplier != null &&
+        Number.isFinite(meta.turboPriorityFeeMultiplier) &&
+        meta.turboPriorityFeeMultiplier > 0
+          ? meta.turboPriorityFeeMultiplier
+          : Math.max(
+              config.mev?.priorityFeeMultiplier ?? 1,
+              TURBO_DEFAULT_PRIORITY_FEE_MULT
+            );
+      let prioWould: number | null = null;
+      try {
+        prioWould = await estimatePriorityFeeMicroLamports();
+        if (prioWould != null && Number.isFinite(prioWould)) {
+          prioWould = Math.floor(prioWould * prioMult);
+        }
+      } catch {
+        prioWould = null;
+      }
+      console.log(
+        `[trade] TURBO (${config.mode}) would-be jito tip=${tipWould} lamports ` +
+          `prio=${prioWould != null ? prioWould + ' µLamports/CU' : 'n/a'} ` +
+          `slip=${slippageBps}bps profile=${meta?.tradeProfileId || '?'} — no bundle sent`
+      );
+    }
     const position = paperTrader.simulateBuy(
       mint,
       symbol,
@@ -756,6 +802,7 @@ export async function executeBuy(
         profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
+        profileTurboMode: turboOn,
         entrySource: meta?.entrySource,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
@@ -822,11 +869,17 @@ export async function executeBuy(
     console.log(
       `[trade] Live buy via wallet "${active?.name ?? 'unknown'}" ` +
         `(${keypair.publicKey.toBase58().slice(0, 8)}…) ` +
-        `MEV=${isMevProtectionEnabled() ? 'ON' : 'OFF'}`
+        `MEV=${isMevProtectionEnabled() ? 'ON' : 'OFF'}` +
+        (turboOn ? ' · TURBO' : '')
     );
-    const live = await executeLiveSwap(quote, keypair, mint);
+    const live = await executeLiveSwap(quote, keypair, mint, {
+      turboMode: turboOn,
+      turboPriorityFeeMultiplier: meta?.turboPriorityFeeMultiplier,
+      turboTipMultiplier: meta?.turboTipMultiplier,
+      tradeProfileId: meta?.tradeProfileId,
+    });
     console.log(
-      `[trade] Live buy via ${live.method} on ${getActiveEndpointLabel()}: ${live.txId}` +
+      `[trade] ${turboOn ? 'TURBO LIVE' : 'Live'} buy via ${live.method} on ${getActiveEndpointLabel()}: ${live.txId}` +
         (live.tipLamports != null ? ` tip=${live.tipLamports}` : '') +
         (live.priorityFeeMicroLamports != null
           ? ` prio=${live.priorityFeeMicroLamports} µLamports/CU`
@@ -871,6 +924,7 @@ export async function executeBuy(
         profileMomentumFailDropPct: meta?.profileMomentumFailDropPct,
         profileDeadVolumeMinHoldMinutes: meta?.profileDeadVolumeMinHoldMinutes,
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
+        profileTurboMode: turboOn,
         entrySource: meta?.entrySource,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
@@ -979,22 +1033,47 @@ export async function executeSell(
 
 /**
  * Build Jupiter swap with congestion-aware priority fees; Jito bundle when MEV/Jito on.
+ * Turbo Mode: prefer Jito + elevated prio/tip even if global MEV UI is off.
  */
 async function executeLiveSwap(
   quote: SwapQuote,
   keypair: Keypair,
-  mint?: string
+  mint?: string,
+  opts?: {
+    turboMode?: boolean;
+    turboPriorityFeeMultiplier?: number;
+    turboTipMultiplier?: number;
+    tradeProfileId?: string;
+  }
 ): Promise<{
   txId: string;
   method: 'jito' | 'rpc';
   tipLamports?: number;
   priorityFeeMicroLamports?: number;
 }> {
+  const turbo = opts?.turboMode === true;
   let priorityMicroLamports = await estimatePriorityFeeMicroLamports(
     keypair.publicKey
   );
 
-  if (isMevProtectionEnabled()) {
+  if (turbo) {
+    const mult =
+      opts?.turboPriorityFeeMultiplier != null &&
+      Number.isFinite(opts.turboPriorityFeeMultiplier) &&
+      opts.turboPriorityFeeMultiplier > 0
+        ? opts.turboPriorityFeeMultiplier
+        : Math.max(
+            config.mev?.priorityFeeMultiplier ?? 1,
+            TURBO_DEFAULT_PRIORITY_FEE_MULT
+          );
+    priorityMicroLamports = Math.floor(priorityMicroLamports * mult);
+    console.log(
+      `[trade] TURBO LIVE priority fee ${priorityMicroLamports} µLamports/CU ` +
+        `(×${mult})` +
+        (mint ? ` mint=${mint.slice(0, 8)}…` : '') +
+        (opts?.tradeProfileId ? ` profile=${opts.tradeProfileId}` : '')
+    );
+  } else if (isMevProtectionEnabled()) {
     const mult = config.mev.priorityFeeMultiplier ?? 1.5;
     priorityMicroLamports = Math.floor(priorityMicroLamports * mult);
     console.log(
@@ -1033,11 +1112,20 @@ async function executeLiveSwap(
     const vtx = VersionedTransaction.deserialize(swapTransactionBuf);
     vtx.sign([keypair]);
 
-    if (shouldUseJitoBundles()) {
-      const jito = await trySendViaJito(vtx, keypair);
+    const wantJito = turbo || shouldUseJitoBundles();
+    const tipOverride = turbo
+      ? turboTipLamports(opts?.turboTipMultiplier)
+      : undefined;
+
+    if (wantJito) {
+      const jito = await trySendViaJito(
+        vtx,
+        keypair,
+        tipOverride != null ? { tipLamports: tipOverride } : undefined
+      );
       if (jito) {
         console.log(
-          `[mev] Atomic Jito landing tip=${jito.tipLamports} lamports ` +
+          `[${turbo ? 'trade] TURBO LIVE' : 'mev]'} Atomic Jito landing tip=${jito.tipLamports} lamports ` +
             `(${(jito.tipLamports / 1e9).toFixed(6)} SOL) bundle=${jito.bundleId}`
         );
         return {
@@ -1048,11 +1136,18 @@ async function executeLiveSwap(
         };
       }
       console.warn(
-        `[mev] Jito bundle failed — falling back to RPC (would-be tip ${effectiveTipLamports()} lamports)`
+        `[${turbo ? 'trade] TURBO LIVE' : 'mev]'} Jito bundle failed — falling back to RPC ` +
+          `(would-be tip ${tipOverride ?? effectiveTipLamports()} lamports)`
       );
     }
 
     const txId = await sendOptimizedTransaction(vtx.serialize());
+    if (turbo) {
+      console.log(
+        `[trade] TURBO LIVE send=rpc (elevated prio, no Jito) ` +
+          `prio=${priorityMicroLamports} µLamports/CU`
+      );
+    }
     return {
       txId,
       method: 'rpc',

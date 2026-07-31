@@ -172,6 +172,8 @@ export interface Position {
   impliedExitMarketCapUsd?: number;
   /** Live Dex MC at exit for tooltip when it disagrees with fill-scaled Exit MC */
   liveExitMarketCapUsd?: number;
+  /** Turbo Mode was ON at open (Jito-prefer / elevated prio) */
+  profileTurboMode?: boolean;
   /** Jupiter-style Top 10 Holders % resolved at entry (for audit / UI) */
   top10HoldPct?: number | null;
   /**
@@ -1053,6 +1055,7 @@ export class PaperTrader {
     profileMomentumFailDropPct?: number;
     profileDeadVolumeMinHoldMinutes?: number;
     profileAggressiveDeadMarket?: boolean;
+    profileTurboMode?: boolean;
     entrySource?: Position['entrySource'];
     scannerPlaybook?: string;
     scannerConfluence?: number;
@@ -1132,6 +1135,7 @@ export class PaperTrader {
       tradeProfileColor: input.tradeProfileColor,
       tradeProfileScore: input.tradeProfileScore,
       tradeProfileReason: input.tradeProfileReason,
+      profileTurboMode: input.profileTurboMode === true,
       entrySource: input.entrySource,
       scannerPlaybook: input.scannerPlaybook,
       scannerConfluence: input.scannerConfluence,
@@ -1316,6 +1320,7 @@ export class PaperTrader {
       profileMomentumFailDropPct?: number;
       profileDeadVolumeMinHoldMinutes?: number;
       profileAggressiveDeadMarket?: boolean;
+      profileTurboMode?: boolean;
       entrySource?: Position['entrySource'];
       scannerPlaybook?: string;
       scannerConfluence?: number;
@@ -1481,6 +1486,7 @@ export class PaperTrader {
       tradeProfileColor: meta?.tradeProfileColor,
       tradeProfileScore: meta?.tradeProfileScore,
       tradeProfileReason: meta?.tradeProfileReason,
+      profileTurboMode: meta?.profileTurboMode === true,
       entrySource: meta?.entrySource,
       scannerPlaybook: meta?.scannerPlaybook,
       scannerConfluence: meta?.scannerConfluence,
@@ -1548,10 +1554,11 @@ export class PaperTrader {
     const profileBit = position.tradeProfileName
       ? ` · ${position.tradeProfileIcon || ''} ${position.tradeProfileName}`
       : '';
+    const turboBit = position.profileTurboMode ? ' · TURBO' : '';
     this.log(
       'buy',
       `Bought ${label} (${mint.slice(0, 8)}…) — ${amountTokens.toFixed(2)} tokens @ ${entryPrice.toExponential(4)} SOL ` +
-        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit}${profileBit})`,
+        `(${spendSol.toFixed(4)} SOL, ${strategyKind}, trail ${position.trailingStopPct}%${mcBit}${profileBit}${turboBit})`,
       { mint, symbol: tokenSymbol, name: tokenName, solAmount: spendSol }
     );
     this.persistState();

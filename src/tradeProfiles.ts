@@ -94,6 +94,35 @@ export type {
   AutoScoringWeights,
   ProfileScoreBreakdown,
 } from './autoProfileScoring';
+
+/** Default Turbo priority-fee multiplier vs dynamic estimate */
+export const TURBO_DEFAULT_PRIORITY_FEE_MULT = 2.5;
+/** Default Turbo Jito tip multiplier vs base tip */
+export const TURBO_DEFAULT_TIP_MULT = 2.0;
+/** Default Turbo buy slippage floor (bps) */
+export const TURBO_DEFAULT_SLIPPAGE_BPS = 250;
+
+/** Raise buy slippage to Turbo floor when turboMode is on. */
+export function resolveTurboSlippageBps(
+  baseSlippageBps: number,
+  opts?: {
+    turboMode?: boolean;
+    turboSlippageBps?: number | null;
+  }
+): number {
+  const base =
+    Number.isFinite(baseSlippageBps) && baseSlippageBps > 0
+      ? Math.floor(baseSlippageBps)
+      : 150;
+  if (!opts?.turboMode) return base;
+  const floor =
+    opts.turboSlippageBps != null &&
+    Number.isFinite(opts.turboSlippageBps) &&
+    opts.turboSlippageBps > 0
+      ? Math.floor(opts.turboSlippageBps)
+      : TURBO_DEFAULT_SLIPPAGE_BPS;
+  return Math.max(base, floor);
+}
 export {
   DEFAULT_AUTO_SCORING,
   DEFAULT_AUTO_SCORING_WEIGHTS,
@@ -167,6 +196,18 @@ export interface TradeProfileExitRules {
    */
   aggressiveDeadMarket?: boolean;
   deadVolumeMinHoldMinutes?: number;
+  /**
+   * Turbo Mode — prefer Jito + higher priority fees + slightly wider buy slip.
+   * Default ON for Scalper / Migration Sniper / Momentum Burst / Reversal Scalper.
+   * Paper + live sim: stamp + log would-be tip/prio (no real bundles).
+   */
+  turboMode?: boolean;
+  /** When turbo: multiply dynamic priority-fee estimate (default 2.5) */
+  turboPriorityFeeMultiplier?: number;
+  /** When turbo: multiply base Jito tip (default 2.0) */
+  turboTipMultiplier?: number;
+  /** When turbo: buy slippage floor in bps (default 250) */
+  turboSlippageBps?: number;
   /**
    * Adaptive exit brain overrides (Smart Bot / profile micro-bot).
    * Merged with catalog defaults in profileTradeIntelligence.resolveExitPolicy.
@@ -481,6 +522,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Smaller position size (~65%)',
       'Focus: small MC (≤$180k) + volume spike',
       'Aggressive dead-market exit · early stall cut',
+      'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 80,
     defaultEnabled: true,
@@ -511,6 +553,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       sizeMultiplier: 0.65,
       aggressiveDeadMarket: true,
       deadVolumeMinHoldMinutes: 3,
+      turboMode: true,
     },
     modules: { ...SCALPER_STYLE_MODULES },
   },
@@ -672,6 +715,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Quality: growing holders + buy pressure',
       'Fallback: ultra-fresh post-grad ≤30s if curve window missed',
       'MC cap ~$200k — not mature DEX tokens',
+      'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
     defaultEnabled: true,
@@ -708,6 +752,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       shortTermStrategyId: 'post_migration_scalp',
       overrideScalpParams: true,
       sizeMultiplier: 1.15,
+      turboMode: true,
     },
     modules: {
       ...CORE_SAFETY_MODULES,
@@ -840,6 +885,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Entry: M5 vol ≥ $8k + buy pressure / bull flag · conviction ≥ 48',
       'Max hold ~2.5–7 min · trail after +10%',
       'Exit on fade / stall / trail — timer is backstop',
+      'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 82,
     defaultEnabled: true,
@@ -869,6 +915,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       hardTimeLimitSecMax: 420,
       momentumFailDropPct: 6,
       sizeMultiplier: 0.9,
+      turboMode: true,
     },
     modules: {
       ...SCALPER_STYLE_MODULES,
@@ -959,6 +1006,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Entry: wick / over-extension (≥12% from peak)',
       'Max hold 1–2.5 minutes · trail after +10%',
       'Fast mean-reversion · early stall cut',
+      'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 83,
     defaultEnabled: true,
@@ -987,6 +1035,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       hardTimeLimitSecMax: 160,
       momentumFailDropPct: 8,
       sizeMultiplier: 0.7,
+      turboMode: true,
     },
     modules: {
       ...SCALPER_STYLE_MODULES,
@@ -3597,14 +3646,19 @@ function buildAssignmentFromDef(
     topScores?: TradeProfileAssignment['topScores'];
   }
 ): TradeProfileAssignment {
+  const exitRules = finalizeExitRulesForWinner(def, ctx);
+  const reason =
+    exitRules.turboMode === true && !/\bturbo\b/i.test(opts.reason)
+      ? `${opts.reason} · turbo`
+      : opts.reason;
   return {
     profileId: def.id,
     name: def.name,
     icon: def.icon,
     color: def.color,
     score: opts.score,
-    reason: opts.reason,
-    exitRules: finalizeExitRulesForWinner(def, ctx),
+    reason,
+    exitRules,
     legacy: def.id === 'default',
     autoScored: opts.autoScored === true,
     forced: opts.forced === true,
@@ -3889,6 +3943,7 @@ function logTradeProfileAssignment(
     er.stopLossPct != null ? `SL ${er.stopLossPct}%` : null,
     er.trailingStopPct != null ? `trail ${er.trailingStopPct}%` : null,
     er.hardTimeLimitSec != null ? `timer ${er.hardTimeLimitSec}s` : null,
+    er.turboMode === true ? 'turbo' : null,
     er.maxTradeOverrideSol != null &&
     Number.isFinite(er.maxTradeOverrideSol) &&
     er.maxTradeOverrideSol > 0
@@ -3945,6 +4000,11 @@ export interface ProfileExitBuyOpts {
   profileMomentumFailDropPct?: number;
   profileDeadVolumeMinHoldMinutes?: number;
   profileAggressiveDeadMarket?: boolean;
+  /** Turbo Mode stamped from profile exitRules */
+  profileTurboMode?: boolean;
+  turboPriorityFeeMultiplier?: number;
+  turboTipMultiplier?: number;
+  turboSlippageBps?: number;
 }
 
 /**
@@ -3988,6 +4048,32 @@ export function applyProfileExitRulesToBuyOpts(
     buyOpts.profileDeadVolumeMinHoldMinutes = rules.deadVolumeMinHoldMinutes;
   }
   if (rules.aggressiveDeadMarket) buyOpts.profileAggressiveDeadMarket = true;
+  if (rules.turboMode === true) {
+    buyOpts.profileTurboMode = true;
+    if (
+      rules.turboPriorityFeeMultiplier != null &&
+      Number.isFinite(rules.turboPriorityFeeMultiplier) &&
+      rules.turboPriorityFeeMultiplier > 0
+    ) {
+      buyOpts.turboPriorityFeeMultiplier = rules.turboPriorityFeeMultiplier;
+    }
+    if (
+      rules.turboTipMultiplier != null &&
+      Number.isFinite(rules.turboTipMultiplier) &&
+      rules.turboTipMultiplier > 0
+    ) {
+      buyOpts.turboTipMultiplier = rules.turboTipMultiplier;
+    }
+    if (
+      rules.turboSlippageBps != null &&
+      Number.isFinite(rules.turboSlippageBps) &&
+      rules.turboSlippageBps > 0
+    ) {
+      buyOpts.turboSlippageBps = Math.floor(rules.turboSlippageBps);
+    }
+  } else if (rules.turboMode === false) {
+    buyOpts.profileTurboMode = false;
+  }
   if (rules.forceScalp) {
     buyOpts.profileForceScalp = true;
     if (rules.shortTermStrategyId) {

@@ -9338,8 +9338,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             p.recommendedRisk
               ? '<div class="tp-risk"><span class="tp-risk-label">Risk</span><span class="tp-risk-value">' +
                 escHtml(p.recommendedRisk) +
-                '</span></div>'
-              : '';
+                '</span>' +
+                (er.turboMode === true
+                  ? '<span class="tp-learn-chip" style="margin-left:0.35rem;background:#7c2d12;color:#fdba74;border-color:#ea580c80" title="Turbo Mode ON — Jito-prefer / elevated prio">Turbo</span>'
+                  : '') +
+                '</div>'
+              : (er.turboMode === true
+                  ? '<div class="tp-risk"><span class="tp-learn-chip" style="background:#7c2d12;color:#fdba74;border-color:#ea580c80" title="Turbo Mode ON">Turbo</span></div>'
+                  : '');
           const rules = Array.isArray(p.rulesSummary) && p.rulesSummary.length
             ? '<details class="tp-rules"><summary>Params &amp; rules</summary>' +
               '<ul class="tp-desc" style="margin:0;padding-left:1rem;list-style:disc">' +
@@ -9778,6 +9784,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   numField({ key: 'trailingActivationProfit', label: 'Trail arm %', title: 'Trail arms after this unrealized profit %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingActivationProfit') }) +
                   numField({ key: 'trailingStopPct', label: 'Trail %', title: 'Trailing stop % from peak after arm. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('trailingStopPct') }) +
                   numField({ key: 'momentumFailDropPct', label: 'Fail drop %', title: 'Scalp fail-drop from peak %. Empty = catalog default.', step: 0.5, min: 0, placeholder: 'default', value: exitValue('momentumFailDropPct') }) +
+                  selectField({
+                    key: 'turboMode',
+                    label: 'Turbo Mode',
+                    title: 'ON = prefer Jito + higher priority fees + wider buy slip (speed over cost). Live sends real bundles when Jito is available; paper/live sim stamps Turbo and logs would-be tip/prio without sending. Default ON for Scalper / Migration Sniper / Momentum Burst / Reversal.',
+                    value:
+                      er.turboMode != null
+                        ? String(er.turboMode)
+                        : off.turboMode != null
+                          ? String(off.turboMode)
+                          : '',
+                    options: [
+                      { value: '', label: 'Default' },
+                      { value: 'true', label: 'ON' },
+                      { value: 'false', label: 'OFF' },
+                    ],
+                  }) +
                   '<p class="tp-param-title" style="grid-column:1/-1;margin-top:0.5rem">Profit-lock / giveback</p>' +
                   '<p class="tp-param-hint" style="grid-column:1/-1">Arm after peak unrealized %; force sell if giveback pts from peak (e.g. 80%→50% = 30 pts).</p>' +
                   '<label title="Arm profit-lock after peak unrealized reaches this %">Lock arm %' +
@@ -11628,6 +11650,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<span class="pos-status-badge is-live" title="Live tracked position">Live</span>'
         );
       }
+      if (p.profileTurboMode) {
+        badges.push(
+          '<span class="pos-status-badge" style="background:#7c2d12;color:#fdba74;border:1px solid #ea580c80" title="Turbo Mode — Jito-prefer / elevated priority fees at entry">Turbo</span>'
+        );
+      }
       return badges.length
         ? '<div class="pos-status-row">' + badges.join('') + '</div>'
         : '';
@@ -12763,6 +12790,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
       } else if (p.tradeProfileReason) {
         lines.push({ label: 'Profile', text: String(p.tradeProfileReason) });
+      }
+
+      if (p.profileTurboMode) {
+        lines.push({
+          label: 'Turbo',
+          text: 'ON — Jito-prefer / elevated prio (live) · stamped for paper/live sim',
+        });
       }
 
       if (p.entrySource) {
