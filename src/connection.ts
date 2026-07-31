@@ -277,6 +277,11 @@ const LATENCY_EWMA_ALPHA = 0.22;
 const LATENCY_STRESS_MS = 500;
 /** EWMA below this → clear latency stress (hysteresis). */
 const LATENCY_RECOVER_MS = 320;
+/**
+ * Utility may soft-fail onto QuickNode only when preferred EWMA is this hot
+ * (after public/fallback alternatives) and QN is not already serving Critical/Scanners.
+ */
+const UTILITY_QUICKNODE_STRESS_MS = 1000;
 /** Prefer piggyback after preferred stays latency-stressed this long. */
 const LATENCY_STRESS_GRACE_MS = 15_000;
 /** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
@@ -523,11 +528,33 @@ function setActiveForRole(role: RpcRole, index: number): void {
 function piggybackOrder(role: RpcRole): RpcRole[] {
   // Critical: Helius → Alchemy → (QuickNode mid-tier) → public.
   // Scanners: Alchemy → Helius → (QuickNode) → public.
-  // Utility: public → Alchemy → Helius (does not prefer QuickNode CU).
+  // Utility: public → (QN only if ~1000ms stressed and not busy) → Alchemy → Helius.
   // Paid cross-lane only here; QuickNode + utility are inserted after in resolve/withRpc.
   if (role === 'primary') return ['secondary'];
   if (role === 'secondary') return ['primary'];
   return ['secondary', 'primary'];
+}
+
+/** True when Critical or Scanners are already piggybacking on QuickNode. */
+function isQuicknodeBusyAsPaidFailover(): boolean {
+  if (preferredQuicknode < 0) return false;
+  return (
+    activePrimary === preferredQuicknode ||
+    activeSecondary === preferredQuicknode
+  );
+}
+
+/**
+ * Utility soft-failover may use QuickNode when preferred is severely stressed,
+ * QN is healthy/faster, and not already serving primary/secondary.
+ */
+function utilityMayUseQuicknodeSoft(pref: EndpointState): boolean {
+  if (preferredQuicknode < 0) return false;
+  if ((pref.latencyMs ?? 0) < UTILITY_QUICKNODE_STRESS_MS) return false;
+  if (isQuicknodeBusyAsPaidFailover()) return false;
+  const qn = endpoints[preferredQuicknode];
+  if (!qn?.healthy || isEndpointRateLimited(qn)) return false;
+  return isFasterAlternate(pref, qn);
 }
 
 /** Accept a failover target if healthy / not rate-limited / (for latency) faster. */
@@ -645,6 +672,21 @@ function resolveIndexForRole(role: RpcRole): number {
       setActiveForRole(role, bestIdx);
       return bestIdx;
     }
+    // No fast public: allow QuickNode only under severe load (~1000ms) when free.
+    if (utilityMayUseQuicknodeSoft(pref)) {
+      const qn = endpoints[preferredQuicknode]!;
+      const now = Date.now();
+      if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
+        pref.lastLatencyFailoverLogAt = now;
+        console.warn(
+          `[rpc] utility lane piggybacking on ${qn.endpoint.label} ` +
+            `(EWMA ${pref.latencyMs ?? '—'}ms ≥ ${UTILITY_QUICKNODE_STRESS_MS}ms — ` +
+            `QuickNode free of Critical/Scanners failover)`
+        );
+      }
+      setActiveForRole(role, preferredQuicknode);
+      return preferredQuicknode;
+    }
   }
 
   // 1) Other paid free lane (Helius ↔ Alchemy)
@@ -704,12 +746,13 @@ function resolveIndexForRole(role: RpcRole): number {
     if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
       continue;
     }
-    // Utility soft-failover: do not burn QuickNode on Favourites soft-watch
+    // Utility soft-failover: skip QuickNode unless severe stress and QN is free
     if (
       role === 'utility' &&
       latencySoft &&
       (endpoints[i]!.endpoint.label === 'quicknode' ||
-        isQuicknodeRpcUrl(endpoints[i]!.endpoint.url))
+        isQuicknodeRpcUrl(endpoints[i]!.endpoint.url)) &&
+      !(pref && utilityMayUseQuicknodeSoft(pref))
     ) {
       continue;
     }

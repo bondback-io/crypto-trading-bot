@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.68',
+    title: 'Utility soft-failover to QuickNode under load',
+    sections: ['execution', 'copy'],
+    items: [
+      'When Utility public RPC EWMA stays ≥1000ms and no faster public/fallback exists, Utility may soft-fail onto QuickNode — only if QuickNode is healthy and not already serving Critical or Scanners failover.',
+      'Normal Utility traffic still prefers publicnode; Alchemy/Helius remain the hard-fail paid piggybacks.',
+    ],
+  },
+  {
     version: '1.2.67',
     title: 'QuickNode mid-tier RPC failover',
     sections: ['execution', 'copy'],
