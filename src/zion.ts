@@ -36,7 +36,20 @@ export interface ZionKolWalletRef {
   source?: string;
 }
 
-export type ZionOfferVisualTier = 'gold' | 'green' | 'default';
+export type ZionOfferVisualTier = 'platinum' | 'gold' | 'green' | 'default';
+
+/** Platinum: score ≥85, ≥10 KOL wallets, 1h vol ≥$750k */
+export const ZION_PLATINUM_MIN_SCORE = 85;
+export const ZION_PLATINUM_MIN_KOL = 10;
+export const ZION_PLATINUM_MIN_VOL_H1_USD = 750_000;
+
+/** Gold (below platinum): score ≥85, ≥8 KOL, 1h vol ≥$500k */
+export const ZION_GOLD_MIN_SCORE = 85;
+export const ZION_GOLD_MIN_KOL = 8;
+export const ZION_GOLD_MIN_VOL_H1_USD = 500_000;
+
+/** Prevent double auto-buys while execute is in flight */
+const platinumAutoInFlight = new Set<string>();
 
 export interface ZionOffer {
   id: string;
@@ -89,7 +102,10 @@ export interface ZionOffer {
   solAmount?: number;
 }
 
-/** Gold first, then green; else default. Uses live vol when present. */
+/**
+ * Platinum first, then gold, then green; else default.
+ * Uses live 1h vol when present.
+ */
 export function resolveZionOfferVisualTier(
   offer: Pick<
     ZionOffer,
@@ -102,7 +118,20 @@ export function resolveZionOfferVisualTier(
     offer.liveVolumeH1Usd != null ? offer.liveVolumeH1Usd : offer.volumeH1Usd
   );
   const vol = Number.isFinite(vol1h) ? vol1h : 0;
-  if (score >= 85 && kolCount >= 8 && vol >= 500_000) return 'gold';
+  if (
+    score >= ZION_PLATINUM_MIN_SCORE &&
+    kolCount >= ZION_PLATINUM_MIN_KOL &&
+    vol >= ZION_PLATINUM_MIN_VOL_H1_USD
+  ) {
+    return 'platinum';
+  }
+  if (
+    score >= ZION_GOLD_MIN_SCORE &&
+    kolCount >= ZION_GOLD_MIN_KOL &&
+    vol >= ZION_GOLD_MIN_VOL_H1_USD
+  ) {
+    return 'gold';
+  }
   if (score >= 70 && score < 85 && kolCount >= 4 && vol >= 250_000) {
     return 'green';
   }
@@ -507,6 +536,7 @@ export function refreshPendingOfferLive(
   if (changed) {
     o.updatedAt = Date.now();
     persist();
+    maybeAutoSendPlatinumToHwr(o);
   }
   return o;
 }
@@ -650,6 +680,7 @@ export function maybeCreateOffer(
     void notifyOfferEmail(offer);
   }
 
+  maybeAutoSendPlatinumToHwr(offer);
   return offer;
 }
 
@@ -698,6 +729,46 @@ export interface ApproveOfferOverrides {
   stopLossPct?: number;
   trailingStopPct?: number;
   trailingActivationProfit?: number;
+  /** Auto Platinum path — stamp High Win-Rate (not Zion exit presets) */
+  autoPlatinumHwr?: boolean;
+}
+
+/**
+ * Fire-and-forget: if toggle ON and offer is Platinum + pending, execute into HWR.
+ */
+export function maybeAutoSendPlatinumToHwr(offer: ZionOffer): void {
+  if (!config.zion?.autoSendPlatinumToHwr) return;
+  if (!offer || offer.status !== 'pending') return;
+  if (resolveZionOfferVisualTier(offer) !== 'platinum') return;
+  if (platinumAutoInFlight.has(offer.id)) return;
+  platinumAutoInFlight.add(offer.id);
+  logger.info('Zion', 'Auto-sending Platinum offer to High Win-Rate', {
+    offerId: offer.id,
+    mint: offer.mint.slice(0, 12),
+    symbol: offer.symbol,
+    score: offer.score,
+    kolCount: offer.kolCount,
+  });
+  void executeApprovedOffer(offer.id, { autoPlatinumHwr: true })
+    .then((r) => {
+      if (!r.ok) {
+        logger.warn('Zion', 'Platinum → HWR auto-exec failed', {
+          offerId: offer.id,
+          error: r.error,
+        });
+      } else {
+        console.log(
+          `[zion] PLATINUM → HWR opened ${offer.symbol} (${offer.mint.slice(0, 8)}…) ` +
+            `score=${offer.score} kol=${offer.kolCount}`
+        );
+      }
+    })
+    .catch((err) => {
+      logger.warn('Zion', 'Platinum → HWR auto-exec error', errorToMeta(err));
+    })
+    .finally(() => {
+      platinumAutoInFlight.delete(offer.id);
+    });
 }
 
 export async function executeApprovedOffer(
@@ -721,11 +792,14 @@ export async function executeApprovedOffer(
     return { ok: false, error: `Offer is ${offer.status}`, offer };
   }
 
+  const autoPlatinumHwr = overrides.autoPlatinumHwr === true;
   const d = config.zion.defaults;
   const useExit =
-    overrides.useExitPresets != null
-      ? Boolean(overrides.useExitPresets)
-      : d.useExitPresets !== false;
+    autoPlatinumHwr
+      ? false // HWR catalog exit rules applied below
+      : overrides.useExitPresets != null
+        ? Boolean(overrides.useExitPresets)
+        : d.useExitPresets !== false;
 
   let solAmount = Number(overrides.solAmount);
   if (!(solAmount > 0)) {
@@ -752,7 +826,9 @@ export async function executeApprovedOffer(
 
   const buyOpts: Parameters<typeof executeBuy>[2] = {
     solAmount,
-    name: `Zion · ${offer.symbol}`,
+    name: autoPlatinumHwr
+      ? `Zion Platinum · ${offer.symbol}`
+      : `Zion · ${offer.symbol}`,
     entrySource: 'zion',
     sourceNames: offer.kolWallets.map((w) => w.name || w.address.slice(0, 8)),
     sourceWallets: offer.kolWallets.map((w) => w.address),
@@ -767,10 +843,87 @@ export async function executeApprovedOffer(
     tradeProfileReason:
       offer.reasons.slice(0, 3).join(' · ') ||
       'Triggered manually via Zion / KOL Scan',
-    entryMarketCapUsd: offer.mcUsd,
+    entryMarketCapUsd:
+      offer.liveMcUsd != null && offer.liveMcUsd > 0
+        ? offer.liveMcUsd
+        : offer.mcUsd,
   };
 
-  if (useExit) {
+  if (autoPlatinumHwr) {
+    const {
+      resolveTradeProfileDefinition,
+      materializeExitRules,
+      applyProfileExitRulesToBuyOpts,
+      applyTradeProfileSizing,
+      recordSyntheticProfileDecision,
+      serializeTradeProfilesForPersist,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+
+    const tpState = serializeTradeProfilesForPersist();
+    if (tpState.profiles?.high_win_rate === false) {
+      offer.status = 'pending';
+      offer.error = 'High Win-Rate profile is OFF — Platinum auto-send skipped';
+      offer.updatedAt = Date.now();
+      persist();
+      console.warn(
+        `[zion] Platinum auto-send blocked — High Win-Rate is OFF (${offer.symbol})`
+      );
+      return { ok: false, offer, error: offer.error };
+    }
+
+    const def = resolveTradeProfileDefinition('high_win_rate');
+    const exitRules = materializeExitRules({ ...def.exitRules });
+    const sized = applyTradeProfileSizing(solAmount, exitRules);
+    solAmount = clampToMaxAllowedTradeSol(sized.sizeSol);
+    offer.solAmount = solAmount;
+    buyOpts.solAmount = solAmount;
+    if (sized.sizeNote) buyOpts.sizeReason = sized.sizeNote;
+
+    buyOpts.tradeProfileId = def.id;
+    buyOpts.tradeProfileName = def.name;
+    buyOpts.tradeProfileIcon = def.icon;
+    buyOpts.tradeProfileColor = def.color;
+    buyOpts.tradeProfileReason =
+      `Zion platinum → High Win-Rate · auto` +
+      (offer.reasons[0] ? ` · ${offer.reasons.slice(0, 2).join(' · ')}` : '');
+    applyProfileExitRulesToBuyOpts(buyOpts, exitRules);
+
+    recordSyntheticProfileDecision({
+      symbol: offer.symbol,
+      profileId: 'high_win_rate',
+      profileName: def.name,
+      icon: def.icon,
+      score:
+        offer.score != null && Number.isFinite(offer.score)
+          ? Math.round(offer.score)
+          : 85,
+      reason: 'Zion platinum → High Win-Rate (auto)',
+    });
+
+    try {
+      const { recordLaneFightOpen, recordLaneFightCascadeResult } =
+        require('./laneOutcomes') as typeof import('./laneOutcomes');
+      recordLaneFightOpen({
+        mint: offer.mint,
+        symbol: offer.symbol,
+        winnerId: 'high_win_rate',
+        lanes: [
+          {
+            id: 'high_win_rate',
+            name: 'High Win-Rate',
+            passed: true,
+            score:
+              offer.score != null && Number.isFinite(offer.score)
+                ? Math.round(offer.score)
+                : 85,
+            reason: 'Zion platinum → High Win-Rate (auto)',
+          },
+        ],
+      });
+    } catch {
+      /* optional lane log */
+    }
+  } else if (useExit) {
     buyOpts.profileTakeProfitPct =
       overrides.takeProfitPct != null
         ? Number(overrides.takeProfitPct)
@@ -793,6 +946,21 @@ export async function executeApprovedOffer(
     const result = await runWithRpcRole('secondary', () =>
       executeBuy(offer.mint, offer.symbol, buyOpts)
     );
+    if (autoPlatinumHwr) {
+      try {
+        const { recordLaneFightCascadeResult } =
+          require('./laneOutcomes') as typeof import('./laneOutcomes');
+        recordLaneFightCascadeResult({
+          mint: offer.mint,
+          opened: result?.success === true,
+          cascadeSkipReason: result?.success
+            ? undefined
+            : result?.error || 'executeBuy failed',
+        });
+      } catch {
+        /* optional */
+      }
+    }
     if (!result?.success) {
       offer.status = 'failed';
       offer.error = result?.error || 'executeBuy failed';
@@ -828,6 +996,19 @@ export async function executeApprovedOffer(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (autoPlatinumHwr) {
+      try {
+        const { recordLaneFightCascadeResult } =
+          require('./laneOutcomes') as typeof import('./laneOutcomes');
+        recordLaneFightCascadeResult({
+          mint: offer.mint,
+          opened: false,
+          cascadeSkipReason: message,
+        });
+      } catch {
+        /* optional */
+      }
+    }
     offer.status = 'failed';
     offer.error = message;
     offer.updatedAt = Date.now();

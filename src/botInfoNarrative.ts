@@ -167,10 +167,10 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
         <h3><span class="botinfo-sec-num">08</span> Zion (KOL Token Scanner)</h3>
-        <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong>. It never auto-buys. You Place Trade from the offer modal (with optional email / sound).</p>
+        <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional <strong>Auto-send Platinum to HWR</strong> can auto-execute Platinum-tier offers into High Win-Rate.</p>
         <ul>
-          <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer.</li>
-          <li>Popup tiers: <strong>Gold</strong> (score ≥85, ≥8 KOLs, ≥$500k vol 1h) · <strong>Green</strong> (score 70–84, ≥4 KOLs, ≥$250k vol) · else default teal. Holders &amp; risk row shows top10 / bundle / insider / dev / snipers / pro traders when known.</li>
+          <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR.</li>
+          <li>Popup tiers: <strong>Platinum</strong> (score ≥85, ≥10 KOLs, ≥$750k vol 1h — optional auto → HWR) · <strong>Gold</strong> (score ≥85, ≥8 KOLs, ≥$500k vol 1h) · <strong>Green</strong> (score 70–84, ≥4 KOLs, ≥$250k vol) · else default teal. Holders &amp; risk row shows top10 / bundle / insider / dev / snipers / pro traders when known.</li>
           <li>Uses the secondary RPC lane so KOL scanning does not starve copy/trading.</li>
           <li>Separate from copy-monitor and market scanner entry paths.</li>
         </ul>

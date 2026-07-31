@@ -2329,6 +2329,9 @@ export function createServer(): express.Application {
       if (typeof body.autoOfferFromScanner === 'boolean') {
         z.autoOfferFromScanner = body.autoOfferFromScanner;
       }
+      if (typeof body.autoSendPlatinumToHwr === 'boolean') {
+        z.autoSendPlatinumToHwr = body.autoSendPlatinumToHwr;
+      }
       if (typeof body.notifyEmailOnOffer === 'boolean') {
         z.notifyEmailOnOffer = body.notifyEmailOnOffer;
       }

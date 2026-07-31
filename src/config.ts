@@ -1628,6 +1628,11 @@ export interface ZionConfig {
   useTrackedWalletsAsBoost: boolean;
   /** When true, qualifying scanner candidates become pending offers (still manual buy) */
   autoOfferFromScanner: boolean;
+  /**
+   * When true, Platinum offers (score ≥85, ≥10 KOL, 1h vol ≥$750k) auto-execute
+   * into High Win-Rate. Gold/Green/default stay manual. Default OFF.
+   */
+  autoSendPlatinumToHwr?: boolean;
   defaults: {
     sizeMode: 'sol' | 'usd';
     solAmount: number;
@@ -2431,6 +2436,7 @@ export const config: BotConfig = {
     mintCooldownMinutes: 120,
     useTrackedWalletsAsBoost: true,
     autoOfferFromScanner: true,
+    autoSendPlatinumToHwr: false,
     defaults: {
       sizeMode: 'sol',
       solAmount: 0.25,

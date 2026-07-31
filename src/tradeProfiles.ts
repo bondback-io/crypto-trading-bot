@@ -1866,6 +1866,36 @@ export function getRecentTradeProfileDecisions(): TradeProfileDecisionLog[] {
   return recentDecisions.slice(0, DECISION_LOG_MAX);
 }
 
+/** Synthetic lane-fight row for Zion Platinum → HWR (and similar external handoffs). */
+export function recordSyntheticProfileDecision(input: {
+  symbol: string;
+  profileId: TradeProfileId;
+  profileName: string;
+  icon: string;
+  score: number;
+  reason: string;
+}): void {
+  pushDecision({
+    at: Date.now(),
+    symbol: input.symbol || 'token',
+    profileId: input.profileId,
+    profileName: input.profileName,
+    icon: input.icon,
+    score: input.score,
+    reason: input.reason,
+    skipped: false,
+    autoScored: false,
+    forced: true,
+    topScores: [
+      {
+        id: input.profileId,
+        name: input.profileName,
+        score: input.score,
+      },
+    ],
+  });
+}
+
 function pushDecision(entry: TradeProfileDecisionLog): void {
   recentDecisions.unshift(entry);
   if (recentDecisions.length > DECISION_LOG_MAX) {
