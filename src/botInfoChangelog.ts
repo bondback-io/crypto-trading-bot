@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.58',
+    title: 'Settings Control Center mobile layout',
+    sections: ['risk', 'knobs'],
+    items: [
+      'Settings Control Center keeps the modules ON count in the top-right on mobile (title row), instead of stacking under the buttons.',
+    ],
+  },
+  {
     version: '1.2.57',
     title: 'Bot Info section update counters',
     sections: ['overview', 'alerts'],

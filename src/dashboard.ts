@@ -342,37 +342,52 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .strategy-control-head {
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.45rem 0.75rem;
+      min-width: 0;
+    }
+    .strategy-control-title-row {
+      display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 0.5rem 0.75rem;
       min-width: 0;
     }
-    .strategy-control-head-main {
-      /* Grow horizontally on desktop; never use a large flex-basis — in
-         column layout (mobile) a 14rem basis became ~224px empty vertical gap. */
+    .strategy-control-title-row .section-title {
+      margin-bottom: 0;
       flex: 1 1 auto;
-      min-width: min(100%, 12rem);
-      max-width: calc(100% - 12rem);
+      min-width: 0;
+      padding-right: 0.25rem;
+    }
+    .strategy-control-head-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
     }
     .strategy-control-head-main > p {
       overflow-wrap: anywhere;
       word-break: break-word;
     }
     .strategy-control-head-meta {
-      flex: 0 0 auto;
+      flex: 0 1 auto;
       text-align: right;
       min-width: 0;
-      max-width: 12rem;
-      margin-left: auto;
+      max-width: min(12rem, 48%);
       position: relative;
       align-self: flex-start;
+    }
+    .strategy-control-head-meta #strategies-count {
+      line-height: 1.2;
+      white-space: nowrap;
     }
     .strategy-control-head-meta #strategies-profile {
       overflow-wrap: anywhere;
       word-break: break-word;
-      max-width: 18rem;
+      max-width: 100%;
       margin-left: auto;
+      margin-top: 0.15rem;
+      line-height: 1.3;
     }
     .strategy-io-btns {
       display: flex;
@@ -1091,21 +1106,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .strategy-control-head {
         flex-direction: column;
         align-items: stretch;
-        gap: 0.35rem;
+        gap: 0.4rem;
+      }
+      .strategy-control-title-row {
+        align-items: flex-start;
+        gap: 0.4rem;
+      }
+      .strategy-control-title-row .section-title {
+        font-size: 0.82rem;
+        line-height: 1.25;
       }
       .strategy-control-head-main {
         flex: 0 0 auto;
         min-width: 0;
         width: 100%;
+        max-width: 100%;
       }
       .strategy-control-head-meta {
-        flex: 0 0 auto;
-        text-align: left;
-        width: 100%;
+        flex: 0 1 auto;
+        text-align: right;
+        width: auto;
+        max-width: min(10.5rem, 46%);
+        margin-left: 0;
+      }
+      .strategy-control-head-meta #strategies-count {
+        font-size: 0.95rem;
       }
       .strategy-control-head-meta #strategies-profile {
-        margin-left: 0;
-        max-width: none;
+        margin-left: auto;
+        max-width: 100%;
+        font-size: 0.65rem;
       }
       .strategy-io-btns {
         width: 100%;
@@ -6910,8 +6940,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card strategy-control-card">
         <div class="strategy-control-head">
-          <div class="strategy-control-head-main">
+          <div class="strategy-control-title-row">
             <div class="section-title">Settings Control Center</div>
+            <div class="strategy-control-head-meta">
+              <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" role="button" aria-expanded="false" title="Click to show which modules are ON">—</div>
+              <div id="strategies-on-popover" class="strategies-on-popover hidden" role="tooltip"></div>
+              <div id="strategies-profile" class="mint text-xs">Loading…</div>
+            </div>
+          </div>
+          <div class="strategy-control-head-main">
             <div class="strategy-io-btns">
               <button type="button" class="btn btn-secondary text-xs" onclick="exportStrategyModulesJson()" title="Download module toggles, internal settings, and Trade Profiles (TP/SL/hold/Size ×/Max Trade/trail/fail-drop, Min MC/Max MC/holders/Top-10/Min Vol M5/conviction, Smart Bot) as JSON">Export JSON</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="triggerStrategyModulesImport()" title="Import module toggles, settings, and Trade Profiles from a previously exported JSON">Import JSON</button>
@@ -6920,11 +6957,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </div>
             <div class="strategy-io-status" id="strategy-io-status" aria-live="polite"></div>
             <p class="text-sm text-slate-400 mb-0">Pick Risk On/Off → enable modules as kill switches. Trade Profile import/export still lives here even though profile tuning moved to Micro Bots.</p>
-          </div>
-          <div class="strategy-control-head-meta">
-            <div id="strategies-count" class="text-base font-semibold strategies-count-hot" tabindex="0" role="button" aria-expanded="false" title="Click to show which modules are ON">—</div>
-            <div id="strategies-on-popover" class="strategies-on-popover hidden" role="tooltip"></div>
-            <div id="strategies-profile" class="mint text-xs">Loading…</div>
           </div>
         </div>
 
