@@ -1,49 +1,49 @@
 {
-    "name":  "solana-smart-money-copy-bot",
-    "version":  "1.2.57",
-    "updatedAt":  "2026-07-31T19:00:00.000Z",
-    "description":  "Solana smart money copy trading bot for Pump.fun launches and migrations",
-    "main":  "dist/index.js",
-    "scripts":  {
-                    "build":  "tsc \u0026\u0026 npm run check:botinfo \u0026\u0026 node -e \"require(\u0027fs\u0027).mkdirSync(\u0027dist/defaults\u0027,{recursive:true}); require(\u0027fs\u0027).copyFileSync(\u0027src/defaults/strategyModulesDefault.json\u0027,\u0027dist/defaults/strategyModulesDefault.json\u0027)\"",
-                    "start":  "node dist/index.js",
-                    "start:prod":  "node dist/index.js",
-                    "prestart":  "node -e \"require(\u0027fs\u0027).accessSync(\u0027dist/index.js\u0027)\"",
-                    "dev":  "tsx watch src/index.ts",
-                    "typecheck":  "tsc --noEmit",
-                    "check:botinfo":  "node scripts/checkBotInfoDrift.cjs",
-                    "calibrate:recipes":  "tsx scripts/calibrateRiskRecipes.ts",
-                    "calibrate:recipes:verify":  "tsx scripts/calibrateRiskRecipes.ts --phase=verify",
-                    "export:learning":  "tsx scripts/exportLearningDataset.ts",
-                    "pm2:start":  "npm run build \u0026\u0026 pm2 start ecosystem.config.cjs --env production",
-                    "pm2:stop":  "pm2 stop solana-copy-bot",
-                    "pm2:restart":  "npm run build \u0026\u0026 pm2 restart solana-copy-bot --update-env",
-                    "pm2:logs":  "pm2 logs solana-copy-bot",
-                    "pm2:delete":  "pm2 delete solana-copy-bot"
-                },
-    "engines":  {
-                    "node":  "\u003e=20"
-                },
-    "keywords":  [
-                     "copy-trading",
-                     "jupiter",
-                     "pump.fun",
-                     "solana"
-                 ],
-    "license":  "MIT",
-    "dependencies":  {
-                         "@jup-ag/api":  "^6.0.41",
-                         "@solana/web3.js":  "^1.98.0",
-                         "@types/express":  "^5.0.0",
-                         "@types/node":  "^22.10.5",
-                         "bs58":  "^6.0.0",
-                         "dotenv":  "^16.4.7",
-                         "express":  "^4.21.2",
-                         "nodemailer":  "^9.0.3",
-                         "typescript":  "^5.7.3"
-                     },
-    "devDependencies":  {
-                            "@types/nodemailer":  "^8.0.1",
-                            "tsx":  "^4.19.2"
-                        }
+  "name": "solana-smart-money-copy-bot",
+  "version": "1.2.57",
+  "updatedAt": "2026-07-31T19:00:00.000Z",
+  "description": "Solana smart money copy trading bot for Pump.fun launches and migrations",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && npm run check:botinfo && node -e \"require('fs').mkdirSync('dist/defaults',{recursive:true}); require('fs').copyFileSync('src/defaults/strategyModulesDefault.json','dist/defaults/strategyModulesDefault.json')\"",
+    "start": "node dist/index.js",
+    "start:prod": "node dist/index.js",
+    "prestart": "node -e \"require('fs').accessSync('dist/index.js')\"",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "check:botinfo": "node scripts/checkBotInfoDrift.cjs",
+    "calibrate:recipes": "tsx scripts/calibrateRiskRecipes.ts",
+    "calibrate:recipes:verify": "tsx scripts/calibrateRiskRecipes.ts --phase=verify",
+    "export:learning": "tsx scripts/exportLearningDataset.ts",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.cjs --env production",
+    "pm2:stop": "pm2 stop solana-copy-bot",
+    "pm2:restart": "npm run build && pm2 restart solana-copy-bot --update-env",
+    "pm2:logs": "pm2 logs solana-copy-bot",
+    "pm2:delete": "pm2 delete solana-copy-bot"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "copy-trading",
+    "jupiter",
+    "pump.fun",
+    "solana"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@jup-ag/api": "^6.0.41",
+    "@solana/web3.js": "^1.98.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nodemailer": "^9.0.3",
+    "typescript": "^5.7.3"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1",
+    "tsx": "^4.19.2"
+  }
 }
