@@ -30,7 +30,10 @@ import {
   sendOptimizedTransaction,
   sendAndConfirmLegacyTx,
   getActiveEndpointLabel,
+  hasRpcRoleContext,
+  runWithRpcRole,
 } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import { trySendViaJito, effectiveTipLamports, turboTipLamports } from './jito';
 import {
   checkSandwichRisk,
@@ -435,6 +438,13 @@ export async function executeBuy(
   symbol: string,
   meta?: BuyOptions
 ): Promise<SwapResult> {
+  if (!hasRpcRoleContext()) {
+    return runWithRpcRole(
+      getRpcRoleFor('trade_entry', Boolean(config.rpc?.shareLoad)),
+      () => executeBuy(mint, symbol, meta),
+      'trade_entry'
+    );
+  }
   if (isDeniedCopyMint(mint, config.solMint)) {
     return {
       success: false,

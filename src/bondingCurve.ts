@@ -5,7 +5,12 @@
 
 import { PublicKey } from '@solana/web3.js';
 import { config, HARD_FILTER_FLOORS } from './config';
-import { getConnection } from './connection';
+import {
+  getConnection,
+  hasRpcRoleContext,
+  runWithRpcRole,
+} from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
 
 /** Canonical initial real token reserves (raw, 6 decimals) from Pump.fun Global */
@@ -394,28 +399,36 @@ export async function fetchBondingCurve(
   }
 
   const job = (async () => {
-    try {
-      let state = await fetchBondingCurveOnChain(mint);
-      if (state.source === 'none' || state.error) {
-        const api = await fetchBondingCurveFromApi(mint).catch(() => null);
-        if (api) state = api;
+    const body = async (): Promise<BondingCurveState> => {
+      try {
+        let state = await fetchBondingCurveOnChain(mint);
+        if (state.source === 'none' || state.error) {
+          const api = await fetchBondingCurveFromApi(mint).catch(() => null);
+          if (api) state = api;
+        }
+        cache.set(mint, {
+          state,
+          expiresAt: Date.now() + cacheTtlMs(),
+        });
+        return state;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const fail = emptyState(mint, message);
+        cache.set(mint, {
+          state: fail,
+          expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
+        });
+        return fail;
+      } finally {
+        inflight.delete(mint);
       }
-      cache.set(mint, {
-        state,
-        expiresAt: Date.now() + cacheTtlMs(),
-      });
-      return state;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const fail = emptyState(mint, message);
-      cache.set(mint, {
-        state: fail,
-        expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
-      });
-      return fail;
-    } finally {
-      inflight.delete(mint);
-    }
+    };
+    if (hasRpcRoleContext()) return body();
+    return runWithRpcRole(
+      getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
+      body,
+      'bonding_curve'
+    );
   })();
 
   inflight.set(mint, job);

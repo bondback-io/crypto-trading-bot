@@ -2316,8 +2316,16 @@ export const config: BotConfig = {
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
     shareLoad:
-      process.env.RPC_SHARE_LOAD === '1' ||
-      process.env.RPC_SHARE_LOAD === 'true',
+      process.env.RPC_SHARE_LOAD === '0' ||
+      process.env.RPC_SHARE_LOAD === 'false'
+        ? false
+        : process.env.RPC_SHARE_LOAD === '1' ||
+          process.env.RPC_SHARE_LOAD === 'true' ||
+          // Default ON when both free provider keys exist (survives Render disk wipe).
+          Boolean(
+            process.env.HELIUS_API_KEY?.trim() &&
+              process.env.ALCHEMY_API_KEY?.trim()
+          ),
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,

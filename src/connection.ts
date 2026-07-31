@@ -466,7 +466,17 @@ export function lanesShareEndpoint(): boolean {
 }
 
 function currentRole(): RpcRole {
-  return rpcRoleAls.getStore() ?? 'primary';
+  const stored = rpcRoleAls.getStore();
+  if (stored) return stored;
+  // Ungated getConnection() callers (curves, metrics, logs) must not burn
+  // Helius/Alchemy when Share load is on — send them to public/utility.
+  if (Boolean(config.rpc?.shareLoad)) return 'utility';
+  return 'primary';
+}
+
+/** True when code is inside runWithRpcRole (or an explicit role was bound). */
+export function hasRpcRoleContext(): boolean {
+  return rpcRoleAls.getStore() != null;
 }
 
 /** Run work on the secondary (or primary) lane — nested getConnection() inherits the role. */
