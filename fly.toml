@@ -9,8 +9,8 @@
 #   • HTTP health check at GET /health
 # =============================================================================
 
-app = 'solana-copy-bot'
-primary_region = 'sjc'
+app = 'crypto-trading-bot-cfv54a'
+primary_region = 'arn'
 
 [build]
   dockerfile = 'Dockerfile'
@@ -19,6 +19,7 @@ primary_region = 'sjc'
 [env]
   NODE_ENV = 'production'
   HOST = '0.0.0.0'
+  # MUST match http_service.internal_port or Fly health checks get connection refused
   PORT = '8080'
   DATA_DIR = '/data'
   TRADING_MODE = 'liveSimulation'
