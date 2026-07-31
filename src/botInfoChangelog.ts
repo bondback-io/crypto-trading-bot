@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.70',
+    title: 'Utility soft watch RPC cap 30',
+    sections: ['execution', 'copy'],
+    items: [
+      'With Share RPC load ON, the utility soft-watch wallet cap defaults to 30 (was 50) to ease Triton/public RPC pressure on Favourites buy watch.',
+    ],
+  },
+  {
     version: '1.2.69',
     title: 'Utility prefers Triton api.mainnet.solana.com',
     sections: ['execution', 'copy'],

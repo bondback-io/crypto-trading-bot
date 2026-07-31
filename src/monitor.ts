@@ -1546,9 +1546,9 @@ export function getWalletsForPolling(): SmartWallet[] {
     return bT - aT;
   });
 
-  // Free Helius/Alchemy/public — rotate a capped watch set (Share: public utility lane default 50).
+  // Free Helius/Alchemy/public — rotate a capped watch set (Share: public utility lane default 30).
   // Keep ~60% sticky-hot (recent activity); rotate the rest so colder wallets still get cycles.
-  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 50 : 40;
+  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 30 : 40;
   const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || softCapDefault);
   if (
     isSoftThrottleRpcUrl(getRpcUrl()) &&
