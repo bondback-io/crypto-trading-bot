@@ -2199,6 +2199,7 @@ export const config: BotConfig = {
       steady_compounder: true,
       reversal_scalper: true,
       smart_money_mirror: true,
+      zion: true,
     },
     globalTakeProfit: {
       enabled: false,
@@ -3295,6 +3296,7 @@ function applySettingsSnapshot(
           steady_compounder: true,
           reversal_scalper: true,
           smart_money_mirror: true,
+          zion: true,
         },
       };
     }

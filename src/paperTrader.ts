@@ -3771,21 +3771,12 @@ export class PaperTrader {
       require('./tradeProfiles') as typeof import('./tradeProfiles');
     const { getLaneOutcomeStatsByProfile } =
       require('./laneOutcomes') as typeof import('./laneOutcomes');
-    const catalog = [
-      ...TRADE_PROFILE_CATALOG.map((p) => ({
-        id: p.id,
-        name: p.name,
-        icon: p.icon,
-        color: p.color,
-      })),
-      // Zion is not a catalog micro-bot but stamps tradeProfileId=zion on closes
-      {
-        id: 'zion',
-        name: 'Zion',
-        icon: '◈',
-        color: '#f2ae66',
-      },
-    ];
+    const catalog = TRADE_PROFILE_CATALOG.map((p) => ({
+      id: p.id,
+      name: p.name,
+      icon: p.icon,
+      color: p.color,
+    }));
     const scoreboard = buildTradeProfileScoreboard(
       this.closedPositions,
       catalog

@@ -147,7 +147,9 @@ export type TradeProfileId =
   | 'momentum_burst'
   | 'steady_compounder'
   | 'reversal_scalper'
-  | 'smart_money_mirror';
+  | 'smart_money_mirror'
+  /** Manual KOL / Place Trade micro-bot — catalog for Active chips; not auto lane-fight */
+  | 'zion';
 
 export interface TradeProfileExitRules {
   /** Freeze take-profit % on the position */
@@ -1103,6 +1105,38 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       tiered_profit_taking: true,
       dead_market_exit: true,
       time_based_entry: true,
+    },
+  },
+
+  // ── 10. Zion (KOL / Place Trade) ─────────────────────────────────────────
+  {
+    id: 'zion',
+    name: 'Zion',
+    icon: '◈',
+    color: TRADE_PROFILE_COLORS.zion,
+    description:
+      'Isolated KOL Token Scanner + manual Place Trade offers (not watch-list copy).',
+    recommendedRisk: 'Medium / High',
+    style: 'KOL / Manual',
+    rulesSummary: [
+      'Signals from Kolscan + GMGN universe (not Favourites watch list)',
+      'Manual or tiered Place Trade offers — not auto lane fights',
+      'Uses Zion tab size / risk / exit settings',
+      'Optional Platinum → High Win-Rate cascade',
+    ],
+    priority: 70,
+    defaultEnabled: true,
+    match: {
+      // No auto-match flags — Place Trade stamps zion; lane fight skips this id
+    },
+    exitRules: {},
+    modules: {
+      ...CORE_SAFETY_MODULES,
+      smart_money_copy: true,
+      wallet_quality_scoring: true,
+      multi_factor_conviction: true,
+      confirmation_layer: true,
+      dead_market_exit: true,
     },
   },
 ] as const;
@@ -2449,7 +2483,8 @@ export function evaluateTradeProfileLanes(
   const results: TradeProfileLaneResult[] = [];
   for (const catalog of TRADE_PROFILE_CATALOG) {
     if (state.profiles[catalog.id] === false) continue;
-    if (catalog.id === 'default') continue;
+    // Default = fallback only; Zion = manual KOL offers only (not copy/scanner lanes)
+    if (catalog.id === 'default' || catalog.id === 'zion') continue;
     const def = resolveTradeProfileDefinition(catalog.id);
     const floors = evaluateLaneEntryFloors(def, ctx);
     if (!floors.ok) {
@@ -3726,9 +3761,19 @@ export function assignTradeProfile(
     return finish(legacyDefaultAssignment('multi-profile off'));
   }
 
-  const candidates = TRADE_PROFILE_CATALOG.filter(
-    (p) => state.profiles[p.id] !== false
-  ).map((p) => resolveTradeProfileDefinition(p.id));
+  const candidates = TRADE_PROFILE_CATALOG.filter((p) => {
+    if (state.profiles[p.id] === false) return false;
+    if (p.id === 'default') return false;
+    // Zion only when forced / preferred from Place Trade — never auto-scored
+    if (
+      p.id === 'zion' &&
+      auto.forceProfileId !== 'zion' &&
+      ctx.preferProfileId !== 'zion'
+    ) {
+      return false;
+    }
+    return true;
+  }).map((p) => resolveTradeProfileDefinition(p.id));
 
   // Manual force override
   if (auto.forceProfileId) {

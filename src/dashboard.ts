@@ -6499,7 +6499,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card mt-4" id="trade-profiles-overview-card">
         <div class="section-title">Trade Profiles Overview</div>
-        <p class="text-xs text-slate-400 mb-3">Live ranking by win rate — Zion is always 1st; micro-bots compete for 2nd–10th. Active profiles are highlighted. Tap a row to jump to its controls.</p>
+        <p class="text-xs text-slate-400 mb-3">Live ranking by win rate — Zion is always 1st; specialty micro-bots compete for 2nd–10th. Active profiles are highlighted. Tap a row to jump to its controls.</p>
         <div class="tp-overview-wrap">
           <table class="tp-overview-table" id="trade-profiles-overview">
             <thead>
@@ -10597,6 +10597,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.resetAutoScoringWeights = resetAutoScoringWeights;
 
     function focusTradeProfileCard(id) {
+      if (id === 'zion') {
+        if (typeof showTab === 'function') showTab('zion');
+        return;
+      }
       const card = document.getElementById('tp-card-' + id);
       if (!card) return;
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
