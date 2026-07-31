@@ -17,7 +17,12 @@ import {
 } from '@solana/web3.js';
 import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcUrl, noteActiveRpcFailure } from './connection';
+import {
+  getConnection,
+  getRpcUrl,
+  noteActiveRpcFailure,
+  shouldDeferHeavyRpc,
+} from './connection';
 import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
 
 /** Raydium AMM v4 — common post-migration venue */
@@ -378,6 +383,9 @@ async function handleLogsNotification(
 ): Promise<void> {
   if (!running) return;
   if (logs.err) return;
+  // Free-tier 429 cooldown — skip WS parses so we don't burn the failover RPC too
+  if (Date.now() < rateLimitedUntil) return;
+  if (shouldDeferHeavyRpc()) return;
 
   const signature = logs.signature;
   if (!signature || processedSigs.has(signature)) return;
@@ -413,12 +421,15 @@ function looksLikeMigrationLogs(
   }
 
   if (program === 'pumpswap') {
-    // PumpSwap sees pool creates + early swaps after migrate
+    // Do NOT match bare "buy"/"create"/"deposit" — that fires on every swap and
+    // burns free Helius/Alchemy CU with getParsedTransaction storms.
     return (
-      migrateHints ||
-      logText.includes('create') ||
-      logText.includes('buy') ||
-      logText.includes('deposit')
+      logText.includes('migrat') ||
+      logText.includes('graduation') ||
+      logText.includes('create_pool') ||
+      logText.includes('initialize2') ||
+      (logText.includes('initialize') && logText.includes('pool')) ||
+      (logText.includes('create') && logText.includes('pool'))
     );
   }
 

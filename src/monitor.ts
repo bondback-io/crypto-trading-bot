@@ -772,18 +772,21 @@ function getWalletPollThrottle(rpcUrl: string): {
   /** Max wallets touched per cycle (rotate remainder next tick). */
   maxWalletsPerCycle: number;
   abortCycleOn429: boolean;
+  cycleBudgetMs: number;
 } {
   const soft = isSoftThrottleRpcUrl(rpcUrl);
   if (soft) {
     return {
       soft: true,
       batchSize: 2,
-      batchGapMs: 400,
+      batchGapMs: 450,
       sigLimit: 8,
       maxParse: 2,
-      pause429Ms: 5_000,
-      maxWalletsPerCycle: 20,
+      pause429Ms: 8_000,
+      maxWalletsPerCycle: 12,
       abortCycleOn429: true,
+      /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
+      cycleBudgetMs: 6_000,
     };
   }
   return {
@@ -795,6 +798,7 @@ function getWalletPollThrottle(rpcUrl: string): {
     pause429Ms: 200,
     maxWalletsPerCycle: Number.POSITIVE_INFINITY,
     abortCycleOn429: false,
+    cycleBudgetMs: 25_000,
   };
 }
 
@@ -1030,13 +1034,13 @@ async function pollAllWallets(): Promise<void> {
     const wallets = getWalletsForPolling();
     const rpcUrl = getRpcUrl();
     const throttle = getWalletPollThrottle(rpcUrl);
-    const { batchSize, batchGapMs, maxWalletsPerCycle, abortCycleOn429, pause429Ms } =
+    const { batchSize, batchGapMs, maxWalletsPerCycle, abortCycleOn429, pause429Ms, cycleBudgetMs } =
       throttle;
     if (throttle.soft && Date.now() - lastSoftThrottleLogAt > 120_000) {
       lastSoftThrottleLogAt = Date.now();
       console.log(
         `[monitor] Soft RPC throttle on (${batchSize}/batch, gap ${batchGapMs}ms, ` +
-          `≤${maxWalletsPerCycle}/cycle) — free Helius/Alchemy/public stay under rate limits`
+          `≤${maxWalletsPerCycle}/cycle, budget ${cycleBudgetMs}ms) — free Helius/Alchemy/public stay under rate limits`
       );
     }
     const n = wallets.length;
@@ -1052,14 +1056,22 @@ async function pollAllWallets(): Promise<void> {
     );
     let hitRateLimit = false;
     let completed = 0;
+    let advanced = 0;
     lastPollAttempted = ordered.length;
     lastPollRateLimited = false;
     for (let i = 0; i < ordered.length; i += batchSize) {
       if (Date.now() < pollRateLimitedUntil) break;
+      if (Date.now() - cycleStarted > cycleBudgetMs) {
+        console.warn(
+          `[monitor] Poll cycle budget ${cycleBudgetMs}ms hit — rotating remaining wallets to next tick`
+        );
+        break;
+      }
       const batch = ordered.slice(i, i + batchSize);
       const results = await Promise.allSettled(
         batch.map((wallet) => pollWallet(wallet, throttle))
       );
+      advanced += batch.length;
       let batchHad429 = false;
       for (const r of results) {
         if (r.status === 'fulfilled') completed += 1;
@@ -1088,8 +1100,8 @@ async function pollAllWallets(): Promise<void> {
     }
     lastPollCompleted = completed;
     if (n > 0) {
-      // Advance by how many we actually attempted so seeding rotates across cycles
-      pollRotationOffset = (offset + ordered.length) % n;
+      // Advance by wallets actually attempted so seeding rotates across cycles
+      pollRotationOffset = (offset + Math.max(advanced, 1)) % n;
     }
     if (hitRateLimit) {
       lastPollRateLimited = true;

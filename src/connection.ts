@@ -109,6 +109,25 @@ function isEndpointRateLimited(state: EndpointState | undefined): boolean {
   return Boolean(state && state.rateLimitedUntil > Date.now());
 }
 
+/**
+ * True when every configured endpoint is in a 429 cooldown — callers should
+ * skip non-critical RPC (migration parse, wallet seed) so /health stays alive.
+ */
+export function shouldDeferHeavyRpc(): boolean {
+  ensureEndpoints();
+  if (endpoints.length === 0) return false;
+  return endpoints.every((e) => isEndpointRateLimited(e));
+}
+
+/** True when the lane's preferred (or active) endpoint is cooling after a 429. */
+export function isLaneRateLimited(role: RpcRole = 'primary'): boolean {
+  ensureEndpoints();
+  const pref = endpoints[preferredIndexFor(role)];
+  if (isEndpointRateLimited(pref)) return true;
+  const active = endpoints[resolveIndexForRole(role)];
+  return isEndpointRateLimited(active);
+}
+
 function failoverDownMs(): number {
   const fromEnv = Number(process.env.RPC_FAILOVER_DOWN_MS);
   if (Number.isFinite(fromEnv) && fromEnv >= MIN_FAILOVER_DOWN_MS) return fromEnv;
@@ -928,12 +947,20 @@ export function startRpcHealthMonitor(): void {
   ensureEndpoints();
 
   const interval = config.rpc?.healthIntervalMs ?? 30_000;
-  void Promise.all(endpoints.map((_, i) => probeEndpoint(i)));
+  // Probe preferred lanes first, serially — parallel probes on free Helius+Alchemy
+  // burn the same CU budget the monitor needs at boot.
+  void (async () => {
+    for (let i = 0; i < endpoints.length; i++) {
+      await probeEndpoint(i);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  })();
 
   healthTimer = setInterval(() => {
     void (async () => {
       for (let i = 0; i < endpoints.length; i++) {
         await probeEndpoint(i);
+        await new Promise((r) => setTimeout(r, 200));
       }
       await maybeSwitchEndpoints();
     })();

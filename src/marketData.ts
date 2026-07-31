@@ -844,7 +844,7 @@ async function fetchFromDexScreener(
   const seen = new Set<string>();
 
   for (const url of endpoints) {
-    const data = await fetchJson(url);
+    const data = await fetchJson(url, 8_000, 2);
     if (!data || !Array.isArray(data)) continue;
 
     for (const row of data as Record<string, unknown>[]) {
