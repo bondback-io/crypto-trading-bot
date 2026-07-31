@@ -39,6 +39,7 @@
     "post_run_dip": true,
     "technical_levels": true,
     "chart_patterns": true,
+    "heikin_ashi": false,
     "pattern_volume_dryup_return": true,
     "pattern_falling_wedge": true,
     "pattern_structured_pullback": true,
@@ -435,6 +436,13 @@
           }
         }
       }
+    },
+    {
+      "key": "heikin_ashi",
+      "name": "Heikin-Ashi Trend",
+      "group": "filters",
+      "source": "optional",
+      "enabled": false
     },
     {
       "key": "pattern_volume_dryup_return",

@@ -218,6 +218,8 @@ export interface Position {
   qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
   selfLearnVersion?: number;
+  /** Whether HA trend exit was enabled on the frozen exit policy at open */
+  haExitEnabledAtOpen?: boolean;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
   nearKeyFib?: boolean;
   nearSupport?: boolean;
@@ -477,6 +479,10 @@ function maybeRecordLearningEpisode(
         Number.isFinite(Number(position.tokenAgeHoursAtEntry))
           ? Number(position.tokenAgeHoursAtEntry)
           : undefined,
+      haExitEnabledAtOpen:
+        position.haExitEnabledAtOpen === true ||
+        (position.profileExitPolicy as { heikinAshiExitEnabled?: boolean } | undefined)
+          ?.heikinAshiExitEnabled === true,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -2099,6 +2105,38 @@ export class PaperTrader {
       }
     }
 
+    // Heikin-Ashi trend exit (sync / backtest) — fail-open without price history
+    if (
+      isStrategyEnabledForProfile('heikin_ashi', position.tradeProfileId) &&
+      position.profileExitPolicy?.heikinAshiExitEnabled !== false
+    ) {
+      try {
+        const { getPriceHistory } =
+          require('./technicalLevels') as typeof import('./technicalLevels');
+        const { evaluateHaTrendExit } =
+          require('./heikinAshi') as typeof import('./heikinAshi');
+        const hist = getPriceHistory(position.mint);
+        if (hist.length >= 10) {
+          const candles = hist.map((p) => ({
+            time: p.time,
+            priceSol: p.price,
+          }));
+          const haReason = evaluateHaTrendExit(candles);
+          if (haReason) {
+            this.simulateSell(position.id, markPrice, haReason);
+            return {
+              kind: 'full',
+              reason: haReason,
+              markPnlPct,
+              stillOpen: this.positions.has(positionId),
+            };
+          }
+        }
+      } catch {
+        /* fail-open */
+      }
+    }
+
     // —— Quick Scalper / short-term timed exits (before tiered profit) ——
     if (position.scalpMode && position.scalpDeadlineMs != null) {
       const scalpAction = evaluateShortTermExit({
@@ -2738,6 +2776,29 @@ export class PaperTrader {
         this.log('sell', `${label}: [DEAD_MARKET]${scalpTag} ${deadReason}`);
         await this.closePositionByRules(position, currentPrice, deadReason);
         continue;
+      }
+
+      // Heikin-Ashi trend exit (swing profiles) — after dead-market, before adaptive
+      if (
+        isStrategyEnabledForProfile('heikin_ashi', position.tradeProfileId) &&
+        position.profileExitPolicy?.heikinAshiExitEnabled !== false
+      ) {
+        try {
+          const { fetchTokenOhlcvCandles } =
+            require('./marketData') as typeof import('./marketData');
+          const { evaluateHaTrendExit } =
+            require('./heikinAshi') as typeof import('./heikinAshi');
+          const ohlcv = await fetchTokenOhlcvCandles(position.mint);
+          const haReason = evaluateHaTrendExit(ohlcv.candles);
+          if (haReason) {
+            console.log(`[ha-exit] 🔴 ${label} — ${haReason}`);
+            this.log('sell', `${label}: [HEIKIN_ASHI] ${haReason}`);
+            await this.closePositionByRules(position, currentPrice, haReason);
+            continue;
+          }
+        } catch {
+          /* fail-open */
+        }
       }
 
       // Adaptive profile exit brain (early partial / trail tighten / momentum fade / profit-lock)

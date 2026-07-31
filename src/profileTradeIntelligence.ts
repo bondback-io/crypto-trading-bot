@@ -48,6 +48,11 @@ export interface ProfileExitPolicy {
   extendHoldIfTaOk: boolean;
   /** Swing bots: full exit when structure breaks while still green */
   cutIfStructureBroken: boolean;
+  /**
+   * Swing bots: exit on confirmed Heikin-Ashi red flip after ≥2 green HA.
+   * Default true for trend_rider / steady_compounder / high_win_rate.
+   */
+  heikinAshiExitEnabled: boolean;
 }
 
 export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
@@ -63,6 +68,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
   reversal_scalper: {
     earlyPartialTpPct: 10,
@@ -76,6 +82,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
   momentum_burst: {
     earlyPartialTpPct: 18,
@@ -89,6 +96,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
   dip_buyer: {
     earlyPartialTpPct: 15,
@@ -102,6 +110,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 8,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
+    heikinAshiExitEnabled: false,
   },
   trend_rider: {
     earlyPartialTpPct: 0,
@@ -115,6 +124,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 5,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
+    heikinAshiExitEnabled: true,
   },
   steady_compounder: {
     earlyPartialTpPct: 6,
@@ -128,6 +138,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 3,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
+    heikinAshiExitEnabled: true,
   },
   high_win_rate: {
     earlyPartialTpPct: 20,
@@ -141,6 +152,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 10,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
+    heikinAshiExitEnabled: true,
   },
   smart_money_mirror: {
     earlyPartialTpPct: 15,
@@ -154,6 +166,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 8,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
   migration_sniper: {
     earlyPartialTpPct: 14,
@@ -167,6 +180,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
   default: {
     earlyPartialTpPct: 0,
@@ -180,6 +194,7 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitFloorPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
+    heikinAshiExitEnabled: false,
   },
 };
 
@@ -241,6 +256,10 @@ export function resolveExitPolicy(
       typeof ep.cutIfStructureBroken === 'boolean'
         ? ep.cutIfStructureBroken
         : base.cutIfStructureBroken,
+    heikinAshiExitEnabled:
+      typeof ep.heikinAshiExitEnabled === 'boolean'
+        ? ep.heikinAshiExitEnabled
+        : base.heikinAshiExitEnabled,
   };
 }
 
@@ -634,6 +653,20 @@ export function buildProfileLearningSuggestions(
         5,
         Math.round(8 + (100 - row.winRatePct) / 10)
       );
+    }
+    if (
+      trailPct >= 28 &&
+      (row.profileId === 'trend_rider' ||
+        row.profileId === 'steady_compounder' ||
+        row.profileId === 'high_win_rate')
+    ) {
+      messages.push(
+        `Trail-heavy swing exits (${trailPct.toFixed(0)}%) — try Heikin-Ashi exit (ride green HA, sell on red flip).`
+      );
+      exitRules.exitPolicy = {
+        ...(exitRules.exitPolicy || {}),
+        heikinAshiExitEnabled: true,
+      };
     }
     if (deadPct >= 25 && row.avgPnlPct < 0) {
       messages.push(

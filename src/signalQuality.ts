@@ -61,6 +61,7 @@ import {
 import { resolveTechnicalLevelsForSignal } from './technicalLevels';
 import { resolveChartPatternsForSignal } from './chartPatterns';
 import { resolveIndicatorsForSignal } from './indicators';
+import { evaluateHaEntryBoost } from './heikinAshi';
 import {
   evaluateHwrQualityFilter,
   logHwrQualityFilterReject,
@@ -97,6 +98,8 @@ export interface ConvictionBreakdown {
   chartPatterns: number;
   /** Classic indicators (RSI/EMA) soft boost */
   indicators: number;
+  /** Heikin-Ashi soft prefer (≥ 0) */
+  heikinAshi: number;
 }
 
 export interface ConvictionVerdict {
@@ -205,6 +208,10 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     b.indicators !== 0
       ? ` ind=${b.indicators >= 0 ? '+' : ''}${b.indicators}`
       : '';
+  const heikinAshi =
+    b.heikinAshi !== 0
+      ? ` ha=${b.heikinAshi >= 0 ? '+' : ''}${b.heikinAshi}`
+      : '';
   return (
     `wallets=${b.wallets} curve=${b.curve} vol=${b.volume} ` +
     `holders=${b.holders} risk=${b.risk} timing=${b.timing} ` +
@@ -217,7 +224,8 @@ function formatBreakdown(b: ConvictionBreakdown): string {
     postRunDip +
     technicals +
     chartPatterns +
-    indicators
+    indicators +
+    heikinAshi
   );
 }
 
@@ -261,6 +269,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     technicals: 0,
     chartPatterns: 0,
     indicators: 0,
+    heikinAshi: 0,
   };
 
   const walletCount = signal.wallets.length;
@@ -751,6 +760,20 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
       reasons.push(indVerdict.logLine);
     }
   }
+
+  // Heikin-Ashi soft prefer — never hard-block; fail-open without candles
+  if (isStrategyEnabled('heikin_ashi')) {
+    try {
+      const haBoost = evaluateHaEntryBoost(signal.candles);
+      if (haBoost.ok && haBoost.delta > 0) {
+        breakdown.heikinAshi = haBoost.delta;
+        reasons.push(`heikin_ashi +${haBoost.delta}`);
+      }
+    } catch {
+      /* fail-open */
+    }
+  }
+
   // Scanner-only thin history: optional hard skip when requireTaSetup and no setup
   if (
     isMarketScannerSignal(signal) &&
@@ -845,7 +868,8 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     breakdown.postRunDip +
     breakdown.technicals +
     breakdown.chartPatterns +
-    breakdown.indicators;
+    breakdown.indicators +
+    breakdown.heikinAshi;
   score = Math.round(clamp(score, 0, 100));
   const sizeMultiplier = riskScoreSizeMultiplier(riskScore);
   const breakdownLine = formatBreakdown(breakdown);

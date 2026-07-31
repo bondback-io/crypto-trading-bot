@@ -531,6 +531,7 @@ const PATCH_LABELS: Record<string, string> = {
   sizeMultiplier: 'size ×',
   requireConvergence: 'require convergence',
   requireCluster: 'require cluster',
+  heikinAshiExitEnabled: 'Heikin-Ashi exit',
 };
 
 /** Flatten a learning patch into a short "knob: value" list for UI hover. */
@@ -803,6 +804,7 @@ export function buildExitLearningCandidates(
     earlyPartialFraction: number;
     momentumFadeDropPct: number;
     hardTimeLimitSecMax?: number;
+    heikinAshiExitEnabled?: boolean;
   }
 ): Array<{ summary: string; patch: LearningProposalPatch }> {
   const out: Array<{ summary: string; patch: LearningProposalPatch }> = [];
@@ -1001,6 +1003,54 @@ export function buildExitLearningCandidates(
         },
       },
     });
+  }
+
+  // Swing HA exit: enable when trail/fade/left-on-table heavy and HA off
+  const haSwing =
+    profileId === 'trend_rider' ||
+    profileId === 'steady_compounder' ||
+    profileId === 'high_win_rate';
+  const trailShare =
+    episodes.filter((e) => e.exitKey === 'trail').length / episodes.length;
+  const fadeShare =
+    categorised.length > 0
+      ? categorised.filter(
+          (e) =>
+            (e.pnlPct || 0) <= 0 && e.failureCategory === 'fade_after_pump'
+        ).length / Math.max(1, categorised.filter((e) => (e.pnlPct || 0) <= 0).length)
+      : 0;
+  const haOn = currentPolicy.heikinAshiExitEnabled === true;
+  if (
+    haSwing &&
+    !haOn &&
+    (trailShare >= 0.25 || fadeShare >= 0.22 || leftOnTable / episodes.length >= 0.22)
+  ) {
+    out.push({
+      summary: `Enable Heikin-Ashi exit (trail ${Math.round(trailShare * 100)}% / left-on-table ${leftOnTable})`,
+      patch: {
+        exitRules: {
+          exitPolicy: { heikinAshiExitEnabled: true },
+        },
+      },
+    });
+  }
+
+  // Swing HA exit: disable when many early HA exits with poor expectancy
+  const haExits = episodes.filter((e) => e.exitKey === 'ha');
+  if (haSwing && haOn && haExits.length >= 4) {
+    const haExpect =
+      haExits.reduce((s, e) => s + (e.pnlPct || 0), 0) / haExits.length;
+    const earlyHa = haExits.filter((e) => (e.holdSec || 0) < 180).length;
+    if (haExpect < 0 && earlyHa / haExits.length >= 0.4) {
+      out.push({
+        summary: `Disable Heikin-Ashi exit (avg ${haExpect.toFixed(1)}% · early cuts ${earlyHa}/${haExits.length})`,
+        patch: {
+          exitRules: {
+            exitPolicy: { heikinAshiExitEnabled: false },
+          },
+        },
+      });
+    }
   }
 
   // Mild always-on exit nudge when recent expectancy is weak or MFE left on table
@@ -1385,6 +1435,7 @@ export function runSelfLearnTick(input: {
     earlyPartialFraction: Number(pol.earlyPartialFraction) || 0.4,
     momentumFadeDropPct: Number(pol.momentumFadeDropPct) || 8,
     hardTimeLimitSecMax: input.currentExit.hardTimeLimitSecMax,
+    heikinAshiExitEnabled: pol.heikinAshiExitEnabled === true,
   };
 
   const candidates = [

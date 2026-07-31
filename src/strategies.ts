@@ -75,6 +75,7 @@ export type StrategyKey =
   | 'post_run_dip'
   | 'technical_levels'
   | 'chart_patterns'
+  | 'heikin_ashi'
   | 'pattern_volume_dryup_return'
   | 'pattern_falling_wedge'
   | 'pattern_structured_pullback'
@@ -624,6 +625,17 @@ export const STRATEGY_REGISTRY: readonly StrategyDefinition[] = [
     group: 'filters',
     description:
       'Optional secondary patterns (triangles, trendline break, holder distribution, capitulation). Core Pump.fun patterns have their own toggles below. Soft boost; configurable sensitivity. Paper / Live Sim / Backtester.',
+    defaultEnabled: false,
+    criticalSafety: false,
+    frequencyWhenOn: 'slightly_fewer',
+    source: 'optional',
+  },
+  {
+    key: 'heikin_ashi',
+    name: 'Heikin-Ashi Trend',
+    group: 'filters',
+    description:
+      'Soft-prefer HA-green entries and exit on confirmed HA red flip after ≥2 green candles. For Trend Rider / Steady Compounder / High Win-Rate. Opt-in master; profile allowlist ON for those three. Does not replace trailing stop. Fail-open with thin history.',
     defaultEnabled: false,
     criticalSafety: false,
     frequencyWhenOn: 'slightly_fewer',
@@ -1846,6 +1858,7 @@ export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
   post_run_dip: false,
   technical_levels: false,
   chart_patterns: false,
+  heikin_ashi: false,
   pattern_volume_dryup_return: false,
   pattern_falling_wedge: false,
   pattern_structured_pullback: false,
@@ -1899,6 +1912,7 @@ export const WIN_RATE_55_60_PRESET: StrategyToggleMap = {
   post_run_dip: false,
   technical_levels: false,
   chart_patterns: false,
+  heikin_ashi: false,
   pattern_volume_dryup_return: false,
   pattern_falling_wedge: false,
   pattern_structured_pullback: false,
@@ -1947,6 +1961,7 @@ export const BALANCED_PRESET: StrategyToggleMap = {
   post_run_dip: false,
   technical_levels: false,
   chart_patterns: false,
+  heikin_ashi: false,
   pattern_volume_dryup_return: false,
   pattern_falling_wedge: false,
   pattern_structured_pullback: false,
@@ -1995,6 +2010,7 @@ export const AGGRESSIVE_PRESET: StrategyToggleMap = {
   post_run_dip: false,
   technical_levels: false,
   chart_patterns: false,
+  heikin_ashi: false,
   pattern_volume_dryup_return: false,
   pattern_falling_wedge: false,
   pattern_structured_pullback: false,
@@ -2043,6 +2059,7 @@ export const QUICK_SCALPER_PRESET: StrategyToggleMap = {
   post_run_dip: false,
   technical_levels: false,
   chart_patterns: false,
+  heikin_ashi: false,
   pattern_volume_dryup_return: false,
   pattern_falling_wedge: false,
   pattern_structured_pullback: false,

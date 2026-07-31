@@ -7949,6 +7949,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           c('tl-favour-volume', 'Favour volume / bounce reaction') +
           c('tl-break-close', 'Break + close invalidation') +
           c('tl-hard-filter', 'Hard filter (block if not near Fib/S)'),
+        heikin_ashi:
+          '<p class="mint text-xs mb-2">Opt-in master for Heikin-Ashi Trend. Soft-prefer HA-green entries; swing profiles exit on confirmed HA red flip after ≥2 green candles. Profile allowlist: Trend Rider, Steady Compounder, High Win-Rate. Learning can toggle <code>heikinAshiExitEnabled</code>. Does not replace trailing stop. Fail-open with thin 5m history.</p>',
         chart_patterns:
           '<p class="mint text-xs mb-2">Optional <strong>extra</strong> patterns (triangles, trendline break, holder distribution, capitulation). The top-5 Pump.fun patterns are separate strategy toggles: Volume Dry-up+Return, Falling Wedge, Structured Pullback, Bull Flag, Trend Continuation. Soft boost; configurable sensitivity. Paper / Live Sim / Backtester.</p>' +
           '<label class="ctl strat-field" data-strategy-control="cp-sensitivity"><span>Sensitivity (shared)</span>' +
@@ -8097,6 +8099,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           'ta_market_scanner',
           'technical_levels',
           'chart_patterns',
+          'heikin_ashi',
           'pattern_volume_dryup_return',
           'pattern_falling_wedge',
           'pattern_structured_pullback',
@@ -11798,6 +11801,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (/dead\\s*market|dead.?vol|inactive\\s*market|volume\\s*dead/i.test(r)) {
         return { key: 'other', label: 'Dead Market' };
+      }
+      if (/heikin-?ashi|ha red flip/i.test(r)) {
+        return { key: 'ha', label: 'Heikin-Ashi' };
       }
       if (/migrat/i.test(r)) return { key: 'other', label: 'Migration' };
       if (/momentum|signal\\s*fail|invalidate|post.?run.?dip/i.test(r)) {

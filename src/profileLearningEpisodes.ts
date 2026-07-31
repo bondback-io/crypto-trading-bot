@@ -56,6 +56,8 @@ export interface ProfileLearningEpisode {
   top10HoldPct?: number | null;
   /** Hours since grad/pair at entry (for raise-only min token age learning) */
   tokenAgeHoursAtEntry?: number;
+  /** Whether Heikin-Ashi exit was enabled on frozen policy at open */
+  haExitEnabledAtOpen?: boolean;
 }
 
 interface EpisodesFile {

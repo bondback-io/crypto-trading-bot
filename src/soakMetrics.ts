@@ -12,6 +12,7 @@ export type ExitMixKey =
   | 'tp'
   | 'manual'
   | 'partial'
+  | 'ha'
   | 'other';
 
 export interface ExitMixBucket {
@@ -76,6 +77,9 @@ export function classifyExitKey(reason: string | undefined | null): {
   }
   if (/dead\s*market|dead.?vol|inactive\s*market|volume\s*dead/i.test(r)) {
     return { key: 'dead_market', label: 'Dead Market' };
+  }
+  if (/heikin-?ashi|ha red flip/i.test(r)) {
+    return { key: 'ha', label: 'Heikin-Ashi' };
   }
   if (/bag\s*to|bag\s*trim/i.test(r)) return { key: 'partial', label: 'Bag Trim' };
   if (/recover|initial recovered/i.test(r)) {

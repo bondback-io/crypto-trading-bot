@@ -49,7 +49,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles.</li>
           <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
-          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog).</li>
+          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip).</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and this manual.</li>
         </ul>
         <div class="botinfo-actions">
@@ -131,6 +131,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         </ul>
         <ul>
           <li>Level = applied upgrades only — not episode count.</li>
+          <li>Heikin-Ashi Trend module (opt-in) + learning can enable/disable <code>heikinAshiExitEnabled</code> on Trend Rider / Steady Compounder / High Win-Rate.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
         </ul>
         <div class="botinfo-actions">

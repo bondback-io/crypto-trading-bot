@@ -76,6 +76,7 @@ const TREND_STYLE_MODULES: TradeProfileModules = {
   confirmation_layer: true,
   technical_levels: true,
   chart_patterns: true,
+  heikin_ashi: true,
   pattern_structured_pullback: true,
   pattern_bull_flag: true,
   pattern_trend_continuation: true,
@@ -182,6 +183,8 @@ export interface TradeProfileExitRules {
     profitFloorPct?: number;
     extendHoldIfTaOk?: boolean;
     cutIfStructureBroken?: boolean;
+    /** Swing: exit on confirmed Heikin-Ashi red flip after ≥2 green HA candles */
+    heikinAshiExitEnabled?: boolean;
   };
 }
 
@@ -597,7 +600,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '▲',
     color: TRADE_PROFILE_COLORS.trend_rider,
     description:
-      'Rides longer-lived tokens with holders and volume for steady continuation.',
+      'Rides longer-lived tokens with holders and volume for steady continuation. HA exit rides green Heikin-Ashi then sells on red flip.',
     recommendedRisk: 'Low / Medium',
     style: 'Trend Hold',
     rulesSummary: [
@@ -605,6 +608,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Holders + KOL presence · 1h vol floor + soft tiers toward $50k/$100k/$500k',
       'Targets 8–18% · tighter risk (~7–10% SL)',
       'Patterns: pullback / bull flag / trend continuation',
+      'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥2h · holders ≥40 · 1h vol ≥$4k',
     ],
     priority: 68,
@@ -644,6 +648,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingStopPct: 6,
       trailingActivationProfit: 6,
       sizeMultiplier: 1.0,
+      exitPolicy: {
+        heikinAshiExitEnabled: true,
+      },
     },
     modules: { ...TREND_STYLE_MODULES },
   },
@@ -731,7 +738,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '◎',
     color: TRADE_PROFILE_COLORS.high_win_rate,
     description:
-      'Extremely selective setups focused on maximum win rate.',
+      'Extremely selective setups focused on maximum win rate. HA exit rides green Heikin-Ashi then sells on red flip.',
     recommendedRisk: 'Low / Medium',
     style: 'High Quality',
     rulesSummary: [
@@ -739,6 +746,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Min conviction 55+ · established MC / holders via Quality Filter',
       'Multi-TA: pattern + Fib/S + confirmation',
       'KOL / specialty feed preferred for scanner entries',
+      'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Selective · smaller size — accuracy over volume',
     ],
     priority: 72,
@@ -787,6 +795,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingStopPct: 10,
       trailingActivationProfit: 22,
       sizeMultiplier: 0.7,
+      exitPolicy: {
+        heikinAshiExitEnabled: true,
+      },
     },
     modules: {
       ...CORE_SAFETY_MODULES,
@@ -801,6 +812,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       confirmation_layer: true,
       technical_levels: true,
       chart_patterns: true,
+      heikin_ashi: true,
       pattern_volume_dryup_return: true,
       pattern_falling_wedge: true,
       pattern_structured_pullback: true,
@@ -874,7 +886,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '◇',
     color: TRADE_PROFILE_COLORS.steady_compounder,
     description:
-      'Small consistent gains on more established tokens.',
+      'Small consistent gains on more established tokens. HA exit rides green Heikin-Ashi then sells on red flip.',
     recommendedRisk: 'Low / Medium',
     style: 'Steady / Compounding',
     rulesSummary: [
@@ -882,6 +894,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'MC ≥$450k (prefer $1M) · holders ≥80 · decent volume',
       'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
+      'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
     ],
     priority: 62,
@@ -919,6 +932,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       trailingStopPct: 4,
       trailingActivationProfit: 4,
       sizeMultiplier: 1.0,
+      exitPolicy: {
+        heikinAshiExitEnabled: true,
+      },
     },
     modules: {
       ...TREND_STYLE_MODULES,
@@ -4017,6 +4033,7 @@ export function applyTradeProfileExitRules(
     tradeProfileId?: string;
     profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
     selfLearnVersion?: number;
+    haExitEnabledAtOpen?: boolean;
   },
   rules: TradeProfileExitRules,
   seedShortTerm?: (
@@ -4040,6 +4057,7 @@ export function applyTradeProfileExitRules(
       require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
     const policy = resolveExitPolicy(position.tradeProfileId, rules);
     position.profileExitPolicy = policy;
+    position.haExitEnabledAtOpen = policy.heikinAshiExitEnabled === true;
     if (policy.aggressiveDeadMarket && position.deadVolumeMinHoldMinutes == null) {
       position.deadVolumeMinHoldMinutes =
         rules.deadVolumeMinHoldMinutes != null

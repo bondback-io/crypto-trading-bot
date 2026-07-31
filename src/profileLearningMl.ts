@@ -72,6 +72,7 @@ const FEATURE_NAMES = [
   'avg_wallets',
   'avg_mc_log',
   'avg_lane',
+  'ha_enabled_share',
   'patch_giveback_delta',
   'patch_arm_delta',
   'patch_partial_delta',
@@ -150,6 +151,9 @@ export function buildWindowFeatures(
   const lanes = episodes
     .map((e) => e.laneScore ?? e.tradeProfileScore)
     .filter((v): v is number => v != null && Number.isFinite(v));
+  const haShare =
+    episodes.filter((e) => e.haExitEnabledAtOpen === true).length /
+    episodes.length;
 
   return [
     mean(pnls) / 20, // scale
@@ -163,6 +167,7 @@ export function buildWindowFeatures(
     wallets.length ? mean(wallets) / 5 : 0.3,
     mcs.length ? Math.log10(mean(mcs) + 1) / 7 : 0.5,
     lanes.length ? mean(lanes) / 100 : 0.5,
+    haShare,
     0,
     0,
     0,
@@ -208,14 +213,14 @@ export function buildPatchFeatures(
       ? Number(patch.exitRules.hardTimeLimitSecMax)
       : timerCur;
 
-  // indices 11..17 are patch slots in buildWindowFeatures
-  base[11] = (giveCur - giveNext) / 10; // tighten giveback → positive
-  base[12] = (armCur - armNext) / 20;
-  base[13] = (partCur - partNext) / 10;
-  base[14] = (convNext - convCur) / 10;
-  base[15] = (timerCur - timerNext) / 120;
-  base[16] = patch.exitRules ? 1 : 0;
-  base[17] = patch.match ? 1 : 0;
+  // indices 12..18 are patch slots in buildWindowFeatures (11 = ha_enabled_share)
+  base[12] = (giveCur - giveNext) / 10; // tighten giveback → positive
+  base[13] = (armCur - armNext) / 20;
+  base[14] = (partCur - partNext) / 10;
+  base[15] = (convNext - convCur) / 10;
+  base[16] = (timerCur - timerNext) / 120;
+  base[17] = patch.exitRules ? 1 : 0;
+  base[18] = patch.match ? 1 : 0;
   return base;
 }
 
