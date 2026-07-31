@@ -21151,11 +21151,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     '" value="' +
                     Number(r.suggestedMs) +
                     '" min="3000" step="1000" /></label>' +
-                    '<button type="button" class="btn btn-primary text-xs" onclick="applyRpcDiagnosticUpdate(\'' +
+                    '<button type="button" class="btn btn-primary text-xs" onclick="applyRpcDiagnosticUpdate(\\'' +
                     target +
-                    '\',\'' +
+                    '\\', \\'' +
                     id +
-                    '\')">Save</button>' +
+                    '\\')">Save</button>' +
                     '</div></div>'
                   );
                 })
