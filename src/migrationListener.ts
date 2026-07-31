@@ -17,7 +17,7 @@ import {
 } from '@solana/web3.js';
 import { config } from './config';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcUrl } from './connection';
+import { getConnection, getRpcUrl, noteActiveRpcFailure } from './connection';
 import { isPublicRpcUrl } from './rpcUrl';
 
 /** Raydium AMM v4 — common post-migration venue */
@@ -84,9 +84,30 @@ const MAX_PROCESSED_SIGS = 800;
 const WS_STALE_MS = 4 * 60 * 1000;
 const HEALTH_CHECK_MS = 45_000;
 const MAX_RECONNECT_DELAY_MS = 60_000;
+/** After RPC 429, pause migration polls so we don't amplify rate limits */
+const RATE_LIMIT_BACKOFF_MS = 45_000;
 
 /** Programs whose signature cursors have been seeded (no historical replay) */
 const seededPollPrograms = new Set<string>();
+let rateLimitedUntil = 0;
+let lastRateLimitLogAt = 0;
+
+function isRpcRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /429|rate.?limit|-32429/i.test(msg);
+}
+
+function armRateLimitBackoff(err: unknown): void {
+  rateLimitedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
+  noteActiveRpcFailure(err, 'primary');
+  if (Date.now() - lastRateLimitLogAt > 15_000) {
+    lastRateLimitLogAt = Date.now();
+    console.warn(
+      `[migration] RPC rate-limited — pausing polls ${RATE_LIMIT_BACKOFF_MS / 1000}s ` +
+        `and marking active endpoint for failover. Set HELIUS_API_KEY / ALCHEMY_API_KEY.`
+    );
+  }
+}
 
 /** Default SOL moved in migrate tx to count as volume spike */
 const DEFAULT_VOLUME_SPIKE_SOL = 40;
@@ -127,7 +148,7 @@ export function startMigrationListener(): void {
   if (isPublicRpcUrl(rpcUrl)) {
     console.warn(
       '[migration] Public RPC detected — WebSocket program logs DISABLED (poll-only). ' +
-        'Set a paid Helius/QuickNode RPC_URL for real-time migration WS.'
+        'Set HELIUS_API_KEY + ALCHEMY_API_KEY (or a paid RPC_URL) for real-time migration WS.'
     );
     wsMode = false;
   } else {
@@ -412,9 +433,11 @@ function looksLikeMigrationLogs(
 
 async function pollMigrations(): Promise<void> {
   if (!running) return;
+  if (Date.now() < rateLimitedUntil) return;
 
   try {
     const conn = getConnection();
+    const publicRpc = isPublicRpcUrl(conn.rpcEndpoint);
     // Poll both PumpSwap (post-migrate venue) and Pump.fun (migrate ix)
     const targets = [
       { id: config.pumpSwapProgramId, label: 'pumpswap' as const },
@@ -422,9 +445,10 @@ async function pollMigrations(): Promise<void> {
     ];
 
     for (const target of targets) {
+      if (Date.now() < rateLimitedUntil) break;
       const signatures = await conn.getSignaturesForAddress(
         new PublicKey(target.id),
-        { limit: 15 }
+        { limit: publicRpc ? 8 : 15 }
       );
       if (signatures.length === 0) continue;
 
@@ -451,24 +475,32 @@ async function pollMigrations(): Promise<void> {
 
       if (newSigs.length === 0) continue;
 
-      // Newest first for latency; cap so public RPCs stay healthy
-      for (const sig of newSigs.slice(0, 5)) {
-        await processMigrationTx(sig, 'poll', target.label);
+      // Newest first for latency; tighter cap on public RPCs to avoid 429 storms
+      const parseCap = publicRpc ? 2 : 5;
+      for (const sig of newSigs.slice(0, parseCap)) {
+        if (Date.now() < rateLimitedUntil) break;
+        const ok = await processMigrationTx(sig, 'poll', target.label);
+        if (!ok && Date.now() < rateLimitedUntil) break;
       }
     }
 
     pruneExpired();
   } catch (err) {
+    if (isRpcRateLimitError(err)) {
+      armRateLimitBackoff(err);
+      return;
+    }
     console.error('[migration] Poll error:', err);
   }
 }
 
+/** @returns false when rate-limited (caller should abort this poll cycle) */
 async function processMigrationTx(
   signature: string,
   source: MigrationEvent['source'],
   programHint: MigrationEvent['program']
-): Promise<void> {
-  if (processedSigs.has(signature)) return;
+): Promise<boolean> {
+  if (processedSigs.has(signature)) return true;
 
   try {
     const conn = getConnection();
@@ -479,7 +511,7 @@ async function processMigrationTx(
     if (!tx?.meta || tx.meta.err) {
       // Confirmed miss / failed tx — don't retry forever
       rememberSig(signature);
-      return;
+      return true;
     }
 
     const logText = (tx.meta.logMessages ?? []).join('\n').toLowerCase();
@@ -492,7 +524,7 @@ async function processMigrationTx(
       !accountKeysInclude(tx, RAYDIUM_AMM_V4)
     ) {
       rememberSig(signature);
-      return;
+      return true;
     }
 
     const parsed = parseMigrationTransaction(tx, signature, source, programHint);
@@ -500,11 +532,17 @@ async function processMigrationTx(
     for (const event of parsed) {
       await recordAndEmit(event);
     }
+    return true;
   } catch (err) {
+    if (isRpcRateLimitError(err)) {
+      armRateLimitBackoff(err);
+      return false;
+    }
     // Leave sig unmarked so a transient RPC miss can retry next poll
     if (Math.random() < 0.08) {
       console.warn('[migration] Tx parse failed:', err);
     }
+    return true;
   }
 }
 

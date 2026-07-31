@@ -333,17 +333,35 @@ function recordFailure(index: number, error: string): void {
   state.lastError = error;
   state.lastCheckedAt = Date.now();
 
-  const threshold = config.rpc?.failureThreshold ?? 3;
+  const isRateLimit = /429|rate.?limit|-32429/i.test(error);
+  const threshold = isRateLimit
+    ? 1
+    : config.rpc?.failureThreshold ?? 3;
   if (state.consecutiveFailures >= threshold) {
     if (state.healthy) {
       state.unhealthySince = Date.now();
     }
     state.healthy = false;
     console.warn(
-      `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures`
+      `[rpc] ${state.endpoint.label} marked unhealthy after ${state.consecutiveFailures} failures` +
+        (isRateLimit ? ' (rate limited)' : '')
     );
     void maybeSwitchEndpoints();
   }
+}
+
+/**
+ * Record a failure against the lane's active endpoint (e.g. migration parse 429).
+ * Rate limits mark the endpoint unhealthy immediately so failover can kick in.
+ */
+export function noteActiveRpcFailure(
+  error: unknown,
+  role: RpcRole = 'primary'
+): void {
+  ensureEndpoints();
+  const index = resolveIndexForRole(role);
+  const message = error instanceof Error ? error.message : String(error);
+  recordFailure(index, message);
 }
 
 async function maybeSwitchEndpoints(): Promise<void> {
