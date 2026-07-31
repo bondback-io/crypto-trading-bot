@@ -6978,7 +6978,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="backup-actions">
             <div class="toggle-row" style="margin:0" title="Enable scheduled performance emails">
               <span style="font-size:0.8rem;color:#cbd5e1">Enabled</span>
-              <label class="switch"><input type="checkbox" id="bot-perf-email-enabled" onchange="saveBotPerfEmailSettings()" /><span class="slider"></span></label>
+              <label class="switch"><input type="checkbox" id="bot-perf-email-enabled" checked onchange="saveBotPerfEmailSettings()" /><span class="slider"></span></label>
             </div>
             <button type="button" class="btn btn-primary" onclick="sendBotPerfEmailNow()" title="Build the digest and email it now">Generate &amp; send now</button>
           </div>

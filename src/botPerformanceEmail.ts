@@ -124,7 +124,7 @@ let sendInFlight = false;
 
 function defaultSettings(): BotPerfEmailSettings {
   return {
-    enabled: false,
+    enabled: true,
     interval: '24h',
     email: DEFAULT_EMAIL,
     sendHour: DEFAULT_SEND_HOUR,
@@ -150,8 +150,14 @@ function normalizeSettings(raw: Partial<BotPerfEmailSettings> | null | undefined
     ? (raw.interval as BotPerfEmailInterval)
     : d.interval;
   const email = String(raw.email || '').trim() || DEFAULT_EMAIL;
+  // Default ON when key missing (fresh file / wipe). Explicit false still disables.
+  let enabled =
+    typeof raw.enabled === 'boolean' ? raw.enabled : d.enabled;
+  const envEn = process.env.BOT_PERF_EMAIL_ENABLED?.trim().toLowerCase();
+  if (envEn === '1' || envEn === 'true') enabled = true;
+  if (envEn === '0' || envEn === 'false') enabled = false;
   return {
-    enabled: raw.enabled === true,
+    enabled,
     interval,
     email,
     sendHour: clampHour(
