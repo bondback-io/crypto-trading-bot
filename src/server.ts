@@ -794,6 +794,31 @@ export function createServer(): express.Application {
     }
   });
 
+  app.post('/api/rpc/diagnostic/apply', (req: Request, res: Response) => {
+    try {
+      const { applyRpcDiagnosticPollUpdates } =
+        require('./rpcDiagnostic') as typeof import('./rpcDiagnostic');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const raw = Array.isArray(body.updates) ? body.updates : [];
+      const updates = raw
+        .map((u) => {
+          const row = (u || {}) as Record<string, unknown>;
+          return {
+            target: String(row.target || '') as import('./rpcDiagnostic').RpcDiagTarget,
+            pollIntervalMs: Number(row.pollIntervalMs),
+          };
+        })
+        .filter((u) => u.target && Number.isFinite(u.pollIntervalMs));
+      const result = applyRpcDiagnosticPollUpdates(updates);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/mev', (_req: Request, res: Response) => {
     res.json(getMevStatus());
   });

@@ -20960,6 +20960,120 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    function syncRpcDiagPollForms(applied) {
+      if (!Array.isArray(applied)) return;
+      for (let i = 0; i < applied.length; i++) {
+        const a = applied[i];
+        const ms = Number(a.pollIntervalMs);
+        if (!Number.isFinite(ms)) continue;
+        if (a.target === 'market_scanner') {
+          const el = document.getElementById('ms-poll-ms');
+          if (el) el.value = String(ms);
+        } else if (a.target === 'alpha_scan') {
+          const el = document.getElementById('as-poll-ms');
+          if (el) el.value = String(ms);
+        } else if (a.target === 'zion_scanner') {
+          const el = document.getElementById('zion-poll-ms');
+          if (el) el.value = String(ms);
+        }
+      }
+    }
+
+    function collectRpcDiagUpdates(singleTarget, singleInputId) {
+      const updates = [];
+      if (singleTarget && singleInputId) {
+        const el = document.getElementById(singleInputId);
+        const n = el ? Number(el.value) : NaN;
+        if (Number.isFinite(n)) {
+          updates.push({ target: singleTarget, pollIntervalMs: n });
+        }
+        return updates;
+      }
+      const inputs = document.querySelectorAll('.rpc-diag-poll-input');
+      for (let i = 0; i < inputs.length; i++) {
+        const inp = inputs[i];
+        const target = inp.getAttribute('data-target');
+        const n = Number(inp.value);
+        if (target && Number.isFinite(n)) {
+          updates.push({ target: target, pollIntervalMs: n });
+        }
+      }
+      return updates;
+    }
+
+    async function applyRpcDiagnosticUpdate(target, inputId) {
+      const st =
+        document.getElementById('rpc-diag-apply-status') ||
+        document.getElementById('rpc-diag-status');
+      const updates = collectRpcDiagUpdates(target, inputId);
+      if (!updates.length) {
+        if (st) st.textContent = 'Enter a valid Poll (ms)';
+        return;
+      }
+      if (st) st.textContent = 'Saving…';
+      try {
+        const data = await fetchJSON('/api/rpc/diagnostic/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates: updates }),
+        });
+        syncRpcDiagPollForms(data.applied || []);
+        const msg =
+          (data.applied && data.applied.length
+            ? 'Saved ' +
+              data.applied
+                .map(function (a) {
+                  return a.fieldLabel + '=' + a.pollIntervalMs;
+                })
+                .join(', ')
+            : 'Nothing saved') +
+          (data.skipped && data.skipped.length
+            ? ' · skipped ' + data.skipped.length
+            : '');
+        await runRpcDiagnostic();
+        const st2 =
+          document.getElementById('rpc-diag-apply-status') ||
+          document.getElementById('rpc-diag-status');
+        if (st2) st2.textContent = msg;
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
+    async function applyAllRpcDiagnosticUpdates() {
+      const st =
+        document.getElementById('rpc-diag-apply-status') ||
+        document.getElementById('rpc-diag-status');
+      const updates = collectRpcDiagUpdates();
+      if (!updates.length) {
+        if (st) st.textContent = 'No recommendations to save';
+        return;
+      }
+      if (st) st.textContent = 'Saving all…';
+      try {
+        const data = await fetchJSON('/api/rpc/diagnostic/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates: updates }),
+        });
+        syncRpcDiagPollForms(data.applied || []);
+        const msg =
+          'Saved ' +
+          (data.applied ? data.applied.length : 0) +
+          ' setting' +
+          (data.applied && data.applied.length === 1 ? '' : 's');
+        await runRpcDiagnostic();
+        const st2 =
+          document.getElementById('rpc-diag-apply-status') ||
+          document.getElementById('rpc-diag-status');
+        if (st2) st2.textContent = msg;
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
     async function runRpcDiagnostic() {
       const st = document.getElementById('rpc-diag-status');
       const panel = document.getElementById('rpc-diag-panel');
@@ -21007,28 +21121,55 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</ul>'
         );
         if (recs.length) {
-          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Recommended Poll (ms) — apply manually</div>');
+          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Recommended Poll (ms) — edit &amp; save here or in Live Feed / Zion</div>');
           lines.push(
-            '<ul style="margin:0;padding-left:1.1rem">' +
+            '<div style="display:flex;flex-direction:column;gap:0.55rem;margin-top:0.35rem">' +
               recs
-                .map(function (r) {
+                .map(function (r, idx) {
+                  const id = 'rpc-diag-poll-' + idx;
+                  const target = escHtml(String(r.target || ''));
                   return (
-                    '<li><strong style="color:#e2e8f0">' +
+                    '<div class="rpc-diag-rec" data-target="' +
+                    target +
+                    '" style="border:1px solid #334155;border-radius:8px;padding:0.55rem 0.65rem;background:#0f172a">' +
+                    '<div style="color:#e2e8f0;margin-bottom:0.3rem"><strong>' +
                     escHtml(r.fieldLabel || r.target) +
-                    '</strong>: ' +
-                    Number(r.currentMs) +
-                    ' → <strong style="color:#4ade80">' +
-                    Number(r.suggestedMs) +
                     '</strong>' +
-                    (r.reason ? ' — ' + escHtml(r.reason) : '') +
-                    '</li>'
+                    (r.reason
+                      ? ' <span style="color:#94a3b8">— ' + escHtml(r.reason) + '</span>'
+                      : '') +
+                    '</div>' +
+                    '<div class="filters-row" style="gap:0.5rem;align-items:center;flex-wrap:wrap">' +
+                    '<span class="mint text-xs">was ' +
+                    Number(r.currentMs) +
+                    '</span>' +
+                    '<label class="ctl ctl-sm" style="margin:0"><span>Poll (ms)</span>' +
+                    '<input type="number" id="' +
+                    id +
+                    '" class="rpc-diag-poll-input" data-target="' +
+                    target +
+                    '" value="' +
+                    Number(r.suggestedMs) +
+                    '" min="3000" step="1000" /></label>' +
+                    '<button type="button" class="btn btn-primary text-xs" onclick="applyRpcDiagnosticUpdate(\'' +
+                    target +
+                    '\',\'' +
+                    id +
+                    '\')">Save</button>' +
+                    '</div></div>'
                   );
                 })
                 .join('') +
-              '</ul>'
+              '</div>'
           );
           lines.push(
-            '<div class="mt-2" style="color:#64748b">Where to change: Live Feed → Market Scanner / AlphaScan Poll; Zion → Poll interval; wallet pollIntervalMs is persisted settings (not always on this page).</div>'
+            '<div class="mt-2 flex flex-wrap gap-2 items-center">' +
+              '<button type="button" class="btn btn-secondary text-xs" onclick="applyAllRpcDiagnosticUpdates()">Save all recommended</button>' +
+              '<span class="mint text-xs" id="rpc-diag-apply-status"></span>' +
+              '</div>'
+          );
+          lines.push(
+            '<div class="mt-2" style="color:#64748b">Saves write the same settings as Live Feed (Market Scanner / AlphaScan), Zion Poll, and monitor pollIntervalMs — forms update after save.</div>'
           );
         } else {
           lines.push('<div style="margin-top:0.45rem;color:#4ade80">No Poll (ms) bumps suggested.</div>');

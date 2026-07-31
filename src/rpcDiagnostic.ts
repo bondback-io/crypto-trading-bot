@@ -71,15 +71,18 @@ function pickEndpointStats(
   downForMs: number;
 } {
   const laneMeta = lane === 'primary' ? rpc.primary : rpc.secondary;
-  const pref = rpc.endpoints.find((e) => e.lane === lane);
-  const byLabel = rpc.endpoints.find((e) => e.label === lane);
-  const hit = pref || byLabel || null;
+  // Prefer the preferred-lane endpoint (lane tag), not the active failover host label.
+  const pref =
+    rpc.endpoints.find((e) => e.lane === lane) ||
+    rpc.endpoints.find((e) => e.label === lane && e.role === lane) ||
+    rpc.endpoints.find((e) => e.role === lane) ||
+    null;
   return {
-    label: laneMeta.label || lane,
+    label: pref?.label || lane,
     healthy: Boolean(laneMeta.healthy),
-    latencyMs: hit?.latencyMs ?? null,
-    successRate: hit != null ? Number(hit.successRate) : null,
-    url: hit?.url || laneMeta.url || '',
+    latencyMs: pref?.latencyMs ?? null,
+    successRate: pref != null ? Number(pref.successRate) : null,
+    url: pref?.url || laneMeta.url || '',
     failover: Boolean(laneMeta.failover),
     downForMs: Number(laneMeta.downForMs) || 0,
   };
@@ -342,5 +345,176 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     turboNote:
       'Turbo Mode (per micro-bot) raises priority fee + buy slip. It does not turn Jito bundles ON. Live Sim stamps Turbo without real bundles.',
     rpc,
+  };
+}
+
+export interface RpcDiagApplyUpdate {
+  target: RpcDiagTarget;
+  pollIntervalMs: number;
+}
+
+export interface RpcDiagApplyResult {
+  ok: boolean;
+  applied: Array<{
+    target: RpcDiagTarget;
+    pollIntervalMs: number;
+    fieldLabel: string;
+  }>;
+  skipped: Array<{ target: string; reason: string }>;
+  diagnostic: RpcLoadDiagnostic;
+}
+
+function clampPoll(
+  target: RpcDiagTarget,
+  n: number
+): number | null {
+  if (!Number.isFinite(n)) return null;
+  const v = Math.round(n);
+  switch (target) {
+    case 'wallet_poll':
+      return Math.max(3_000, Math.min(120_000, v));
+    case 'market_scanner':
+    case 'alpha_scan':
+      return Math.max(15_000, Math.min(600_000, v));
+    case 'zion_scanner':
+      return Math.max(30_000, Math.min(600_000, v));
+    case 'health':
+      return Math.max(10_000, Math.min(300_000, v));
+    default:
+      return null;
+  }
+}
+
+/**
+ * Apply Poll (ms) recommendations from the RPC diagnostic panel.
+ * Writes the same config fields as Live Feed / Zion / monitor settings.
+ */
+export function applyRpcDiagnosticPollUpdates(
+  updates: RpcDiagApplyUpdate[]
+): RpcDiagApplyResult {
+  const { persistUserSettings } =
+    require('./config') as typeof import('./config');
+
+  const applied: RpcDiagApplyResult['applied'] = [];
+  const skipped: RpcDiagApplyResult['skipped'] = [];
+  let touchWallet = false;
+  let touchScanner = false;
+  let touchZion = false;
+  let touchHealth = false;
+
+  const labels: Record<RpcDiagTarget, string> = {
+    wallet_poll: 'Wallet / monitor pollIntervalMs',
+    market_scanner: 'Market Scanner Poll interval (ms)',
+    alpha_scan: 'AlphaScan Poll (ms)',
+    zion_scanner: 'Zion Poll interval (ms)',
+    health: 'RPC healthIntervalMs',
+  };
+
+  for (const u of updates || []) {
+    const target = u?.target;
+    if (
+      target !== 'wallet_poll' &&
+      target !== 'market_scanner' &&
+      target !== 'alpha_scan' &&
+      target !== 'zion_scanner' &&
+      target !== 'health'
+    ) {
+      skipped.push({ target: String(u?.target), reason: 'unknown target' });
+      continue;
+    }
+    const clamped = clampPoll(target, Number(u.pollIntervalMs));
+    if (clamped == null) {
+      skipped.push({ target, reason: 'invalid pollIntervalMs' });
+      continue;
+    }
+
+    if (target === 'wallet_poll') {
+      config.pollIntervalMs = clamped;
+      touchWallet = true;
+    } else if (target === 'market_scanner') {
+      if (!config.marketScanner) {
+        skipped.push({ target, reason: 'marketScanner config missing' });
+        continue;
+      }
+      config.marketScanner.pollIntervalMs = clamped;
+      touchScanner = true;
+    } else if (target === 'alpha_scan') {
+      if (!config.alphaScan) {
+        skipped.push({ target, reason: 'alphaScan config missing' });
+        continue;
+      }
+      config.alphaScan.pollIntervalMs = clamped;
+    } else if (target === 'zion_scanner') {
+      if (!config.zion?.scanner) {
+        skipped.push({ target, reason: 'zion.scanner config missing' });
+        continue;
+      }
+      config.zion.scanner.pollIntervalMs = clamped;
+      touchZion = true;
+    } else if (target === 'health') {
+      if (!config.rpc) {
+        skipped.push({ target, reason: 'rpc config missing' });
+        continue;
+      }
+      config.rpc.healthIntervalMs = clamped;
+      touchHealth = true;
+    }
+
+    applied.push({
+      target,
+      pollIntervalMs: clamped,
+      fieldLabel: labels[target],
+    });
+  }
+
+  if (applied.length) {
+    persistUserSettings();
+  }
+
+  if (touchWallet) {
+    try {
+      const mon = require('./monitor') as typeof import('./monitor');
+      const wasRunning = mon.getMonitorStatus().running;
+      if (wasRunning) {
+        mon.stopMonitor();
+        mon.startMonitor();
+      }
+    } catch {
+      /* optional */
+    }
+  }
+  if (touchScanner) {
+    try {
+      const { restartMarketScanner } =
+        require('./marketScanner') as typeof import('./marketScanner');
+      restartMarketScanner();
+    } catch {
+      /* optional */
+    }
+  }
+  if (touchZion) {
+    try {
+      const { syncZionKolScannerLifecycle } =
+        require('./zionKolScanner') as typeof import('./zionKolScanner');
+      syncZionKolScannerLifecycle();
+    } catch {
+      /* optional */
+    }
+  }
+  if (touchHealth) {
+    try {
+      const conn = require('./connection') as typeof import('./connection');
+      conn.stopRpcHealthMonitor();
+      conn.startRpcHealthMonitor();
+    } catch {
+      /* health interval may require process restart — still persisted */
+    }
+  }
+
+  return {
+    ok: true,
+    applied,
+    skipped,
+    diagnostic: getRpcLoadDiagnostic(),
   };
 }
