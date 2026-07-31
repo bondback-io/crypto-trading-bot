@@ -47,7 +47,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.overviewSvg}
         ${slots.pipelineFlow}
         <ul>
-          <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles.</li>
+          <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
           <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
           <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip).</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and this manual.</li>

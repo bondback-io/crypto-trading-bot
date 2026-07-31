@@ -5122,7 +5122,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
         <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
-        <div class="card !py-3 col-span-2"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
+          <div class="signal-light mt-1" id="entry-path-light" title="Green = path clear. Amber = soft limit. Red = abnormal blocker.">
+            <span class="dot dot-quiet" id="entry-path-light-dot"></span>
+            <span id="entry-path-light-label">—</span>
+          </div>
+        </div>
+        <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
       <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
@@ -15956,6 +15962,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Amber = running but quiet (or paused). ' +
             'Red = stopped, no wallets, or RPC unhealthy. ' +
             'Last signal: ' + age + ' · 24h count: ' + (light.signals24h ?? status.monitor.recentSignals ?? 0);
+        }
+      })();
+      (function updateEntryPathLight() {
+        const light = status.monitor.entryPathLight || {};
+        const state = light.state || ((!status.monitor.running || status.monitor.paused) ? (status.monitor.paused ? 'paused' : 'off') : 'live');
+        const label = light.label || (
+          state === 'live' ? 'Entries: clear' :
+          state === 'paused' ? 'Entries: paused' :
+          state === 'off' ? 'Entries: off' :
+          'Entries: cooldown'
+        );
+        const dot = document.getElementById('entry-path-light-dot');
+        const lab = document.getElementById('entry-path-light-label');
+        const wrap = document.getElementById('entry-path-light');
+        if (dot) {
+          const cls =
+            state === 'live' ? 'dot-live' :
+            state === 'paused' ? 'dot-paused' :
+            state === 'off' ? 'dot-off' :
+            'dot-quiet';
+          dot.className = 'dot ' + cls;
+        }
+        if (lab) lab.textContent = label;
+        if (wrap) {
+          const blockers = Array.isArray(light.blockers) && light.blockers.length
+            ? light.blockers.join(' · ')
+            : 'none';
+          const detail = light.detail ? String(light.detail) : '';
+          wrap.title =
+            'Green = entry path clear (micro-bots can open). ' +
+            'Amber = soft limit (cooldown / poll / scanner stopped). ' +
+            'Red = abnormal blocker (off, pause, risk, funds, engines, max positions, RPC). ' +
+            'Blockers: ' + blockers +
+            (detail ? ' · ' + detail : '');
         }
       })();
       document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';

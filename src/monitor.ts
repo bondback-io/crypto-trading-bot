@@ -22,6 +22,7 @@ import {
   stampFromAssignment,
   applyProfileExitRulesToBuyOpts,
   isSmartBotProfilesEnabled,
+  getTradeProfilesStatus,
   withStrategyProfileGateAsync,
   applyTradeProfileSizing,
   evaluateTradeProfileLanes,
@@ -29,6 +30,7 @@ import {
   type TradeProfileMatchContext,
   type TradeProfileLaneResult,
 } from './tradeProfiles';
+import { evaluateAffordability } from './fundGate';
 import { refreshOpenMarketActivity } from './marketData';
 import { getDiscoveryStatus } from './walletDiscovery';
 import {
@@ -97,6 +99,7 @@ import {
 import {
   calculateDynamicPositionSize,
   isRiskHalted,
+  getRiskHaltReason,
   onRiskHalt,
   getRiskStatus,
   clearRiskHalt,
@@ -5064,6 +5067,147 @@ export function getSignalLightStatus(now = Date.now()): {
   };
 }
 
+/**
+ * Overview entry-path light: abnormal blockers only (not lane no-match quietness).
+ * Green = path clear; amber = soft limit; red = hard blocker / off.
+ */
+export function getEntryPathLightStatus(): {
+  state: 'live' | 'quiet' | 'paused' | 'off';
+  label: string;
+  detail?: string;
+  blockers: string[];
+} {
+  const blockers: string[] = [];
+  const rpc = getRpcStats();
+  const rpcHealthy = Boolean(rpc.ok);
+  const openCount = paperTrader.getOpenPositions().length;
+  const maxPos = Math.max(1, Number(config.filters?.maxConcurrentPositions) || 1);
+  const copyOn = isStrategyEnabled('smart_money_copy');
+  const scannerOn = isStrategyEnabled('ta_market_scanner');
+  const scanner = getScannerStatus();
+  const rate = canExecuteTradeNow();
+  const minTrade = Math.max(
+    0.001,
+    Number(config.risk?.minTradeSol) || 0.01
+  );
+  const funds = evaluateAffordability(minTrade);
+  const skipHint = lastFilterSkipReason
+    ? `Last skip: ${lastFilterSkipReason}`
+    : undefined;
+
+  if (!running) {
+    blockers.push('monitor not running');
+    return {
+      state: 'off',
+      label: 'Entries: off',
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (paused) {
+    blockers.push('monitor paused');
+    return {
+      state: 'paused',
+      label: 'Entries: paused',
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (isRiskHalted()) {
+    const reason = getRiskHaltReason() || 'risk halt';
+    blockers.push(`risk halt: ${reason}`);
+    return {
+      state: 'off',
+      label: 'Entries: risk halt',
+      detail: String(reason),
+      blockers,
+    };
+  }
+  if (!rpcHealthy) {
+    blockers.push('RPC unhealthy');
+    return {
+      state: 'off',
+      label: 'Entries: RPC down',
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (openCount >= maxPos) {
+    blockers.push(`max concurrent positions ${openCount}/${maxPos}`);
+    return {
+      state: 'off',
+      label: `Entries: max positions (${openCount}/${maxPos})`,
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (!copyOn && !scannerOn) {
+    blockers.push('copy + scanner engines off');
+    return {
+      state: 'off',
+      label: 'Entries: engines off',
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (isSmartBotProfilesEnabled()) {
+    const profiles = getTradeProfilesStatus().profiles;
+    const enabledCount = profiles.filter((p) => p.enabled).length;
+    if (enabledCount === 0) {
+      blockers.push('all Smart Bot profiles disabled');
+      return {
+        state: 'off',
+        label: 'Entries: all bots off',
+        detail: skipHint,
+        blockers,
+      };
+    }
+  }
+  if (!funds.ok) {
+    blockers.push(funds.reason);
+    return {
+      state: 'off',
+      label: 'Entries: no funds',
+      detail: funds.reason,
+      blockers,
+    };
+  }
+  if (!rate.ok) {
+    blockers.push(rate.reason || 'trade-rate / cooldown');
+    return {
+      state: 'quiet',
+      label: 'Entries: cooldown',
+      detail: rate.reason || skipHint,
+      blockers,
+    };
+  }
+  if (lastPollRateLimited) {
+    blockers.push('wallet poll rate-limited');
+    return {
+      state: 'quiet',
+      label: 'Entries: poll limited',
+      detail: skipHint,
+      blockers,
+    };
+  }
+  if (scannerOn && !scanner.running && !copyOn) {
+    blockers.push('scanner enabled but not running');
+    return {
+      state: 'quiet',
+      label: 'Entries: scanner stopped',
+      detail: skipHint,
+      blockers,
+    };
+  }
+
+  return {
+    state: 'live',
+    label: 'Entries: clear',
+    detail: skipHint,
+    blockers,
+  };
+}
+
 function pruneActivityFeed(): void {
   const cutoff = Date.now() - ACTIVITY_FEED_TTL_MS;
   while (activityFeed.length > 0) {
@@ -5156,6 +5300,7 @@ export function getMonitorStatus(): {
   recentSignals: number;
   lastSignalAt: number | null;
   signalLight: ReturnType<typeof getSignalLightStatus>;
+  entryPathLight: ReturnType<typeof getEntryPathLightStatus>;
   dailyPnlSol: number;
   openPositions: number;
   migration: ReturnType<typeof getMigrationStatus>;
@@ -5187,6 +5332,7 @@ export function getMonitorStatus(): {
   const tracked = config.smartWallets.length;
   const enabled = config.smartWallets.filter((w) => w.enabled).length;
   const signalLight = getSignalLightStatus();
+  const entryPathLight = getEntryPathLightStatus();
 
   return {
     running,
@@ -5205,6 +5351,7 @@ export function getMonitorStatus(): {
     recentSignals: getSignals24hCount(),
     lastSignalAt: signalLight.lastSignalAt,
     signalLight,
+    entryPathLight,
     dailyPnlSol: paperTrader.getDailyPnlSol(),
     openPositions: paperTrader.getOpenPositions().length,
     migration: getMigrationStatus(),
