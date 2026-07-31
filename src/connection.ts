@@ -276,8 +276,17 @@ const LATENCY_STRESS_MS = 500;
 const LATENCY_RECOVER_MS = 320;
 /** Prefer piggyback after preferred stays latency-stressed this long. */
 const LATENCY_STRESS_GRACE_MS = 15_000;
+/** Public Solana is often chronically slow from cloud hosts — fail over sooner. */
+const LATENCY_STRESS_GRACE_PUBLIC_MS = 5_000;
 /** Don't re-log latency piggyback more often than this. */
 const LATENCY_FAILOVER_LOG_THROTTLE_MS = 45_000;
+
+function latencyStressGraceMs(state: EndpointState | undefined): number {
+  if (state && isPublicRpcUrl(state.endpoint.url)) {
+    return LATENCY_STRESS_GRACE_PUBLIC_MS;
+  }
+  return LATENCY_STRESS_GRACE_MS;
+}
 
 function isRpcRateLimitMessage(error: string): boolean {
   return (
@@ -541,6 +550,65 @@ function resolveIndexForRole(role: RpcRole): number {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const avoidPublicForCritical = shareLoad && role === 'primary';
 
+  // Utility + public preferred is slow: try another public/fallback (e.g. publicnode)
+  // before burning Alchemy/Helius CU on wallet polls.
+  if (latencySoft && role === 'utility' && pref) {
+    let bestIdx = -1;
+    let bestMs = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < endpoints.length; i++) {
+      if (i === preferred) continue;
+      const e = endpoints[i];
+      if (!e?.healthy || isEndpointRateLimited(e)) continue;
+      const isAltPublic =
+        isPublicRpcUrl(e.endpoint.url) ||
+        e.role === 'fallback' ||
+        e.role === 'utility';
+      if (!isAltPublic) continue;
+      if (!isFasterAlternate(pref, e)) continue;
+      const ms = e.latencyMs ?? Number.POSITIVE_INFINITY;
+      if (ms < bestMs) {
+        bestMs = ms;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      const other = endpoints[bestIdx]!;
+      const now = Date.now();
+      if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
+        pref.lastLatencyFailoverLogAt = now;
+        console.warn(
+          `[rpc] utility lane piggybacking on ${other.endpoint.label} ` +
+            `(public rpc-url EWMA ${pref.latencyMs ?? '—'}ms — prefer faster public/fallback before paid)`
+        );
+      }
+      // #region agent log
+      fetch('http://127.0.0.1:7866/ingest/fc734c21-8b91-4271-9f04-a522317b1ea4', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '8695ba',
+        },
+        body: JSON.stringify({
+          sessionId: '8695ba',
+          runId: 'rpc-url-latency',
+          hypothesisId: 'C',
+          location: 'connection.ts:resolveIndexForRole',
+          message: 'utility prefer faster public fallback',
+          data: {
+            from: pref.endpoint.label,
+            to: other.endpoint.label,
+            prefEwma: pref.latencyMs,
+            otherEwma: other.latencyMs,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      setActiveForRole(role, bestIdx);
+      return bestIdx;
+    }
+  }
+
   for (const otherRole of piggybackOrder(role)) {
     const otherPreferred = preferredIndexFor(otherRole);
     if (otherPreferred === preferred) continue;
@@ -555,7 +623,7 @@ function resolveIndexForRole(role: RpcRole): number {
       const reason = rateLimited
         ? 'rate-limited'
         : latencySoft
-          ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(LATENCY_STRESS_GRACE_MS / 1000)}s`
+          ? `latency EWMA ${pref?.latencyMs ?? '—'}ms ≥ ${LATENCY_STRESS_MS}ms for ${Math.round(latencyStressGraceMs(pref) / 1000)}s`
           : `preferred down ${Math.round(downMs / 1000)}s ≥ ${Math.round(failoverDownMs() / 1000)}s`;
       const now = Date.now();
       if (
@@ -727,7 +795,7 @@ function updateLatencyStress(state: EndpointState): void {
       }).catch(() => {});
       // #endregion
       console.warn(
-        `[rpc] ${state.endpoint.label} latency stressed (EWMA ${ewma}ms, last ${state.lastCallLatencyMs ?? '—'}ms) — soft failover in ${LATENCY_STRESS_GRACE_MS / 1000}s if it stays high`
+        `[rpc] ${state.endpoint.label} latency stressed (EWMA ${ewma}ms, last ${state.lastCallLatencyMs ?? '—'}ms) — soft failover in ${latencyStressGraceMs(state) / 1000}s if it stays high`
       );
     }
   }
@@ -737,7 +805,7 @@ function updateLatencyStress(state: EndpointState): void {
 function latencyFailoverReady(state: EndpointState | undefined): boolean {
   if (!state?.latencyStressedSince) return false;
   if (state.latencyMs == null || state.latencyMs < LATENCY_STRESS_MS) return false;
-  return Date.now() - state.latencyStressedSince >= LATENCY_STRESS_GRACE_MS;
+  return Date.now() - state.latencyStressedSince >= latencyStressGraceMs(state);
 }
 
 function isFasterAlternate(
@@ -1410,8 +1478,18 @@ export function startRpcHealthMonitor(): void {
     const isPrimary = index === preferredPrimary;
     const isSecondary =
       index === preferredSecondary && preferredSecondary !== preferredPrimary;
-    // Errors / logs / diagnostics: always keep public + utility probed.
-    if (isUtil || isPublic) return true;
+    // Errors / logs / diagnostics: keep public + utility probed, but ease off
+    // when already latency-stressed (mainnet-beta often stays ~800ms+ from cloud).
+    if (isUtil || isPublic) {
+      if (
+        state.latencyStressedSince != null &&
+        state.latencyMs != null &&
+        state.latencyMs >= LATENCY_STRESS_MS
+      ) {
+        return cycle % 2 === 0;
+      }
+      return true;
+    }
     // Helius (critical): every 3rd cycle (~90s at 30s interval)
     if (isPrimary) return cycle % 3 === 0;
     // Alchemy (scanners): every 2nd cycle (~60s)

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.65',
+    title: 'Public rpc-url latency soft-failover',
+    sections: ['execution', 'copy'],
+    items: [
+      'Public Solana (rpc-url) uses a 5s latency soft-failover grace (faster than paid lanes).',
+      'When rpc-url stays slow, Utility prefers a faster public/fallback (e.g. publicnode) before Alchemy, and probes the hot public endpoint less often while stressed.',
+    ],
+  },
+  {
     version: '1.2.64',
     title: 'Helius latency EWMA + soft failover',
     sections: ['execution', 'copy'],
