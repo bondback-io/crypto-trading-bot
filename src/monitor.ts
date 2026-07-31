@@ -14,6 +14,7 @@ import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
+import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
 import { paperTrader } from './paperTrader';
 import { logger } from './logger';
@@ -1041,7 +1042,8 @@ async function pollAllWallets(): Promise<void> {
     }
 
     const wallets = getWalletsForPolling();
-    const rpcUrl = getRpcUrl();
+    const pollRole = getRpcRoleFor('wallet_poll', Boolean(config.rpc?.shareLoad));
+    const rpcUrl = getRpcUrl(pollRole);
     const throttle = getWalletPollThrottle(rpcUrl);
     const { batchSize, batchGapMs, maxWalletsPerCycle, abortCycleOn429, pause429Ms, cycleBudgetMs } =
       throttle;
@@ -1155,7 +1157,8 @@ export async function checkWalletLastTrade(
   signature?: string;
   failed?: boolean;
 }> {
-  return runWithRpcRole('secondary', async () => {
+  const role = getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad));
+  return runWithRpcRole(role, async () => {
     try {
       const pubkey = new PublicKey(address);
       const conn = getConnection();
@@ -1338,7 +1341,9 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
 
-  return runWithRpcRole('secondary', async () => {
+  return runWithRpcRole(
+    getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad)),
+    async () => {
     for (let i = 0; i < config.smartWallets.length; i++) {
       const wallet = config.smartWallets[i];
       const report = await refreshWalletActivity(wallet);
@@ -1349,7 +1354,8 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
       }
     }
     return reports;
-  });
+  }
+  );
 }
 
 /**
@@ -1864,6 +1870,14 @@ async function fetchParsedTx(
 }
 
 async function pollWallet(
+  wallet: SmartWallet,
+  throttle?: ReturnType<typeof getWalletPollThrottle>
+): Promise<void> {
+  const role = getRpcRoleFor('wallet_poll', Boolean(config.rpc?.shareLoad));
+  return runWithRpcRole(role, () => pollWalletInner(wallet, throttle));
+}
+
+async function pollWalletInner(
   wallet: SmartWallet,
   throttle?: ReturnType<typeof getWalletPollThrottle>
 ): Promise<void> {

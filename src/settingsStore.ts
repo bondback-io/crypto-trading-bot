@@ -124,6 +124,8 @@ export interface PersistedBotSettings {
   bondingCurve?: Record<string, unknown>;
   convergenceWindowMs?: number;
   pollIntervalMs?: number;
+  /** Share RPC load across Helius / Alchemy / public */
+  rpcShareLoad?: boolean;
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

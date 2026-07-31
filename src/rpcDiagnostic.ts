@@ -28,7 +28,7 @@ export interface RpcDiagLaneSnapshot {
 
 export interface RpcDiagLoader {
   id: string;
-  lane: 'primary' | 'secondary' | 'all' | 'http';
+  lane: 'primary' | 'secondary' | 'utility' | 'all' | 'http';
   intervalMs: number;
   note: string;
 }
@@ -45,6 +45,8 @@ export interface RpcLoadDiagnostic {
   at: number;
   primary: RpcDiagLaneSnapshot;
   secondary: RpcDiagLaneSnapshot;
+  utility: RpcDiagLaneSnapshot;
+  shareLoad: boolean;
   chokeHints: string[];
   loaders: RpcDiagLoader[];
   recommendations: RpcDiagRecommendation[];
@@ -60,7 +62,7 @@ function bumpMs(current: number, floor: number, cap: number): number {
 
 function pickEndpointStats(
   rpc: ReturnType<typeof getRpcStats>,
-  lane: 'primary' | 'secondary'
+  lane: 'primary' | 'secondary' | 'utility'
 ): {
   label: string;
   healthy: boolean;
@@ -70,7 +72,12 @@ function pickEndpointStats(
   failover: boolean;
   downForMs: number;
 } {
-  const laneMeta = lane === 'primary' ? rpc.primary : rpc.secondary;
+  const laneMeta =
+    lane === 'primary'
+      ? rpc.primary
+      : lane === 'secondary'
+        ? rpc.secondary
+        : rpc.utility;
   // Prefer the preferred-lane endpoint (lane tag), not the active failover host label.
   const pref =
     rpc.endpoints.find((e) => e.lane === lane) ||
@@ -79,12 +86,12 @@ function pickEndpointStats(
     null;
   return {
     label: pref?.label || lane,
-    healthy: Boolean(laneMeta.healthy),
+    healthy: Boolean(laneMeta?.healthy),
     latencyMs: pref?.latencyMs ?? null,
     successRate: pref != null ? Number(pref.successRate) : null,
-    url: pref?.url || laneMeta.url || '',
-    failover: Boolean(laneMeta.failover),
-    downForMs: Number(laneMeta.downForMs) || 0,
+    url: pref?.url || laneMeta?.url || '',
+    failover: Boolean(laneMeta?.failover),
+    downForMs: Number(laneMeta?.downForMs) || 0,
   };
 }
 
@@ -105,6 +112,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
 
   const pRaw = pickEndpointStats(rpc, 'primary');
   const sRaw = pickEndpointStats(rpc, 'secondary');
+  const uRaw = pickEndpointStats(rpc, 'utility');
   const primary: RpcDiagLaneSnapshot = {
     label: pRaw.label,
     healthy: pRaw.healthy,
@@ -122,6 +130,15 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     public: isPublicRpcUrl(sRaw.url),
     failover: sRaw.failover,
     downForMs: sRaw.downForMs,
+  };
+  const utility: RpcDiagLaneSnapshot = {
+    label: uRaw.label,
+    healthy: uRaw.healthy,
+    latencyMs: uRaw.latencyMs,
+    successRate: uRaw.successRate,
+    public: isPublicRpcUrl(uRaw.url),
+    failover: uRaw.failover,
+    downForMs: uRaw.downForMs,
   };
 
   const walletPoll = Math.max(3_000, Number(config.pollIntervalMs) || 8_000);
@@ -171,6 +188,10 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     /* optional */
   }
 
+  const shareLoad = Boolean(config.rpc?.shareLoad);
+  const scannerLane = shareLoad ? 'secondary' : 'primary';
+  const activityLane = shareLoad ? 'utility' : 'secondary';
+
   const loaders: RpcDiagLoader[] = [
     {
       id: 'wallet_poll',
@@ -186,7 +207,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     },
     {
       id: 'market_scanner',
-      lane: 'primary',
+      lane: scannerLane,
       intervalMs: scannerPoll,
       note: scannerOn
         ? 'Market Scanner + curve enrich (Live Feed → Poll interval)'
@@ -194,7 +215,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     },
     {
       id: 'alpha_scan',
-      lane: 'primary',
+      lane: scannerLane,
       intervalMs: alphaPoll,
       note: alphaOn
         ? 'AlphaScan curve enrich (Live Feed → Poll ms)'
@@ -207,6 +228,14 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       note: zionOn
         ? 'Zion KOL scanner (Zion → Poll interval)'
         : 'Zion scanner off',
+    },
+    {
+      id: 'activity',
+      lane: activityLane,
+      intervalMs: Math.max(walletPoll * 4, 60_000),
+      note: shareLoad
+        ? 'Wallet activity refresh (utility / public when Share ON)'
+        : 'Wallet activity refresh (secondary)',
     },
     {
       id: 'health',
@@ -333,6 +362,8 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     at: Date.now(),
     primary,
     secondary,
+    utility,
+    shareLoad: Boolean(config.rpc?.shareLoad),
     chokeHints,
     loaders,
     recommendations,

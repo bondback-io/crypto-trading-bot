@@ -9,9 +9,10 @@
  *   5. RPC_SECONDARY                     — final fallback (+ Zion lane when Alchemy unset)
  *   6. remaining RPC_FALLBACKS
  *
- * Dual-lane layout (unchanged callers):
- *   Primary lane   → preferred = Helius (else first usable in chain)
- *   Secondary lane → preferred = Alchemy (else RPC_SECONDARY / next distinct)
+ * Triple-lane layout (Share RPC load ON):
+ *   Primary (critical) → Helius — entries, migration, wallet buy detection
+ *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
+ *   Utility → Public Solana — wallet import / activity / light polls
  * Health monitor + piggyback failover live in connection.ts.
  */
 
@@ -122,7 +123,7 @@ export function isSoftThrottleRpcUrl(url: string | null | undefined): boolean {
   return false;
 }
 
-export type RpcLaneRole = 'primary' | 'secondary' | 'fallback';
+export type RpcLaneRole = 'primary' | 'secondary' | 'utility' | 'fallback';
 
 export interface NormalizedRpcEndpoint {
   url: string;
@@ -175,9 +176,11 @@ export function normalizeRpcEndpoints(
         ? 'primary'
         : c.label === 'secondary'
           ? 'secondary'
-          : i === 0
-            ? 'primary'
-            : 'fallback');
+          : c.label === 'utility'
+            ? 'utility'
+            : i === 0
+              ? 'primary'
+              : 'fallback');
     push(
       c.url,
       c.label ||
@@ -185,7 +188,9 @@ export function normalizeRpcEndpoints(
           ? 'primary'
           : role === 'secondary'
             ? 'secondary'
-            : `rpc-${i + 1}`),
+            : role === 'utility'
+              ? 'utility'
+              : `rpc-${i + 1}`),
       role,
       c.wsUrl
     );
@@ -282,7 +287,7 @@ export function rpcEndpointsFromEnv(
     });
   }
 
-  // Pick preferred primary / secondary URLs
+  // Pick preferred primary / secondary / utility URLs
   const primaryUrl =
     helius || rpcUrl || alchemy || PUBLIC_SOLANA_RPC;
   let secondaryUrl = '';
@@ -296,6 +301,26 @@ export function rpcEndpointsFromEnv(
         secondaryUrl = c.url;
         break;
       }
+    }
+  }
+
+  // Utility lane prefers public Solana when distinct from primary/secondary
+  let utilityUrl = '';
+  if (
+    PUBLIC_SOLANA_RPC !== primaryUrl &&
+    PUBLIC_SOLANA_RPC !== secondaryUrl
+  ) {
+    utilityUrl = PUBLIC_SOLANA_RPC;
+  } else {
+    for (const c of pool) {
+      if (c.url !== primaryUrl && c.url !== secondaryUrl) {
+        utilityUrl = c.url;
+        break;
+      }
+    }
+    // Last resort: share secondary or primary if no third URL exists
+    if (!utilityUrl) {
+      utilityUrl = secondaryUrl || primaryUrl;
     }
   }
 
@@ -313,31 +338,22 @@ export function rpcEndpointsFromEnv(
     candidates.push({ url, label, role });
   };
 
-  // Preferred lanes first (sticky until unhealthy), then remaining failover order
-  const primaryLabel =
-    primaryUrl === helius
-      ? 'helius'
-      : primaryUrl === alchemy
-        ? 'alchemy'
-        : primaryUrl === rpcUrl
-          ? 'primary'
-          : primaryUrl === PUBLIC_SOLANA_RPC
-            ? 'public-fallback'
-            : 'primary';
-  add(primaryUrl, primaryLabel, 'primary');
+  const labelFor = (url: string, fallback: string): string => {
+    if (url === helius) return 'helius';
+    if (url === alchemy) return 'alchemy';
+    if (url === rpcUrl) return 'rpc-url';
+    if (url === rpcSecondary) return 'rpc-secondary';
+    if (url === PUBLIC_SOLANA_RPC) return 'public-fallback';
+    return fallback;
+  };
 
+  // Preferred lanes first (sticky until unhealthy), then remaining failover order
+  add(primaryUrl, labelFor(primaryUrl, 'primary'), 'primary');
   if (secondaryUrl) {
-    const secondaryLabel =
-      secondaryUrl === alchemy
-        ? 'alchemy'
-        : secondaryUrl === rpcSecondary
-          ? 'secondary'
-          : secondaryUrl === helius
-            ? 'helius'
-            : secondaryUrl === PUBLIC_SOLANA_RPC
-              ? 'public-fallback'
-              : 'secondary';
-    add(secondaryUrl, secondaryLabel, 'secondary');
+    add(secondaryUrl, labelFor(secondaryUrl, 'secondary'), 'secondary');
+  }
+  if (utilityUrl) {
+    add(utilityUrl, labelFor(utilityUrl, 'utility'), 'utility');
   }
 
   for (const c of pool) {
@@ -350,7 +366,8 @@ export function rpcEndpointsFromEnv(
   console.log(
     `[rpc] Multi-RPC chain: ${chain}` +
       (helius ? ' (Helius free primary)' : '') +
-      (alchemy ? ' (Alchemy free secondary)' : '')
+      (alchemy ? ' (Alchemy free secondary)' : '') +
+      (utilityUrl === PUBLIC_SOLANA_RPC ? ' (public utility)' : '')
   );
   if (!helius && !alchemy) {
     console.warn(
@@ -362,27 +379,42 @@ export function rpcEndpointsFromEnv(
   return out;
 }
 
-/** Human-readable lane assignments for Config > RPC UI. */
+/** Human-readable lane assignments for Config > RPC UI (Share OFF defaults). */
 export const RPC_LANE_SUPPORTS = {
   primary: [
-    'Trade profile bots / live execution',
-    'Copy + signal scanner (wallet buy detection)',
-    'Main market scanner entry RPC (filters / metrics)',
-    'Pump.fun migrate scanner',
-    'Open trades (on-chain needs; marks still use Dex HTTP)',
-    'Preferred: Helius Free (HELIUS_API_KEY) → failover Alchemy / RPC_URL / public',
+    'Critical: trade entries / turbo / migration sniper / copy buys',
+    'Wallet buy detection (signal poll)',
+    'Migration listener parses',
+    'Preferred: Helius Free (HELIUS_API_KEY) → failover Alchemy → public',
   ],
   secondary: [
-    'Zion micro-bot + Place Trade',
-    'KOL Token Scanner',
-    'Zion open trades / trade requests (on-chain bits)',
-    'Wallet on-chain activity refresh',
-    'Non-critical enrichment',
+    'Market Scanner + AlphaScan (Share ON)',
+    'Zion micro-bot + KOL Token Scanner',
+    'Zion Place Trade on-chain bits',
     'Preferred: Alchemy Free (ALCHEMY_API_KEY) → else RPC_SECONDARY',
+  ],
+  utility: [
+    'Wallet favourites / import on-chain checks (Share ON)',
+    'Wallet activity refresh / last-trade polls (Share ON)',
+    'Other light non-entry polls',
+    'Preferred: Public Solana (api.mainnet-beta.solana.com)',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
     'Wallet discovery / search (GMGN, Kolscan, etc. — HTTP APIs)',
     'Open-trade mark prices (DexScreener HTTP)',
+  ],
+} as const;
+
+/** Copy when Share RPC load is enabled. */
+export const RPC_SHARE_LOAD_SUPPORTS = {
+  critical: [
+    'Helius — trade entries, turbo profiles, migration sniper, copy buys, migration parses, wallet buy detection',
+  ],
+  scanners: [
+    'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
+  ],
+  utility: [
+    'Public Solana — wallet import / favourites on-chain checks, activity refresh, light polls',
   ],
 } as const;

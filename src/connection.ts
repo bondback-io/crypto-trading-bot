@@ -1,6 +1,6 @@
 /**
- * Multi-RPC connection manager with dual lanes (primary / secondary),
- * health monitoring, 30s cross-lane failover, priority fees, and stats.
+ * Multi-RPC connection manager with primary / secondary / utility lanes,
+ * health monitoring, cross-lane failover, priority fees, and stats.
  */
 
 import { AsyncLocalStorage } from 'async_hooks';
@@ -22,6 +22,8 @@ import {
   normalizeRpcEndpoints,
   rpcEndpointsFromEnv,
   RPC_LANE_SUPPORTS,
+  RPC_SHARE_LOAD_SUPPORTS,
+  isPublicRpcUrl,
   type RpcLaneRole,
 } from './rpcUrl';
 
@@ -29,8 +31,8 @@ dotenv.config();
 
 const DEFAULT_RPC = PUBLIC_SOLANA_RPC;
 
-/** Workload lane — primary = trading/copy; secondary = Zion / KOL / enrichment */
-export type RpcRole = 'primary' | 'secondary';
+/** Workload lane — primary=critical; secondary=scanners/Zion; utility=import/activity */
+export type RpcRole = 'primary' | 'secondary' | 'utility';
 
 export interface RpcEndpoint {
   url: string;
@@ -53,7 +55,7 @@ export interface RpcEndpointStats {
   lastCheckedAt: number | null;
   unhealthySince: number | null;
   isActive: boolean;
-  /** Preferred endpoint for primary or secondary lane */
+  /** Preferred endpoint for primary, secondary, or utility lane */
   lane?: RpcRole | null;
 }
 
@@ -79,9 +81,11 @@ let endpoints: EndpointState[] = [];
 /** Preferred index for each lane */
 let preferredPrimary = 0;
 let preferredSecondary = 0;
+let preferredUtility = 0;
 /** Currently resolved index serving each lane (may differ after failover) */
 let activePrimary = 0;
 let activeSecondary = 0;
+let activeUtility = 0;
 /** Legacy single active pointer — mirrors primary lane for older callers */
 let activeIndex = 0;
 
@@ -178,7 +182,9 @@ function ensureEndpoints(): void {
         ? 'primary'
         : endpoint.label === 'secondary'
           ? 'secondary'
-          : 'fallback');
+          : endpoint.label === 'utility'
+            ? 'utility'
+            : 'fallback');
     return {
       endpoint: { ...endpoint, role },
       connection: new Connection(endpoint.url, {
@@ -205,8 +211,16 @@ function ensureEndpoints(): void {
   );
   const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
   preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
+  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
+  preferredUtility =
+    utilIdx >= 0
+      ? utilIdx
+      : endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url)) >= 0
+        ? endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url))
+        : preferredSecondary;
   activePrimary = preferredPrimary;
   activeSecondary = preferredSecondary;
+  activeUtility = preferredUtility;
   activeIndex = activePrimary;
 
   console.log(
@@ -220,6 +234,8 @@ function ensureEndpoints(): void {
       `(${maskUrlForLog(endpoints[preferredPrimary]?.endpoint.url)}) · ` +
       `secondary→${endpoints[preferredSecondary]?.endpoint.label} ` +
       `(${maskUrlForLog(endpoints[preferredSecondary]?.endpoint.url)}) · ` +
+      `utility→${endpoints[preferredUtility]?.endpoint.label} ` +
+      `(${maskUrlForLog(endpoints[preferredUtility]?.endpoint.url)}) · ` +
       `cross-lane failover after ${formatFailoverGrace(failoverDownMs())} down` +
       (preferredPrimary === preferredSecondary ? ' · SHARED' : ' · distinct')
   );
@@ -265,7 +281,9 @@ export async function runWithRpcRole<T>(
 
 function preferredIndexFor(role: RpcRole): number {
   ensureEndpoints();
-  return role === 'primary' ? preferredPrimary : preferredSecondary;
+  if (role === 'secondary') return preferredSecondary;
+  if (role === 'utility') return preferredUtility;
+  return preferredPrimary;
 }
 
 function downForMs(state: EndpointState | undefined): number {
@@ -273,66 +291,84 @@ function downForMs(state: EndpointState | undefined): number {
   return Math.max(0, Date.now() - state.unhealthySince);
 }
 
+function setActiveForRole(role: RpcRole, index: number): void {
+  if (role === 'primary') {
+    activePrimary = index;
+    activeIndex = index;
+  } else if (role === 'secondary') {
+    activeSecondary = index;
+  } else {
+    activeUtility = index;
+  }
+}
+
+function piggybackOrder(role: RpcRole): RpcRole[] {
+  // Critical trades: Helius → Alchemy → (public last). Scanners: Alchemy → Helius → public.
+  // Utility: public → Alchemy → Helius.
+  if (role === 'primary') return ['secondary', 'utility'];
+  if (role === 'secondary') return ['primary', 'utility'];
+  return ['secondary', 'primary'];
+}
+
 /**
  * Resolve which endpoint index should serve a lane.
  * Preferred stays sticky until unhealthy for failoverDownMs, then piggybacks
- * on the other lane (or any healthy fallback).
- * Rate-limited preferred endpoints skip grace and fail over immediately —
- * otherwise we keep hammering a 429 host and flood the event loop / kill /health.
+ * on other lanes (or any healthy fallback).
+ * Rate-limited preferred endpoints skip grace and fail over immediately.
+ * Critical (primary) prefers non-public piggybacks when Share load is on.
  */
 function resolveIndexForRole(role: RpcRole): number {
   ensureEndpoints();
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   if (pref?.healthy && !isEndpointRateLimited(pref)) {
-    if (role === 'primary') activePrimary = preferred;
-    else activeSecondary = preferred;
-    if (role === 'primary') activeIndex = preferred;
+    setActiveForRole(role, preferred);
     return preferred;
   }
 
   const downMs = downForMs(pref);
   const rateLimited = isEndpointRateLimited(pref);
-  // Transient errors: sticky grace. Rate limits: leave immediately.
   if (!rateLimited && downMs > 0 && downMs < failoverDownMs()) {
     return preferred;
   }
 
-  const otherPreferred = preferredIndexFor(
-    role === 'primary' ? 'secondary' : 'primary'
-  );
-  if (
-    otherPreferred !== preferred &&
-    endpoints[otherPreferred]?.healthy &&
-    !isEndpointRateLimited(endpoints[otherPreferred])
-  ) {
+  const shareLoad = Boolean(config.rpc?.shareLoad);
+  const avoidPublicForCritical = shareLoad && role === 'primary';
+
+  for (const otherRole of piggybackOrder(role)) {
+    const otherPreferred = preferredIndexFor(otherRole);
+    if (otherPreferred === preferred) continue;
+    const other = endpoints[otherPreferred];
+    if (!other?.healthy || isEndpointRateLimited(other)) continue;
+    if (avoidPublicForCritical && isPublicRpcUrl(other.endpoint.url)) continue;
     if (
-      (role === 'primary' ? activePrimary : activeSecondary) !== otherPreferred
+      (role === 'primary' ? activePrimary : role === 'secondary' ? activeSecondary : activeUtility) !==
+      otherPreferred
     ) {
       console.warn(
-        `[rpc] ${role} lane piggybacking on ${endpoints[otherPreferred].endpoint.label} ` +
+        `[rpc] ${role} lane piggybacking on ${other.endpoint.label} ` +
           `(preferred down ${Math.round(downMs / 1000)}s` +
           (rateLimited ? ', rate-limited' : ` ≥ ${Math.round(failoverDownMs() / 1000)}s`) +
           `)`
       );
     }
-    if (role === 'primary') {
-      activePrimary = otherPreferred;
-      activeIndex = otherPreferred;
-    } else {
-      activeSecondary = otherPreferred;
-    }
+    setActiveForRole(role, otherPreferred);
     return otherPreferred;
   }
 
   for (let i = 0; i < endpoints.length; i++) {
+    if (!endpoints[i]?.healthy || isEndpointRateLimited(endpoints[i])) continue;
+    if (avoidPublicForCritical && isPublicRpcUrl(endpoints[i].endpoint.url)) {
+      continue;
+    }
+    setActiveForRole(role, i);
+    return i;
+  }
+
+  // Last resort: any healthy endpoint (even public for critical)
+  for (let i = 0; i < endpoints.length; i++) {
     if (endpoints[i]?.healthy && !isEndpointRateLimited(endpoints[i])) {
-      if (role === 'primary') {
-        activePrimary = i;
-        activeIndex = i;
-      } else {
-        activeSecondary = i;
-      }
+      setActiveForRole(role, i);
       return i;
     }
   }
@@ -444,9 +480,9 @@ export function noteActiveRpcFailure(
 async function maybeSwitchEndpoints(): Promise<void> {
   ensureEndpoints();
   if (endpoints.length <= 1) return;
-  // Re-resolve both lanes (may piggyback after grace).
   resolveIndexForRole('primary');
   resolveIndexForRole('secondary');
+  resolveIndexForRole('utility');
 }
 
 async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean> {
@@ -497,7 +533,9 @@ export async function withRpc<T>(
     if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
   };
   pushUnique(startIndex);
-  pushUnique(preferredIndexFor(r === 'primary' ? 'secondary' : 'primary'));
+  for (const other of piggybackOrder(r)) {
+    pushUnique(preferredIndexFor(other));
+  }
   for (let i = 0; i < endpoints.length; i++) pushUnique(i);
 
   logger.info('RPC', `start: ${label}`, {
@@ -533,12 +571,7 @@ export async function withRpc<T>(
 
     const t0 = Date.now();
     try {
-      if (r === 'primary') {
-        activePrimary = index;
-        activeIndex = index;
-      } else {
-        activeSecondary = index;
-      }
+      setActiveForRole(r, index);
       const result = await fn(state.connection);
       const latencyMs = Date.now() - t0;
       recordSuccess(index, latencyMs);
@@ -587,6 +620,15 @@ export function getRpcStats(): {
     failover: boolean;
     downForMs: number;
   };
+  utility: {
+    label: string;
+    url: string;
+    healthy: boolean;
+    failover: boolean;
+    downForMs: number;
+  };
+  shareLoad: boolean;
+  shareSupports: typeof RPC_SHARE_LOAD_SUPPORTS;
   failoverDownMs: number;
   /** True when primary and secondary prefer the same endpoint (Zion shares CU with copy). */
   lanesShareEndpoint: boolean;
@@ -602,14 +644,18 @@ export function getRpcStats(): {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
   const sIdx = resolveIndexForRole('secondary');
+  const uIdx = resolveIndexForRole('utility');
   const pPref = endpoints[preferredPrimary];
   const sPref = endpoints[preferredSecondary];
+  const uPref = endpoints[preferredUtility];
   const pActive = endpoints[pIdx];
   const sActive = endpoints[sIdx];
+  const uActive = endpoints[uIdx];
   const anyHealthy = endpoints.some(
     (e) => e.healthy && !isEndpointRateLimited(e)
   );
   const share = lanesShareEndpoint();
+  const shareLoad = Boolean(config.rpc?.shareLoad);
   let warning: string | null = null;
   if (!anyHealthy) {
     warning =
@@ -652,6 +698,15 @@ export function getRpcStats(): {
       failover: sIdx !== preferredSecondary,
       downForMs: downForMs(sPref),
     },
+    utility: {
+      label: uActive?.endpoint.label || 'utility',
+      url: maskUrl(uActive?.endpoint.url || ''),
+      healthy: Boolean(uPref?.healthy),
+      failover: uIdx !== preferredUtility,
+      downForMs: downForMs(uPref),
+    },
+    shareLoad,
+    shareSupports: RPC_SHARE_LOAD_SUPPORTS,
     failoverDownMs: failoverDownMs(),
     lanesShareEndpoint: share,
     supports: RPC_LANE_SUPPORTS,
@@ -659,8 +714,17 @@ export function getRpcStats(): {
       const total = s.successCount + s.failureCount;
       let lane: RpcRole | null = null;
       if (i === preferredPrimary) lane = 'primary';
-      else if (i === preferredSecondary && preferredSecondary !== preferredPrimary)
+      else if (
+        i === preferredSecondary &&
+        preferredSecondary !== preferredPrimary
+      )
         lane = 'secondary';
+      else if (
+        i === preferredUtility &&
+        preferredUtility !== preferredPrimary &&
+        preferredUtility !== preferredSecondary
+      )
+        lane = 'utility';
       return {
         url: s.endpoint.url,
         label: s.endpoint.label,
@@ -673,7 +737,7 @@ export function getRpcStats(): {
         lastError: s.lastError,
         lastCheckedAt: s.lastCheckedAt,
         unhealthySince: s.unhealthySince,
-        isActive: i === pIdx || i === sIdx,
+        isActive: i === pIdx || i === sIdx || i === uIdx,
         lane,
       };
     }),

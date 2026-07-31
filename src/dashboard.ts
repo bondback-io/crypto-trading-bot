@@ -6844,13 +6844,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <label class="ctl ctl-sm"><span>Max buyers <span class="tip" tabindex="0" data-tip="Recent same-block buyers before sandwich abort."></span></span><input type="number" id="sandwichMaxRecentBuys" value="3" /></label>
           </div>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
-          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Dual-lane Solana RPC: Primary for trading/copy/migrate; Secondary for Zion/KOL. If a lane is down ≥30 seconds, traffic piggybacks on the other (or any healthy fallback), then returns to the preferred lane when it recovers."></span></div>
+          <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
+          <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses, wallet buy detection</div>
+            <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — wallet import/favourites on-chain checks, activity refresh, light polls</div>
+          </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary lane</strong> — Trade profile bots, copy + signal scanner, market scanner, Pump.fun migrate, open-trade on-chain needs. Prefers Helius.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Secondary lane</strong> — Zion + Place Trade, KOL scanner, wallet activity. Prefers Alchemy (keeps CU off the copy lane).</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration + wallet buy detection. Prefers Helius.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Import + activity (Share ON). Prefers public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
-            <div class="mint">Failover: preferred lane must stay unhealthy ≥30 seconds before piggybacking. Set distinct Helius + Alchemy keys so Zion does not share CU with copy/signals.</div>
+            <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
@@ -6959,7 +6966,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
-        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo. Render: dashboard env vars · Fly: <code>fly secrets set GITHUB_BACKUP_TOKEN=...</code></p>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo. Set these in the Render dashboard env vars.</p>
       </div>
 
       <div class="card">
@@ -15520,7 +15527,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const vol =
             p.volumeMounted === true
               ? '<span style="color:#4ade80">yes</span>'
-              : p.onRender || p.onFly
+              : p.onRender
                 ? '<span style="color:#f87171">NO</span>'
                 : 'n/a (local)';
           const survived =
@@ -15838,23 +15845,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.getElementById('rpc-summary').textContent =
         'Primary active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
+        ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
         ' · Failover after: ' + (rpc.failoverDownMs != null
           ? (Number(rpc.failoverDownMs) < 60000
               ? Math.round(Number(rpc.failoverDownMs) / 1000) + 's'
               : Math.round(Number(rpc.failoverDownMs) / 60000) + 'm')
           : '30s') +
         ' · Priority fee est: ' + (rpc.priorityFeeLamports != null ? rpc.priorityFeeLamports + ' lamports' : 'n/a');
+      const shareToggle = document.getElementById('rpc-share-load');
+      if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
+      const shareAlloc = document.getElementById('rpc-share-alloc');
+      if (shareAlloc) shareAlloc.style.display = rpc.shareLoad ? 'block' : 'none';
       const laneSt = document.getElementById('rpc-lane-status');
       if (laneSt) {
         const p = rpc.primary || {};
         const s = rpc.secondary || {};
+        const u = rpc.utility || {};
         laneSt.textContent =
-          'Primary lane: ' + (p.label || '—') +
+          'Critical: ' + (p.label || '—') +
           (p.failover ? ' (FAILOVER)' : '') +
           (p.healthy === false ? ' · preferred DOWN' : '') +
-          ' · Secondary lane: ' + (s.label || '—') +
+          ' · Scanners: ' + (s.label || '—') +
           (s.failover ? ' (FAILOVER)' : '') +
           (s.healthy === false ? ' · preferred DOWN' : '') +
+          ' · Utility: ' + (u.label || '—') +
+          (u.failover ? ' (FAILOVER)' : '') +
+          (u.healthy === false ? ' · preferred DOWN' : '') +
           (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
       }
       const rpcBanner = document.getElementById('rpc-banner');
@@ -21075,6 +21091,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    async function toggleRpcShareLoad(enabled) {
+      const st = document.getElementById('rpc-diag-status');
+      if (st) st.textContent = 'Saving Share RPC load…';
+      try {
+        const data = await fetchJSON('/api/rpc/share-load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !!enabled }),
+        });
+        if (st) {
+          st.textContent = data.shareLoad
+            ? 'Share RPC load ON — critical→Helius, scanners→Alchemy, utility→public'
+            : 'Share RPC load OFF — legacy primary/secondary routing';
+        }
+        const shareAlloc = document.getElementById('rpc-share-alloc');
+        if (shareAlloc) shareAlloc.style.display = data.shareLoad ? 'block' : 'none';
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        const t = document.getElementById('rpc-share-load');
+        if (t) t.checked = !enabled;
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+
     async function runRpcDiagnostic() {
       const st = document.getElementById('rpc-diag-status');
       const panel = document.getElementById('rpc-diag-panel');
@@ -21418,7 +21458,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           data.health === 'at_risk' ||
           data.episodesDroppedLikely ||
           data.learningFilesMissing ||
-          ((p.onRender || p.onFly) && !p.durableLikely);
+          (p.onRender && !p.durableLikely);
         if (show) {
           banner.classList.remove('hidden');
           banner.innerHTML =

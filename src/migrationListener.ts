@@ -21,9 +21,11 @@ import {
   getConnection,
   getRpcUrl,
   noteActiveRpcFailure,
+  runWithRpcRole,
   shouldDeferHeavyRpc,
 } from './connection';
 import { isPublicRpcUrl, isSoftThrottleRpcUrl } from './rpcUrl';
+import { getRpcRoleFor } from './rpcRouting';
 
 /** Raydium AMM v4 — common post-migration venue */
 const RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -402,7 +404,10 @@ async function handleLogsNotification(
 
   migrationParseInFlight += 1;
   try {
-    await processMigrationTx(signature, 'websocket', program);
+    const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
+    await runWithRpcRole(role, () =>
+      processMigrationTx(signature, 'websocket', program)
+    );
   } finally {
     migrationParseInFlight -= 1;
   }
@@ -459,6 +464,8 @@ async function pollMigrations(): Promise<void> {
   if (!running) return;
   if (Date.now() < rateLimitedUntil) return;
 
+  const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
+  return runWithRpcRole(role, async () => {
   try {
     const conn = getConnection();
     const softRpc = isSoftThrottleRpcUrl(conn.rpcEndpoint);
@@ -516,6 +523,7 @@ async function pollMigrations(): Promise<void> {
     }
     console.error('[migration] Poll error:', err);
   }
+  });
 }
 
 /** @returns false when rate-limited (caller should abort this poll cycle) */

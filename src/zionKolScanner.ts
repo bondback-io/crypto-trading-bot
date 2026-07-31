@@ -7,6 +7,7 @@
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
 import { getConnection, lanesShareEndpoint } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
   atomicWriteJson,
@@ -336,7 +337,9 @@ async function parseBuysFromSig(
   wallet: UniverseWallet,
   signature: string
 ): Promise<number> {
-  const conn = getConnection('secondary');
+  const conn = getConnection(
+    getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad))
+  );
   const tx = await conn.getParsedTransaction(signature, {
     maxSupportedTransactionVersion: 0,
     commitment: 'confirmed',
@@ -385,7 +388,9 @@ async function pollUniverseBatch(): Promise<number> {
   }
   rotationIndex = (start + batch.length) % Math.max(1, universe.length);
 
-  const conn = getConnection('secondary');
+  const conn = getConnection(
+    getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad))
+  );
   let buys = 0;
 
   for (const wallet of batch) {

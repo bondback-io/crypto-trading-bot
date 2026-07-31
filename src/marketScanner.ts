@@ -8,6 +8,8 @@
 
 import { config, HARD_FILTER_FLOORS } from './config';
 import { logger, errorToMeta } from './logger';
+import { runWithRpcRole } from './connection';
+import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
   fetchSolUsdPrice,
@@ -817,7 +819,10 @@ async function enrichCurve(event: LaunchEvent): Promise<{
   progressPct: number | null;
 }> {
   try {
-    const curve = await fetchBondingCurve(event.mint);
+    const curve = await runWithRpcRole(
+      getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
+      () => fetchBondingCurve(event.mint)
+    );
     if (!curve) return { bonus: 0, nearMigration: false, progressPct: null };
     const sum = summarizeBondingCurve(curve);
     let bonus = 0;

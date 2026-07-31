@@ -1834,6 +1834,11 @@ export interface BotConfig {
     failureThreshold: number;
     /** Prefer other lane only after preferred endpoint is unhealthy this long (ms). */
     failoverDownMs: number;
+    /**
+     * When true, split workloads: Helius=critical, Alchemy=scanners/Zion,
+     * public=utility (import/activity).
+     */
+    shareLoad: boolean;
     priorityFee: {
       minMicroLamports: number;
       maxMicroLamports: number;
@@ -2310,6 +2315,9 @@ export const config: BotConfig = {
     healthIntervalMs: 30_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
+    shareLoad:
+      process.env.RPC_SHARE_LOAD === '1' ||
+      process.env.RPC_SHARE_LOAD === 'true',
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
@@ -2659,6 +2667,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     bondingCurve: { ...config.bondingCurve },
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
+    rpcShareLoad: Boolean(config.rpc.shareLoad),
     migrations: { ...settingsMigrations },
   };
 }
@@ -3197,6 +3206,9 @@ function applySettingsSnapshot(
   }
   if (typeof saved.pollIntervalMs === 'number') {
     config.pollIntervalMs = saved.pollIntervalMs;
+  }
+  if (typeof saved.rpcShareLoad === 'boolean') {
+    config.rpc.shareLoad = saved.rpcShareLoad;
   }
 
   if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {
@@ -4422,6 +4434,19 @@ export function updateConfig(partial: Partial<BotConfig>): void {
   persistUserSettings();
 }
 
+/** Enable/disable Share RPC load mode (Helius/Alchemy/public workload split). */
+export function setRpcShareLoad(enabled: boolean): boolean {
+  config.rpc.shareLoad = Boolean(enabled);
+  persistUserSettings();
+  console.log(
+    `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
+      (config.rpc.shareLoad
+        ? 'critical→Helius, scanners/Zion→Alchemy, utility→public'
+        : 'legacy primary/secondary routing')
+  );
+  return config.rpc.shareLoad;
+}
+
 export function updateTradeConfig(partial: Partial<TradeConfig>): void {
   Object.assign(config.trade, partial);
   // Keep base ↔ legacy tradeAmount aliases in sync
@@ -5135,6 +5160,7 @@ export function getConfigSnapshot() {
       jitoEnabled: config.rpc.jito.enabled,
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
+      shareLoad: Boolean(config.rpc.shareLoad),
     },
     mev: { ...config.mev },
     tokenMetrics: { ...config.tokenMetrics },

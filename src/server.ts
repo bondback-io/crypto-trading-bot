@@ -220,7 +220,7 @@ export function createServer(): express.Application {
 
   /**
    * Cloud / load-balancer health check — always 200 when the process is up.
-   * Used by Fly.io, Render, etc. Response: { status: "ok", uptime }
+   * Used by Render, etc. Response: { status: "ok", uptime }
    */
   app.get('/health', (_req: Request, res: Response) => {
     const app = getAppVersion();
@@ -766,6 +766,30 @@ export function createServer(): express.Application {
       jito: getJitoStatus(),
       mev: getMevStatus(),
     });
+  });
+
+  app.post('/api/rpc/share-load', (req: Request, res: Response) => {
+    try {
+      const { setRpcShareLoad } = require('./config') as typeof import('./config');
+      const enabled =
+        req.body?.enabled === true ||
+        req.body?.enabled === 'true' ||
+        req.body?.enabled === 1 ||
+        req.body?.shareLoad === true;
+      const shareLoad = setRpcShareLoad(enabled);
+      res.json({
+        ...getRpcStats(),
+        jito: getJitoStatus(),
+        mev: getMevStatus(),
+        ok: true,
+        shareLoad,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.get('/api/rpc/diagnostic', (_req: Request, res: Response) => {
