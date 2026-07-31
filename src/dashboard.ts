@@ -82,6 +82,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       0%, 100% { box-shadow: 0 0 4px #34d39988; opacity: 1; }
       50% { box-shadow: 0 0 10px #34d399; opacity: .85; }
     }
+    @keyframes ico-play-nudge {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.14); }
+    }
+    @keyframes ico-rpc-beat {
+      0%, 100% { transform: translateY(0); opacity: 1; }
+      40% { transform: translateY(-1.5px); opacity: 0.7; }
+    }
+    @keyframes ico-star-twinkle {
+      0%, 100% { transform: rotate(0deg) scale(1); opacity: 1; filter: drop-shadow(0 0 0 transparent); }
+      50% { transform: rotate(-8deg) scale(1.08); opacity: 0.92; filter: drop-shadow(0 0 4px rgba(94, 234, 212, 0.55)); }
+    }
+    @keyframes mode-badge-sheen {
+      0%, 100% { box-shadow: inset 0 0 0 1px rgba(94, 234, 212, 0.2); }
+      50% { box-shadow: inset 0 0 0 1px rgba(94, 234, 212, 0.45), 0 0 10px rgba(45, 212, 191, 0.18); }
+    }
+    .run-status.run-running #run-status-icon,
+    .run-status.run-running .status-ico[data-run-icon] {
+      animation: ico-play-nudge 1.7s ease-in-out infinite;
+      transform-origin: 40% 50%;
+    }
+    .rpc-status.rpc-ok #rpc-health-icon {
+      animation: ico-rpc-beat 1.35s ease-in-out infinite;
+      color: #6ee7b7;
+    }
+    .rpc-status.rpc-bad #rpc-health-icon {
+      color: #fca5a5;
+    }
+    .header-actions .risk-badge .risk-badge-icon {
+      animation: ico-star-twinkle 2.6s ease-in-out infinite;
+      transform-origin: center;
+    }
+    .header-actions #mode-badge.badge-livesim {
+      animation: mode-badge-sheen 2.8s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .dot-running,
+      .run-status.run-running #run-status-icon,
+      .run-status.run-running .status-ico[data-run-icon],
+      .rpc-status.rpc-ok #rpc-health-icon,
+      .header-actions .risk-badge .risk-badge-icon,
+      .header-actions #mode-badge.badge-livesim {
+        animation: none !important;
+      }
+    }
     .status-ico {
       width: 12px;
       height: 12px;
@@ -3963,13 +4008,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       max-width: 100%;
       width: 100%;
       box-sizing: border-box;
-      padding: 0.35rem 0.5rem !important;
+      padding: 0.4rem 0.55rem !important;
+      background:
+        linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.88) 55%, rgba(15, 23, 42, 0.95) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.18);
+      box-shadow:
+        0 0 0 1px rgba(15, 23, 42, 0.5),
+        0 8px 24px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(148, 163, 184, 0.08);
     }
     .header-actions .status-meta {
       display: inline-flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 0.25rem 0.45rem;
+      gap: 0.28rem 0.4rem;
       min-width: 0;
       flex: 1 1 12rem;
     }
@@ -3978,36 +4030,67 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       flex-wrap: wrap;
       align-items: center;
       justify-content: flex-end;
-      gap: 0.25rem;
+      gap: 0.3rem;
       margin-left: auto;
       min-width: 0;
       max-width: 100%;
     }
     .header-actions .status-stat {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       color: #94a3b8;
       white-space: nowrap;
       line-height: 1.2;
+      letter-spacing: 0.01em;
     }
-    .header-actions .status-stat strong { color: #e2e8f0; font-weight: 650; }
+    .header-actions .status-stat strong {
+      color: #f1f5f9;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .header-actions .status-stat.is-pnl-neg strong { color: #fca5a5; }
+    .header-actions .status-stat.is-pnl-pos strong { color: #6ee7b7; }
+    .header-actions .rpc-pill .rpc-pill-label {
+      color: #94a3b8;
+      font-weight: 650;
+      font-size: 0.65rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .header-actions .rpc-pill.rpc-ok {
+      border-color: rgba(52, 211, 153, 0.4);
+      background: rgba(6, 78, 59, 0.28);
+    }
+    .header-actions .rpc-pill.rpc-bad {
+      border-color: rgba(248, 113, 113, 0.45);
+      background: rgba(127, 29, 29, 0.28);
+    }
     .header-actions #rpc-status-wrap {
-      max-width: 9.5rem;
+      max-width: none;
       overflow: hidden;
     }
     .header-actions #rpc-active {
       display: inline-block;
-      max-width: 7.5rem;
+      max-width: 5.5rem;
       overflow: hidden;
       text-overflow: ellipsis;
       vertical-align: bottom;
       white-space: nowrap;
+      color: inherit;
+    }
+    .header-actions .rpc-latency-sep {
+      color: #64748b;
+      font-weight: 600;
     }
     .header-actions #rpc-latency {
       display: inline-block;
-      min-width: 3.75rem;
-      text-align: right;
+      min-width: 0;
+      text-align: left;
       font-variant-numeric: tabular-nums;
+      color: #e2e8f0;
+      font-weight: 700;
     }
+    .header-actions #rpc-latency.is-slow { color: #fbbf24; }
+    .header-actions #rpc-latency.is-bad { color: #fca5a5; }
     .header-actions #status-text { font-size: 0.75rem; line-height: 1.2; }
     .header-actions .badge { padding: 1px 7px; font-size: 10px; letter-spacing: 0.02em; }
     .header-actions .strict-badge,
@@ -4018,11 +4101,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .header-actions .status-ico { width: 11px; height: 11px; }
     .header-actions .run-status { padding: 1px 6px 1px 3px; }
     .header-actions .btn {
+      position: relative;
       flex: 0 0 auto;
       min-height: 1.85rem;
       padding: 0.2rem 0.5rem;
       font-size: 11px;
-      border-radius: 0.4rem;
+      border-radius: 0.45rem;
+    }
+    .header-actions .btn-primary {
+      box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 4px 14px rgba(16, 185, 129, 0.22);
+    }
+    .header-actions .open-trades-badge {
+      position: absolute;
+      top: -0.45rem;
+      right: -0.4rem;
+      z-index: 2;
+      min-width: 1.15rem;
+      height: 1.15rem;
+      padding: 0 0.28rem;
+      border-radius: 9999px;
+      background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+      border: 1.5px solid #0f172a;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1.15rem;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45);
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .header-actions .open-trades-badge[hidden] {
+      display: none !important;
     }
     .settings-menu-wrap {
       position: relative;
@@ -4651,27 +4761,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card { padding: 0.85rem; border-radius: 0.65rem; }
       .header-bar { margin-bottom: 0.5rem; gap: 0.35rem 0.4rem; }
       .header-actions {
-        padding: 0.4rem 0.45rem !important;
-        gap: 0.35rem;
+        padding: 0.45rem 0.5rem !important;
+        gap: 0.4rem;
       }
       .header-actions .status-meta {
         flex: 1 1 100%;
-        gap: 0.2rem 0.4rem;
+        gap: 0.25rem 0.35rem;
+      }
+      .header-actions .rpc-pill {
+        max-width: 100%;
+        flex: 1 1 auto;
+      }
+      .header-actions #rpc-active {
+        max-width: 6.5rem;
       }
       .header-actions .status-controls {
         flex: 1 1 100%;
         margin-left: 0;
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 0.3rem;
+        gap: 0.35rem;
+        padding-top: 0.1rem;
       }
       .header-actions .btn {
         flex: unset;
         width: 100%;
         justify-content: center;
-        min-height: 2.15rem;
-        padding: 0.35rem 0.4rem;
+        min-height: 2.25rem;
+        padding: 0.4rem 0.45rem;
         font-size: 11px;
+      }
+      .header-actions .open-trades-badge {
+        top: -0.35rem;
+        right: 0.15rem;
       }
       .nav-tabs {
         scroll-snap-type: x proximity;
@@ -4986,17 +5108,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
-          <span class="status-stat has-tip" title="Realized PnL for the current UTC day">Day <strong id="daily-pnl">—</strong></span>
-          <span class="status-stat rpc-status rpc-unknown hidden sm:inline has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint label">
+          <span class="status-stat has-tip" id="header-daily-pnl-wrap" title="Realized PnL for the current UTC day">Day <strong id="daily-pnl">—</strong></span>
+          <span class="status-stat rpc-status rpc-pill rpc-unknown has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint and last measured latency">
             <svg id="rpc-health-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            RPC <strong id="rpc-active">—</strong>
+            <span class="rpc-pill-label">RPC</span>
+            <strong id="rpc-active">—</strong>
+            <span class="rpc-latency-sep" aria-hidden="true">·</span>
+            <strong id="rpc-latency">—</strong>
           </span>
-          <span class="status-stat hidden md:inline has-tip" title="Last measured RPC latency"><strong id="rpc-latency">—</strong></span>
         </div>
         <div class="status-controls">
           <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
           <button id="mode-paper" onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
-          <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds.">Live Sim</button>
+          <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds. Badge = open trades.">
+            <span id="open-trades-badge" class="open-trades-badge" hidden aria-live="polite">0</span>
+            Live Sim
+          </button>
           <button id="mode-live" onclick="setMode('live')" class="btn btn-secondary" title="Switch to live trading — real SOL will be spent. Confirm carefully.">Live</button>
         </div>
       </div>
@@ -15711,10 +15838,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
 
       document.getElementById('balance').textContent = status.balance != null ? Number(status.balance).toFixed(4) : '—';
-      document.getElementById('daily-pnl').textContent =
+      const dayPnl =
         status.monitor && status.monitor.dailyPnlSol != null
-          ? Number(status.monitor.dailyPnlSol).toFixed(4)
-          : '—';
+          ? Number(status.monitor.dailyPnlSol)
+          : null;
+      const dayEl = document.getElementById('daily-pnl');
+      if (dayEl) {
+        dayEl.textContent = dayPnl != null ? dayPnl.toFixed(4) : '—';
+      }
+      const dayWrap = document.getElementById('header-daily-pnl-wrap');
+      if (dayWrap) {
+        dayWrap.classList.toggle('is-pnl-pos', dayPnl != null && dayPnl > 0);
+        dayWrap.classList.toggle('is-pnl-neg', dayPnl != null && dayPnl < 0);
+      }
       const port = status.portfolio || {};
       const availSol = port.availableBalanceSol != null ? Number(port.availableBalanceSol)
         : (status.balance != null ? Number(status.balance) : null);
@@ -15819,6 +15955,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (openCountEl && openCnt != null) {
         openCountEl.textContent = String(openCnt);
       }
+      updateOpenTradesBadge(openCnt);
 
       // RPC status
       const rpc = status.rpc || {};
@@ -15838,14 +15975,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (rpc.ok === false) rpcWrap.classList.add('rpc-bad');
         else if (rpc.ok === true) rpcWrap.classList.add('rpc-ok');
         else rpcWrap.classList.add('rpc-unknown');
+        const latTip =
+          activeEp.latencyMs != null ? ' · ' + activeEp.latencyMs + 'ms' : '';
         rpcWrap.title =
           rpc.ok === false
             ? (rpc.warning || 'RPC unhealthy — wallet buys may not be detected')
-            : 'Active Solana RPC: ' + (rpc.active || '—');
+            : 'Active Solana RPC: ' + (rpc.active || '—') + latTip;
       }
       setStatusIcon(rpcIcon, rpc.ok === false ? 'activityBad' : 'activity');
-      document.getElementById('rpc-latency').textContent =
-        activeEp.latencyMs != null ? activeEp.latencyMs + 'ms' : '—';
+      const rpcLatEl = document.getElementById('rpc-latency');
+      if (rpcLatEl) {
+        const ms = activeEp.latencyMs != null ? Number(activeEp.latencyMs) : null;
+        rpcLatEl.textContent = ms != null && Number.isFinite(ms) ? Math.round(ms) + 'ms' : '—';
+        rpcLatEl.classList.toggle('is-slow', ms != null && ms >= 400 && ms < 1200);
+        rpcLatEl.classList.toggle('is-bad', ms != null && ms >= 1200);
+      }
       document.getElementById('rpc-summary').textContent =
         'Primary active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
@@ -15964,6 +16108,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : 'No wallets currently on the poll list — import wallets or Force Refresh Monitoring.';
       }
       document.getElementById('open-count').textContent = status.monitor.openPositions;
+      updateOpenTradesBadge(
+        status.monitor.openPositions != null
+          ? status.monitor.openPositions
+          : status.stats?.openTrades
+      );
       document.getElementById('signals').textContent = status.monitor.recentSignals;
       (function updateSignalLight() {
         const light = status.monitor.signalLight || {};
@@ -18504,6 +18653,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       strictMed: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
       strictHigh: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
     };
+
+    function updateOpenTradesBadge(n) {
+      const el = document.getElementById('open-trades-badge');
+      if (!el) return;
+      const count = Number(n);
+      if (!Number.isFinite(count) || count <= 0) {
+        el.hidden = true;
+        el.textContent = '0';
+        el.setAttribute('aria-label', 'No open trades');
+        return;
+      }
+      el.hidden = false;
+      el.textContent = count > 99 ? '99+' : String(Math.round(count));
+      el.setAttribute(
+        'aria-label',
+        Math.round(count) + ' open trade' + (count === 1 ? '' : 's')
+      );
+    }
 
     function setStatusIcon(svgEl, key) {
       if (!svgEl) return;
