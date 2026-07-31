@@ -6,7 +6,7 @@
 
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection, lanesShareEndpoint } from './connection';
+import { getConnection, lanesShareEndpoint, runWithRpcRole } from './connection';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
@@ -337,9 +337,7 @@ async function parseBuysFromSig(
   wallet: UniverseWallet,
   signature: string
 ): Promise<number> {
-  const conn = getConnection(
-    getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad))
-  );
+  const conn = getConnection();
   const tx = await conn.getParsedTransaction(signature, {
     maxSupportedTransactionVersion: 0,
     commitment: 'confirmed',
@@ -388,9 +386,11 @@ async function pollUniverseBatch(): Promise<number> {
   }
   rotationIndex = (start + batch.length) % Math.max(1, universe.length);
 
-  const conn = getConnection(
-    getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad))
-  );
+  const role = getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad));
+  return runWithRpcRole(
+    role,
+    async () => {
+  const conn = getConnection();
   let buys = 0;
 
   for (const wallet of batch) {
@@ -431,6 +431,9 @@ async function pollUniverseBatch(): Promise<number> {
     }
   }
   return buys;
+    },
+    'zion'
+  );
 }
 
 function pruneAggs(): void {

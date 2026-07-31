@@ -946,7 +946,8 @@ export async function executeApprovedOffer(
   try {
     const result = await runWithRpcRole(
       getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad)),
-      () => executeBuy(offer.mint, offer.symbol, buyOpts)
+      () => executeBuy(offer.mint, offer.symbol, buyOpts),
+      'zion'
     );
     if (autoPlatinumHwr) {
       try {

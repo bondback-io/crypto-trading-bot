@@ -405,8 +405,10 @@ async function handleLogsNotification(
   migrationParseInFlight += 1;
   try {
     const role = getRpcRoleFor('migration', Boolean(config.rpc?.shareLoad));
-    await runWithRpcRole(role, () =>
-      processMigrationTx(signature, 'websocket', program)
+    await runWithRpcRole(
+      role,
+      () => processMigrationTx(signature, 'websocket', program),
+      'migration'
     );
   } finally {
     migrationParseInFlight -= 1;
@@ -523,7 +525,7 @@ async function pollMigrations(): Promise<void> {
     }
     console.error('[migration] Poll error:', err);
   }
-  });
+  }, 'migration');
 }
 
 /** @returns false when rate-limited (caller should abort this poll cycle) */

@@ -90,11 +90,208 @@ let activeUtility = 0;
 let activeIndex = 0;
 
 const rpcRoleAls = new AsyncLocalStorage<RpcRole>();
+/** Optional feature tag for call metering (wallet_poll, health_probe, …). */
+const rpcFeatureAls = new AsyncLocalStorage<string>();
 
 /** Cached keypairs by trading wallet id — secrets never leave process memory */
 const keypairCache = new Map<string, Keypair>();
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let started = false;
+
+/** HTTP JSON-RPC call meter — counts real CU burn (getConnection path included). */
+export type RpcCallTrafficRow = {
+  endpoint: string;
+  feature: string;
+  method: string;
+  role: RpcRole | 'unknown';
+  calls: number;
+  errors: number;
+  totalMs: number;
+  avgMs: number;
+};
+
+type CallMeterKey = string;
+const callMeter = new Map<
+  CallMeterKey,
+  {
+    endpoint: string;
+    feature: string;
+    method: string;
+    role: RpcRole | 'unknown';
+    calls: number;
+    errors: number;
+    totalMs: number;
+  }
+>();
+let callMeterStartedAt = Date.now();
+let lastDebugTrafficAt = 0;
+
+function callMeterKey(
+  endpoint: string,
+  feature: string,
+  method: string,
+  role: string
+): CallMeterKey {
+  return `${endpoint}|${feature}|${method}|${role}`;
+}
+
+function recordHttpRpcCall(opts: {
+  endpoint: string;
+  method: string;
+  ok: boolean;
+  latencyMs: number;
+}): void {
+  const feature = rpcFeatureAls.getStore() || 'ungated';
+  const role = rpcRoleAls.getStore() ?? 'unknown';
+  const key = callMeterKey(opts.endpoint, feature, opts.method, role);
+  let row = callMeter.get(key);
+  if (!row) {
+    row = {
+      endpoint: opts.endpoint,
+      feature,
+      method: opts.method,
+      role,
+      calls: 0,
+      errors: 0,
+      totalMs: 0,
+    };
+    callMeter.set(key, row);
+  }
+  row.calls += 1;
+  if (!opts.ok) row.errors += 1;
+  row.totalMs += Math.max(0, opts.latencyMs);
+}
+
+export function getRpcCallTraffic(limit = 40): {
+  sinceMs: number;
+  totalCalls: number;
+  byEndpoint: Record<string, number>;
+  byFeature: Record<string, number>;
+  top: RpcCallTrafficRow[];
+} {
+  const top: RpcCallTrafficRow[] = [];
+  const byEndpoint: Record<string, number> = {};
+  const byFeature: Record<string, number> = {};
+  let totalCalls = 0;
+  for (const row of callMeter.values()) {
+    totalCalls += row.calls;
+    byEndpoint[row.endpoint] = (byEndpoint[row.endpoint] || 0) + row.calls;
+    byFeature[row.feature] = (byFeature[row.feature] || 0) + row.calls;
+    top.push({
+      ...row,
+      avgMs: row.calls ? Math.round(row.totalMs / row.calls) : 0,
+    });
+  }
+  top.sort((a, b) => b.calls - a.calls);
+  return {
+    sinceMs: Date.now() - callMeterStartedAt,
+    totalCalls,
+    byEndpoint,
+    byFeature,
+    top: top.slice(0, Math.max(1, limit)),
+  };
+}
+
+function emitDebugTrafficSnapshot(hypothesisId: string): void {
+  const traffic = getRpcCallTraffic(15);
+  const payload = {
+    sessionId: '8695ba',
+    runId: 'rpc-traffic',
+    hypothesisId,
+    location: 'connection.ts:emitDebugTrafficSnapshot',
+    message: 'RPC HTTP traffic snapshot',
+    data: {
+      sinceMs: traffic.sinceMs,
+      totalCalls: traffic.totalCalls,
+      byEndpoint: traffic.byEndpoint,
+      byFeature: traffic.byFeature,
+      top: traffic.top.slice(0, 10),
+    },
+    timestamp: Date.now(),
+  };
+  // #region agent log
+  fetch('http://127.0.0.1:7721/ingest/2e608684-d436-4b7d-9b88-409138f56f43', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': '8695ba',
+    },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+  try {
+    const fs = require('fs') as typeof import('fs');
+    const path = require('path') as typeof import('path');
+    const logPath = path.join(process.cwd(), 'debug-8695ba.log');
+    fs.appendFileSync(logPath, JSON.stringify(payload) + '\n');
+  } catch {
+    /* ignore */
+  }
+  // #endregion
+  console.log(
+    `[rpc:debug] traffic ${Math.round(traffic.sinceMs / 1000)}s total=${traffic.totalCalls} ` +
+      `byEp=${JSON.stringify(traffic.byEndpoint)} byFeat=${JSON.stringify(traffic.byFeature)}`
+  );
+}
+
+function parseRpcMethodsFromBody(body: unknown): string[] {
+  try {
+    let raw = '';
+    if (typeof body === 'string') raw = body;
+    else if (body != null && typeof (body as { toString?: () => string }).toString === 'function') {
+      raw = String(body);
+    }
+    if (!raw) return ['unknown'];
+    const parsed = JSON.parse(raw) as
+      | { method?: string }
+      | Array<{ method?: string }>;
+    if (Array.isArray(parsed)) {
+      const methods = parsed
+        .map((p) => p?.method)
+        .filter((m): m is string => Boolean(m));
+      return methods.length ? methods : ['batch'];
+    }
+    return [parsed?.method || 'unknown'];
+  } catch {
+    return ['unknown'];
+  }
+}
+
+function meteredFetch(endpointLabel: string) {
+  const baseFetch = globalThis.fetch.bind(globalThis);
+  return async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1]
+  ): Promise<Response> => {
+    const methods = parseRpcMethodsFromBody(init?.body);
+    const t0 = Date.now();
+    let ok = false;
+    try {
+      const res = await baseFetch(input, init);
+      ok = res.ok;
+      const latencyMs = Date.now() - t0;
+      for (const method of methods) {
+        recordHttpRpcCall({
+          endpoint: endpointLabel,
+          method,
+          ok,
+          latencyMs,
+        });
+      }
+      return res;
+    } catch (err) {
+      const latencyMs = Date.now() - t0;
+      for (const method of methods) {
+        recordHttpRpcCall({
+          endpoint: endpointLabel,
+          method,
+          ok: false,
+          latencyMs,
+        });
+      }
+      throw err;
+    }
+  };
+}
 
 /** Default cross-lane piggyback grace — preferred must stay unhealthy this long. */
 const DEFAULT_FAILOVER_DOWN_MS = 30_000;
@@ -191,6 +388,7 @@ function ensureEndpoints(): void {
         commitment: 'confirmed',
         wsEndpoint: endpoint.wsUrl || toWsUrl(endpoint.url),
         disableRetryOnRateLimit: true,
+        fetch: meteredFetch(endpoint.label || `rpc`),
       }),
       healthy: true,
       latencyMs: null,
@@ -274,9 +472,20 @@ function currentRole(): RpcRole {
 /** Run work on the secondary (or primary) lane — nested getConnection() inherits the role. */
 export async function runWithRpcRole<T>(
   role: RpcRole,
+  fn: () => Promise<T> | T,
+  feature?: string
+): Promise<T> {
+  const run = () => rpcRoleAls.run(role, async () => await fn());
+  if (feature) return rpcFeatureAls.run(feature, run);
+  return run();
+}
+
+/** Tag current async context for HTTP call metering (health probes, etc.). */
+export async function runWithRpcFeature<T>(
+  feature: string,
   fn: () => Promise<T> | T
 ): Promise<T> {
-  return rpcRoleAls.run(role, async () => await fn());
+  return rpcFeatureAls.run(feature, async () => await fn());
 }
 
 function preferredIndexFor(role: RpcRole): number {
@@ -496,28 +705,38 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
     return false;
   }
 
-  const start = Date.now();
-  try {
-    await Promise.race([
-      state.connection.getSlot('confirmed'),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`RPC probe timeout after ${timeoutMs}ms`)),
-          timeoutMs
-        )
-      ),
-    ]);
-    recordSuccess(index, Date.now() - start);
-    return true;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    recordFailure(index, message);
-    return false;
-  }
+  return runWithRpcFeature('health_probe', async () => {
+    const start = Date.now();
+    try {
+      await Promise.race([
+        state.connection.getSlot('confirmed'),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`RPC probe timeout after ${timeoutMs}ms`)),
+            timeoutMs
+          )
+        ),
+      ]);
+      recordSuccess(index, Date.now() - start);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      recordFailure(index, message);
+      return false;
+    }
+  });
 }
 
 /** Run a timed RPC call against the lane's active endpoint; failover on failure */
 export async function withRpc<T>(
+  label: string,
+  fn: (conn: Connection) => Promise<T>,
+  role?: RpcRole
+): Promise<T> {
+  return runWithRpcFeature(label, () => withRpcInner(label, fn, role));
+}
+
+async function withRpcInner<T>(
   label: string,
   fn: (conn: Connection) => Promise<T>,
   role?: RpcRole
@@ -640,6 +859,8 @@ export function getRpcStats(): {
   ok: boolean;
   /** Human-readable warning when polling is likely broken */
   warning: string | null;
+  /** Real HTTP JSON-RPC call traffic (includes getConnection path). */
+  callTraffic: ReturnType<typeof getRpcCallTraffic>;
 } {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
@@ -678,12 +899,26 @@ export function getRpcStats(): {
       'Primary and secondary resolve to the same RPC — Zion KOL shares CU with copy/signals. Set a distinct RPC_SECONDARY.';
   }
 
-  const maskUrl = (url: string) =>
-    url.replace(/\/\/.*@/, '//***@').slice(0, 72);
+  const maskUrl = (url: string) => {
+    try {
+      const u = new URL(url);
+      if (/api\.key|api-key|apikey/i.test(u.search)) u.search = '';
+      const path = u.pathname.replace(
+        /\/(v\d+\/)?[A-Za-z0-9_-]{20,}(\/|$)/g,
+        '/***$2'
+      );
+      return `${u.protocol}//${u.host}${path}`.slice(0, 72);
+    } catch {
+      return url
+        .replace(/\/\/.*@/, '//***@')
+        .replace(/\/[A-Za-z0-9_-]{20,}/g, '/***')
+        .slice(0, 72);
+    }
+  };
 
   return {
     active: getActiveEndpointLabel('primary'),
-    activeUrl: getRpcUrl('primary'),
+    activeUrl: maskUrl(getRpcUrl('primary')),
     primary: {
       label: pActive?.endpoint.label || 'primary',
       url: maskUrl(pActive?.endpoint.url || ''),
@@ -726,7 +961,7 @@ export function getRpcStats(): {
       )
         lane = 'utility';
       return {
-        url: s.endpoint.url,
+        url: maskUrl(s.endpoint.url),
         label: s.endpoint.label,
         role: s.role,
         healthy: s.healthy,
@@ -745,6 +980,7 @@ export function getRpcStats(): {
     priorityFeeLamports: lastPriorityFeeLamports,
     ok: anyHealthy,
     warning,
+    callTraffic: getRpcCallTraffic(40),
   };
 }
 
@@ -762,44 +998,60 @@ export async function estimatePriorityFeeMicroLamports(
   const fallback = config.rpc?.priorityFee?.defaultMicroLamports ?? 50_000;
 
   try {
-    const conn = getConnection();
-    const account =
-      sampleAccount ??
-      getWalletPublicKey() ??
-      new PublicKey('11111111111111111111111111111111');
+    const feeRole: RpcRole = Boolean(config.rpc?.shareLoad)
+      ? 'utility'
+      : 'primary';
+    return await runWithRpcRole(
+      feeRole,
+      async () => {
+        const conn = getConnection();
+        const account =
+          sampleAccount ??
+          getWalletPublicKey() ??
+          new PublicKey('11111111111111111111111111111111');
 
-    // getRecentPrioritizationFees available on newer web3.js
-    const fees = await (
-      conn as Connection & {
-        getRecentPrioritizationFees?: (args: {
-          lockedWritableAccounts: PublicKey[];
-        }) => Promise<{ prioritizationFee: number }[]>;
-      }
-    ).getRecentPrioritizationFees?.({
-      lockedWritableAccounts: [account],
-    });
+        // getRecentPrioritizationFees available on newer web3.js
+        const fees = await (
+          conn as Connection & {
+            getRecentPrioritizationFees?: (args: {
+              lockedWritableAccounts: PublicKey[];
+            }) => Promise<{ prioritizationFee: number }[]>;
+          }
+        ).getRecentPrioritizationFees?.({
+          lockedWritableAccounts: [account],
+        });
 
-    if (fees && fees.length > 0) {
-      const sorted = fees
-        .map((f) => f.prioritizationFee)
-        .filter((n) => Number.isFinite(n))
-        .sort((a, b) => a - b);
+        if (fees && fees.length > 0) {
+          const sorted = fees
+            .map((f) => f.prioritizationFee)
+            .filter((n) => Number.isFinite(n))
+            .sort((a, b) => a - b);
 
-      if (sorted.length > 0) {
-        // Use ~75th percentile for competitive landing
-        const idx = Math.min(
-          sorted.length - 1,
-          Math.floor(sorted.length * 0.75)
-        );
-        const estimated = Math.max(min, Math.min(max, sorted[idx] || fallback));
-        // Convert micro-lamports/CU → store approximate lamports for UI (assume 200k CU)
-        lastPriorityFeeLamports = Math.ceil((estimated * 200_000) / 1_000_000);
-        console.log(
-          `[rpc] Priority fee ~${estimated} µLamports/CU (est. ${lastPriorityFeeLamports} lamports)`
-        );
-        return estimated;
-      }
-    }
+          if (sorted.length > 0) {
+            // Use ~75th percentile for competitive landing
+            const idx = Math.min(
+              sorted.length - 1,
+              Math.floor(sorted.length * 0.75)
+            );
+            const estimated = Math.max(
+              min,
+              Math.min(max, sorted[idx] || fallback)
+            );
+            // Convert micro-lamports/CU → store approximate lamports for UI (assume 200k CU)
+            lastPriorityFeeLamports = Math.ceil(
+              (estimated * 200_000) / 1_000_000
+            );
+            console.log(
+              `[rpc] Priority fee ~${estimated} µLamports/CU (est. ${lastPriorityFeeLamports} lamports)`
+            );
+            return estimated;
+          }
+        }
+        lastPriorityFeeLamports = Math.ceil((fallback * 200_000) / 1_000_000);
+        return fallback;
+      },
+      'priority_fee'
+    );
   } catch (err) {
     console.warn(
       '[rpc] Priority fee estimate failed, using default:',
@@ -1016,27 +1268,73 @@ export function startRpcHealthMonitor(): void {
   ensureEndpoints();
 
   const interval = config.rpc?.healthIntervalMs ?? 30_000;
-  // Probe preferred lanes first, serially — parallel probes on free Helius+Alchemy
-  // burn the same CU budget the monitor needs at boot.
+  let healthCycle = 0;
+
+  /** Share load: keep public/utility hot for diagnostics; probe paid lanes sparsely. */
+  function shouldProbeIndex(index: number, cycle: number): boolean {
+    if (!Boolean(config.rpc?.shareLoad)) return true;
+    const state = endpoints[index];
+    if (!state) return false;
+    const isPublic = isPublicRpcUrl(state.endpoint.url);
+    const isUtil = index === preferredUtility;
+    const isPrimary = index === preferredPrimary;
+    const isSecondary =
+      index === preferredSecondary && preferredSecondary !== preferredPrimary;
+    // Errors / logs / diagnostics: always keep public + utility probed.
+    if (isUtil || isPublic) return true;
+    // Helius (critical): every 3rd cycle (~90s at 30s interval)
+    if (isPrimary) return cycle % 3 === 0;
+    // Alchemy (scanners): every 2nd cycle (~60s)
+    if (isSecondary) return cycle % 2 === 0;
+    // Inactive fallback: rare
+    return cycle % 4 === 0;
+  }
+
+  // Boot: probe utility/public first, then preferred paid lanes once (not all fallbacks).
   void (async () => {
-    for (let i = 0; i < endpoints.length; i++) {
+    const order: number[] = [];
+    const push = (i: number) => {
+      if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+    };
+    if (Boolean(config.rpc?.shareLoad)) {
+      push(preferredUtility);
+      for (let i = 0; i < endpoints.length; i++) {
+        if (isPublicRpcUrl(endpoints[i]?.endpoint.url || '')) push(i);
+      }
+      push(preferredPrimary);
+      push(preferredSecondary);
+    } else {
+      for (let i = 0; i < endpoints.length; i++) push(i);
+    }
+    for (const i of order) {
       await probeEndpoint(i);
       await new Promise((r) => setTimeout(r, 250));
     }
+    emitDebugTrafficSnapshot('H4-boot');
   })();
 
   healthTimer = setInterval(() => {
     void (async () => {
+      healthCycle += 1;
       for (let i = 0; i < endpoints.length; i++) {
+        if (!shouldProbeIndex(i, healthCycle)) continue;
         await probeEndpoint(i);
         await new Promise((r) => setTimeout(r, 200));
       }
       await maybeSwitchEndpoints();
+      if (Date.now() - lastDebugTrafficAt >= 45_000) {
+        lastDebugTrafficAt = Date.now();
+        emitDebugTrafficSnapshot('H1-H5');
+      }
     })();
   }, interval);
 
   console.log(
-    `[rpc] Health monitor started (every ${interval}ms) — endpoints: ` +
+    `[rpc] Health monitor started (every ${interval}ms` +
+      (Boolean(config.rpc?.shareLoad)
+        ? '; share-load: public/utility every tick, helius~3x, alchemy~2x'
+        : '') +
+      `) — endpoints: ` +
       endpoints.map((e) => `${e.endpoint.label}[${e.role}]`).join(', ') +
       ` · active primary=${getActiveEndpointLabel('primary')} secondary=${getActiveEndpointLabel('secondary')}`
   );

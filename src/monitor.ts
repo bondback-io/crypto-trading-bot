@@ -777,14 +777,15 @@ function getWalletPollThrottle(rpcUrl: string): {
 } {
   const soft = isSoftThrottleRpcUrl(rpcUrl);
   if (soft) {
+    const share = Boolean(config.rpc?.shareLoad);
     return {
       soft: true,
       batchSize: 1,
-      batchGapMs: 600,
+      batchGapMs: share ? 750 : 600,
       sigLimit: 5,
       maxParse: 1,
       pause429Ms: 20_000,
-      maxWalletsPerCycle: 8,
+      maxWalletsPerCycle: share ? 6 : 8,
       abortCycleOn429: true,
       /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
       cycleBudgetMs: 5_000,
@@ -1158,7 +1159,9 @@ export async function checkWalletLastTrade(
   failed?: boolean;
 }> {
   const role = getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(role, async () => {
+  return runWithRpcRole(
+    role,
+    async () => {
     try {
       const pubkey = new PublicKey(address);
       const conn = getConnection();
@@ -1191,7 +1194,9 @@ export async function checkWalletLastTrade(
       // Do NOT invent zeros — callers must keep prior lastTradedAt / tradesLast30d
       return { lastTradedAt: null, tradesLast30d: 0, failed: true };
     }
-  });
+  },
+    'activity'
+  );
 }
 
 /** Refresh activity metadata for one wallet (GMGN first, on-chain fallback) */
@@ -1354,7 +1359,8 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
       }
     }
     return reports;
-  }
+  },
+    'activity'
   );
 }
 
@@ -1536,7 +1542,8 @@ export function getWalletsForPolling(): SmartWallet[] {
   });
 
   // Free Helius/Alchemy cannot sustain 100+ wallet watches — rotate a capped set.
-  const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || 40);
+  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 24 : 40;
+  const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || softCapDefault);
   if (
     isSoftThrottleRpcUrl(getRpcUrl()) &&
     Number.isFinite(softCap) &&
@@ -1874,7 +1881,7 @@ async function pollWallet(
   throttle?: ReturnType<typeof getWalletPollThrottle>
 ): Promise<void> {
   const role = getRpcRoleFor('wallet_poll', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(role, () => pollWalletInner(wallet, throttle));
+  return runWithRpcRole(role, () => pollWalletInner(wallet, throttle), 'wallet_poll');
 }
 
 async function pollWalletInner(

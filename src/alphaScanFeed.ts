@@ -285,7 +285,7 @@ async function enrichCurves(
         }
       })
     );
-  });
+  }, 'alpha_scan');
   return out;
 }
 

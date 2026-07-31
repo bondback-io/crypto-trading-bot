@@ -53,6 +53,7 @@ export interface RpcLoadDiagnostic {
   jito: { bundlesEnabled: boolean; note: string };
   turboNote: string;
   rpc: ReturnType<typeof getRpcStats>;
+  callTraffic?: ReturnType<typeof getRpcStats>['callTraffic'];
 }
 
 function bumpMs(current: number, floor: number, cap: number): number {
@@ -241,7 +242,9 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       id: 'health',
       lane: 'all',
       intervalMs: healthPoll,
-      note: 'RPC health getSlot probes (all registered endpoints)',
+      note: Boolean(config.rpc?.shareLoad)
+        ? 'RPC health getSlot — public/utility every tick; Helius ~1/3; Alchemy ~1/2; fallback rare'
+        : 'RPC health getSlot probes (all registered endpoints)',
     },
   ];
 
@@ -376,6 +379,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     turboNote:
       'Turbo Mode (per micro-bot) raises priority fee + buy slip. It does not turn Jito bundles ON. Live Sim stamps Turbo without real bundles.',
     rpc,
+    callTraffic: rpc.callTraffic,
   };
 }
 

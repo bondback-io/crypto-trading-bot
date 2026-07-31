@@ -821,7 +821,8 @@ async function enrichCurve(event: LaunchEvent): Promise<{
   try {
     const curve = await runWithRpcRole(
       getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
-      () => fetchBondingCurve(event.mint)
+      () => fetchBondingCurve(event.mint),
+      'market_scanner'
     );
     if (!curve) return { bonus: 0, nearMigration: false, progressPct: null };
     const sum = summarizeBondingCurve(curve);
