@@ -678,6 +678,18 @@ async function runAntiRugChecks(
       if (sev === 'critical') score += 20;
       else if (sev === 'high') score += 12;
       else if (sev === 'medium') score += 6;
+
+      // Concentration-class RugCheck risks are clear rugs — hard skip (not score-only).
+      // SAOF-class: "High holder correlation" + "Single holder ownership" scored ~57
+      // and still passed maxRiskScore 78 when insider/top10 were unknown.
+      if (isRugcheckConcentrationHardRisk(r.name)) {
+        const reason = `Skipped — high holder concentration (${r.name})`;
+        if (!skipReasons.includes(reason)) {
+          hardSkipReasons.push(reason);
+          skipReasons.push(reason);
+        }
+        score = Math.max(score, 80);
+      }
     }
   }
 
@@ -1260,6 +1272,19 @@ function mapRugSeverity(level?: string): FlagSeverity {
   if (l.includes('medium') || l.includes('caution')) return 'medium';
   if (l.includes('info') || l.includes('low')) return 'low';
   return 'medium';
+}
+
+/** RugCheck names that imply insider/cluster concentration — hard skip. */
+function isRugcheckConcentrationHardRisk(name: string): boolean {
+  const n = (name || '').toLowerCase();
+  return (
+    /holder correlation/.test(n) ||
+    /single.?holder/.test(n) ||
+    /high holder concentration/.test(n) ||
+    /concentrated.*(hold|owner)/.test(n) ||
+    /majority.*(hold|owner)/.test(n) ||
+    /one.?person.?owns/.test(n)
+  );
 }
 
 interface RugcheckParsed {

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.60',
+    title: 'Steady Compounder / HWR rug concentration harden',
+    sections: ['microbots', 'execution'],
+    items: [
+      'RugCheck single-holder / high holder correlation risks hard-skip (no longer score-only).',
+      'Steady Compounder + High Win-Rate fail-closed when insider or top-10 % is unknown after fetch; reject near-zero pro-trader % when known.',
+    ],
+  },
+  {
     version: '1.2.59',
     title: 'Overview Active Profiles collapse on mobile',
     sections: ['overview', 'microbots'],

@@ -945,6 +945,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Patient but disciplined · no hard timer',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
+      'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
     ],
     priority: 62,
     defaultEnabled: true,

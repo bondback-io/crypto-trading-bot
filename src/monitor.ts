@@ -4705,6 +4705,38 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             `lp=${report.checks.liquidityLockedOrBurned == null ? '?' : report.checks.liquidityLockedOrBurned ? 'locked' : 'unlocked'} ` +
             `sources=${report.sources.join('+')}`
         );
+
+        // Steady Compounder / High Win-Rate: fail-closed on unknown insider/top10
+        // and reject near-zero pro-trader hold when GMGN reports it.
+        const qualityLaneId =
+          lanePassers && lanePassers[0] ? lanePassers[0].profileId : null;
+        if (
+          qualityLaneId === 'steady_compounder' ||
+          qualityLaneId === 'high_win_rate'
+        ) {
+          const qualityGate = evaluateHolderConcentrationHardFloors({
+            top10HoldPct: report.checks.top10HoldPct,
+            insiderPct: report.checks.insiderPct,
+            devHoldPct: report.checks.devHoldPct,
+            failClosedUnknown: true,
+            proTraderPct: report.sniper?.proTraderPct ?? null,
+            minProTraderPct: 0.05,
+          });
+          if (qualityGate.skipReasons.length > 0) {
+            const reason = qualityGate.skipReasons[0]!;
+            console.log(
+              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                `quality=${qualityLaneId} ${reason}`
+            );
+            paperTrader.addLog(
+              'info',
+              `Quality holder gate ${signal.symbol} (${qualityLaneId}): ${reason}`,
+              { mint: signal.mint, symbol: signal.symbol }
+            );
+            recordRejectedSignal(signal, reason);
+            return false;
+          }
+        }
       } else {
         // Legacy metrics-only path when anti-rug master switch is off
         const { evaluateTokenMetricsFilters } = await import('./tokenMetrics');

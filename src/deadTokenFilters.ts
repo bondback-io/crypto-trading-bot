@@ -97,8 +97,13 @@ export function isNonBypassableSkipReason(reason: string): boolean {
     r.includes('top10 holders too low') ||
     r.includes('top 10 holders too high') ||
     r.includes('top10 holders too high') ||
+    r.includes('top 10 holders unknown') ||
     r.includes('high holder concentration') ||
+    r.includes('holder correlation') ||
+    r.includes('single holder') ||
     r.includes('insider % too high') ||
+    r.includes('insider % unknown') ||
+    r.includes('pro trader') ||
     r.includes('buy-heavy') ||
     r.includes('buy/sell txn ratio') ||
     r.includes('organic score too low') ||
@@ -820,6 +825,15 @@ export interface HolderConcentrationSnapshot {
   insiderPct: number | null;
   /** Extreme dev hold treated as insider-cluster when ≥ hard max */
   devHoldPct?: number | null;
+  /**
+   * Quality profiles (Steady Compounder / High Win-Rate): unknown top10 or
+   * insider after fetch attempts hard-skip instead of soft-pass.
+   */
+  failClosedUnknown?: boolean;
+  /** Known GMGN pro-trader / bluechip hold % (quality profiles). */
+  proTraderPct?: number | null;
+  /** Min pro-trader % when known (quality). 0 = ignore. */
+  minProTraderPct?: number;
 }
 
 /**
@@ -843,8 +857,13 @@ export function evaluateHolderConcentrationHardFloors(
   const maxInsider = effectiveMaxInsiderPct();
   // Insider hard cap is disabled under Risk OFF (effectiveMaxInsiderPct → 100).
   const insiderGateActive = maxInsider < 100;
+  const failClosed = snap.failClosedUnknown === true;
+  const minPro =
+    snap.minProTraderPct != null && Number.isFinite(snap.minProTraderPct)
+      ? Number(snap.minProTraderPct)
+      : 0;
 
-  if (!top10GateActive && !insiderGateActive) {
+  if (!top10GateActive && !insiderGateActive && minPro <= 0) {
     return { skipReasons: [], scorePenalty: 0, flags: [] };
   }
 
@@ -874,6 +893,17 @@ export function evaluateHolderConcentrationHardFloors(
           `Skipped — top 10 holders too high (${snap.top10HoldPct.toFixed(1)}% > ${maxTop10}%)`
         );
       }
+    } else if (failClosed) {
+      scorePenalty += 35;
+      flags.push({
+        id: 'hard_unknown_top10',
+        severity: 'critical',
+        label: 'Top-10 holders unknown',
+        detail: 'quality profile requires known top-10 %',
+      });
+      skipReasons.push(
+        'Skipped — top 10 holders unknown (quality profile requires known concentration)'
+      );
     } else {
       // Soft-pass unknown after Jupiter + on-chain (known band still hard above)
       scorePenalty += hardFilterFloorsActive() ? 18 : 12;
@@ -905,6 +935,17 @@ export function evaluateHolderConcentrationHardFloors(
         `Skipped — insider % too high (${snap.insiderPct.toFixed(0)}% ≥ ${maxInsider}%)`
       );
     }
+  } else if (insiderGateActive && failClosed) {
+    scorePenalty += 35;
+    flags.push({
+      id: 'hard_unknown_insider',
+      severity: 'critical',
+      label: 'Insider % unknown',
+      detail: 'quality profile requires known insider %',
+    });
+    skipReasons.push(
+      'Skipped — insider % unknown (quality profile requires known insider data)'
+    );
   } else if (insiderGateActive) {
     // Soft-pass unknown after GMGN attempt — known ≥ hard max still rejects above
     scorePenalty += hardFilterFloorsActive() ? 18 : 12;
@@ -914,6 +955,24 @@ export function evaluateHolderConcentrationHardFloors(
       label: 'Insider % unknown',
       detail: `need < ${maxInsider}% when data available`,
     });
+  }
+
+  if (
+    minPro > 0 &&
+    snap.proTraderPct != null &&
+    Number.isFinite(snap.proTraderPct) &&
+    snap.proTraderPct < minPro
+  ) {
+    scorePenalty += 28;
+    flags.push({
+      id: 'hard_pro_trader_too_low',
+      severity: 'critical',
+      label: 'Pro trader % too low',
+      detail: `${snap.proTraderPct.toFixed(3)}% < ${minPro}%`,
+    });
+    skipReasons.push(
+      `Skipped — pro trader % too low (${snap.proTraderPct.toFixed(3)}% < ${minPro}%)`
+    );
   }
 
   // Extreme deployer hold (≥ hard insider cap) — same non-bypassable class

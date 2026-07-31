@@ -2421,6 +2421,7 @@ export function summarizeSniper(report: GmgnSniperReport): {
   sniperCount: number | null;
   bundlerPct: number | null;
   insiderPct: number | null;
+  proTraderPct: number | null;
   highRisk: boolean;
   warnings: string[];
   source: string;
@@ -2430,6 +2431,7 @@ export function summarizeSniper(report: GmgnSniperReport): {
     sniperCount: report.sniperCount,
     bundlerPct: report.bundlerPct,
     insiderPct: report.insiderPct,
+    proTraderPct: report.proTraderPct,
     highRisk: report.highRisk,
     warnings: report.warnings.slice(0, 4),
     source: report.source,
