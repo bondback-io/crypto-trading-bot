@@ -4681,8 +4681,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     @media (max-width: 640px) {
       .nav-tabs .btn.nav-tab-zion {
-        padding-left: 0.7rem;
-        padding-right: 0.7rem;
+        padding-left: 0.2rem;
+        padding-right: 0.2rem;
+        letter-spacing: 0;
       }
     }
     /* Micro Bots — brushed steel / arena-bot hover (Battle Bots · Real Steel vibe) */
@@ -4789,8 +4790,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     @media (max-width: 640px) {
       .nav-tabs .btn.nav-tab-microbots {
-        padding-left: 0.7rem;
-        padding-right: 0.7rem;
+        padding-left: 0.2rem;
+        padding-right: 0.2rem;
+        letter-spacing: 0.01em;
       }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -4928,15 +4930,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         right: 0.15rem;
       }
       .nav-tabs {
-        scroll-snap-type: x proximity;
-        gap: 0.35rem;
-        padding-bottom: 0.65rem;
+        scroll-snap-type: none;
+        gap: 0.2rem;
+        padding: 0.4rem 0 0.55rem;
+        margin-left: 0;
+        margin-right: 0;
         border-bottom-color: #1e293b;
+        overflow-x: hidden;
+        width: 100%;
       }
       .nav-tabs .btn {
-        min-height: 2.4rem;
-        padding: 0.45rem 0.7rem;
-        font-size: 12px;
+        flex: 1 1 0;
+        min-width: 0;
+        justify-content: center;
+        min-height: 2.75rem;
+        padding: 0.35rem 0.15rem;
+        font-size: 11px;
+        gap: 0.15rem;
+      }
+      /* Prefer full nav labels on phones (Live Feed, etc.) when equal-width tabs fit */
+      .nav-tabs .btn-label-short { display: none; }
+      .nav-tabs .btn-label-full { display: inline; }
+      /* Micro Bots is the longest label — keep short "Bots" so Live Feed can stay full */
+      .nav-tabs .btn.nav-tab-microbots .btn-label-short { display: inline; }
+      .nav-tabs .btn.nav-tab-microbots .btn-label-full { display: none; }
+      .nav-tabs .btn.nav-tab-zion .btn-label-full::before,
+      .nav-tabs .btn.nav-tab-zion .btn-label-short::before,
+      .nav-tabs .btn.nav-tab-microbots .btn-label-full::before,
+      .nav-tabs .btn.nav-tab-microbots .btn-label-short::before {
+        content: none;
       }
       .filters-row {
         gap: 0.5rem;
