@@ -2164,6 +2164,7 @@ export function createServer(): express.Application {
           routeBondedToReversalScalper: true,
           soonMinCurvePct: 70,
           bondedMaxAgeMinutes: 45,
+          bondedMinMarketCapUsd: 25_000,
           maxHandOffPerPoll: 8,
           includeNewInScannerUniverse: false,
           recentLimit: 40,
@@ -2206,6 +2207,12 @@ export function createServer(): express.Application {
         const n = Number(body.bondedMaxAgeMinutes);
         if (Number.isFinite(n)) {
           a.bondedMaxAgeMinutes = Math.max(5, Math.min(360, Math.round(n)));
+        }
+      }
+      if (body.bondedMinMarketCapUsd !== undefined) {
+        const n = Number(body.bondedMinMarketCapUsd);
+        if (Number.isFinite(n)) {
+          a.bondedMinMarketCapUsd = Math.max(0, Math.min(5_000_000, Math.round(n)));
         }
       }
       if (body.maxHandOffPerPoll !== undefined) {

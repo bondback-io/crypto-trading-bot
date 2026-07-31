@@ -92,6 +92,7 @@ function asCfg() {
     routeBondedToReversalScalper: true,
     soonMinCurvePct: 70,
     bondedMaxAgeMinutes: 45,
+    bondedMinMarketCapUsd: 25_000,
     maxHandOffPerPoll: 8,
     includeNewInScannerUniverse: false,
     recentLimit: 40,
@@ -228,7 +229,7 @@ async function enrichCurves(
   Map<
     string,
     {
-      progressPct: number;
+      progressPct: number | null;
       complete: boolean;
       nearMigration: boolean;
       missing: boolean;
@@ -238,7 +239,7 @@ async function enrichCurves(
   const out = new Map<
     string,
     {
-      progressPct: number;
+      progressPct: number | null;
       complete: boolean;
       nearMigration: boolean;
       missing: boolean;
@@ -260,10 +261,10 @@ async function enrichCurves(
         const cached = getCachedBondingCurve(mint);
         const state = cached || (await fetchBondingCurve(mint));
         if (!state || state.source === 'none') {
-          // No curve account — likely already bonded / migrated off-curve
+          // Missing curve is not proof of graduation — do not synthesize 100%/complete.
           out.set(mint, {
-            progressPct: 100,
-            complete: true,
+            progressPct: null,
+            complete: false,
             nearMigration: false,
             missing: true,
           });
@@ -302,6 +303,10 @@ export async function refreshAlphaScanBuckets(): Promise<{
   const now = Date.now();
   const bondedMaxMs = Math.max(1, cfg.bondedMaxAgeMinutes || 45) * 60_000;
   const soonMin = Math.max(0, Math.min(99, Number(cfg.soonMinCurvePct) || 70));
+  const bondedMinMc = Math.max(
+    0,
+    Number(cfg.bondedMinMarketCapUsd) || 25_000
+  );
 
   const news: AlphaScanRow[] = [];
   const soons: AlphaScanRow[] = [];
@@ -313,19 +318,23 @@ export async function refreshAlphaScanBuckets(): Promise<{
     const graduatedAtMs = parseMs(token.graduatedAt ?? null);
     const ageMs = tokenAgeMs(token);
     const curve = curves.get(mint);
-    const progress = curve?.progressPct;
-    const complete = curve?.complete === true;
+    const progress =
+      curve?.progressPct != null && Number.isFinite(curve.progressPct)
+        ? curve.progressPct
+        : null;
+    const complete = curve?.complete === true && curve?.missing !== true;
     const curveMissing = curve?.missing === true;
     const nearMig = curve?.nearMigration === true;
     const pumpish =
       isJupiterPumpFunToken(token) || mint.toLowerCase().endsWith('pump');
-    const liq =
-      token.liquidity != null && Number.isFinite(Number(token.liquidity))
-        ? Number(token.liquidity)
-        : 0;
+    const mcUsd =
+      token.mcap != null && Number.isFinite(Number(token.mcap))
+        ? Number(token.mcap)
+        : null;
+    const mcOk = mcUsd != null && mcUsd >= bondedMinMc;
 
-    // Bonded: Jupiter graduatedAt in window, or curve complete / missing curve + DEX liq
-    // within first-pool age window (Jupiter often omits graduatedAt on /recent).
+    // Bonded = true post-grad only: graduatedAt in window OR real curve complete,
+    // always with min MC (blocks ~$2k missing-curve false positives).
     const graduatedFresh =
       graduatedAtMs != null &&
       now - graduatedAtMs >= 0 &&
@@ -333,24 +342,18 @@ export async function refreshAlphaScanBuckets(): Promise<{
     const firstPoolFresh =
       ageMs != null && ageMs >= 0 && ageMs <= bondedMaxMs;
     const looksBonded =
-      graduatedFresh ||
-      (pumpish &&
-        firstPoolFresh &&
-        (complete || curveMissing) &&
-        (liq > 0 || graduatedAtMs != null));
+      mcOk &&
+      (graduatedFresh ||
+        (pumpish && firstPoolFresh && complete));
 
     if (looksBonded && cfg.feedBonded !== false) {
       bondeds.push(
         toRow(token, 'bonded', {
-          curveProgressPct: progress ?? 100,
+          curveProgressPct: progress ?? (complete ? 100 : null),
           graduatedAtMs,
           reasons: [
             'alphascan:bonded',
-            graduatedFresh
-              ? 'graduatedAt'
-              : curveMissing
-                ? 'no-curve+liq'
-                : 'curve-complete',
+            graduatedFresh ? 'graduatedAt' : 'curve-complete',
           ],
         })
       );

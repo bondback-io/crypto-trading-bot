@@ -1916,6 +1916,11 @@ export interface BotConfig {
     soonMinCurvePct: number;
     /** Max age since graduatedAt for Bonded scalp handoffs (minutes) */
     bondedMaxAgeMinutes: number;
+    /**
+     * Min market-cap USD for Bonded (true graduation / off-curve).
+     * Blocks missing-curve false positives at low MC (default $25k).
+     */
+    bondedMinMarketCapUsd: number;
     maxHandOffPerPoll: number;
     /** Soft-merge New column into scanner universe (default false) */
     includeNewInScannerUniverse: boolean;
@@ -2366,6 +2371,7 @@ export const config: BotConfig = {
     routeBondedToReversalScalper: true,
     soonMinCurvePct: 70,
     bondedMaxAgeMinutes: 45,
+    bondedMinMarketCapUsd: 25_000,
     maxHandOffPerPoll: 8,
     includeNewInScannerUniverse: false,
     recentLimit: 40,

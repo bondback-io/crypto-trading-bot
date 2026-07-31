@@ -6075,9 +6075,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
 
       <div class="card">
-        <div class="section-title">AlphaScan <span class="tip" tabindex="0" data-tip="Additive New / Soon / Bonded discovery from Jupiter Tokens API /recent + bonding-curve checks. Default OFF — does not change Jupiter trending or existing scanner gates. Soon → Migration Sniper grad-watch; Bonded → Scalper / Reversal Scalper."></span></div>
+        <div class="section-title">AlphaScan <span class="tip" tabindex="0" data-tip="Additive New / Soon / Bonded discovery from Jupiter Tokens API /recent + bonding-curve checks. Default OFF — does not change Jupiter trending or existing scanner gates. Soon = still on pump.fun curve approaching graduation (~85 SOL). Bonded = recently graduated off-curve (DEX), not launch — requires real graduate evidence + min MC."></span></div>
         <p class="mint text-xs mb-3" style="color:#94a3b8;line-height:1.45">
-          Optional feed alongside the Market Scanner. Uses your existing <code>JUPITER_API_KEY</code>. Turn on only when you want extra Soon/Bonded opportunities for Migration Sniper and scalpers.
+          Optional feed alongside the Market Scanner. Uses your existing <code>JUPITER_API_KEY</code>. Soon → Migration Sniper (pre-grad); Bonded → Scalper / Reversal (true grads only, min MC floor).
         </p>
         <div class="toggle-row">
           <span>Enable AlphaScan <span class="tip" tabindex="0" data-tip="Master switch. When off, no AlphaScan polls or handoffs run."></span></span>
@@ -6088,11 +6088,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="as-feed-new" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Feed Soon column <span class="tip" tabindex="0" data-tip="Pre-grad tokens approaching migration (curve ≥ Soon min %)."></span></span>
+          <span>Feed Soon column <span class="tip" tabindex="0" data-tip="Still on the pump.fun bonding curve, approaching graduation (~85 SOL / high curve %). Not yet migrated to DEX."></span></span>
           <label class="switch"><input type="checkbox" id="as-feed-soon" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Feed Bonded column <span class="tip" tabindex="0" data-tip="Recently graduated / bonded tokens for scalp profiles."></span></span>
+          <span>Feed Bonded column <span class="tip" tabindex="0" data-tip="Recently graduated off pump.fun curve onto DEX — not launch. Requires Jupiter graduatedAt or real curve-complete, plus min MC (default $25k). Missing-curve alone is not enough."></span></span>
           <label class="switch"><input type="checkbox" id="as-feed-bonded" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -6123,6 +6123,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="ctl ctl-sm">
             <span>Bonded max age (min)</span>
             <input type="number" id="as-bonded-age" value="45" min="5" max="360" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Bonded min MC ($)</span>
+            <input type="number" id="as-bonded-min-mc" value="25000" min="0" max="5000000" step="1000" title="Min market cap for Bonded (true graduation)" />
           </label>
           <label class="ctl ctl-sm">
             <span>Max handoffs / poll</span>
@@ -19375,6 +19379,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       setNum('as-poll-ms', cfg.pollIntervalMs);
       setNum('as-soon-min', cfg.soonMinCurvePct);
       setNum('as-bonded-age', cfg.bondedMaxAgeMinutes);
+      setNum('as-bonded-min-mc', cfg.bondedMinMarketCapUsd);
       setNum('as-max-handoff', cfg.maxHandOffPerPoll);
       _alphaScanFormHydrated = true;
     }
@@ -19535,6 +19540,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           pollIntervalMs: asNum('as-poll-ms', 45000),
           soonMinCurvePct: asNum('as-soon-min', 70),
           bondedMaxAgeMinutes: asNum('as-bonded-age', 45),
+          bondedMinMarketCapUsd: asNum('as-bonded-min-mc', 25000),
           maxHandOffPerPoll: asNum('as-max-handoff', 8),
         };
         const data = await fetchJSON('/api/config/alphascan', {
