@@ -1478,9 +1478,9 @@ export function startRpcHealthMonitor(): void {
     const isPrimary = index === preferredPrimary;
     const isSecondary =
       index === preferredSecondary && preferredSecondary !== preferredPrimary;
-    // Errors / logs / diagnostics: keep public + utility probed, but ease off
-    // when already latency-stressed (mainnet-beta often stays ~800ms+ from cloud).
-    if (isUtil || isPublic) {
+    // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
+    // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
+    if (isUtil || index === activeUtility) {
       if (
         state.latencyStressedSince != null &&
         state.latencyMs != null &&
@@ -1489,6 +1489,9 @@ export function startRpcHealthMonitor(): void {
         return cycle % 2 === 0;
       }
       return true;
+    }
+    if (isPublic) {
+      return cycle % 4 === 0;
     }
     // Helius (critical): every 3rd cycle (~90s at 30s interval)
     if (isPrimary) return cycle % 3 === 0;

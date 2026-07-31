@@ -5,25 +5,35 @@
  *   1. Helius Free     — HELIUS_API_KEY  → https://mainnet.helius-rpc.com/?api-key=…
  *   2. Alchemy Free    — ALCHEMY_API_KEY → https://solana-mainnet.g.alchemy.com/v2/…
  *   3. RPC_URL / RPC_PRIMARY             — legacy / extra paid endpoint
- *   4. Public Solana                     — https://api.mainnet-beta.solana.com
- *   5. RPC_SECONDARY                     — final fallback (+ Zion lane when Alchemy unset)
- *   6. remaining RPC_FALLBACKS
+ *   4. Public Solana (utility)           — https://solana-rpc.publicnode.com
+ *   5. Official public fallback          — https://api.mainnet-beta.solana.com
+ *   6. RPC_SECONDARY                     — extra fallback (+ Zion lane when Alchemy unset)
+ *   7. remaining RPC_FALLBACKS
  *
  * Triple-lane layout (Share RPC load ON):
  *   Primary (critical) → Helius — entries, migration, wallet buy detection
  *   Secondary (scanners) → Alchemy — Market / Alpha / Zion
- *   Utility → Public Solana — wallet import / activity / light polls
+ *   Utility → Publicnode (not official mainnet-beta — often 1s+ from cloud hosts)
  * Health monitor + piggyback failover live in connection.ts.
  */
 
-export const PUBLIC_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
+/** Official Solana public RPC — last-resort only (often slow from Render/cloud). */
+export const PUBLIC_SOLANA_RPC_OFFICIAL =
+  'https://api.mainnet-beta.solana.com';
+
+/**
+ * Preferred free public endpoint for the Utility lane.
+ * publicnode is typically much faster from cloud hosts than official mainnet-beta.
+ */
+export const PUBLIC_SOLANA_RPC = 'https://solana-rpc.publicnode.com';
 
 /**
  * @deprecated Extra free hosts are no longer auto-registered (noisy / often dead).
  * Kept for isPublicRpcUrl detection only.
  */
 export const PUBLIC_RPC_FALLBACKS = [
-  'https://solana-rpc.publicnode.com',
+  PUBLIC_SOLANA_RPC,
+  PUBLIC_SOLANA_RPC_OFFICIAL,
   'https://solana.drpc.org',
   'https://rpc.ankr.com/solana',
   'https://solana.api.onfinality.io/public',
@@ -196,14 +206,12 @@ export function normalizeRpcEndpoints(
     );
   }
 
-  // Always keep public Solana as last-resort if missing
-  const hasPublic = out.some((e) =>
-    e.url.toLowerCase().includes('mainnet-beta.solana.com')
-  );
+  // Always keep a public endpoint as last resort if missing
+  const hasPublic = out.some((e) => isPublicRpcUrl(e.url));
   if (!hasPublic) {
     push(
       PUBLIC_SOLANA_RPC,
-      out.length === 0 ? 'primary' : 'public-fallback',
+      out.length === 0 ? 'primary' : 'publicnode',
       out.length === 0 ? 'primary' : 'fallback'
     );
   }
@@ -269,7 +277,12 @@ export function rpcEndpointsFromEnv(
   if (rpcUrl) pool.push({ url: rpcUrl, label: 'rpc-url', role: 'fallback' });
   pool.push({
     url: PUBLIC_SOLANA_RPC,
-    label: 'public-fallback',
+    label: 'publicnode',
+    role: 'fallback',
+  });
+  pool.push({
+    url: PUBLIC_SOLANA_RPC_OFFICIAL,
+    label: 'mainnet-beta',
     role: 'fallback',
   });
   if (rpcSecondary) {
@@ -304,24 +317,33 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers public Solana when distinct from primary/secondary
+  // Utility lane prefers publicnode (fast from cloud). Skip official mainnet-beta
+  // and any RPC_URL that is also official public — those stay as fallbacks only.
   let utilityUrl = '';
-  if (
-    PUBLIC_SOLANA_RPC !== primaryUrl &&
-    PUBLIC_SOLANA_RPC !== secondaryUrl
-  ) {
-    utilityUrl = PUBLIC_SOLANA_RPC;
-  } else {
+  const utilityPrefs = [PUBLIC_SOLANA_RPC, rpcSecondary].filter(
+    (u) => u && isUsableRpcUrl(u)
+  );
+  for (const u of utilityPrefs) {
+    if (u !== primaryUrl && u !== secondaryUrl) {
+      utilityUrl = u;
+      break;
+    }
+  }
+  if (!utilityUrl) {
     for (const c of pool) {
-      if (c.url !== primaryUrl && c.url !== secondaryUrl) {
-        utilityUrl = c.url;
-        break;
-      }
+      if (c.url === primaryUrl || c.url === secondaryUrl) continue;
+      // Never prefer official mainnet-beta as sticky utility when alternatives exist
+      if (c.url === PUBLIC_SOLANA_RPC_OFFICIAL) continue;
+      if (c.url === rpcUrl && isPublicRpcUrl(rpcUrl)) continue;
+      utilityUrl = c.url;
+      break;
     }
-    // Last resort: share secondary or primary if no third URL exists
-    if (!utilityUrl) {
-      utilityUrl = secondaryUrl || primaryUrl;
-    }
+  }
+  if (!utilityUrl) {
+    utilityUrl =
+      PUBLIC_SOLANA_RPC !== primaryUrl && PUBLIC_SOLANA_RPC !== secondaryUrl
+        ? PUBLIC_SOLANA_RPC
+        : secondaryUrl || primaryUrl;
   }
 
   if (secondaryUrl && secondaryUrl === primaryUrl) {
@@ -343,7 +365,8 @@ export function rpcEndpointsFromEnv(
     if (url === alchemy) return 'alchemy';
     if (url === rpcUrl) return 'rpc-url';
     if (url === rpcSecondary) return 'rpc-secondary';
-    if (url === PUBLIC_SOLANA_RPC) return 'public-fallback';
+    if (url === PUBLIC_SOLANA_RPC) return 'publicnode';
+    if (url === PUBLIC_SOLANA_RPC_OFFICIAL) return 'mainnet-beta';
     return fallback;
   };
 
@@ -367,7 +390,9 @@ export function rpcEndpointsFromEnv(
     `[rpc] Multi-RPC chain: ${chain}` +
       (helius ? ' (Helius free primary)' : '') +
       (alchemy ? ' (Alchemy free secondary)' : '') +
-      (utilityUrl === PUBLIC_SOLANA_RPC ? ' (public utility)' : '')
+      (utilityUrl === PUBLIC_SOLANA_RPC || utilityUrl === rpcSecondary
+        ? ' (publicnode utility)'
+        : '')
   );
   if (!helius && !alchemy) {
     console.warn(
@@ -397,7 +422,7 @@ export const RPC_LANE_SUPPORTS = {
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: Public Solana (api.mainnet-beta.solana.com)',
+    'Preferred: publicnode (solana-rpc.publicnode.com) → official mainnet-beta last',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -415,6 +440,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'Public Solana — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'publicnode — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;

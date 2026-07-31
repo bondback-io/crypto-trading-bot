@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.66',
+    title: 'Utility prefers publicnode over mainnet-beta',
+    sections: ['execution', 'copy'],
+    items: [
+      'Utility lane now prefers solana-rpc.publicnode.com by default — official api.mainnet-beta.solana.com is last-resort only (often 1s+ from Render).',
+      'Inactive public fallbacks are probed rarely so a slow mainnet-beta row no longer dominates the Multi-RPC table.',
+    ],
+  },
+  {
     version: '1.2.65',
     title: 'Public rpc-url latency soft-failover',
     sections: ['execution', 'copy'],

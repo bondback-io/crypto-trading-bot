@@ -75,7 +75,7 @@ export const env: EnvConfig = {
       !raw ||
       /your-helius|your-quicknode|example\.com|changeme/i.test(raw)
     ) {
-      return 'https://api.mainnet-beta.solana.com';
+      return 'https://solana-rpc.publicnode.com';
     }
     return raw;
   })(),
