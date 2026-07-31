@@ -166,10 +166,12 @@ export interface Position {
   entryMarketCapUsd?: number;
   /** Market cap USD when the copied smart wallet bought (signal-time) */
   sourceEntryMcUsd?: number;
-  /** Market cap USD at exit (Dex/live preferred when fill-implied invents a fake dip) */
+  /** Market cap USD at exit (fill-scaled from Buy MC × exit/entry — tracks PnL) */
   exitMarketCapUsd?: number;
-  /** Fill-scaled exit MC (entry × exitFill/entryFill) for PnL audit */
+  /** Fill-scaled exit MC (entry × exitFill/entryFill) — same basis as exitMarketCapUsd */
   impliedExitMarketCapUsd?: number;
+  /** Live Dex MC at exit for tooltip when it disagrees with fill-scaled Exit MC */
+  liveExitMarketCapUsd?: number;
   /** Jupiter-style Top 10 Holders % resolved at entry (for audit / UI) */
   top10HoldPct?: number | null;
   /**
@@ -1672,7 +1674,7 @@ export class PaperTrader {
 
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
     const liveMc = this.marketCapCache.get(position.mint);
-    // Implied MC from pre-slip mark (PnL decision basis); display may prefer Dex
+    // Display Exit MC is fill-scaled; live Dex kept for tooltip audit
     const exitCaps = resolveExitMarketCaps({
       entryMarketCapUsd: position.entryMarketCapUsd,
       entryPriceSol: position.entryPriceSol,
@@ -1681,6 +1683,7 @@ export class PaperTrader {
     });
     const exitMc = exitCaps.displayUsd;
     const impliedExitMc = exitCaps.impliedFromFillUsd;
+    const liveExitMc = exitCaps.liveUsd;
 
     if (isPartial && position.amountTokens > 1e-12) {
       position.status = 'partial';
@@ -1714,6 +1717,7 @@ export class PaperTrader {
         exitPriceSol: exitPrice,
         exitMarketCapUsd: exitMc,
         impliedExitMarketCapUsd: impliedExitMc,
+        liveExitMarketCapUsd: liveExitMc,
         pnlSol,
         pnlPct,
         reason: `partial: ${reason}`,
@@ -1744,6 +1748,7 @@ export class PaperTrader {
     position.exitPriceSol = exitPrice;
     position.exitMarketCapUsd = exitMc;
     position.impliedExitMarketCapUsd = impliedExitMc;
+    position.liveExitMarketCapUsd = liveExitMc;
     position.pnlSol = totalPnl;
     position.pnlPct = totalPct;
     position.reason = reason;
@@ -3328,6 +3333,7 @@ export class PaperTrader {
                 exitPriceSol: currentPrice,
                 exitMarketCapUsd: exitCaps.displayUsd,
                 impliedExitMarketCapUsd: exitCaps.impliedFromFillUsd,
+                liveExitMarketCapUsd: exitCaps.liveUsd,
                 pnlSol: slicePnl,
                 pnlPct: slicePct,
                 reason: `partial: ${action.reason}`,
@@ -3396,6 +3402,7 @@ export class PaperTrader {
           });
           position.exitMarketCapUsd = exitCaps.displayUsd;
           position.impliedExitMarketCapUsd = exitCaps.impliedFromFillUsd;
+          position.liveExitMarketCapUsd = exitCaps.liveUsd;
           position.reason = reason;
           const pnlPct =
             ((currentPriceSol - position.entryPriceSol) /

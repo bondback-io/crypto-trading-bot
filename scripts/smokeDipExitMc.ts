@@ -3,6 +3,7 @@
  * Run: npx tsx scripts/smokeDipExitMc.ts
  */
 import {
+  PHANTOM_DUMP_MC_GATE_MS,
   reconcileMarkPriceSol,
   resolveExitMarketCaps,
 } from '../src/marketData';
@@ -27,14 +28,44 @@ const r = reconcileMarkPriceSol({
 });
 check('early mark/MC disagree rejected', r.rejected === true, r.reason);
 
-const r2 = reconcileMarkPriceSol({
+const rMid = reconcileMarkPriceSol({
   entryPriceSol: 1,
   markPriceSol: 0.83,
   entryMarketCapUsd: 2.9e6,
   markMarketCapUsd: 2.85e6,
   positionAgeMs: 60_000,
 });
-check('after grace mark accepted', r2.rejected === false, String(r2.priceSol));
+check(
+  'within 120s mark/MC disagree still rejected',
+  rMid.rejected === true,
+  rMid.reason
+);
+
+const r2 = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 0.83,
+  entryMarketCapUsd: 2.9e6,
+  markMarketCapUsd: 2.85e6,
+  positionAgeMs: PHANTOM_DUMP_MC_GATE_MS + 1_000,
+});
+check(
+  'after 120s gate mark accepted',
+  r2.rejected === false,
+  String(r2.priceSol)
+);
+
+const rConfirmDump = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 0.83,
+  entryMarketCapUsd: 2.9e6,
+  markMarketCapUsd: 2.4e6,
+  positionAgeMs: 30_000,
+});
+check(
+  'dump + Dex also down accepted',
+  rConfirmDump.rejected === false,
+  String(rConfirmDump.priceSol)
+);
 
 const caps = resolveExitMarketCaps({
   entryMarketCapUsd: 2.9e6,
@@ -43,8 +74,8 @@ const caps = resolveExitMarketCaps({
   liveMarketCapUsd: 2.85e6,
 });
 check(
-  'display prefers live Dex MC',
-  Math.abs((caps.displayUsd || 0) - 2.85e6) < 1,
+  'display prefers fill-implied (not Dex live)',
+  Math.abs((caps.displayUsd || 0) - 2.9e6 * 0.83) < 1e3,
   `display=${caps.displayUsd} src=${caps.source}`
 );
 check(
@@ -52,6 +83,25 @@ check(
   Math.abs((caps.impliedFromFillUsd || 0) - 2.9e6 * 0.83) < 1e3,
   String(caps.impliedFromFillUsd)
 );
+check(
+  'liveUsd preserved for tooltip',
+  Math.abs((caps.liveUsd || 0) - 2.85e6) < 1,
+  String(caps.liveUsd)
+);
+
+// fomodog-class: −19% fill vs +39% Dex MC → column must follow fill
+const fomo = resolveExitMarketCaps({
+  entryMarketCapUsd: 23_000,
+  entryPriceSol: 1,
+  exitPriceSol: 0.81,
+  liveMarketCapUsd: 32_000,
+});
+check(
+  'fomodog: Exit MC tracks −19% fill not Dex $32K',
+  Math.abs((fomo.displayUsd || 0) - 23_000 * 0.81) < 1,
+  `display=${fomo.displayUsd} live=${fomo.liveUsd}`
+);
+check('fomodog source is implied', fomo.source === 'implied', fomo.source);
 
 const base: ProfitPositionView = {
   entryPriceSol: 1,

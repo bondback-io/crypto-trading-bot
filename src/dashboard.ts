@@ -5875,7 +5875,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 <th title="Staged profit takes: partial → recover initial → remainder">Takes</th>
                 <th title="Estimated market cap when the smart wallet bought">Wallet MC</th>
                 <th title="Estimated market cap when your copy filled (after delay)">Your MC</th>
-                <th title="Market cap at exit (scaled from Dex snapshot at last price — path multiples are capped so h24 moons don't invent 50–100× rides)">Exit MC</th>
+                <th title="Market cap at exit (fill-scaled from Buy MC × exit/entry so it tracks PnL; Dex live shown on hover when it disagrees)">Exit MC</th>
                 <th title="Time from smart-wallet buy until your copy fill">Delay</th>
                 <th title="Your hold time (copy fill → exit)">Hold</th>
                 <th title="Max drawdown while open">Max DD</th>
@@ -12112,15 +12112,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<td>' + fmtMintCa(p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy fill (scaled to entry price)">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="' +
-            (p.impliedExitMarketCapUsd != null &&
+            (p.liveExitMarketCapUsd != null &&
             p.exitMarketCapUsd != null &&
-            Math.abs(Number(p.impliedExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
+            Math.abs(Number(p.liveExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
               Math.max(Number(p.exitMarketCapUsd), 1) >
               0.05
-              ? 'Dex/live exit MC (fill-implied was ' +
-                fmtUsdShort(p.impliedExitMarketCapUsd) +
-                ' from PnL mark — token may not have traded at that MC)'
-              : 'Exit market cap (Dex/live when sane; else fill-scaled from entry)') +
+              ? 'Fill-scaled Exit MC (tracks PnL). Dex live showed ' +
+                fmtUsdShort(p.liveExitMarketCapUsd) +
+                ' — may disagree with your fill'
+              : 'Exit MC fill-scaled from Buy MC × exit/entry (tracks PnL)') +
           '">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
           '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
             fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd) +
@@ -13046,16 +13046,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           }
         }
         if (
-          p.impliedExitMarketCapUsd != null &&
-          Number(p.impliedExitMarketCapUsd) > 0 &&
-          Math.abs(Number(p.impliedExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
+          p.liveExitMarketCapUsd != null &&
+          Number(p.liveExitMarketCapUsd) > 0 &&
+          Math.abs(Number(p.liveExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
             Math.max(Number(p.exitMarketCapUsd), 1) >
             0.05
         ) {
           mcText +=
-            ' · fill-implied ' +
-            fmtUsdShort(p.impliedExitMarketCapUsd) +
-            ' (PnL mark; may not match Dex)';
+            ' · Dex live ' +
+            fmtUsdShort(p.liveExitMarketCapUsd) +
+            ' (may disagree with fill)';
         }
         lines.push({ label: 'Exit MC', text: mcText });
       }
@@ -14168,7 +14168,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<td>' + fmtExitTakes(t) + '</td>' +
                 '<td class="mint" title="Smart wallet entry MC">' + fmtUsdShort(walletMc) + '</td>' +
                 '<td class="mint bt-your-mc" title="Your copy fill MC">' + fmtUsdShort(yourMc) + '</td>' +
-                '<td class="mint" title="Exit MC scaled from Dex snapshot (path multiple capped)">' + fmtUsdShort(exitMc) + '</td>' +
+                '<td class="mint" title="Exit MC fill-scaled from Buy MC × exit/entry (tracks PnL)">' + fmtUsdShort(exitMc) + '</td>' +
                 '<td class="mint" title="Copy delay after smart wallet">' + fmtCopyDelay(t.copyDelayMs) + '</td>' +
                 '<td class="mint">' + fmtHold(t.holdingTimeMs) + '</td>' +
                 '<td style="color:var(--red)">' + Number(t.maxDrawdownPct || 0).toFixed(1) + '%</td>' +
