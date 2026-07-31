@@ -1483,6 +1483,20 @@ export function createServer(): express.Application {
   });
 
   /**
+   * Clear closed trades from the session view only.
+   * Does not wipe learning episodes, open positions, or balance.
+   */
+  app.post('/api/paper/clear-closed', (_req: Request, res: Response) => {
+    const result = paperTrader.clearClosedHistory();
+    res.json({
+      ok: true,
+      cleared: result.cleared,
+      closed: [],
+      stats: paperTrader.getStats(),
+    });
+  });
+
+  /**
    * Full Overview session reset for module A/B tests:
    * balance, equity, open/closed trades, logs, signals, skip tallies, trade-rate.
    * Does not change risk level or strategy modules.

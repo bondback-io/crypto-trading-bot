@@ -718,7 +718,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     button.warning { background: #F1BB72; color: #1c1917; border-color: #F1BB72; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.warning:hover { background: #e5a85c; border-color: #e5a85c; color: #1c1917; }
     button.warning:active { background: #d99a4e; border-color: #d99a4e; color: #1c1917; }
-    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip):not(.notif-item):not(.notif-bell-btn) {
+    button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.closed-clear-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip):not(.notif-item):not(.notif-bell-btn) {
       background: #059669;
       color: white;
       border: 1px solid #059669;
@@ -1857,6 +1857,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .closed-trades-head .section-title {
       margin-bottom: 0;
+    }
+    .closed-clear-btn {
+      appearance: none;
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 0.35rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 500;
+      line-height: 1.2;
+      padding: 0.28rem 0.55rem;
+      min-height: 1.6rem;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+    }
+    .closed-clear-btn:hover,
+    .closed-clear-btn:focus-visible {
+      color: #cbd5e1;
+      border-color: #64748b;
+      background: rgba(51, 65, 85, 0.35);
+      outline: none;
     }
     .closed-filter {
       display: inline-flex;
@@ -5600,6 +5622,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear closed trades from this session view. Does not delete micro-bot learning episodes.">Clear</button>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
@@ -5702,6 +5725,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+            <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear closed trades from this session view. Does not delete micro-bot learning episodes.">Clear</button>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
@@ -13402,6 +13426,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       paintClosedTradesTables();
     }
     window.setClosedTradesFilter = setClosedTradesFilter;
+
+    async function clearClosedTradesSession() {
+      if (
+        !confirm(
+          'Clear closed trades from this session view only?\\n\\n' +
+            'Open positions and balance stay as they are.\\n' +
+            'Micro-bot learning episodes and self-learning data are kept.'
+        )
+      ) {
+        return;
+      }
+      try {
+        await fetchJSON('/api/paper/clear-closed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        refresh();
+      } catch (err) {
+        alert('Clear closed trades failed: ' + (err.message || err));
+      }
+    }
+    window.clearClosedTradesSession = clearClosedTradesSession;
 
     function setClosedProfileFilter(profileId) {
       window._closedProfileFilter = profileId || 'all';

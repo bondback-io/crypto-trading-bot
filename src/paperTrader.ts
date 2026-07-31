@@ -1926,6 +1926,18 @@ export class PaperTrader {
   }
 
   /**
+   * Clear closed-trade session history only.
+   * Does not touch open positions, balance, logs, or learning / tradeProfiles.
+   */
+  clearClosedHistory(): { cleared: number } {
+    const cleared = this.closedPositions.length;
+    this.closedPositions = [];
+    this.persistState();
+    this.log('info', 'Closed trade history cleared (session)');
+    return { cleared };
+  }
+
+  /**
    * Reset paper balance to config.paper.startingBalanceSol and clear open positions.
    * Closed trade history is kept unless clearHistory is true.
    */
