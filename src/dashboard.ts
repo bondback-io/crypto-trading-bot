@@ -5310,17 +5310,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
             Settings
           </button>
-          <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug filters, strategy toggles, risk, and MEV">
+          <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug, strategy, risk, MEV, notifications, and logs">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
           </button>
           <button type="button" role="menuitem" data-settings-tab="backtester" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/></svg></span>
             Backtester
-          </button>
-          <button type="button" role="menuitem" data-settings-tab="logs" onclick="showTab('logs')" title="Trade events and system/API error logs for debugging">
-            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></span>
-            Logs
           </button>
           <button type="button" role="menuitem" data-settings-tab="backup" onclick="showTab('backup')" title="Site backup, persistence health, and micro-bot self-learning data">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
@@ -7209,7 +7205,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="config-section-label">Alerts <span>Email + in-app sounds</span></div>
       <div class="card">
         <div class="section-title">Notifications <span class="tip" tabindex="0" data-tip="Email alerts and in-app bell / sound preferences. Delivery uses RESEND_API_KEY (recommended on Render) or SMTP_*. Secrets stay in Render env."></span></div>
-        <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Logs without it.</div>
+        <div class="mint text-xs mb-3" id="notify-delivery-hint">Set RESEND_API_KEY on Render (or SMTP_*) to deliver mail. Events still appear in Config → Logs without it.</div>
         <div class="config-notify-grid">
           <div class="config-notify-col">
             <h4>Email</h4>
@@ -7241,6 +7237,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" class="btn btn-secondary" onclick="testNotificationEmail()" title="Send a test email via SMTP">Send test email</button>
           <span class="mint text-xs" id="notify-status"></span>
         </div>
+      </div>
+
+      <div class="config-section-label" id="config-logs-section">Logs <span>Trade events + system / API errors</span></div>
+      <div class="card">
+        <div class="filters-row mb-3">
+          <div class="section-title !mb-0">Trade Logs <span class="tip" tabindex="0" data-tip="Chronological buy/sell/signal/info events from the trading engine."></span></div>
+          <select id="log-filter-type" onchange="applyLogFilter()" title="Filter by event type">
+            <option value="all">All types</option>
+            <option value="buy">Buys</option>
+            <option value="sell">Sells</option>
+            <option value="error">Errors</option>
+            <option value="info">Info</option>
+            <option value="signal">Signals</option>
+            <option value="risk">Risk / skips</option>
+          </select>
+          <input type="search" id="log-filter-q" placeholder="Filter text..." oninput="applyLogFilter()" title="Search log text" class="search-q" />
+        </div>
+        <div id="logs-full" class="max-h-[40vh] overflow-y-auto"></div>
+      </div>
+
+      <div class="card">
+        <div class="filters-row mb-3">
+          <div class="section-title !mb-0">System / Fetch Errors <span class="tip" tabindex="0" data-tip="API/RPC/fetch failures (GMGN, Birdeye, Jupiter, etc.) for debugging connectivity."></span></div>
+          <select id="syslog-level" onchange="loadSystemLogs()" title="Filter by log level">
+            <option value="all">All levels</option>
+            <option value="error" selected>Errors</option>
+            <option value="warn">Warnings</option>
+            <option value="info">Info</option>
+          </select>
+          <select id="syslog-context" onchange="loadSystemLogs()" title="Filter by subsystem">
+            <option value="">All contexts</option>
+            <option value="GMGN">GMGN</option>
+            <option value="RPC">RPC</option>
+            <option value="Jupiter">Jupiter</option>
+            <option value="Jito">Jito</option>
+            <option value="DexScreener">DexScreener</option>
+            <option value="RugCheck">RugCheck</option>
+            <option value="Pump">Pump</option>
+            <option value="MarketData">MarketData</option>
+            <option value="Server">Server</option>
+          </select>
+          <input type="search" id="syslog-q" placeholder="Search…" oninput="debounceSysLogs()" title="Search system log messages" class="search-q" />
+          <button type="button" class="btn btn-secondary" onclick="loadSystemLogs()" title="Reload system logs">Refresh</button>
+          <button type="button" class="btn btn-warning" onclick="clearSystemLogs()" title="Clear in-memory system logs (disk log kept)">Clear</button>
+          <span class="mint self-center" id="syslog-stats">—</span>
+        </div>
+        <div id="system-logs" class="max-h-[50vh] overflow-y-auto text-sm font-mono"></div>
       </div>
     </section>
 
@@ -7394,55 +7437,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </section>
 
     <!-- BOT_INFO_PANEL_PLACEHOLDER -->
-
-    <!-- ========== TAB: Logs ========== -->
-    <section data-tab-panel="logs" class="hidden space-y-4">
-      <div class="card">
-        <div class="filters-row mb-3">
-          <div class="section-title !mb-0">Trade Logs <span class="tip" tabindex="0" data-tip="Chronological buy/sell/signal/info events from the trading engine."></span></div>
-          <select id="log-filter-type" onchange="applyLogFilter()" title="Filter by event type">
-            <option value="all">All types</option>
-            <option value="buy">Buys</option>
-            <option value="sell">Sells</option>
-            <option value="error">Errors</option>
-            <option value="info">Info</option>
-            <option value="signal">Signals</option>
-            <option value="risk">Risk / skips</option>
-          </select>
-          <input type="search" id="log-filter-q" placeholder="Filter text..." oninput="applyLogFilter()" title="Search log text" class="search-q" />
-        </div>
-        <div id="logs-full" class="max-h-[40vh] overflow-y-auto"></div>
-      </div>
-
-      <div class="card">
-        <div class="filters-row mb-3">
-          <div class="section-title !mb-0">System / Fetch Errors <span class="tip" tabindex="0" data-tip="API/RPC/fetch failures (GMGN, Birdeye, Jupiter, etc.) for debugging connectivity."></span></div>
-          <select id="syslog-level" onchange="loadSystemLogs()" title="Filter by log level">
-            <option value="all">All levels</option>
-            <option value="error" selected>Errors</option>
-            <option value="warn">Warnings</option>
-            <option value="info">Info</option>
-          </select>
-          <select id="syslog-context" onchange="loadSystemLogs()" title="Filter by subsystem">
-            <option value="">All contexts</option>
-            <option value="GMGN">GMGN</option>
-            <option value="RPC">RPC</option>
-            <option value="Jupiter">Jupiter</option>
-            <option value="Jito">Jito</option>
-            <option value="DexScreener">DexScreener</option>
-            <option value="RugCheck">RugCheck</option>
-            <option value="Pump">Pump</option>
-            <option value="MarketData">MarketData</option>
-            <option value="Server">Server</option>
-          </select>
-          <input type="search" id="syslog-q" placeholder="Search…" oninput="debounceSysLogs()" title="Search system log messages" class="search-q" />
-          <button type="button" class="btn btn-secondary" onclick="loadSystemLogs()" title="Reload system logs">Refresh</button>
-          <button type="button" class="btn btn-warning" onclick="clearSystemLogs()" title="Clear in-memory system logs (disk log kept)">Clear</button>
-          <span class="mint self-center" id="syslog-stats">—</span>
-        </div>
-        <div id="system-logs" class="max-h-[50vh] overflow-y-auto text-sm font-mono"></div>
-      </div>
-    </section>
 
     <div class="page-alerts" aria-live="polite">
       <div id="persist-banner" class="persist-banner" role="alert"></div>
@@ -11901,6 +11895,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.resetStrategyModulesToDefaults = resetStrategyModulesToDefaults;
 
     function showTab(name, btn) {
+      const scrollToConfigLogs = name === 'logs';
+      if (name === 'logs') name = 'config';
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
         el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
       });
@@ -11923,7 +11919,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'logs' || name === 'backtester' || name === 'backup' || name === 'botinfo');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'backtester' || name === 'backup' || name === 'botinfo');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -11938,7 +11934,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           window.dispatchEvent(new Event('resize'));
         }, 80);
       }
-      if (name === 'logs') loadSystemLogs();
+      if (name === 'config') {
+        loadSystemLogs();
+        if (scrollToConfigLogs) {
+          setTimeout(function () {
+            const el = document.getElementById('config-logs-section');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 60);
+        }
+      }
       if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {
@@ -23135,9 +23139,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const normalizeTabName = function (name) {
       if (name === 'strategies') return 'settings';
       if (name === 'signals') return 'scanner';
+      if (name === 'logs') return 'config';
       return name;
     };
-    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'logs', 'backup', 'botinfo'];
+    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'backup', 'botinfo'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
