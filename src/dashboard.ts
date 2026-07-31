@@ -695,10 +695,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .btn-secondary { background: #1e293b; color: #e2e8f0; border-color: #334155; }
     .btn-secondary:hover { background: #334155; }
     .btn-danger { background: #dc2626; color: white; }
-    .btn-warning { background: #b45309; color: white; }
+    .btn-warning { background: #F1BB72; color: #1c1917; border-color: #F1BB72; }
+    .btn-warning:hover { background: #e5a85c; border-color: #e5a85c; color: #1c1917; }
+    .btn-warning:active { background: #d99a4e; border-color: #d99a4e; color: #1c1917; }
     button.danger { background: #dc2626; color: white; border-color: #dc2626; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
     button.secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
-    button.warning { background: #b45309; color: white; border-color: #b45309; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button.warning { background: #F1BB72; color: #1c1917; border-color: #F1BB72; border-radius: 0.5rem; padding: 0.35rem 0.65rem; font-size: 12px; font-weight: 600; cursor: pointer; }
+    button.warning:hover { background: #e5a85c; border-color: #e5a85c; color: #1c1917; }
+    button.warning:active { background: #d99a4e; border-color: #d99a4e; color: #1c1917; }
     button:not(.btn):not(.danger):not(.secondary):not(.warning):not(.settings-btn):not([data-settings-tab]):not(.strategy-preset-btn):not(.closed-filter-btn):not(.nav-tab):not(.trade-group-toggle):not(.ca-btn):not(.tip):not(.notif-item):not(.notif-bell-btn) {
       background: #059669;
       color: white;
