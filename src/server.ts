@@ -5632,7 +5632,7 @@ export function createServer(): express.Application {
     res.json({ wallets: config.smartWallets });
   });
 
-  /** Wipe all tracked smart wallets (Watch list). Skips boot auto-import until Import Favourites. */
+  /** Wipe all tracked smart wallets (Watch list). Boot never auto-imports favourites. */
   app.post('/api/wallets/reset-tracker', (_req: Request, res: Response) => {
     const removed = clearAllSmartWallets();
     try {
@@ -5651,7 +5651,7 @@ export function createServer(): express.Application {
       removed,
       wallets: getWalletsWithActivity(),
       monitoring,
-      message: `Removed ${removed} tracked wallet(s). Import Favourites to reload defaults.`,
+      message: `Removed ${removed} tracked wallet(s). Import Favourites when you want a watch list again.`,
     });
   });
 

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.72',
+    title: 'No baked favourites on fresh deploy',
+    sections: ['copy', 'execution'],
+    items: [
+      'Boot no longer auto-imports Favourites / Nansen seed when the watch list is empty — fresh deploys start with 0 tracked wallets so Utility soft-watch is not choked.',
+      'Optional CLEAR_WATCHED_WALLETS_ON_BOOT=1 clears persisted watched wallets once on boot (then unset the env). Or use Reset Wallet Tracker in the UI.',
+    ],
+  },
+  {
     version: '1.2.71',
     title: 'Stop token-metrics choking Utility RPC',
     sections: ['execution', 'copy'],

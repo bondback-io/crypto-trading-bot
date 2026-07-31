@@ -6017,7 +6017,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
           <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
           <button class="btn btn-secondary" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
-          <button class="btn btn-danger" onclick="resetWalletTracker()" title="Remove ALL tracked smart wallets from the Watch list. Boot will not auto-reload favourites until you click Import Favourites again."><span class="btn-label-short">Reset</span><span class="btn-label-full">Reset Wallet Tracker</span></button>
+          <button class="btn btn-danger" onclick="resetWalletTracker()" title="Remove ALL tracked smart wallets from the Watch list. Boot does not auto-import favourites — use Import Favourites when you want a list again."><span class="btn-label-short">Reset</span><span class="btn-label-full">Reset Wallet Tracker</span></button>
           <span class="mint" id="gmgn-status"></span>
         </div>
         <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
@@ -19360,7 +19360,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     async function resetWalletTracker() {
       if (
         !confirm(
-          'Reset Wallet Tracker?\\n\\nThis removes ALL tracked smart wallets from the Watch list.\\n\\nBoot will not auto-import favourites again until you click Import Favourites.\\n\\nContinue?'
+          'Reset Wallet Tracker?\\n\\nThis removes ALL tracked smart wallets from the Watch list.\\n\\nBoot does not auto-import favourites — click Import Favourites when you want a list again.\\n\\nContinue?'
         )
       ) {
         return;

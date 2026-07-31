@@ -25,8 +25,9 @@ export interface DashboardState {
   /** Build identity when the reset timer was last aligned to a deploy */
   lastBuildId: string | null;
   /**
-   * When true, skip boot-time Import Favourites auto-load
-   * (set by Reset Wallet Tracker until user runs Import Favourites again).
+   * Legacy flag from when boot auto-imported favourites.
+   * Boot no longer auto-imports; still set by Reset Wallet Tracker /
+   * CLEAR_WATCHED_WALLETS_ON_BOOT for compatibility.
    */
   skipFavouritesAutoImport?: boolean;
 }

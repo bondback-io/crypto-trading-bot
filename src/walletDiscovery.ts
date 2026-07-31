@@ -1806,87 +1806,22 @@ export async function importFavouritesSmartWallets(
 }
 
 /**
- * Boot helper: if no tracked wallets and user has not Reset the tracker,
- * run the same Import Favourites flow so wallets are watching by default.
+ * Boot helper (no longer seeds wallets).
+ * Fresh / empty watch lists stay empty so Utility soft-watch is not choked by
+ * baked favourites + Nansen seed. Use dashboard Import Favourites explicitly.
  */
 export async function ensureFavouritesAutoImportOnBoot(): Promise<{
   ran: boolean;
   imported: number;
   message: string;
 }> {
-  const {
-    getSkipFavouritesAutoImport,
-    setSkipFavouritesAutoImport,
-  } = require('./dashboardState') as typeof import('./dashboardState');
   const { config } = require('./config') as typeof import('./config');
-
-  if (getSkipFavouritesAutoImport()) {
-    return {
-      ran: false,
-      imported: 0,
-      message: 'Favourites auto-import skipped (wallet tracker was reset)',
-    };
-  }
-  if ((config.smartWallets?.length ?? 0) > 0) {
-    return {
-      ran: false,
-      imported: 0,
-      message: `Favourites auto-import skipped (${config.smartWallets.length} wallets already tracked)`,
-    };
-  }
-
-  console.log('[wallets] No tracked wallets — auto Import Favourites…');
-  try {
-    // Free Helius/Alchemy cannot seed 100+ wallets on boot without 429/crash.
-    // Cap the import; full favourites can be re-run from the dashboard later.
-    let soft = false;
-    try {
-      const { isSoftThrottleRpcUrl } =
-        require('./rpcUrl') as typeof import('./rpcUrl');
-      const { getRpcUrl } =
-        require('./connection') as typeof import('./connection');
-      soft = isSoftThrottleRpcUrl(getRpcUrl());
-    } catch {
-      /* optional */
-    }
-    if (soft) {
-      console.log(
-        '[wallets] Soft RPC boot — favourites import capped (attach a Render Disk ' +
-          'so wallets survive deploys and skip this storm)'
-      );
-    }
-    const result = await importFavouritesSmartWallets({ force: true });
-    if (soft && result.imported > 40) {
-      // Keep tracked list, but disable excess so poll set stays small
-      const { config, persistWallets } =
-        require('./config') as typeof import('./config');
-      const keep = 40;
-      let disabled = 0;
-      for (let i = keep; i < config.smartWallets.length; i++) {
-        if (config.smartWallets[i].enabled) {
-          config.smartWallets[i].enabled = false;
-          disabled += 1;
-        }
-      }
-      if (disabled > 0) {
-        persistWallets();
-        console.log(
-          `[wallets] Soft RPC — disabled ${disabled} excess wallet(s) ` +
-            `(watching ≤${keep}; re-enable from dashboard when on paid RPC)`
-        );
-      }
-    }
-    setSkipFavouritesAutoImport(false);
-    console.log(`[wallets] ${result.message}`);
-    return {
-      ran: true,
-      imported: result.imported,
-      message: result.message,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn('[wallets] Favourites auto-import failed:', message);
-    return { ran: true, imported: 0, message };
-  }
+  const n = config.smartWallets?.length ?? 0;
+  const message =
+    n > 0
+      ? `Favourites auto-import disabled (${n} wallet(s) already on disk)`
+      : 'Favourites auto-import disabled — empty watch list (Import Favourites from dashboard when ready)';
+  console.log(`[wallets] ${message}`);
+  return { ran: false, imported: 0, message };
 }
 

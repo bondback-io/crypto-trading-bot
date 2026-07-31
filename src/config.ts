@@ -4224,6 +4224,31 @@ export function resetToDefaults(): {
   return result;
 }
 
+/**
+ * Optional one-shot wipe of tracked smart wallets when
+ * CLEAR_WATCHED_WALLETS_ON_BOOT=1 (true/yes/on). Does not wipe other data.
+ * Unset the env after the deploy that needs the clear.
+ */
+export function maybeClearWatchedWalletsOnBoot(): number {
+  const raw = (process.env.CLEAR_WATCHED_WALLETS_ON_BOOT || '')
+    .trim()
+    .toLowerCase();
+  if (!['1', 'true', 'yes', 'on'].includes(raw)) return 0;
+  const n = clearAllSmartWallets();
+  try {
+    const { setSkipFavouritesAutoImport } =
+      require('./dashboardState') as typeof import('./dashboardState');
+    setSkipFavouritesAutoImport(true);
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    `[wallets] CLEAR_WATCHED_WALLETS_ON_BOOT — cleared ${n} tracked wallet(s). ` +
+      'Unset this env after deploy so later boots keep wallets you add.'
+  );
+  return n;
+}
+
 /** Load persisted wallets into config on startup */
 export function initWallets(): void {
   const loaded = loadWalletsFromDisk();
@@ -4249,6 +4274,8 @@ export function initWallets(): void {
     qualityScoredAt: w.qualityScoredAt,
     avgHoldTimeSec: w.avgHoldTimeSec,
   }));
+
+  maybeClearWatchedWalletsOnBoot();
 
   initTradingWallets();
   applyPersistedSettings();
