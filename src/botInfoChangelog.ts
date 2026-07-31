@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.74',
+    title: 'Keep sandwich/anti-rug off Utility lane',
+    sections: ['execution', 'copy'],
+    items: [
+      'With 0 Favourites watched, Utility high latency was mostly preferred-endpoint health probes plus ungated sandwich/anti-rug/dev-activity getParsedTransaction calls under Share load.',
+      'MEV sandwich checks now use Critical (Helius); anti-rug/dev activity use Scanners (Alchemy) so Utility stays free for Favourites soft-watch.',
+    ],
+  },
+  {
     version: '1.2.73',
     title: 'Utility prefers official mainnet-beta',
     sections: ['execution', 'copy'],

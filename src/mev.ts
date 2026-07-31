@@ -4,7 +4,7 @@
 
 import { PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { config, persistUserSettings } from './config';
-import { getConnection } from './connection';
+import { getConnection, runWithRpcRole } from './connection';
 import { getJitoStatus, getJitoStats } from './jito';
 import { isStrategyEnabled } from './strategies';
 
@@ -81,6 +81,19 @@ export async function checkSandwichRisk(
   if (!mint || mint.length < 32) {
     return empty(true, 'Invalid mint — skip sandwich check');
   }
+
+  // Share load: do not dump getParsedTransaction storms onto Utility (Favourites lane).
+  return runWithRpcRole('primary', () => checkSandwichRiskInner(mint, empty), 'mev_sandwich');
+}
+
+async function checkSandwichRiskInner(
+  mint: string,
+  empty: (safe: boolean, reason: string) => SandwichCheckResult
+): Promise<SandwichCheckResult> {
+  const windowMs = config.mev?.sandwichWindowMs ?? 12_000;
+  const maxBuys = config.mev?.sandwichMaxRecentBuys ?? 3;
+  const lookback = config.mev?.sandwichLookbackTxs ?? 16;
+  const now = Date.now();
 
   try {
     const conn = getConnection();

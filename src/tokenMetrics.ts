@@ -698,22 +698,29 @@ async function fetchDevActivity(
   address: string
 ): Promise<{ count: number; active: boolean }> {
   const lookbackMs = config.tokenMetrics?.devActivityLookbackMs ?? 2 * MS_PER_DAY;
-  try {
-    const conn = getConnection();
-    const sigs = await conn.getSignaturesForAddress(new PublicKey(address), {
-      limit: 20,
-    });
-    const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
-    const recent = sigs.filter(
-      (s) => s.blockTime != null && s.blockTime >= cutoff && !s.err
-    );
-    return {
-      count: recent.length,
-      active: recent.length > 0,
-    };
-  } catch {
-    return { count: 0, active: false };
-  }
+  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  return runWithRpcRole(
+    role,
+    async () => {
+      try {
+        const conn = getConnection();
+        const sigs = await conn.getSignaturesForAddress(new PublicKey(address), {
+          limit: 20,
+        });
+        const cutoff = Math.floor((Date.now() - lookbackMs) / 1000);
+        const recent = sigs.filter(
+          (s) => s.blockTime != null && s.blockTime >= cutoff && !s.err
+        );
+        return {
+          count: recent.length,
+          active: recent.length > 0,
+        };
+      } catch {
+        return { count: 0, active: false };
+      }
+    },
+    'token_metrics'
+  );
 }
 
 async function fetchGmgnTokenHints(
