@@ -4223,6 +4223,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .header-actions #rpc-latency.is-slow { color: #fbbf24; }
     .header-actions #rpc-latency.is-bad { color: #fca5a5; }
+    .header-actions #market-session-badge {
+      flex: 0 0 auto;
+      max-width: 8.5rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      font-size: 0.65rem;
+      padding: 1px 6px;
+      line-height: 1.2;
+      letter-spacing: 0.01em;
+    }
+    .header-actions #market-session-label {
+      display: inline;
+    }
     .header-actions #status-text { font-size: 0.75rem; line-height: 1.2; }
     .header-actions .badge { padding: 1px 7px; font-size: 10px; letter-spacing: 0.02em; }
     .header-actions .strict-badge,
@@ -4918,6 +4935,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .header-actions #rpc-active {
         max-width: 6.5rem;
       }
+      .header-actions #market-session-badge {
+        font-size: 0.6rem;
+        padding: 1px 5px;
+        max-width: 6.25rem;
+        flex: 0 1 auto;
+      }
       .header-actions .status-controls {
         flex: 1 1 100%;
         margin-left: 0;
@@ -5278,13 +5301,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
-          <span class="status-stat has-tip" id="header-daily-pnl-wrap" title="Realized PnL for the current UTC day">Day <strong id="daily-pnl">—</strong></span>
           <span class="status-stat rpc-status rpc-pill rpc-unknown has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint and last measured latency">
             <svg id="rpc-health-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             <span class="rpc-pill-label">RPC</span>
             <strong id="rpc-active">—</strong>
             <span class="rpc-latency-sep" aria-hidden="true">·</span>
             <strong id="rpc-latency">—</strong>
+          </span>
+          <span id="market-session-badge" class="badge status-badge session-pill has-tip" title="Current UTC market session">
+            <span id="market-session-label">Session —</span>
           </span>
         </div>
         <div class="status-controls">
@@ -5311,31 +5336,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     <!-- ========== TAB: Overview ========== -->
     <section data-tab-panel="overview" class="space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-overview" title="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.">
-        <div class="active-profile-main">
-          <span class="active-profile-kicker">Active Profile</span>
-          <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
-            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">On</span>
-          </span>
-          <span class="active-profile-extras" aria-label="Mode and run status">
-            <span class="run-status run-running has-tip" data-run-status title="Monitor run status">
-              <span class="dot dot-running" data-run-dot aria-hidden="true"></span>
-              <svg class="status-ico" data-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <strong data-run-label>Running</strong>
-            </span>
-            <span class="badge badge-livesim status-badge has-tip" data-mode-status title="Trading mode">
-              <svg class="status-ico" data-mode-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
-              <span data-mode-label>LIVE SIM</span>
-            </span>
-            <span id="market-session-badge" class="badge status-badge has-tip" title="Current UTC market session" style="background:#1e293b;border:1px solid #334155;color:#94a3b8">
-              <span id="market-session-label">Session —</span>
-            </span>
-          </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually."></span>
-        </div>
-        <p class="active-profile-hint">Risk On = lean floors + Copy/Scanner. Risk Off = ops-only (signal soak). Enable modules manually.</p>
-      </div>
       <div class="card" style="padding:0.65rem 0.85rem">
         <div class="flex flex-wrap gap-2 items-center justify-between mb-1">
           <div class="mint text-xs uppercase tracking-wide" style="color:#94a3b8">Active trade profiles</div>
