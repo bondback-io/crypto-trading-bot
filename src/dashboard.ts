@@ -6854,7 +6854,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
+          <div class="mt-3 flex flex-wrap gap-2 items-center">
+            <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
+            <span class="mint text-xs" id="rpc-diag-status">—</span>
+          </div>
+          <div id="rpc-diag-panel" class="mint text-xs mt-2" style="display:none;line-height:1.5;color:#94a3b8"></div>
           <div class="mint mt-2" id="jito-status"></div>
+          <p class="mint text-xs mt-1" id="jito-turbo-tip" style="color:#64748b;line-height:1.4">Turbo Mode raises priority fee + buy slip; Jito bundles only if MEV “Jito bundles” (or rpc.jito) is on. Live Sim never sends real bundles.</p>
         </div>
       </div>
 
@@ -15887,7 +15893,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const mev = status.mev || {};
       const js = mev.jitoStats || {};
       document.getElementById('jito-status').textContent =
-        'Jito: ' + (jito.enabled ? 'ON' : 'OFF') +
+        'Jito bundles: ' + (jito.enabled ? 'ON' : 'OFF') +
         ' · tip ' + (jito.tipLamports ?? '—') + ' lamports' +
         ' · bundles ' + (js.bundlesSucceeded ?? 0) + '/' + (js.bundlesAttempted ?? 0) +
         (js.lastError ? ' · last err: ' + js.lastError : '');
@@ -20951,6 +20957,128 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (err) {
         if (status) status.textContent = err.message || String(err);
         alert('Save failed: ' + (err.message || String(err)));
+      }
+    }
+
+    async function runRpcDiagnostic() {
+      const st = document.getElementById('rpc-diag-status');
+      const panel = document.getElementById('rpc-diag-panel');
+      if (st) st.textContent = 'Scanning…';
+      if (panel) {
+        panel.style.display = 'block';
+        panel.textContent = 'Running diagnostic…';
+      }
+      try {
+        const data = await fetchJSON('/api/rpc/diagnostic', { method: 'POST' });
+        const hints = Array.isArray(data.chokeHints) ? data.chokeHints : [];
+        const recs = Array.isArray(data.recommendations) ? data.recommendations : [];
+        const loaders = Array.isArray(data.loaders) ? data.loaders : [];
+        const p = data.primary || {};
+        const s = data.secondary || {};
+        const lines = [];
+        lines.push(
+          '<div style="color:#e2e8f0;margin-bottom:0.35rem"><strong>Primary</strong> ' +
+            escHtml(p.label || '—') +
+            ' · ' +
+            (p.healthy ? 'OK' : 'DOWN') +
+            (p.latencyMs != null ? ' · ' + p.latencyMs + 'ms' : '') +
+            (p.successRate != null ? ' · ' + Number(p.successRate).toFixed(0) + '%' : '') +
+            (p.public ? ' · public' : '') +
+            '</div>'
+        );
+        lines.push(
+          '<div style="color:#e2e8f0;margin-bottom:0.35rem"><strong>Secondary</strong> ' +
+            escHtml(s.label || '—') +
+            ' · ' +
+            (s.healthy ? 'OK' : 'DOWN') +
+            (s.latencyMs != null ? ' · ' + s.latencyMs + 'ms' : '') +
+            (s.successRate != null ? ' · ' + Number(s.successRate).toFixed(0) + '%' : '') +
+            (s.public ? ' · public' : '') +
+            '</div>'
+        );
+        lines.push('<div style="margin:0.4rem 0 0.2rem;color:#cbd5e1">Choke hints</div>');
+        lines.push(
+          '<ul style="margin:0;padding-left:1.1rem">' +
+            hints
+              .map(function (h) {
+                return '<li>' + escHtml(String(h)) + '</li>';
+              })
+              .join('') +
+            '</ul>'
+        );
+        if (recs.length) {
+          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Recommended Poll (ms) — apply manually</div>');
+          lines.push(
+            '<ul style="margin:0;padding-left:1.1rem">' +
+              recs
+                .map(function (r) {
+                  return (
+                    '<li><strong style="color:#e2e8f0">' +
+                    escHtml(r.fieldLabel || r.target) +
+                    '</strong>: ' +
+                    Number(r.currentMs) +
+                    ' → <strong style="color:#4ade80">' +
+                    Number(r.suggestedMs) +
+                    '</strong>' +
+                    (r.reason ? ' — ' + escHtml(r.reason) : '') +
+                    '</li>'
+                  );
+                })
+                .join('') +
+              '</ul>'
+          );
+          lines.push(
+            '<div class="mt-2" style="color:#64748b">Where to change: Live Feed → Market Scanner / AlphaScan Poll; Zion → Poll interval; wallet pollIntervalMs is persisted settings (not always on this page).</div>'
+          );
+        } else {
+          lines.push('<div style="margin-top:0.45rem;color:#4ade80">No Poll (ms) bumps suggested.</div>');
+        }
+        if (loaders.length) {
+          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Current loaders</div>');
+          lines.push(
+            '<ul style="margin:0;padding-left:1.1rem">' +
+              loaders
+                .map(function (L) {
+                  return (
+                    '<li>' +
+                    escHtml(L.id) +
+                    ' [' +
+                    escHtml(L.lane) +
+                    '] every ' +
+                    Number(L.intervalMs) +
+                    'ms — ' +
+                    escHtml(L.note || '') +
+                    '</li>'
+                  );
+                })
+                .join('') +
+              '</ul>'
+          );
+        }
+        if (data.jito && data.jito.note) {
+          lines.push(
+            '<div style="margin-top:0.55rem">' + escHtml(data.jito.note) + '</div>'
+          );
+        }
+        if (data.turboNote) {
+          lines.push('<div style="margin-top:0.25rem">' + escHtml(data.turboNote) + '</div>');
+        }
+        if (panel) {
+          panel.style.display = 'block';
+          panel.innerHTML = lines.join('');
+        }
+        if (st) {
+          st.textContent =
+            recs.length > 0
+              ? recs.length + ' recommendation' + (recs.length === 1 ? '' : 's')
+              : 'Clear';
+        }
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+        if (panel) {
+          panel.style.display = 'block';
+          panel.textContent = err.message || String(err);
+        }
       }
     }
 

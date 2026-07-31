@@ -768,6 +768,32 @@ export function createServer(): express.Application {
     });
   });
 
+  app.get('/api/rpc/diagnostic', (_req: Request, res: Response) => {
+    try {
+      const { getRpcLoadDiagnostic } =
+        require('./rpcDiagnostic') as typeof import('./rpcDiagnostic');
+      res.json({ ok: true, ...getRpcLoadDiagnostic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/rpc/diagnostic', (_req: Request, res: Response) => {
+    try {
+      const { getRpcLoadDiagnostic } =
+        require('./rpcDiagnostic') as typeof import('./rpcDiagnostic');
+      res.json({ ok: true, ...getRpcLoadDiagnostic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/mev', (_req: Request, res: Response) => {
     res.json(getMevStatus());
   });

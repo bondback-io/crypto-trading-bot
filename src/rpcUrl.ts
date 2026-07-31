@@ -1,19 +1,18 @@
 /**
  * RPC URL sanitization — reject .env.example placeholders and ensure a
- * working public fallback so wallet polling never sits on a dead endpoint.
+ * working public fallback when fewer than two usable endpoints are configured.
  *
  * Dual-lane layout (when two paid RPCs are configured):
  *   RPC_URL / RPC_PRIMARY     → primary lane
  *   RPC_SECONDARY (or first RPC_FALLBACKS entry) → secondary lane
- *   remaining RPC_FALLBACKS + public backups → last-resort fallbacks
+ *   remaining RPC_FALLBACKS → extra fallbacks (no auto public-3/4/5)
  */
 
 export const PUBLIC_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
 
 /**
- * Extra free/public Solana mainnet endpoints used as last-resort failover
- * after your RPC_URL / RPC_SECONDARY / RPC_FALLBACKS. No API keys required — rate-limited.
- * Prefer paid Helius/QuickNode/Alchemy for production.
+ * @deprecated No longer auto-appended (avoid probing dead free hosts).
+ * Kept for reference / isPublicRpcUrl detection only.
  */
 export const PUBLIC_RPC_FALLBACKS = [
   'https://solana-rpc.publicnode.com',
@@ -73,7 +72,8 @@ export interface NormalizedRpcEndpoint {
 
 /**
  * Build a sanitized endpoint list from env/config candidates.
- * Drops placeholders, dedupes, and always appends public fallbacks.
+ * Drops placeholders, dedupes. Appends a single public last-resort only when
+ * fewer than 2 usable endpoints are configured (primary+secondary setups stay clean).
  */
 export function normalizeRpcEndpoints(
   candidates: Array<{
@@ -130,14 +130,14 @@ export function normalizeRpcEndpoints(
     );
   }
 
-  // Always keep at least one working public endpoint
-  push(
-    PUBLIC_SOLANA_RPC,
-    out.length === 0 ? 'primary' : 'public-fallback',
-    out.length === 0 ? 'primary' : 'fallback'
-  );
-  for (let i = 0; i < PUBLIC_RPC_FALLBACKS.length; i++) {
-    push(PUBLIC_RPC_FALLBACKS[i], `public-fallback-${i + 2}`, 'fallback');
+  // Last-resort public only when we lack a dual-lane setup (avoids probing
+  // dead public-fallback-3/4/5 every health tick when primary+secondary exist).
+  if (out.length < 2) {
+    push(
+      PUBLIC_SOLANA_RPC,
+      out.length === 0 ? 'primary' : 'public-fallback',
+      out.length === 0 ? 'primary' : 'fallback'
+    );
   }
 
   if (droppedPlaceholder && out.length > 0) {
