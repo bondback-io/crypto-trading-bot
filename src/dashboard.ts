@@ -6706,18 +6706,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     <!-- ========== TAB: Micro Bots ========== -->
     <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
-      <div class="active-profile-banner tone-medium" data-active-profile id="active-profile-microbots" title="Tune who can fight, who wins, and which modules each micro-bot can use.">
-        <div class="active-profile-main">
-          <span class="active-profile-kicker">Micro Bots</span>
-          <span class="risk-badge risk-badge-medium" data-risk-badge title="Risk Level">
-            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">On</span>
-          </span>
-          <span class="tip tip-below" tabindex="0" data-tip="Smart Bot Profiles ON = each trade profile is its own micro-bot lane. Multi-profile ON = lanes compete and the winner stamps the trade."></span>
-        </div>
-        <p class="active-profile-hint">Use this tab to tune micro-bot participation, lane fights, and profile-level modules without mixing it into the main settings page.</p>
-      </div>
-
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
