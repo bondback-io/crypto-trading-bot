@@ -27,6 +27,7 @@ import {
   reconcileMarkPriceSol,
   resolveExitMarketCaps,
   isSaneMarkMarketCapUsd,
+  alignClosedExitMarketCapsToFill,
 } from './marketData';
 import { recordScannerOutcome } from './scannerOutcomes';
 import { loadPaperBalance, savePaperBalance } from './paperStateStore';
@@ -731,6 +732,17 @@ export class PaperTrader {
       }
     }
     this.closedPositions = (saved.closedPositions || []).map((p) => ({ ...p }));
+    // Historical Closed Trades: Exit MC used to prefer Dex while PnL used fill.
+    // Align Exit MC to fill-scaled only — never rewrite pnlSol/pnlPct (overview stats).
+    const aligned = alignClosedExitMarketCapsToFill(this.closedPositions);
+    this.closedPositions = aligned.closed;
+    if (aligned.fixed > 0) {
+      console.log(
+        `[paper] Aligned Exit MC to fill on ${aligned.fixed} closed trade(s) ` +
+          `(PnL / Realized unchanged — MC column only)`
+      );
+      this.persistState();
+    }
     resetPeakEquity(this.getEquitySol());
     console.log(
       `[paper] Loaded paperBalance.json — balance ${this.balanceSol.toFixed(4)} SOL, ` +

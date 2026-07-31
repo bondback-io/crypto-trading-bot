@@ -352,6 +352,97 @@ export function resolveExitMarketCapUsd(
 }
 
 /**
+ * One-shot / idempotent repair for historical closed rows where Exit MC preferred
+ * live Dex while PnL used the fill mark. Rewrites Exit MC to fill-scaled only —
+ * never touches pnlSol / pnlPct / cost (overview Realized stays correct).
+ */
+export function alignClosedExitMarketCapToFill<T extends {
+  entryMarketCapUsd?: number;
+  entryPriceSol?: number;
+  exitPriceSol?: number;
+  exitMarketCapUsd?: number;
+  impliedExitMarketCapUsd?: number;
+  liveExitMarketCapUsd?: number;
+  pnlPct?: number;
+}>(pos: T): { pos: T; changed: boolean } {
+  const entryMc = pos.entryMarketCapUsd;
+  const entryPx = pos.entryPriceSol;
+  const exitPx = pos.exitPriceSol;
+  if (
+    entryMc == null ||
+    !(entryMc > 0) ||
+    entryPx == null ||
+    !(entryPx > 0) ||
+    exitPx == null ||
+    !(exitPx >= 0)
+  ) {
+    return { pos, changed: false };
+  }
+
+  const fillImplied =
+    pos.impliedExitMarketCapUsd != null &&
+    Number.isFinite(pos.impliedExitMarketCapUsd) &&
+    pos.impliedExitMarketCapUsd > 0
+      ? pos.impliedExitMarketCapUsd
+      : marketCapAtPrice(entryMc, entryPx, exitPx);
+
+  if (fillImplied == null || !(fillImplied > 0)) {
+    return { pos, changed: false };
+  }
+
+  const display = pos.exitMarketCapUsd;
+  const alreadyAligned =
+    display != null &&
+    Number.isFinite(display) &&
+    display > 0 &&
+    Math.abs(display - fillImplied) / Math.max(fillImplied, 1) <= 0.01;
+
+  if (
+    alreadyAligned &&
+    pos.impliedExitMarketCapUsd != null &&
+    Math.abs(Number(pos.impliedExitMarketCapUsd) - fillImplied) /
+      Math.max(fillImplied, 1) <=
+      0.01
+  ) {
+    return { pos, changed: false };
+  }
+
+  const next = { ...pos };
+  // Preserve prior Dex/display as live tooltip when it disagreed with fill
+  if (
+    display != null &&
+    Number.isFinite(display) &&
+    display > 0 &&
+    Math.abs(display - fillImplied) / Math.max(fillImplied, 1) > 0.05 &&
+    (next.liveExitMarketCapUsd == null || !(next.liveExitMarketCapUsd > 0))
+  ) {
+    next.liveExitMarketCapUsd = display;
+  }
+  next.exitMarketCapUsd = fillImplied;
+  next.impliedExitMarketCapUsd = fillImplied;
+  return { pos: next, changed: true };
+}
+
+/** Align all closed rows; returns how many Exit MC values were rewritten. */
+export function alignClosedExitMarketCapsToFill<T extends {
+  entryMarketCapUsd?: number;
+  entryPriceSol?: number;
+  exitPriceSol?: number;
+  exitMarketCapUsd?: number;
+  impliedExitMarketCapUsd?: number;
+  liveExitMarketCapUsd?: number;
+  pnlPct?: number;
+}>(closed: T[]): { closed: T[]; fixed: number } {
+  let fixed = 0;
+  const out = closed.map((p) => {
+    const { pos, changed } = alignClosedExitMarketCapToFill(p);
+    if (changed) fixed += 1;
+    return pos;
+  });
+  return { closed: out, fixed };
+}
+
+/**
  * True when a candidate mark MC is usable vs an open entry (guards FDV bugs).
  */
 export function isSaneMarkMarketCapUsd(
