@@ -124,7 +124,6 @@ const callMeter = new Map<
   }
 >();
 let callMeterStartedAt = Date.now();
-let lastDebugTrafficAt = 0;
 
 function callMeterKey(
   endpoint: string,
@@ -190,47 +189,6 @@ export function getRpcCallTraffic(limit = 40): {
     byFeature,
     top: top.slice(0, Math.max(1, limit)),
   };
-}
-
-function emitDebugTrafficSnapshot(hypothesisId: string): void {
-  const traffic = getRpcCallTraffic(15);
-  const payload = {
-    sessionId: '8695ba',
-    runId: 'rpc-traffic',
-    hypothesisId,
-    location: 'connection.ts:emitDebugTrafficSnapshot',
-    message: 'RPC HTTP traffic snapshot',
-    data: {
-      sinceMs: traffic.sinceMs,
-      totalCalls: traffic.totalCalls,
-      byEndpoint: traffic.byEndpoint,
-      byFeature: traffic.byFeature,
-      top: traffic.top.slice(0, 10),
-    },
-    timestamp: Date.now(),
-  };
-  // #region agent log
-  fetch('http://127.0.0.1:7721/ingest/2e608684-d436-4b7d-9b88-409138f56f43', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '8695ba',
-    },
-    body: JSON.stringify(payload),
-  }).catch(() => {});
-  try {
-    const fs = require('fs') as typeof import('fs');
-    const path = require('path') as typeof import('path');
-    const logPath = path.join(process.cwd(), 'debug-8695ba.log');
-    fs.appendFileSync(logPath, JSON.stringify(payload) + '\n');
-  } catch {
-    /* ignore */
-  }
-  // #endregion
-  console.log(
-    `[rpc:debug] traffic ${Math.round(traffic.sinceMs / 1000)}s total=${traffic.totalCalls} ` +
-      `byEp=${JSON.stringify(traffic.byEndpoint)} byFeat=${JSON.stringify(traffic.byFeature)}`
-  );
 }
 
 function parseRpcMethodsFromBody(body: unknown): string[] {
@@ -1320,7 +1278,6 @@ export function startRpcHealthMonitor(): void {
       await probeEndpoint(i);
       await new Promise((r) => setTimeout(r, 250));
     }
-    emitDebugTrafficSnapshot('H4-boot');
   })();
 
   healthTimer = setInterval(() => {
@@ -1332,10 +1289,6 @@ export function startRpcHealthMonitor(): void {
         await new Promise((r) => setTimeout(r, 200));
       }
       await maybeSwitchEndpoints();
-      if (Date.now() - lastDebugTrafficAt >= 45_000) {
-        lastDebugTrafficAt = Date.now();
-        emitDebugTrafficSnapshot('H1-H5');
-      }
     })();
   }, interval);
 
