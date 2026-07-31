@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.75',
+    title: 'Utility lane debug instrumentation removed',
+    sections: ['execution'],
+    items: [
+      'Temporary Utility RPC debug ingest/logging removed after verifying sandwich/anti-rug no longer land on the Utility lane.',
+    ],
+  },
+  {
     version: '1.2.74',
     title: 'Keep sandwich/anti-rug off Utility lane',
     sections: ['execution', 'copy'],
