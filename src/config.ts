@@ -4449,7 +4449,7 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   console.log(
     `[rpc] Share RPC load ${config.rpc.shareLoad ? 'ON' : 'OFF'} — ` +
       (config.rpc.shareLoad
-        ? 'critical→Helius, scanners/Zion→Alchemy, utility→public'
+        ? 'critical→Helius, scanners/Zion→Alchemy, wallet-watch+utility→public'
         : 'legacy primary/secondary routing')
   );
   return config.rpc.shareLoad;

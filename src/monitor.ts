@@ -1541,8 +1541,8 @@ export function getWalletsForPolling(): SmartWallet[] {
     return bT - aT;
   });
 
-  // Free Helius/Alchemy cannot sustain 100+ wallet watches — rotate a capped set.
-  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 24 : 40;
+  // Free Helius/Alchemy/public — rotate a capped watch set (Share: public lane can hold more).
+  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 100 : 40;
   const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || softCapDefault);
   if (
     isSoftThrottleRpcUrl(getRpcUrl()) &&

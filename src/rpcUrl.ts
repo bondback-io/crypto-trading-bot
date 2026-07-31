@@ -409,12 +409,12 @@ export const RPC_LANE_SUPPORTS = {
 /** Copy when Share RPC load is enabled. */
 export const RPC_SHARE_LOAD_SUPPORTS = {
   critical: [
-    'Helius — trade entries, turbo profiles, migration sniper, copy buys, migration parses, wallet buy detection',
+    'Helius — trade entries, turbo profiles, migration sniper/parses',
   ],
   scanners: [
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'Public Solana — wallet import / favourites on-chain checks, activity refresh, light polls',
+    'Public Solana — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;

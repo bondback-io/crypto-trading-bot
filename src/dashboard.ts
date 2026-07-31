@@ -6847,15 +6847,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
-            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses, wallet buy detection</div>
+            <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — wallet import/favourites on-chain checks, activity refresh, light polls</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch, import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration + wallet buy detection. Prefers Helius.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Primary / Critical</strong> — Entries + migration. Prefers Helius.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">Secondary / Scanners</strong> — Market / Alpha / Zion (Share ON). Prefers Alchemy.</div>
-            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Import + activity (Share ON). Prefers public Solana.</div>
+            <div class="mb-2"><strong style="color:#e2e8f0">Utility</strong> — Favourites wallet watch + import + activity (Share ON). Prefers public Solana.</div>
             <div class="mb-2"><strong style="color:#e2e8f0">No Solana RPC</strong> — Email (Resend/SMTP), wallet discovery/search (GMGN/Kolscan HTTP), open-trade mark prices (DexScreener).</div>
             <div class="mint">Failover: preferred lane must stay unhealthy ≥30s (or immediately on 429) before piggybacking. Critical prefers Alchemy over public when Share is ON.</div>
           </div>

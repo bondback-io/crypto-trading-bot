@@ -192,13 +192,16 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const scannerLane = shareLoad ? 'secondary' : 'primary';
   const activityLane = shareLoad ? 'utility' : 'secondary';
+  const walletPollLane = shareLoad ? 'utility' : 'primary';
 
   const loaders: RpcDiagLoader[] = [
     {
       id: 'wallet_poll',
-      lane: 'primary',
+      lane: walletPollLane,
       intervalMs: walletPoll,
-      note: 'Copy / wallet buy detection (pollIntervalMs)',
+      note: shareLoad
+        ? 'Copy / wallet buy detection on public utility (soft watch cap 100)'
+        : 'Copy / wallet buy detection (pollIntervalMs)',
     },
     {
       id: 'migration',
@@ -258,6 +261,10 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
 
   const primaryStressed = laneStressed(primary);
   const secondaryStressed = laneStressed(secondary);
+  const utilityStressed = laneStressed(utility);
+  const walletPollStressed = shareLoad
+    ? utilityStressed || lastPollRateLimited
+    : primaryStressed || lastPollRateLimited || primary.public;
 
   if (!primary.healthy) {
     chokeHints.push(
@@ -276,7 +283,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   if (primary.failover) {
     chokeHints.push('Primary lane is piggybacking (failover active).');
   }
-  if (primary.public) {
+  if (primary.public && !shareLoad) {
     chokeHints.push(
       'Primary is a public/free RPC — rate limits commonly choke wallet poll + migration + scanner.'
     );
@@ -306,20 +313,25 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     );
   }
 
-  if (primaryStressed || lastPollRateLimited || primary.public) {
+  if (walletPollStressed) {
     addRec({
       target: 'wallet_poll',
       fieldLabel: 'Wallet / monitor pollIntervalMs',
       currentMs: walletPoll,
       suggestedMs: bumpMs(
         walletPoll,
-        lastPollRateLimited || !primary.healthy ? 20_000 : 15_000,
+        lastPollRateLimited || (shareLoad ? !utility.healthy : !primary.healthy)
+          ? 20_000
+          : 15_000,
         60_000
       ),
-      reason:
-        'Primary carries copy wallet polling — longer interval reduces getSignatures pressure.',
+      reason: shareLoad
+        ? 'Utility/public carries Favourites wallet watch — longer interval eases public RPC pressure.'
+        : 'Primary carries copy wallet polling — longer interval reduces getSignatures pressure.',
     });
-    if (scannerOn) {
+  }
+  if (primaryStressed || lastPollRateLimited || (primary.public && !shareLoad)) {
+    if (scannerOn && !shareLoad) {
       addRec({
         target: 'market_scanner',
         fieldLabel: 'Market Scanner Poll interval (ms)',
@@ -329,7 +341,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
           'Scanner curve enrich stacks on primary with wallet + migration polls.',
       });
     }
-    if (alphaOn) {
+    if (alphaOn && !shareLoad) {
       addRec({
         target: 'alpha_scan',
         fieldLabel: 'AlphaScan Poll (ms)',

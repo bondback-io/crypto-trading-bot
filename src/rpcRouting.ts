@@ -19,7 +19,7 @@ export type RpcFeature =
  * Map a workload feature to an RPC lane.
  * Share OFF: mostly primary; Zion + activity stay secondary (legacy).
  * Share ON: critical→primary (Helius), scanners/Zion→secondary (Alchemy),
- * import/activity→utility (public).
+ * wallet poll + import/activity→utility (public).
  */
 export function getRpcRoleFor(
   feature: RpcFeature,
@@ -33,12 +33,12 @@ export function getRpcRoleFor(
   switch (feature) {
     case 'trade_entry':
     case 'migration':
-    case 'wallet_poll':
       return 'primary';
     case 'market_scanner':
     case 'alpha_scan':
     case 'zion':
       return 'secondary';
+    case 'wallet_poll':
     case 'wallet_import':
     case 'activity':
       return 'utility';
