@@ -6205,6 +6205,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     <!-- ========== TAB: Live Feed (scanner) ========== -->
     <section data-tab-panel="scanner" class="hidden space-y-4">
+      <div class="setup-watches-stack space-y-3">
+        <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Dip Buyer</span>
+              <span class="setup-watch-title">Dip setup watchlist</span>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. Unwatch cools out for 15 minutes.</p>
+            </div>
+            <span id="dip-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
+        </div>
+
+        <div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Migration Sniper</span>
+              <span class="setup-watch-title">Graduation watchlist</span>
+              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at ≥95% until complete · post-grad handoff within Post-grad max (s). Keeps volatile MC (only drops if &lt;$8k for 5m). Triggered rows stay visible briefly; expired/invalidated breadcrumb ~5m. Unwatch cools 15m.</p>
+            </div>
+            <span id="grad-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
+        </div>
+        <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Diagnostics</span>
+              <span class="setup-watch-title">Top entry skip reasons</span>
+              <p class="setup-watch-sub mb-0">Live tallies from FILTER_SKIP / lane fight — see what is blocking opens.</p>
+            </div>
+            <button type="button" class="btn btn-secondary text-xs" onclick="refreshEntrySkipDiag()">Refresh</button>
+          </div>
+          <div id="entry-skip-diag" class="mint text-xs mt-1">—</div>
+        </div>
+      </div>
+
       <div class="config-section-label">Market scanner <span>Live candidates + settings</span></div>
       <div class="card">
         <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview."></span></div>
@@ -6662,44 +6699,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
 
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
-      <div id="learning-durability-banner" class="hidden text-xs rounded-md px-3 py-2 border border-red-600/70 bg-red-950/50 text-red-100" role="alert"></div>
-
-      <div class="setup-watches-stack space-y-3">
-        <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
-          <div class="setup-watch-head">
-            <div class="setup-watch-title-block">
-              <span class="setup-watch-kicker">Dip Buyer</span>
-              <span class="setup-watch-title">Dip setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. Unwatch cools out for 15 minutes.</p>
-            </div>
-            <span id="dip-watch-count" class="setup-watch-count mint">—</span>
-          </div>
-          <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
-        </div>
-
-        <div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
-          <div class="setup-watch-head">
-            <div class="setup-watch-title-block">
-              <span class="setup-watch-kicker">Migration Sniper</span>
-              <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at ≥95% until complete · post-grad handoff within Post-grad max (s). Keeps volatile MC (only drops if &lt;$8k for 5m). Triggered rows stay visible briefly; expired/invalidated breadcrumb ~5m. Unwatch cools 15m.</p>
-            </div>
-            <span id="grad-watch-count" class="setup-watch-count mint">—</span>
-          </div>
-          <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
-        </div>
-        <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
-          <div class="setup-watch-head">
-            <div class="setup-watch-title-block">
-              <span class="setup-watch-kicker">Diagnostics</span>
-              <span class="setup-watch-title">Top entry skip reasons</span>
-              <p class="setup-watch-sub mb-0">Live tallies from FILTER_SKIP / lane fight — see what is blocking opens.</p>
-            </div>
-            <button type="button" class="btn btn-secondary text-xs" onclick="refreshEntrySkipDiag()">Refresh</button>
-          </div>
-          <div id="entry-skip-diag" class="mint text-xs mt-1">—</div>
-        </div>
-      </div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
@@ -7285,6 +7284,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card">
         <div class="section-title">Micro Bots Self-Learning Data <span class="tip" tabindex="0" data-tip="Durable knobs, episode files, and the learning save journal for Trade Profiles."></span></div>
+        <div id="learning-durability-banner" class="hidden text-xs rounded-md px-3 py-2 mb-2 border border-red-600/70 bg-red-950/50 text-red-100" role="alert"></div>
         <p class="mint text-xs mb-2">If notification email resets on deploy, learning data will too until DATA_DIR is on a mounted disk.</p>
         <div id="learning-health-status" class="backup-meta mb-3">Checking learning health…</div>
         <div class="filters-row mb-2" id="learning-saves-filters">
@@ -9569,7 +9569,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : '—';
       }
       if (toggles) {
-        toggles.innerHTML = (tp.profiles || []).map(function (p) {
+        // UI only: hide Default (legacy stack stays in code); pin Zion first among Smart Bot cards.
+        const uiProfiles = (tp.profiles || [])
+          .filter(function (p) { return p.id !== 'default'; })
+          .slice()
+          .sort(function (a, b) {
+            if (a.id === 'zion') return -1;
+            if (b.id === 'zion') return 1;
+            return 0;
+          });
+        toggles.innerHTML = uiProfiles.map(function (p) {
           const checked = p.enabled !== false ? ' checked' : '';
           const disabled = p.id === 'default' ? ' disabled' : '';
           const er = p.exitRules || {};
