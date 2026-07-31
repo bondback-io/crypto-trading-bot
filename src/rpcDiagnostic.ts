@@ -200,7 +200,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       lane: walletPollLane,
       intervalMs: walletPoll,
       note: shareLoad
-        ? 'Copy / wallet buy detection on public utility (soft watch cap 100)'
+        ? 'Copy / wallet buy detection on public utility (soft watch cap 75)'
         : 'Copy / wallet buy detection (pollIntervalMs)',
     },
     {
