@@ -68,7 +68,8 @@ export interface AlphaScanSnapshot {
 }
 
 const MAX_ROWS_PER_COLUMN = 40;
-const CURVE_ENRICH_CAP = 18;
+/** Enrich bonding curves for all recent pump mints (was 18 — starved Soon). */
+const CURVE_ENRICH_CAP = 40;
 
 let lastPollAt: number | null = null;
 let lastError: string | null = null;
@@ -223,10 +224,25 @@ function buildCandidate(
 
 async function enrichCurves(
   tokens: JupiterTokenInfo[]
-): Promise<Map<string, { progressPct: number; complete: boolean; nearMigration: boolean }>> {
+): Promise<
+  Map<
+    string,
+    {
+      progressPct: number;
+      complete: boolean;
+      nearMigration: boolean;
+      missing: boolean;
+    }
+  >
+> {
   const out = new Map<
     string,
-    { progressPct: number; complete: boolean; nearMigration: boolean }
+    {
+      progressPct: number;
+      complete: boolean;
+      nearMigration: boolean;
+      missing: boolean;
+    }
   >();
   const pumpish = tokens.filter(
     (t) =>
@@ -243,14 +259,24 @@ async function enrichCurves(
       try {
         const cached = getCachedBondingCurve(mint);
         const state = cached || (await fetchBondingCurve(mint));
-        if (!state) return;
+        if (!state || state.source === 'none') {
+          // No curve account — likely already bonded / migrated off-curve
+          out.set(mint, {
+            progressPct: 100,
+            complete: true,
+            nearMigration: false,
+            missing: true,
+          });
+          return;
+        }
         out.set(mint, {
           progressPct: state.progressPct,
           complete: state.complete === true,
           nearMigration: state.nearMigration === true,
+          missing: false,
         });
       } catch {
-        /* optional */
+        /* leave unset — stay New */
       }
     })
   );
@@ -285,38 +311,60 @@ export async function refreshAlphaScanBuckets(): Promise<{
     const mint = String(token.id || '').trim();
     if (!mint) continue;
     const graduatedAtMs = parseMs(token.graduatedAt ?? null);
+    const ageMs = tokenAgeMs(token);
     const curve = curves.get(mint);
     const progress = curve?.progressPct;
     const complete = curve?.complete === true;
+    const curveMissing = curve?.missing === true;
+    const nearMig = curve?.nearMigration === true;
+    const pumpish =
+      isJupiterPumpFunToken(token) || mint.toLowerCase().endsWith('pump');
+    const liq =
+      token.liquidity != null && Number.isFinite(Number(token.liquidity))
+        ? Number(token.liquidity)
+        : 0;
 
-    const bondedAgeOk =
-      graduatedAtMs != null && now - graduatedAtMs >= 0 && now - graduatedAtMs <= bondedMaxMs;
-    const isBonded =
-      bondedAgeOk ||
-      (complete &&
-        graduatedAtMs != null &&
-        now - graduatedAtMs <= bondedMaxMs) ||
-      (complete && graduatedAtMs == null && (token.liquidity || 0) > 0);
+    // Bonded: Jupiter graduatedAt in window, or curve complete / missing curve + DEX liq
+    // within first-pool age window (Jupiter often omits graduatedAt on /recent).
+    const graduatedFresh =
+      graduatedAtMs != null &&
+      now - graduatedAtMs >= 0 &&
+      now - graduatedAtMs <= bondedMaxMs;
+    const firstPoolFresh =
+      ageMs != null && ageMs >= 0 && ageMs <= bondedMaxMs;
+    const looksBonded =
+      graduatedFresh ||
+      (pumpish &&
+        firstPoolFresh &&
+        (complete || curveMissing) &&
+        (liq > 0 || graduatedAtMs != null));
 
-    if (isBonded && cfg.feedBonded !== false) {
+    if (looksBonded && cfg.feedBonded !== false) {
       bondeds.push(
         toRow(token, 'bonded', {
           curveProgressPct: progress ?? 100,
           graduatedAtMs,
-          reasons: ['alphascan:bonded'],
+          reasons: [
+            'alphascan:bonded',
+            graduatedFresh
+              ? 'graduatedAt'
+              : curveMissing
+                ? 'no-curve+liq'
+                : 'curve-complete',
+          ],
         })
       );
       continue;
     }
 
-    const pumpish =
-      isJupiterPumpFunToken(token) || mint.toLowerCase().endsWith('pump');
+    // Soon: still on curve, pump-like, near migration / ≥ Soon min %
     const soonOk =
       pumpish &&
       !graduatedAtMs &&
       !complete &&
+      !curveMissing &&
       progress != null &&
-      progress >= soonMin;
+      (progress >= soonMin || nearMig);
 
     if (soonOk && cfg.feedSoon !== false) {
       soons.push(
@@ -325,7 +373,9 @@ export async function refreshAlphaScanBuckets(): Promise<{
           graduatedAtMs: null,
           reasons: [
             'alphascan:soon',
-            `curve ${progress!.toFixed(0)}%`,
+            nearMig && (progress == null || progress < soonMin)
+              ? 'near-mig'
+              : `curve ${progress!.toFixed(0)}%`,
           ],
         })
       );
@@ -337,7 +387,10 @@ export async function refreshAlphaScanBuckets(): Promise<{
         toRow(token, 'new', {
           curveProgressPct: progress ?? null,
           graduatedAtMs,
-          reasons: ['alphascan:new'],
+          reasons: [
+            'alphascan:new',
+            progress != null ? `curve ${progress.toFixed(0)}%` : 'no-curve-yet',
+          ],
         })
       );
     }
