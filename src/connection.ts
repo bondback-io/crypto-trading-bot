@@ -1627,6 +1627,17 @@ export function startRpcHealthMonitor(): void {
     // Preferred / active utility: keep warm. Other public fallbacks (e.g. slow
     // official mainnet-beta): rare probes only — avoids painting the table with 1s+ spikes.
     if (isUtil || index === activeUtility) {
+      // Preferred Utility already soft-failed elsewhere: probe it rarely so slow
+      // Triton/rpc-url getSlot samples do not keep painting the Multi-RPC row.
+      if (
+        isUtil &&
+        index !== activeUtility &&
+        state.latencyStressedSince != null &&
+        state.latencyMs != null &&
+        state.latencyMs >= LATENCY_STRESS_MS
+      ) {
+        return cycle % 4 === 0;
+      }
       if (
         state.latencyStressedSince != null &&
         state.latencyMs != null &&

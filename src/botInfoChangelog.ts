@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.71',
+    title: 'Stop token-metrics choking Utility RPC',
+    sections: ['execution', 'copy'],
+    items: [
+      'Holder/top-10 on-chain metrics (getTokenLargestAccounts) now run on Alchemy under Share load with short timeouts — they were timing out ~15s on Utility and starving Favourites polls.',
+      'Utility preferred is publicnode again (Triton stays as failover); stressed preferred Utility is probed less while soft-failed over.',
+    ],
+  },
+  {
     version: '1.2.70',
     title: 'Utility soft watch RPC cap 30',
     sections: ['execution', 'copy'],

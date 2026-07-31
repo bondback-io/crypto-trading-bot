@@ -379,13 +379,13 @@ export function rpcEndpointsFromEnv(
     }
   }
 
-  // Utility lane prefers Triton api.mainnet.solana.com (RPC_URL / RPC_SECONDARY),
-  // then publicnode. Never sticky official mainnet-beta.
+  // Utility lane prefers publicnode (fast from Render), then Triton
+  // api.mainnet.solana.com. Never sticky official mainnet-beta (probe-fast / poll-slow).
   let utilityUrl = '';
   const utilityPrefs = [
+    PUBLIC_SOLANA_RPC,
     rpcUrl && isTritonMainnetRpcUrl(rpcUrl) ? rpcUrl : '',
     rpcSecondary && isTritonMainnetRpcUrl(rpcSecondary) ? rpcSecondary : '',
-    PUBLIC_SOLANA_RPC,
     rpcSecondary && !isOfficialMainnetBetaRpcUrl(rpcSecondary) ? rpcSecondary : '',
   ].filter((u) => u && isUsableRpcUrl(u));
   for (const u of utilityPrefs) {
@@ -497,7 +497,7 @@ export const RPC_LANE_SUPPORTS = {
     'Wallet favourites / import on-chain checks (Share ON)',
     'Wallet activity refresh / last-trade polls (Share ON)',
     'Other light non-entry polls',
-    'Preferred: api.mainnet.solana.com (Triton) → publicnode → official mainnet-beta last',
+    'Preferred: publicnode → api.mainnet.solana.com (Triton) → official mainnet-beta last',
   ],
   httpOnly: [
     'Email notifications (Resend / SMTP — no Solana RPC)',
@@ -515,6 +515,6 @@ export const RPC_SHARE_LOAD_SUPPORTS = {
     'Alchemy — Market Scanner, AlphaScan, Zion KOL scanner, Zion Place Trade',
   ],
   utility: [
-    'api.mainnet.solana.com (Triton) — wallet buy watch (Favourites), import checks, activity refresh, light polls',
+    'publicnode — wallet buy watch (Favourites), import checks, activity refresh, light polls',
   ],
 } as const;

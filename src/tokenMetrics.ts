@@ -13,7 +13,7 @@ import {
   effectiveMaxTop10HolderPct,
 } from './config';
 import { getBondingCurvePda } from './bondingCurve';
-import { getConnection } from './connection';
+import { getConnection, runWithRpcRole } from './connection';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { effectiveStrictMinVolume24hUsd } from './filterEffective';
 import {
@@ -521,6 +521,34 @@ async function resolvePoolVaultExcludeOwners(
 async function fetchOnChainHolderMetrics(
   mint: string
 ): Promise<Partial<TokenMetrics>> {
+  // Share load: keep heavy holder RPCs off Utility (Favourites soft-watch).
+  // Public utility was timing out ~15s on getTokenLargestAccounts.
+  const role = Boolean(config.rpc?.shareLoad) ? 'secondary' : 'primary';
+  return runWithRpcRole(role, () => fetchOnChainHolderMetricsInner(mint), 'token_metrics');
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms
+    );
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
+async function fetchOnChainHolderMetricsInner(
+  mint: string
+): Promise<Partial<TokenMetrics>> {
   const conn = getConnection();
   const mintKey = new PublicKey(mint);
 
@@ -530,7 +558,11 @@ async function fetchOnChainHolderMetrics(
   let decimals = 6;
 
   try {
-    const supply = await conn.getTokenSupply(mintKey);
+    const supply = await withTimeout(
+      conn.getTokenSupply(mintKey),
+      4_000,
+      'getTokenSupply'
+    );
     decimals = supply.value.decimals;
     supplyUi = Number(supply.value.uiAmount ?? 0);
   } catch {
@@ -538,7 +570,11 @@ async function fetchOnChainHolderMetrics(
   }
 
   try {
-    const info = await conn.getParsedAccountInfo(mintKey);
+    const info = await withTimeout(
+      conn.getParsedAccountInfo(mintKey),
+      4_000,
+      'getParsedAccountInfo'
+    );
     const parsed = (info.value?.data as { parsed?: { info?: Record<string, unknown> } } | undefined)
       ?.parsed?.info;
     if (parsed) {
@@ -562,7 +598,11 @@ async function fetchOnChainHolderMetrics(
   const excludeOwners = await resolvePoolVaultExcludeOwners(mint);
 
   try {
-    const largest = await conn.getTokenLargestAccounts(mintKey);
+    const largest = await withTimeout(
+      conn.getTokenLargestAccounts(mintKey),
+      3_000,
+      'getTokenLargestAccounts'
+    );
     const accounts = largest.value ?? [];
     const supply =
       supplyUi && supplyUi > 0
@@ -576,7 +616,11 @@ async function fetchOnChainHolderMetrics(
       const tokenAccount = acc.address.toBase58();
       let owner = tokenAccount;
       try {
-        const tok = await conn.getParsedAccountInfo(acc.address);
+        const tok = await withTimeout(
+          conn.getParsedAccountInfo(acc.address),
+          2_500,
+          'getParsedAccountInfo(token)'
+        );
         const info = (
           tok.value?.data as {
             parsed?: { info?: { owner?: string } };
