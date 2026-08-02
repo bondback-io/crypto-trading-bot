@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.85',
+    title: 'Learning Mode bulb OFF vs ON colours',
+    sections: ['overview', 'learning'],
+    items: [
+      'Header Learning Mode bulb stays visible: muted outline when OFF; filled Pause peach (#F1BB72) only when ON.',
+    ],
+  },
+  {
     version: '1.2.84',
     title: 'Bot Performance under cog menu',
     sections: ['microbots', 'overview'],
