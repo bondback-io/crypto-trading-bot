@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.103',
+    title: 'Scalper exempt from Require TA setup',
+    sections: ['microbots', 'learning', 'scanners'],
+    items: [
+      'Scanner Require TA no longer blocks the Scalper lane (or small-MC ≤$180k queue candidates); Learning Mode still does not bypass TA for other profiles.',
+      'Micro Bots: Migration Sniper / Reversal show Paused (perf) when off after the v1.2.91 review; Bot Info clarifies LM vs pause vs TA.',
+    ],
+  },
+  {
     version: '1.2.102',
     title: 'Packaged profit cash-register alert',
     sections: ['alerts'],

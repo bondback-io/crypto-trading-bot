@@ -1007,15 +1007,25 @@ export async function selectScannerCandidates(
 
     if (ranked.veto?.startsWith('bearish:')) return null;
     if (score < minRank) return null;
-    if (requireTa && !ranked.taSetup) return null;
+    // Scalper lane does not require TA — still queue small-MC names so the
+    // cascade can win scalper when Require TA setup is ON (LM does not bypass TA).
+    const scalperMcEligible =
+      event.marketCapUsd != null &&
+      event.marketCapUsd > 0 &&
+      event.marketCapUsd <= 180_000;
+    if (requireTa && !ranked.taSetup && !scalperMcEligible) return null;
     if (cfg.requireMtfAligned === true && !ranked.mtfAligned) return null;
     if (
       requireTa &&
+      !scalperMcEligible &&
       (ranked.confluence == null || ranked.confluence < minConfluence)
     ) {
       return null;
     }
-    if (requireTa && !ranked.playbook) return null;
+    if (requireTa && !scalperMcEligible && !ranked.playbook) return null;
+    if (requireTa && !ranked.taSetup && scalperMcEligible) {
+      ranked.reasons.push('scalper-mc-eligible');
+    }
 
     const id = `scan-${event.mint.slice(0, 8)}-${now}`;
     const row: Enriched = {

@@ -100,6 +100,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.profilesGrid}
         <ul>
           <li><strong>Watchlists</strong> — Dip setup watch and Graduation (migration) watch live on the Micro Bots tab.</li>
+          <li><strong>Migration Sniper / Reversal Scalper</strong> — may show <em>Paused (perf)</em> after the v1.2.91 allocation review (weak paper WR/PF). That pause is not from Learning Mode; toggle the profile on to resume.</li>
           <li><strong>Migration Sniper</strong> — watch ~80% → fire ≥95% until complete → post-grad handoff (default ≤120s). Armed watches no longer vanish without a buy attempt on curve complete.</li>
           <li><strong>Turbo Mode</strong> — default ON for Scalper / Migration Sniper / Momentum Burst / Reversal (Exit &amp; sizing). Live: prefer Jito + higher prio/tip + wider buy slip. Paper &amp; Live Sim: same slip + TURBO log/stamp (no real bundles). Safer profiles stay OFF.</li>
           <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
@@ -136,6 +137,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li>Level = applied upgrades only — not episode count.</li>
           <li>Heikin-Ashi Trend module (opt-in) + learning can enable/disable <code>heikinAshiExitEnabled</code> on Trend Rider / Steady Compounder / High Win-Rate.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
+          <li><strong>Learning Mode (global)</strong> softens conviction / wallet-quality / cluster / some MC floors and raises throughput — it does <em>not</em> bypass Require TA setup, anti-rug floors, daily-loss halts, or disabled profiles. Scalper scanner entries are exempt from Require TA when that lane wins.</li>
         </ul>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open learning controls')}
@@ -238,7 +240,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>TP / SL + Profit Strategy</strong> — partial → recover → bag → trail lifecycle.</li>
           <li><strong>Max positions · daily loss · convergence · min conviction / wallet Q</strong>.</li>
           <li><strong>Hard floors</strong> — min liq / MC / holders / volume; <strong>Min token age</strong> (per micro-bot); pump.fun-only; anti-rug / honeypot / sniper.</li>
-          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>; optional AlphaScan for Soon/Bonded.</li>
+          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>; optional AlphaScan for Soon/Bonded. Learning Mode does not bypass Require TA — Scalper lane (small-MC) is exempt.</li>
           <li><strong>Smart Bot Profiles / Multi-profile / Global TP override</strong> — ${nProfiles} catalog profiles.</li>
           <li><strong>MEV + Jito tip</strong> (Live only).</li>
         </ul>

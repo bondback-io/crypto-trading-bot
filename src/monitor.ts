@@ -2247,9 +2247,17 @@ async function handleScannerCandidate(
       preferId === 'dip_buyer' ||
       reasonBits.includes('grad-watch:triggered') ||
       reasonBits.includes('dip-watch:triggered');
+    // Small-MC scalps may win the Scalper lane without Fib/playbook — do not
+    // drop them here when Require TA is ON (Scalper itself has no TA module).
+    const scalperMcEligible =
+      preferId === 'scalper' ||
+      reasonBits.includes('scalper-mc-eligible') ||
+      (candidate.marketCapUsd != null &&
+        candidate.marketCapUsd > 0 &&
+        candidate.marketCapUsd <= 180_000);
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
-    if (!hybrid && requireTa && !setupWatchHandoff) {
+    if (!hybrid && requireTa && !setupWatchHandoff && !scalperMcEligible) {
       if (!candidate.playbook) {
         finishBuy(candidate.mint, false);
         annotateScannerCandidate(candidate.mint, {
@@ -4944,13 +4952,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
   // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
   // Setup-watch handoffs are synthetic (no Fib/candles) — lane floors still apply.
+  // Scalper lane has no ta_market_scanner module — exempt when it wins the cascade.
+  // Learning Mode does not bypass Require TA for other profiles.
   const reasonBits = reasonBitsEarly;
+  const scalperLaneWin = signal.candidateTradeProfileId === 'scalper';
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&
     config.riskLevel !== 'off' &&
     config.marketScanner?.requireTaSetup !== false &&
-    !setupWatchHandoff
+    !setupWatchHandoff &&
+    !scalperLaneWin
   ) {
     const ind = evaluateIndicators({
       mint: signal.mint,
@@ -4970,11 +4982,21 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       logStrategyDecision(
         'ta_market_scanner',
         'skip',
-        `${signal.symbol} — no TA setup (Fib/support/pattern/indicator)`
+        `${signal.symbol} — no TA setup (Fib/support/pattern/indicator; Learning Mode does not bypass Require TA)`
       );
       recordRejectedSignal(signal, 'scanner: no TA setup');
       return false;
     }
+  } else if (
+    scalperLaneWin &&
+    scannerSignal &&
+    signal.entrySource !== 'hybrid' &&
+    config.marketScanner?.requireTaSetup !== false &&
+    config.riskLevel !== 'off'
+  ) {
+    console.log(
+      `[monitor] Scalper lane exempt from Require TA setup · ${signal.symbol}`
+    );
   }
 
   return true;
@@ -5280,7 +5302,9 @@ export function getEntryPathLightStatus(): {
   );
   const funds = evaluateAffordability(minTrade);
   const skipHint = lastFilterSkipReason
-    ? `Last skip: ${lastFilterSkipReason}`
+    ? /no TA setup/i.test(lastFilterSkipReason)
+      ? `Last skip: ${lastFilterSkipReason} · Learning Mode does not bypass Require TA (Scalper lane exempt)`
+      : `Last skip: ${lastFilterSkipReason}`
     : undefined;
 
   if (!running) {

@@ -6758,7 +6758,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview."></span></div>
         <p class="text-sm text-slate-400 mb-2">
           <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
-          Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on.
+          Scanner-only entries need a Fib/support/pattern setup when <em>Require TA setup</em> is on
+          (Learning Mode does not bypass this; <strong>Scalper</strong> lane is exempt for small-MC scalps).
           Strategy module also lives under
           <button type="button" class="text-emerald-400 underline" onclick="showTab('settings')">Settings</button>
           → Market Scanner (TA).
@@ -6777,7 +6778,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue. Improves entry quality; skips raw momentum without structure. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
+          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper lane / small-MC ≤$180k). Learning Mode Looser does not turn this off. Improves entry quality for non-scalp lanes. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -11634,6 +11635,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : '';
           const color = profileColorFor(p.id) || p.color || '#94a3b8';
           const paused = !p.enabled && p.id !== 'default';
+          const perfPausedHint =
+            paused && (p.id === 'migration_sniper' || p.id === 'reversal_scalper')
+              ? ' title="Paused by default after performance review (v1.2.91) — not caused by Learning Mode. Toggle on to resume."'
+              : '';
+          const pausedBadge = paused
+            ? p.id === 'migration_sniper' || p.id === 'reversal_scalper'
+              ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5"' +
+                perfPausedHint +
+                '>Paused (perf)</span>'
+              : '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5">Paused</span>'
+            : '';
           return (
             '<div class="tp-toggle-card' + (paused ? ' tp-card-paused' : '') + '" id="tp-card-' + escHtml(p.id) + '" data-tp-card="' + escHtml(p.id) + '" style="--tp-accent:' + color + ';border-color:' + color + '88">' +
               '<div class="tp-head">' +
@@ -11642,7 +11654,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
                     escHtml(p.name || '') + ' modules">' +
                     escHtml(p.icon || '') + ' ' + escHtml(p.name) +
-                    (paused ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5">Paused</span>' : '') +
+                    pausedBadge +
                     (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
                     (sl.enabled && slBadge
                       ? '<span class="tp-override-badge" style="background:#14532d;color:#86efac" title="Self-learning progress">' +
