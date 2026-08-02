@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "kind": "strategy-modules",
-  "defaultsId": "2026-08-02-tr-sc-cluster-align",
+  "defaultsId": "2026-08-02-perf-alloc-v191",
   "exportedAt": "2026-07-28T08:00:00.000Z",
   "riskLevel": "on",
   "strategyRecipeMode": "custom",
@@ -866,11 +866,11 @@
       "scalper": true,
       "dip_buyer": true,
       "trend_rider": true,
-      "migration_sniper": true,
+      "migration_sniper": false,
       "high_win_rate": true,
       "momentum_burst": true,
       "steady_compounder": true,
-      "reversal_scalper": true,
+      "reversal_scalper": false,
       "smart_money_mirror": true
     },
     "overrides": {
@@ -882,12 +882,12 @@
           "stopLossPctMax": 12,
           "hardTimeLimitSecMin": 55,
           "hardTimeLimitSecMax": 220,
-          "sizeMultiplier": 0.65,
-          "maxTradeOverrideSol": 0.15
+          "sizeMultiplier": 0.45,
+          "maxTradeOverrideSol": 0.12
         },
         "match": {
-          "minConviction": 35,
-          "minWalletQuality": 35,
+          "minConviction": 48,
+          "minWalletQuality": 40,
           "minWalletCount": 1,
           "requireCluster": false
         }
@@ -898,8 +898,8 @@
           "takeProfitPctMax": 50,
           "stopLossPctMin": 12,
           "stopLossPctMax": 18,
-          "sizeMultiplier": 1.1,
-          "maxTradeOverrideSol": 0.75
+          "sizeMultiplier": 1.25,
+          "maxTradeOverrideSol": 1
         },
         "match": {
           "minConviction": 40,
@@ -932,12 +932,12 @@
           "stopLossPctMax": 15,
           "hardTimeLimitSecMin": 90,
           "hardTimeLimitSecMax": 420,
-          "sizeMultiplier": 1.15,
-          "maxTradeOverrideSol": 0.25
+          "sizeMultiplier": 0.7,
+          "maxTradeOverrideSol": 0.15
         },
         "match": {
-          "minConviction": 35,
-          "minWalletQuality": 35,
+          "minConviction": 55,
+          "minWalletQuality": 45,
           "minWalletCount": 1,
           "requireCluster": false
         }
@@ -949,7 +949,7 @@
           "stopLossPctMin": 11,
           "stopLossPctMax": 16,
           "sizeMultiplier": 0.7,
-          "maxTradeOverrideSol": 1.5
+          "maxTradeOverrideSol": 1
         },
         "match": {
           "minConviction": 65,
@@ -978,14 +978,14 @@
           "takeProfitPctMax": 25,
           "stopLossPctMin": 6,
           "stopLossPctMax": 10,
-          "hardTimeLimitSecMin": 50,
-          "hardTimeLimitSecMax": 160,
-          "sizeMultiplier": 0.7,
-          "maxTradeOverrideSol": 0.15
+          "hardTimeLimitSecMin": 90,
+          "hardTimeLimitSecMax": 240,
+          "sizeMultiplier": 0.5,
+          "maxTradeOverrideSol": 0.12
         },
         "match": {
-          "minConviction": 35,
-          "minWalletQuality": 35,
+          "minConviction": 42,
+          "minWalletQuality": 40,
           "minWalletCount": 1,
           "requireCluster": false
         }
@@ -1033,13 +1033,13 @@
           "trailingStopPct": 9,
           "trailingActivationProfit": 10,
           "momentumFailDropPct": 6,
-          "sizeMultiplier": 0.9,
-          "maxTradeOverrideSol": 0.5
+          "sizeMultiplier": 0.5,
+          "maxTradeOverrideSol": 0.25
         },
         "match": {
-          "minConviction": 50,
-          "minVolumeM5Usd": 6000,
-          "minWalletQuality": 35,
+          "minConviction": 55,
+          "minVolumeM5Usd": 8000,
+          "minWalletQuality": 40,
           "minWalletCount": 1,
           "requireCluster": false
         }
@@ -1136,7 +1136,7 @@
       "maxSniperScore": 0,
       "convergenceRequired": 2,
       "maxConcurrentPositions": 12,
-      "dailyLossLimitSol": 2.5,
+      "dailyLossLimitSol": 0.5,
       "minActivityDays": 14,
       "minTradesLast30d": 10,
       "enableActivityFilter": true,
@@ -1505,11 +1505,11 @@
         "scalper": true,
         "dip_buyer": true,
         "trend_rider": true,
-        "migration_sniper": true,
+        "migration_sniper": false,
         "high_win_rate": true,
         "momentum_burst": true,
         "steady_compounder": true,
-        "reversal_scalper": true,
+        "reversal_scalper": false,
         "smart_money_mirror": true
       },
       "overrides": {
@@ -1521,12 +1521,12 @@
             "stopLossPctMax": 12,
             "hardTimeLimitSecMin": 55,
             "hardTimeLimitSecMax": 220,
-            "sizeMultiplier": 0.65,
-            "maxTradeOverrideSol": 0.15
+            "sizeMultiplier": 0.45,
+            "maxTradeOverrideSol": 0.12
           },
           "match": {
-            "minConviction": 35,
-            "minWalletQuality": 35,
+            "minConviction": 48,
+            "minWalletQuality": 40,
             "minWalletCount": 1,
             "requireCluster": false
           }
@@ -1537,8 +1537,8 @@
             "takeProfitPctMax": 50,
             "stopLossPctMin": 12,
             "stopLossPctMax": 18,
-            "sizeMultiplier": 1.1,
-            "maxTradeOverrideSol": 0.75
+            "sizeMultiplier": 1.25,
+            "maxTradeOverrideSol": 1
           },
           "match": {
             "minConviction": 40,
@@ -1571,12 +1571,12 @@
             "stopLossPctMax": 15,
             "hardTimeLimitSecMin": 90,
             "hardTimeLimitSecMax": 420,
-            "sizeMultiplier": 1.15,
-            "maxTradeOverrideSol": 0.25
+            "sizeMultiplier": 0.7,
+            "maxTradeOverrideSol": 0.15
           },
           "match": {
-            "minConviction": 35,
-            "minWalletQuality": 35,
+            "minConviction": 55,
+            "minWalletQuality": 45,
             "minWalletCount": 1,
             "requireCluster": false
           }
@@ -1588,7 +1588,7 @@
             "stopLossPctMin": 11,
             "stopLossPctMax": 16,
             "sizeMultiplier": 0.7,
-            "maxTradeOverrideSol": 1.5
+            "maxTradeOverrideSol": 1
           },
           "match": {
             "minConviction": 65,
@@ -1617,14 +1617,14 @@
             "takeProfitPctMax": 25,
             "stopLossPctMin": 6,
             "stopLossPctMax": 10,
-            "hardTimeLimitSecMin": 50,
-            "hardTimeLimitSecMax": 160,
-            "sizeMultiplier": 0.7,
-            "maxTradeOverrideSol": 0.15
+            "hardTimeLimitSecMin": 90,
+            "hardTimeLimitSecMax": 240,
+            "sizeMultiplier": 0.5,
+            "maxTradeOverrideSol": 0.12
           },
           "match": {
-            "minConviction": 35,
-            "minWalletQuality": 35,
+            "minConviction": 42,
+            "minWalletQuality": 40,
             "minWalletCount": 1,
             "requireCluster": false
           }
@@ -1672,13 +1672,13 @@
             "trailingStopPct": 9,
             "trailingActivationProfit": 10,
             "momentumFailDropPct": 6,
-            "sizeMultiplier": 0.9,
-            "maxTradeOverrideSol": 0.5
+            "sizeMultiplier": 0.5,
+            "maxTradeOverrideSol": 0.25
           },
           "match": {
-            "minConviction": 50,
-            "minVolumeM5Usd": 6000,
-            "minWalletQuality": 35,
+            "minConviction": 55,
+            "minVolumeM5Usd": 8000,
+            "minWalletQuality": 40,
             "minWalletCount": 1,
             "requireCluster": false
           }

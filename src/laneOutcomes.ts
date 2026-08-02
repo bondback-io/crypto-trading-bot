@@ -42,7 +42,8 @@ interface OutcomesFile {
   updatedAt: number;
 }
 
-const MAX_RING = 200;
+/** Larger ring so multi-hour holds (dip/swing) still find their fight. */
+const MAX_RING = 800;
 const OUTCOMES_FILE = () => dataFile('lane-outcomes.json');
 
 let ring: LaneOutcomeRecord[] = [];
@@ -69,14 +70,33 @@ export function invalidateLaneOutcomesCache(): void {
   ring = [];
 }
 
+function isPendingOpen(row: LaneOutcomeRecord): boolean {
+  return row.opened === true && row.closedAt == null;
+}
+
+/** Trim oldest disposable rows; never drop opened-but-not-yet-closed fights. */
+function trimRing(): void {
+  while (ring.length > MAX_RING) {
+    const dropIdx = ring.findIndex((r) => !isPendingOpen(r));
+    if (dropIdx < 0) break;
+    ring.splice(dropIdx, 1);
+  }
+}
+
 function persist(): void {
   try {
     ensureDataDir();
     const payload: OutcomesFile = {
       version: 1,
-      ring: ring.slice(-MAX_RING),
+      ring: ring.slice(-Math.max(MAX_RING, ring.length)),
       updatedAt: Date.now(),
     };
+    // Cap only disposable rows if somehow overfilled with pending opens
+    if (payload.ring.length > MAX_RING * 2) {
+      const pending = payload.ring.filter(isPendingOpen);
+      const rest = payload.ring.filter((r) => !isPendingOpen(r));
+      payload.ring = [...rest.slice(-(MAX_RING - pending.length)), ...pending];
+    }
     atomicWriteJson(OUTCOMES_FILE(), payload);
   } catch (err) {
     logger.warn('LaneOutcomes', 'persist failed', errorToMeta(err));
@@ -103,7 +123,7 @@ export function recordLaneFightOpen(input: {
     winnerId: input.winnerId,
     lanes: input.lanes,
   });
-  if (ring.length > MAX_RING) ring = ring.slice(-MAX_RING);
+  trimRing();
   persist();
 }
 
@@ -133,7 +153,8 @@ export function recordLaneFightCascadeResult(input: {
 }
 
 /**
- * Attach closed PnL to the newest open lane record for this mint + winner profile.
+ * Attach closed PnL to the matching lane record for this mint + winner profile.
+ * Prefers opened-unclosed rows; requires winnerId === profileId when profile known.
  */
 export function recordLaneFightClose(input: {
   mint: string;
@@ -148,11 +169,8 @@ export function recordLaneFightClose(input: {
   const mint = String(input.mint || '').trim();
   if (!mint) return;
   const profileId = input.profileId ? String(input.profileId) : null;
-  for (let i = ring.length - 1; i >= 0; i--) {
-    const row = ring[i];
-    if (row.mint !== mint) continue;
-    if (row.closedAt != null) continue;
-    if (profileId && row.winnerId && row.winnerId !== profileId) continue;
+
+  const apply = (row: LaneOutcomeRecord): void => {
     row.closedAt = Date.now();
     row.pnlSol = Number(input.pnlSol) || 0;
     if (input.pnlPct != null && Number.isFinite(input.pnlPct)) {
@@ -166,7 +184,32 @@ export function recordLaneFightClose(input: {
       row.maxRunupPct = Number(input.maxRunupPct);
     }
     row.win = row.pnlSol > 0;
+    if (row.opened == null) row.opened = true;
     persist();
+  };
+
+  const matchesProfile = (row: LaneOutcomeRecord): boolean => {
+    if (!profileId) return true;
+    return row.winnerId === profileId;
+  };
+
+  // 1) Newest opened + unclosed + matching winner
+  for (let i = ring.length - 1; i >= 0; i--) {
+    const row = ring[i];
+    if (row.mint !== mint || row.closedAt != null) continue;
+    if (!matchesProfile(row)) continue;
+    if (row.opened === true) {
+      apply(row);
+      return;
+    }
+  }
+
+  // 2) Newest unclosed + matching winner (opened flag may still be unset)
+  for (let i = ring.length - 1; i >= 0; i--) {
+    const row = ring[i];
+    if (row.mint !== mint || row.closedAt != null) continue;
+    if (!matchesProfile(row)) continue;
+    apply(row);
     return;
   }
 }
@@ -186,6 +229,7 @@ export function getLaneOutcomeStatsByProfile(): Record<
   const out: Record<string, { n: number; wins: number; sumPnl: number }> = {};
   for (const row of ring) {
     if (row.closedAt == null || !row.winnerId) continue;
+    if (row.pnlSol == null || !Number.isFinite(row.pnlSol)) continue;
     const id = row.winnerId;
     if (!out[id]) out[id] = { n: 0, wins: 0, sumPnl: 0 };
     out[id].n += 1;

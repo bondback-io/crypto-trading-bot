@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.91',
+    title: 'Performance allocation + lane PnL learning fix',
+    sections: ['microbots', 'learning', 'risk'],
+    items: [
+      'Paused Migration Sniper + Reversal Scalper by default (weak WR/PF in paper); dip_buyer size↑; scalper/MB size↓ + higher conviction; daily loss floor 0.5 SOL.',
+      'Lane outcomes: keep opened fights until close (was evicting before dip/swing exits) + stricter winner↔profile PnL join.',
+      'Exit mix: classify momentum fade / SL strings; self-learn expectancy winsorizes 1 extreme win+loss so LOOP outliers cannot dominate upgrades.',
+    ],
+  },
+  {
     version: '1.2.90',
     title: 'Trend Rider / Steady Compounder cluster entry fix',
     sections: ['microbots'],

@@ -6,6 +6,7 @@
 export type ExitMixKey =
   | 'trail'
   | 'stall'
+  | 'fade'
   | 'dead_market'
   | 'timer'
   | 'sl'
@@ -60,10 +61,19 @@ export function classifyExitKey(reason: string | undefined | null): {
   if (/stalled|stall\b|underwater after/i.test(low)) {
     return { key: 'stall', label: 'Stall' };
   }
+  if (
+    /momentum\s*(fail|fade)|fade\s*from\s*peak|drop\s*from\s*peak|from\s*peak/i.test(
+      low
+    )
+  ) {
+    return { key: 'fade', label: 'Momentum Fade' };
+  }
   if (/trailing\s*stop|trail\s*exit|bag exit/i.test(r)) {
     return { key: 'trail', label: 'Trailing Stop' };
   }
-  if (/hard\s*stop|stop-?loss|stop loss/i.test(r)) {
+  if (
+    /hard\s*stop|stop-?loss|stop loss|\bsl\s*-|profile\s*sl|sl\s*@/i.test(low)
+  ) {
     return { key: 'sl', label: 'Hard Stop-Loss' };
   }
   if (/max\s*profit/i.test(r)) {

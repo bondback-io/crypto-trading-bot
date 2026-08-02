@@ -720,7 +720,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
-    defaultEnabled: true,
+    /** Paused by default — live book showed ~10% WR / PF ~0.1 (re-enable after retune). */
+    defaultEnabled: false,
     match: {
       preferMigration: true,
       preferSmartMoney: true,
@@ -1012,15 +1013,16 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 83,
-    defaultEnabled: true,
+    /** Paused by default — timer exits dominated (~70s) with weak WR (re-enable after retune). */
+    defaultEnabled: false,
     match: {
       preferReversal: true,
       primaryPatternIds: ['falling_wedge'],
       patternSensitivity: 'high',
-      patternMinConfidence: 45,
-      minDropFromPeakPct: 12,
-      minConviction: 32,
-      minWalletQuality: 32,
+      patternMinConfidence: 52,
+      minDropFromPeakPct: 14,
+      minConviction: 42,
+      minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
     },
@@ -1034,10 +1036,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       stopLossPctMax: 10,
       trailingStopPct: 7,
       trailingActivationProfit: 10,
-      hardTimeLimitSecMin: 50,
-      hardTimeLimitSecMax: 160,
+      hardTimeLimitSecMin: 90,
+      hardTimeLimitSecMax: 240,
       momentumFailDropPct: 8,
-      sizeMultiplier: 0.7,
+      sizeMultiplier: 0.5,
       turboMode: true,
     },
     modules: {
@@ -5511,6 +5513,119 @@ export function migrateTrendCompounderClusterAlignV1(): boolean {
     );
   }
   return changed > 0;
+}
+
+/**
+ * One-shot: pause bleeders (migration / reversal), favor dip size, tighten
+ * scalper + momentum burst — based on Aug 2026 paper book (WR ~23%, migration PF ~0.1).
+ */
+export function migratePerformanceAllocV191(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'perfAlloc_v191';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.profiles) state.profiles = {} as TradeProfileRuntimeState['profiles'];
+  if (!state.overrides) state.overrides = {};
+
+  state.profiles.migration_sniper = false;
+  state.profiles.reversal_scalper = false;
+
+  const mergeOv = (
+    id: TradeProfileId,
+    patch: TradeProfileParamOverride
+  ): void => {
+    const prev = state.overrides![id] || {};
+    state.overrides![id] = {
+      exitRules: { ...(prev.exitRules || {}), ...(patch.exitRules || {}) },
+      match: { ...(prev.match || {}), ...(patch.match || {}) },
+      modules: { ...(prev.modules || {}), ...(patch.modules || {}) },
+    };
+  };
+
+  mergeOv('scalper', {
+    exitRules: { sizeMultiplier: 0.45, maxTradeOverrideSol: 0.12 },
+    match: { minConviction: 48, minWalletQuality: 40 },
+  });
+  mergeOv('dip_buyer', {
+    exitRules: { sizeMultiplier: 1.25, maxTradeOverrideSol: 1.0 },
+  });
+  mergeOv('momentum_burst', {
+    exitRules: { sizeMultiplier: 0.5, maxTradeOverrideSol: 0.25 },
+    match: { minConviction: 55, minVolumeM5Usd: 8000, minWalletQuality: 40 },
+  });
+  mergeOv('migration_sniper', {
+    exitRules: { sizeMultiplier: 0.7, maxTradeOverrideSol: 0.15 },
+    match: { minConviction: 55, minWalletQuality: 45 },
+  });
+  mergeOv('reversal_scalper', {
+    exitRules: {
+      sizeMultiplier: 0.5,
+      maxTradeOverrideSol: 0.12,
+      hardTimeLimitSecMin: 90,
+      hardTimeLimitSecMax: 240,
+    },
+    match: { minConviction: 42, minWalletQuality: 40 },
+  });
+  mergeOv('high_win_rate', {
+    exitRules: { maxTradeOverrideSol: 1.0 },
+  });
+
+  try {
+    const {
+      loadTradeProfilesUserState,
+      saveTradeProfilesUserState,
+    } = require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    const user = loadTradeProfilesUserState();
+    if (user) {
+      const nextProfiles = {
+        ...(user.profiles || {}),
+        migration_sniper: false,
+        reversal_scalper: false,
+      } as TradeProfileRuntimeState['profiles'];
+      user.profiles = nextProfiles;
+      user.overrides = {
+        ...(user.overrides || {}),
+        ...(state.overrides || {}),
+      };
+      saveTradeProfilesUserState({
+        enabled: user.enabled,
+        smartBotProfiles: user.smartBotProfiles,
+        profiles: user.profiles,
+        overrides: user.overrides,
+        selfLearning: user.selfLearning,
+        learningModeOptIn: user.learningModeOptIn,
+      });
+    }
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const { config: cfg } = require('./config') as typeof import('./config');
+    if (cfg.filters && Number(cfg.filters.dailyLossLimitSol) > 0.5) {
+      // Cap loose daily loss to ~5% of a 10 SOL book (operator can raise later)
+      cfg.filters.dailyLossLimitSol = 0.5;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    `[trade-profiles] Applied ${MIGRATION_ID} — paused migration_sniper + reversal_scalper; dip size↑; scalper/MB tightened; daily loss ≤0.5 SOL`
+  );
+  return true;
 }
 
 export function ensureTradeProfilesInitialized(): void {

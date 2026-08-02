@@ -4402,6 +4402,17 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  // Pause bleeders + rebalance sizes toward dip_buyer (Aug 2026 paper book).
+  try {
+    const { migratePerformanceAllocV191 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migratePerformanceAllocV191();
+  } catch (err) {
+    console.warn(
+      '[config] perfAlloc_v191 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /** Load live trading wallet slots (metadata only) */

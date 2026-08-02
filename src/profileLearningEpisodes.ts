@@ -267,19 +267,30 @@ export function getProfileEpisodeExpectancy(
       riskAdjustedExpectancyPct: 0,
     };
   }
-  const sumPct = eps.reduce((s, e) => s + (e.pnlPct || 0), 0);
+  // Winsorize one extreme win + one extreme loss so a LOOP-style outlier
+  // cannot dominate self-learn upgrades (keep raw n / winRate on full sample).
+  let scored = eps;
+  if (eps.length >= 12) {
+    const byPnl = [...eps].sort(
+      (a, b) => (a.pnlPct || 0) - (b.pnlPct || 0)
+    );
+    const drop = new Set([byPnl[0]!.id, byPnl[byPnl.length - 1]!.id]);
+    const trimmed = eps.filter((e) => !drop.has(e.id));
+    if (trimmed.length >= 8) scored = trimmed;
+  }
+  const sumPct = scored.reduce((s, e) => s + (e.pnlPct || 0), 0);
   const wins = eps.filter((e) => (e.pnlPct || 0) > 0).length;
   const avgHold =
     eps.reduce((s, e) => s + (e.holdSec || 0), 0) / Math.max(1, eps.length);
-  const expectancyPct = sumPct / eps.length;
+  const expectancyPct = sumPct / scored.length;
   // Penalize large losers and very long dead holds
   let penalty = 0;
-  for (const e of eps) {
+  for (const e of scored) {
     if ((e.pnlPct || 0) < -15) penalty += Math.abs(e.pnlPct) * 0.15;
     if ((e.holdSec || 0) > 900 && (e.pnlPct || 0) < 2) penalty += 1.5;
   }
   const riskAdjustedExpectancyPct =
-    expectancyPct - penalty / Math.max(1, eps.length);
+    expectancyPct - penalty / Math.max(1, scored.length);
   return {
     n: eps.length,
     expectancyPct,

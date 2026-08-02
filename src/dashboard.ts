@@ -13495,10 +13495,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (/manual\\s*force\\s*sell|force\\s*sell|^manual$/i.test(r)) {
         return { key: 'manual', label: 'Manual' };
       }
+      if (/stalled|stall\\b|underwater after/i.test(low)) {
+        return { key: 'stall', label: 'Stall' };
+      }
+      if (
+        /momentum\\s*(fail|fade)|fade\\s*from\\s*peak|drop\\s*from\\s*peak|from\\s*peak/i.test(
+          low
+        )
+      ) {
+        return { key: 'fade', label: 'Momentum Fade' };
+      }
       if (/trailing\\s*stop|trail\\s*exit|bag exit/i.test(r)) {
         return { key: 'trail', label: 'Trailing Stop' };
       }
-      if (/hard\\s*stop|stop-?loss|stop loss/i.test(r)) {
+      if (/hard\\s*stop|stop-?loss|stop loss|\\bsl\\s*-|profile\\s*sl/i.test(low)) {
         return { key: 'sl', label: 'Hard Stop-Loss' };
       }
       if (/max\\s*profit/i.test(r)) {
@@ -13541,7 +13551,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function exitStyleIconHtml(key) {
       const k = String(key || 'other');
-      const cls = 'exit-ico is-' + (k === 'tp' || k === 'sl' || k === 'trail' || k === 'timer' || k === 'manual' || k === 'partial' ? k : 'other');
+      const cls = 'exit-ico is-' + (k === 'tp' || k === 'sl' || k === 'trail' || k === 'timer' || k === 'manual' || k === 'partial' || k === 'fade' || k === 'stall' || k === 'ha' ? k : 'other');
       const title =
         k === 'tp' ? 'Take profit' :
         k === 'sl' ? 'Stop-loss' :
