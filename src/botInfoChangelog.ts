@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.104',
+    title: 'Pump.fun mint markers',
+    sections: ['overview'],
+    items: [
+      'Open Positions, Open Trades, and Closed Trades now show a compact pump badge before Copy when the mint address ends in pump.',
+    ],
+  },
+  {
     version: '1.2.103',
     title: 'Scalper exempt from Require TA setup',
     sections: ['microbots', 'learning', 'scanners'],

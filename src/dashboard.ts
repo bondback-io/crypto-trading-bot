@@ -4124,6 +4124,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       padding: 0.12rem 0.4rem;
       font-size: 10px;
     }
+    .mint-ca .pump-fun-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.12rem 0.4rem;
+      border: 1px solid rgba(244, 114, 182, 0.5);
+      border-radius: 0.4rem;
+      background: rgba(244, 114, 182, 0.14);
+      color: #f9a8d4;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.3;
+      letter-spacing: 0.01em;
+    }
     .setup-watches-stack {
       display: flex;
       flex-direction: column;
@@ -16707,13 +16720,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         '<strong>' + label + '</strong></span>';
     }
 
-    /** Compact mint column: Copy + Jupiter; full CA stays in Copy's accessible label. */
+    /** Compact mint column: pump.fun marker + Copy + Jupiter; full CA stays in Copy's accessible label. */
     function fmtMintCa(mint) {
       const ca = String(mint || '').trim();
       if (!ca) return '<span class="mint">—</span>';
       const attr = escAttr(ca);
       const jup = escAttr(jupiterTokenUrl(ca));
       return '<span class="mint-ca">' +
+        (ca.toLowerCase().endsWith('pump')
+          ? '<span class="pump-fun-badge" title="pump.fun token">pump</span>'
+          : '') +
         '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy (' + attr + ')" aria-label="Copy (' + attr + ')">Copy</button>' +
         '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
       '</span>';
