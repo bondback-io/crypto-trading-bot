@@ -8485,14 +8485,63 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function emitProfitCashSound() {
-      // Cash-register "cha-ching": a restrained, detuned metallic drawer clack
-      // followed by a bright bell pair. The short tails and low gains keep it
-      // clearly audible without competing with the rest of the dashboard.
-      playSoftTone(392, 0, 0.065, 0.014, 'triangle', 0.006);
-      playSoftTone(622, 0.012, 0.055, 0.01, 'square', 0.005);
-      playSoftTone(2093, 0.09, 0.31, 0.021, 'sine', 0.012);
-      playSoftTone(3136, 0.102, 0.22, 0.009, 'triangle', 0.01);
-      notifyHaptic([18, 42, 20]);
+      // Original Web Audio approximation only: a mechanical cash-drawer clack
+      // followed by a bright, slightly inharmonic register bell. This deliberately
+      // does not use or embed any third-party audio asset.
+      try {
+        const ctx = getNotifyAudioCtx();
+        if (!ctx || ctx.state !== 'running') return;
+        const now = ctx.currentTime;
+        const master = ctx.createGain();
+        // Keep the complete profit cue at the requested half-volume ceiling.
+        master.gain.setValueAtTime(0.5, now);
+        master.connect(ctx.destination);
+
+        const tone = function (frequency, start, duration, peak, type, detune) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          const at = now + start;
+          osc.type = type;
+          osc.frequency.setValueAtTime(frequency, at);
+          if (detune) osc.detune.setValueAtTime(detune, at);
+          gain.gain.setValueAtTime(0.0001, at);
+          gain.gain.exponentialRampToValueAtTime(peak, at + 0.006);
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+          osc.connect(gain);
+          gain.connect(master);
+          osc.start(at);
+          osc.stop(at + duration + 0.02);
+        };
+
+        // Brief filtered noise gives the initial drawer/mechanism clack.
+        const clackLength = Math.max(1, Math.floor(ctx.sampleRate * 0.045));
+        const clackBuffer = ctx.createBuffer(1, clackLength, ctx.sampleRate);
+        const clackData = clackBuffer.getChannelData(0);
+        for (let i = 0; i < clackData.length; i++) {
+          clackData[i] = (Math.random() * 2 - 1) * (1 - i / clackData.length);
+        }
+        const clack = ctx.createBufferSource();
+        const clackFilter = ctx.createBiquadFilter();
+        const clackGain = ctx.createGain();
+        clack.buffer = clackBuffer;
+        clackFilter.type = 'bandpass';
+        clackFilter.frequency.setValueAtTime(1750, now);
+        clackFilter.Q.setValueAtTime(1.8, now);
+        clackGain.gain.setValueAtTime(0.18, now);
+        clackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+        clack.connect(clackFilter);
+        clackFilter.connect(clackGain);
+        clackGain.connect(master);
+        clack.start(now);
+
+        tone(168, 0, 0.08, 0.15, 'square', -7);
+        tone(252, 0.009, 0.065, 0.08, 'triangle', 5);
+        // High bell partials make the follow-up clearly read as "ching".
+        tone(2349, 0.075, 0.44, 0.13, 'sine', 0);
+        tone(3136, 0.079, 0.34, 0.065, 'sine', 11);
+        tone(4698, 0.083, 0.22, 0.026, 'triangle', -9);
+        notifyHaptic([18, 42, 20]);
+      } catch (_) {}
     }
 
     function emitZionPlaceConfirmSound() {
@@ -8551,7 +8600,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.playTradeRequestChime = playTradeRequestChime;
 
-    /** Soft cash / buy ding for profitable closes. */
+    /** The only profitable-close cue: original synthesized cash-register cha-ching. */
     function playProfitCashSound() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.profitCloseSound === false) return;
@@ -8757,21 +8806,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { updateNotifyAudioUnlockChip(); } catch (_) {}
         }
         const items = data.items || [];
-        let newProfitClose = false;
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           if (!item || !item.id) continue;
-          if (_notifFeedHydrated && !_notifSeenIds.has(item.id) && item.kind === 'profit_close') {
-            newProfitClose = true;
-          }
           _notifSeenIds.add(item.id);
         }
         _notifFeedHydrated = true;
         window._notifFeedHydrated = true;
-        if (newProfitClose) {
-          // Avoid double cash chime if lifecycle poll already played for this close.
-          playProfitCashSound();
-        }
         if (_notifSeenIds.size > 300) {
           _notifSeenIds = new Set(items.map(function (x) { return x.id; }));
           window._notifSeenIds = _notifSeenIds;

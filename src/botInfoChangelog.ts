@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.101',
+    title: 'Single half-volume profit cash register',
+    sections: ['alerts'],
+    items: [
+      'Profitable closes now use one original Web Audio cash-register cha-ching at a 50% master-gain ceiling; notification refreshes no longer add a second profit chime.',
+    ],
+  },
+  {
     version: '1.2.100',
     title: 'Cleaner open-position token cells',
     sections: ['overview'],
