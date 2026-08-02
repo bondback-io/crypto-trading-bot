@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.92',
+    title: 'Trade open / close alert chimes',
+    sections: ['alerts'],
+    items: [
+      'New unique Web Audio chime when a position opens; subtler soft tone on close (profits still use the cash sound). Alerts toggles + mobile unlock / pending queue / haptic.',
+    ],
+  },
+  {
     version: '1.2.91',
     title: 'Performance allocation + lane PnL learning fix',
     sections: ['microbots', 'learning', 'risk'],

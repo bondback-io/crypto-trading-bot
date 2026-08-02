@@ -7480,10 +7480,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div class="config-notify-col">
             <h4>In-app</h4>
-            <p class="mint text-xs mb-2">Bell feed, soft sounds, and Zion popups. Default ON. On phones/Safari, tap <strong>Enable sounds</strong> in the header (or anywhere once) — browsers block audio until a gesture. iPhone Ring/Silent mute still silences Web Audio.</p>
+            <p class="mint text-xs mb-2">Bell feed, trade open/close chimes, and Zion popups. Default ON. On phones/Safari, tap <strong>Enable sounds</strong> in the header (or anywhere once) — browsers block audio until a gesture. iPhone Ring/Silent mute still silences Web Audio.</p>
             <div class="space-y-1">
               <div class="toggle-row" title="Show trade requests, emails, profit closes, and system notes in the header bell"><span>Notification bell</span><label class="switch"><input type="checkbox" id="notify-dashboard" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft chime when a new Zion trade request arrives"><span>Trade request sound</span><label class="switch"><input type="checkbox" id="notify-offer-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Bright open chime when any new position fills"><span>Trade open sound</span><label class="switch"><input type="checkbox" id="notify-trade-open-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Subtle soft tone when any position closes (losses / breakeven)"><span>Trade close sound</span><label class="switch"><input type="checkbox" id="notify-trade-close-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft cash sound when a profitable close hits the bell"><span>Profit close sound</span><label class="switch"><input type="checkbox" id="notify-profit-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft confirm sound when you click Place Trade on a Zion offer"><span>Place trade sound</span><label class="switch"><input type="checkbox" id="notify-place-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
@@ -7924,6 +7926,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       tradeRequestSound: true,
       profitCloseSound: true,
       zionPlaceTradeSound: true,
+      tradeOpenSound: true,
+      tradeCloseSound: true,
       tradeRequestPopups: true,
     };
     let _notifCache = { items: [], unread: 0 };
@@ -7991,6 +7995,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       trade_request: false,
       profit_close: false,
       place: false,
+      trade_open: false,
+      trade_close: false,
     };
 
     function anyNotifySoundPrefOn() {
@@ -7998,7 +8004,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return (
         prefs.tradeRequestSound !== false ||
         prefs.profitCloseSound !== false ||
-        prefs.zionPlaceTradeSound !== false
+        prefs.zionPlaceTradeSound !== false ||
+        prefs.tradeOpenSound !== false ||
+        prefs.tradeCloseSound !== false
       );
     }
 
@@ -8026,7 +8034,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function hasPendingNotifySounds() {
       const p = _pendingNotifySounds || {};
-      return !!(p.trade_request || p.profit_close || p.place);
+      return !!(
+        p.trade_request ||
+        p.profit_close ||
+        p.place ||
+        p.trade_open ||
+        p.trade_close
+      );
     }
 
     function isNotifyAudioRunning() {
@@ -8129,7 +8143,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const pending = _pendingNotifySounds || {};
       const hadPending =
-        !!pending.trade_request || !!pending.profit_close || !!pending.place;
+        !!pending.trade_request ||
+        !!pending.profit_close ||
+        !!pending.place ||
+        !!pending.trade_open ||
+        !!pending.trade_close;
       const ok = await unlockNotifyAudio();
       if (ok && !hadPending) {
         // Short test blip so the user hears unlock worked.
@@ -8244,19 +8262,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       notifyHaptic(40);
     }
 
+    /** Bright open chime — distinct from Zion request / place / profit. */
+    function emitTradeOpenChime() {
+      playSoftTone(659.25, 0, 0.14, 0.038, 'triangle');
+      playSoftTone(880, 0.08, 0.18, 0.034, 'sine');
+      playSoftTone(1318.51, 0.18, 0.32, 0.028, 'triangle');
+      notifyHaptic([22, 28, 32]);
+    }
+
+    /** Subtle close tone — quieter, shorter, lower than open / profit cash. */
+    function emitTradeCloseSound() {
+      playSoftTone(492, 0, 0.2, 0.014, 'sine');
+      playSoftTone(369.99, 0.1, 0.28, 0.01, 'triangle');
+      notifyHaptic(18);
+    }
+
     function flushPendingNotifySounds() {
       if (!isNotifyAudioRunning()) return;
       const pending = _pendingNotifySounds || {};
       const trade = !!pending.trade_request;
       const profit = !!pending.profit_close;
       const place = !!pending.place;
+      const open = !!pending.trade_open;
+      const close = !!pending.trade_close;
       _pendingNotifySounds = {
         trade_request: false,
         profit_close: false,
         place: false,
+        trade_open: false,
+        trade_close: false,
       };
       if (trade) emitTradeRequestChime();
+      if (open) emitTradeOpenChime();
       if (profit) emitProfitCashSound();
+      else if (close) emitTradeCloseSound();
       if (place) emitZionPlaceConfirmSound();
     }
 
@@ -8298,6 +8337,116 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       emitZionPlaceConfirmSound();
     }
     window.playZionPlaceConfirmSound = playZionPlaceConfirmSound;
+
+    /** Bright chime when a new live/paper position opens. */
+    function playTradeOpenChime() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.tradeOpenSound === false) return;
+      if (!isNotifyAudioRunning()) {
+        queuePendingNotifySound('trade_open');
+        unlockNotifyAudio();
+        return;
+      }
+      emitTradeOpenChime();
+    }
+    window.playTradeOpenChime = playTradeOpenChime;
+
+    /** Subtle tone when a position closes (non-profit path; profits use cash sound). */
+    function playTradeCloseSound() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.tradeCloseSound === false) return;
+      if (!isNotifyAudioRunning()) {
+        queuePendingNotifySound('trade_close');
+        unlockNotifyAudio();
+        return;
+      }
+      emitTradeCloseSound();
+    }
+    window.playTradeCloseSound = playTradeCloseSound;
+
+    /**
+     * Diff open/closed position ids across refreshes and play lifecycle chimes.
+     * First poll hydrates silently (no chime storm on dashboard load).
+     */
+    function maybePlayTradeLifecycleSounds(openList, closedList) {
+      try {
+        if (!window.__tradeSoundState) {
+          window.__tradeSoundState = {
+            openIds: new Set(),
+            closedIds: new Set(),
+            hydrated: false,
+          };
+        }
+        const st = window.__tradeSoundState;
+        const opens = Array.isArray(openList) ? openList : [];
+        const closeds = Array.isArray(closedList) ? closedList : [];
+        const curOpen = new Set();
+        for (let i = 0; i < opens.length; i++) {
+          const id = opens[i] && opens[i].id;
+          if (id) curOpen.add(String(id));
+        }
+        if (!st.hydrated) {
+          st.openIds = curOpen;
+          for (let i = 0; i < closeds.length; i++) {
+            const c = closeds[i];
+            if (c && c.id && !/^partial:/i.test(String(c.reason || ''))) {
+              st.closedIds.add(String(c.id));
+            }
+          }
+          st.hydrated = true;
+          return;
+        }
+        const prefs = window.__notifyPrefs || {};
+        for (const id of curOpen) {
+          if (!st.openIds.has(id)) playTradeOpenChime();
+        }
+        // Newest closed first — play at most a few per poll (burst protection)
+        let closeChimes = 0;
+        const sortedClosed = closeds.slice().sort(function (a, b) {
+          return (Number(b.closedAt) || 0) - (Number(a.closedAt) || 0);
+        });
+        for (let i = 0; i < sortedClosed.length && closeChimes < 3; i++) {
+          const c = sortedClosed[i];
+          if (!c || !c.id) continue;
+          if (/^partial:/i.test(String(c.reason || ''))) continue;
+          const cid = String(c.id);
+          if (st.closedIds.has(cid)) continue;
+          st.closedIds.add(cid);
+          closeChimes += 1;
+          const pnl = Number(c.pnlSol);
+          const isProfit = Number.isFinite(pnl) && pnl > 0;
+          if (isProfit && prefs.profitCloseSound !== false) {
+            if (!window.__profitCloseSoundedIds) {
+              window.__profitCloseSoundedIds = new Set();
+            }
+            if (!window.__profitCloseSoundedIds.has(cid)) {
+              window.__profitCloseSoundedIds.add(cid);
+              playProfitCashSound();
+            }
+          } else {
+            playTradeCloseSound();
+          }
+        }
+        st.openIds = curOpen;
+        if (st.closedIds.size > 400) {
+          const keep = sortedClosed
+            .filter(function (c) {
+              return c && c.id && !/^partial:/i.test(String(c.reason || ''));
+            })
+            .slice(0, 200)
+            .map(function (c) {
+              return String(c.id);
+            });
+          st.closedIds = new Set(keep);
+        }
+        if (window.__profitCloseSoundedIds && window.__profitCloseSoundedIds.size > 200) {
+          window.__profitCloseSoundedIds = new Set(
+            Array.from(window.__profitCloseSoundedIds).slice(-100)
+          );
+        }
+      } catch (_) {}
+    }
+    window.maybePlayTradeLifecycleSounds = maybePlayTradeLifecycleSounds;
 
     installNotifyAudioUnlock();
 
@@ -8353,6 +8502,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           data.tradeRequestPopups != null ||
           data.profitCloseSound != null ||
           data.zionPlaceTradeSound != null ||
+          data.tradeOpenSound != null ||
+          data.tradeCloseSound != null ||
           data.enabled != null
         ) {
           window.__notifyPrefs = {
@@ -8360,6 +8511,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             tradeRequestSound: data.tradeRequestSound !== false,
             profitCloseSound: data.profitCloseSound !== false,
             zionPlaceTradeSound: data.zionPlaceTradeSound !== false,
+            tradeOpenSound: data.tradeOpenSound !== false,
+            tradeCloseSound: data.tradeCloseSound !== false,
             tradeRequestPopups: data.tradeRequestPopups !== false,
           };
           try { updateNotifyAudioUnlockChip(); } catch (_) {}
@@ -8376,7 +8529,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         _notifFeedHydrated = true;
         window._notifFeedHydrated = true;
-        if (newProfitClose) playProfitCashSound();
+        if (newProfitClose) {
+          // Avoid double cash chime if lifecycle poll already played for this close.
+          playProfitCashSound();
+        }
         if (_notifSeenIds.size > 300) {
           _notifSeenIds = new Set(items.map(function (x) { return x.id; }));
           window._notifSeenIds = _notifSeenIds;
@@ -13952,6 +14108,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._lastOpenPositions,
         incoming
       );
+      try {
+        maybePlayTradeLifecycleSounds(
+          window._lastOpenPositions || [],
+          (opts && opts.closed) || []
+        );
+      } catch (_) {}
       const openN = (window._lastOpenPositions || []).length;
       const openCountEl = document.getElementById('open-count');
       if (openCountEl) openCountEl.textContent = String(openN);
@@ -13976,6 +14138,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         applyOpenPositionsList((posData && posData.open) || [], {
           fromFill: fromFill,
+          closed: (posData && posData.closed) || [],
         });
       } catch (_) {}
     }
@@ -18072,6 +18235,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           setChk('notify-profit-close', n.profitableCloseEnabled !== false);
           setChk('notify-dashboard', n.dashboardEnabled !== false);
           setChk('notify-offer-sound', n.tradeRequestSound !== false);
+          setChk('notify-trade-open-sound', n.tradeOpenSound !== false);
+          setChk('notify-trade-close-sound', n.tradeCloseSound !== false);
           setChk('notify-profit-sound', n.profitCloseSound !== false);
           setChk('notify-place-sound', n.zionPlaceTradeSound !== false);
           setChk('notify-offer-popups', n.tradeRequestPopups !== false);
@@ -18080,6 +18245,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             tradeRequestSound: n.tradeRequestSound !== false,
             profitCloseSound: n.profitCloseSound !== false,
             zionPlaceTradeSound: n.zionPlaceTradeSound !== false,
+            tradeOpenSound: n.tradeOpenSound !== false,
+            tradeCloseSound: n.tradeCloseSound !== false,
             tradeRequestPopups: n.tradeRequestPopups !== false,
           };
           try { updateNotifyAudioUnlockChip(); } catch (_) {}
@@ -18262,6 +18429,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           positions.open || []
         );
       }
+      try {
+        maybePlayTradeLifecycleSounds(
+          window._lastOpenPositions || positions.open || [],
+          positions.closed || []
+        );
+      } catch (_) {}
       updateOpenTradesBadge(
         (window._lastOpenPositions || positions.open || []).length
       );
@@ -23123,6 +23296,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             profitableCloseEnabled: !!(document.getElementById('notify-profit-close') || {}).checked,
             dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
             tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+            tradeOpenSound: !!(document.getElementById('notify-trade-open-sound') || {}).checked,
+            tradeCloseSound: !!(document.getElementById('notify-trade-close-sound') || {}).checked,
             profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
             zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
             tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
@@ -23131,6 +23306,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window.__notifyPrefs = {
           dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
           tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
+          tradeOpenSound: !!(document.getElementById('notify-trade-open-sound') || {}).checked,
+          tradeCloseSound: !!(document.getElementById('notify-trade-close-sound') || {}).checked,
           profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
           zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
           tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
