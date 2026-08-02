@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.96',
+    title: 'Clearer open-position columns',
+    sections: ['overview'],
+    items: [
+      'Open Positions and Open Trades remove the Trailing Stop column; its armed/active state, threshold, stop, and peak now appear in Reason → More Info.',
+      'Mint now contains Copy and Jupiter actions only (Copy exposes the full contract address in its tooltip), while rebalanced columns prevent Name, TP/SL, and Reason from overlapping.',
+      'Buy MC and Live MC are more distinct at a glance, with a stronger live-mark accent.',
+    ],
+  },
+  {
     version: '1.2.95',
     title: 'Readable open-position values',
     sections: ['overview'],

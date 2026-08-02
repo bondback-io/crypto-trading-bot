@@ -1595,19 +1595,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       height: 1.15rem;
       font-size: 0.7rem;
     }
-    .card-open-positions .trail-cell-compact {
-      font-size: 0.72rem;
-      white-space: nowrap;
-      max-width: 9.5rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
     .card-open-positions .pos-tpsl-cell {
       font-size: 0.7rem;
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
       line-height: 1.2;
     }
+    .card-open-positions .pos-buy-mc,
+    .card-open-positions .pos-live-mc {
+      font-size: 0.73rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .card-open-positions .pos-buy-mc { color: #cbd5e1; }
+    .card-open-positions .pos-live-mc { color: #7dd3fc; }
     .card-open-positions .pos-more-info {
       display: inline-flex;
       align-items: center;
@@ -5182,33 +5184,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table th:nth-child(1),
       .card-open-positions #trades-positions-table th:nth-child(1) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(2),
-      .card-open-positions #trades-positions-table th:nth-child(2) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(3),
-      .card-open-positions #trades-positions-table th:nth-child(3) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 9.5%; }
       .card-open-positions #positions-table th:nth-child(4),
-      .card-open-positions #trades-positions-table th:nth-child(4) { width: 10%; }
+      .card-open-positions #trades-positions-table th:nth-child(4) { width: 7.5%; }
       .card-open-positions #positions-table th:nth-child(5),
       .card-open-positions #trades-positions-table th:nth-child(5),
       .card-open-positions #positions-table th:nth-child(6),
-      .card-open-positions #trades-positions-table th:nth-child(6) { width: 5%; }
+      .card-open-positions #trades-positions-table th:nth-child(6) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(7),
       .card-open-positions #trades-positions-table th:nth-child(7) { width: 11%; }
       .card-open-positions #positions-table th:nth-child(8),
-      .card-open-positions #trades-positions-table th:nth-child(8) { width: 6%; }
+      .card-open-positions #trades-positions-table th:nth-child(8) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(9),
-      .card-open-positions #trades-positions-table th:nth-child(9) { width: 4%; }
+      .card-open-positions #trades-positions-table th:nth-child(9) { width: 5%; }
       .card-open-positions #positions-table th:nth-child(10),
-      .card-open-positions #trades-positions-table th:nth-child(10) { width: 11%; }
+      .card-open-positions #trades-positions-table th:nth-child(10) { width: 9%; }
       .card-open-positions #positions-table th:nth-child(11),
-      .card-open-positions #trades-positions-table th:nth-child(11) { width: 6%; }
+      .card-open-positions #trades-positions-table th:nth-child(11) { width: 5.5%; }
       .card-open-positions #positions-table th:nth-child(12),
-      .card-open-positions #trades-positions-table th:nth-child(12) { width: 5%; }
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 7.5%; }
       .card-open-positions #positions-table th:nth-child(13),
-      .card-open-positions #trades-positions-table th:nth-child(13) { width: 6%; }
+      .card-open-positions #trades-positions-table th:nth-child(13) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(14),
-      .card-open-positions #trades-positions-table th:nth-child(14) { width: 5%; }
-      .card-open-positions #positions-table th:nth-child(15),
-      .card-open-positions #trades-positions-table th:nth-child(15) { width: 4%; }
+      .card-open-positions #trades-positions-table th:nth-child(14) { width: 3.5%; }
       .card-open-positions #positions-table td:nth-child(10) .pos-pnl-sub,
       .card-open-positions #trades-positions-table td:nth-child(10) .pos-pnl-sub {
         overflow-wrap: anywhere;
@@ -5223,17 +5223,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table td:nth-child(4) .mint-ca,
       .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         max-width: 100%;
-        overflow: visible;
-      }
-      .card-open-positions #positions-table td:nth-child(4) .mint-ca > .token-ca,
-      .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca > .token-ca {
-        flex: 0 1 100%;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        gap: 0.15rem;
       }
       .card-open-positions .pos-cost-cell {
         overflow: visible;
@@ -5249,10 +5241,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #trades-positions-table td:nth-child(6),
       .card-open-positions #positions-table td:nth-child(9),
       .card-open-positions #trades-positions-table td:nth-child(9),
-      .card-open-positions #positions-table td:nth-child(12),
-      .card-open-positions #trades-positions-table td:nth-child(12),
-      .card-open-positions #positions-table td:nth-child(14),
-      .card-open-positions #trades-positions-table td:nth-child(14) {
+      .card-open-positions #positions-table td:nth-child(11),
+      .card-open-positions #trades-positions-table td:nth-child(11),
+      .card-open-positions #positions-table td:nth-child(13),
+      .card-open-positions #trades-positions-table td:nth-child(13) {
         font-size: 0.62rem;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -5869,7 +5861,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Positions</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL, trailing stop, TP/SL, and Reason → More Info (profile assignment, entry path, MC, technicals, wallets, quality 0–100). Use Sell to force-close."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size (SOL + USD), partial take-profit progress, converging wallets, 1h volume, unrealized PnL, TP/SL, and Reason → More Info (including trailing stop state, profile assignment, entry path, MC, technicals, wallets, quality 0–100). Use Sell to force-close."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="open-positions-badge" data-empty="1">0 open</span>
@@ -5891,7 +5883,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -5998,7 +5990,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="section-title-open">
           <div class="title-left">
             <span class="title-text">Open Trades</span>
-            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size, partial take-profit progress, converging wallets, 1h volume, unrealized PnL on remaining size, trailing stop, take-profit, and stop-loss. Coloured profile badges show which strategy owns each trade. Filter by profile below. Same data as Overview Open Positions."></span>
+            <span class="tip" tabindex="0" data-tip="Active holdings with buy MC, live MC, original/remaining size, partial take-profit progress, converging wallets, 1h volume, unrealized PnL on remaining size, take-profit, and stop-loss. Reason → More Info includes trailing-stop state. Coloured profile badges show which strategy owns each trade. Filter by profile below. Same data as Overview Open Positions."></span>
           </div>
           <div class="title-right">
             <span class="pos-count-badge" id="trades-open-positions-badge" data-empty="1">0 open</span>
@@ -6020,7 +6012,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -14780,7 +14772,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             Array.from(row.cells).forEach((cell, cellIndex) => {
               // The hold ticker owns this cell between refreshes; preserve a
               // tapped expanded timestamp instead of replacing it every poll.
-              if (cellIndex === 13) return;
+              if (cellIndex === 12) return;
               const nextCell = nextRow.cells[cellIndex];
               if (nextCell && cell.innerHTML !== nextCell.innerHTML) {
                 cell.innerHTML = nextCell.innerHTML;
@@ -15131,6 +15123,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ')';
         }
         lines.push({ label: 'Market cap', text: mcText });
+      }
+
+      const trailPct = Number(p.trailingStopPct);
+      const armAt = Number(
+        p.trailingActivationProfit != null
+          ? p.trailingActivationProfit
+          : window._trailArmAt
+      );
+      if (Number.isFinite(trailPct) || Number.isFinite(armAt)) {
+        let trailText = p.trailingActive ? 'Active' : 'Waiting';
+        if (Number.isFinite(armAt) && Number.isFinite(trailPct)) {
+          trailText +=
+            p.trailingActive
+              ? ' · ' + trailPct.toFixed(0) + '% from peak (armed at +' + armAt.toFixed(0) + '%)'
+              : ' · arms at +' + armAt.toFixed(0) + '% → ' + trailPct.toFixed(0) + '% from peak';
+        } else if (Number.isFinite(trailPct)) {
+          trailText += ' · ' + trailPct.toFixed(0) + '% from peak';
+        }
+        if (p.trailingActive && p.trailingStopPriceSol != null) {
+          trailText += ' · stop ' + Number(p.trailingStopPriceSol).toExponential(2);
+        }
+        if (p.trailingActive && p.highWaterMarkSol != null) {
+          trailText += ' · peak ' + Number(p.highWaterMarkSol).toExponential(2);
+        }
+        lines.push({ label: 'Trailing stop', text: trailText });
       }
 
       if (p.convictionScore != null && Number.isFinite(Number(p.convictionScore))) {
@@ -16607,17 +16624,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         '<strong>' + label + '</strong></span>';
     }
 
-    /** Compact mint column: short CA + Copy + Jupiter */
+    /** Compact mint column: Copy + Jupiter; full CA stays in Copy's accessible label. */
     function fmtMintCa(mint) {
       const ca = String(mint || '').trim();
       if (!ca) return '<span class="mint">—</span>';
       const attr = escAttr(ca);
-      const short = escHtml(ca.slice(0, 8) + '…' + ca.slice(-4));
       const jup = escAttr(jupiterTokenUrl(ca));
       return '<span class="mint-ca">' +
-        '<span class="token-ca" tabindex="0" role="button" data-mint="' + attr +
-          '" title="' + attr + ' — click to copy" onclick="copyContractAddress(event)">' + short + '</span>' +
-        '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy contract address">Copy</button>' +
+        '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy (' + attr + ')" aria-label="Copy (' + attr + ')">Copy</button>' +
         '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
       '</span>';
     }
@@ -18800,35 +18814,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         (window._lastOpenPositions || positions.open || []).length
       );
       window._renderOpenPositionsHtml = function renderOpenPositionsHtml(list) {
-        const armAt = window._trailArmAt != null ? window._trailArmAt : 30;
         if (!list || list.length === 0) {
           const pf = window._openProfileFilter || 'all';
           if (pf && pf !== 'all') {
-            return '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions for this profile</strong><span>Clear the profile filter or wait for a matching fill.</span></div></td></tr>';
+            return '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions for this profile</strong><span>Clear the profile filter or wait for a matching fill.</span></div></td></tr>';
           }
-          return '<tr><td colspan="15"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail, TP and SL.</span></div></td></tr>';
+          return '<tr><td colspan="14"><div class="positions-empty"><strong>No open positions</strong><span>Live paper/live fills will appear here with PnL, trail details, TP and SL.</span></div></td></tr>';
         }
         return list.map(p => {
           const prog = openPositionProgress(p);
           const pnlCell = fmtOpenPnlCell(p);
-          let trailCell;
-          if (p.trailingActive) {
-            const stop = p.trailingStopPriceSol != null
-              ? p.trailingStopPriceSol.toExponential(2)
-              : '—';
-            const peak = p.highWaterMarkSol != null
-              ? p.highWaterMarkSol.toExponential(2)
-              : '—';
-            const tip = 'Trailing ACTIVE · ' + (p.trailingStopPct ?? '—') + '% from peak · stop ' + stop + ' · peak ' + peak;
-            trailCell =
-              '<span class="trail-cell-compact" style="color:var(--green)" title="' + tip.replace(/"/g, '&quot;') +
-              '">ON ' + (p.trailingStopPct ?? '—') + '%</span>';
-          } else {
-            const tip = 'Trail off until +' + armAt + '% profit, then ' + (p.trailingStopPct ?? '—') + '% from peak';
-            trailCell =
-              '<span class="trail-cell-compact mint" title="' + tip.replace(/"/g, '&quot;') +
-              '">+' + armAt + '% → ' + (p.trailingStopPct ?? '—') + '%</span>';
-          }
           const ar = p.antiRug;
           const be = ar?.birdeye;
           const riskBits = [];
@@ -18894,13 +18889,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <td>\${fmtTradeProfileBadge(p)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>
             <td>\${fmtMintCa(p.mint)}</td>
-            <td class="mint" title="Market cap at your buy">\${buyMc}</td>
-            <td class="mint" title="Current market cap (live mark)">\${liveMc}</td>
+            <td class="pos-buy-mc" title="Market cap at your buy">\${buyMc}</td>
+            <td class="pos-live-mc" title="Current market cap (live mark)">\${liveMc}</td>
             <td class="pos-cost-cell" title="Original size and partial take-profit progress">\${costCell}</td>
             <td class="mint" title="Copied wallet — hover/tap for their entry MC">\${walletsCell}</td>
             <td>\${volCell}</td>
             <td>\${pnlCell}</td>
-            <td>\${trailCell}</td>
             <td>\${tpSlCell}</td>
             <td>\${reasonCell}</td>
             <td>\${openedCell}</td>
