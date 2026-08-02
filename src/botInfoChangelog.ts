@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.81',
+    title: 'Hide sound unlock chip on desktop',
+    sections: ['alerts', 'overview'],
+    items: [
+      '“Tap to enable sounds” no longer shows on desktop — silent gesture unlock keeps alert chimes working without the header chip.',
+      'On mobile/iPhone the chip only appears if a chime was blocked and audio is still locked; any tap still auto-unlocks when possible (Safari cannot unlock with zero gesture).',
+    ],
+  },
+  {
     version: '1.2.80',
     title: 'Block phantom Dip Buyer take-profit marks',
     sections: ['microbots', 'execution'],

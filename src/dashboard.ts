@@ -5432,7 +5432,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
       <div class="header-tools">
       <button type="button" id="notify-audio-unlock-chip" class="notify-audio-unlock-chip" hidden
-        title="Browsers block alert sounds until you tap. Tap here to unlock (iPhone: Ring/Silent switch must be off)."
+        title="Mobile browsers block alert sounds until you interact. Tap here (or anywhere) to unlock. iPhone: Ring/Silent switch must allow sound."
         onclick="enableNotifyAudioFromGesture(event)">
         <span class="notify-audio-unlock-label-full">Tap to enable sounds</span>
         <span class="notify-audio-unlock-label-short">Enable sounds</span>
@@ -7897,6 +7897,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    /** Safari/iOS/coarse touch — strict autoplay; desktop unlocks via any click without a chip. */
+    function isStrictNotifyAudioAutoplayEnv() {
+      try {
+        const ua = String(navigator.userAgent || '');
+        const iOS =
+          /iPhone|iPad|iPod/i.test(ua) ||
+          (navigator.platform === 'MacIntel' &&
+            Number(navigator.maxTouchPoints || 0) > 1);
+        const android = /Android/i.test(ua);
+        const coarse =
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(pointer: coarse)').matches;
+        const touchPrimary =
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(hover: none)').matches &&
+          Number(navigator.maxTouchPoints || 0) > 0;
+        return iOS || android || coarse || touchPrimary;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function hasPendingNotifySounds() {
+      const p = _pendingNotifySounds || {};
+      return !!(p.trade_request || p.profit_close || p.place);
+    }
+
     function isNotifyAudioRunning() {
       try {
         const ctx = window.__notifyAudioCtx;
@@ -7914,7 +7941,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function updateNotifyAudioUnlockChip() {
       const chip = document.getElementById('notify-audio-unlock-chip');
       if (!chip) return;
-      const show = anyNotifySoundPrefOn() && !isNotifyAudioRunning();
+      // Desktop / mouse: never show — gesture listeners unlock silently; sounds already work.
+      if (!isStrictNotifyAudioAutoplayEnv()) {
+        chip.hidden = true;
+        return;
+      }
+      // Mobile: browsers forbid true autoplay without a gesture. Unlock on any tap
+      // (installNotifyAudioUnlock). Only show the chip as a last resort when a chime
+      // was deferred and audio is still locked.
+      const show =
+        anyNotifySoundPrefOn() &&
+        !isNotifyAudioRunning() &&
+        hasPendingNotifySounds();
       chip.hidden = !show;
     }
     window.updateNotifyAudioUnlockChip = updateNotifyAudioUnlockChip;
@@ -8020,11 +8058,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         updateNotifyAudioUnlockChip();
         unlockNotifyAudio();
       });
-      // First paint: show chip if locked; do not pretend unlock succeeded.
+      // Desktop: try unlock immediately (often succeeds). Mobile: still requires a
+      // tap — chip stays hidden until a pending chime needs it.
       syncNotifyAudioUnlockedFlag();
       updateNotifyAudioUnlockChip();
-      unlockNotifyAudio();
-      setTimeout(updateNotifyAudioUnlockChip, 400);
+      unlockNotifyAudio().then(function () {
+        updateNotifyAudioUnlockChip();
+      });
+      setTimeout(function () {
+        unlockNotifyAudio().then(function () {
+          updateNotifyAudioUnlockChip();
+        });
+      }, 400);
     }
 
     /** Light haptic when sound prefs are on (helps Android; not available on iOS Safari). */
