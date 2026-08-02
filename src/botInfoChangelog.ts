@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.98',
+    title: 'Spaced open-position columns',
+    sections: ['overview'],
+    items: [
+      'Open Positions and Open Trades now contain long profile badges within their column and give TP/SL and Reason clearer separation on desktop.',
+    ],
+  },
+  {
     version: '1.2.97',
     title: 'Clear profit-close cash chime',
     sections: ['alerts'],

@@ -5182,11 +5182,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         font-size: 0.68rem;
       }
       .card-open-positions #positions-table th:nth-child(1),
-      .card-open-positions #trades-positions-table th:nth-child(1) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(1) { width: 7.5%; }
       .card-open-positions #positions-table th:nth-child(2),
-      .card-open-positions #trades-positions-table th:nth-child(2) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 10%; }
       .card-open-positions #positions-table th:nth-child(3),
-      .card-open-positions #trades-positions-table th:nth-child(3) { width: 9.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 8.5%; }
       .card-open-positions #positions-table th:nth-child(4),
       .card-open-positions #trades-positions-table th:nth-child(4) { width: 7.5%; }
       .card-open-positions #positions-table th:nth-child(5),
@@ -5194,21 +5194,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table th:nth-child(6),
       .card-open-positions #trades-positions-table th:nth-child(6) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(7),
-      .card-open-positions #trades-positions-table th:nth-child(7) { width: 11%; }
+      .card-open-positions #trades-positions-table th:nth-child(7) { width: 10.25%; }
       .card-open-positions #positions-table th:nth-child(8),
-      .card-open-positions #trades-positions-table th:nth-child(8) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(8) { width: 6.75%; }
       .card-open-positions #positions-table th:nth-child(9),
       .card-open-positions #trades-positions-table th:nth-child(9) { width: 5%; }
       .card-open-positions #positions-table th:nth-child(10),
-      .card-open-positions #trades-positions-table th:nth-child(10) { width: 9%; }
+      .card-open-positions #trades-positions-table th:nth-child(10) { width: 8.5%; }
       .card-open-positions #positions-table th:nth-child(11),
-      .card-open-positions #trades-positions-table th:nth-child(11) { width: 5.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(11) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(12),
-      .card-open-positions #trades-positions-table th:nth-child(12) { width: 7.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(13),
       .card-open-positions #trades-positions-table th:nth-child(13) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(14),
       .card-open-positions #trades-positions-table th:nth-child(14) { width: 3.5%; }
+      .card-open-positions #positions-table td:nth-child(2),
+      .card-open-positions #trades-positions-table td:nth-child(2) {
+        overflow: hidden;
+      }
+      .card-open-positions #positions-table td:nth-child(2) .trade-profile-badge,
+      .card-open-positions #trades-positions-table td:nth-child(2) .trade-profile-badge {
+        display: flex;
+        max-width: 100%;
+        width: 100%;
+      }
+      .card-open-positions #positions-table th:nth-child(11),
+      .card-open-positions #trades-positions-table th:nth-child(11),
+      .card-open-positions #positions-table td:nth-child(11),
+      .card-open-positions #trades-positions-table td:nth-child(11) {
+        padding-right: 0.5rem;
+      }
+      .card-open-positions #positions-table th:nth-child(12),
+      .card-open-positions #trades-positions-table th:nth-child(12),
+      .card-open-positions #positions-table td:nth-child(12),
+      .card-open-positions #trades-positions-table td:nth-child(12) {
+        padding-left: 0.5rem;
+      }
       .card-open-positions #positions-table td:nth-child(10) .pos-pnl-sub,
       .card-open-positions #trades-positions-table td:nth-child(10) .pos-pnl-sub {
         overflow-wrap: anywhere;
