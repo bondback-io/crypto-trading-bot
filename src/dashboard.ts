@@ -13836,7 +13836,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
-    function fmtOpenTokenCell(p, riskBit) {
+    function fmtOpenTokenCell(p) {
       const prog = openPositionProgress(p);
       const pnl = p.pnlPct != null ? Number(p.pnlPct) : null;
       const tone = pnl == null ? 'flat' : pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'flat';
@@ -13850,7 +13850,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '</span>' +
           '<div class="pos-token-main">' +
             fmtToken(p.symbol, p.name, p.mint) +
-            (riskBit || '') +
             fmtOpenStatusBadges(p, prog) +
           '</div>' +
         '</div>'
@@ -18854,45 +18853,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         return list.map(p => {
           const prog = openPositionProgress(p);
           const pnlCell = fmtOpenPnlCell(p);
-          const ar = p.antiRug;
-          const be = ar?.birdeye;
-          const riskBits = [];
-          const riskTips = [];
-          if (ar) {
-            riskBits.push('r' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + String(ar.flags[0]).slice(0, 18) : ''));
-            riskTips.push('risk ' + ar.riskScore + (ar.flags && ar.flags[0] ? ' · ' + ar.flags[0] : ''));
-          }
-          if (p.convictionScore != null) {
-            riskBits.push('c' + p.convictionScore);
-            riskTips.push('conviction ' + p.convictionScore);
-          }
-          if (p.technicalLevels && p.technicalLevels.summary) {
-            riskBits.push(String(p.technicalLevels.summary).slice(0, 22));
-            riskTips.push(p.technicalLevels.summary);
-          }
-          if (be && (be.liquidityUsd != null || be.volume24hUsd != null)) {
-            riskTips.push(
-              'BE liq $' + (be.liquidityUsd != null ? Number(be.liquidityUsd).toFixed(0) : '?') +
-              (be.volume24hUsd != null ? ' · vol $' + Number(be.volume24hUsd).toFixed(0) : '') +
-              (be.smartMoneyScore != null ? ' · SM ' + be.smartMoneyScore : '')
-            );
-          }
-          if (ar && (ar.liquidityUsd != null || ar.volume24hUsd != null || ar.holderCount != null)) {
-            riskTips.push(
-              'liq $' + (ar.liquidityUsd != null ? Number(ar.liquidityUsd).toFixed(0) : '?') +
-              (ar.volume24hUsd != null ? ' · vol24h $' + Number(ar.volume24hUsd).toFixed(0) : '') +
-              (ar.holderCount != null ? ' · holders ' + ar.holderCount : '')
-            );
-          }
-          const riskBit = riskBits.length
-            ? '<div class="pos-token-meta mint" title="' +
-              escAttr(riskTips.join(' · ')) +
-              '" style="color:' +
-              (ar && (ar.riskLevel === 'high' || ar.riskLevel === 'critical') ? 'var(--red)' : 'var(--muted)') +
-              '">' +
-              escHtml(riskBits.join(' · ')) +
-              '</div>'
-            : '';
           const buyMc = fmtUsdShort(p.entryMarketCapUsd);
           const liveMc = fmtUsdShort(p.liveMarketCapUsd);
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
@@ -18900,7 +18860,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const walletsCell = fmtWalletConvergence(p);
           const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
-          const tokenCell = fmtOpenTokenCell(p, riskBit);
+          const tokenCell = fmtOpenTokenCell(p);
           const reasonCell = fmtOpenReasonCell(p);
           const tpSlCell =
             '<span class="pos-tpsl-cell" title="Take-profit / stop-loss">' +

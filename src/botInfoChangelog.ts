@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.100',
+    title: 'Cleaner open-position token cells',
+    sections: ['overview'],
+    items: [
+      'Open Positions and Open Trades now keep the Token cell to the ticker and status badges; risk, conviction, anti-rug flags, and technical entry context remain in Reason → More Info.',
+    ],
+  },
+  {
     version: '1.2.99',
     title: 'Softer cash-register profit chime',
     sections: ['alerts'],
