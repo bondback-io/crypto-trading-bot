@@ -3787,7 +3787,9 @@ export class PaperTrader {
   }
 
   /** Per-profile scoreboard + learning suggestions for Trade Profiles UI */
-  getTradeProfileIntelligence() {
+  getTradeProfileIntelligence(opts?: {
+    performanceWindow?: import('./microBotPerformance').PerformanceWindow;
+  }) {
     const {
       buildTradeProfileScoreboard,
       buildProfileLearningSuggestions,
@@ -3810,7 +3812,60 @@ export class PaperTrader {
       scoreboard,
       getLaneOutcomeStatsByProfile()
     );
-    return { scoreboard, suggestions };
+    const performance = this.getMicroBotPerformance(
+      opts?.performanceWindow ?? '7d'
+    );
+    return { scoreboard, suggestions, performance };
+  }
+
+  /** Ranked micro-bot performance for a time window (closed + episodes). */
+  getMicroBotPerformance(
+    window: import('./microBotPerformance').PerformanceWindow = '7d'
+  ) {
+    const { buildMicroBotPerformance, parsePerformanceWindow } =
+      require('./microBotPerformance') as typeof import('./microBotPerformance');
+    const {
+      TRADE_PROFILE_CATALOG,
+      ensureTradeProfilesInitialized,
+      isProfileLearningModeOptedIn,
+      getTradeProfilesStatus,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const { isLearningModeActive } =
+      require('./learningMode') as typeof import('./learningMode');
+    const { getCachedSolUsdPrice } =
+      require('./marketData') as typeof import('./marketData');
+    ensureTradeProfilesInitialized();
+    const win = parsePerformanceWindow(window, '7d');
+    const status = getTradeProfilesStatus();
+    const enabledById = new Map(
+      status.profiles.map((p) => [p.id, p.enabled !== false] as const)
+    );
+    const learningModeOptIn: Partial<Record<string, boolean>> = {};
+    const catalog = TRADE_PROFILE_CATALOG.map((p) => {
+      learningModeOptIn[p.id] = isProfileLearningModeOptedIn(p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        icon: p.icon,
+        color: p.color,
+        enabled: enabledById.get(p.id) !== false,
+      };
+    });
+    let solUsd: number | null = null;
+    try {
+      const px = getCachedSolUsdPrice();
+      if (Number.isFinite(px) && px > 0) solUsd = px;
+    } catch {
+      /* optional */
+    }
+    return buildMicroBotPerformance({
+      closed: this.closedPositions,
+      catalog,
+      window: win,
+      solUsd,
+      globalLearningMode: isLearningModeActive(),
+      learningModeOptIn,
+    });
   }
 
   /**

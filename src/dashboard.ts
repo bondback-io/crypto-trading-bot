@@ -3021,6 +3021,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       border: 1px solid #334155;
     }
     .tp-toggle-card .tp-desc { font-size: 0.65rem; color: #94a3b8; line-height: 1.3; }
+    .mbp-window-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      margin-bottom: 0.65rem;
+    }
+    .mbp-table-wrap { overflow-x: auto; }
+    .mbp-table td, .mbp-table th { white-space: nowrap; }
+    .mbp-table tr.mbp-top { background: rgba(16, 185, 129, 0.08); }
+    .mbp-table tr.mbp-under { background: rgba(248, 113, 113, 0.07); }
+    .mbp-table tr.mbp-off { opacity: 0.55; }
+    .mbp-streak-win { color: #4ade80; font-weight: 700; }
+    .mbp-streak-loss { color: #f87171; font-weight: 700; }
+    .mbp-streak-flat { color: #94a3b8; }
+    .mbp-lm-on { color: #F1BB72; font-weight: 600; }
+    .mbp-lm-off { color: #64748b; }
+    .tp-perf-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-top: 0.3rem;
+      font-size: 0.65rem;
+      color: #94a3b8;
+      flex-wrap: wrap;
+    }
+    .tp-perf-chip .mbp-rank { color: #e2e8f0; font-weight: 700; }
     .tp-toggle-card details.tp-rules {
       margin-top: 0.2rem;
     }
@@ -6999,6 +7026,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card mt-4" id="microbot-performance-card">
+        <div class="section-title">Micro Bot Performance <span class="tip" tabindex="0" data-tip="Per-profile win rate, PnL, profit factor, max drawdown, streaks, and Learning Mode participate. Ranked by Profit Factor → Win Rate → Net PnL → Max DD (lower better). Merges closed trades with durable learning episodes."></span></div>
+        <p class="text-xs text-slate-400 mb-2">Use rankings + streaks to decide which bots should Participate in Learning Mode. Does not change Overview totals.</p>
+        <div class="mbp-window-row" role="group" aria-label="Performance time window">
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="today" onclick="setMicroBotPerfWindow('today')">Today</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="24h" onclick="setMicroBotPerfWindow('24h')">24h</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn is-active" data-mbp-window="7d" onclick="setMicroBotPerfWindow('7d')" aria-pressed="true">7d</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="all" onclick="setMicroBotPerfWindow('all')">All</button>
+          <span class="mint text-xs ml-auto" id="mbp-ranked-at">—</span>
+        </div>
+        <div class="tp-overview-wrap mbp-table-wrap">
+          <table class="tp-overview-table mbp-table" id="microbot-performance-table">
+            <thead>
+              <tr>
+                <th scope="col">Rank</th>
+                <th scope="col">Bot</th>
+                <th scope="col">WR</th>
+                <th scope="col">W/L</th>
+                <th scope="col">PF</th>
+                <th scope="col">Net PnL</th>
+                <th scope="col">Max DD</th>
+                <th scope="col">Avg hold</th>
+                <th scope="col">Best / Worst</th>
+                <th scope="col">Streak</th>
+                <th scope="col">LM</th>
+              </tr>
+            </thead>
+            <tbody id="microbot-performance-body">
+              <tr><td colspan="11" class="mint">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="card mt-4" id="trade-profiles-overview-card">
         <div class="section-title">Trade Profiles Overview</div>
         <p class="text-xs text-slate-400 mb-3">Live ranking by win rate — Zion is always 1st; specialty micro-bots compete for 2nd–10th. Active profiles are highlighted. Tap a row to jump to its controls.</p>
@@ -10313,6 +10374,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '"></div>' +
               '</div>' +
             '</div>';
+          const perfRow = performanceRowFor(p.id, window.__mbpPerformance);
+          const perfChipHtml = fmtMicroBotPerfChip(perfRow);
           const num = function (v, fallback) {
             if (v == null || v === '') return fallback != null ? fallback : '';
             return v;
@@ -11113,6 +11176,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   ' onchange="toggleTradeProfile(\\'' + p.id + '\\', this.checked)" title="' + (p.enabled ? 'Pause' : 'Resume') + ' ' + escHtml(p.name) + '" />' +
               '</div>' +
               learnProgressHtml +
+              perfChipHtml +
               blurb +
               patternLine +
               risk +
@@ -11129,6 +11193,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadTradeProfileIntelligence();
         loadLaneDecisions();
       }
+      loadMicroBotPerformance();
       renderAutoScoringUi(tp);
     }
 
@@ -11142,6 +11207,331 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (mod10 === 3) return v + 'rd';
       return v + 'th';
     }
+
+    window._mbpWindow = window._mbpWindow || (function () {
+      try {
+        const stored = localStorage.getItem('mbpWindow');
+        if (stored === 'today' || stored === '24h' || stored === '7d' || stored === 'all') {
+          return stored;
+        }
+      } catch (_) {}
+      return '7d';
+    })();
+
+    function syncMicroBotPerfWindowButtons() {
+      const cur = window._mbpWindow || '7d';
+      document.querySelectorAll('.mbp-window-btn').forEach(function (btn) {
+        const w = btn.getAttribute('data-mbp-window');
+        const on = w === cur;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+
+    function performanceRowFor(id, performance) {
+      const rows = (performance && performance.rows) || [];
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].profileId === id) return rows[i];
+      }
+      return null;
+    }
+
+    function fmtMicroBotStreak(streak) {
+      if (!streak || !streak.length) {
+        return '<span class="mbp-streak-flat">—</span>';
+      }
+      const kind = streak.kind === 'win' ? 'win' : streak.kind === 'loss' ? 'loss' : 'flat';
+      const cls =
+        kind === 'win'
+          ? 'mbp-streak-win'
+          : kind === 'loss'
+            ? 'mbp-streak-loss'
+            : 'mbp-streak-flat';
+      const letter = kind === 'win' ? 'W' : kind === 'loss' ? 'L' : '·';
+      return (
+        '<span class="' +
+        cls +
+        '" title="Current streak">' +
+        letter +
+        streak.length +
+        '</span>'
+      );
+    }
+
+    function fmtMicroBotPerfChip(row) {
+      if (!row || !row.trades) {
+        return '<div class="tp-perf-chip mint">No closed trades in window</div>';
+      }
+      const rank =
+        row.rank != null
+          ? '<span class="mbp-rank">#' + escHtml(String(row.rank)) + '</span>'
+          : '<span class="mint">—</span>';
+      return (
+        '<div class="tp-perf-chip" title="Micro Bot Performance (active time window)">' +
+          rank +
+          ' · ' +
+          fmtMicroBotStreak(row.currentStreak) +
+          (row.longestWinStreak
+            ? ' · best W' + escHtml(String(row.longestWinStreak))
+            : '') +
+          (row.learningModeActive
+            ? ' · <span class="mbp-lm-on">LM</span>'
+            : row.learningModeOptIn
+              ? ' · <span class="mint">LM opt-in</span>'
+              : ' · <span class="mbp-lm-off">LM off</span>') +
+        '</div>'
+      );
+    }
+
+    function fmtProfitFactor(pf) {
+      const n = Number(pf);
+      if (!Number.isFinite(n) || n <= 0) return '—';
+      if (n >= 900) return '∞';
+      return n.toFixed(n >= 10 ? 1 : 2);
+    }
+
+    function renderMicroBotPerformance(performance) {
+      const body = document.getElementById('microbot-performance-body');
+      const atEl = document.getElementById('mbp-ranked-at');
+      syncMicroBotPerfWindowButtons();
+      if (atEl) {
+        const at = performance && performance.rankedAt
+          ? new Date(performance.rankedAt).toLocaleString()
+          : '';
+        const win = (performance && performance.window) || window._mbpWindow || '7d';
+        atEl.textContent = at
+          ? 'Window ' + win + ' · ranked ' + at
+          : 'Window ' + win;
+      }
+      if (!body) return;
+      const rows = (performance && performance.rows) || [];
+      if (!rows.length) {
+        body.innerHTML =
+          '<tr><td colspan="11" class="mint">No profile performance yet</td></tr>';
+        return;
+      }
+      body.innerHTML = rows
+        .map(function (r) {
+          const bandCls =
+            r.band === 'top'
+              ? ' mbp-top'
+              : r.band === 'under'
+                ? ' mbp-under'
+                : '';
+          const offCls = r.enabled === false ? ' mbp-off' : '';
+          const color = profileColorFor(r.profileId) || r.color || '#94a3b8';
+          const rankCell =
+            r.rank != null
+              ? '#' + r.rank
+              : '—';
+          const wr =
+            r.trades > 0
+              ? Number(r.winRatePct).toFixed(0) + '%'
+              : '—';
+          const wrColor =
+            r.trades > 0
+              ? r.winRatePct >= 50
+                ? 'var(--green)'
+                : r.winRatePct < 40
+                  ? '#f87171'
+                  : ''
+              : '';
+          const wl =
+            r.trades > 0
+              ? r.wins + '/' + r.losses + ' · ' + r.trades
+              : '0';
+          const pf = r.trades > 0 ? fmtProfitFactor(r.profitFactor) : '—';
+          const pnlSol = Number(r.netPnlSol) || 0;
+          const pnlUsd = r.netPnlUsd != null ? Number(r.netPnlUsd) : null;
+          const pnlHtml =
+            r.trades > 0
+              ? (pnlSol >= 0 ? '+' : '') +
+                pnlSol.toFixed(4) +
+                ' SOL' +
+                (pnlUsd != null && Number.isFinite(pnlUsd)
+                  ? '<div class="pos-pnl-sub">' +
+                    (pnlUsd < 0 ? '-$' : '$') +
+                    Math.abs(pnlUsd).toFixed(2) +
+                    '</div>'
+                  : '')
+              : '—';
+          const pnlColor =
+            r.trades > 0
+              ? pnlSol >= 0
+                ? 'var(--green)'
+                : '#f87171'
+              : '';
+          const dd =
+            r.trades > 0
+              ? '-' +
+                Number(r.maxDrawdownSol || 0).toFixed(4) +
+                ' SOL' +
+                (r.maxDrawdownPct
+                  ? ' (' + Number(r.maxDrawdownPct).toFixed(0) + '%)'
+                  : '')
+              : '—';
+          const hold = r.trades > 0 ? fmtHoldSec(r.avgHoldSec) : '—';
+          const best =
+            r.bestTrade && r.trades
+              ? escHtml(r.bestTrade.symbol || '—') +
+                ' ' +
+                (r.bestTrade.pnlPct >= 0 ? '+' : '') +
+                Number(r.bestTrade.pnlPct).toFixed(0) +
+                '%'
+              : '—';
+          const worst =
+            r.worstTrade && r.trades
+              ? escHtml(r.worstTrade.symbol || '—') +
+                ' ' +
+                (r.worstTrade.pnlPct >= 0 ? '+' : '') +
+                Number(r.worstTrade.pnlPct).toFixed(0) +
+                '%'
+              : '—';
+          const avgWin =
+            r.avgPnlPctWinners != null
+              ? 'W ' +
+                (r.avgPnlPctWinners >= 0 ? '+' : '') +
+                Number(r.avgPnlPctWinners).toFixed(0) +
+                '%'
+              : '';
+          const avgLoss =
+            r.avgPnlPctLosers != null
+              ? 'L ' +
+                (r.avgPnlPctLosers >= 0 ? '+' : '') +
+                Number(r.avgPnlPctLosers).toFixed(0) +
+                '%'
+              : '';
+          const streakTitle =
+            'Current ' +
+            (r.currentStreak && r.currentStreak.kind) +
+            ' · longest W' +
+            (r.longestWinStreak || 0) +
+            ' / L' +
+            (r.longestLossStreak || 0);
+          const lmHtml = r.learningModeActive
+            ? '<span class="mbp-lm-on" title="Global LM ON + Participate">ON · ' +
+              escHtml(String(r.learningModeTrades || 0)) +
+              ' LM trades</span>'
+            : r.learningModeOptIn
+              ? '<span class="mint" title="Participate ON; Global LM OFF">opt-in · ' +
+                escHtml(String(r.learningModeTrades || 0)) +
+                '</span>'
+              : '<span class="mbp-lm-off" title="Participate OFF">off · ' +
+                escHtml(String(r.learningModeTrades || 0)) +
+                '</span>';
+          return (
+            '<tr class="' +
+            bandCls.trim() +
+            offCls +
+            '" style="cursor:pointer" onclick="(function(id){var el=document.getElementById(\'tp-card-\'+id);if(el)el.scrollIntoView({behavior:\'smooth\',block:\'nearest\'});})(\'' +
+            escHtml(r.profileId) +
+            '\')" title="Jump to bot card">' +
+              '<td><strong>' +
+              escHtml(rankCell) +
+              '</strong></td>' +
+              '<td style="color:' +
+              color +
+              '">' +
+              escHtml(r.icon || '') +
+              ' ' +
+              escHtml(r.name) +
+              '</td>' +
+              '<td style="color:' +
+              wrColor +
+              '">' +
+              wr +
+              (avgWin || avgLoss
+                ? '<div class="mint text-xs">' +
+                  [avgWin, avgLoss].filter(Boolean).join(' · ') +
+                  '</div>'
+                : '') +
+              '</td>' +
+              '<td class="mint">' +
+              wl +
+              '</td>' +
+              '<td>' +
+              pf +
+              '</td>' +
+              '<td style="color:' +
+              pnlColor +
+              '">' +
+              pnlHtml +
+              '</td>' +
+              '<td class="mint">' +
+              dd +
+              '</td>' +
+              '<td class="mint">' +
+              hold +
+              '</td>' +
+              '<td class="mint" style="white-space:normal;max-width:9rem">' +
+              best +
+              '<br/>' +
+              worst +
+              '</td>' +
+              '<td title="' +
+              escAttr(streakTitle) +
+              '">' +
+              fmtMicroBotStreak(r.currentStreak) +
+              '</td>' +
+              '<td>' +
+              lmHtml +
+              '</td>' +
+            '</tr>'
+          );
+        })
+        .join('');
+    }
+
+    async function loadMicroBotPerformance() {
+      syncMicroBotPerfWindowButtons();
+      const win = window._mbpWindow || '7d';
+      try {
+        const data = await fetchJSON(
+          '/api/trade-profiles/performance?window=' + encodeURIComponent(win)
+        );
+        const perf = (data && data.performance) || data;
+        window.__mbpPerformance = perf;
+        renderMicroBotPerformance(perf);
+        // Refresh chips on cards if already rendered
+        const tp = window.__tradeProfilesStatus;
+        if (tp && tp.profiles) {
+          (tp.profiles || []).forEach(function (p) {
+            const card = document.getElementById('tp-card-' + p.id);
+            if (!card) return;
+            let chip = card.querySelector('.tp-perf-chip');
+            const html = fmtMicroBotPerfChip(
+              performanceRowFor(p.id, window.__mbpPerformance)
+            );
+            if (chip) {
+              chip.outerHTML = html;
+            }
+          });
+        }
+      } catch (err) {
+        const body = document.getElementById('microbot-performance-body');
+        if (body) {
+          body.innerHTML =
+            '<tr><td colspan="11" class="mint">Performance unavailable: ' +
+            escHtml(err.message || String(err)) +
+            '</td></tr>';
+        }
+      }
+    }
+    window.loadMicroBotPerformance = loadMicroBotPerformance;
+
+    function setMicroBotPerfWindow(win) {
+      const next =
+        win === 'today' || win === '24h' || win === '7d' || win === 'all'
+          ? win
+          : '7d';
+      window._mbpWindow = next;
+      try {
+        localStorage.setItem('mbpWindow', next);
+      } catch (_) {}
+      syncMicroBotPerfWindowButtons();
+      loadMicroBotPerformance();
+    }
+    window.setMicroBotPerfWindow = setMicroBotPerfWindow;
 
     function scoreboardRowFor(id, intelligence) {
       const rows =
@@ -11348,8 +11738,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const detail = document.getElementById('tp-scoreboard-detail');
       const panel = document.getElementById('tp-learning-panel');
       try {
-        const data = await fetchJSON('/api/trade-profiles/intelligence');
+        const data = await fetchJSON(
+          '/api/trade-profiles/intelligence?window=' +
+            encodeURIComponent(window._mbpWindow || '7d')
+        );
         window.__tpIntelligence = data;
+        if (data.performance) {
+          window.__mbpPerformance = data.performance;
+          renderMicroBotPerformance(data.performance);
+        } else {
+          loadMicroBotPerformance();
+        }
         const rows = (data.scoreboard && data.scoreboard.rows) || [];
         const profiles =
           (window.__tradeProfilesStatus && window.__tradeProfilesStatus.profiles) ||

@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.83',
+    title: 'Micro Bot Performance metrics & ranking',
+    sections: ['microbots', 'learning', 'overview'],
+    items: [
+      'New Micro Bot Performance card: WR, W/L, PnL (SOL+USD), profit factor, max drawdown, hold, best/worst, streaks, and Learning Mode participate + LM trade counts.',
+      'Time filters Today / 24h / 7d / All; ranks by Profit Factor → Win Rate → Net PnL → Max DD. Merges closed trades with durable learning episodes (beyond the 200-row closed cap).',
+      'Top/underperformer colouring, green/red streak chips, and #rank · streak line on each Micro Bot card.',
+    ],
+  },
+  {
     version: '1.2.82',
     title: 'Per-profile Learning Mode opt-in + peach bulb',
     sections: ['overview', 'learning', 'microbots'],

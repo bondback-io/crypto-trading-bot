@@ -2781,10 +2781,29 @@ export function createServer(): express.Application {
     res.json({ decisions: getLaneDecisionLog(limit) });
   });
 
-  app.get('/api/trade-profiles/intelligence', (_req: Request, res: Response) => {
+  app.get('/api/trade-profiles/intelligence', (req: Request, res: Response) => {
     try {
-      const intel = paperTrader.getTradeProfileIntelligence();
+      const { parsePerformanceWindow } =
+        require('./microBotPerformance') as typeof import('./microBotPerformance');
+      const window = parsePerformanceWindow(req.query.window, '7d');
+      const intel = paperTrader.getTradeProfileIntelligence({
+        performanceWindow: window,
+      });
       res.json(intel);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/trade-profiles/performance', (req: Request, res: Response) => {
+    try {
+      const { parsePerformanceWindow } =
+        require('./microBotPerformance') as typeof import('./microBotPerformance');
+      const window = parsePerformanceWindow(req.query.window, '7d');
+      const performance = paperTrader.getMicroBotPerformance(window);
+      res.json({ ok: true, performance });
     } catch (err) {
       res.status(500).json({
         error: err instanceof Error ? err.message : String(err),
