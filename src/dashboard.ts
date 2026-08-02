@@ -5151,6 +5151,113 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     #bt-results-table { min-width: 64rem; }
     #positions-table,
     #trades-positions-table { min-width: 56rem; }
+    /*
+     * Open positions is intentionally dense on desktop. Fixed layout keeps
+     * live-mark digit changes from negotiating column widths on every poll.
+     */
+    @media (min-width: 1024px) {
+      .card-open-positions #positions-table,
+      .card-open-positions #trades-positions-table {
+        width: 100%;
+        min-width: 0;
+        table-layout: fixed;
+      }
+      .card-open-positions #positions-table th,
+      .card-open-positions #trades-positions-table th {
+        padding: 0.32rem 0.22rem;
+        font-size: 0.58rem;
+      }
+      .card-open-positions #positions-table td,
+      .card-open-positions #trades-positions-table td {
+        padding: 0.32rem 0.22rem;
+        font-size: 0.68rem;
+        overflow: hidden;
+      }
+      .card-open-positions #positions-table th:nth-child(1),
+      .card-open-positions #trades-positions-table th:nth-child(1) { width: 9%; }
+      .card-open-positions #positions-table th:nth-child(2),
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 8%; }
+      .card-open-positions #positions-table th:nth-child(3),
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 9%; }
+      .card-open-positions #positions-table th:nth-child(4),
+      .card-open-positions #trades-positions-table th:nth-child(4) { width: 7%; }
+      .card-open-positions #positions-table th:nth-child(5),
+      .card-open-positions #trades-positions-table th:nth-child(5),
+      .card-open-positions #positions-table th:nth-child(6),
+      .card-open-positions #trades-positions-table th:nth-child(6) { width: 5%; }
+      .card-open-positions #positions-table th:nth-child(7),
+      .card-open-positions #trades-positions-table th:nth-child(7) { width: 7%; }
+      .card-open-positions #positions-table th:nth-child(8),
+      .card-open-positions #trades-positions-table th:nth-child(8) { width: 7%; }
+      .card-open-positions #positions-table th:nth-child(9),
+      .card-open-positions #trades-positions-table th:nth-child(9) { width: 5%; }
+      .card-open-positions #positions-table th:nth-child(10),
+      .card-open-positions #trades-positions-table th:nth-child(10) { width: 8%; }
+      .card-open-positions #positions-table th:nth-child(11),
+      .card-open-positions #trades-positions-table th:nth-child(11) { width: 7%; }
+      .card-open-positions #positions-table th:nth-child(12),
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 6%; }
+      .card-open-positions #positions-table th:nth-child(13),
+      .card-open-positions #trades-positions-table th:nth-child(13) { width: 6%; }
+      .card-open-positions #positions-table th:nth-child(14),
+      .card-open-positions #trades-positions-table th:nth-child(14) { width: 5%; }
+      .card-open-positions #positions-table th:nth-child(15),
+      .card-open-positions #trades-positions-table th:nth-child(15) { width: 4%; }
+      .card-open-positions #positions-table td:nth-child(3),
+      .card-open-positions #trades-positions-table td:nth-child(3),
+      .card-open-positions #positions-table td:nth-child(10) .pos-pnl-sub,
+      .card-open-positions #trades-positions-table td:nth-child(10) .pos-pnl-sub {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-open-positions .pos-token-name {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-open-positions #positions-table td:nth-child(4) .mint-ca,
+      .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca {
+        display: flex;
+        flex-wrap: nowrap;
+        max-width: 100%;
+        overflow: hidden;
+      }
+      .card-open-positions #positions-table td:nth-child(5),
+      .card-open-positions #trades-positions-table td:nth-child(5),
+      .card-open-positions #positions-table td:nth-child(6),
+      .card-open-positions #trades-positions-table td:nth-child(6),
+      .card-open-positions #positions-table td:nth-child(9),
+      .card-open-positions #trades-positions-table td:nth-child(9),
+      .card-open-positions #positions-table td:nth-child(12),
+      .card-open-positions #trades-positions-table td:nth-child(12),
+      .card-open-positions #positions-table td:nth-child(14),
+      .card-open-positions #trades-positions-table td:nth-child(14) {
+        font-size: 0.62rem;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .card-open-positions #positions-table td:last-child .danger,
+      .card-open-positions #trades-positions-table td:last-child .danger {
+        min-height: 1.5rem;
+        padding: 0.18rem 0.38rem;
+        font-size: 0.62rem;
+      }
+    }
+    /* Preserve the critical live-trading data at laptop widths. */
+    @media (min-width: 1024px) and (max-width: 1279px) {
+      .card-open-positions #positions-table th:nth-child(5),
+      .card-open-positions #positions-table td:nth-child(5),
+      .card-open-positions #trades-positions-table th:nth-child(5),
+      .card-open-positions #trades-positions-table td:nth-child(5),
+      .card-open-positions #positions-table th:nth-child(9),
+      .card-open-positions #positions-table td:nth-child(9),
+      .card-open-positions #trades-positions-table th:nth-child(9),
+      .card-open-positions #trades-positions-table td:nth-child(9) {
+        display: none;
+      }
+    }
     #closed-table,
     #trades-closed-table { min-width: 58rem; }
     #pump-activity-table,
@@ -8361,7 +8468,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       notifyHaptic([22, 28, 32]);
     }
 
-    /** Subtle close tone — still quieter and lower than open / profit cash. */
+    /** Subtle close tone — quieter, shorter, lower than open / profit cash. */
     function emitTradeCloseSound() {
       playSoftTone(492, 0, 0.2, 0.02, 'sine');
       playSoftTone(369.99, 0.1, 0.28, 0.015, 'triangle');
@@ -14627,7 +14734,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           // Skip no-op repaints — identical HTML still forced reflow/flicker every poll.
           if (ptbody.getAttribute('data-pos-html') === html) return;
           ptbody.setAttribute('data-pos-html', html);
-          ptbody.innerHTML = html;
+          const next = document.createElement('template');
+          next.innerHTML = html.trim();
+          const nextRows = Array.from(next.content.querySelectorAll('tr'));
+          const currentRows = Array.from(ptbody.querySelectorAll(':scope > tr'));
+          const canPatch =
+            nextRows.length > 0 &&
+            currentRows.length === nextRows.length &&
+            currentRows.every((row, index) => {
+              const nextRow = nextRows[index];
+              return (
+                row.getAttribute('data-position-id') &&
+                row.getAttribute('data-position-id') === nextRow.getAttribute('data-position-id') &&
+                row.cells.length === nextRow.cells.length
+              );
+            });
+          if (!canPatch) {
+            // A fill, close, filter, or sort changed the row set/order.
+            ptbody.innerHTML = html;
+            return;
+          }
+          currentRows.forEach((row, rowIndex) => {
+            const nextRow = nextRows[rowIndex];
+            if (row.className !== nextRow.className) row.className = nextRow.className;
+            Array.from(row.cells).forEach((cell, cellIndex) => {
+              // The hold ticker owns this cell between refreshes; preserve a
+              // tapped expanded timestamp instead of replacing it every poll.
+              if (cellIndex === 13) return;
+              const nextCell = nextRow.cells[cellIndex];
+              if (nextCell && cell.innerHTML !== nextCell.innerHTML) {
+                cell.innerHTML = nextCell.innerHTML;
+              }
+            });
+          });
         });
         ensurePosHoldTicker();
         tickOpenPositionHolds();
@@ -17276,7 +17415,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const tick = (symbol || (mint ? mint.slice(0, 6) : '?')).trim();
       const full = (name || '').trim();
       if (!full || full.toLowerCase() === tick.toLowerCase()) return '<span class="mint">—</span>';
-      return escHtml(full);
+      return '<span class="pos-token-name" title="' + escAttr(full) + '">' + escHtml(full) + '</span>';
     }
 
     async function paperTopUp() {
@@ -18730,7 +18869,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             p.trailingActive ? 'pos-row-trail' : '',
           ].filter(Boolean).join(' ');
           return \`
-          <tr class="\${rowClass}">
+          <tr class="\${rowClass}" data-position-id="\${escAttr(String(p.id || p.mint || p.openedAt || 'position'))}">
             <td>\${tokenCell}</td>
             <td>\${fmtTradeProfileBadge(p)}</td>
             <td>\${fmtTokenName(p.symbol, p.name, p.mint)}</td>

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.94',
+    title: 'Stable, desktop-fit open positions',
+    sections: ['overview'],
+    items: [
+      'Open Positions and Open Trades now keep their existing rows during live price refreshes, preventing periodic table flicker and preserving expanded hold timestamps.',
+      'Desktop position tables use fixed compact columns with no horizontal scrollbar at standard laptop widths; narrower desktop views temporarily hide Buy MC and 1h volume while retaining the live mark, PnL, risk controls, and sell action.',
+    ],
+  },
+  {
     version: '1.2.93',
     title: 'Trade sorting and refined close sounds',
     sections: ['overview', 'alerts'],
