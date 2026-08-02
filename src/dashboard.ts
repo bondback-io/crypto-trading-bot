@@ -7628,11 +7628,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <option value="24h">Every 24 hours</option>
             </select>
           </label>
+          <div class="toggle-row" style="margin:0;align-self:flex-end;padding-bottom:0.15rem" title="On deploy/restart, download and restore the latest GitHub backup when the remote SHA is new. Also set GITHUB_BACKUP_AUTO_IMPORT=1 for ephemeral DATA_DIR wipes.">
+            <span style="font-size:0.8rem;color:#cbd5e1">Auto import on deploy</span>
+            <label class="switch"><input type="checkbox" id="github-backup-auto-import" onchange="saveGithubBackupSettings()" /><span class="slider"></span></label>
+          </div>
           <label class="ctl ctl-md" title="GitHub owner or org (or set GITHUB_BACKUP_OWNER)">
             <span>Owner</span>
             <input type="text" id="github-backup-owner" placeholder="org-or-user" onchange="saveGithubBackupSettings()" autocomplete="off" />
           </label>
-          <label class="ctl ctl-md" title="Private repo name (or set GITHUB_BACKUP_REPO)">
+          <label class="ctl ctl-md" title="GitHub private repo name (or set GITHUB_BACKUP_REPO)">
             <span>Repo</span>
             <input type="text" id="github-backup-repo" placeholder="my-bot-backups" onchange="saveGithubBackupSettings()" autocomplete="off" />
           </label>
@@ -7642,7 +7646,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
-        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo. Set these in the Render dashboard env vars.</p>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. For wipe recovery without a mounted disk, also set <code>GITHUB_BACKUP_AUTO_IMPORT=1</code> (or enable Auto import on deploy). Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo.</p>
       </div>
 
       <div class="card">
@@ -23731,10 +23735,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
         const data = await fetchJSON('/api/site-backup/github/status');
         const intervalEl = document.getElementById('github-backup-interval');
+        const autoEl = document.getElementById('github-backup-auto-import');
         const ownerEl = document.getElementById('github-backup-owner');
         const repoEl = document.getElementById('github-backup-repo');
         const pathEl = document.getElementById('github-backup-path');
         if (intervalEl && data.interval) intervalEl.value = data.interval;
+        if (autoEl) autoEl.checked = data.autoImportOnBoot === true;
         if (ownerEl && document.activeElement !== ownerEl) {
           ownerEl.value = data.owner || '';
         }
@@ -23760,7 +23766,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               (data.path || '')
           );
         }
-        parts.push('auto: ' + (data.interval || 'none'));
+        parts.push('auto upload: ' + (data.interval || 'none'));
+        if (data.autoImportEffective) {
+          parts.push(
+            'auto import: ON' +
+              (data.autoImportEnvOverride && !data.autoImportOnBoot
+                ? ' (env)'
+                : data.autoImportEnvOverride
+                  ? ' (setting+env)'
+                  : '')
+          );
+        } else {
+          parts.push('auto import: off');
+        }
         if (data.lastUploadAtMs) {
           parts.push(
             'last upload: ' +
@@ -23775,6 +23793,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         if (data.lastUploadOk === false && data.lastUploadError) {
           parts.push('error: ' + String(data.lastUploadError).slice(0, 120));
+        }
+        if (data.lastAutoImportAtMs) {
+          parts.push(
+            'last import: ' +
+              new Date(data.lastAutoImportAtMs).toLocaleString() +
+              (data.lastAutoImportOk === false
+                ? ' (failed)'
+                : data.lastAutoImportOk === true
+                  ? ' (ok)'
+                  : '')
+          );
+        } else if (data.lastAutoImportSkippedReason) {
+          parts.push('last import skip: ' + String(data.lastAutoImportSkippedReason));
+        }
+        if (data.lastAutoImportOk === false && data.lastAutoImportError) {
+          parts.push(
+            'import error: ' + String(data.lastAutoImportError).slice(0, 120)
+          );
         }
         if (data.nextDueAtMs && data.interval && data.interval !== 'none') {
           parts.push('next due: ' + new Date(data.nextDueAtMs).toLocaleString());
@@ -23793,6 +23829,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const msg = document.getElementById('persist-reset-msg');
       try {
         const intervalEl = document.getElementById('github-backup-interval');
+        const autoEl = document.getElementById('github-backup-auto-import');
         const ownerEl = document.getElementById('github-backup-owner');
         const repoEl = document.getElementById('github-backup-repo');
         const pathEl = document.getElementById('github-backup-path');
@@ -23801,6 +23838,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             interval: intervalEl ? intervalEl.value : 'none',
+            autoImportOnBoot: autoEl ? !!autoEl.checked : false,
             owner: ownerEl ? ownerEl.value : '',
             repo: repoEl ? repoEl.value : '',
             path: pathEl ? pathEl.value : '',

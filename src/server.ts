@@ -547,6 +547,7 @@ export function createServer(): express.Application {
         owner?: string;
         repo?: string;
         path?: string;
+        autoImportOnBoot?: boolean;
       };
       if (
         body.interval != null &&
@@ -565,6 +566,10 @@ export function createServer(): express.Application {
         owner: body.owner,
         repo: body.repo,
         path: body.path,
+        autoImportOnBoot:
+          body.autoImportOnBoot != null
+            ? body.autoImportOnBoot === true
+            : undefined,
       });
       res.json({ ok: true, ...status });
     } catch (err) {
@@ -5834,5 +5839,21 @@ export function startServer(port?: number, host?: string): void {
     logger.info('Server', `Dashboard → ${url}`, { health: '/health' });
     console.log(`[server] Dashboard → ${url}`);
     console.log(`[server] Health    → http://${listenHost === '0.0.0.0' ? 'localhost' : listenHost}:${listenPort}/health`);
+
+    // Auto-import after listen so a slow GitHub restore cannot block the dashboard.
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const { maybeAutoImportGithubBackupOnBoot } =
+            require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+          await maybeAutoImportGithubBackupOnBoot();
+        } catch (err) {
+          console.warn(
+            '[github-backup] auto-import boot hook failed:',
+            err instanceof Error ? err.message : err
+          );
+        }
+      })();
+    }, 2500);
   });
 }

@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.88',
+    title: 'GitHub Backup auto-import on deploy',
+    sections: ['backup'],
+    items: [
+      'Back Up → GitHub Backup: enable Auto import on deploy (or GITHUB_BACKUP_AUTO_IMPORT=1) to restore the latest remote backup after listen when the SHA is new — dashboard stays up first.',
+    ],
+  },
+  {
     version: '1.2.87',
     title: 'Fix dashboard blank screen',
     sections: ['overview', 'microbots', 'backup'],

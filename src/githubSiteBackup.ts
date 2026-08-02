@@ -46,11 +46,22 @@ export interface GithubBackupSettings {
   owner: string;
   repo: string;
   path: string;
+  /**
+   * When true, restore from GitHub on boot/restart if remote SHA differs
+   * from lastAutoImportSha. Also enabled by GITHUB_BACKUP_AUTO_IMPORT=1|true|yes|on.
+   */
+  autoImportOnBoot: boolean;
   lastUploadAtMs: number | null;
   lastUploadOk: boolean | null;
   lastUploadError: string | null;
   lastUploadBytes: number | null;
   lastRemoteSha: string | null;
+  /** Blob SHA of the last successful auto-import (or manual GitHub restore). */
+  lastAutoImportSha: string | null;
+  lastAutoImportAtMs: number | null;
+  lastAutoImportOk: boolean | null;
+  lastAutoImportError: string | null;
+  lastAutoImportSkippedReason: string | null;
 }
 
 export interface GithubBackupStatus {
@@ -60,17 +71,28 @@ export interface GithubBackupStatus {
   repo: string | null;
   path: string;
   interval: GithubBackupInterval;
+  autoImportOnBoot: boolean;
+  /** Effective: setting OR GITHUB_BACKUP_AUTO_IMPORT env */
+  autoImportEffective: boolean;
+  autoImportEnvOverride: boolean;
   lastUploadAtMs: number | null;
   lastUploadAt: string | null;
   lastUploadOk: boolean | null;
   lastUploadError: string | null;
   lastUploadBytes: number | null;
+  lastAutoImportSha: string | null;
+  lastAutoImportAtMs: number | null;
+  lastAutoImportAt: string | null;
+  lastAutoImportOk: boolean | null;
+  lastAutoImportError: string | null;
+  lastAutoImportSkippedReason: string | null;
   nextDueAtMs: number | null;
   schedulerRunning: boolean;
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let uploadInFlight = false;
+let autoImportInFlight = false;
 
 function envToken(): string {
   return String(process.env.GITHUB_BACKUP_TOKEN || '').trim();
@@ -88,18 +110,36 @@ function envPath(): string {
   return String(process.env.GITHUB_BACKUP_PATH || '').trim();
 }
 
+/** Env force-on for ephemeral DATA_DIR wipe (Render disk missing, etc.). */
+export function envGithubBackupAutoImportEnabled(): boolean {
+  const v = String(process.env.GITHUB_BACKUP_AUTO_IMPORT || '')
+    .trim()
+    .toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
 function defaultSettings(): GithubBackupSettings {
   return {
     interval: 'none',
     owner: '',
     repo: '',
     path: '',
+    autoImportOnBoot: false,
     lastUploadAtMs: null,
     lastUploadOk: null,
     lastUploadError: null,
     lastUploadBytes: null,
     lastRemoteSha: null,
+    lastAutoImportSha: null,
+    lastAutoImportAtMs: null,
+    lastAutoImportOk: null,
+    lastAutoImportError: null,
+    lastAutoImportSkippedReason: null,
   };
+}
+
+function isAutoImportEnabled(s: GithubBackupSettings): boolean {
+  return s.autoImportOnBoot === true || envGithubBackupAutoImportEnabled();
 }
 
 function normalizeInterval(raw: unknown): GithubBackupInterval {
@@ -135,6 +175,7 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
     owner: String(raw.owner || '').trim(),
     repo: String(raw.repo || '').trim(),
     path: String(raw.path || '').trim(),
+    autoImportOnBoot: raw.autoImportOnBoot === true,
     lastUploadAtMs:
       raw.lastUploadAtMs != null && Number.isFinite(Number(raw.lastUploadAtMs))
         ? Number(raw.lastUploadAtMs)
@@ -149,6 +190,23 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
         : null,
     lastRemoteSha:
       raw.lastRemoteSha != null ? String(raw.lastRemoteSha) : null,
+    lastAutoImportSha:
+      raw.lastAutoImportSha != null ? String(raw.lastAutoImportSha) : null,
+    lastAutoImportAtMs:
+      raw.lastAutoImportAtMs != null &&
+      Number.isFinite(Number(raw.lastAutoImportAtMs))
+        ? Number(raw.lastAutoImportAtMs)
+        : null,
+    lastAutoImportOk:
+      typeof raw.lastAutoImportOk === 'boolean' ? raw.lastAutoImportOk : null,
+    lastAutoImportError:
+      raw.lastAutoImportError != null
+        ? String(raw.lastAutoImportError)
+        : null,
+    lastAutoImportSkippedReason:
+      raw.lastAutoImportSkippedReason != null
+        ? String(raw.lastAutoImportSkippedReason)
+        : null,
   };
 }
 
@@ -187,6 +245,7 @@ export function getGithubBackupStatus(): GithubBackupStatus {
     tokenConfigured && target.owner && target.repo && target.path
   );
   const due = nextDueAtMs(s);
+  const envOverride = envGithubBackupAutoImportEnabled();
   return {
     configured,
     tokenConfigured,
@@ -194,6 +253,9 @@ export function getGithubBackupStatus(): GithubBackupStatus {
     repo: target.repo || null,
     path: target.path,
     interval: s.interval,
+    autoImportOnBoot: s.autoImportOnBoot === true,
+    autoImportEffective: isAutoImportEnabled(s),
+    autoImportEnvOverride: envOverride,
     lastUploadAtMs: s.lastUploadAtMs,
     lastUploadAt: s.lastUploadAtMs
       ? new Date(s.lastUploadAtMs).toISOString()
@@ -201,6 +263,14 @@ export function getGithubBackupStatus(): GithubBackupStatus {
     lastUploadOk: s.lastUploadOk,
     lastUploadError: s.lastUploadError,
     lastUploadBytes: s.lastUploadBytes,
+    lastAutoImportSha: s.lastAutoImportSha,
+    lastAutoImportAtMs: s.lastAutoImportAtMs,
+    lastAutoImportAt: s.lastAutoImportAtMs
+      ? new Date(s.lastAutoImportAtMs).toISOString()
+      : null,
+    lastAutoImportOk: s.lastAutoImportOk,
+    lastAutoImportError: s.lastAutoImportError,
+    lastAutoImportSkippedReason: s.lastAutoImportSkippedReason,
     nextDueAtMs: configured && s.interval !== 'none' ? due : null,
     schedulerRunning: tickTimer != null,
   };
@@ -211,6 +281,7 @@ export function updateGithubBackupSettings(partial: {
   owner?: string;
   repo?: string;
   path?: string;
+  autoImportOnBoot?: boolean;
 }): GithubBackupStatus {
   const s = loadGithubBackupSettings();
   if (partial.interval != null) {
@@ -219,6 +290,9 @@ export function updateGithubBackupSettings(partial: {
   if (partial.owner != null) s.owner = String(partial.owner).trim();
   if (partial.repo != null) s.repo = String(partial.repo).trim();
   if (partial.path != null) s.path = String(partial.path).trim();
+  if (partial.autoImportOnBoot != null) {
+    s.autoImportOnBoot = partial.autoImportOnBoot === true;
+  }
   saveGithubBackupSettings(s);
   return getGithubBackupStatus();
 }
@@ -393,6 +467,7 @@ export async function restoreSiteBackupFromGithub(): Promise<{
   exportedAt: string;
   fileCount: number;
   path: string;
+  sha: string | null;
 }> {
   const s = loadGithubBackupSettings();
   const target = resolveGithubBackupTarget(s);
@@ -465,11 +540,17 @@ export async function restoreSiteBackupFromGithub(): Promise<{
   saveSiteBackup(backup);
   const result = restoreSiteBackup(backup);
 
-  if (get.json.sha) {
-    const next = loadGithubBackupSettings();
-    next.lastRemoteSha = get.json.sha;
-    saveGithubBackupSettings(next);
+  const sha = get.json.sha ? String(get.json.sha) : null;
+  const next = loadGithubBackupSettings();
+  if (sha) {
+    next.lastRemoteSha = sha;
+    next.lastAutoImportSha = sha;
   }
+  next.lastAutoImportAtMs = Date.now();
+  next.lastAutoImportOk = true;
+  next.lastAutoImportError = null;
+  next.lastAutoImportSkippedReason = null;
+  saveGithubBackupSettings(next);
 
   return {
     ok: true,
@@ -477,7 +558,118 @@ export async function restoreSiteBackupFromGithub(): Promise<{
     exportedAt: result.exportedAt,
     fileCount: result.fileCount,
     path: target.path,
+    sha,
   };
+}
+
+function recordAutoImportSkip(reason: string): void {
+  try {
+    const s = loadGithubBackupSettings();
+    s.lastAutoImportSkippedReason = reason.slice(0, 200);
+    saveGithubBackupSettings(s);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Boot/restart auto-import: restore from GitHub when enabled and remote SHA
+ * differs from lastAutoImportSha. Never throws — logs and returns.
+ * Call AFTER app.listen so the dashboard stays available.
+ */
+export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
+  skipped: boolean;
+  reason?: string;
+  ok?: boolean;
+  sha?: string | null;
+  fileCount?: number;
+  exportedAt?: string;
+  error?: string;
+}> {
+  if (autoImportInFlight) {
+    return { skipped: true, reason: 'in flight' };
+  }
+  const s = loadGithubBackupSettings();
+  if (!isAutoImportEnabled(s)) {
+    return { skipped: true, reason: 'disabled' };
+  }
+  const target = resolveGithubBackupTarget(s);
+  if (!target.token || !target.owner || !target.repo) {
+    console.log(
+      '[github-backup] auto-import skipped: not fully configured (token/owner/repo)'
+    );
+    recordAutoImportSkip('not configured');
+    return { skipped: true, reason: 'not configured' };
+  }
+
+  autoImportInFlight = true;
+  const source = envGithubBackupAutoImportEnabled()
+    ? s.autoImportOnBoot
+      ? 'setting+env'
+      : 'env'
+    : 'setting';
+  try {
+    console.log(
+      `[github-backup] auto-import checking remote (${source}) · ${target.owner}/${target.repo}/${target.path}`
+    );
+    const remoteSha = await fetchRemoteSha(
+      target.owner,
+      target.repo,
+      target.path,
+      target.token
+    );
+    if (!remoteSha) {
+      console.log('[github-backup] auto-import skipped: no remote backup file');
+      recordAutoImportSkip('no remote file');
+      return { skipped: true, reason: 'no remote file' };
+    }
+    // Prefer dedicated import SHA; do not treat upload-only lastRemoteSha as imported
+    // unless we never recorded an import (legacy: allow lastRemoteSha match to skip).
+    const lastImported =
+      s.lastAutoImportSha ||
+      (s.lastAutoImportAtMs != null ? s.lastRemoteSha : null);
+    if (lastImported && lastImported === remoteSha) {
+      console.log(
+        `[github-backup] auto-import skipped: sha unchanged (${remoteSha.slice(0, 7)})`
+      );
+      recordAutoImportSkip('sha unchanged');
+      return { skipped: true, reason: 'sha unchanged', sha: remoteSha };
+    }
+
+    console.log(
+      `[github-backup] auto-import restoring (remote ${remoteSha.slice(0, 7)} ≠ last ${
+        lastImported ? lastImported.slice(0, 7) : 'none'
+      })…`
+    );
+    const result = await restoreSiteBackupFromGithub();
+    console.log(
+      `[github-backup] auto-import ok · ${result.fileCount} files · ${result.exportedAt}` +
+        (result.sha ? ` · sha ${result.sha.slice(0, 7)}` : '')
+    );
+    return {
+      skipped: false,
+      ok: true,
+      sha: result.sha,
+      fileCount: result.fileCount,
+      exportedAt: result.exportedAt,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[github-backup] auto-import failed:', msg);
+    try {
+      const next = loadGithubBackupSettings();
+      next.lastAutoImportAtMs = Date.now();
+      next.lastAutoImportOk = false;
+      next.lastAutoImportError = msg.slice(0, 400);
+      next.lastAutoImportSkippedReason = null;
+      saveGithubBackupSettings(next);
+    } catch {
+      /* ignore */
+    }
+    return { skipped: false, ok: false, error: msg };
+  } finally {
+    autoImportInFlight = false;
+  }
 }
 
 async function scheduledTick(): Promise<void> {
