@@ -1739,20 +1739,37 @@ export function getActiveCascadeMatchFloors(
   ) {
     const def = resolveTradeProfileDefinition(gate);
     const m = def.match;
+    let minWalletQuality = Math.max(
+      0,
+      Math.min(100, Number(m.minWalletQuality ?? 40))
+    );
+    let minWalletCount = Math.max(
+      1,
+      Math.min(5, Number(m.minWalletCount ?? 1))
+    );
+    let minConviction = Math.max(
+      0,
+      Math.min(100, Number(m.minConviction ?? 40))
+    );
+    try {
+      const { isLearningModeActive, applyLearningMinOverlay } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive()) {
+        minWalletQuality = applyLearningMinOverlay(
+          minWalletQuality,
+          'minWalletQuality'
+        );
+        minConviction = applyLearningMinOverlay(minConviction, 'minConviction');
+        minWalletCount = applyLearningMinOverlay(minWalletCount, 'minCluster');
+      }
+    } catch {
+      /* ignore */
+    }
     return {
-      minWalletQuality: Math.max(
-        0,
-        Math.min(100, Number(m.minWalletQuality ?? 40))
-      ),
-      minWalletCount: Math.max(
-        1,
-        Math.min(5, Number(m.minWalletCount ?? 1))
-      ),
+      minWalletQuality,
+      minWalletCount,
       requireCluster: m.requireCluster === true,
-      minConviction: Math.max(
-        0,
-        Math.min(100, Number(m.minConviction ?? 40))
-      ),
+      minConviction,
       profileId: def.id,
       profileName: def.name,
       profileOwned: true,
@@ -1767,6 +1784,36 @@ export function getActiveCascadeMatchFloors(
     profileName: null,
     profileOwned: false,
   };
+}
+
+/** LM-adjusted profile match mins (Middle/Looser never raise vs def.match). */
+function learningAdjustedMatchMins(m: TradeProfileDefinition['match']): {
+  minConviction: number | null | undefined;
+  minWalletQuality: number | null | undefined;
+} {
+  let minConviction = m.minConviction;
+  let minWalletQuality = m.minWalletQuality;
+  try {
+    const { isLearningModeActive, applyLearningMinOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      if (minConviction != null && Number.isFinite(minConviction)) {
+        minConviction = applyLearningMinOverlay(
+          Number(minConviction),
+          'minConviction'
+        );
+      }
+      if (minWalletQuality != null && Number.isFinite(minWalletQuality)) {
+        minWalletQuality = applyLearningMinOverlay(
+          Number(minWalletQuality),
+          'minWalletQuality'
+        );
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return { minConviction, minWalletQuality };
 }
 
 export function getTradeProfilesStatus(): {
@@ -2632,6 +2679,9 @@ function scoreProfile(
     return { score: 0, reason: floors.reason || 'lane floors' };
   }
   const m = def.match;
+  const lmMatch = learningAdjustedMatchMins(m);
+  const minConviction = lmMatch.minConviction;
+  const minWalletQuality = lmMatch.minWalletQuality;
   let score = 0;
   const bits: string[] = [];
 
@@ -2640,8 +2690,8 @@ function scoreProfile(
       ? Number(ctx.convictionScore)
       : null;
   // Known-only: unknown conviction does not hard-zero early lane fight (computed later in gate)
-  if (m.minConviction != null && conv != null && conv < m.minConviction) {
-    return { score: 0, reason: `conviction < ${m.minConviction}` };
+  if (minConviction != null && conv != null && conv < minConviction) {
+    return { score: 0, reason: `conviction < ${minConviction}` };
   }
 
   const mc =
@@ -3033,7 +3083,7 @@ function scoreProfile(
     if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a trend hold setup' };
     }
-    if (conv != null && conv < (m.minConviction ?? 50)) {
+    if (conv != null && conv < (minConviction ?? 50)) {
       return { score: 0, reason: 'conviction too low for trend' };
     }
     let quality = 0;
@@ -3109,7 +3159,7 @@ function scoreProfile(
     if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a compounder setup' };
     }
-    if (conv != null && conv < (m.minConviction ?? 45)) {
+    if (conv != null && conv < (minConviction ?? 45)) {
       return { score: 0, reason: 'conviction too low for compounder' };
     }
     const ageFloor =
@@ -3212,7 +3262,7 @@ function scoreProfile(
     ) {
       return { score: 0, reason: 'not a clean copy / mirror setup' };
     }
-    if (conv != null && conv < (m.minConviction ?? 48)) {
+    if (conv != null && conv < (minConviction ?? 48)) {
       return { score: 0, reason: 'conviction too low for mirror' };
     }
     // Late fill after peak — copy already chasing; Mirror wants fresher entries
@@ -3233,7 +3283,7 @@ function scoreProfile(
       if (
         wallets < 2 ||
         wqEarly == null ||
-        (m.minWalletQuality != null && wqEarly < m.minWalletQuality)
+        (minWalletQuality != null && wqEarly < minWalletQuality)
       ) {
         return { score: 0, reason: 'need wallet convergence' };
       }
@@ -3242,10 +3292,10 @@ function scoreProfile(
       ctx.walletQualityAvg != null && Number.isFinite(ctx.walletQualityAvg)
         ? Number(ctx.walletQualityAvg)
         : null;
-    if (m.minWalletQuality != null && wq != null && wq < m.minWalletQuality) {
+    if (minWalletQuality != null && wq != null && wq < minWalletQuality) {
       return {
         score: 0,
-        reason: `wallet quality ${wq.toFixed(0)} < ${m.minWalletQuality}`,
+        reason: `wallet quality ${wq.toFixed(0)} < ${minWalletQuality}`,
       };
     }
     // Unknown WQ in BT: demand higher conviction + cluster (skip when conviction pending)
@@ -3272,7 +3322,7 @@ function scoreProfile(
       score += 8;
       bits.push(`${wallets} wallets (quality OK)`);
     }
-    if (wq != null && (m.minWalletQuality == null || wq >= m.minWalletQuality)) {
+    if (wq != null && (minWalletQuality == null || wq >= minWalletQuality)) {
       score += 12;
       bits.push(`WQ ${wq.toFixed(0)}`);
     }
@@ -3302,7 +3352,7 @@ function scoreProfile(
     ) {
       return { score: 0, reason: 'not high-win-rate selective' };
     }
-    if (conv != null && conv < (m.minConviction ?? 55)) {
+    if (conv != null && conv < (minConviction ?? 55)) {
       return { score: 0, reason: 'conviction too low' };
     }
     if (
@@ -3316,10 +3366,10 @@ function scoreProfile(
       ctx.walletQualityAvg != null && Number.isFinite(ctx.walletQualityAvg)
         ? Number(ctx.walletQualityAvg)
         : null;
-    if (m.minWalletQuality != null && wq != null && wq < m.minWalletQuality) {
+    if (minWalletQuality != null && wq != null && wq < minWalletQuality) {
       return {
         score: 0,
-        reason: `wallet quality ${wq.toFixed(0)} < ${m.minWalletQuality}`,
+        reason: `wallet quality ${wq.toFixed(0)} < ${minWalletQuality}`,
       };
     }
     const hwrConv =
@@ -3334,7 +3384,7 @@ function scoreProfile(
       score += 14;
       bits.push(`cluster ${effectiveClusterWallets}`);
     }
-    if (wq != null && m.minWalletQuality != null && wq >= m.minWalletQuality) {
+    if (wq != null && minWalletQuality != null && wq >= minWalletQuality) {
       score += 12;
       bits.push(`WQ ${wq.toFixed(0)}`);
     }

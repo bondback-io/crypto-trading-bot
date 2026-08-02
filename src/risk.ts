@@ -196,7 +196,14 @@ export function calculateDynamicPositionSize(options: {
   let size = baseSol * riskFactor * convictionFactor * migrationFactor;
 
   // Concurrent-aware scale: shrink toward minTradeSol as open book fills
-  const maxConc = Math.max(1, config.filters.maxConcurrentPositions || 1);
+  let maxConc = Math.max(1, config.filters.maxConcurrentPositions || 1);
+  try {
+    const { learningModeAdjustedMaxConcurrent } =
+      require('./learningMode') as typeof import('./learningMode');
+    maxConc = learningModeAdjustedMaxConcurrent(maxConc);
+  } catch {
+    /* ignore */
+  }
   const openCount =
     options.openCount != null && Number.isFinite(options.openCount)
       ? Math.max(0, options.openCount)

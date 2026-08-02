@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.77',
+    title: 'Learning Mode softens gates correctly',
+    sections: ['learning', 'microbots', 'risk'],
+    items: [
+      'Middle/Looser now blend with your live baselines (never raise conviction/WQ/cluster mins or tighten sniper/bundler maxes). Fixes Learning Mode accidentally setting conviction ~73 over soft micro-bot floors.',
+      'Middle/Looser also raise effective Max Positions (≥16 / ≥24) and soften trade-rate at runtime without changing the Max Positions slider or SOL size.',
+      'Profile match conviction/WQ aligned with the same soft blend; Settings tip clarifies throughput vs sizing.',
+    ],
+  },
+  {
     version: '1.2.76',
     title: 'Micro-bot Learning Mode',
     sections: ['learning', 'microbots', 'risk'],

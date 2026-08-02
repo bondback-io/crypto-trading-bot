@@ -34,24 +34,28 @@ function activeProfileStyleFloors():
 
 /** Min wallet quality — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinWalletQualityScore(): number {
+  const profile = activeProfileStyleFloors();
+  let score: number;
+  if (profile) {
+    score = profile.minWalletQuality;
+  } else {
+    const base = config.filters.minWalletQualityScore ?? 55;
+    score = base;
+    try {
+      const { getQualityModeOverlays } =
+        require('./strategies') as typeof import('./strategies');
+      const ov = getQualityModeOverlays().minWalletQualityScore;
+      if (ov != null) score = Math.max(score, ov);
+    } catch {
+      /* ignore bootstrap */
+    }
+  }
   try {
     const { isLearningModeActive, applyLearningMinOverlay } =
       require('./learningMode') as typeof import('./learningMode');
     if (isLearningModeActive()) {
-      return Math.min(85, applyLearningMinOverlay(55, 'minWalletQuality'));
+      score = applyLearningMinOverlay(score, 'minWalletQuality');
     }
-  } catch {
-    /* ignore bootstrap */
-  }
-  const profile = activeProfileStyleFloors();
-  if (profile) return Math.min(85, profile.minWalletQuality);
-  const base = config.filters.minWalletQualityScore ?? 55;
-  let score = base;
-  try {
-    const { getQualityModeOverlays } =
-      require('./strategies') as typeof import('./strategies');
-    const ov = getQualityModeOverlays().minWalletQualityScore;
-    if (ov != null) score = Math.max(score, ov);
   } catch {
     /* ignore bootstrap */
   }
@@ -60,24 +64,28 @@ export function effectiveMinWalletQualityScore(): number {
 
 /** Min conviction — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinConvictionScore(): number {
+  const profile = activeProfileStyleFloors();
+  let score: number;
+  if (profile) {
+    score = profile.minConviction;
+  } else {
+    const base = config.selective?.minConvictionScore ?? 40;
+    score = base;
+    try {
+      const { getQualityModeOverlays } =
+        require('./strategies') as typeof import('./strategies');
+      const ov = getQualityModeOverlays().minConvictionScore;
+      if (ov != null) score = Math.max(score, ov);
+    } catch {
+      /* ignore bootstrap */
+    }
+  }
   try {
     const { isLearningModeActive, applyLearningMinOverlay } =
       require('./learningMode') as typeof import('./learningMode');
     if (isLearningModeActive()) {
-      return Math.min(80, applyLearningMinOverlay(40, 'minConviction'));
+      score = applyLearningMinOverlay(score, 'minConviction');
     }
-  } catch {
-    /* ignore bootstrap */
-  }
-  const profile = activeProfileStyleFloors();
-  if (profile) return Math.min(80, profile.minConviction);
-  const base = config.selective?.minConvictionScore ?? 40;
-  let score = base;
-  try {
-    const { getQualityModeOverlays } =
-      require('./strategies') as typeof import('./strategies');
-    const ov = getQualityModeOverlays().minConvictionScore;
-    if (ov != null) score = Math.max(score, ov);
   } catch {
     /* ignore bootstrap */
   }
@@ -86,33 +94,37 @@ export function effectiveMinConvictionScore(): number {
 
 /** Cluster / convergence wallet floor — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveClusterMinWallets(): number {
+  const profile = activeProfileStyleFloors();
+  let floor: number;
+  if (profile) {
+    floor = profile.minWalletCount;
+  } else {
+    const base = Math.max(
+      1,
+      config.filters.clusterMinWallets ?? 1,
+      config.filters.convergenceRequired ?? 1,
+      config.selective?.minWalletsForTrade ?? 1
+    );
+    floor = base;
+    try {
+      const { getQualityModeOverlays } =
+        require('./strategies') as typeof import('./strategies');
+      const ov = getQualityModeOverlays().minClusterWallets;
+      if (ov != null) floor = Math.max(floor, ov);
+    } catch {
+      /* ignore bootstrap */
+    }
+  }
   try {
     const { isLearningModeActive, applyLearningMinOverlay } =
       require('./learningMode') as typeof import('./learningMode');
     if (isLearningModeActive()) {
-      return Math.min(5, Math.max(1, applyLearningMinOverlay(1, 'minCluster')));
+      floor = applyLearningMinOverlay(floor, 'minCluster');
     }
   } catch {
     /* ignore bootstrap */
   }
-  const profile = activeProfileStyleFloors();
-  if (profile) return Math.min(5, Math.max(1, profile.minWalletCount));
-  const base = Math.max(
-    1,
-    config.filters.clusterMinWallets ?? 1,
-    config.filters.convergenceRequired ?? 1,
-    config.selective?.minWalletsForTrade ?? 1
-  );
-  let floor = base;
-  try {
-    const { getQualityModeOverlays } =
-      require('./strategies') as typeof import('./strategies');
-    const ov = getQualityModeOverlays().minClusterWallets;
-    if (ov != null) floor = Math.max(floor, ov);
-  } catch {
-    /* ignore bootstrap */
-  }
-  return Math.min(5, floor);
+  return Math.min(5, Math.max(1, floor));
 }
 
 /** Max entry age minutes. */

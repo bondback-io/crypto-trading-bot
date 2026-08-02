@@ -4565,11 +4565,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   const openCount = paperTrader.getOpenPositions().length;
-  if (openCount >= filters.maxConcurrentPositions) {
+  let maxConcurrent = Math.max(1, Number(filters.maxConcurrentPositions) || 1);
+  try {
+    const { learningModeAdjustedMaxConcurrent } =
+      require('./learningMode') as typeof import('./learningMode');
+    maxConcurrent = learningModeAdjustedMaxConcurrent(maxConcurrent);
+  } catch {
+    /* ignore */
+  }
+  if (openCount >= maxConcurrent) {
     console.log(
-      `[monitor] Signal rejected (${signalKind}) — max concurrent positions (${filters.maxConcurrentPositions})`
+      `[monitor] Signal rejected (${signalKind}) — max concurrent positions (${maxConcurrent})`
     );
-    recordRejectedSignal(signal, `max positions (${filters.maxConcurrentPositions})`);
+    recordRejectedSignal(signal, `max positions (${maxConcurrent})`);
     return false;
   }
 
@@ -5254,7 +5262,14 @@ export function getEntryPathLightStatus(): {
   const rpc = getRpcStats();
   const rpcHealthy = Boolean(rpc.ok);
   const openCount = paperTrader.getOpenPositions().length;
-  const maxPos = Math.max(1, Number(config.filters?.maxConcurrentPositions) || 1);
+  let maxPos = Math.max(1, Number(config.filters?.maxConcurrentPositions) || 1);
+  try {
+    const { learningModeAdjustedMaxConcurrent } =
+      require('./learningMode') as typeof import('./learningMode');
+    maxPos = learningModeAdjustedMaxConcurrent(maxPos);
+  } catch {
+    /* ignore */
+  }
   const copyOn = isStrategyEnabled('smart_money_copy');
   const scannerOn = isStrategyEnabled('ta_market_scanner');
   const scanner = getScannerStatus();

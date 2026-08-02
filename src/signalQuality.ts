@@ -998,7 +998,19 @@ export function canExecuteTradeAt(
 
   const prior = recentTimes.filter((t) => t <= nowMs);
 
-  const maxPerHour = sel.maxTradesPerHour ?? 0;
+  let maxPerHour = sel.maxTradesPerHour ?? 0;
+  let minGap = sel.minMsBetweenTrades ?? 0;
+  try {
+    const {
+      learningModeAdjustedMaxTradesPerHour,
+      learningModeAdjustedMinMsBetweenTrades,
+    } = require('./learningMode') as typeof import('./learningMode');
+    maxPerHour = learningModeAdjustedMaxTradesPerHour(maxPerHour);
+    minGap = learningModeAdjustedMinMsBetweenTrades(minGap);
+  } catch {
+    /* ignore */
+  }
+
   if (maxPerHour > 0) {
     const hourAgo = nowMs - 3_600_000;
     const recent = prior.filter((t) => t >= hourAgo);
@@ -1010,7 +1022,6 @@ export function canExecuteTradeAt(
     }
   }
 
-  const minGap = sel.minMsBetweenTrades ?? 0;
   if (minGap > 0 && prior.length > 0) {
     const last = prior.reduce((m, t) => (t > m ? t : m), 0);
     if (nowMs - last < minGap) {
@@ -1033,9 +1044,17 @@ export function getTradeRateStatus(): {
   const hourAgo = now - 3_600_000;
   const recent = recentTradeTimes.filter((t) => t >= hourAgo);
   const last = recentTradeTimes[recentTradeTimes.length - 1];
+  let maxTradesPerHour = config.selective?.maxTradesPerHour ?? 0;
+  try {
+    const { learningModeAdjustedMaxTradesPerHour } =
+      require('./learningMode') as typeof import('./learningMode');
+    maxTradesPerHour = learningModeAdjustedMaxTradesPerHour(maxTradesPerHour);
+  } catch {
+    /* ignore */
+  }
   return {
     tradesLastHour: recent.length,
-    maxTradesPerHour: config.selective?.maxTradesPerHour ?? 0,
+    maxTradesPerHour,
     msSinceLastTrade: last != null ? now - last : null,
   };
 }

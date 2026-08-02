@@ -7008,7 +7008,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mint mt-2" id="risk-status">—</div>
 
         <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="learning-mode-card">
-          <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Overlays micro-bot entry gates (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots among passers. Does not change position sizing. Default OFF."></span></div>
+          <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Softens micro-bot entry gates vs your live baselines (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots. Middle/Looser never tighten vs current floors; also raises effective Max Positions (≥16/≥24) and softens trade-rate at runtime without changing the Max Positions slider or SOL size. Default OFF."></span></div>
           <p class="text-xs text-slate-400 mb-2">Explore gate strictness for micro-bots. Fairness boost reorders among passers only — hard floors still apply.</p>
           <div class="flex flex-wrap items-center gap-3 mb-2">
             <label class="ctl-check" title="Turn Learning Mode on/off">
@@ -7028,7 +7028,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <button type="button" class="btn btn-secondary text-xs" onclick="resetLearningMode()" title="Restore snapshot from first ON; turns Learning Mode OFF. Does not wipe episodes/ML.">Reset Learning Mode</button>
             <span class="mint text-xs" id="learning-mode-status">—</span>
           </div>
-          <div id="learning-mode-live-warning" class="hidden text-amber-300 text-xs mt-2 font-medium rounded-md px-2.5 py-2 border border-amber-600/60 bg-amber-950/40">Live trading with Learning Mode ON — gate overlays are active. Position sizing is unchanged.</div>
+          <div id="learning-mode-live-warning" class="hidden text-amber-300 text-xs mt-2 font-medium rounded-md px-2.5 py-2 border border-amber-600/60 bg-amber-950/40">Live trading with Learning Mode ON — softened gate overlays + effective concurrent/rate are active. Position size (SOL) and the Max Positions slider baseline are unchanged.</div>
           <p class="text-xs text-slate-500 mt-2 mb-0">Does not change position sizing. Snapshot captured on first OFF→ON; Reset restores it.</p>
         </div>
 
@@ -11643,7 +11643,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           mbBanner.classList.remove('hidden');
           mbBanner.innerHTML =
             '<strong>' + (lm.label || ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle'))) +
-            '</strong> — gate overlays + fairness boost among passers. Does not change position sizing.';
+            '</strong> — softens entry gates vs your baselines; Middle/Looser never tighten. Effective Max Positions ≥16/≥24 + softer trade-rate at runtime. SOL size unchanged.';
         } else {
           mbBanner.classList.add('hidden');
           mbBanner.innerHTML = '';

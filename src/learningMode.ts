@@ -1,6 +1,8 @@
 /**
  * Micro-bot Learning Mode — global gate overlays, fairness boost, and snapshot/reset.
- * Default OFF. Does not change position sizing.
+ * Default OFF. Does not change position *sizing* (SOL per trade).
+ * Middle/Looser soften entry gates vs the live baseline and may raise effective
+ * concurrent / rate floors at runtime (never persist over the Max Positions knob).
  */
 
 import { config, HARD_FILTER_FLOORS } from './config';
@@ -90,29 +92,30 @@ const GATE_MATRIX: Record<LearningModeStrictness, LearningModeGateOverlays> = {
     minTokenAgeMult: 1.2,
     autoScoreMinDelta: 4,
   },
+  /** Soft ceilings for mins / floors for maxes — blended with live baseline. */
   middle: {
-    minConviction: 73,
-    minCluster: 1,
-    minWalletQuality: 55,
-    sniperCountMax: 53,
-    bundlerPctMax: 59,
-    top10MinPct: 5.5,
-    top10MaxPct: 29,
-    devHoldingsMaxPct: 17,
-    minMarketCapMult: 1,
-    minLiquidityMult: 1,
-    minTokenAgeMult: 1,
-    autoScoreMinDelta: 0,
-  },
-  looser: {
     minConviction: 68,
     minCluster: 1,
-    minWalletQuality: 48,
-    sniperCountMax: 65,
-    bundlerPctMax: 68,
+    minWalletQuality: 52,
+    sniperCountMax: 58,
+    bundlerPctMax: 62,
+    top10MinPct: 5,
+    top10MaxPct: 32,
+    devHoldingsMaxPct: 18,
+    minMarketCapMult: 0.95,
+    minLiquidityMult: 0.95,
+    minTokenAgeMult: 0.9,
+    autoScoreMinDelta: -2,
+  },
+  looser: {
+    minConviction: 60,
+    minCluster: 1,
+    minWalletQuality: 45,
+    sniperCountMax: 70,
+    bundlerPctMax: 72,
     top10MinPct: 4,
-    top10MaxPct: 34,
-    devHoldingsMaxPct: 22,
+    top10MaxPct: 36,
+    devHoldingsMaxPct: 24,
     minMarketCapMult: 0.9,
     minLiquidityMult: 0.9,
     minTokenAgeMult: 0.8,
@@ -120,7 +123,7 @@ const GATE_MATRIX: Record<LearningModeStrictness, LearningModeGateOverlays> = {
   },
 };
 
-/** Absolute hard floors Learning Mode must never undercut. */
+/** Floors when Learning Mode tightens (stricter). */
 const ABSOLUTE_FLOORS = {
   minConviction: 55,
   minCluster: 1,
@@ -134,6 +137,22 @@ const ABSOLUTE_FLOORS = {
   minLiquidityUsd: HARD_FILTER_FLOORS.minLiquidityUsd,
   minTokenAgeHours: 0,
 } as const;
+
+/** Soft path may go below stricter absolutes down to micro-bot match floors. */
+const SOFT_ABS_FLOORS = {
+  minConviction: 25,
+  minCluster: 1,
+  minWalletQuality: 25,
+  top10MinPct: 0,
+  sniperCountMaxMin: 10,
+  bundlerPctMaxMin: 15,
+  top10MaxPct: 20,
+  devHoldingsMaxPct: 8,
+} as const;
+
+function isSoftenStrictness(s: LearningModeStrictness): boolean {
+  return s === 'middle' || s === 'looser';
+}
 
 /** Max fairness score bump for zero-episode profiles. */
 export const LEARNING_FAIRNESS_MAX_BUMP = 8;
@@ -398,7 +417,10 @@ export function resetLearningMode(): LearningModeConfig {
   return { ...lm };
 }
 
-/** Apply absolute min overlay with floor/ceiling clamps. */
+/**
+ * Blend min-gate overlay with live baseline.
+ * Stricter: max(baseline, overlay). Middle/Looser: min(baseline, overlay) — never raise.
+ */
 export function applyLearningMinOverlay(
   baseline: number,
   overlayKey:
@@ -409,19 +431,44 @@ export function applyLearningMinOverlay(
 ): number {
   const ov = getLearningModeGateOverlays();
   if (!ov) return baseline;
+  const strictness = getLearningModeStrictness();
+  const soften = isSoftenStrictness(strictness);
+  const base = Number.isFinite(baseline) ? baseline : 0;
+
+  // Disabled / Risk-Off zero floors stay disabled on soft path
+  if (soften && overlayKey === 'top10MinPct' && base <= 0) return base;
+
+  let overlay: number;
+  let lo: number;
+  let hi: number;
   if (overlayKey === 'minConviction') {
-    return clamp(ov.minConviction, ABSOLUTE_FLOORS.minConviction, 90);
+    overlay = ov.minConviction;
+    lo = soften ? SOFT_ABS_FLOORS.minConviction : ABSOLUTE_FLOORS.minConviction;
+    hi = 90;
+  } else if (overlayKey === 'minCluster') {
+    overlay = ov.minCluster;
+    lo = soften ? SOFT_ABS_FLOORS.minCluster : ABSOLUTE_FLOORS.minCluster;
+    hi = 5;
+  } else if (overlayKey === 'minWalletQuality') {
+    overlay = ov.minWalletQuality;
+    lo = soften
+      ? SOFT_ABS_FLOORS.minWalletQuality
+      : ABSOLUTE_FLOORS.minWalletQuality;
+    hi = 85;
+  } else {
+    overlay = ov.top10MinPct;
+    lo = soften ? SOFT_ABS_FLOORS.top10MinPct : ABSOLUTE_FLOORS.top10MinPct;
+    hi = 40;
   }
-  if (overlayKey === 'minCluster') {
-    return clamp(ov.minCluster, ABSOLUTE_FLOORS.minCluster, 5);
-  }
-  if (overlayKey === 'minWalletQuality') {
-    return clamp(ov.minWalletQuality, ABSOLUTE_FLOORS.minWalletQuality, 85);
-  }
-  // top10MinPct
-  return clamp(ov.top10MinPct, ABSOLUTE_FLOORS.top10MinPct, 40);
+
+  const blended = soften ? Math.min(base, overlay) : Math.max(base, overlay);
+  return clamp(blended, lo, hi);
 }
 
+/**
+ * Blend max-gate overlay with live baseline.
+ * Stricter: min(baseline, overlay). Middle/Looser: max(baseline, overlay) — never tighten.
+ */
 export function applyLearningMaxOverlay(
   baseline: number,
   overlayKey:
@@ -432,29 +479,60 @@ export function applyLearningMaxOverlay(
 ): number {
   const ov = getLearningModeGateOverlays();
   if (!ov) return baseline;
+  const strictness = getLearningModeStrictness();
+  const soften = isSoftenStrictness(strictness);
+  const base = Number.isFinite(baseline) ? baseline : 0;
+
+  let overlay: number;
+  let lo: number;
+  let hi: number;
   if (overlayKey === 'sniperCountMax') {
-    return clamp(ov.sniperCountMax, ABSOLUTE_FLOORS.sniperCountMaxMin, 100);
+    overlay = ov.sniperCountMax;
+    lo = soften
+      ? SOFT_ABS_FLOORS.sniperCountMaxMin
+      : ABSOLUTE_FLOORS.sniperCountMaxMin;
+    hi = 100;
+  } else if (overlayKey === 'bundlerPctMax') {
+    overlay = ov.bundlerPctMax;
+    lo = soften
+      ? SOFT_ABS_FLOORS.bundlerPctMaxMin
+      : ABSOLUTE_FLOORS.bundlerPctMaxMin;
+    hi = 90;
+  } else if (overlayKey === 'top10MaxPct') {
+    overlay = ov.top10MaxPct;
+    lo = soften ? SOFT_ABS_FLOORS.top10MaxPct : ABSOLUTE_FLOORS.top10MaxPct;
+    hi = 80;
+  } else {
+    overlay = ov.devHoldingsMaxPct;
+    lo = soften
+      ? SOFT_ABS_FLOORS.devHoldingsMaxPct
+      : ABSOLUTE_FLOORS.devHoldingsMaxPct;
+    hi = 40;
   }
-  if (overlayKey === 'bundlerPctMax') {
-    return clamp(ov.bundlerPctMax, ABSOLUTE_FLOORS.bundlerPctMaxMin, 90);
-  }
-  if (overlayKey === 'top10MaxPct') {
-    return clamp(ov.top10MaxPct, ABSOLUTE_FLOORS.top10MaxPct, 80);
-  }
-  return clamp(ov.devHoldingsMaxPct, ABSOLUTE_FLOORS.devHoldingsMaxPct, 40);
+
+  const blended = soften ? Math.max(base, overlay) : Math.min(base, overlay);
+  return clamp(blended, lo, hi);
 }
 
-/** Relative floor: multiply baseline, never undercut hard floor. */
+/**
+ * Relative floor: multiply baseline.
+ * Soft path: never re-impose hard floors when baseline is 0 (Risk Off bypass).
+ */
 export function applyLearningRelativeFloor(
   baseline: number,
   mult: number,
   hardFloor: number
 ): number {
   if (!Number.isFinite(baseline) || baseline <= 0) {
-    return Math.max(hardFloor, 0);
+    return Math.max(0, Number.isFinite(baseline) ? baseline : 0);
   }
   const scaled = baseline * mult;
-  // Floored at hard safety floor (and never negative)
+  if (!isLearningModeActive()) return Math.max(hardFloor, scaled);
+  const soften = isSoftenStrictness(getLearningModeStrictness());
+  if (soften) {
+    // Soften toward scaled but never below hard safety when Risk On floors exist
+    return Math.max(hardFloor, scaled);
+  }
   return Math.max(hardFloor, scaled);
 }
 
@@ -492,6 +570,39 @@ export function learningModeAdjustedAutoMinScore(baseline: number): number {
   const ov = getLearningModeGateOverlays();
   if (!ov) return baseline;
   return clamp(baseline + ov.autoScoreMinDelta, 20, 95);
+}
+
+/**
+ * Runtime max concurrent opens — does not persist Max Positions slider.
+ * Middle ≥16, Looser ≥24 vs baseline; Stricter unchanged.
+ */
+export function learningModeAdjustedMaxConcurrent(baseline: number): number {
+  const b = Math.max(1, Number(baseline) || 1);
+  if (!isLearningModeActive()) return b;
+  const s = getLearningModeStrictness();
+  if (s === 'stricter') return b;
+  if (s === 'looser') return Math.max(b, 24);
+  return Math.max(b, 16);
+}
+
+/** Runtime hourly trade cap floor while LM softens. 0 = unlimited stays unlimited. */
+export function learningModeAdjustedMaxTradesPerHour(baseline: number): number {
+  const b = Number(baseline) || 0;
+  if (!isLearningModeActive() || b <= 0) return b;
+  const s = getLearningModeStrictness();
+  if (s === 'stricter') return b;
+  if (s === 'looser') return Math.max(b, 24);
+  return Math.max(b, 18);
+}
+
+/** Runtime cooldown ceiling (shorten) while LM softens. */
+export function learningModeAdjustedMinMsBetweenTrades(baseline: number): number {
+  const b = Number(baseline) || 0;
+  if (!isLearningModeActive() || b <= 0) return b;
+  const s = getLearningModeStrictness();
+  if (s === 'stricter') return b;
+  if (s === 'looser') return Math.min(b, 15_000);
+  return Math.min(b, 20_000);
 }
 
 /**
