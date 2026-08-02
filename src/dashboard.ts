@@ -11231,7 +11231,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadTradeProfileIntelligence();
         loadLaneDecisions();
       }
-      loadMicroBotPerformance();
+      // Performance is heavy (episode merge) — only refresh when Bot Performance tab is open
+      try {
+        const botperf = document.querySelector('[data-tab-panel="botperf"]');
+        if (botperf && !botperf.classList.contains('hidden')) {
+          loadMicroBotPerformance();
+        }
+      } catch (_) {}
       renderAutoScoringUi(tp);
     }
 
@@ -11776,17 +11782,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const detail = document.getElementById('tp-scoreboard-detail');
       const panel = document.getElementById('tp-learning-panel');
       try {
-        const data = await fetchJSON(
-          '/api/trade-profiles/intelligence?window=' +
-            encodeURIComponent(window._mbpWindow || '7d')
-        );
+        const data = await fetchJSON('/api/trade-profiles/intelligence');
         window.__tpIntelligence = data;
-        if (data.performance) {
-          window.__mbpPerformance = data.performance;
-          renderMicroBotPerformance(data.performance);
-        } else {
-          loadMicroBotPerformance();
-        }
         const rows = (data.scoreboard && data.scoreboard.rows) || [];
         const profiles =
           (window.__tradeProfilesStatus && window.__tradeProfilesStatus.profiles) ||
@@ -12916,7 +12913,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'botperf') {
         try { loadMicroBotPerformance(); } catch (_) {}
-        try { loadStrategies(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {

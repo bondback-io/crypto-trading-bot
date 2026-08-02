@@ -1618,6 +1618,16 @@ export function isSmartBotProfilesEnabled(): boolean {
   return ensureState().smartBotProfiles === true;
 }
 
+/** Lightweight enabled map — avoids full getTradeProfilesStatus(). */
+export function getTradeProfileEnabledFlags(): Record<string, boolean> {
+  const state = ensureState();
+  const out: Record<string, boolean> = {};
+  for (const p of TRADE_PROFILE_CATALOG) {
+    out[p.id] = state.profiles[p.id] !== false;
+  }
+  return out;
+}
+
 export function setSmartBotProfilesEnabled(
   enabled: boolean
 ): TradeProfileRuntimeState {

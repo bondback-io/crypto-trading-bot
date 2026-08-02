@@ -3789,6 +3789,8 @@ export class PaperTrader {
   /** Per-profile scoreboard + learning suggestions for Trade Profiles UI */
   getTradeProfileIntelligence(opts?: {
     performanceWindow?: import('./microBotPerformance').PerformanceWindow;
+    /** Heavy — only when explicitly requested (Bot Performance tab). */
+    includePerformance?: boolean;
   }) {
     const {
       buildTradeProfileScoreboard,
@@ -3812,10 +3814,16 @@ export class PaperTrader {
       scoreboard,
       getLaneOutcomeStatsByProfile()
     );
-    const performance = this.getMicroBotPerformance(
-      opts?.performanceWindow ?? '7d'
-    );
-    return { scoreboard, suggestions, performance };
+    if (opts?.includePerformance) {
+      return {
+        scoreboard,
+        suggestions,
+        performance: this.getMicroBotPerformance(
+          opts?.performanceWindow ?? '7d'
+        ),
+      };
+    }
+    return { scoreboard, suggestions };
   }
 
   /** Ranked micro-bot performance for a time window (closed + episodes). */
@@ -3828,7 +3836,7 @@ export class PaperTrader {
       TRADE_PROFILE_CATALOG,
       ensureTradeProfilesInitialized,
       isProfileLearningModeOptedIn,
-      getTradeProfilesStatus,
+      getTradeProfileEnabledFlags,
     } = require('./tradeProfiles') as typeof import('./tradeProfiles');
     const { isLearningModeActive } =
       require('./learningMode') as typeof import('./learningMode');
@@ -3836,10 +3844,18 @@ export class PaperTrader {
       require('./marketData') as typeof import('./marketData');
     ensureTradeProfilesInitialized();
     const win = parsePerformanceWindow(window, '7d');
-    const status = getTradeProfilesStatus();
-    const enabledById = new Map(
-      status.profiles.map((p) => [p.id, p.enabled !== false] as const)
-    );
+
+    // Short TTL cache — episode merge is disk-heavy; avoid blocking the event loop
+    // on every intelligence / strategies poll.
+    const cacheKey = win;
+    const now = Date.now();
+    const cached = (this as { _mbpCache?: { key: string; at: number; value: unknown } })
+      ._mbpCache;
+    if (cached && cached.key === cacheKey && now - cached.at < 12_000) {
+      return cached.value as ReturnType<typeof buildMicroBotPerformance>;
+    }
+
+    const enabledById = getTradeProfileEnabledFlags();
     const learningModeOptIn: Partial<Record<string, boolean>> = {};
     const catalog = TRADE_PROFILE_CATALOG.map((p) => {
       learningModeOptIn[p.id] = isProfileLearningModeOptedIn(p.id);
@@ -3848,7 +3864,7 @@ export class PaperTrader {
         name: p.name,
         icon: p.icon,
         color: p.color,
-        enabled: enabledById.get(p.id) !== false,
+        enabled: enabledById[p.id] !== false,
       };
     });
     let solUsd: number | null = null;
@@ -3858,7 +3874,7 @@ export class PaperTrader {
     } catch {
       /* optional */
     }
-    return buildMicroBotPerformance({
+    const value = buildMicroBotPerformance({
       closed: this.closedPositions,
       catalog,
       window: win,
@@ -3866,6 +3882,9 @@ export class PaperTrader {
       globalLearningMode: isLearningModeActive(),
       learningModeOptIn,
     });
+    (this as { _mbpCache?: { key: string; at: number; value: unknown } })._mbpCache =
+      { key: cacheKey, at: now, value };
+    return value;
   }
 
   /**

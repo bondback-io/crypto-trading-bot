@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.86',
+    title: 'Unstall dashboard performance polls',
+    sections: ['overview', 'microbots'],
+    items: [
+      'Micro Bot Performance no longer runs on every strategies/intelligence poll — only when the Bot Performance tab is open (plus a short server cache), so the main dashboard stops stalling.',
+    ],
+  },
+  {
     version: '1.2.85',
     title: 'Learning Mode bulb OFF vs ON colours',
     sections: ['overview', 'learning'],

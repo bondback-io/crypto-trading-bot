@@ -2785,9 +2785,13 @@ export function createServer(): express.Application {
     try {
       const { parsePerformanceWindow } =
         require('./microBotPerformance') as typeof import('./microBotPerformance');
+      const includePerformance =
+        String(req.query.includePerformance || '') === '1' ||
+        String(req.query.includePerformance || '') === 'true';
       const window = parsePerformanceWindow(req.query.window, '7d');
       const intel = paperTrader.getTradeProfileIntelligence({
         performanceWindow: window,
+        includePerformance,
       });
       res.json(intel);
     } catch (err) {
