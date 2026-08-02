@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.84',
+    title: 'Bot Performance under cog menu',
+    sections: ['microbots', 'overview'],
+    items: [
+      'Micro Bot Performance is a dedicated cog-menu tab (Bot Performance) with the full rankings table; Micro Bots keeps an Open Performance shortcut.',
+    ],
+  },
+  {
     version: '1.2.83',
     title: 'Micro Bot Performance metrics & ranking',
     sections: ['microbots', 'learning', 'overview'],

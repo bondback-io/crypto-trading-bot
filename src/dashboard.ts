@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Logs / Back Up / Bot Info via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Bot Performance / Logs / Back Up / Bot Info via settings menu)
  */
 
 import {
@@ -5489,7 +5489,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and Bot Info" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Bot Performance, Logs, Back Up, and Bot Info" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -5512,6 +5512,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" role="menuitem" data-settings-tab="config" onclick="showTab('config')" title="Trade size, TP/SL, anti-rug, strategy, risk, MEV, notifications, and logs">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
+          </button>
+          <button type="button" role="menuitem" data-settings-tab="botperf" onclick="showTab('botperf')" title="Per-micro-bot rankings, streaks, profit factor, drawdown, and Learning Mode participate">
+            <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/><circle cx="18" cy="6" r="2"/></svg></span>
+            Bot Performance
           </button>
           <button type="button" role="menuitem" data-settings-tab="backup" onclick="showTab('backup')" title="Site backup, persistence health, and micro-bot self-learning data">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
@@ -7026,37 +7030,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="card mt-4" id="microbot-performance-card">
-        <div class="section-title">Micro Bot Performance <span class="tip" tabindex="0" data-tip="Per-profile win rate, PnL, profit factor, max drawdown, streaks, and Learning Mode participate. Ranked by Profit Factor → Win Rate → Net PnL → Max DD (lower better). Merges closed trades with durable learning episodes."></span></div>
-        <p class="text-xs text-slate-400 mb-2">Use rankings + streaks to decide which bots should Participate in Learning Mode. Does not change Overview totals.</p>
-        <div class="mbp-window-row" role="group" aria-label="Performance time window">
-          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="today" onclick="setMicroBotPerfWindow('today')">Today</button>
-          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="24h" onclick="setMicroBotPerfWindow('24h')">24h</button>
-          <button type="button" class="closed-filter-btn mbp-window-btn is-active" data-mbp-window="7d" onclick="setMicroBotPerfWindow('7d')" aria-pressed="true">7d</button>
-          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="all" onclick="setMicroBotPerfWindow('all')">All</button>
-          <span class="mint text-xs ml-auto" id="mbp-ranked-at">—</span>
-        </div>
-        <div class="tp-overview-wrap mbp-table-wrap">
-          <table class="tp-overview-table mbp-table" id="microbot-performance-table">
-            <thead>
-              <tr>
-                <th scope="col">Rank</th>
-                <th scope="col">Bot</th>
-                <th scope="col">WR</th>
-                <th scope="col">W/L</th>
-                <th scope="col">PF</th>
-                <th scope="col">Net PnL</th>
-                <th scope="col">Max DD</th>
-                <th scope="col">Avg hold</th>
-                <th scope="col">Best / Worst</th>
-                <th scope="col">Streak</th>
-                <th scope="col">LM</th>
-              </tr>
-            </thead>
-            <tbody id="microbot-performance-body">
-              <tr><td colspan="11" class="mint">Loading…</td></tr>
-            </tbody>
-          </table>
+      <div class="card mt-4" id="microbot-performance-teaser">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title !text-sm mb-1">Micro Bot Performance</div>
+            <p class="text-xs text-slate-400 mb-0">Rankings, streaks, profit factor, and Learning Mode participate — full table lives under the cog menu.</p>
+          </div>
+          <button type="button" class="btn btn-secondary text-xs" onclick="showTab('botperf')" title="Open Micro Bot Performance (cog menu)">Open Performance</button>
         </div>
       </div>
 
@@ -7545,6 +7525,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="mint self-center" id="syslog-stats">—</span>
         </div>
         <div id="system-logs" class="max-h-[50vh] overflow-y-auto text-sm font-mono"></div>
+      </div>
+    </section>
+
+    <!-- ========== TAB: Micro Bot Performance (cog menu) ========== -->
+    <section data-tab-panel="botperf" class="strategies-panel hidden space-y-4">
+      <div class="card" id="microbot-performance-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Micro Bot Performance <span class="tip" tabindex="0" data-tip="Per-profile win rate, PnL, profit factor, max drawdown, streaks, and Learning Mode participate. Ranked by Profit Factor → Win Rate → Net PnL → Max DD (lower better). Merges closed trades with durable learning episodes."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Use rankings + streaks to decide which bots should Participate in Learning Mode. Does not change Overview totals. Tune bots on the <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button> tab.</p>
+          </div>
+        </div>
+        <div class="mbp-window-row" role="group" aria-label="Performance time window">
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="today" onclick="setMicroBotPerfWindow('today')">Today</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="24h" onclick="setMicroBotPerfWindow('24h')">24h</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn is-active" data-mbp-window="7d" onclick="setMicroBotPerfWindow('7d')" aria-pressed="true">7d</button>
+          <button type="button" class="closed-filter-btn mbp-window-btn" data-mbp-window="all" onclick="setMicroBotPerfWindow('all')">All</button>
+          <span class="mint text-xs ml-auto" id="mbp-ranked-at">—</span>
+        </div>
+        <div class="tp-overview-wrap mbp-table-wrap">
+          <table class="tp-overview-table mbp-table" id="microbot-performance-table">
+            <thead>
+              <tr>
+                <th scope="col">Rank</th>
+                <th scope="col">Bot</th>
+                <th scope="col">WR</th>
+                <th scope="col">W/L</th>
+                <th scope="col">PF</th>
+                <th scope="col">Net PnL</th>
+                <th scope="col">Max DD</th>
+                <th scope="col">Avg hold</th>
+                <th scope="col">Best / Worst</th>
+                <th scope="col">Streak</th>
+                <th scope="col">LM</th>
+              </tr>
+            </thead>
+            <tbody id="microbot-performance-body">
+              <tr><td colspan="11" class="mint">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -11423,9 +11444,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<tr class="' +
             bandCls.trim() +
             offCls +
-            '" style="cursor:pointer" onclick="(function(id){var el=document.getElementById(\'tp-card-\'+id);if(el)el.scrollIntoView({behavior:\'smooth\',block:\'nearest\'});})(\'' +
+            '" style="cursor:pointer" onclick="(function(id){showTab(\'microbots\');setTimeout(function(){var el=document.getElementById(\'tp-card-\'+id);if(el)el.scrollIntoView({behavior:\'smooth\',block:\'nearest\'});},120);})(\'' +
             escHtml(r.profileId) +
-            '\')" title="Jump to bot card">' +
+            '\')" title="Open Micro Bots and jump to this card">' +
               '<td><strong>' +
               escHtml(rankCell) +
               '</strong></td>' +
@@ -12839,7 +12860,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'backtester' || name === 'backup' || name === 'botinfo');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'backtester' || name === 'botperf' || name === 'backup' || name === 'botinfo');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -12864,6 +12885,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       }
       if (name === 'settings' || name === 'microbots') loadStrategies();
+      if (name === 'botperf') {
+        try { loadMicroBotPerformance(); } catch (_) {}
+        try { loadStrategies(); } catch (_) {}
+      }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {
         loadMarketScannerConfig();
@@ -24151,7 +24176,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'logs') return 'config';
       return name;
     };
-    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'backup', 'botinfo'];
+    const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'botperf', 'backup', 'botinfo'];
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
