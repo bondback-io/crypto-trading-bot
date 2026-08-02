@@ -2025,6 +2025,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .trade-sort-select {
       cursor: pointer;
+      background-color: #0f172a;
+      color: #e2e8f0;
+      color-scheme: dark;
+    }
+    .trade-sort-select option {
+      background-color: #0f172a;
+      color: #e2e8f0;
     }
     .trade-sort-default-btn {
       cursor: pointer;
@@ -5171,45 +5178,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #trades-positions-table td {
         padding: 0.32rem 0.22rem;
         font-size: 0.68rem;
-        overflow: hidden;
       }
       .card-open-positions #positions-table th:nth-child(1),
-      .card-open-positions #trades-positions-table th:nth-child(1) { width: 9%; }
+      .card-open-positions #trades-positions-table th:nth-child(1) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(2),
-      .card-open-positions #trades-positions-table th:nth-child(2) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(3),
-      .card-open-positions #trades-positions-table th:nth-child(3) { width: 9%; }
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(4),
-      .card-open-positions #trades-positions-table th:nth-child(4) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(4) { width: 10%; }
       .card-open-positions #positions-table th:nth-child(5),
       .card-open-positions #trades-positions-table th:nth-child(5),
       .card-open-positions #positions-table th:nth-child(6),
       .card-open-positions #trades-positions-table th:nth-child(6) { width: 5%; }
       .card-open-positions #positions-table th:nth-child(7),
-      .card-open-positions #trades-positions-table th:nth-child(7) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(7) { width: 11%; }
       .card-open-positions #positions-table th:nth-child(8),
-      .card-open-positions #trades-positions-table th:nth-child(8) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(8) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(9),
-      .card-open-positions #trades-positions-table th:nth-child(9) { width: 5%; }
+      .card-open-positions #trades-positions-table th:nth-child(9) { width: 4%; }
       .card-open-positions #positions-table th:nth-child(10),
-      .card-open-positions #trades-positions-table th:nth-child(10) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(10) { width: 11%; }
       .card-open-positions #positions-table th:nth-child(11),
-      .card-open-positions #trades-positions-table th:nth-child(11) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(11) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(12),
-      .card-open-positions #trades-positions-table th:nth-child(12) { width: 6%; }
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 5%; }
       .card-open-positions #positions-table th:nth-child(13),
       .card-open-positions #trades-positions-table th:nth-child(13) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(14),
       .card-open-positions #trades-positions-table th:nth-child(14) { width: 5%; }
       .card-open-positions #positions-table th:nth-child(15),
       .card-open-positions #trades-positions-table th:nth-child(15) { width: 4%; }
-      .card-open-positions #positions-table td:nth-child(3),
-      .card-open-positions #trades-positions-table td:nth-child(3),
       .card-open-positions #positions-table td:nth-child(10) .pos-pnl-sub,
       .card-open-positions #trades-positions-table td:nth-child(10) .pos-pnl-sub {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
+        white-space: normal;
       }
       .card-open-positions .pos-token-name {
         display: block;
@@ -5220,9 +5223,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table td:nth-child(4) .mint-ca,
       .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca {
         display: flex;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         max-width: 100%;
+        overflow: visible;
+      }
+      .card-open-positions #positions-table td:nth-child(4) .mint-ca > .token-ca,
+      .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca > .token-ca {
+        flex: 0 1 100%;
+        min-width: 0;
         overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-open-positions .pos-cost-cell {
+        overflow: visible;
+        white-space: normal;
+      }
+      .card-open-positions .pos-cost-cell .pos-cost-sol,
+      .card-open-positions .pos-cost-cell .pos-cost-usd {
+        white-space: nowrap;
       }
       .card-open-positions #positions-table td:nth-child(5),
       .card-open-positions #trades-positions-table td:nth-child(5),
@@ -13594,9 +13613,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if ((usd == null || !Number.isFinite(usd)) && solUsd != null && Number(solUsd) > 0) {
         usd = sol * Number(solUsd);
       }
-      const solBit = sol.toFixed(4) + ' SOL';
+      const solBit = '<span class="pos-cost-sol">' + sol.toFixed(4) + ' SOL</span>';
       if (usd == null || !Number.isFinite(usd)) return solBit;
-      return solBit + ' · $' + usd.toFixed(2);
+      return solBit + '<span class="pos-cost-usd"> · $' + usd.toFixed(2) + '</span>';
     }
 
     function fmtSolShort(sol) {
@@ -13719,7 +13738,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           fmtCostSolUsd(prog.initial, prog.initialUsd, prog.solUsd).replace(/<[^>]+>/g, '') +
           ' · taken ' + prog.takenPct.toFixed(0) + '%">' +
           '<div class="pos-size-main">' +
-            fmtSolShort(prog.remain) + ' SOL' + remainUsdBit +
+            '<span class="pos-cost-sol">' + fmtSolShort(prog.remain) + ' SOL</span>' +
+            (remainUsdBit ? '<span class="pos-cost-usd">' + remainUsdBit + '</span>' : '') +
           '</div>' +
           '<div class="pos-pnl-sub">left ' + prog.remainPct.toFixed(0) + '% · took ' + prog.takenPct.toFixed(0) + '%</div>' +
           '<div class="pos-partial-bar" title="' + prog.takenPct.toFixed(0) + '% taken">' +

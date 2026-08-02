@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.95',
+    title: 'Readable open-position values',
+    sections: ['overview'],
+    items: [
+      'Open Positions and Open Trades now give Cost, PnL, and Mint more usable desktop space; full SOL and USD values wrap instead of being cut off.',
+      'Mint addresses keep the compact form while Copy and Jupiter actions move below the address when needed.',
+      'Position sort menus now use a dark, high-contrast native dropdown on Windows and other desktop browsers.',
+    ],
+  },
+  {
     version: '1.2.94',
     title: 'Stable, desktop-fit open positions',
     sections: ['overview'],
