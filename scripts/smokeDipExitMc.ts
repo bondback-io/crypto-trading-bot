@@ -3,6 +3,7 @@
  * Run: npx tsx scripts/smokeDipExitMc.ts
  */
 import {
+  MAX_MARK_TICK_PUMP_PCT,
   PHANTOM_DUMP_MC_GATE_MS,
   reconcileMarkPriceSol,
   resolveExitMarketCaps,
@@ -65,6 +66,66 @@ check(
   'dump + Dex also down accepted',
   rConfirmDump.rejected === false,
   String(rConfirmDump.priceSol)
+);
+
+// TROLL-class: price +37% but Dex MC still ~flat → early phantom pump rejected
+const pumpEarly = reconcileMarkPriceSol({
+  entryPriceSol: 0.000521,
+  markPriceSol: 0.000716,
+  entryMarketCapUsd: 37.35e6,
+  markMarketCapUsd: 37.5e6,
+  positionAgeMs: 30_000,
+});
+check(
+  'early phantom pump rejected (px +37% vs flat MC)',
+  pumpEarly.rejected === true,
+  pumpEarly.reason
+);
+
+// Price leads MC by >8pp after gate window → clamp to MC-implied
+const pumpClamp = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 1.37,
+  entryMarketCapUsd: 37e6,
+  markMarketCapUsd: 40e6, // +8.1% MC vs +37% price
+  positionAgeMs: PHANTOM_DUMP_MC_GATE_MS + 5_000,
+});
+check(
+  'price-ahead-of-MC clamped to MC-implied',
+  pumpClamp.rejected === false &&
+    pumpClamp.adjusted === true &&
+    Math.abs(pumpClamp.priceSol - 1 * (40e6 / 37e6)) < 0.01,
+  String(pumpClamp.priceSol)
+);
+
+// Confirmed pump (price + MC both up ~same) accepted
+const pumpOk = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 1.2,
+  entryMarketCapUsd: 37e6,
+  markMarketCapUsd: 44e6,
+  positionAgeMs: 60_000,
+});
+check(
+  'confirmed pump accepted',
+  pumpOk.rejected === false && pumpOk.adjusted === false,
+  String(pumpOk.priceSol)
+);
+
+// Tick spike without MC confirmation
+const tick = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 1.3,
+  entryMarketCapUsd: 37e6,
+  markMarketCapUsd: 37.2e6,
+  positionAgeMs: PHANTOM_DUMP_MC_GATE_MS + 1_000,
+  prevMarkPriceSol: 1.0,
+});
+check(
+  'tick pump capped',
+  tick.adjusted === true &&
+    tick.priceSol <= 1 * (1 + MAX_MARK_TICK_PUMP_PCT / 100) + 1e-9,
+  String(tick.priceSol)
 );
 
 const caps = resolveExitMarketCaps({

@@ -3405,10 +3405,32 @@ export async function refreshPaperPricesFromLive(
 
   for (const pos of open) {
     const snap = await fetchLiveTokenSnapshot(pos.mint);
-    const price = snap?.priceSol ?? null;
+    let price = snap?.priceSol ?? null;
+    let mc = snap?.marketCapUsd;
+    // When Dex mark is green vs entry, ceiling with Jupiter so phantom Dex pumps
+    // cannot invent Full TP / inflated exit MC (TROLL-class).
+    if (
+      price != null &&
+      price > 0 &&
+      pos.entryPriceSol > 0 &&
+      price > pos.entryPriceSol * 1.08
+    ) {
+      try {
+        const { getQuote, quoteToPriceSol } = await import('./trade');
+        const q = await getQuote(pos.mint, 0.01);
+        if (q) {
+          const jp = quoteToPriceSol(q);
+          if (jp > 0 && Number.isFinite(jp) && price > jp * 1.02) {
+            price = Math.min(price, jp);
+          }
+        }
+      } catch {
+        /* Jupiter optional */
+      }
+    }
     if (price != null && price > 0) {
       trader.setTokenPrice(pos.mint, price, {
-        marketCapUsd: snap?.marketCapUsd,
+        marketCapUsd: mc,
       });
       updated += 1;
     }

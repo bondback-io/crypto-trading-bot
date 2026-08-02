@@ -175,8 +175,10 @@ export interface ReconcileMarkPriceInput {
   markPriceSol: number;
   entryMarketCapUsd?: number;
   markMarketCapUsd?: number | null;
-  /** Age of the open position (ms) — used to reject early phantom dumps */
+  /** Age of the open position (ms) — used to reject early phantom dumps/pumps */
   positionAgeMs?: number;
+  /** Last accepted mark (tick spike guard) */
+  prevMarkPriceSol?: number | null;
 }
 
 export interface ReconcileMarkPriceResult {
@@ -190,6 +192,15 @@ export interface ReconcileMarkPriceResult {
 /** Reject price dumps that Dex MC has not confirmed (flat/up) for this long after open. */
 export const PHANTOM_DUMP_MC_GATE_MS = 120_000;
 
+/** Same window for early phantom pumps (price green, MC flat). */
+export const PHANTOM_PUMP_MC_GATE_MS = PHANTOM_DUMP_MC_GATE_MS;
+
+/** Price PnL must not lead Dex MC PnL by more than this (percentage points). */
+export const PHANTOM_PUMP_GAP_PCT = 8;
+
+/** Max +% jump from previous accepted mark in one update unless MC confirms. */
+export const MAX_MARK_TICK_PUMP_PCT = 12;
+
 /**
  * Reconcile a live mark vs entry so paper PnL cannot explode from unit mismatches
  * (bonding-curve SOL/lamports, Dex native vs USD, decimal scale errors).
@@ -201,6 +212,9 @@ export const PHANTOM_DUMP_MC_GATE_MS = 120_000;
  * Early after open: if Dex MC is still near entry (or up) but the price mark shows a
  * steep dump, reject the mark (stops Dip Buyer inventing −17% SL exits while
  * live MC never moved).
+ *
+ * Symmetric phantom-pump: if price is strongly green but Dex MC has not confirmed
+ * (flat/down), reject or clamp to MC-implied so Full TP cannot fire on junk marks.
  */
 export function reconcileMarkPriceSol(
   input: ReconcileMarkPriceInput
@@ -219,27 +233,35 @@ export function reconcileMarkPriceSol(
     return { priceSol: entry, adjusted: true, rejected: true, reason: 'bad-mark' };
   }
 
-  const pxRatio = mark / entry;
+  let priceSol = mark;
+  let adjusted = false;
+  let reason: string | undefined;
+
+  const pxRatio = priceSol / entry;
   const ageMs =
     input.positionAgeMs != null && Number.isFinite(input.positionAgeMs)
       ? Math.max(0, Number(input.positionAgeMs))
       : null;
   const entryMc = input.entryMarketCapUsd;
   const markMc = input.markMarketCapUsd;
-
-  // Phantom-dump gate: price says −10%+ but Dex MC is still within ~5% of entry (or up)
-  if (
-    ageMs != null &&
-    ageMs < PHANTOM_DUMP_MC_GATE_MS &&
+  const hasMc =
     entryMc != null &&
     Number.isFinite(entryMc) &&
     entryMc > 0 &&
     markMc != null &&
     Number.isFinite(markMc) &&
-    markMc > 0
+    markMc > 0;
+
+  const pxPnlPct = (pxRatio - 1) * 100;
+  const mcPnlPct = hasMc ? (markMc! / entryMc! - 1) * 100 : null;
+
+  // Phantom-dump gate: price says −10%+ but Dex MC is still within ~5% of entry (or up)
+  if (
+    ageMs != null &&
+    ageMs < PHANTOM_DUMP_MC_GATE_MS &&
+    hasMc &&
+    mcPnlPct != null
   ) {
-    const pxPnlPct = (pxRatio - 1) * 100;
-    const mcPnlPct = (markMc / entryMc - 1) * 100;
     if (pxPnlPct <= -10 && mcPnlPct > -5) {
       return {
         priceSol: entry,
@@ -250,24 +272,77 @@ export function reconcileMarkPriceSol(
     }
   }
 
+  // Phantom-pump gate (early): price +10%+ but Dex MC still flat/down (~within +5%)
+  if (
+    ageMs != null &&
+    ageMs < PHANTOM_PUMP_MC_GATE_MS &&
+    hasMc &&
+    mcPnlPct != null
+  ) {
+    if (pxPnlPct >= 10 && mcPnlPct < 5) {
+      return {
+        priceSol: entry,
+        adjusted: true,
+        rejected: true,
+        reason: `early phantom pump (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`,
+      };
+    }
+  }
+
+  // Ongoing: price PnL leads MC PnL by ≥ gap → clamp mark down to MC-implied
+  if (hasMc && mcPnlPct != null && pxPnlPct > mcPnlPct + PHANTOM_PUMP_GAP_PCT) {
+    const mcImplied = entry * (markMc! / entryMc!);
+    if (mcImplied > 0 && Number.isFinite(mcImplied) && mcImplied < priceSol) {
+      priceSol = mcImplied;
+      adjusted = true;
+      reason = `clamp to MC (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`;
+    }
+  }
+
+  // Tick spike: sudden jump from last accepted mark without MC confirmation
+  const prev = input.prevMarkPriceSol;
+  if (
+    prev != null &&
+    Number.isFinite(prev) &&
+    prev > 0 &&
+    priceSol > prev * (1 + MAX_MARK_TICK_PUMP_PCT / 100)
+  ) {
+    const tickPct = (priceSol / prev - 1) * 100;
+    const mcConfirmsTick =
+      hasMc &&
+      mcPnlPct != null &&
+      Math.abs(mcPnlPct - (priceSol / entry - 1) * 100) <= PHANTOM_PUMP_GAP_PCT;
+    if (!mcConfirmsTick) {
+      const capped = prev * (1 + MAX_MARK_TICK_PUMP_PCT / 100);
+      priceSol = Math.min(priceSol, capped);
+      adjusted = true;
+      reason = `tick pump cap ${tickPct.toFixed(1)}%→${MAX_MARK_TICK_PUMP_PCT}%`;
+    }
+  }
+
   // NOTE: We intentionally do not scale the mark price from Dex MC in the
   // general path. Fresh pumps often have MC that disagrees with fill price;
   // MC-scaling previously invented fake −40% marks and instant Scalper stops.
 
+  const outRatio = priceSol / entry;
   if (
-    pxRatio > MAX_SANE_MARK_PRICE_RATIO ||
-    pxRatio < 1 / MAX_SANE_MARK_PRICE_RATIO
+    outRatio > MAX_SANE_MARK_PRICE_RATIO ||
+    outRatio < 1 / MAX_SANE_MARK_PRICE_RATIO
   ) {
-    // No trustworthy MC — refuse to poison the book with a pathological mark
     return {
       priceSol: entry,
       adjusted: true,
       rejected: true,
-      reason: `absurd ratio ${pxRatio.toExponential(2)}`,
+      reason: `absurd ratio ${outRatio.toExponential(2)}`,
     };
   }
 
-  return { priceSol: mark, adjusted: false, rejected: false };
+  return {
+    priceSol,
+    adjusted,
+    rejected: false,
+    reason,
+  };
 }
 
 export interface ResolveExitMarketCapInput {
@@ -1447,12 +1522,16 @@ export async function fetchLiveTokenSnapshot(
   const priceFromUsd =
     priceUsd > 0 && solUsd > 0 ? priceUsd / solUsd : null;
 
-  // Prefer SOL-native; if native vs USD-implied disagree by >10×, USD path is safer
-  // (avoids inverted/odd pairs poisoning paper marks).
+  // Prefer SOL-native when close to USD-implied; on divergence prefer USD, else
+  // the more conservative (lower) mark so phantom pumps cannot invent Full TP.
   let priceSol: number | null = null;
   if (priceNative > 0 && priceFromUsd != null && priceFromUsd > 0) {
     const r = priceNative / priceFromUsd;
-    priceSol = r > 10 || r < 0.1 ? priceFromUsd : priceNative;
+    if (r > 1.25 || r < 0.8) {
+      priceSol = priceFromUsd;
+    } else {
+      priceSol = Math.min(priceNative, priceFromUsd);
+    }
   } else if (priceNative > 0) {
     priceSol = priceNative;
   } else if (priceFromUsd != null && priceFromUsd > 0) {

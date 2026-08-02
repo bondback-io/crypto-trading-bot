@@ -781,6 +781,7 @@ export class PaperTrader {
     let mark = priceSol;
     let acceptedMc: number | undefined;
     let sawOpen = false;
+    const prevMark = this.priceCache.get(mint);
     for (const pos of this.positions.values()) {
       if (pos.mint !== mint || pos.status === 'closed') continue;
       if (!(pos.entryPriceSol > 0)) break;
@@ -796,6 +797,10 @@ export class PaperTrader {
         entryMarketCapUsd: pos.entryMarketCapUsd,
         markMarketCapUsd: markMcForReconcile,
         positionAgeMs: Math.max(0, Date.now() - (pos.openedAt || Date.now())),
+        prevMarkPriceSol:
+          prevMark != null && Number.isFinite(prevMark) && prevMark > 0
+            ? prevMark
+            : null,
       });
       if (reconciled.rejected) {
         console.warn(

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.80',
+    title: 'Block phantom Dip Buyer take-profit marks',
+    sections: ['microbots', 'execution'],
+    items: [
+      'Paper marks now reject early phantom pumps (price green while Dex MC flat) and clamp marks that lead MC by ≥8pp — stops Full TP / inflated Exit MC when Jupiter never printed the move.',
+      'Dex native vs USD: prefer USD on >25% diverge, else the lower mark; live refresh ceilings green Dex marks with Jupiter when available.',
+    ],
+  },
+  {
     version: '1.2.79',
     title: 'Learning Mode mark on closed trades',
     sections: ['overview', 'learning', 'microbots'],
