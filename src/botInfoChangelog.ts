@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.99',
+    title: 'Softer cash-register profit chime',
+    sections: ['alerts'],
+    items: [
+      'Profitable closes now play a short, soft cash-register cha-ching: a metallic drawer clack followed by a bright bell ring.',
+    ],
+  },
+  {
     version: '1.2.98',
     title: 'Spaced open-position columns',
     sections: ['overview'],

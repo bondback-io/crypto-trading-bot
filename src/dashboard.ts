@@ -8436,7 +8436,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
     }
 
-    function playSoftTone(freq, start, dur, gain, type) {
+    function playSoftTone(freq, start, dur, gain, type, attack) {
       const run = function (ctx) {
         try {
           if (!ctx || ctx.state !== 'running') return;
@@ -8450,8 +8450,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             typeof window.matchMedia === 'function' &&
             window.matchMedia('(pointer: coarse)').matches;
           const amp = Math.max(0.0001, (gain || 0.03) * (isCoarse ? 1.7 : 1));
+          const attackTime = Math.min(
+            Math.max(Number(attack) || 0.03, 0.004),
+            Math.max(0.004, dur * 0.45)
+          );
           g.gain.setValueAtTime(0.0001, now + start);
-          g.gain.exponentialRampToValueAtTime(amp, now + start + 0.03);
+          g.gain.exponentialRampToValueAtTime(amp, now + start + attackTime);
           g.gain.exponentialRampToValueAtTime(0.0001, now + start + dur);
           osc.connect(g);
           g.connect(ctx.destination);
@@ -8481,12 +8485,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function emitProfitCashSound() {
-      // A compact cash-register "cha-ching": a short mechanical strike followed
-      // by a bright paired bell. It sits just above the other soft alerts but
-      // avoids a sustained ring or loud, sharp attack.
-      playSoftTone(987.77, 0, 0.075, 0.03, 'triangle');
-      playSoftTone(2349.32, 0.075, 0.17, 0.034, 'triangle');
-      playSoftTone(3135.96, 0.09, 0.14, 0.016, 'sine');
+      // Cash-register "cha-ching": a restrained, detuned metallic drawer clack
+      // followed by a bright bell pair. The short tails and low gains keep it
+      // clearly audible without competing with the rest of the dashboard.
+      playSoftTone(392, 0, 0.065, 0.014, 'triangle', 0.006);
+      playSoftTone(622, 0.012, 0.055, 0.01, 'square', 0.005);
+      playSoftTone(2093, 0.09, 0.31, 0.021, 'sine', 0.012);
+      playSoftTone(3136, 0.102, 0.22, 0.009, 'triangle', 0.01);
       notifyHaptic([18, 42, 20]);
     }
 
