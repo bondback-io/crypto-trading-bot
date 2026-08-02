@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.105',
+    title: 'Trend Rider specialty entry unlock',
+    sections: ['microbots', 'scanners', 'learning'],
+    items: [
+      'Trend Rider / Steady Compounder Jupiter|KOL specialty handoffs bypass Pump.fun-only and Require TA so mature organic names can enter; lane MC/age/volume floors still apply.',
+      'Trend Rider floors widened to age ≥1.5h and MC ≥$75k (catalog + safe migrate from old 2h/$100k). Quiet Trend was often Pump.fun-only vs Jupiter organic — not Learning Mode.',
+    ],
+  },
+  {
     version: '1.2.104',
     title: 'Pump.fun mint markers',
     sections: ['overview'],

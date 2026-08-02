@@ -649,12 +649,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'Low / Medium',
     style: 'Trend Hold',
     rulesSummary: [
-      'Quality continuation: age ≥2h · MC ≥$100k (prefer $500k)',
+      'Quality continuation: age ≥1.5h · MC ≥$75k (prefer $500k)',
       'Holders + KOL presence · 1h vol floor + soft tiers toward $50k/$100k/$500k',
       'Targets 8–18% · tighter risk (~7–10% SL)',
       'Patterns: pullback / bull flag / trend continuation',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥2h · holders ≥40 · 1h vol ≥$4k',
+      'Lane floors: age ≥1.5h · holders ≥40 · 1h vol ≥$4k',
+      'Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA (global scanner still gated)',
     ],
     priority: 68,
     defaultEnabled: true,
@@ -674,8 +675,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
-      minTokenAgeHours: 2,
-      minMarketCapUsd: 100_000,
+      minTokenAgeHours: 1.5,
+      minMarketCapUsd: 75_000,
       preferMarketCapUsd: 500_000,
       minHolders: 40,
       minVolumeH1Usd: 4_000,
@@ -3178,13 +3179,16 @@ function scoreProfile(
         ctx.entrySource === 'migration') &&
       !feedPrefer
     ) {
-      return { score: 0, reason: 'defer migration to Migration Sniper' };
+      return {
+        score: 0,
+        reason: 'trend_rider: defer migration to Migration Sniper',
+      };
     }
     if (hostileArmed && !feedPrefer) {
-      return { score: 0, reason: 'not a trend hold setup' };
+      return { score: 0, reason: 'trend_rider: not a trend hold setup' };
     }
     if (conv != null && conv < (minConviction ?? 50)) {
-      return { score: 0, reason: 'conviction too low for trend' };
+      return { score: 0, reason: 'trend_rider: conviction too low' };
     }
     let quality = 0;
     // Established MC tokens can qualify earlier than pure age floors
@@ -3204,7 +3208,10 @@ function scoreProfile(
         quality += 1;
         bits.push(`${holders} holders`);
       } else if (holders != null && holders < m.minHolders) {
-        return { score: 0, reason: `holders ${holders} < ${m.minHolders}` };
+        return {
+          score: 0,
+          reason: `trend_rider: holders ${holders} < ${m.minHolders}`,
+        };
       }
     }
     if (m.minVolumeH1Usd != null) {
@@ -3214,7 +3221,7 @@ function scoreProfile(
       } else if (volH1 != null && volH1 < m.minVolumeH1Usd) {
         return {
           score: 0,
-          reason: `1h vol $${Math.round(volH1)} < $${m.minVolumeH1Usd}`,
+          reason: `trend_rider: 1h vol $${Math.round(volH1)} < $${m.minVolumeH1Usd}`,
         };
       }
     }
@@ -5510,6 +5517,90 @@ export function migrateTrendCompounderClusterAlignV1(): boolean {
   } else {
     console.log(
       `[trade-profiles] Applied ${MIGRATION_ID} — no old cluster bake signature found (feedPrefer bypass still active)`
+    );
+  }
+  return changed > 0;
+}
+
+/**
+ * One-shot: widen Trend Rider entry floors to catalog 1.5h / $75k when the user
+ * still has the old bake signature (2h / $100k) and no other custom on those keys.
+ */
+export function migrateTrendEntryWidenV1105(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'trendEntryWiden_v1105';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+
+  const patchMatch = (
+    match: Record<string, unknown> | undefined
+  ): boolean => {
+    if (!match || typeof match !== 'object') return false;
+    let changed = false;
+    const mc = Number(match.minMarketCapUsd);
+    if (Number.isFinite(mc) && Math.round(mc) === 100_000) {
+      match.minMarketCapUsd = 75_000;
+      changed = true;
+    }
+    const age = Number(match.minTokenAgeHours);
+    if (Number.isFinite(age) && Math.abs(age - 2) < 1e-9) {
+      match.minTokenAgeHours = 1.5;
+      changed = true;
+    }
+    return changed;
+  };
+
+  let changed = 0;
+  const ov = state.overrides.trend_rider;
+  if (ov?.match && patchMatch(ov.match as Record<string, unknown>)) {
+    changed += 1;
+  }
+
+  try {
+    const {
+      loadTradeProfilesUserState,
+      saveTradeProfilesUserState,
+    } = require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    const user = loadTradeProfilesUserState();
+    if (user?.overrides?.trend_rider?.match) {
+      if (
+        patchMatch(user.overrides.trend_rider.match as Record<string, unknown>)
+      ) {
+        saveTradeProfilesUserState({
+          enabled: user.enabled,
+          smartBotProfiles: user.smartBotProfiles,
+          profiles: user.profiles,
+          overrides: user.overrides,
+          selfLearning: user.selfLearning,
+          learningModeOptIn: user.learningModeOptIn,
+        });
+        changed += 1;
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  if (changed > 0) {
+    console.log(
+      `[trade-profiles] Applied ${MIGRATION_ID} — Trend Rider floors → 1.5h / $75k (${changed} patch(es))`
+    );
+  } else {
+    console.log(
+      `[trade-profiles] Applied ${MIGRATION_ID} — catalog defaults apply (no old 2h/$100k override)`
     );
   }
   return changed > 0;

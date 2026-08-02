@@ -124,6 +124,7 @@ import {
   evaluateBuyPumpFunOnlyGate,
   evaluateEntryTimingGate,
   evaluateHolderConcentrationHardFloors,
+  isPumpFunMintSuffix,
 } from './deadTokenFilters';
 import {
   fetchBondingCurve,
@@ -2104,7 +2105,13 @@ async function handleScannerCandidate(
     markScannerCooldown(candidate.mint, false);
     return;
   }
-  const pumpFunGate = evaluateBuyPumpFunOnlyGate(candidate.mint);
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(candidate.mint, {
+    specialtyFeed: candidate.specialtyFeed || candidate.launch?.specialtyFeed,
+    preferredProfileId:
+      candidate.preferredProfileId ||
+      candidate.launch?.preferredProfileId ||
+      null,
+  });
   if (pumpFunGate) {
     annotateScannerCandidate(candidate.mint, {
       status: 'skipped',
@@ -2112,6 +2119,20 @@ async function handleScannerCandidate(
     });
     markScannerCooldown(candidate.mint, false);
     return;
+  }
+  if (
+    !isPumpFunMintSuffix(candidate.mint) &&
+    (candidate.specialtyFeed === 'jupiter' ||
+      candidate.specialtyFeed === 'kolscan') &&
+    (candidate.preferredProfileId === 'trend_rider' ||
+      candidate.preferredProfileId === 'steady_compounder' ||
+      candidate.launch?.preferredProfileId === 'trend_rider' ||
+      candidate.launch?.preferredProfileId === 'steady_compounder')
+  ) {
+    console.log(
+      `[monitor] Specialty pump.fun-only bypass · ${candidate.symbol || candidate.mint.slice(0, 8)} ` +
+        `(${candidate.preferredProfileId || candidate.launch?.preferredProfileId}/${candidate.specialtyFeed})`
+    );
   }
 
   // Overview feed early (mirror copy path) — before beginBuy / risk_off / requireTa
@@ -4353,13 +4374,28 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
-  const pumpFunGate = evaluateBuyPumpFunOnlyGate(signal.mint);
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(signal.mint, {
+    specialtyFeed: signal.specialtyFeed,
+    candidateTradeProfileId: signal.candidateTradeProfileId,
+    preferredProfileId: signal.candidateTradeProfileId,
+  });
   if (pumpFunGate) {
     console.log(
       `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} reason=${pumpFunGate}`
     );
     recordRejectedSignal(signal, pumpFunGate);
     return false;
+  }
+  if (
+    !isPumpFunMintSuffix(signal.mint) &&
+    (signal.specialtyFeed === 'jupiter' || signal.specialtyFeed === 'kolscan') &&
+    (signal.candidateTradeProfileId === 'trend_rider' ||
+      signal.candidateTradeProfileId === 'steady_compounder')
+  ) {
+    console.log(
+      `[monitor] Specialty pump.fun-only bypass · ${signal.symbol} ` +
+        `(${signal.candidateTradeProfileId}/${signal.specialtyFeed})`
+    );
   }
 
   // Smart Bot Profiles ON: enrich → lane fight (floors + match) → cascade
@@ -4953,16 +4989,22 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
   // Setup-watch handoffs are synthetic (no Fib/candles) — lane floors still apply.
   // Scalper lane has no ta_market_scanner module — exempt when it wins the cascade.
-  // Learning Mode does not bypass Require TA for other profiles.
+  // Trend / Compounder Jupiter|KOL specialty handoffs are also exempt (mature feeds).
+  // Learning Mode does not bypass Require TA for other profiles / generic scanner.
   const reasonBits = reasonBitsEarly;
   const scalperLaneWin = signal.candidateTradeProfileId === 'scalper';
+  const matureSpecialtyTaExempt =
+    (signal.candidateTradeProfileId === 'trend_rider' ||
+      signal.candidateTradeProfileId === 'steady_compounder') &&
+    (signal.specialtyFeed === 'jupiter' || signal.specialtyFeed === 'kolscan');
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&
     config.riskLevel !== 'off' &&
     config.marketScanner?.requireTaSetup !== false &&
     !setupWatchHandoff &&
-    !scalperLaneWin
+    !scalperLaneWin &&
+    !matureSpecialtyTaExempt
   ) {
     const ind = evaluateIndicators({
       mint: signal.mint,
@@ -4987,6 +5029,16 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       recordRejectedSignal(signal, 'scanner: no TA setup');
       return false;
     }
+  } else if (
+    matureSpecialtyTaExempt &&
+    scannerSignal &&
+    signal.entrySource !== 'hybrid' &&
+    config.marketScanner?.requireTaSetup !== false &&
+    config.riskLevel !== 'off'
+  ) {
+    console.log(
+      `[monitor] ${signal.candidateTradeProfileId === 'steady_compounder' ? 'Steady Compounder' : 'Trend Rider'} specialty exempt from Require TA · ${signal.symbol}`
+    );
   } else if (
     scalperLaneWin &&
     scannerSignal &&
@@ -5303,8 +5355,10 @@ export function getEntryPathLightStatus(): {
   const funds = evaluateAffordability(minTrade);
   const skipHint = lastFilterSkipReason
     ? /no TA setup/i.test(lastFilterSkipReason)
-      ? `Last skip: ${lastFilterSkipReason} · Learning Mode does not bypass Require TA (Scalper lane exempt)`
-      : `Last skip: ${lastFilterSkipReason}`
+      ? `Last skip: ${lastFilterSkipReason} · Learning Mode does not bypass Require TA (Scalper + Trend/Compounder specialty exempt)`
+      : /not a pump\.fun mint/i.test(lastFilterSkipReason)
+        ? `Last skip: ${lastFilterSkipReason} · Trend/Compounder Jupiter|KOL specialty can bypass Pump.fun-only`
+        : `Last skip: ${lastFilterSkipReason}`
     : undefined;
 
   if (!running) {

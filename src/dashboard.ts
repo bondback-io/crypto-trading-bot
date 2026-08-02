@@ -6791,7 +6791,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper lane / small-MC ≤$180k). Learning Mode Looser does not turn this off. Improves entry quality for non-scalp lanes. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
+          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper lane / small-MC ≤$180k, and Trend Rider / Steady Compounder Jupiter|KOL specialty). Learning Mode does not turn this off. Improves entry quality for generic scanner. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -7570,7 +7570,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div class="mt-2 space-y-0">
             <p class="mint mb-2">Master safety switches moved to Settings. Configure their thresholds here.</p>
-            <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor — non-bypassable by soft-pass / early path.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
+            <div class="toggle-row"><span title="Only enter buys when the mint/contract ends with pump (Pump.fun convention). Hard floor for generic scanner/copy — Trend Rider / Steady Compounder Jupiter|KOL specialty handoffs may bypass so mature organic names can enter.">Buy tokens only · pump.fun</span><label class="switch"><input type="checkbox" id="buyPumpFunOnly" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Probe sellability and transfer tax before buying">Honeypot / tax probe</span><label class="switch"><input type="checkbox" id="checkHoneypot" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Skip if the deployer sold recently (dump risk)">Skip recent dev sells</span><label class="switch"><input type="checkbox" id="skipIfDevRecentSells" checked /><span class="slider"></span></label></div>
             <div class="toggle-row"><span title="Require liquidity pool to look locked / burned">Require LP locked</span><label class="switch"><input type="checkbox" id="requireLiquidityLocked" /><span class="slider"></span></label></div>
@@ -11266,7 +11266,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const specialtyFeedHtml =
             '<div class="tp-param-section">' +
               '<p class="tp-param-title">Specialty feed</p>' +
-              '<p class="tp-param-hint">Optional Kolscan/KOL + Jupiter token feed for this bot only. Soft-prefers this profile in lane fights on tagged mints. Requires Market Scanner + Smart Bot ON.</p>' +
+              '<p class="tp-param-hint">' +
+                (p.id === 'trend_rider' || p.id === 'steady_compounder'
+                  ? 'Optional Kolscan/KOL + Jupiter feed (Trend: toporganicscore/6h). Soft-prefers this profile. Jupiter/KOL specialty handoffs bypass global Pump.fun-only and Require TA; lane MC/age/volume floors still apply. Needs Market Scanner + Smart Bot ON.'
+                  : 'Optional Kolscan/KOL + Jupiter token feed for this bot only. Soft-prefers this profile in lane fights on tagged mints. Requires Market Scanner + Smart Bot ON.') +
+              '</p>' +
               selectField({
                 key: 'kolscanFeedEnabled',
                 label: 'Enable specialty feed',

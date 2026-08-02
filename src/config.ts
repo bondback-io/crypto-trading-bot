@@ -4419,6 +4419,17 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  // Widen Trend Rider age/MC floors when still on old 2h / $100k bake.
+  try {
+    const { migrateTrendEntryWidenV1105 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateTrendEntryWidenV1105();
+  } catch (err) {
+    console.warn(
+      '[config] trendEntryWiden_v1105 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /** Load live trading wallet slots (metadata only) */
