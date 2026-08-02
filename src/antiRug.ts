@@ -405,13 +405,25 @@ async function runAntiRugChecks(
   const checks = emptyChecks();
   let score = 0;
 
-  const maxDev =
+  let maxDev =
     filters.maxDevPercent ?? filters.maxDevHoldPct ?? 15;
-  const minDev = filters.minDevHoldPct ?? 0;
   // maxHolderConcentration = Top-10% max (pair with minTop10HolderPct).
   // Do not fall back to maxTopHolderPct (that is single-wallet max).
-  const maxConc =
-    filters.maxHolderConcentration ?? 0;
+  let maxConc = filters.maxHolderConcentration ?? 0;
+  try {
+    const { isLearningModeActive, applyLearningMaxOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      maxDev = applyLearningMaxOverlay(maxDev, 'devHoldingsMaxPct');
+      maxConc = applyLearningMaxOverlay(
+        maxConc > 0 ? maxConc : 29,
+        'top10MaxPct'
+      );
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
+  const minDev = filters.minDevHoldPct ?? 0;
   const minTopHolder = filters.minTopHolderPct ?? 0;
   const maxTopHolder = filters.maxTopHolderPct ?? 0;
   const maxTax = filters.maxEstimatedTaxPct ?? 25;

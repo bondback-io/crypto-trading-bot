@@ -58,6 +58,10 @@ export interface ProfileLearningEpisode {
   tokenAgeHoursAtEntry?: number;
   /** Whether Heikin-Ashi exit was enabled on frozen policy at open */
   haExitEnabledAtOpen?: boolean;
+  /** Learning Mode attribution at open */
+  learningMode?: boolean;
+  learningStrictness?: 'stricter' | 'middle' | 'looser';
+  learningFairnessApplied?: boolean;
 }
 
 interface EpisodesFile {

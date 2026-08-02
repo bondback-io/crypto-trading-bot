@@ -20,7 +20,10 @@ export type LearningSaveKind =
   | 'micro'
   | 'toggle'
   | 'reset'
-  | 'min_trades';
+  | 'min_trades'
+  | 'learning_mode'
+  | 'proposal'
+  | 'rollback';
 
 export interface LearningSaveEntry {
   id: string;
@@ -411,7 +414,7 @@ export function getLearningHealthSummary(options?: {
     reason = episodesDroppedLikely
       ? 'Learning episodes missing after boot — prior journal exists but episode files are empty/gone. Mount DATA_DIR on a durable disk and restore a backup.'
       : 'Learning episode files missing — self-learning progress will not persist. Attach a Disk at DATA_DIR.';
-  } else if (persistence.onRender || persistence.onFly) {
+  } else if (persistence.onRender) {
     if (!persistence.volumeMounted || !persistence.durableLikely || persistence.warning) {
       health = 'at_risk';
       reason =

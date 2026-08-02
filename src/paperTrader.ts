@@ -223,6 +223,10 @@ export interface Position {
   qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
   selfLearnVersion?: number;
+  /** Learning Mode ON when this position opened */
+  learningMode?: boolean;
+  learningStrictness?: 'stricter' | 'middle' | 'looser';
+  learningFairnessApplied?: boolean;
   /** Whether HA trend exit was enabled on the frozen exit policy at open */
   haExitEnabledAtOpen?: boolean;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
@@ -488,6 +492,10 @@ function maybeRecordLearningEpisode(
         position.haExitEnabledAtOpen === true ||
         (position.profileExitPolicy as { heikinAshiExitEnabled?: boolean } | undefined)
           ?.heikinAshiExitEnabled === true,
+      learningMode: position.learningMode === true ? true : undefined,
+      learningStrictness: position.learningStrictness,
+      learningFairnessApplied:
+        position.learningFairnessApplied === true ? true : undefined,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');

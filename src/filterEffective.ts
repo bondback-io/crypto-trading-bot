@@ -34,6 +34,15 @@ function activeProfileStyleFloors():
 
 /** Min wallet quality — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinWalletQualityScore(): number {
+  try {
+    const { isLearningModeActive, applyLearningMinOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      return Math.min(85, applyLearningMinOverlay(55, 'minWalletQuality'));
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
   const profile = activeProfileStyleFloors();
   if (profile) return Math.min(85, profile.minWalletQuality);
   const base = config.filters.minWalletQualityScore ?? 55;
@@ -51,6 +60,15 @@ export function effectiveMinWalletQualityScore(): number {
 
 /** Min conviction — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveMinConvictionScore(): number {
+  try {
+    const { isLearningModeActive, applyLearningMinOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      return Math.min(80, applyLearningMinOverlay(40, 'minConviction'));
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
   const profile = activeProfileStyleFloors();
   if (profile) return Math.min(80, profile.minConviction);
   const base = config.selective?.minConvictionScore ?? 40;
@@ -68,6 +86,15 @@ export function effectiveMinConvictionScore(): number {
 
 /** Cluster / convergence wallet floor — profile-owned under Smart Bot gate, else config + overlays. */
 export function effectiveClusterMinWallets(): number {
+  try {
+    const { isLearningModeActive, applyLearningMinOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      return Math.min(5, Math.max(1, applyLearningMinOverlay(1, 'minCluster')));
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
   const profile = activeProfileStyleFloors();
   if (profile) return Math.min(5, Math.max(1, profile.minWalletCount));
   const base = Math.max(

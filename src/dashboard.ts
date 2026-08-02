@@ -5454,6 +5454,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
             <span class="risk-badge-label">On</span>
           </span>
+          <span id="header-learning-mode-badge" class="badge status-badge has-tip hidden" title="Micro-bot Learning Mode gate overlays" style="border-color:#38bdf8;color:#7dd3fc">
+            <span id="header-learning-mode-label">Learning Mode</span>
+          </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
           <span class="status-stat rpc-status rpc-pill rpc-unknown has-tip" id="rpc-status-wrap" title="Active Solana RPC endpoint and last measured latency">
@@ -6864,6 +6867,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <!-- ========== TAB: Micro Bots ========== -->
     <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
+      <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
@@ -7002,6 +7006,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mint text-sm" id="risk-level-summary">—</div>
         <div class="mint text-xs mt-1" id="risk-recipe-blurb">—</div>
         <div class="mint mt-2" id="risk-status">—</div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="learning-mode-card">
+          <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Overlays micro-bot entry gates (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots among passers. Does not change position sizing. Default OFF."></span></div>
+          <p class="text-xs text-slate-400 mb-2">Explore gate strictness for micro-bots. Fairness boost reorders among passers only — hard floors still apply.</p>
+          <div class="flex flex-wrap items-center gap-3 mb-2">
+            <label class="ctl-check" title="Turn Learning Mode on/off">
+              <input type="checkbox" id="learning-mode-enabled" onchange="setLearningModeEnabled(this.checked)" />
+              <span>Learning Mode</span>
+            </label>
+            <span class="mint text-xs" id="learning-mode-label">OFF</span>
+          </div>
+          <div class="mb-2">
+            <label class="text-xs text-slate-300" for="learning-mode-strictness">Strictness — <span class="val" id="v-learning-mode-strictness">Middle</span></label>
+            <input type="range" id="learning-mode-strictness" min="0" max="2" step="1" value="1" oninput="onLearningModeStrictnessInput(this.value)" onchange="setLearningModeStrictness(this.value)" style="width:100%;max-width:280px" />
+            <div class="flex justify-between text-xs text-slate-500" style="max-width:280px">
+              <span>Stricter</span><span>Middle</span><span>Looser</span>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button type="button" class="btn btn-secondary text-xs" onclick="resetLearningMode()" title="Restore snapshot from first ON; turns Learning Mode OFF. Does not wipe episodes/ML.">Reset Learning Mode</button>
+            <span class="mint text-xs" id="learning-mode-status">—</span>
+          </div>
+          <div id="learning-mode-live-warning" class="hidden text-amber-300 text-xs mt-2 font-medium rounded-md px-2.5 py-2 border border-amber-600/60 bg-amber-950/40">Live trading with Learning Mode ON — gate overlays are active. Position sizing is unchanged.</div>
+          <p class="text-xs text-slate-500 mt-2 mb-0">Does not change position sizing. Snapshot captured on first OFF→ON; Reset restores it.</p>
+        </div>
+
         <details id="module-tune-card">
           <summary>
             <span class="module-tune-summary-main">
@@ -11558,7 +11588,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           banner.innerHTML =
             '<strong>Global Micro-Bot Take Profit ON</strong> — fixed <strong>+' +
             pct +
-            '%</strong> master override is active for all trade-profile bots.';
+            '%</strong> master override is active for all trade-profile bots. ' +
+            '<span class="text-amber-100/90">TP/SL delta learning is paused while Global TP is ON (entry learning continues).</span>';
         } else {
           banner.classList.add('hidden');
           banner.innerHTML = '';
@@ -11566,6 +11597,121 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.updateGlobalMicroBotTpUi = updateGlobalMicroBotTpUi;
+
+    const LM_STRICTNESS = ['stricter', 'middle', 'looser'];
+    const LM_LABELS = { stricter: 'Stricter', middle: 'Middle', looser: 'Looser' };
+
+    function updateLearningModeUi(lm) {
+      if (!lm) return;
+      const on = lm.enabled === true;
+      const strict = LM_STRICTNESS.indexOf(lm.strictness) >= 0 ? lm.strictness : 'middle';
+      const en = document.getElementById('learning-mode-enabled');
+      const slider = document.getElementById('learning-mode-strictness');
+      const vLabel = document.getElementById('v-learning-mode-strictness');
+      const label = document.getElementById('learning-mode-label');
+      const status = document.getElementById('learning-mode-status');
+      const liveWarn = document.getElementById('learning-mode-live-warning');
+      const headerBadge = document.getElementById('header-learning-mode-badge');
+      const headerLabel = document.getElementById('header-learning-mode-label');
+      const mbBanner = document.getElementById('learning-mode-microbots-banner');
+      if (en) en.checked = on;
+      if (slider) {
+        slider.value = String(LM_STRICTNESS.indexOf(strict));
+        slider.disabled = false;
+      }
+      if (vLabel) vLabel.textContent = LM_LABELS[strict] || 'Middle';
+      if (label) label.textContent = on ? ('ON · ' + (LM_LABELS[strict] || 'Middle')) : 'OFF';
+      if (status) {
+        status.textContent = on
+          ? (lm.label || ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle')))
+          : (lm.hasSnapshot ? 'OFF (snapshot saved)' : 'OFF');
+      }
+      if (liveWarn) {
+        if (lm.liveWarning) liveWarn.classList.remove('hidden');
+        else liveWarn.classList.add('hidden');
+      }
+      if (headerBadge && headerLabel) {
+        if (on) {
+          headerBadge.classList.remove('hidden');
+          headerLabel.textContent = 'Learning Mode · ' + (LM_LABELS[strict] || 'Middle');
+        } else {
+          headerBadge.classList.add('hidden');
+        }
+      }
+      if (mbBanner) {
+        if (on) {
+          mbBanner.classList.remove('hidden');
+          mbBanner.innerHTML =
+            '<strong>' + (lm.label || ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle'))) +
+            '</strong> — gate overlays + fairness boost among passers. Does not change position sizing.';
+        } else {
+          mbBanner.classList.add('hidden');
+          mbBanner.innerHTML = '';
+        }
+      }
+    }
+    window.updateLearningModeUi = updateLearningModeUi;
+
+    function onLearningModeStrictnessInput(v) {
+      const idx = Math.max(0, Math.min(2, Number(v) || 0));
+      const el = document.getElementById('v-learning-mode-strictness');
+      if (el) el.textContent = LM_LABELS[LM_STRICTNESS[idx]] || 'Middle';
+    }
+    window.onLearningModeStrictnessInput = onLearningModeStrictnessInput;
+
+    async function setLearningModeEnabled(on) {
+      try {
+        const data = await fetchJSON('/api/config/learning-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !!on }),
+        });
+        updateLearningModeUi((data && data.learningMode) || data);
+        if (data && data.config) _lastConfig = data.config;
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.setLearningModeEnabled = setLearningModeEnabled;
+
+    async function setLearningModeStrictness(v) {
+      const idx = Math.max(0, Math.min(2, Number(v) || 0));
+      const strictness = LM_STRICTNESS[idx] || 'middle';
+      onLearningModeStrictnessInput(idx);
+      try {
+        const data = await fetchJSON('/api/config/learning-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ strictness: strictness }),
+        });
+        updateLearningModeUi((data && data.learningMode) || data);
+        if (data && data.config) _lastConfig = data.config;
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.setLearningModeStrictness = setLearningModeStrictness;
+
+    async function resetLearningMode() {
+      if (!confirm('Reset Learning Mode? This restores the snapshot from first ON (strictness + related filter baselines) and turns Learning Mode OFF. Episodes and ML are NOT wiped.')) {
+        return;
+      }
+      try {
+        const data = await fetchJSON('/api/config/learning-mode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reset: true }),
+        });
+        updateLearningModeUi((data && data.learningMode) || data);
+        if (data && data.config) {
+          _lastConfig = data.config;
+          try { applyStrategyConfigValues(data.config); } catch (_) {}
+        }
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.resetLearningMode = resetLearningMode;
 
     async function toggleTradeProfile(id, enabled, skipConfirm) {
       if (!enabled && !skipConfirm) {
@@ -13762,6 +13908,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         lines.push({
           label: 'Turbo',
           text: 'ON — Jito-prefer / elevated prio (live) · stamped for paper/live sim',
+        });
+      }
+
+      if (p.learningMode) {
+        const strict = p.learningStrictness
+          ? String(p.learningStrictness).charAt(0).toUpperCase() +
+            String(p.learningStrictness).slice(1)
+          : 'Middle';
+        lines.push({
+          label: 'Learning Mode',
+          text:
+            strict +
+            (p.learningFairnessApplied ? ' · fairness applied' : ''),
         });
       }
 
@@ -16412,6 +16571,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try { refreshDashboardNotifications(); } catch (_) {}
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
+      try {
+        if (typeof updateLearningModeUi === 'function') {
+          updateLearningModeUi(cfg.learningMode || null);
+        }
+      } catch (_) {}
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
 
       updateCharts(paper && paper.charts);

@@ -2105,6 +2105,19 @@ export function getSniperThresholds(
   if (f.maxSniperScore != null && f.maxSniperScore > 0) {
     t.maxSniperScore = f.maxSniperScore;
   }
+  try {
+    const { isLearningModeActive, applyLearningMaxOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      t.maxSniperCount = applyLearningMaxOverlay(
+        t.maxSniperCount,
+        'sniperCountMax'
+      );
+      t.maxBundlerPct = applyLearningMaxOverlay(t.maxBundlerPct, 'bundlerPctMax');
+    }
+  } catch {
+    /* ignore bootstrap */
+  }
   return t;
 }
 

@@ -2643,6 +2643,60 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Micro-bot Learning Mode — gate overlays + fairness (not position sizing). */
+  app.get('/api/config/learning-mode', (_req: Request, res: Response) => {
+    try {
+      const { getLearningModeStatus } =
+        require('./learningMode') as typeof import('./learningMode');
+      res.json({ ok: true, learningMode: getLearningModeStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/learning-mode', (req: Request, res: Response) => {
+    try {
+      const {
+        setLearningModeEnabled,
+        setLearningModeStrictness,
+        resetLearningMode,
+        getLearningModeStatus,
+      } = require('./learningMode') as typeof import('./learningMode');
+      const body = (req.body ?? {}) as {
+        enabled?: boolean;
+        strictness?: 'stricter' | 'middle' | 'looser';
+        reset?: boolean;
+      };
+      if (body.reset === true) {
+        resetLearningMode();
+      } else {
+        if (typeof body.enabled === 'boolean') {
+          setLearningModeEnabled(body.enabled);
+        }
+        if (
+          body.strictness === 'stricter' ||
+          body.strictness === 'middle' ||
+          body.strictness === 'looser'
+        ) {
+          setLearningModeStrictness(body.strictness);
+        }
+      }
+      res.json({
+        ok: true,
+        learningMode: getLearningModeStatus(),
+        config: getConfigSnapshot(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/strategies', (_req: Request, res: Response) => {
     const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
     ensureStrategyToggles();

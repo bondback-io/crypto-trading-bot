@@ -2416,12 +2416,21 @@ export function evaluateLaneEntryFloors(
     }
   }
 
-  const minAgeH =
+  let minAgeH =
     m.minTokenAgeHours != null &&
     Number.isFinite(m.minTokenAgeHours) &&
     m.minTokenAgeHours > 0
       ? Number(m.minTokenAgeHours)
       : 0;
+  try {
+    const { learningModeAdjustedMinTokenAgeHours } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (minAgeH > 0) {
+      minAgeH = learningModeAdjustedMinTokenAgeHours(minAgeH);
+    }
+  } catch {
+    /* ignore */
+  }
   if (minAgeH > 0) {
     const ageH = resolveTokenAgeHoursForGate(ctx);
     // Known-only: unknown age does not fail (Dex/grad gaps)
@@ -2517,9 +2526,27 @@ export function evaluateTradeProfileLanes(
       });
       continue;
     }
+    let laneScore = Math.round(scored.score * 10) / 10;
+    let laneReason = scored.reason;
+    try {
+      const { isLearningModeActive, learningModeFairnessBump } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive()) {
+        const { getProfileLearningEpisodes } =
+          require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+        const eps = getProfileLearningEpisodes(def.id, 500);
+        const bump = learningModeFairnessBump(eps.length);
+        if (bump > 0) {
+          laneScore = Math.round((laneScore + bump) * 10) / 10;
+          laneReason = `${laneReason} · LM fairness +${bump}`;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     const assignment = buildAssignmentFromDef(def, ctx, {
-      score: Math.round(scored.score * 10) / 10,
-      reason: scored.reason,
+      score: laneScore,
+      reason: laneReason,
       autoScored: false,
     });
     results.push({
@@ -3890,13 +3917,32 @@ export function assignTradeProfile(
       match.score,
       match.reason
     );
+    let score = combined.score;
+    let reason = combined.reason;
+    try {
+      const { isLearningModeActive, learningModeFairnessBump } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive() && score > 0) {
+        const { getProfileLearningEpisodes } =
+          require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+        const bump = learningModeFairnessBump(
+          getProfileLearningEpisodes(def.id, 500).length
+        );
+        if (bump > 0) {
+          score = Math.round((score + bump) * 10) / 10;
+          reason = `${reason} · LM fairness +${bump}`;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     breakdowns.push({
       profileId: def.id,
       name: def.name,
       icon: def.icon,
       color: def.color,
-      score: combined.score,
-      reason: combined.reason,
+      score,
+      reason,
       matchRaw: match.score,
       factors: combined.factors,
     });
@@ -3926,9 +3972,17 @@ export function assignTradeProfile(
     return finish(a);
   }
 
+  let autoMinScore = auto.minScore;
+  try {
+    const { learningModeAdjustedAutoMinScore } =
+      require('./learningMode') as typeof import('./learningMode');
+    autoMinScore = learningModeAdjustedAutoMinScore(autoMinScore);
+  } catch {
+    /* ignore */
+  }
   if (
     auto.skipBelowMin &&
-    winner.score < auto.minScore &&
+    winner.score < autoMinScore &&
     config.riskLevel !== 'off'
   ) {
     const skip: TradeProfileAssignment = {
@@ -3937,11 +3991,11 @@ export function assignTradeProfile(
       icon: '⊘',
       color: TRADE_PROFILE_COLORS.skipped,
       score: winner.score,
-      reason: `best ${winner.name} scored ${winner.score} < min ${auto.minScore}`,
+      reason: `best ${winner.name} scored ${winner.score} < min ${autoMinScore}`,
       exitRules: {},
       legacy: true,
       skipped: true,
-      skipReason: `Auto-score ${winner.score} below minimum ${auto.minScore} (best: ${winner.name})`,
+      skipReason: `Auto-score ${winner.score} below minimum ${autoMinScore} (best: ${winner.name})`,
       autoScored: true,
       topScores,
     };
@@ -4238,6 +4292,21 @@ export function applyTradeProfileExitRules(
     }
   } catch {
     position.selfLearnVersion = 0;
+  }
+  // Stamp Learning Mode attribution
+  try {
+    const { stampLearningModeFields } =
+      require('./learningMode') as typeof import('./learningMode');
+    const lm = stampLearningModeFields();
+    if (lm.learningMode) {
+      (position as { learningMode?: boolean }).learningMode = true;
+      (position as { learningStrictness?: string }).learningStrictness =
+        lm.learningStrictness;
+      (position as { learningFairnessApplied?: boolean }).learningFairnessApplied =
+        lm.learningFairnessApplied === true;
+    }
+  } catch {
+    /* ignore */
   }
 
   if (rules.forceScalp && rules.shortTermStrategyId && seedShortTerm) {
@@ -4880,18 +4949,29 @@ export function onProfileTradeClosedForSelfLearn(profileId: string): void {
   });
   sl = tick.state;
 
-  if (tick.rollback && sl.previousOverrideSnapshot) {
-    // Revert overrides to previous snapshot
-    if (!state.overrides) state.overrides = {};
-    state.overrides[id] = JSON.parse(
-      JSON.stringify(sl.previousOverrideSnapshot)
-    ) as TradeProfileParamOverride;
+  if (tick.rollback) {
+    // Multi-step rollback: pop from stack (fallback to previousOverrideSnapshot)
+    const stack = Array.isArray(sl.previousOverrideStack)
+      ? [...sl.previousOverrideStack]
+      : [];
+    const snap =
+      stack.length > 0
+        ? stack.pop()!
+        : sl.previousOverrideSnapshot || null;
+    if (snap) {
+      if (!state.overrides) state.overrides = {};
+      state.overrides[id] = JSON.parse(
+        JSON.stringify(snap)
+      ) as TradeProfileParamOverride;
+    }
     sl.version = Math.max(0, sl.version - 1);
-    sl.previousOverrideSnapshot = null;
+    sl.previousOverrideStack = stack;
+    sl.previousOverrideSnapshot =
+      stack.length > 0 ? stack[stack.length - 1]! : null;
     sl.tradesSinceUpgrade = 0;
     console.log(`[self-learn] ${id} rolled back to v${sl.version}`);
     writeProfileSelfLearning(id, sl, {
-      kind: 'reset',
+      kind: 'rollback',
       summary: `Rolled back to v${sl.version}`,
     });
     return;

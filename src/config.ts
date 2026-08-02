@@ -2030,6 +2030,12 @@ export interface BotConfig {
   pumpFunProgramId: string;
   pumpSwapProgramId: string;
   port: number;
+
+  /**
+   * Micro-bot Learning Mode — global gate overlays + fairness boost.
+   * Default OFF. Does not change position sizing.
+   */
+  learningMode: import('./learningMode').LearningModeConfig;
 }
 
 export const config: BotConfig = {
@@ -2205,6 +2211,13 @@ export const config: BotConfig = {
       enabled: false,
       takeProfitPct: 25,
     },
+  },
+
+  learningMode: {
+    enabled: false,
+    strictness: 'middle',
+    snapshot: null,
+    fairnessBoost: true,
   },
 
   profitStrategy: {
@@ -2677,6 +2690,14 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
     rpcShareLoad: Boolean(config.rpc.shareLoad),
+    learningMode: config.learningMode
+      ? (cloneJson(config.learningMode) as PersistedBotSettings['learningMode'])
+      : {
+          enabled: false,
+          strictness: 'middle',
+          snapshot: null,
+          fairnessBoost: true,
+        },
     migrations: { ...settingsMigrations },
   };
 }
@@ -3353,6 +3374,31 @@ function applySettingsSnapshot(
           g.takeProfitPct != null && Number.isFinite(Number(g.takeProfitPct))
             ? Math.max(1, Math.min(5000, Number(g.takeProfitPct)))
             : 25,
+      };
+    }
+  }
+  if (saved.learningMode && typeof saved.learningMode === 'object') {
+    try {
+      const { normalizeLearningModeConfig } =
+        require('./learningMode') as typeof import('./learningMode');
+      config.learningMode = normalizeLearningModeConfig(
+        saved.learningMode as import('./learningMode').LearningModeConfig
+      );
+    } catch {
+      config.learningMode = {
+        enabled: saved.learningMode.enabled === true,
+        strictness:
+          saved.learningMode.strictness === 'stricter' ||
+          saved.learningMode.strictness === 'looser' ||
+          saved.learningMode.strictness === 'middle'
+            ? saved.learningMode.strictness
+            : 'middle',
+        snapshot:
+          saved.learningMode.snapshot &&
+          typeof saved.learningMode.snapshot === 'object'
+            ? (cloneJson(saved.learningMode.snapshot) as unknown as import('./learningMode').LearningModeConfig['snapshot'])
+            : null,
+        fairnessBoost: saved.learningMode.fairnessBoost !== false,
       };
     }
   }
@@ -4055,23 +4101,41 @@ export function hardFilterFloorsActive(): boolean {
 }
 
 export function effectiveMinLiquidityUsd(): number {
+  let base: number;
   if (!hardFilterFloorsActive()) {
-    return Math.max(0, config.filters.minLiquidity ?? 0);
+    base = Math.max(0, config.filters.minLiquidity ?? 0);
+  } else {
+    base = Math.max(
+      config.filters.minLiquidity ?? 0,
+      HARD_FILTER_FLOORS.minLiquidityUsd
+    );
   }
-  return Math.max(
-    config.filters.minLiquidity ?? 0,
-    HARD_FILTER_FLOORS.minLiquidityUsd
-  );
+  try {
+    const { learningModeAdjustedMinLiquidity } =
+      require('./learningMode') as typeof import('./learningMode');
+    return learningModeAdjustedMinLiquidity(base);
+  } catch {
+    return base;
+  }
 }
 
 export function effectiveMinMarketCapUsd(): number {
+  let base: number;
   if (!hardFilterFloorsActive()) {
-    return Math.max(0, config.filters.minMarketCapUsd ?? 0);
+    base = Math.max(0, config.filters.minMarketCapUsd ?? 0);
+  } else {
+    base = Math.max(
+      config.filters.minMarketCapUsd ?? 0,
+      HARD_FILTER_FLOORS.minMarketCapUsd
+    );
   }
-  return Math.max(
-    config.filters.minMarketCapUsd ?? 0,
-    HARD_FILTER_FLOORS.minMarketCapUsd
-  );
+  try {
+    const { learningModeAdjustedMinMarketCap } =
+      require('./learningMode') as typeof import('./learningMode');
+    return learningModeAdjustedMinMarketCap(base);
+  } catch {
+    return base;
+  }
 }
 
 export function effectiveMinVolume24hUsd(): number {
@@ -4138,13 +4202,25 @@ export function effectiveMinRecentActivity(): number {
 
 /** Min top-10 concentration — never below HARD_FILTER_FLOORS (5%), default 8%. Risk OFF → configured (0 when soak). */
 export function effectiveMinTop10HolderPct(): number {
+  let base: number;
   if (!hardFilterFloorsActive()) {
     const configured = Number(config.filters.minTop10HolderPct);
-    return Number.isFinite(configured) && configured > 0 ? configured : 0;
+    base = Number.isFinite(configured) && configured > 0 ? configured : 0;
+  } else {
+    const configured = Number(config.filters.minTop10HolderPct);
+    const preferred = Number.isFinite(configured) && configured > 0 ? configured : 8;
+    base = Math.max(preferred, HARD_FILTER_FLOORS.minTop10HolderPct);
   }
-  const configured = Number(config.filters.minTop10HolderPct);
-  const preferred = Number.isFinite(configured) && configured > 0 ? configured : 8;
-  return Math.max(preferred, HARD_FILTER_FLOORS.minTop10HolderPct);
+  try {
+    const { isLearningModeActive, applyLearningMinOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      return applyLearningMinOverlay(base, 'top10MinPct');
+    }
+  } catch {
+    /* ignore */
+  }
+  return base;
 }
 
 /**
@@ -4153,8 +4229,21 @@ export function effectiveMinTop10HolderPct(): number {
  */
 export function effectiveMaxTop10HolderPct(): number {
   const configured = Number(config.filters.maxHolderConcentration);
-  if (!Number.isFinite(configured) || configured <= 0) return 0;
-  return Math.min(100, configured);
+  let base =
+    !Number.isFinite(configured) || configured <= 0
+      ? 0
+      : Math.min(100, configured);
+  try {
+    const { isLearningModeActive, applyLearningMaxOverlay } =
+      require('./learningMode') as typeof import('./learningMode');
+    if (isLearningModeActive()) {
+      // Learning Mode always supplies a top10 max when ON
+      return applyLearningMaxOverlay(base > 0 ? base : 29, 'top10MaxPct');
+    }
+  } catch {
+    /* ignore */
+  }
+  return base;
 }
 
 /** Ensure minTop10 ≤ maxHolderConcentration when both are enabled. */
@@ -5205,5 +5294,26 @@ export function getConfigSnapshot() {
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
     smartWallets: config.smartWallets,
+    learningMode: (() => {
+      try {
+        const { getLearningModeStatus } =
+          require('./learningMode') as typeof import('./learningMode');
+        return getLearningModeStatus();
+      } catch {
+        return {
+          enabled: config.learningMode?.enabled === true,
+          strictness: config.learningMode?.strictness || 'middle',
+          fairnessBoost: true,
+          hasSnapshot: config.learningMode?.snapshot != null,
+          overlays: null,
+          label:
+            config.learningMode?.enabled === true
+              ? `Learning Mode · ${String(config.learningMode.strictness || 'middle')}`
+              : 'Learning Mode OFF',
+          liveWarning:
+            config.learningMode?.enabled === true && config.mode === 'live',
+        };
+      }
+    })(),
   };
 }

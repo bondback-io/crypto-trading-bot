@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.76',
+    title: 'Micro-bot Learning Mode',
+    sections: ['learning', 'microbots', 'risk'],
+    items: [
+      'New Learning Mode in Settings (near Risk): ON/OFF, Stricter/Middle/Looser slider, Reset with snapshot restore. Default OFF; does not change position sizing.',
+      'When ON, overlays entry gates (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots among passers only.',
+      'Self-learn: Global TP pauses TP/SL exit deltas (entry continues); tighter ±5% patch clamps; multi-step rollback stack; small loosen entry deltas when evidence supports.',
+    ],
+  },
+  {
     version: '1.2.75',
     title: 'Utility lane debug instrumentation removed',
     sections: ['execution'],

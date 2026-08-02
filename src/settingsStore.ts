@@ -126,6 +126,13 @@ export interface PersistedBotSettings {
   pollIntervalMs?: number;
   /** Share RPC load across Helius / Alchemy / public */
   rpcShareLoad?: boolean;
+  /** Micro-bot Learning Mode (global gate overlays + fairness) */
+  learningMode?: {
+    enabled?: boolean;
+    strictness?: 'stricter' | 'middle' | 'looser';
+    snapshot?: Record<string, unknown> | null;
+    fairnessBoost?: boolean;
+  };
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

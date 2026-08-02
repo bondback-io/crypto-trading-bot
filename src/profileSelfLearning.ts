@@ -122,6 +122,8 @@ export interface ProfileSelfLearningState {
   history: SelfLearnHistoryEntry[];
   /** Snapshot of overrides before last upgrade (for rollback) */
   previousOverrideSnapshot?: TradeProfileParamOverride | null;
+  /** Multi-step rollback stack (newest last; max 8) */
+  previousOverrideStack?: TradeProfileParamOverride[];
   /** Tiny tweaks between Level upgrades (does not bump version) */
   microVersion: number;
   /** Apply a micro nudge every N closes when no full upgrade candidate */
@@ -152,6 +154,7 @@ export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
   pendingProposal: null,
   history: [],
   previousOverrideSnapshot: null,
+  previousOverrideStack: [],
   microVersion: 0,
   microEveryTrades: 4,
   tradesSinceMicro: 0,
@@ -362,6 +365,19 @@ export function normalizeSelfLearning(
       typeof raw.previousOverrideSnapshot === 'object'
         ? raw.previousOverrideSnapshot
         : null,
+    previousOverrideStack: Array.isArray(
+      (raw as { previousOverrideStack?: unknown }).previousOverrideStack
+    )
+      ? (
+          (raw as { previousOverrideStack: TradeProfileParamOverride[] })
+            .previousOverrideStack || []
+        )
+          .filter((x) => x && typeof x === 'object')
+          .slice(-8)
+      : raw.previousOverrideSnapshot &&
+          typeof raw.previousOverrideSnapshot === 'object'
+        ? [raw.previousOverrideSnapshot]
+        : [],
     microVersion: Math.max(0, Math.round(Number(raw.microVersion) || 0)),
     microEveryTrades: clamp(
       Number(raw.microEveryTrades) || d.microEveryTrades,
@@ -1176,7 +1192,7 @@ export function buildEntryLearningCandidates(
     });
   }
 
-  // Raise-only Min token age: young losers vs older winners
+  // Raise Min token age: young losers vs older winners
   const aged = episodes.filter(
     (e) =>
       e.tokenAgeHoursAtEntry != null &&
@@ -1218,10 +1234,65 @@ export function buildEntryLearningCandidates(
     }
   }
 
+  // Small loosen entry deltas when evidence supports (healthy WR, floors too tight)
+  const winners = episodes.filter((e) => (e.pnlPct || 0) > 0);
+  const winRate = winners.length / Math.max(1, episodes.length);
+  if (episodes.length >= 12 && winRate >= 0.58 && loserRate <= 0.35) {
+    const convWins = winners
+      .map((e) => Number(e.convictionScore))
+      .filter((n) => Number.isFinite(n));
+    const curConv = Number(currentMatch.minConviction) || 0;
+    if (convWins.length >= 5 && curConv >= 40) {
+      const medianWinConv = [...convWins].sort((a, b) => a - b)[
+        Math.floor(convWins.length / 2)
+      ];
+      if (medianWinConv + 8 < curConv) {
+        const next = clamp(curConv - 3, 30, 85);
+        if (next < curConv - 0.5) {
+          out.push({
+            summary: `Loosen min conviction → ${next} (winners median ${medianWinConv.toFixed(0)})`,
+            patch: { match: { minConviction: next } },
+          });
+        }
+      }
+    }
+    const wqWins = winners
+      .map((e) => Number((e as { walletQuality?: number }).walletQuality))
+      .filter((n) => Number.isFinite(n));
+    // Prefer walletCount signal when WQ not on episode: loosen cluster if many 1-wallet winners
+    const curWallets = Number(currentMatch.minWalletCount) || 1;
+    if (curWallets >= 2) {
+      const oneWalletWins = winners.filter(
+        (e) => e.walletCount != null && Number(e.walletCount) <= 1
+      ).length;
+      if (oneWalletWins / Math.max(1, winners.length) >= 0.35) {
+        out.push({
+          summary: `Loosen cluster floor → ${curWallets - 1} (many 1-wallet winners)`,
+          patch: { match: { minWalletCount: curWallets - 1 } },
+        });
+      }
+    }
+    void wqWins;
+  }
+
   return out.slice(0, 3);
 }
 
-/** Clamp learning patches to safety bands vs catalog. */
+/** Clamp a numeric patch to catalog ±5% (with absolute safety band). */
+function clampDeltaPct(
+  proposed: number,
+  catalog: number,
+  absLo: number,
+  absHi: number,
+  pctBand = 0.05
+): number {
+  const cat = Number.isFinite(catalog) ? catalog : proposed;
+  const lo = Math.min(cat * (1 - pctBand), cat - Math.abs(cat) * pctBand);
+  const hi = Math.max(cat * (1 + pctBand), cat + Math.abs(cat) * pctBand);
+  return clamp(proposed, Math.max(absLo, lo), Math.min(absHi, hi));
+}
+
+/** Clamp learning patches to tight ±5% / small-step bands vs catalog. */
 export function clampLearningPatch(
   profileId: string,
   catalogExit: TradeProfileExitRules,
@@ -1234,24 +1305,37 @@ export function clampLearningPatch(
   const match: Partial<TradeProfileMatchRules> = { ...(patch.match || {}) };
 
   if (exitRules.sizeMultiplier != null) {
-    exitRules.sizeMultiplier = clamp(Number(exitRules.sizeMultiplier), 0.4, 1.2);
+    const cat = catalogExit.sizeMultiplier ?? 1;
+    exitRules.sizeMultiplier = clampDeltaPct(
+      Number(exitRules.sizeMultiplier),
+      cat,
+      0.4,
+      1.2
+    );
   }
   if (exitRules.hardTimeLimitSecMax != null) {
     const catMax = catalogExit.hardTimeLimitSecMax ?? 600;
-    exitRules.hardTimeLimitSecMax = clamp(
+    exitRules.hardTimeLimitSecMax = clampDeltaPct(
       Number(exitRules.hardTimeLimitSecMax),
+      catMax,
       Math.max(40, catMax * 0.5),
       catMax * 1.6
     );
   }
   if (exitRules.stopLossPctMax != null) {
     const cat = Math.abs(catalogExit.stopLossPctMax ?? 14);
-    exitRules.stopLossPctMax = clamp(Number(exitRules.stopLossPctMax), cat * 0.7, cat * 1.5);
+    exitRules.stopLossPctMax = clampDeltaPct(
+      Number(exitRules.stopLossPctMax),
+      cat,
+      cat * 0.7,
+      cat * 1.5
+    );
   }
   if (exitRules.takeProfitPctMin != null) {
     const cat = catalogExit.takeProfitPctMin ?? 15;
-    exitRules.takeProfitPctMin = clamp(
+    exitRules.takeProfitPctMin = clampDeltaPct(
       Number(exitRules.takeProfitPctMin),
+      cat,
       cat * 0.5,
       cat * 1.4
     );
@@ -1259,38 +1343,76 @@ export function clampLearningPatch(
 
   const ep = exitRules.exitPolicy;
   if (ep) {
+    const catPol = catalogExit.exitPolicy || {};
     if (ep.profitLockArmPct != null) {
-      ep.profitLockArmPct = clamp(Number(ep.profitLockArmPct), 12, 100);
+      ep.profitLockArmPct = clampDeltaPct(
+        Number(ep.profitLockArmPct),
+        Number(catPol.profitLockArmPct) || 40,
+        12,
+        100
+      );
     }
     if (ep.profitGivebackPts != null) {
-      ep.profitGivebackPts = clamp(Number(ep.profitGivebackPts), 6, 55);
+      ep.profitGivebackPts = clampDeltaPct(
+        Number(ep.profitGivebackPts),
+        Number(catPol.profitGivebackPts) || 25,
+        6,
+        55
+      );
     }
     if (ep.profitFloorPct != null) {
-      ep.profitFloorPct = clamp(Number(ep.profitFloorPct), 0, 60);
+      ep.profitFloorPct = clampDeltaPct(
+        Number(ep.profitFloorPct),
+        Number(catPol.profitFloorPct) || 0,
+        0,
+        60
+      );
     }
     if (ep.earlyPartialTpPct != null) {
-      ep.earlyPartialTpPct = clamp(Number(ep.earlyPartialTpPct), 0, 80);
+      ep.earlyPartialTpPct = clampDeltaPct(
+        Number(ep.earlyPartialTpPct),
+        Number(catPol.earlyPartialTpPct) || 15,
+        0,
+        80
+      );
     }
     if (ep.earlyPartialFraction != null) {
-      ep.earlyPartialFraction = clamp(Number(ep.earlyPartialFraction), 0.2, 0.6);
+      ep.earlyPartialFraction = clampDeltaPct(
+        Number(ep.earlyPartialFraction),
+        Number(catPol.earlyPartialFraction) || 0.4,
+        0.2,
+        0.6
+      );
     }
     exitRules.exitPolicy = ep;
   }
 
   if (match.minConviction != null) {
     const cat = catalogMatch.minConviction ?? 40;
-    const lo = SCALP_PROFILES.has(profileId) ? Math.min(25, cat - 10) : cat - 5;
-    match.minConviction = clamp(Number(match.minConviction), lo, 90);
+    // Small step: ±5 points from catalog, within absolute band
+    const absLo = SCALP_PROFILES.has(profileId) ? Math.min(25, cat - 10) : Math.max(30, cat - 8);
+    match.minConviction = clamp(
+      Number(match.minConviction),
+      Math.max(absLo, cat - 5),
+      Math.min(90, cat + 5)
+    );
   }
   if (match.minWalletQuality != null) {
+    const cat = catalogMatch.minWalletQuality ?? (SCALP_PROFILES.has(profileId) ? 35 : 45);
+    const absLo = SCALP_PROFILES.has(profileId) ? 25 : 35;
     match.minWalletQuality = clamp(
       Number(match.minWalletQuality),
-      SCALP_PROFILES.has(profileId) ? 25 : 40,
-      85
+      Math.max(absLo, cat - 5),
+      Math.min(85, cat + 5)
     );
   }
   if (match.minWalletCount != null) {
-    match.minWalletCount = clamp(Number(match.minWalletCount), 1, 5);
+    const cat = catalogMatch.minWalletCount ?? 1;
+    match.minWalletCount = clamp(
+      Number(match.minWalletCount),
+      Math.max(1, cat - 1),
+      Math.min(5, cat + 1)
+    );
   }
   if (match.minTokenAgeHours != null) {
     const cat =
@@ -1298,10 +1420,12 @@ export function clampLearningPatch(
       Number.isFinite(catalogMatch.minTokenAgeHours)
         ? Number(catalogMatch.minTokenAgeHours)
         : 0;
-    // Raise-only vs catalog: never auto-lower below catalog baseline
     const n = Number(match.minTokenAgeHours);
     if (Number.isFinite(n)) {
-      match.minTokenAgeHours = clamp(Math.max(cat, n), 0, 48);
+      // Allow small loosen (down to 80% of catalog) or tighten (+20% / +1h)
+      const lo = cat > 0 ? Math.max(0, cat * 0.8) : 0;
+      const hi = cat > 0 ? Math.min(48, Math.max(cat + 1, cat * 1.2)) : 48;
+      match.minTokenAgeHours = clamp(n, lo, hi);
     } else {
       delete match.minTokenAgeHours;
     }
@@ -1380,10 +1504,10 @@ export function runSelfLearnTick(input: {
   const microEvery = state.microEveryTrades || 4;
   state.nextEligibleIn = Math.max(0, microEvery - (state.tradesSinceMicro || 0));
 
-  // Rollback check: post-upgrade window worse than previous score
+  // Rollback check: post-upgrade window (~12 trades) worse than previous score
   if (
     state.version > 0 &&
-    state.tradesSinceUpgrade >= state.upgradeCooldownTrades &&
+    state.tradesSinceUpgrade >= Math.max(12, state.upgradeCooldownTrades) &&
     state.history.length > 0
   ) {
     const last = state.history[state.history.length - 1];
@@ -1391,13 +1515,30 @@ export function runSelfLearnTick(input: {
       const recent = getProfileLearningEpisodes(input.profileId, 80).filter(
         (e) => e.paramVersion === state.version
       );
-      if (recent.length >= Math.max(5, Math.floor(state.upgradeCooldownTrades * 0.75))) {
+      const needTrades = Math.max(
+        12,
+        Math.floor(state.upgradeCooldownTrades * 0.75)
+      );
+      if (recent.length >= needTrades) {
         const after = scoreEpisodesHeuristic(recent);
         const lastSource = state.lastMutation?.source;
         const margin =
           lastSource === 'ml' || lastSource === 'hybrid' ? 1.5 : 2.5;
         if (after < last.scoreBefore - margin) {
           state.pendingProposal = null;
+          try {
+            const { appendLearningSave } =
+              require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+            appendLearningSave({
+              profileId: input.profileId,
+              kind: 'rollback',
+              summary: `Auto-rollback v${state.version}: score ${after.toFixed(1)} < ${last.scoreBefore.toFixed(1)} − ${margin} after ${recent.length} trades`,
+              version: state.version,
+              episodeCount: recent.length,
+            });
+          } catch {
+            /* optional */
+          }
           return {
             state: {
               ...state,
@@ -1438,8 +1579,20 @@ export function runSelfLearnTick(input: {
     heikinAshiExitEnabled: pol.heikinAshiExitEnabled === true,
   };
 
+  // Global Micro-Bot TP: skip exit delta learning only; entry continues
+  let allowExitDeltas = confidence.allowExit;
+  try {
+    const { getGlobalMicroBotTakeProfitPct } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    if (getGlobalMicroBotTakeProfitPct() != null) {
+      allowExitDeltas = false;
+    }
+  } catch {
+    /* ignore */
+  }
+
   const candidates = [
-    ...(confidence.allowExit
+    ...(allowExitDeltas
       ? buildExitLearningCandidates(input.profileId, episodes, currentPolicy)
       : []),
     ...(confidence.allowEntry
@@ -1454,7 +1607,7 @@ export function runSelfLearnTick(input: {
   // ML lead mode: add tiny continuous delta candidates (still clamped)
   try {
     const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
-    if (state.mlMode === 'lead' && confidence.allowExit) {
+    if (state.mlMode === 'lead' && allowExitDeltas) {
       candidates.push(
         ...mlMod.buildMlLedCandidates(episodes, {
           ...currentPolicy,
@@ -1613,6 +1766,18 @@ export function runSelfLearnTick(input: {
       0,
       microEvery - (state.tradesSinceMicro || 0)
     );
+    try {
+      const { appendLearningSave } =
+        require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+      appendLearningSave({
+        profileId: input.profileId,
+        kind: 'proposal',
+        summary: `${state.mode === 'auto' ? 'Accept' : 'Propose'}: ${best.summary}`,
+        version: state.version,
+      });
+    } catch {
+      /* optional */
+    }
 
     if (state.mode === 'auto') {
       return { state, applyPatch: best.patch, applyKind: 'upgrade' };
@@ -1628,8 +1793,11 @@ export function runSelfLearnTick(input: {
   }
 
   // Continuous micro-evolve (auto only): tiny nudge every N closes
+  // When Global TP is on, still allow entry-only micro; skip if bestNear is exit-only
   const microDue = (state.tradesSinceMicro || 0) >= microEvery;
-  if (state.mode === 'auto' && microDue && confidence.allowExit && !best) {
+  const microAllow =
+    confidence.allowExit || confidence.allowEntry;
+  if (state.mode === 'auto' && microDue && microAllow && !best) {
     let microPatch: LearningProposalPatch | null = null;
     let microSummary = '';
     let microScoreAfter = scoreBefore;
@@ -1753,6 +1921,13 @@ export function applySelfLearnUpgrade(
     winsAtUpgrade = snap.wins;
     lossesAtUpgrade = snap.losses;
   }
+  const stack = [
+    ...(Array.isArray(state.previousOverrideStack)
+      ? state.previousOverrideStack
+      : []),
+    ...(previousOverrides ? [previousOverrides] : []),
+  ].slice(-8);
+
   return normalizeSelfLearning({
     ...state,
     version: nextVersion,
@@ -1763,6 +1938,7 @@ export function applySelfLearnUpgrade(
     nearMiss: null,
     mode: state.mode === 'shadow' ? 'auto' : state.mode,
     previousOverrideSnapshot: previousOverrides,
+    previousOverrideStack: stack,
     lastMutation: {
       at: Date.now(),
       kind: 'upgrade',
