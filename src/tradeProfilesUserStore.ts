@@ -24,6 +24,8 @@ export interface TradeProfilesUserState {
   profiles?: TradeProfileRuntimeState['profiles'];
   overrides?: TradeProfileRuntimeState['overrides'];
   selfLearning?: TradeProfileRuntimeState['selfLearning'];
+  /** Per-profile Participate in Learning Mode (distinct from Self-Learning). */
+  learningModeOptIn?: TradeProfileRuntimeState['learningModeOptIn'];
 }
 
 const USER_FILE = () => dataFile(PERSIST_FILES.tradeProfilesUser);
@@ -72,6 +74,11 @@ export function saveTradeProfilesUserState(
             JSON.stringify(state.selfLearning)
           ) as TradeProfilesUserState['selfLearning'])
         : undefined,
+      learningModeOptIn: state.learningModeOptIn
+        ? (JSON.parse(
+            JSON.stringify(state.learningModeOptIn)
+          ) as TradeProfilesUserState['learningModeOptIn'])
+        : undefined,
     };
     atomicWriteJson(USER_FILE(), payload);
   } catch (err) {
@@ -95,9 +102,11 @@ export function migrateTradeProfilesUserStateFromRuntime(
     state.overrides && Object.keys(state.overrides).length > 0;
   const hasSelfLearn =
     state.selfLearning && Object.keys(state.selfLearning).length > 0;
+  const hasLmOptIn =
+    state.learningModeOptIn && Object.keys(state.learningModeOptIn).length > 0;
   const hasProfiles =
     state.profiles && Object.keys(state.profiles).length > 0;
-  if (!hasOverrides && !hasSelfLearn && !hasProfiles) return false;
+  if (!hasOverrides && !hasSelfLearn && !hasLmOptIn && !hasProfiles) return false;
   saveTradeProfilesUserState(state);
   console.log(
     '[trade-profiles-user] Migrated user knobs from runtime → trade-profiles-user.json'
@@ -143,6 +152,12 @@ export function applyTradeProfilesUserStateOnBoot(): boolean {
         selfLearning: user.selfLearning
           ? { ...(current.selfLearning || {}), ...user.selfLearning }
           : current.selfLearning,
+        learningModeOptIn: user.learningModeOptIn
+          ? {
+              ...(current.learningModeOptIn || {}),
+              ...user.learningModeOptIn,
+            }
+          : current.learningModeOptIn,
         autoScoring: current.autoScoring,
       },
     });
@@ -150,7 +165,8 @@ export function applyTradeProfilesUserStateOnBoot(): boolean {
     console.log(
       `[trade-profiles-user] Restored user knobs from ${PERSIST_FILES.tradeProfilesUser}` +
         ` · overrides=${Object.keys(user.overrides || {}).length}` +
-        ` · selfLearn=${Object.keys(user.selfLearning || {}).length}`
+        ` · selfLearn=${Object.keys(user.selfLearning || {}).length}` +
+        ` · lmOptIn=${Object.keys(user.learningModeOptIn || {}).length}`
     );
 
     try {

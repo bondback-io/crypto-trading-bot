@@ -87,6 +87,8 @@ export interface PersistedBotSettings {
       weights?: Record<string, number>;
     };
     selfLearning?: Record<string, unknown>;
+    /** Per-profile Participate in Learning Mode (default true when unset). */
+    learningModeOptIn?: Record<string, boolean>;
     globalTakeProfit?: {
       enabled?: boolean;
       takeProfitPct?: number;

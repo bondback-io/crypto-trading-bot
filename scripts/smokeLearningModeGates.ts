@@ -1,7 +1,8 @@
 /**
  * Smoke: Learning Mode Middle/Looser never tighten vs baseline; concurrent floors.
+ * Also: per-profile Participate opt-in scopes match soften under Smart Bot.
  * Run: npx tsx scripts/smokeLearningModeGates.ts
- * Mutates in-memory config only (does not call persist helpers).
+ * Mutates in-memory config; restores prior Participate flags after opt-in checks.
  */
 import { config } from '../src/config';
 import {
@@ -11,6 +12,17 @@ import {
   learningModeAdjustedMaxTradesPerHour,
   learningModeAdjustedMinMsBetweenTrades,
 } from '../src/learningMode';
+import {
+  ensureTradeProfilesInitialized,
+  setSmartBotProfilesEnabled,
+  setProfileLearningModeOptIn,
+  isProfileLearningModeOptedIn,
+  getActiveCascadeMatchFloors,
+  resolveTradeProfileDefinition,
+  countLearningModeOptInProfiles,
+  isSmartBotProfilesEnabled,
+  updateTradeProfileParams,
+} from '../src/tradeProfiles';
 
 let failed = 0;
 function check(label: string, ok: boolean, detail?: string): void {
@@ -116,6 +128,66 @@ check(
   learningModeAdjustedMaxConcurrent(3) === 3,
   String(learningModeAdjustedMaxConcurrent(3))
 );
+
+// ── Per-profile Learning Mode opt-in ───────────────────────────────────────
+ensureTradeProfilesInitialized();
+const prevSmart = isSmartBotProfilesEnabled();
+setSmartBotProfilesEnabled(true);
+
+const prevHwr = isProfileLearningModeOptedIn('high_win_rate');
+const prevScalper = isProfileLearningModeOptedIn('scalper');
+
+setLm(true, 'middle');
+setProfileLearningModeOptIn('high_win_rate', true);
+setProfileLearningModeOptIn('scalper', false);
+// Raise HWR floor so Middle soften is observable (catalog 55 ≈ matrix → no delta)
+updateTradeProfileParams('high_win_rate', { match: { minConviction: 80 } });
+
+check(
+  'Opt-in: high_win_rate participates',
+  isProfileLearningModeOptedIn('high_win_rate') === true
+);
+check(
+  'Opt-out: scalper does not participate',
+  isProfileLearningModeOptedIn('scalper') === false
+);
+
+const hwrRaw = Number(
+  resolveTradeProfileDefinition('high_win_rate').match.minConviction ?? 80
+);
+const scalperRaw = Number(
+  resolveTradeProfileDefinition('scalper').match.minConviction ?? 32
+);
+const hwrExpected = applyLearningMinOverlay(hwrRaw, 'minConviction');
+const hwrFloors = getActiveCascadeMatchFloors('high_win_rate');
+const scalperFloors = getActiveCascadeMatchFloors('scalper');
+
+check(
+  'Opt-in: HWR match conviction softens under LM',
+  hwrFloors.minConviction === hwrExpected && hwrExpected < hwrRaw,
+  `raw=${hwrRaw} soft=${hwrExpected} floors=${hwrFloors.minConviction}`
+);
+check(
+  'Opt-out: scalper match conviction stays catalog',
+  scalperFloors.minConviction === scalperRaw,
+  `raw=${scalperRaw} floors=${scalperFloors.minConviction}`
+);
+
+const counts = countLearningModeOptInProfiles();
+check(
+  'Opt-in count: scalper out reduces optedIn',
+  counts.optedIn < counts.total && counts.total > 0,
+  `${counts.optedIn}/${counts.total}`
+);
+
+// Restore prior opt-in flags + clear temporary HWR conviction override
+updateTradeProfileParams('high_win_rate', {
+  match: { minConviction: null as unknown as number },
+});
+setProfileLearningModeOptIn('high_win_rate', prevHwr);
+setProfileLearningModeOptIn('scalper', prevScalper);
+setSmartBotProfilesEnabled(prevSmart);
+setLm(false, 'middle');
 
 console.log(failed === 0 ? '\nAll checks passed.' : `\n${failed} failed.`);
 process.exit(failed === 0 ? 0 : 1);

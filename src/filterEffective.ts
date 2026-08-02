@@ -50,14 +50,18 @@ export function effectiveMinWalletQualityScore(): number {
       /* ignore bootstrap */
     }
   }
-  try {
-    const { isLearningModeActive, applyLearningMinOverlay } =
-      require('./learningMode') as typeof import('./learningMode');
-    if (isLearningModeActive()) {
-      score = applyLearningMinOverlay(score, 'minWalletQuality');
+  // When Smart Bot profile-owns floors, LM soften is applied in
+  // getActiveCascadeMatchFloors (per-profile opt-in) — do not re-apply here.
+  if (!profile) {
+    try {
+      const { isLearningModeActive, applyLearningMinOverlay } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive()) {
+        score = applyLearningMinOverlay(score, 'minWalletQuality');
+      }
+    } catch {
+      /* ignore bootstrap */
     }
-  } catch {
-    /* ignore bootstrap */
   }
   return Math.min(85, score);
 }
@@ -80,14 +84,16 @@ export function effectiveMinConvictionScore(): number {
       /* ignore bootstrap */
     }
   }
-  try {
-    const { isLearningModeActive, applyLearningMinOverlay } =
-      require('./learningMode') as typeof import('./learningMode');
-    if (isLearningModeActive()) {
-      score = applyLearningMinOverlay(score, 'minConviction');
+  if (!profile) {
+    try {
+      const { isLearningModeActive, applyLearningMinOverlay } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive()) {
+        score = applyLearningMinOverlay(score, 'minConviction');
+      }
+    } catch {
+      /* ignore bootstrap */
     }
-  } catch {
-    /* ignore bootstrap */
   }
   return Math.min(80, score);
 }
@@ -115,14 +121,16 @@ export function effectiveClusterMinWallets(): number {
       /* ignore bootstrap */
     }
   }
-  try {
-    const { isLearningModeActive, applyLearningMinOverlay } =
-      require('./learningMode') as typeof import('./learningMode');
-    if (isLearningModeActive()) {
-      floor = applyLearningMinOverlay(floor, 'minCluster');
+  if (!profile) {
+    try {
+      const { isLearningModeActive, applyLearningMinOverlay } =
+        require('./learningMode') as typeof import('./learningMode');
+      if (isLearningModeActive()) {
+        floor = applyLearningMinOverlay(floor, 'minCluster');
+      }
+    } catch {
+      /* ignore bootstrap */
     }
-  } catch {
-    /* ignore bootstrap */
   }
   return Math.min(5, Math.max(1, floor));
 }

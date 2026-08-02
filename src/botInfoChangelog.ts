@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.82',
+    title: 'Per-profile Learning Mode opt-in + peach bulb',
+    sections: ['overview', 'learning', 'microbots'],
+    items: [
+      'Each Micro Bot has Participate in Learning Mode (default ON) — softens that bot’s entry floors/fairness/stamps only when Global LM is ON; separate from Self-Learning deltas.',
+      'Under Smart Bot Profiles, LM conviction/WQ/cluster soften is scoped to opted-in bots (no blanket global min overlays). Concurrent/rate + sniper/bundler max softens stay global.',
+      'Header Learning Mode ON indicator is a filled bulb in Pause peach (#F1BB72); tip/banner show opted-in bot count. Closed-trade LM marks stay outline.',
+    ],
+  },
+  {
     version: '1.2.81',
     title: 'Hide sound unlock chip on desktop',
     sections: ['alerts', 'overview'],

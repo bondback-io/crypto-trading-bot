@@ -113,34 +113,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .header-actions #mode-badge.badge-livesim {
       animation: mode-badge-sheen 2.8s ease-in-out infinite;
     }
+    /* LM ON bulb: filled, pause-button peach (#F1BB72 / .btn-warning) */
     .header-actions #header-learning-mode-badge {
       padding: 2px 6px;
       gap: 0;
       min-width: 0;
-      border-color: rgba(56, 189, 248, 0.55);
-      color: #7dd3fc;
-      background: rgba(12, 74, 110, 0.35);
+      border-color: rgba(241, 187, 114, 0.55);
+      color: #F1BB72;
+      background: rgba(120, 53, 15, 0.35);
     }
     .header-actions #header-learning-mode-badge .status-ico {
       width: 12px;
       height: 12px;
-      color: #7dd3fc;
+      color: #F1BB72;
+      fill: #F1BB72;
     }
     .header-actions #header-learning-mode-badge.lm-strictness-stricter {
       border-color: rgba(251, 146, 60, 0.55);
-      color: #fdba74;
+      color: #F1BB72;
       background: rgba(124, 45, 18, 0.35);
     }
     .header-actions #header-learning-mode-badge.lm-strictness-stricter .status-ico {
-      color: #fdba74;
+      color: #F1BB72;
     }
     .header-actions #header-learning-mode-badge.lm-strictness-looser {
       border-color: rgba(52, 211, 153, 0.5);
-      color: #6ee7b7;
+      color: #F1BB72;
       background: rgba(6, 78, 59, 0.35);
     }
     .header-actions #header-learning-mode-badge.lm-strictness-looser .status-ico {
-      color: #6ee7b7;
+      color: #F1BB72;
     }
     @media (prefers-reduced-motion: reduce) {
       .dot-running,
@@ -5504,7 +5506,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span id="mode-badge-label">LIVE SIM</span>
           </span>
           <span id="header-learning-mode-badge" class="badge status-badge has-tip hidden lm-strictness-middle" title="Learning Mode OFF" aria-label="Learning Mode">
-            <svg class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/></svg>
+            <svg class="status-ico" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6" fill="none"/><path d="M10 17v4" fill="none"/><path d="M14 17v4" fill="none"/></svg>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
@@ -7057,8 +7059,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mint mt-2" id="risk-status">—</div>
 
         <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="learning-mode-card">
-          <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Softens micro-bot entry gates vs your live baselines (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots. Middle/Looser never tighten vs current floors; also raises effective Max Positions (≥16/≥24) and softens trade-rate at runtime without changing the Max Positions slider or SOL size. Default OFF."></span></div>
-          <p class="text-xs text-slate-400 mb-2">Explore gate strictness for micro-bots. Fairness boost reorders among passers only — hard floors still apply.</p>
+          <div class="section-title !text-sm mb-1">Learning Mode <span class="tip" tabindex="0" data-tip="Softens micro-bot entry gates vs your live baselines (conviction, cluster, WQ, sniper/bundler, top10, MC/liq/age) and fairness-boosts low-episode bots. Middle/Looser never tighten vs current floors; also raises effective Max Positions (≥16/≥24) and softens trade-rate at runtime without changing the Max Positions slider or SOL size. Default OFF. Per-bot Participate toggles live on Micro Bots cards."></span></div>
+          <p class="text-xs text-slate-400 mb-2">Explore gate strictness for micro-bots. Fairness boost reorders among passers only — hard floors still apply. Per-bot Participate toggles live on Micro Bots cards.</p>
           <div class="flex flex-wrap items-center gap-3 mb-2">
             <label class="ctl-check" title="Turn Learning Mode on/off">
               <input type="checkbox" id="learning-mode-enabled" onchange="setLearningModeEnabled(this.checked)" />
@@ -10832,6 +10834,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '</div>' +
                 (editable
                   ? '<div class="tp-param-section">' +
+                      '<p class="tp-param-title">Learning Mode</p>' +
+                      '<p class="mint text-xs" style="margin:0 0 0.35rem;color:#94a3b8">Requires Global Learning Mode ON (Settings → Risk). Softens this bot&apos;s entry floors and fairness only — separate from Self-Learning deltas.</p>' +
+                      '<label class="tp-check" title="When Global Learning Mode is ON, this bot participates in entry soften, fairness bump, and LM trade stamps.">' +
+                        '<input type="checkbox" data-lm-optin-toggle="1"' +
+                          (p.learningModeOptIn !== false ? ' checked' : '') +
+                          ' onchange="toggleProfileLearningModeOptIn(\\'' + p.id + '\\', this.checked)" />' +
+                        '<span>Participate in Learning Mode</span>' +
+                      '</label>' +
+                    '</div>' +
+                    '<div class="tp-param-section">' +
                       '<p class="tp-param-title">Self-learning</p>' +
                       '<p class="mint text-xs" style="margin:0 0 0.35rem;color:#94a3b8">Level = applied upgrades only — not episode count. Prefer <strong style="color:#86efac">auto</strong> for frequent micro-tweaks + Level upgrades (rollback still on).</p>' +
                       '<label class="tp-check">' +
@@ -11724,6 +11736,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (lm.liveWarning) liveWarn.classList.remove('hidden');
         else liveWarn.classList.add('hidden');
       }
+      const optInCount = Number(lm.optInCount);
+      const optInTotal = Number(lm.optInTotal);
+      const optInTip =
+        Number.isFinite(optInCount) &&
+        Number.isFinite(optInTotal) &&
+        optInTotal > 0
+          ? optInCount + '/' + optInTotal + ' bots participate'
+          : '';
       if (headerBadge) {
         headerBadge.classList.remove(
           'lm-strictness-stricter',
@@ -11735,7 +11755,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           lm.label ||
           ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle'));
         headerBadge.title = on
-          ? tip + ' — softens entry gates (Settings → Risk)'
+          ? tip +
+            (optInTip ? ' · ' + optInTip : '') +
+            ' — softens entry/fairness for Participate bots (Settings → Risk)'
           : 'Learning Mode OFF';
         headerBadge.setAttribute('aria-label', on ? tip : 'Learning Mode OFF');
         if (on) headerBadge.classList.remove('hidden');
@@ -11746,7 +11768,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           mbBanner.classList.remove('hidden');
           mbBanner.innerHTML =
             '<strong>' + (lm.label || ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle'))) +
-            '</strong> — softens entry gates vs your baselines; Middle/Looser never tighten. Effective Max Positions ≥16/≥24 + softer trade-rate at runtime. SOL size unchanged.';
+            '</strong>' +
+            (optInTip ? ' · <span class="mint">' + optInTip + '</span>' : '') +
+            ' — softens entry gates for Participate bots; Middle/Looser never tighten. Effective Max Positions ≥16/≥24 + softer trade-rate at runtime. SOL size unchanged.';
         } else {
           mbBanner.classList.add('hidden');
           mbBanner.innerHTML = '';
@@ -12048,6 +12072,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.toggleProfileSelfLearning = toggleProfileSelfLearning;
+
+    async function toggleProfileLearningModeOptIn(id, optedIn) {
+      try {
+        const data = await fetchJSON('/api/trade-profiles/learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profileId: id,
+            learningModeOptIn: !!optedIn,
+          }),
+        });
+        renderTradeProfilesUi(data.tradeProfiles || data);
+        try {
+          const lm = await fetchJSON('/api/config/learning-mode');
+          updateLearningModeUi((lm && lm.learningMode) || lm);
+        } catch (_) {}
+      } catch (err) {
+        alert(err.message || String(err));
+        loadStrategies();
+      }
+    }
+    window.toggleProfileLearningModeOptIn = toggleProfileLearningModeOptIn;
 
     async function setProfileSelfLearnMode(id, mode) {
       try {

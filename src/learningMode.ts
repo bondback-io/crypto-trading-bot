@@ -227,12 +227,26 @@ export function getLearningModeStatus(): {
   overlays: LearningModeGateOverlays | null;
   label: string;
   liveWarning: boolean;
+  /** Profiles opted into Learning Mode (Participate) vs catalog total. */
+  optInCount: number;
+  optInTotal: number;
 } {
   const lm = ensureLearningMode();
   const overlays = lm.enabled ? { ...GATE_MATRIX[lm.strictness] } : null;
   const label = lm.enabled
     ? `Learning Mode · ${lm.strictness.charAt(0).toUpperCase()}${lm.strictness.slice(1)}`
     : 'Learning Mode OFF';
+  let optInCount = 0;
+  let optInTotal = 0;
+  try {
+    const { countLearningModeOptInProfiles } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const c = countLearningModeOptInProfiles();
+    optInCount = c.optedIn;
+    optInTotal = c.total;
+  } catch {
+    /* bootstrap */
+  }
   return {
     enabled: lm.enabled,
     strictness: lm.strictness,
@@ -241,6 +255,8 @@ export function getLearningModeStatus(): {
     overlays,
     label,
     liveWarning: lm.enabled && config.mode === 'live',
+    optInCount,
+    optInTotal,
   };
 }
 

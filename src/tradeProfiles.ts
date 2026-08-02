@@ -1175,6 +1175,12 @@ export interface TradeProfileRuntimeState {
     >
   >;
   /**
+   * Per-profile Learning Mode participation (entry soften / fairness / stamps).
+   * Requires global Learning Mode ON. Default true when missing.
+   * Independent of selfLearning.enabled (delta patches).
+   */
+  learningModeOptIn?: Partial<Record<TradeProfileId, boolean>>;
+  /**
    * Master override for all trade-profile micro-bots: force a single fixed TP%.
    * Overrides TP min/max, profile exitRules TP, scalp TP stamps, and tiered
    * profit-taking / profitStrategy take-profit paths for profile-stamped trades.
@@ -1572,6 +1578,16 @@ function ensureState(): TradeProfileRuntimeState {
         } as NonNullable<TradeProfileRuntimeState['selfLearning']>)
       : undefined;
 
+  const learningModeOptIn =
+    existing.learningModeOptIn &&
+    typeof existing.learningModeOptIn === 'object'
+      ? ({
+          ...(existing.learningModeOptIn as NonNullable<
+            TradeProfileRuntimeState['learningModeOptIn']
+          >),
+        } as NonNullable<TradeProfileRuntimeState['learningModeOptIn']>)
+      : undefined;
+
   const globalTakeProfit = normalizeGlobalMicroBotTakeProfit(
     (existing as TradeProfileRuntimeState).globalTakeProfit
   );
@@ -1584,6 +1600,7 @@ function ensureState(): TradeProfileRuntimeState {
     autoScoring,
     globalTakeProfit,
     ...(selfLearning ? { selfLearning } : {}),
+    ...(learningModeOptIn ? { learningModeOptIn } : {}),
   };
   writeTradeProfilesState(state);
   return state;
@@ -1754,7 +1771,7 @@ export function getActiveCascadeMatchFloors(
     try {
       const { isLearningModeActive, applyLearningMinOverlay } =
         require('./learningMode') as typeof import('./learningMode');
-      if (isLearningModeActive()) {
+      if (isLearningModeActive() && isProfileLearningModeOptedIn(def.id)) {
         minWalletQuality = applyLearningMinOverlay(
           minWalletQuality,
           'minWalletQuality'
@@ -1786,8 +1803,74 @@ export function getActiveCascadeMatchFloors(
   };
 }
 
+/** Default true when unset — preserves prior Global LM behavior until operator opts out. */
+export function isProfileLearningModeOptedIn(
+  profileId: string | null | undefined
+): boolean {
+  if (!profileId || profileId === 'default') return false;
+  try {
+    const state = ensureState();
+    const map = state.learningModeOptIn;
+    if (!map || typeof map !== 'object') return true;
+    const v = map[profileId as TradeProfileId];
+    if (v === undefined) return true;
+    return v === true;
+  } catch {
+    return true;
+  }
+}
+
+export function setProfileLearningModeOptIn(
+  profileId: string,
+  optedIn: boolean
+): boolean {
+  const id = profileId as TradeProfileId;
+  if (!ALL_IDS.includes(id) || id === 'default') return false;
+  const state = ensureState();
+  if (!state.learningModeOptIn) state.learningModeOptIn = {};
+  state.learningModeOptIn[id] = optedIn === true;
+  writeTradeProfilesState(state);
+  persistUserSettings();
+  try {
+    const { saveTradeProfilesUserState } =
+      require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    saveTradeProfilesUserState(serializeTradeProfilesForPersist());
+  } catch {
+    /* optional */
+  }
+  try {
+    const { appendLearningSave } =
+      require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+    appendLearningSave({
+      profileId: id,
+      kind: 'learning_mode',
+      summary: optedIn
+        ? 'Participate in Learning Mode ON'
+        : 'Participate in Learning Mode OFF',
+    });
+  } catch {
+    /* optional */
+  }
+  return optedIn === true;
+}
+
+export function countLearningModeOptInProfiles(): {
+  optedIn: number;
+  total: number;
+} {
+  let optedIn = 0;
+  const total = TRADE_PROFILE_CATALOG.length;
+  for (const p of TRADE_PROFILE_CATALOG) {
+    if (isProfileLearningModeOptedIn(p.id)) optedIn += 1;
+  }
+  return { optedIn, total };
+}
+
 /** LM-adjusted profile match mins (Middle/Looser never raise vs def.match). */
-function learningAdjustedMatchMins(m: TradeProfileDefinition['match']): {
+function learningAdjustedMatchMins(
+  profileId: string,
+  m: TradeProfileDefinition['match']
+): {
   minConviction: number | null | undefined;
   minWalletQuality: number | null | undefined;
 } {
@@ -1796,7 +1879,7 @@ function learningAdjustedMatchMins(m: TradeProfileDefinition['match']): {
   try {
     const { isLearningModeActive, applyLearningMinOverlay } =
       require('./learningMode') as typeof import('./learningMode');
-    if (isLearningModeActive()) {
+    if (isLearningModeActive() && isProfileLearningModeOptedIn(profileId)) {
       if (minConviction != null && Number.isFinite(minConviction)) {
         minConviction = applyLearningMinOverlay(
           Number(minConviction),
@@ -1833,6 +1916,8 @@ export function getTradeProfilesStatus(): {
       effectiveModules: ReturnType<typeof listEffectiveModulesForProfile>;
       selfLearning: import('./profileSelfLearning').ProfileSelfLearningState;
       selfLearnBadge: string;
+      /** Participate in Global Learning Mode (entry soften / fairness / stamps) */
+      learningModeOptIn: boolean;
       learningProgress: import('./profileSelfLearning').LearningProgressSnapshot;
       laneFloorHints: Array<{
         summary: string;
@@ -1880,6 +1965,7 @@ export function getTradeProfilesStatus(): {
       effectiveModules: listEffectiveModulesForProfile(p.id),
       selfLearning: sl,
       selfLearnBadge: formatSelfLearnBadge(sl),
+      learningModeOptIn: isProfileLearningModeOptedIn(p.id),
       learningProgress: getLearningProgressSnapshot(p.id, sl, resolved.name),
       laneFloorHints,
     };
@@ -2470,9 +2556,12 @@ export function evaluateLaneEntryFloors(
       ? Number(m.minTokenAgeHours)
       : 0;
   try {
-    const { learningModeAdjustedMinTokenAgeHours } =
-      require('./learningMode') as typeof import('./learningMode');
-    if (minAgeH > 0) {
+    if (
+      minAgeH > 0 &&
+      isProfileLearningModeOptedIn(def.id)
+    ) {
+      const { learningModeAdjustedMinTokenAgeHours } =
+        require('./learningMode') as typeof import('./learningMode');
       minAgeH = learningModeAdjustedMinTokenAgeHours(minAgeH);
     }
   } catch {
@@ -2578,7 +2667,7 @@ export function evaluateTradeProfileLanes(
     try {
       const { isLearningModeActive, learningModeFairnessBump } =
         require('./learningMode') as typeof import('./learningMode');
-      if (isLearningModeActive()) {
+      if (isLearningModeActive() && isProfileLearningModeOptedIn(def.id)) {
         const { getProfileLearningEpisodes } =
           require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
         const eps = getProfileLearningEpisodes(def.id, 500);
@@ -2679,7 +2768,7 @@ function scoreProfile(
     return { score: 0, reason: floors.reason || 'lane floors' };
   }
   const m = def.match;
-  const lmMatch = learningAdjustedMatchMins(m);
+  const lmMatch = learningAdjustedMatchMins(def.id, m);
   const minConviction = lmMatch.minConviction;
   const minWalletQuality = lmMatch.minWalletQuality;
   let score = 0;
@@ -3972,7 +4061,11 @@ export function assignTradeProfile(
     try {
       const { isLearningModeActive, learningModeFairnessBump } =
         require('./learningMode') as typeof import('./learningMode');
-      if (isLearningModeActive() && score > 0) {
+      if (
+        isLearningModeActive() &&
+        isProfileLearningModeOptedIn(def.id) &&
+        score > 0
+      ) {
         const { getProfileLearningEpisodes } =
           require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
         const bump = learningModeFairnessBump(
@@ -4024,9 +4117,12 @@ export function assignTradeProfile(
 
   let autoMinScore = auto.minScore;
   try {
-    const { learningModeAdjustedAutoMinScore } =
-      require('./learningMode') as typeof import('./learningMode');
-    autoMinScore = learningModeAdjustedAutoMinScore(autoMinScore);
+    // LM-adjusted auto min-score only softens for opted-in winners
+    if (isProfileLearningModeOptedIn(winner.profileId)) {
+      const { learningModeAdjustedAutoMinScore } =
+        require('./learningMode') as typeof import('./learningMode');
+      autoMinScore = learningModeAdjustedAutoMinScore(autoMinScore);
+    }
   } catch {
     /* ignore */
   }
@@ -4343,17 +4439,21 @@ export function applyTradeProfileExitRules(
   } catch {
     position.selfLearnVersion = 0;
   }
-  // Stamp Learning Mode attribution
+  // Stamp Learning Mode attribution (global ON + profile opted in)
   try {
     const { stampLearningModeFields } =
       require('./learningMode') as typeof import('./learningMode');
-    const lm = stampLearningModeFields();
-    if (lm.learningMode) {
-      (position as { learningMode?: boolean }).learningMode = true;
-      (position as { learningStrictness?: string }).learningStrictness =
-        lm.learningStrictness;
-      (position as { learningFairnessApplied?: boolean }).learningFairnessApplied =
-        lm.learningFairnessApplied === true;
+    const pid = position.tradeProfileId;
+    if (pid && isProfileLearningModeOptedIn(pid)) {
+      const lm = stampLearningModeFields();
+      if (lm.learningMode) {
+        (position as { learningMode?: boolean }).learningMode = true;
+        (position as { learningStrictness?: string }).learningStrictness =
+          lm.learningStrictness;
+        (position as {
+          learningFairnessApplied?: boolean;
+        }).learningFairnessApplied = lm.learningFairnessApplied === true;
+      }
     }
   } catch {
     /* ignore */
@@ -4476,6 +4576,7 @@ export function hydrateTradeProfilesFromSettings(
     // Keep prior self-learning / overrides if a partial re-hydrate had no payload
     if (prev?.overrides) base.overrides = prev.overrides;
     if (prev?.selfLearning) base.selfLearning = prev.selfLearning;
+    if (prev?.learningModeOptIn) base.learningModeOptIn = prev.learningModeOptIn;
     if (prev?.globalTakeProfit) {
       base.globalTakeProfit = normalizeGlobalMicroBotTakeProfit(
         prev.globalTakeProfit
@@ -4534,6 +4635,15 @@ export function hydrateTradeProfilesFromSettings(
   } else if (prev?.selfLearning) {
     // Never drop learning state when caller omits the key (bake/import partials)
     base.selfLearning = prev.selfLearning;
+  }
+  if (s.learningModeOptIn && typeof s.learningModeOptIn === 'object') {
+    base.learningModeOptIn = {};
+    for (const [id, raw] of Object.entries(s.learningModeOptIn)) {
+      if (!ALL_IDS.includes(id as TradeProfileId)) continue;
+      base.learningModeOptIn[id as TradeProfileId] = raw === true;
+    }
+  } else if (prev?.learningModeOptIn) {
+    base.learningModeOptIn = prev.learningModeOptIn;
   }
   base.profiles.default = true;
   writeTradeProfilesState(base);

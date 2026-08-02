@@ -2799,6 +2799,7 @@ export function createServer(): express.Application {
       getTradeProfilesStatus,
       ensureTradeProfilesInitialized,
       setProfileSelfLearningEnabled,
+      setProfileLearningModeOptIn,
       applyProfileSelfLearnProposal,
       rejectProfileSelfLearnProposal,
       resetProfileSelfLearning,
@@ -2814,6 +2815,8 @@ export function createServer(): express.Application {
       selfLearningEnabled?: boolean;
       selfLearningMode?: 'shadow' | 'auto';
       selfLearningMlMode?: 'off' | 'shadow' | 'hybrid' | 'lead';
+      /** Per-profile Participate in Learning Mode (distinct from Self-Learning). */
+      learningModeOptIn?: boolean;
       minTrades?: number;
       applySelfLearnProposal?: boolean;
       rejectSelfLearnProposal?: boolean;
@@ -2830,6 +2833,15 @@ export function createServer(): express.Application {
       };
     };
     try {
+      if (body.profileId && typeof body.learningModeOptIn === 'boolean') {
+        setProfileLearningModeOptIn(body.profileId, body.learningModeOptIn);
+        res.json({
+          ok: true,
+          tradeProfiles: getTradeProfilesStatus(),
+          intelligence: paperTrader.getTradeProfileIntelligence(),
+        });
+        return;
+      }
       if (
         body.profileId &&
         body.selfLearningMlMode &&
