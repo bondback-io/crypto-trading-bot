@@ -8459,9 +8459,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function emitProfitCashSound() {
-      // Short, bell-like cash-register "cha-ching" without a long ring.
-      playSoftTone(1318.51, 0, 0.16, 0.024, 'triangle');
-      playSoftTone(2093, 0.1, 0.2, 0.021, 'sine');
+      // A compact cash-register "cha-ching": a short mechanical strike followed
+      // by a bright paired bell. It sits just above the other soft alerts but
+      // avoids a sustained ring or loud, sharp attack.
+      playSoftTone(987.77, 0, 0.075, 0.03, 'triangle');
+      playSoftTone(2349.32, 0.075, 0.17, 0.034, 'triangle');
+      playSoftTone(3135.96, 0.09, 0.14, 0.016, 'sine');
       notifyHaptic([18, 42, 20]);
     }
 
