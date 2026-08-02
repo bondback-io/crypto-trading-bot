@@ -110,19 +110,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .rpc-status.rpc-bad #rpc-health-icon {
       color: #fca5a5;
     }
-    .header-actions .risk-badge .risk-badge-icon {
-      animation: ico-star-twinkle 2.6s ease-in-out infinite;
-      transform-origin: center;
-    }
     .header-actions #mode-badge.badge-livesim {
       animation: mode-badge-sheen 2.8s ease-in-out infinite;
+    }
+    .header-actions #header-learning-mode-badge {
+      padding: 2px 6px;
+      gap: 0;
+      min-width: 0;
+      border-color: rgba(56, 189, 248, 0.55);
+      color: #7dd3fc;
+      background: rgba(12, 74, 110, 0.35);
+    }
+    .header-actions #header-learning-mode-badge .status-ico {
+      width: 12px;
+      height: 12px;
+      color: #7dd3fc;
+    }
+    .header-actions #header-learning-mode-badge.lm-strictness-stricter {
+      border-color: rgba(251, 146, 60, 0.55);
+      color: #fdba74;
+      background: rgba(124, 45, 18, 0.35);
+    }
+    .header-actions #header-learning-mode-badge.lm-strictness-stricter .status-ico {
+      color: #fdba74;
+    }
+    .header-actions #header-learning-mode-badge.lm-strictness-looser {
+      border-color: rgba(52, 211, 153, 0.5);
+      color: #6ee7b7;
+      background: rgba(6, 78, 59, 0.35);
+    }
+    .header-actions #header-learning-mode-badge.lm-strictness-looser .status-ico {
+      color: #6ee7b7;
     }
     @media (prefers-reduced-motion: reduce) {
       .dot-running,
       .run-status.run-running #run-status-icon,
       .run-status.run-running .status-ico[data-run-icon],
       .rpc-status.rpc-ok #rpc-health-icon,
-      .header-actions .risk-badge .risk-badge-icon,
       .header-actions #mode-badge.badge-livesim {
         animation: none !important;
       }
@@ -5450,12 +5474,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <svg id="mode-badge-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
             <span id="mode-badge-label">LIVE SIM</span>
           </span>
-          <span id="header-risk-badge" class="risk-badge risk-badge-medium has-tip" data-risk-badge title="Risk On/Off sets the base risk appetite">
-            <svg class="status-ico risk-badge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
-            <span class="risk-badge-label">On</span>
-          </span>
-          <span id="header-learning-mode-badge" class="badge status-badge has-tip hidden" title="Micro-bot Learning Mode gate overlays" style="border-color:#38bdf8;color:#7dd3fc">
-            <span id="header-learning-mode-label">Learning Mode</span>
+          <span id="header-learning-mode-badge" class="badge status-badge has-tip hidden lm-strictness-middle" title="Learning Mode OFF" aria-label="Learning Mode">
+            <svg class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/></svg>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
@@ -11612,7 +11632,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const status = document.getElementById('learning-mode-status');
       const liveWarn = document.getElementById('learning-mode-live-warning');
       const headerBadge = document.getElementById('header-learning-mode-badge');
-      const headerLabel = document.getElementById('header-learning-mode-label');
       const mbBanner = document.getElementById('learning-mode-microbots-banner');
       if (en) en.checked = on;
       if (slider) {
@@ -11630,13 +11649,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (lm.liveWarning) liveWarn.classList.remove('hidden');
         else liveWarn.classList.add('hidden');
       }
-      if (headerBadge && headerLabel) {
-        if (on) {
-          headerBadge.classList.remove('hidden');
-          headerLabel.textContent = 'Learning Mode · ' + (LM_LABELS[strict] || 'Middle');
-        } else {
-          headerBadge.classList.add('hidden');
-        }
+      if (headerBadge) {
+        headerBadge.classList.remove(
+          'lm-strictness-stricter',
+          'lm-strictness-middle',
+          'lm-strictness-looser'
+        );
+        headerBadge.classList.add('lm-strictness-' + strict);
+        const tip =
+          lm.label ||
+          ('Learning Mode · ' + (LM_LABELS[strict] || 'Middle'));
+        headerBadge.title = on
+          ? tip + ' — softens entry gates (Settings → Risk)'
+          : 'Learning Mode OFF';
+        headerBadge.setAttribute('aria-label', on ? tip : 'Learning Mode OFF');
+        if (on) headerBadge.classList.remove('hidden');
+        else headerBadge.classList.add('hidden');
       }
       if (mbBanner) {
         if (on) {

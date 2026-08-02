@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.78',
+    title: 'Compact Learning Mode header badge',
+    sections: ['overview', 'learning'],
+    items: [
+      'Header Learning Mode is now a compact bulb icon (tooltip shows Middle/Stricter/Looser); Risk On/Off star badge removed from the top status bar to free space.',
+    ],
+  },
+  {
     version: '1.2.77',
     title: 'Learning Mode softens gates correctly',
     sections: ['learning', 'microbots', 'risk'],
