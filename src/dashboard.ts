@@ -1967,41 +1967,85 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       align-items: center;
       justify-content: center;
       gap: 0.25rem;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #cbd5e1;
-      font-size: 11px;
-      font-weight: 600;
+      border: 1px solid rgba(100, 116, 139, 0.45);
+      background: rgba(30, 41, 59, 0.28);
+      color: #94a3b8;
+      font-size: 10px;
+      font-weight: 500;
       line-height: 1.2;
-      padding: 0.45rem 0.7rem;
-      min-height: 2rem;
-      border-radius: 0.45rem;
+      padding: 0.3rem 0.52rem;
+      min-height: 1.7rem;
+      border-radius: 0.3rem;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
     }
     .closed-filter-btn:hover,
     .closed-filter-btn:focus-visible {
-      color: #f8fafc;
-      background: #334155;
-      border-color: #64748b;
+      color: #cbd5e1;
+      background: rgba(51, 65, 85, 0.45);
+      border-color: rgba(148, 163, 184, 0.58);
       outline: none;
     }
     .closed-filter-btn.is-active {
-      color: #ecfdf5;
-      background: rgba(16, 185, 129, 0.28);
-      border-color: rgba(52, 211, 153, 0.65);
-      font-weight: 700;
+      color: #d1fae5;
+      background: rgba(16, 185, 129, 0.16);
+      border-color: rgba(52, 211, 153, 0.48);
+      font-weight: 600;
     }
     .closed-filter-btn.is-active[data-closed-filter="profit"] {
-      color: #052e1c;
-      background: #34d399;
-      border-color: #6ee7b7;
+      color: #a7f3d0;
+      background: rgba(16, 185, 129, 0.17);
+      border-color: rgba(52, 211, 153, 0.48);
     }
     .closed-filter-btn.is-active[data-closed-filter="loss"] {
-      color: #450a0a;
-      background: #f87171;
-      border-color: #fca5a5;
+      color: #fecaca;
+      background: rgba(248, 113, 113, 0.14);
+      border-color: rgba(252, 165, 165, 0.42);
+    }
+    .trade-sort-bar {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin: -0.12rem 0 0.45rem;
+      color: #64748b;
+      font-size: 10px;
+      line-height: 1.2;
+    }
+    .trade-sort-select,
+    .trade-sort-default-btn {
+      appearance: none;
+      border: 1px solid rgba(100, 116, 139, 0.38);
+      border-radius: 0.25rem;
+      background: rgba(15, 23, 42, 0.18);
+      color: #94a3b8;
+      font: inherit;
+      padding: 0.22rem 0.38rem;
+    }
+    .trade-sort-select {
+      cursor: pointer;
+    }
+    .trade-sort-default-btn {
+      cursor: pointer;
+    }
+    .trade-sort-default-btn:hover,
+    .trade-sort-default-btn:focus-visible,
+    .trade-sort-select:hover,
+    .trade-sort-select:focus-visible {
+      color: #cbd5e1;
+      border-color: rgba(148, 163, 184, 0.56);
+      outline: none;
+    }
+    .trade-sort-default-btn:disabled {
+      cursor: default;
+      color: #64748b;
+      border-color: rgba(100, 116, 139, 0.24);
+      background: transparent;
+    }
+    .trade-sort-default-label {
+      color: #64748b;
+      font-size: 9px;
     }
     .trade-profile-badge {
       display: inline-flex;
@@ -5707,6 +5751,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 open-profile-filter" role="group" aria-label="Filter open positions by profile" style="margin-top:0.35rem"></div>
+        <div class="trade-sort-bar" role="group" aria-label="Sort open positions">
+          <span>Sort</span>
+          <select class="trade-sort-select" data-open-sort onchange="setOpenSort(this.value)" aria-label="Sort open positions">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="pnl">PnL high → low</option>
+            <option value="pnl_asc">PnL low → high</option>
+            <option value="mc">MC high → low</option>
+            <option value="mc_asc">MC low → high</option>
+          </select>
+          <button type="button" class="trade-sort-default-btn" data-open-sort-default onclick="setOpenSortDefault()">Set default</button>
+        </div>
         <div class="positions-scroll">
           <table id="positions-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
@@ -5728,6 +5784,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" id="closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
+        <div class="trade-sort-bar" role="group" aria-label="Sort closed trades">
+          <span>Sort</span>
+          <select class="trade-sort-select" data-closed-sort onchange="setClosedSort(this.value)" aria-label="Sort closed trades">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="pnl">PnL high → low</option>
+            <option value="pnl_asc">PnL low → high</option>
+            <option value="mc">MC high → low</option>
+            <option value="mc_asc">MC low → high</option>
+          </select>
+          <button type="button" class="trade-sort-default-btn" data-closed-sort-default onclick="setClosedSortDefault()">Set default</button>
+        </div>
         <div class="closed-trades-scroll">
           <table id="closed-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -5812,6 +5880,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 open-profile-filter" id="open-profile-filter" role="group" aria-label="Filter open trades by profile" style="margin-top:0.35rem"></div>
+        <div class="trade-sort-bar" role="group" aria-label="Sort open trades">
+          <span>Sort</span>
+          <select class="trade-sort-select" data-open-sort onchange="setOpenSort(this.value)" aria-label="Sort open trades">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="pnl">PnL high → low</option>
+            <option value="pnl_asc">PnL low → high</option>
+            <option value="mc">MC high → low</option>
+            <option value="mc_asc">MC low → high</option>
+          </select>
+          <button type="button" class="trade-sort-default-btn" data-open-sort-default onclick="setOpenSortDefault()">Set default</button>
+        </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>Trailing stop</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
@@ -5831,6 +5911,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="closed-filter mb-2 closed-profile-filter" role="group" aria-label="Filter closed trades by profile" style="margin-top:0.35rem"></div>
+        <div class="trade-sort-bar" role="group" aria-label="Sort closed trades">
+          <span>Sort</span>
+          <select class="trade-sort-select" data-closed-sort onchange="setClosedSort(this.value)" aria-label="Sort closed trades">
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="pnl">PnL high → low</option>
+            <option value="pnl_asc">PnL low → high</option>
+            <option value="mc">MC high → low</option>
+            <option value="mc_asc">MC low → high</option>
+          </select>
+          <button type="button" class="trade-sort-default-btn" data-closed-sort-default onclick="setClosedSortDefault()">Set default</button>
+        </div>
         <div class="closed-trades-scroll">
           <table id="trades-closed-table">
             <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Exit MC</th><th>Buy-in</th><th>Wallet</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead>
@@ -8249,11 +8341,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function emitProfitCashSound() {
-      playSoftTone(880, 0, 0.18, 0.028, 'triangle');
-      playSoftTone(1174.66, 0.1, 0.22, 0.032, 'sine');
-      playSoftTone(1567.98, 0.22, 0.35, 0.022, 'sine');
-      playSoftTone(2093, 0.36, 0.45, 0.016, 'triangle');
-      notifyHaptic([18, 30, 18, 30, 24]);
+      // Short, bell-like cash-register "cha-ching" without a long ring.
+      playSoftTone(1318.51, 0, 0.16, 0.024, 'triangle');
+      playSoftTone(2093, 0.1, 0.2, 0.021, 'sine');
+      notifyHaptic([18, 42, 20]);
     }
 
     function emitZionPlaceConfirmSound() {
@@ -8270,10 +8361,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       notifyHaptic([22, 28, 32]);
     }
 
-    /** Subtle close tone — quieter, shorter, lower than open / profit cash. */
+    /** Subtle close tone — still quieter and lower than open / profit cash. */
     function emitTradeCloseSound() {
-      playSoftTone(492, 0, 0.2, 0.014, 'sine');
-      playSoftTone(369.99, 0.1, 0.28, 0.01, 'triangle');
+      playSoftTone(492, 0, 0.2, 0.02, 'sine');
+      playSoftTone(369.99, 0.1, 0.28, 0.015, 'triangle');
       notifyHaptic(18);
     }
 
@@ -14068,11 +14159,111 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window._closedTradesFilter = window._closedTradesFilter || 'all';
     window._closedProfileFilter = window._closedProfileFilter || 'all';
     window._openProfileFilter = window._openProfileFilter || 'all';
+    const TRADE_SORT_VALUES = ['newest', 'oldest', 'pnl', 'pnl_asc', 'mc', 'mc_asc'];
+    function normalizeTradeSort(value) {
+      return TRADE_SORT_VALUES.includes(value) ? value : 'newest';
+    }
+    function readTradeSortDefault(key) {
+      try {
+        return normalizeTradeSort(localStorage.getItem(key));
+      } catch (_) {
+        return 'newest';
+      }
+    }
+    function writeTradeSortDefault(key, value) {
+      try {
+        localStorage.setItem(key, normalizeTradeSort(value));
+      } catch (_) {}
+    }
+    window._openSort = normalizeTradeSort(window._openSort || readTradeSortDefault('botOpenSort'));
+    window._closedSort = normalizeTradeSort(window._closedSort || readTradeSortDefault('botClosedSort'));
     window._closedTradeGroups = window._closedTradeGroups || [];
     window._expandedClosedTradeGroups = window._expandedClosedTradeGroups || {};
     window._lastOpenPositions = window._lastOpenPositions || [];
     /** Bumped when a known fill paints positions — blocks stale in-flight refresh overwrites */
     window._openPositionsGen = window._openPositionsGen || 0;
+
+    function tradeSortNumber(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    function tradeSortTime(value) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) return numeric;
+      const parsed = Date.parse(value || '');
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    function openPositionMarketCap(p) {
+      return tradeSortNumber(
+        p && (p.liveMarketCapUsd ?? p.entryMarketCapUsd ?? p.buyMarketCapUsd ?? p.marketCapUsd)
+      );
+    }
+    function closedTradeMarketCap(group) {
+      const p = (group && group.parent) || {};
+      const final = (group && group.final) || {};
+      return tradeSortNumber(
+        final.exitMarketCapUsd ??
+          p.exitMarketCapUsd ??
+          p.entryMarketCapUsd ??
+          p.buyMarketCapUsd ??
+          p.marketCapUsd
+      );
+    }
+    function sortTradeList(list, sort, metrics) {
+      const direction = sort === 'oldest' || sort === 'pnl_asc' || sort === 'mc_asc' ? 1 : -1;
+      const field =
+        sort === 'oldest' || sort === 'newest' ? 'time' :
+          (sort === 'pnl' || sort === 'pnl_asc' ? 'pnl' : 'mc');
+      return (list || [])
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => {
+          const delta = metrics[field](a.item) - metrics[field](b.item);
+          return delta ? direction * delta : a.index - b.index;
+        })
+        .map((entry) => entry.item);
+    }
+    function syncTradeSortControls() {
+      const openSort = normalizeTradeSort(window._openSort);
+      const closedSort = normalizeTradeSort(window._closedSort);
+      const openDefault = readTradeSortDefault('botOpenSort');
+      const closedDefault = readTradeSortDefault('botClosedSort');
+      document.querySelectorAll('[data-open-sort]').forEach((el) => {
+        if (el.value !== openSort) el.value = openSort;
+      });
+      document.querySelectorAll('[data-closed-sort]').forEach((el) => {
+        if (el.value !== closedSort) el.value = closedSort;
+      });
+      document.querySelectorAll('[data-open-sort-default]').forEach((btn) => {
+        const label = openDefault === openSort ? 'Default set' : 'Set default';
+        if (btn.textContent !== label) btn.textContent = label;
+      });
+      document.querySelectorAll('[data-closed-sort-default]').forEach((btn) => {
+        const label = closedDefault === closedSort ? 'Default set' : 'Set default';
+        if (btn.textContent !== label) btn.textContent = label;
+      });
+    }
+    function setOpenSort(sort) {
+      window._openSort = normalizeTradeSort(sort);
+      syncTradeSortControls();
+      paintOpenPositionsTables();
+    }
+    window.setOpenSort = setOpenSort;
+    function setClosedSort(sort) {
+      window._closedSort = normalizeTradeSort(sort);
+      syncTradeSortControls();
+      paintClosedTradesTables();
+    }
+    window.setClosedSort = setClosedSort;
+    function setOpenSortDefault() {
+      writeTradeSortDefault('botOpenSort', window._openSort);
+      syncTradeSortControls();
+    }
+    window.setOpenSortDefault = setOpenSortDefault;
+    function setClosedSortDefault() {
+      writeTradeSortDefault('botClosedSort', window._closedSort);
+      syncTradeSortControls();
+    }
+    window.setClosedSortDefault = setClosedSortDefault;
 
     /** Keep enrichment the fast poll used to omit (e.g. technicalLevels) so rows don't grow/shrink. */
     function mergeOpenPositionsPreserve(prev, next) {
@@ -14237,7 +14428,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (pf && pf !== 'all') {
         list = list.filter((g) => resolveProfileVisual(g.parent).id === pf);
       }
-      return list;
+      return sortTradeList(list, normalizeTradeSort(window._closedSort), {
+        time: (g) => tradeSortTime((g.final && g.final.closedAt) || (g.parent && g.parent.closedAt)),
+        pnl: (g) => tradeSortNumber(g.parent && g.parent.pnlSol),
+        mc: closedTradeMarketCap,
+      });
     }
 
     function renderClosedTradesHtml(groups) {
@@ -14366,6 +14561,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ctbody.innerHTML = html;
       });
       syncClosedTradesFilterButtons(window._closedTradesFilter || 'all');
+      syncTradeSortControls();
     }
 
     function setClosedTradesFilter(filter) {
@@ -14420,8 +14616,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         pf && pf !== 'all'
           ? all.filter((p) => resolveProfileVisual(p).id === pf)
           : all;
+      const sorted = sortTradeList(list, normalizeTradeSort(window._openSort), {
+        time: (p) => tradeSortTime(p && p.openedAt),
+        pnl: (p) => tradeSortNumber(p && (p.pnlSol ?? p.unrealizedPnlSol ?? p.pnlUsd)),
+        mc: openPositionMarketCap,
+      });
       if (typeof window._renderOpenPositionsHtml === 'function') {
-        const html = window._renderOpenPositionsHtml(list);
+        const html = window._renderOpenPositionsHtml(sorted);
         document.querySelectorAll('#positions-table tbody, #trades-positions-table tbody').forEach((ptbody) => {
           // Skip no-op repaints — identical HTML still forced reflow/flicker every poll.
           if (ptbody.getAttribute('data-pos-html') === html) return;
@@ -14431,7 +14632,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ensurePosHoldTicker();
         tickOpenPositionHolds();
       }
-      const count = list.length;
+      const count = sorted.length;
       const total = all.length;
       const empty = total === 0;
       const label =
@@ -14445,6 +14646,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         el.setAttribute('data-empty', empty ? '1' : '0');
       });
       syncClosedTradesFilterButtons(window._closedTradesFilter || 'all');
+      syncTradeSortControls();
     }
 
     /**

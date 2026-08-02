@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.93',
+    title: 'Trade sorting and refined close sounds',
+    sections: ['overview', 'alerts'],
+    items: [
+      'Open positions and closed trades can now be sorted by newest, oldest, PnL, or market cap; choose Set default to retain each table type’s order between dashboard visits.',
+      'Profitable closes now use a brief, subtle two-tone cash-register chime; regular exit sounds are slightly louder while preserving Alerts preferences and mobile audio unlock behavior.',
+    ],
+  },
+  {
     version: '1.2.92',
     title: 'Trade open / close alert chimes',
     sections: ['alerts'],
