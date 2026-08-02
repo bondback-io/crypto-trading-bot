@@ -2,6 +2,7 @@
  * Express API + dashboard for monitoring and configuration.
  */
 
+import path from 'node:path';
 import express, { Request, Response } from 'express';
 import {
   config,
@@ -215,6 +216,15 @@ export function createServer(): express.Application {
   // Site-backup restore posts the full snapshot (~1MB+); default 100kb is too small.
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  // Browser-served alert assets are kept in the repository so Render deploys them
+  // alongside the dashboard instead of depending on a local machine path.
+  app.use(
+    '/sounds',
+    express.static(path.join(process.cwd(), 'public', 'sounds'), {
+      immutable: true,
+      maxAge: '1y',
+    })
+  );
 
   const bootedAt = Date.now();
 

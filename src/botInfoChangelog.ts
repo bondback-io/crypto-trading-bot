@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.102',
+    title: 'Packaged profit cash-register alert',
+    sections: ['alerts'],
+    items: [
+      'Profitable closes now play the packaged cash-register recording from its 3-second mark at 50% volume; the synthesized profit chime has been removed.',
+    ],
+  },
+  {
     version: '1.2.101',
     title: 'Single half-volume profit cash register',
     sections: ['alerts'],

@@ -8322,6 +8322,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
      */
     function unlockNotifyAudio() {
       try {
+        // Prime the HTMLAudioElement during a gesture as well as Web Audio. This
+        // keeps the packaged profit cue eligible for later async trade updates on
+        // mobile browsers with autoplay restrictions.
+        primeProfitCashAudio();
         const ctx = getNotifyAudioCtx();
         if (!ctx) {
           syncNotifyAudioUnlockedFlag();
@@ -8484,64 +8488,61 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       notifyHaptic([28, 40, 28]);
     }
 
-    function emitProfitCashSound() {
-      // Original Web Audio approximation only: a mechanical cash-drawer clack
-      // followed by a bright, slightly inharmonic register bell. This deliberately
-      // does not use or embed any third-party audio asset.
+    const PROFIT_CASH_SOUND_URL = '/sounds/profit-cha-ching.m4a';
+    const PROFIT_CASH_SOUND_START_SECONDS = 3;
+    const PROFIT_CASH_SOUND_VOLUME = 0.5;
+
+    function getProfitCashAudio() {
+      if (!window.__profitCashAudio) {
+        const audio = new Audio(PROFIT_CASH_SOUND_URL);
+        audio.preload = 'auto';
+        audio.volume = PROFIT_CASH_SOUND_VOLUME;
+        window.__profitCashAudio = audio;
+      }
+      return window.__profitCashAudio;
+    }
+
+    function primeProfitCashAudio() {
       try {
-        const ctx = getNotifyAudioCtx();
-        if (!ctx || ctx.state !== 'running') return;
-        const now = ctx.currentTime;
-        const master = ctx.createGain();
-        // Keep the complete profit cue at the requested half-volume ceiling.
-        master.gain.setValueAtTime(0.5, now);
-        master.connect(ctx.destination);
-
-        const tone = function (frequency, start, duration, peak, type, detune) {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          const at = now + start;
-          osc.type = type;
-          osc.frequency.setValueAtTime(frequency, at);
-          if (detune) osc.detune.setValueAtTime(detune, at);
-          gain.gain.setValueAtTime(0.0001, at);
-          gain.gain.exponentialRampToValueAtTime(peak, at + 0.006);
-          gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-          osc.connect(gain);
-          gain.connect(master);
-          osc.start(at);
-          osc.stop(at + duration + 0.02);
+        const audio = getProfitCashAudio();
+        const wasMuted = audio.muted;
+        audio.muted = true;
+        audio.volume = PROFIT_CASH_SOUND_VOLUME;
+        audio.currentTime = PROFIT_CASH_SOUND_START_SECONDS;
+        const restore = function () {
+          audio.pause();
+          audio.currentTime = PROFIT_CASH_SOUND_START_SECONDS;
+          audio.muted = wasMuted;
         };
-
-        // Brief filtered noise gives the initial drawer/mechanism clack.
-        const clackLength = Math.max(1, Math.floor(ctx.sampleRate * 0.045));
-        const clackBuffer = ctx.createBuffer(1, clackLength, ctx.sampleRate);
-        const clackData = clackBuffer.getChannelData(0);
-        for (let i = 0; i < clackData.length; i++) {
-          clackData[i] = (Math.random() * 2 - 1) * (1 - i / clackData.length);
+        const play = audio.play();
+        if (play && typeof play.then === 'function') {
+          play.then(restore).catch(function () {
+            audio.muted = wasMuted;
+          });
+        } else {
+          restore();
         }
-        const clack = ctx.createBufferSource();
-        const clackFilter = ctx.createBiquadFilter();
-        const clackGain = ctx.createGain();
-        clack.buffer = clackBuffer;
-        clackFilter.type = 'bandpass';
-        clackFilter.frequency.setValueAtTime(1750, now);
-        clackFilter.Q.setValueAtTime(1.8, now);
-        clackGain.gain.setValueAtTime(0.18, now);
-        clackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
-        clack.connect(clackFilter);
-        clackFilter.connect(clackGain);
-        clackGain.connect(master);
-        clack.start(now);
-
-        tone(168, 0, 0.08, 0.15, 'square', -7);
-        tone(252, 0.009, 0.065, 0.08, 'triangle', 5);
-        // High bell partials make the follow-up clearly read as "ching".
-        tone(2349, 0.075, 0.44, 0.13, 'sine', 0);
-        tone(3136, 0.079, 0.34, 0.065, 'sine', 11);
-        tone(4698, 0.083, 0.22, 0.026, 'triangle', -9);
-        notifyHaptic([18, 42, 20]);
       } catch (_) {}
+    }
+
+    /** The only profitable-close cue: the packaged cash-register recording. */
+    function emitProfitCashSound() {
+      try {
+        const audio = getProfitCashAudio();
+        audio.pause();
+        audio.currentTime = PROFIT_CASH_SOUND_START_SECONDS;
+        audio.volume = PROFIT_CASH_SOUND_VOLUME;
+        audio.muted = false;
+        const play = audio.play();
+        if (play && typeof play.catch === 'function') {
+          play.catch(function () {
+            queuePendingNotifySound('profit_close');
+          });
+        }
+        notifyHaptic([18, 42, 20]);
+      } catch (_) {
+        queuePendingNotifySound('profit_close');
+      }
     }
 
     function emitZionPlaceConfirmSound() {
@@ -8600,7 +8601,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.playTradeRequestChime = playTradeRequestChime;
 
-    /** The only profitable-close cue: original synthesized cash-register cha-ching. */
+    /** The only profitable-close cue: the packaged cash-register recording. */
     function playProfitCashSound() {
       const prefs = window.__notifyPrefs || {};
       if (prefs.profitCloseSound === false) return;
