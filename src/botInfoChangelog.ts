@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.106',
+    title: 'Contained mint table actions',
+    sections: ['overview'],
+    items: [
+      'Open and closed mint columns now keep the pump marker above compact Copy and Jup actions, preventing them from overlapping Buy MC.',
+    ],
+  },
+  {
     version: '1.2.105',
     title: 'Trend Rider specialty entry unlock',
     sections: ['microbots', 'scanners', 'learning'],

@@ -1577,9 +1577,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .card-open-positions .mint-ca,
     .card-closed-trades .mint-ca {
       display: inline-flex;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .card-open-positions .mint-ca-actions,
+    .card-closed-trades .mint-ca-actions {
+      display: flex;
+      flex-wrap: nowrap;
       align-items: center;
       gap: 0.2rem;
+      max-width: 100%;
+      overflow: hidden;
     }
     .card-open-positions .mint-ca .ca-btn,
     .card-closed-trades .mint-ca .ca-btn,
@@ -5197,17 +5208,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table th:nth-child(1),
       .card-open-positions #trades-positions-table th:nth-child(1) { width: 7.5%; }
       .card-open-positions #positions-table th:nth-child(2),
-      .card-open-positions #trades-positions-table th:nth-child(2) { width: 10%; }
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 9%; }
       .card-open-positions #positions-table th:nth-child(3),
-      .card-open-positions #trades-positions-table th:nth-child(3) { width: 8.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(4),
-      .card-open-positions #trades-positions-table th:nth-child(4) { width: 7.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(4) { width: 10%; }
       .card-open-positions #positions-table th:nth-child(5),
       .card-open-positions #trades-positions-table th:nth-child(5),
       .card-open-positions #positions-table th:nth-child(6),
       .card-open-positions #trades-positions-table th:nth-child(6) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(7),
-      .card-open-positions #trades-positions-table th:nth-child(7) { width: 10.25%; }
+      .card-open-positions #trades-positions-table th:nth-child(7) { width: 9.25%; }
       .card-open-positions #positions-table th:nth-child(8),
       .card-open-positions #trades-positions-table th:nth-child(8) { width: 6.75%; }
       .card-open-positions #positions-table th:nth-child(9),
@@ -5217,7 +5228,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #positions-table th:nth-child(11),
       .card-open-positions #trades-positions-table th:nth-child(11) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(12),
-      .card-open-positions #trades-positions-table th:nth-child(12) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(13),
       .card-open-positions #trades-positions-table th:nth-child(13) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(14),
@@ -5257,10 +5268,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       .card-open-positions #positions-table td:nth-child(4) .mint-ca,
       .card-open-positions #trades-positions-table td:nth-child(4) .mint-ca {
-        display: flex;
-        flex-wrap: nowrap;
+        width: 100%;
         max-width: 100%;
-        gap: 0.15rem;
+        overflow: hidden;
       }
       .card-open-positions .pos-cost-cell {
         overflow: visible;
@@ -16734,8 +16744,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         (ca.toLowerCase().endsWith('pump')
           ? '<span class="pump-fun-badge" title="pump.fun token">pump</span>'
           : '') +
-        '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy (' + attr + ')" aria-label="Copy (' + attr + ')">Copy</button>' +
-        '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jupiter</a>' +
+        '<span class="mint-ca-actions">' +
+          '<button type="button" class="ca-btn" data-mint="' + attr + '" onclick="copyMintFromEl(event)" title="Copy (' + attr + ')" aria-label="Copy (' + attr + ')">Copy</button>' +
+          '<a class="ca-btn ca-jup" href="' + jup + '" target="_blank" rel="noopener noreferrer" title="Open on Jupiter">Jup</a>' +
+        '</span>' +
       '</span>';
     }
 
