@@ -1871,6 +1871,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .exit-ico.is-manual { color: #fbbf24; }
     .exit-ico.is-partial { color: #67e8f9; }
     .exit-ico.is-other { color: #94a3b8; }
+    .lm-trade-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.05rem;
+      height: 1.05rem;
+      margin-left: 0.28rem;
+      vertical-align: -0.15em;
+      border-radius: 9999px;
+      border: 1px solid rgba(56, 189, 248, 0.55);
+      background: rgba(12, 74, 110, 0.4);
+      color: #7dd3fc;
+      flex-shrink: 0;
+    }
+    .lm-trade-mark svg {
+      width: 0.7rem;
+      height: 0.7rem;
+      display: block;
+    }
+    .lm-trade-mark.lm-strictness-stricter {
+      border-color: rgba(251, 146, 60, 0.55);
+      background: rgba(124, 45, 18, 0.4);
+      color: #fdba74;
+    }
+    .lm-trade-mark.lm-strictness-looser {
+      border-color: rgba(52, 211, 153, 0.5);
+      background: rgba(6, 78, 59, 0.4);
+      color: #6ee7b7;
+    }
     .closed-trades-head {
       display: flex;
       flex-wrap: wrap;
@@ -5640,7 +5669,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
@@ -5743,7 +5772,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="trades-closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
             <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
@@ -7575,6 +7604,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <option value="toggle">Toggle</option>
               <option value="reset">Reset</option>
               <option value="min_trades">Min trades</option>
+              <option value="learning_mode">Learning Mode</option>
             </select>
           </label>
           <input type="search" id="learning-filter-q" class="search-q" placeholder="Search summary…" oninput="debounceLearningSavesFilter()" title="Search summary / bot / type" />
@@ -13194,15 +13224,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    /** Compact bulb mark for trades opened under Learning Mode. */
+    function fmtLearningModeMark(p) {
+      if (!p || p.learningMode !== true) return '';
+      const strictRaw = String(p.learningStrictness || 'middle').toLowerCase();
+      const strict =
+        strictRaw === 'stricter' || strictRaw === 'looser' ? strictRaw : 'middle';
+      const label =
+        strict.charAt(0).toUpperCase() + strict.slice(1);
+      const fair =
+        p.learningFairnessApplied === true ? ' · fairness applied' : '';
+      return (
+        '<span class="lm-trade-mark lm-strictness-' +
+        strict +
+        ' has-tip" title="Learning Mode · ' +
+        escHtml(label) +
+        fair +
+        ' — opened under Learning Mode gates" aria-label="Learning Mode ' +
+        escHtml(label) +
+        '">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/>' +
+        '<path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/>' +
+        '</svg></span>'
+      );
+    }
+
     function renderClosedTradeRow(p, opts) {
       opts = opts || {};
       const exitLabel = opts.exitLabel || '';
       const toggle = opts.toggleHtml || '';
       const meta = opts.metaHtml || '';
       const summary = opts.summaryHtml || '';
+      const lmSrc = opts.profileSource || p;
+      const lmMark = fmtLearningModeMark(lmSrc);
       const tokenInner = summary
-        ? summary
-        : (fmtToken(p.symbol, p.name, p.mint) + meta);
+        ? summary + lmMark
+        : (fmtToken(p.symbol, p.name, p.mint) + lmMark + meta);
       const tokenCell = summary
         ? ('<div class="trade-group-head">' + toggle + tokenInner + '</div>')
         : (toggle + tokenInner);
@@ -22556,6 +22614,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         toggle: 'Toggle',
         reset: 'Reset',
         min_trades: 'Min trades',
+        learning_mode: 'Learning Mode',
+        proposal: 'Proposal',
+        rollback: 'Rollback',
       };
       return map[kind] || kind || '—';
     }
@@ -22642,6 +22703,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       body.innerHTML = rows
         .map(function (r) {
+          const lm =
+            r.learningMode === true
+              ? '<span class="lm-trade-mark lm-strictness-' +
+                escHtml(String(r.learningStrictness || 'middle')) +
+                '" title="Learning Mode episode" aria-label="Learning Mode" style="margin-left:0.35rem;vertical-align:-0.2em">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/>' +
+                '<path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/>' +
+                '</svg></span>'
+              : '';
           return (
             '<tr style="border-bottom:1px solid #1e293b">' +
               '<td style="padding:0.35rem 0.4rem;white-space:nowrap;color:#94a3b8">' +
@@ -22652,6 +22723,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '</td>' +
               '<td style="padding:0.35rem 0.4rem;color:#94a3b8">' +
                 escHtml(learningKindLabel(r.kind)) +
+                lm +
               '</td>' +
               '<td style="padding:0.35rem 0.4rem;color:#cbd5e1">' +
                 escHtml(r.summary || '') +

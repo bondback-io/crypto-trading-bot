@@ -211,9 +211,20 @@ export function appendProfileLearningEpisode(
       kind: 'episode',
       summary: `Closed trade episode · ${row.symbol || row.mint.slice(0, 8)} · ${
         Number.isFinite(row.pnlPct) ? `${row.pnlPct.toFixed(1)}%` : 'n/a'
-      } · ${row.exitKey}`,
+      } · ${row.exitKey} · ${
+        row.learningMode === true
+          ? `LM ${
+              row.learningStrictness
+                ? row.learningStrictness.charAt(0).toUpperCase() +
+                  row.learningStrictness.slice(1)
+                : 'Middle'
+            }`
+          : 'non-LM'
+      }`,
       episodeCount: ring.length,
       version: row.paramVersion,
+      learningMode: row.learningMode === true ? true : undefined,
+      learningStrictness: row.learningStrictness,
     });
   } catch {
     /* optional journal */

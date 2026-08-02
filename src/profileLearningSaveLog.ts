@@ -34,6 +34,9 @@ export interface LearningSaveEntry {
   summary: string;
   episodeCount?: number;
   version?: number;
+  /** True when the closed episode was opened under Learning Mode */
+  learningMode?: boolean;
+  learningStrictness?: 'stricter' | 'middle' | 'looser';
 }
 
 interface SaveLogFile {
@@ -108,6 +111,8 @@ export function appendLearningSave(input: {
   summary: string;
   episodeCount?: number;
   version?: number;
+  learningMode?: boolean;
+  learningStrictness?: 'stricter' | 'middle' | 'looser';
 }): LearningSaveEntry {
   const profileId = String(input.profileId || 'all').trim() || 'all';
   const entry: LearningSaveEntry = {
@@ -119,11 +124,18 @@ export function appendLearningSave(input: {
     summary: String(input.summary || '').slice(0, 240),
     episodeCount:
       input.episodeCount != null && Number.isFinite(input.episodeCount)
-        ? Math.max(0, Math.round(input.episodeCount))
+        ? Number(input.episodeCount)
         : undefined,
     version:
       input.version != null && Number.isFinite(input.version)
-        ? Math.max(0, Math.round(input.version))
+        ? Number(input.version)
+        : undefined,
+    learningMode: input.learningMode === true ? true : undefined,
+    learningStrictness:
+      input.learningStrictness === 'stricter' ||
+      input.learningStrictness === 'middle' ||
+      input.learningStrictness === 'looser'
+        ? input.learningStrictness
         : undefined,
   };
   const entries = loadEntries();
@@ -494,6 +506,8 @@ export function exportLearningBundle(format: 'json' | 'csv'): {
       'summary',
       'episodeCount',
       'version',
+      'learningMode',
+      'learningStrictness',
     ];
     const rows = allSaves.map((e) =>
       [
@@ -504,6 +518,8 @@ export function exportLearningBundle(format: 'json' | 'csv'): {
         JSON.stringify(e.summary),
         e.episodeCount ?? '',
         e.version ?? '',
+        e.learningMode === true ? '1' : e.learningMode === false ? '0' : '',
+        e.learningStrictness ?? '',
       ].join(',')
     );
     const botHeader =

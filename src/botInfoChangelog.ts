@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.79',
+    title: 'Learning Mode mark on closed trades',
+    sections: ['overview', 'learning', 'microbots'],
+    items: [
+      'Closed Trades show a compact bulb icon on rows opened under Learning Mode (strictness in tooltip; also in Reason → More Info).',
+      'Self-learning save journal tags each closed episode as LM Middle/Stricter/Looser or non-LM, with learningMode fields in export CSV/JSON.',
+    ],
+  },
+  {
     version: '1.2.78',
     title: 'Compact Learning Mode header badge',
     sections: ['overview', 'learning'],
