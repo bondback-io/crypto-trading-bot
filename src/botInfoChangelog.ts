@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.87',
+    title: 'Fix dashboard blank screen',
+    sections: ['overview', 'microbots', 'backup'],
+    items: [
+      'Bot Performance row click handler used broken quote escaping inside the dashboard script, which threw a JS parse error and stopped the whole UI from loading — fixed.',
+    ],
+  },
+  {
     version: '1.2.86',
     title: 'Unstall dashboard performance polls',
     sections: ['overview', 'microbots'],

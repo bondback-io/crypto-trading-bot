@@ -11467,9 +11467,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<tr class="' +
             bandCls.trim() +
             offCls +
-            '" style="cursor:pointer" onclick="(function(id){showTab(\'microbots\');setTimeout(function(){var el=document.getElementById(\'tp-card-\'+id);if(el)el.scrollIntoView({behavior:\'smooth\',block:\'nearest\'});},120);})(\'' +
+            '" style="cursor:pointer" onclick="(function(id){showTab(\\'microbots\\');setTimeout(function(){var el=document.getElementById(\\'tp-card-\\'+id);if(el)el.scrollIntoView({behavior:\\'smooth\\',block:\\'nearest\\'});},120);})(\\'' +
             escHtml(r.profileId) +
-            '\')" title="Open Micro Bots and jump to this card">' +
+            '\\')" title="Open Micro Bots and jump to this card">' +
               '<td><strong>' +
               escHtml(rankCell) +
               '</strong></td>' +
