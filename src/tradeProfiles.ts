@@ -2898,11 +2898,10 @@ function scoreProfile(
     ctx.shortTermStrategyId === 'post_run_dip';
 
   if (m.requireCluster && m.minWalletCount != null) {
-    // Specialty / KOL-tagged HWR may satisfy cluster via kolCount
-    if (
-      effectiveClusterWallets < m.minWalletCount &&
-      !(feedPrefer && (kolN ?? 0) >= (m.minKolWallets ?? m.minWalletCount))
-    ) {
+    // Specialty stamp (feedPrefer): cluster already implied by the feed pick —
+    // Jupiter handoffs have 1 scanner wallet and often no kolCount, so requiring
+    // kolN >= minKolWallets made Trend Rider / Steady Compounder specialty dead.
+    if (!feedPrefer && effectiveClusterWallets < m.minWalletCount) {
       return {
         score: 0,
         reason: `cluster ${effectiveClusterWallets} < ${m.minWalletCount} wallets`,
@@ -5421,6 +5420,97 @@ export function evaluateProfileSelfLearn(
     nextEligibleIn: sl.nextEligibleIn,
     ...mlMeta(),
   };
+}
+
+/**
+ * One-shot: realign Trend Rider / Steady Compounder cluster gates with catalog
+ * (scanner / Jupiter specialty handoffs are 1-wallet). Only rewrites the old
+ * bake signature requireCluster:true + minWalletCount:2 — leaves intentional
+ * custom cluster settings alone.
+ */
+export function migrateTrendCompounderClusterAlignV1(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'trScClusterAlign_v1';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+
+  const IDS = ['trend_rider', 'steady_compounder'] as const;
+  let changed = 0;
+
+  const patchMatch = (
+    match: Record<string, unknown> | undefined
+  ): boolean => {
+    if (!match || typeof match !== 'object') return false;
+    const req = match.requireCluster === true;
+    const n = Number(match.minWalletCount);
+    if (!req || !Number.isFinite(n) || Math.round(n) !== 2) return false;
+    match.requireCluster = false;
+    match.minWalletCount = 1;
+    return true;
+  };
+
+  for (const id of IDS) {
+    const ov = state.overrides[id];
+    if (!ov?.match) continue;
+    if (patchMatch(ov.match as Record<string, unknown>)) {
+      changed += 1;
+    }
+  }
+
+  try {
+    const {
+      loadTradeProfilesUserState,
+      saveTradeProfilesUserState,
+    } = require('./tradeProfilesUserStore') as typeof import('./tradeProfilesUserStore');
+    const user = loadTradeProfilesUserState();
+    if (user?.overrides) {
+      let userChanged = false;
+      for (const id of IDS) {
+        const ov = user.overrides[id];
+        if (!ov?.match) continue;
+        if (patchMatch(ov.match as Record<string, unknown>)) {
+          userChanged = true;
+          changed += 1;
+        }
+      }
+      if (userChanged) {
+        saveTradeProfilesUserState({
+          enabled: user.enabled,
+          smartBotProfiles: user.smartBotProfiles,
+          profiles: user.profiles,
+          overrides: user.overrides,
+          selfLearning: user.selfLearning,
+          learningModeOptIn: user.learningModeOptIn,
+        });
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  if (changed > 0) {
+    console.log(
+      `[trade-profiles] Applied ${MIGRATION_ID} — Trend Rider / Steady Compounder cluster → off / minWallets 1 (${changed} patch(es))`
+    );
+  } else {
+    console.log(
+      `[trade-profiles] Applied ${MIGRATION_ID} — no old cluster bake signature found (feedPrefer bypass still active)`
+    );
+  }
+  return changed > 0;
 }
 
 export function ensureTradeProfilesInitialized(): void {

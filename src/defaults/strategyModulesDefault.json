@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "kind": "strategy-modules",
-  "defaultsId": "2026-07-28-mb-lane-floors",
+  "defaultsId": "2026-08-02-tr-sc-cluster-align",
   "exportedAt": "2026-07-28T08:00:00.000Z",
   "riskLevel": "on",
   "strategyRecipeMode": "custom",
@@ -920,8 +920,8 @@
         "match": {
           "minConviction": 50,
           "minWalletQuality": 50,
-          "minWalletCount": 2,
-          "requireCluster": true
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "migration_sniper": {
@@ -1018,8 +1018,8 @@
         "match": {
           "minConviction": 45,
           "minWalletQuality": 50,
-          "minWalletCount": 2,
-          "requireCluster": true
+          "minWalletCount": 1,
+          "requireCluster": false
         }
       },
       "momentum_burst": {
@@ -1559,8 +1559,8 @@
           "match": {
             "minConviction": 50,
             "minWalletQuality": 50,
-            "minWalletCount": 2,
-            "requireCluster": true
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "migration_sniper": {
@@ -1657,8 +1657,8 @@
           "match": {
             "minConviction": 45,
             "minWalletQuality": 50,
-            "minWalletCount": 2,
-            "requireCluster": true
+            "minWalletCount": 1,
+            "requireCluster": false
           }
         },
         "momentum_burst": {

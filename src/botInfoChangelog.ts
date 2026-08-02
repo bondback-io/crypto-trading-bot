@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.90',
+    title: 'Trend Rider / Steady Compounder cluster entry fix',
+    sections: ['microbots'],
+    items: [
+      'Trend Rider + Steady Compounder: specialty-feed stamps no longer fail the 2-wallet cluster gate (Jupiter/scanner 1-wallet handoffs).',
+      'Bake defaults realigned to catalog (requireCluster off, min wallets 1); one-shot migration clears the old bake signature. Conviction/WQ quality floors unchanged. Learning Mode untouched.',
+    ],
+  },
+  {
     version: '1.2.89',
     title: 'GitHub Backup auto-import defaults ON',
     sections: ['backup'],

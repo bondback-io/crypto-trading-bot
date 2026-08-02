@@ -4391,6 +4391,17 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  // After bake + user restore: clear old TR/SC cluster bake signature if present.
+  try {
+    const { migrateTrendCompounderClusterAlignV1 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateTrendCompounderClusterAlignV1();
+  } catch (err) {
+    console.warn(
+      '[config] trScClusterAlign_v1 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /** Load live trading wallet slots (metadata only) */
