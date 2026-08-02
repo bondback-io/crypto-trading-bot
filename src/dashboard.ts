@@ -113,36 +113,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .header-actions #mode-badge.badge-livesim {
       animation: mode-badge-sheen 2.8s ease-in-out infinite;
     }
-    /* LM ON bulb: filled, pause-button peach (#F1BB72 / .btn-warning) */
+    /* Header LM bulb: OFF = muted outline; ON = filled Pause peach (#F1BB72) */
     .header-actions #header-learning-mode-badge {
       padding: 2px 6px;
       gap: 0;
       min-width: 0;
-      border-color: rgba(241, 187, 114, 0.55);
-      color: #F1BB72;
-      background: rgba(120, 53, 15, 0.35);
     }
     .header-actions #header-learning-mode-badge .status-ico {
       width: 12px;
       height: 12px;
+    }
+    .header-actions #header-learning-mode-badge.lm-off {
+      border-color: rgba(100, 116, 139, 0.55);
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.55);
+    }
+    .header-actions #header-learning-mode-badge.lm-off .status-ico {
+      color: #94a3b8;
+      fill: none;
+      stroke: currentColor;
+    }
+    .header-actions #header-learning-mode-badge.lm-on {
+      border-color: rgba(241, 187, 114, 0.55);
+      color: #F1BB72;
+      background: rgba(120, 53, 15, 0.35);
+    }
+    .header-actions #header-learning-mode-badge.lm-on .status-ico {
       color: #F1BB72;
       fill: #F1BB72;
+      stroke: currentColor;
     }
-    .header-actions #header-learning-mode-badge.lm-strictness-stricter {
+    .header-actions #header-learning-mode-badge.lm-on.lm-strictness-stricter {
       border-color: rgba(251, 146, 60, 0.55);
       color: #F1BB72;
       background: rgba(124, 45, 18, 0.35);
     }
-    .header-actions #header-learning-mode-badge.lm-strictness-stricter .status-ico {
+    .header-actions #header-learning-mode-badge.lm-on.lm-strictness-stricter .status-ico {
       color: #F1BB72;
+      fill: #F1BB72;
     }
-    .header-actions #header-learning-mode-badge.lm-strictness-looser {
+    .header-actions #header-learning-mode-badge.lm-on.lm-strictness-looser {
       border-color: rgba(52, 211, 153, 0.5);
       color: #F1BB72;
       background: rgba(6, 78, 59, 0.35);
     }
-    .header-actions #header-learning-mode-badge.lm-strictness-looser .status-ico {
+    .header-actions #header-learning-mode-badge.lm-on.lm-strictness-looser .status-ico {
       color: #F1BB72;
+      fill: #F1BB72;
     }
     @media (prefers-reduced-motion: reduce) {
       .dot-running,
