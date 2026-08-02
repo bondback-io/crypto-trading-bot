@@ -7628,9 +7628,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <option value="24h">Every 24 hours</option>
             </select>
           </label>
-          <div class="toggle-row" style="margin:0;align-self:flex-end;padding-bottom:0.15rem" title="On deploy/restart, download and restore the latest GitHub backup when the remote SHA is new. Also set GITHUB_BACKUP_AUTO_IMPORT=1 for ephemeral DATA_DIR wipes.">
+          <div class="toggle-row" style="margin:0;align-self:flex-end;padding-bottom:0.15rem" title="On by default: on deploy/restart, download and restore the latest GitHub backup when the remote SHA is new. Uncheck to disable. Also set GITHUB_BACKUP_AUTO_IMPORT=1 for ephemeral DATA_DIR wipes.">
             <span style="font-size:0.8rem;color:#cbd5e1">Auto import on deploy</span>
-            <label class="switch"><input type="checkbox" id="github-backup-auto-import" onchange="saveGithubBackupSettings()" /><span class="slider"></span></label>
+            <label class="switch"><input type="checkbox" id="github-backup-auto-import" checked onchange="saveGithubBackupSettings()" /><span class="slider"></span></label>
           </div>
           <label class="ctl ctl-md" title="GitHub owner or org (or set GITHUB_BACKUP_OWNER)">
             <span>Owner</span>
@@ -7646,7 +7646,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
         </div>
         <div class="mint text-xs mt-1" id="github-backup-status">GitHub backup: —</div>
-        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. For wipe recovery without a mounted disk, also set <code>GITHUB_BACKUP_AUTO_IMPORT=1</code> (or enable Auto import on deploy). Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo.</p>
+        <p class="mint text-xs mt-2">Set <code>GITHUB_BACKUP_TOKEN</code> (fine-grained PAT with Contents write). Optional: <code>GITHUB_BACKUP_OWNER</code> / <code>GITHUB_BACKUP_REPO</code> / <code>GITHUB_BACKUP_PATH</code>. Auto import on deploy defaults to ON (uncheck to disable). For wipe recovery without a mounted disk, also set <code>GITHUB_BACKUP_AUTO_IMPORT=1</code>. Backup commits use <code>[skip render]</code> so Render should not auto-deploy; also add Ignored Path <code>site-backups/**</code> under Build Filters if backups stay in this repo.</p>
       </div>
 
       <div class="card">
@@ -23838,7 +23838,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             interval: intervalEl ? intervalEl.value : 'none',
-            autoImportOnBoot: autoEl ? !!autoEl.checked : false,
+            autoImportOnBoot: autoEl ? !!autoEl.checked : true,
             owner: ownerEl ? ownerEl.value : '',
             repo: repoEl ? repoEl.value : '',
             path: pathEl ? pathEl.value : '',

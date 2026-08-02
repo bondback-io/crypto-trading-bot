@@ -47,8 +47,9 @@ export interface GithubBackupSettings {
   repo: string;
   path: string;
   /**
-   * When true, restore from GitHub on boot/restart if remote SHA differs
-   * from lastAutoImportSha. Also enabled by GITHUB_BACKUP_AUTO_IMPORT=1|true|yes|on.
+   * When true (default if unset), restore from GitHub on boot/restart if remote
+   * SHA differs from lastAutoImportSha. Explicit false stays off. Also enabled
+   * by GITHUB_BACKUP_AUTO_IMPORT=1|true|yes|on.
    */
   autoImportOnBoot: boolean;
   lastUploadAtMs: number | null;
@@ -124,7 +125,7 @@ function defaultSettings(): GithubBackupSettings {
     owner: '',
     repo: '',
     path: '',
-    autoImportOnBoot: false,
+    autoImportOnBoot: true,
     lastUploadAtMs: null,
     lastUploadOk: null,
     lastUploadError: null,
@@ -175,7 +176,11 @@ export function loadGithubBackupSettings(): GithubBackupSettings {
     owner: String(raw.owner || '').trim(),
     repo: String(raw.repo || '').trim(),
     path: String(raw.path || '').trim(),
-    autoImportOnBoot: raw.autoImportOnBoot === true,
+    // Missing/undefined → true (new default); explicit false stays false.
+    autoImportOnBoot:
+      typeof raw.autoImportOnBoot === 'boolean'
+        ? raw.autoImportOnBoot
+        : true,
     lastUploadAtMs:
       raw.lastUploadAtMs != null && Number.isFinite(Number(raw.lastUploadAtMs))
         ? Number(raw.lastUploadAtMs)

@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.89',
+    title: 'GitHub Backup auto-import defaults ON',
+    sections: ['backup'],
+    items: [
+      'Back Up → GitHub Backup: Auto import on deploy now defaults to ON when unset; an explicit OFF stays OFF. GITHUB_BACKUP_AUTO_IMPORT=1 still force-enables for wipe recovery.',
+    ],
+  },
+  {
     version: '1.2.88',
     title: 'GitHub Backup auto-import on deploy',
     sections: ['backup'],
