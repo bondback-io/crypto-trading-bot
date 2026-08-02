@@ -5553,8 +5553,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <svg id="mode-badge-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
             <span id="mode-badge-label">LIVE SIM</span>
           </span>
-          <span id="header-learning-mode-badge" class="badge status-badge has-tip hidden lm-strictness-middle" title="Learning Mode OFF" aria-label="Learning Mode">
-            <svg class="status-ico" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6" fill="none"/><path d="M10 17v4" fill="none"/><path d="M14 17v4" fill="none"/></svg>
+          <span id="header-learning-mode-badge" class="badge status-badge has-tip lm-off lm-strictness-middle" title="Learning Mode OFF" aria-label="Learning Mode OFF">
+            <svg class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-4 10.5V17h8v-3.5A6 6 0 0 0 12 3z"/><path d="M9 21h6"/><path d="M10 17v4"/><path d="M14 17v4"/></svg>
           </span>
           <span class="status-stat has-tip" title="Total equity = Available Balance + Positions Value">Eq <strong id="header-equity">—</strong></span>
           <span class="status-stat has-tip" title="Available SOL not locked in open trades">Avail <strong id="balance">—</strong></span>
@@ -12183,10 +12183,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : '';
       if (headerBadge) {
         headerBadge.classList.remove(
+          'lm-on',
+          'lm-off',
           'lm-strictness-stricter',
           'lm-strictness-middle',
-          'lm-strictness-looser'
+          'lm-strictness-looser',
+          'hidden'
         );
+        headerBadge.classList.add(on ? 'lm-on' : 'lm-off');
         headerBadge.classList.add('lm-strictness-' + strict);
         const tip =
           lm.label ||
@@ -12197,8 +12201,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' — softens entry/fairness for Participate bots (Settings → Risk)'
           : 'Learning Mode OFF';
         headerBadge.setAttribute('aria-label', on ? tip : 'Learning Mode OFF');
-        if (on) headerBadge.classList.remove('hidden');
-        else headerBadge.classList.add('hidden');
+        const svg = headerBadge.querySelector('svg.status-ico');
+        if (svg) {
+          if (on) {
+            svg.setAttribute('fill', 'currentColor');
+            svg.setAttribute('stroke-width', '1.5');
+          } else {
+            svg.setAttribute('fill', 'none');
+            svg.setAttribute('stroke-width', '2');
+          }
+        }
       }
       if (mbBanner) {
         if (on) {
