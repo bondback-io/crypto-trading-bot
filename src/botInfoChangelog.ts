@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.118',
+    title: 'Zion chat sync across tab and popup',
+    sections: ['zion'],
+    items: [
+      'Zion Agent tab chat and floating popup now share one in-memory thread and always paint together after send, refresh, or typewriter.',
+      'Returning to the Zion tab (or opening the popup) instantly syncs from cache then force-refreshes chat history from the server (no-store).',
+    ],
+  },
+  {
     version: '1.2.117',
     title: 'Migration Sniper event lane (hold → spike exit)',
     sections: ['microbots', 'scanners'],

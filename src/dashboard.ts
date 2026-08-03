@@ -13797,6 +13797,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'zion') {
         loadZion();
+        // Instant shared paint, then force-refresh server history for both surfaces
+        try { syncZionChatSurfaces(); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
@@ -23757,29 +23759,56 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionImprovementCache = [];
     let _zionImprovementHistoryCache = [];
     const ZION_CHAT_CACHE_KEY = 'zionAgentChatMessages_v1';
+    /** In-memory source of truth so tab + widget always paint the same thread */
+    let _zionChatMessagesLive = [];
+    let _zionChatBusy = false;
+    let _zionChatNeedsRefresh = false;
+    let _zionTypewriterGen = 0;
+    let _zionTypewriterTimer = null;
     function cacheZionChatMessages(messages) {
+      const list = Array.isArray(messages) ? messages.slice(-40) : [];
+      _zionChatMessagesLive = list;
       try {
         localStorage.setItem(ZION_CHAT_CACHE_KEY, JSON.stringify({
           savedAt: Date.now(),
-          messages: Array.isArray(messages) ? messages.slice(-40) : [],
+          messages: list,
         }));
       } catch (_) {}
     }
     function loadCachedZionChatMessages() {
+      if (_zionChatMessagesLive && _zionChatMessagesLive.length) {
+        return _zionChatMessagesLive.slice();
+      }
       try {
         const raw = JSON.parse(localStorage.getItem(ZION_CHAT_CACHE_KEY) || 'null');
-        if (raw && Array.isArray(raw.messages)) return raw.messages;
+        if (raw && Array.isArray(raw.messages)) {
+          _zionChatMessagesLive = raw.messages;
+          return raw.messages.slice();
+        }
       } catch (_) {}
       return null;
     }
+    function stopZionTypewriter() {
+      _zionTypewriterGen += 1;
+      if (_zionTypewriterTimer) {
+        clearInterval(_zionTypewriterTimer);
+        _zionTypewriterTimer = null;
+      }
+    }
     function paintZionChatThreads(messages) {
-      const messageHtml = renderZionAgentMessages(Array.isArray(messages) ? messages : []);
+      const list = Array.isArray(messages) ? messages : (_zionChatMessagesLive || []);
+      const messageHtml = renderZionAgentMessages(list);
       ['zion-agent-chat', 'zion-agent-widget-chat'].forEach(function (id) {
         const chat = document.getElementById(id);
         if (!chat) return;
         chat.innerHTML = messageHtml;
         chat.scrollTop = chat.scrollHeight;
       });
+    }
+    /** Paint both surfaces from the shared live/cache thread (instant sync). */
+    function syncZionChatSurfaces() {
+      const msgs = loadCachedZionChatMessages();
+      if (msgs && msgs.length) paintZionChatThreads(msgs);
     }
     function fmtZionChatWhen(ts) {
       if (ts == null || ts === '') return '';
@@ -23812,6 +23841,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     function typewriterZionBubbles(fullText) {
       return new Promise(function (resolve) {
+        stopZionTypewriter();
+        const gen = _zionTypewriterGen;
         let text = String(fullText || '');
         text = text
           .replace(/\\n*_via (?:Gemini|Groq|OpenAI)[^\\n]*_?\\s*$/i, '\\n\\n~ Zion Valton')
@@ -23837,7 +23868,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const steps = Math.max(1, Math.ceil(duration / stepMs));
         let step = 0;
         bubbles.forEach(function (b) { b.el.innerHTML = ''; });
-        const timer = setInterval(function () {
+        _zionTypewriterTimer = setInterval(function () {
+          if (gen !== _zionTypewriterGen) {
+            clearInterval(_zionTypewriterTimer);
+            _zionTypewriterTimer = null;
+            resolve();
+            return;
+          }
           step += 1;
           const n = Math.min(len, Math.ceil((step / steps) * len));
           const slice = text.slice(0, n);
@@ -23846,7 +23883,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             b.chat.scrollTop = b.chat.scrollHeight;
           });
           if (n >= len) {
-            clearInterval(timer);
+            clearInterval(_zionTypewriterTimer);
+            _zionTypewriterTimer = null;
+            // Final paint from shared history so both surfaces match exactly
+            syncZionChatSurfaces();
             resolve();
           }
         }, stepMs);
@@ -24098,6 +24138,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       zionAgentWidgetState.open = typeof forceOpen === 'boolean' ? forceOpen : !zionAgentWidgetState.open;
       if (zionAgentWidgetState.open) {
         zionAgentWidgetState.unread = 0;
+        syncZionChatSurfaces();
+        if (typeof loadZionAgent === 'function') loadZionAgent();
         setTimeout(function () {
           const input = document.getElementById('zion-agent-widget-input');
           if (input) input.focus();
@@ -24119,6 +24161,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const semi = document.getElementById('zion-agent-semi');
       if (semi) semi.checked = !!st.semiAutonomous;
       const msgs = Array.isArray(data.messages) ? data.messages : [];
+      stopZionTypewriter();
+      clearZionTyping();
       cacheZionChatMessages(msgs);
       paintZionChatThreads(msgs);
       const list = Array.isArray(data.improvementRequests)
@@ -24153,11 +24197,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       renderZionAgentWidgetState();
     }
     async function loadZionAgent() {
+      if (_zionChatBusy) {
+        _zionChatNeedsRefresh = true;
+        syncZionChatSurfaces();
+        return;
+      }
       try {
-        const data = await fetchJSON('/api/zion/agent');
+        const data = await fetchJSON('/api/zion/agent?_=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
         renderZionAgentUi(data);
       } catch (err) {
         console.warn('loadZionAgent', err);
+        syncZionChatSurfaces();
       }
     }
     async function saveZionAgentConfig() {
@@ -24179,11 +24232,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const started = Date.now();
       const minTypingMs = 2000;
+      stopZionTypewriter();
       const optimistic = (loadCachedZionChatMessages() || []).slice();
       optimistic.push({ id: 'local-u-' + started, role: 'user', text: msg, at: started });
       cacheZionChatMessages(optimistic);
       paintZionChatThreads(optimistic);
       showZionTyping();
+      _zionChatBusy = true;
       setZionChatBusy(true);
       try {
         const out = await fetchJSON('/api/zion/agent/chat', {
@@ -24195,9 +24250,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const waitMore = Math.max(0, minTypingMs - (Date.now() - started));
         if (waitMore) await new Promise(function (resolve) { setTimeout(resolve, waitMore); });
         clearZionTyping();
+        // Allow server reload before typewriter
+        _zionChatBusy = false;
         await loadZionAgent();
         if (out && out.reply) {
           await typewriterZionBubbles(out.reply);
+        } else {
+          syncZionChatSurfaces();
         }
         if (out && out.changeRequest) {
           showZionIrNudgeChip('New improvement request ready to review');
@@ -24205,8 +24264,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (err) {
         clearZionTyping();
         alert('Zion chat failed: ' + (err.message || err));
+        syncZionChatSurfaces();
       } finally {
+        _zionChatBusy = false;
         setZionChatBusy(false);
+        if (_zionChatNeedsRefresh) {
+          _zionChatNeedsRefresh = false;
+          loadZionAgent();
+        }
       }
     }
     async function decideZionChangeRequest(id, approve) {
