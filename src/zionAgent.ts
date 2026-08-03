@@ -303,8 +303,8 @@ function localAnalystReply(
   const q = question.toLowerCase();
   const facts = parseContextPack(ctx);
   const greet = opts?.isFirst
-    ? 'Hey — happy to help.'
-    : 'Sure — happy to check.';
+    ? 'Hey — good to see you.'
+    : 'Sure — on it.';
 
   if (wantsRawSnapshot(q)) {
     return formatZionReply({
@@ -463,7 +463,7 @@ function localAnalystReply(
   const onProfiles = facts.profiles.filter((p) => p.enabled).map((p) => p.label);
   const offProfiles = facts.profiles.filter((p) => !p.enabled).map((p) => p.label);
   return formatZionReply({
-    greeting: opts?.isFirst ? 'Hey — happy to help.' : 'Sure.',
+    greeting: opts?.isFirst ? 'Hey — good to see you.' : 'Sure.',
     answer: overallStats
       ? overallStats
       : 'I can check profiles, Learning Mode, MARL, skips, or overall performance — just say which.',
@@ -561,7 +561,7 @@ async function callOpenAiCompatibleChat(
       },
       body: JSON.stringify({
         model: opts.model,
-        temperature: 0.45,
+        temperature: 0.65,
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },
@@ -621,7 +621,7 @@ async function callGeminiModel(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.45 },
+        generationConfig: { temperature: 0.65 },
       }),
     });
     if (!res.ok) {
@@ -779,27 +779,35 @@ async function callZionLlm(
   return null;
 }
 
-const SYSTEM_PROMPT = `You are Zion, a read-only analyst for a Solana copy/scanner trading bot dashboard.
+const SYSTEM_PROMPT = `You are Zion — a fun, smart trading teammate for this Solana copy/scanner bot dashboard. Read-only analyst with personality.
 
 Personality:
-- Calm, direct, and friendly-professional — like a helpful human trading analyst.
-- Slightly technical when needed, but always clear. Explain jargon in plain language.
-- Concise and easy to understand. Never dump raw logs, full config, or the context pack unless the user explicitly asks for raw/dump/snapshot/detail.
+- Fun, sharp, slightly technical, and optimistic — positive outlook without being fake or reckless.
+- Talk like a clever human teammate, not a report generator or support bot.
+- Light wit is fine; never slang walls, never corporate filler.
 
-Response structure (follow this):
-1. Short friendly greeting or acknowledgement when appropriate (especially first messages or starting a new analysis). Examples: "Hey,", "Hi,", "Sure,", "Here's a quick look…"
-2. Direct answer to the question first.
-3. Short clear summary with only the relevant facts.
-4. Offer one useful follow-up if relevant.
+Length & readability (strict):
+- Default: ~4–8 short lines, about 120–150 words max unless the user asks for depth.
+- Short paragraphs or tight bullets — easy to skim on mobile.
+- Do NOT dump a full dashboard recap (mode/risk/every filter/every profile) unless asked.
+- Do NOT re-introduce yourself (“I’m Zion, your trading bot analyst”) every turn — only on a true first hello.
+- Do NOT list every micro-bot with essays. If asked about each bot: **one punchy sentence per bot**, then stop.
+- Skip raw ids like dip_buyer when a friendly name works (Dip Buyer).
 
-If a profile is off or data is missing, say so simply.
-Never reply with large unbroken blocks of raw system state.
+Response shape:
+1. Quick ack (“Hey,” “Sure,” “On it,” “Love this question —”)
+2. Direct answer in plain language (lead with the point)
+3. One bright takeaway (what’s working / what’s worth watching)
+4. One optional follow-up question
+
+If a profile is off or data is missing, say so simply and stay upbeat about next steps.
+Never paste the context pack, raw logs, or huge config blocks unless the user asks for raw/snapshot/dump.
 
 Boundaries:
 - Never claim you changed micro-bot TP, SL, timers, or self-learning / delta learning.
 - Never instruct the user to bypass hard safety (anti-rug, risk halt) without warning.
 - You may explain MARL soft coordination but must not control MARL directly.
-- If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block (not shown to the user as the main answer — keep the spoken reply natural, then append the block):
+- If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
 \`\`\`zion-change-request
 {"title":"...","what":"...","why":"...","expectedBenefit":"...","target":"global_gates","payload":{"path":"selective.minConvictionScore","value":55}}
 \`\`\`
@@ -909,7 +917,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey — ask me about a profile, Learning Mode, MARL, skips, or overall performance.',
+        'Hey — ask me about a profile, Learning Mode, MARL, or how the bots are doing.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
@@ -925,8 +933,8 @@ export async function zionAgentChat(userText: string): Promise<{
     SYSTEM_PROMPT +
     `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
     (isFirst
-      ? '\nConversation cue: first exchange — greet briefly.'
-      : '') +
+      ? '\nConversation cue: first exchange — greet briefly, stay short and upbeat.'
+      : '\nConversation cue: keep it short, fun, and skimmable — no dashboard dump.') +
     `\n\nContext pack (internal — do not paste unless user asks for raw/snapshot):\n${ctx}`;
 
   let provider: ZionLlmProvider = 'local';

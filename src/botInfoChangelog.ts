@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.112',
+    title: 'Zion voice v2 + typing indicator',
+    sections: ['zion'],
+    items: [
+      'Zion’s LLM voice is now fun, smart, slightly technical, and optimistic — shorter skimmable replies (no full dashboard dumps or endless bot essays).',
+      'Chat shows “Zion is typing…” with a short natural delay before the reply appears; assistant bubbles render newlines and **bold** for easier reading.',
+    ],
+  },
+  {
     version: '1.2.111',
     title: 'MARL thoughts in lane fight log',
     sections: ['microbots', 'overview'],

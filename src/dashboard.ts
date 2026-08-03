@@ -5251,6 +5251,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
     .zion-chat-refresh { flex: 0 0 auto; min-height: 2.2rem; padding: 0.35rem 0.55rem; color: #94a3b8; background: transparent; border: 0; border-radius: 0.5rem; }
     .zion-chat-refresh:hover, .zion-chat-refresh:focus-visible { color: #f8fafc; background: #1e293b; outline: none; }
+    .zion-chat-typing {
+      align-self: flex-start;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      max-width: 88%;
+      color: #f2ae66;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+    .zion-chat-typing-bubble {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.75rem 0.75rem 0.75rem 0.22rem;
+      border: 1px solid rgba(242, 174, 102, 0.35);
+      background: rgba(242, 174, 102, 0.08);
+      color: #f8d9b0;
+    }
+    .zion-chat-typing-dots { display: inline-flex; gap: 0.22rem; align-items: center; }
+    .zion-chat-typing-dots span {
+      width: 0.35rem; height: 0.35rem; border-radius: 50%;
+      background: var(--zion-peach, #f2ae66);
+      opacity: 0.35;
+      animation: zion-typing-dot 1.1s ease-in-out infinite;
+    }
+    .zion-chat-typing-dots span:nth-child(2) { animation-delay: 0.18s; }
+    .zion-chat-typing-dots span:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes zion-typing-dot {
+      0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+      40% { opacity: 1; transform: translateY(-2px); }
+    }
     .zion-change-requests { margin-top: 0.8rem; }
     .zion-change-request { border: 1px solid rgba(242, 174, 102, 0.26); border-radius: 0.7rem; padding: 0.65rem; margin-bottom: 0.5rem; background: rgba(11, 18, 32, 0.78); }
     .zion-improvement-card-section {
@@ -23673,9 +23706,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
     let _zionImprovementCache = [];
     let _zionImprovementHistoryCache = [];
+    function formatZionBubbleHtml(text, isUser) {
+      const raw = String(text || '');
+      let html = escHtml(raw);
+      if (isUser) return html;
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\n/g, '<br>');
+      return html;
+    }
     function renderZionAgentMessages(messages) {
       if (!messages.length) {
-        return '<div class="zion-chat-empty">Ask about profiles, Learning Mode, MARL, skips, or performance.</div>';
+        return '<div class="zion-chat-empty">Ask about profiles, Learning Mode, MARL, or how the bots are doing.</div>';
       }
       return messages
         .map((m) => {
@@ -23683,11 +23724,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return (
             '<div class="zion-chat-message' + (isUser ? ' is-user' : '') + '">' +
               '<div class="zion-chat-message-avatar">' + (isUser ? 'You' : 'Z') + '</div>' +
-              '<div class="zion-chat-bubble">' + escHtml(m.text || '') + '</div>' +
+              '<div class="zion-chat-bubble">' + formatZionBubbleHtml(m.text || '', isUser) + '</div>' +
             '</div>'
           );
         })
         .join('');
+    }
+    function zionTypingHtml() {
+      return (
+        '<div class="zion-chat-typing" id="zion-chat-typing" aria-live="polite">' +
+          '<div class="zion-chat-message-avatar">Z</div>' +
+          '<div class="zion-chat-typing-bubble">' +
+            '<span class="zion-chat-typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>' +
+            'Zion is typing…' +
+          '</div>' +
+        '</div>'
+      );
+    }
+    function showZionTyping() {
+      ['zion-agent-chat', 'zion-agent-widget-chat'].forEach(function (id) {
+        const chat = document.getElementById(id);
+        if (!chat) return;
+        chat.querySelectorAll('.zion-chat-typing').forEach(function (el) { el.remove(); });
+        chat.insertAdjacentHTML('beforeend', zionTypingHtml());
+        chat.scrollTop = chat.scrollHeight;
+      });
+    }
+    function clearZionTyping() {
+      document.querySelectorAll('.zion-chat-typing').forEach(function (el) { el.remove(); });
+    }
+    function setZionChatBusy(busy) {
+      ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !!busy;
+      });
+      document.querySelectorAll('.zion-chat-send').forEach(function (btn) {
+        btn.disabled = !!busy;
+      });
     }
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
@@ -23964,18 +24037,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const msg = inp ? String(inp.value || '').trim() : '';
       if (!msg) return;
       if (inp) inp.value = '';
+      const started = Date.now();
+      const minTypingMs = 900;
+      showZionTyping();
+      setZionChatBusy(true);
       try {
         const out = await fetchJSON('/api/zion/agent/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: msg }),
         });
+        const waitMore = Math.max(0, minTypingMs - (Date.now() - started));
+        if (waitMore) await new Promise(function (resolve) { setTimeout(resolve, waitMore); });
+        clearZionTyping();
         await loadZionAgent();
         if (out && out.changeRequest) {
           showZionIrNudgeChip('New improvement request ready to review');
         }
       } catch (err) {
+        clearZionTyping();
         alert('Zion chat failed: ' + (err.message || err));
+      } finally {
+        setZionChatBusy(false);
       }
     }
     async function decideZionChangeRequest(id, approve) {
