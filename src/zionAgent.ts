@@ -57,6 +57,9 @@ export function getZionAgentStatus(): {
   label: string;
   semiAutonomous: boolean;
   hasLlmKey: boolean;
+  llmProviders: { gemini: boolean; groq: boolean; openai: boolean };
+  preferredProvider: ZionLlmProvider;
+  preferredProviderLabel: string;
   messageCount: number;
   pendingChangeRequests: number;
   pendingImprovementRequests: number;
@@ -64,14 +67,17 @@ export function getZionAgentStatus(): {
   const st = loadZionAgentState();
   const semi = st.semiAutonomous === true;
   const pending = st.changeRequests.filter((c) => c.status === 'pending').length;
+  const llmProviders = getLlmProviderAvailability();
+  const preferred = preferredProviderFromKeys();
   return {
     mode: semi ? 'semi_autonomous' : 'read_only',
     label: semi ? 'Zion · Semi-Autonomous' : 'Zion · Read-Only',
     semiAutonomous: semi,
-    hasLlmKey: Boolean(
-      (process.env.OPENAI_API_KEY || '').trim() ||
-        (config as { zionAgent?: { apiKey?: string } }).zionAgent?.apiKey
-    ),
+    hasLlmKey:
+      llmProviders.gemini || llmProviders.groq || llmProviders.openai,
+    llmProviders,
+    preferredProvider: preferred.provider,
+    preferredProviderLabel: preferred.label,
     messageCount: st.messages.length,
     pendingChangeRequests: pending,
     pendingImprovementRequests: pending,
@@ -474,57 +480,303 @@ function localAnalystReply(
   });
 }
 
-async function callOpenAiChat(
-  system: string,
-  user: string
-): Promise<string | null> {
-  const apiKey =
-    (process.env.OPENAI_API_KEY || '').trim() ||
+export type ZionLlmProvider = 'gemini' | 'groq' | 'openai' | 'local';
+
+type ZionLlmResult = {
+  text: string;
+  provider: ZionLlmProvider;
+  model: string;
+};
+
+function envTrim(name: string): string {
+  return String(process.env[name] || '').trim();
+}
+
+function getGeminiApiKey(): string {
+  return envTrim('GEMINI_API_KEY') || envTrim('GOOGLE_API_KEY');
+}
+
+function getGroqApiKey(): string {
+  return envTrim('GROQ_API_KEY');
+}
+
+function getOpenAiApiKey(): string {
+  return (
+    envTrim('OPENAI_API_KEY') ||
     String(
       (config as { zionAgent?: { apiKey?: string } }).zionAgent?.apiKey || ''
-    ).trim();
-  if (!apiKey) return null;
-  const base = (
-    process.env.OPENAI_BASE_URL ||
-    (config as { zionAgent?: { baseUrl?: string } }).zionAgent?.baseUrl ||
-    'https://api.openai.com/v1'
-  ).replace(/\/$/, '');
-  const model =
-    process.env.OPENAI_MODEL ||
-    (config as { zionAgent?: { model?: string } }).zionAgent?.model ||
-    'gpt-4o-mini';
+    ).trim()
+  );
+}
+
+function getLlmProviderAvailability(): {
+  gemini: boolean;
+  groq: boolean;
+  openai: boolean;
+} {
+  return {
+    gemini: Boolean(getGeminiApiKey()),
+    groq: Boolean(getGroqApiKey()),
+    openai: Boolean(getOpenAiApiKey()),
+  };
+}
+
+function preferredProviderFromKeys(): {
+  provider: ZionLlmProvider;
+  label: string;
+} {
+  const avail = getLlmProviderAvailability();
+  if (avail.gemini) return { provider: 'gemini', label: 'via Gemini' };
+  if (avail.groq) return { provider: 'groq', label: 'via Groq' };
+  if (avail.openai) return { provider: 'openai', label: 'via OpenAI' };
+  return { provider: 'local', label: 'Local analysis' };
+}
+
+function providerAttribution(provider: ZionLlmProvider, model: string): string {
+  if (provider === 'local') return '_Local analysis mode — no API key_';
+  const name =
+    provider === 'gemini' ? 'Gemini' : provider === 'groq' ? 'Groq' : 'OpenAI';
+  return `_via ${name} · ${model}_`;
+}
+
+type OpenAiCompatOpts = {
+  provider: 'groq' | 'openai';
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  system: string;
+  user: string;
+};
+
+async function callOpenAiCompatibleChat(
+  opts: OpenAiCompatOpts
+): Promise<{ text: string; model: string } | null> {
+  const base = opts.baseUrl.replace(/\/$/, '');
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${opts.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model,
+        model: opts.model,
         temperature: 0.45,
         messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
+          { role: 'system', content: opts.system },
+          { role: 'user', content: opts.user },
         ],
       }),
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      console.warn('[zion-agent] LLM HTTP', res.status, t.slice(0, 200));
+      console.warn(
+        '[zion-agent] fallback',
+        opts.provider,
+        opts.model,
+        res.status,
+        t.slice(0, 200)
+      );
       return null;
     }
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    return String(data.choices?.[0]?.message?.content || '').trim() || null;
+    const text = String(data.choices?.[0]?.message?.content || '').trim();
+    if (!text) {
+      console.warn(
+        '[zion-agent] fallback',
+        opts.provider,
+        opts.model,
+        'empty response'
+      );
+      return null;
+    }
+    return { text, model: opts.model };
   } catch (err) {
     console.warn(
-      '[zion-agent] LLM failed:',
+      '[zion-agent] fallback',
+      opts.provider,
+      opts.model,
       err instanceof Error ? err.message : err
     );
     return null;
   }
+}
+
+async function callGeminiModel(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string
+): Promise<{ text: string; model: string } | null> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: { temperature: 0.45 },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      console.warn(
+        '[zion-agent] fallback',
+        'gemini',
+        model,
+        res.status,
+        t.slice(0, 200)
+      );
+      return null;
+    }
+    const data = (await res.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const text = parts
+      .map((p) => String(p.text || ''))
+      .join('')
+      .trim();
+    if (!text) {
+      console.warn('[zion-agent] fallback', 'gemini', model, 'empty response');
+      return null;
+    }
+    return { text, model };
+  } catch (err) {
+    console.warn(
+      '[zion-agent] fallback',
+      'gemini',
+      model,
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+async function callGeminiChat(
+  system: string,
+  user: string
+): Promise<{ text: string; model: string } | null> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) return null;
+  const override = envTrim('GEMINI_MODEL');
+  const models = override
+    ? [override, 'gemini-3.6-flash', 'gemini-3.5-flash'].filter(
+        (m, i, arr) => arr.indexOf(m) === i
+      )
+    : ['gemini-3.6-flash', 'gemini-3.5-flash'];
+  for (const model of models) {
+    const out = await callGeminiModel(apiKey, model, system, user);
+    if (out) return out;
+  }
+  return null;
+}
+
+async function callGroqChat(
+  system: string,
+  user: string
+): Promise<{ text: string; model: string } | null> {
+  const apiKey = getGroqApiKey();
+  if (!apiKey) return null;
+  const override = envTrim('GROQ_MODEL');
+  const models = override
+    ? [override, 'llama-3.1-8b-instant'].filter(
+        (m, i, arr) => arr.indexOf(m) === i
+      )
+    : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+  for (const model of models) {
+    const out = await callOpenAiCompatibleChat({
+      provider: 'groq',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      apiKey,
+      model,
+      system,
+      user,
+    });
+    if (out) return out;
+  }
+  return null;
+}
+
+async function callOpenAiChat(
+  system: string,
+  user: string
+): Promise<{ text: string; model: string } | null> {
+  const apiKey = getOpenAiApiKey();
+  if (!apiKey) return null;
+  const base = (
+    envTrim('OPENAI_BASE_URL') ||
+    String(
+      (config as { zionAgent?: { baseUrl?: string } }).zionAgent?.baseUrl || ''
+    ).trim() ||
+    'https://api.openai.com/v1'
+  ).replace(/\/$/, '');
+  const model =
+    envTrim('OPENAI_MODEL') ||
+    String(
+      (config as { zionAgent?: { model?: string } }).zionAgent?.model || ''
+    ).trim() ||
+    'gpt-4o-mini';
+  return callOpenAiCompatibleChat({
+    provider: 'openai',
+    baseUrl: base,
+    apiKey,
+    model,
+    system,
+    user,
+  });
+}
+
+/** Gemini → Groq (70B then 8B) → OpenAI → caller uses local. Never throws. */
+async function callZionLlm(
+  system: string,
+  user: string
+): Promise<ZionLlmResult | null> {
+  try {
+    const gemini = await callGeminiChat(system, user);
+    if (gemini) {
+      return { text: gemini.text, provider: 'gemini', model: gemini.model };
+    }
+  } catch (err) {
+    console.warn(
+      '[zion-agent] fallback',
+      'gemini',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const groq = await callGroqChat(system, user);
+    if (groq) {
+      return { text: groq.text, provider: 'groq', model: groq.model };
+    }
+  } catch (err) {
+    console.warn(
+      '[zion-agent] fallback',
+      'groq',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const openai = await callOpenAiChat(system, user);
+    if (openai) {
+      return { text: openai.text, provider: 'openai', model: openai.model };
+    }
+  } catch (err) {
+    console.warn(
+      '[zion-agent] fallback',
+      'openai',
+      err instanceof Error ? err.message : err
+    );
+  }
+  return null;
 }
 
 const SYSTEM_PROMPT = `You are Zion, a read-only analyst for a Solana copy/scanner trading bot dashboard.
@@ -650,6 +902,8 @@ export async function zionAgentChat(userText: string): Promise<{
   reply: string;
   changeRequest: ZionChangeRequest | null;
   mode: string;
+  provider: ZionLlmProvider;
+  model: string;
 }> {
   const text = String(userText || '').trim().slice(0, 4000);
   if (!text) {
@@ -658,6 +912,8 @@ export async function zionAgentChat(userText: string): Promise<{
         'Hey — ask me about a profile, Learning Mode, MARL, skips, or overall performance.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
+      provider: preferredProviderFromKeys().provider,
+      model: '',
     };
   }
   const prior = loadZionAgentState();
@@ -672,9 +928,33 @@ export async function zionAgentChat(userText: string): Promise<{
       ? '\nConversation cue: first exchange — greet briefly.'
       : '') +
     `\n\nContext pack (internal — do not paste unless user asks for raw/snapshot):\n${ctx}`;
-  let reply =
-    (await callOpenAiChat(system, text)) ||
-    localAnalystReply(text, ctx, { isFirst });
+
+  let provider: ZionLlmProvider = 'local';
+  let model = 'local';
+  let reply: string;
+  try {
+    const llm = await callZionLlm(system, text);
+    if (llm?.text) {
+      provider = llm.provider;
+      model = llm.model;
+      reply = llm.text;
+    } else {
+      console.warn(
+        '[zion-agent] fallback',
+        'local',
+        'all external providers failed or missing keys'
+      );
+      reply = localAnalystReply(text, ctx, { isFirst });
+    }
+  } catch (err) {
+    console.warn(
+      '[zion-agent] fallback',
+      'local',
+      err instanceof Error ? err.message : err
+    );
+    reply = localAnalystReply(text, ctx, { isFirst });
+  }
+
   let changeRequest: ZionChangeRequest | null = null;
   if (st.semiAutonomous) {
     const extracted = extractChangeRequest(reply);
@@ -699,8 +979,20 @@ export async function zionAgentChat(userText: string): Promise<{
       reply += `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**. Approve or deny it below when you’re ready.`;
     }
   }
+
+  // Attribution footer for history (source of truth in chat bubbles)
+  if (!/_via (?:Gemini|Groq|OpenAI)/i.test(reply) && !/_Local analysis mode/i.test(reply)) {
+    reply = `${reply.trim()}\n\n${providerAttribution(provider, model)}`;
+  }
+
   appendZionChat('assistant', reply);
-  return { reply, changeRequest, mode: getZionAgentStatus().label };
+  return {
+    reply,
+    changeRequest,
+    mode: getZionAgentStatus().label,
+    provider,
+    model,
+  };
 }
 
 export function zionAgentDecideChangeRequest(

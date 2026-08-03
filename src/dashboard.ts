@@ -7300,8 +7300,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="zion-chat-identity">
             <div class="zion-chat-avatar" aria-hidden="true">Z</div>
             <div>
-              <div class="zion-chat-title">Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Improvement Requests for your Approve/Deny."></span></div>
-              <div class="zion-chat-presence">Online · Bot analyst</div>
+              <div class="zion-chat-title">Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Prefers free Gemini (GEMINI_API_KEY / GOOGLE_API_KEY), then Groq (GROQ_API_KEY), then OpenAI if set; otherwise local analysis. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Improvement Requests for your Approve/Deny."></span></div>
+              <div class="zion-chat-presence" id="zion-agent-presence">Online · Bot analyst</div>
             </div>
           </div>
           <span id="zion-agent-mode-badge" class="badge status-badge" style="font-size:11px">Zion · Read-Only</span>
@@ -7426,7 +7426,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="zion-chat-header">
           <div class="zion-chat-identity">
             <div class="zion-chat-avatar" aria-hidden="true">Z</div>
-            <div><div class="zion-chat-title">Zion</div><div class="zion-chat-presence">Online · Bot analyst</div></div>
+            <div><div class="zion-chat-title">Zion</div><div class="zion-chat-presence" id="zion-agent-widget-presence">Online · Bot analyst</div></div>
           </div>
           <button type="button" class="zion-chat-refresh" onclick="toggleZionAgentWidget(false)" aria-label="Close Zion chat" title="Close">✕</button>
         </div>
@@ -23886,6 +23886,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const st = data.status || {};
       const badge = document.getElementById('zion-agent-mode-badge');
       if (badge) badge.textContent = st.label || 'Zion · Read-Only';
+      const presenceLabel = st.preferredProviderLabel
+        ? ('Online · ' + st.preferredProviderLabel)
+        : (st.hasLlmKey ? 'Online · via LLM' : 'Online · Local analysis');
+      ['zion-agent-presence', 'zion-agent-widget-presence'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = presenceLabel;
+      });
       const semi = document.getElementById('zion-agent-semi');
       if (semi) semi.checked = !!st.semiAutonomous;
       const msgs = Array.isArray(data.messages) ? data.messages : [];

@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.110',
+    title: 'Zion free multi-provider LLM',
+    sections: ['zion'],
+    items: [
+      'Zion chat falls back automatically: Gemini (GEMINI_API_KEY / GOOGLE_API_KEY) → Groq (GROQ_API_KEY) → OpenAI → local analysis — never crashes without a reply.',
+      'Default models: gemini-3.6-flash (then gemini-3.5-flash), Groq llama-3.3-70b-versatile (then llama-3.1-8b-instant); overrides via GEMINI_MODEL / GROQ_MODEL / OPENAI_MODEL.',
+      'Presence shows “via Gemini / Groq / OpenAI / Local analysis”; each reply ends with a via-provider footer for history.',
+    ],
+  },
+  {
     version: '1.2.109',
     title: 'Zion personality + Improvement Requests',
     sections: ['zion', 'alerts', 'knobs'],
