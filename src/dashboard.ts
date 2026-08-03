@@ -5351,8 +5351,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
     .zion-chat-message.is-user .zion-chat-time { text-align: right; }
     .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
-    .zion-chat-composer input { min-width: 0; flex: 1; border: 0; outline: 0; color: #e2e8f0; background: transparent; padding: 0.48rem 0.4rem; }
-    .zion-chat-composer input::placeholder { color: #64748b; }
+    /* 16px prevents iOS Safari auto-zoom on focus */
+    .zion-chat-composer input {
+      min-width: 0;
+      flex: 1;
+      border: 0;
+      outline: 0;
+      color: #e2e8f0;
+      background: transparent;
+      padding: 0.48rem 0.4rem;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+    .zion-chat-composer input::placeholder { color: #64748b; font-size: 16px; }
     .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
     .zion-chat-refresh { flex: 0 0 auto; min-height: 2.2rem; padding: 0.35rem 0.55rem; color: #94a3b8; background: transparent; border: 0; border-radius: 0.5rem; }

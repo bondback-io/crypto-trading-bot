@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.123',
+    title: 'Zion chat: no mobile focus zoom',
+    sections: ['zion'],
+    items: [
+      'Zion chat inputs (tab + floating popup) use 16px text so iOS Safari no longer auto-zooms when you tap to type.',
+    ],
+  },
+  {
     version: '1.2.122',
     title: 'Zion proactive performance analyst',
     sections: ['zion', 'learning'],
