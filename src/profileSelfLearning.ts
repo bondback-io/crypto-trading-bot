@@ -548,6 +548,7 @@ const PATCH_LABELS: Record<string, string> = {
   requireConvergence: 'require convergence',
   requireCluster: 'require cluster',
   heikinAshiExitEnabled: 'Heikin-Ashi exit',
+  trailTightenFactor: 'trail tighten ×',
 };
 
 /** Flatten a learning patch into a short "knob: value" list for UI hover. */
@@ -650,15 +651,22 @@ export function scoreEpisodesHeuristic(
   let sum = 0;
   let penalty = 0;
   for (const e of episodes) {
-    sum += e.pnlPct || 0;
-    if ((e.pnlPct || 0) < -15) penalty += Math.abs(e.pnlPct) * 0.15;
-    if ((e.holdSec || 0) > 900 && (e.pnlPct || 0) < 2) penalty += 1.5;
-    // Left a lot of MFE on the table
-    if (
-      (e.maxRunupPct || 0) >= 40 &&
-      (e.exitUnrealizedPct || 0) < (e.maxRunupPct || 0) * 0.35
-    ) {
-      penalty += 2;
+    // Prefer enriched timing reward when present (new closes); else pnl/MFE path
+    if (e.timingReward != null && Number.isFinite(e.timingReward)) {
+      sum += Number(e.timingReward);
+      if ((e.exitQualityScore ?? 50) < 35) penalty += 1.2;
+      if ((e.entryQualityScore ?? 50) < 35) penalty += 0.8;
+    } else {
+      sum += e.pnlPct || 0;
+      if ((e.pnlPct || 0) < -15) penalty += Math.abs(e.pnlPct) * 0.15;
+      if ((e.holdSec || 0) > 900 && (e.pnlPct || 0) < 2) penalty += 1.5;
+      // Left a lot of MFE on the table
+      if (
+        (e.maxRunupPct || 0) >= 40 &&
+        (e.exitUnrealizedPct || 0) < (e.maxRunupPct || 0) * 0.35
+      ) {
+        penalty += 2;
+      }
     }
   }
   return sum / episodes.length - penalty / episodes.length;
@@ -1109,6 +1117,207 @@ export function buildExitLearningCandidates(
   return out.slice(0, 5);
 }
 
+/**
+ * Soft exit-feedback report (scoring / logs only — does not write overrides).
+ */
+export interface SoftExitFeedbackReport {
+  n: number;
+  avgGivebackPct: number;
+  largeGivebackRate: number;
+  deadMarketShare: number;
+  deadMarketAvgPnl: number;
+  earlySlRate: number;
+  normalSlRate: number;
+  avgMaeAbs: number;
+  avgEntryQuality: number | null;
+  avgExitQuality: number | null;
+  /** Hint weights for ranking candidates (not applied as patches by themselves) */
+  preferTightenGiveback: boolean;
+  preferTighterTrail: boolean;
+  preferLooserFade: boolean;
+  preferEarlierTrailArm: boolean;
+}
+
+export function buildSoftExitFeedback(
+  episodes: ProfileLearningEpisode[]
+): SoftExitFeedbackReport {
+  const n = episodes.length;
+  if (n === 0) {
+    return {
+      n: 0,
+      avgGivebackPct: 0,
+      largeGivebackRate: 0,
+      deadMarketShare: 0,
+      deadMarketAvgPnl: 0,
+      earlySlRate: 0,
+      normalSlRate: 0,
+      avgMaeAbs: 0,
+      avgEntryQuality: null,
+      avgExitQuality: null,
+      preferTightenGiveback: false,
+      preferTighterTrail: false,
+      preferLooserFade: false,
+      preferEarlierTrailArm: false,
+    };
+  }
+  const give = episodes.map((e) => e.givebackFromPeakPct || 0);
+  const avgGivebackPct = give.reduce((a, b) => a + b, 0) / n;
+  const largeGivebackRate =
+    give.filter((g) => g >= 12).length / n;
+  const dead = episodes.filter((e) => e.exitKey === 'dead_market');
+  const deadMarketShare = dead.length / n;
+  const deadMarketAvgPnl = dead.length
+    ? dead.reduce((s, e) => s + (e.pnlPct || 0), 0) / dead.length
+    : 0;
+  const earlySlRate =
+    episodes.filter((e) => e.failureCategory === 'early_sl').length / n;
+  const normalSlRate =
+    episodes.filter((e) => e.failureCategory === 'normal_sl').length / n;
+  const avgMaeAbs =
+    episodes.reduce((s, e) => s + Math.abs(e.maxDrawdownPct || 0), 0) / n;
+  const entryQs = episodes
+    .map((e) => e.entryQualityScore)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const exitQs = episodes
+    .map((e) => e.exitQualityScore)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const avgEntryQuality = entryQs.length
+    ? entryQs.reduce((a, b) => a + b, 0) / entryQs.length
+    : null;
+  const avgExitQuality = exitQs.length
+    ? exitQs.reduce((a, b) => a + b, 0) / exitQs.length
+    : null;
+
+  const preferTightenGiveback =
+    largeGivebackRate >= 0.28 || avgGivebackPct >= 14;
+  const preferEarlierTrailArm =
+    preferTightenGiveback ||
+    (avgExitQuality != null && avgExitQuality < 42);
+  const preferTighterTrail =
+    preferTightenGiveback ||
+    episodes.filter(
+      (e) =>
+        (e.maxRunupPct || 0) >= 30 &&
+        (e.exitUnrealizedPct || 0) < (e.maxRunupPct || 0) * 0.4
+    ).length /
+      n >=
+      0.22;
+  // Early stops with shallow MAE → fade threshold may be too tight (looser fade)
+  const preferLooserFade = earlySlRate >= 0.2 && avgMaeAbs < 9;
+
+  return {
+    n,
+    avgGivebackPct,
+    largeGivebackRate,
+    deadMarketShare,
+    deadMarketAvgPnl,
+    earlySlRate,
+    normalSlRate,
+    avgMaeAbs,
+    avgEntryQuality,
+    avgExitQuality,
+    preferTightenGiveback,
+    preferTighterTrail,
+    preferLooserFade,
+    preferEarlierTrailArm,
+  };
+}
+
+/**
+ * Timing-only micro deltas (±3–5%): trail tighten, momentum fade, trail arm.
+ * Never emits takeProfitPct* / stopLossPct*.
+ */
+export function buildTimingLearningCandidates(
+  episodes: ProfileLearningEpisode[],
+  current: {
+    trailTightenFactor: number;
+    momentumFadeDropPct: number;
+    trailingActivationProfit: number;
+  },
+  soft?: SoftExitFeedbackReport | null
+): Array<{ summary: string; patch: LearningProposalPatch }> {
+  const out: Array<{ summary: string; patch: LearningProposalPatch }> = [];
+  if (episodes.length < 6) return out;
+
+  const fb = soft || buildSoftExitFeedback(episodes);
+  const leftOnTable =
+    episodes.filter(
+      (e) =>
+        (e.maxRunupPct || 0) >= 30 &&
+        (e.exitUnrealizedPct || 0) < (e.maxRunupPct || 0) * 0.4
+    ).length / episodes.length;
+
+  if (fb.preferTighterTrail || leftOnTable >= 0.22) {
+    const next = clamp(current.trailTightenFactor * 0.95, 0.4, 1);
+    if (Math.abs(next - current.trailTightenFactor) >= 0.01) {
+      out.push({
+        summary: `Timing: tighten trail after profit ${current.trailTightenFactor.toFixed(2)}→${next.toFixed(2)} (giveback/MFE leave-on-table)`,
+        patch: {
+          exitRules: {
+            exitPolicy: { trailTightenFactor: next },
+          },
+        },
+      });
+    }
+  }
+
+  if (fb.preferEarlierTrailArm || leftOnTable >= 0.25) {
+    const next = clamp(
+      Math.round(current.trailingActivationProfit * 0.95),
+      3,
+      80
+    );
+    if (next !== Math.round(current.trailingActivationProfit)) {
+      out.push({
+        summary: `Timing: arm trail earlier ${current.trailingActivationProfit}→${next}% after green`,
+        patch: {
+          exitRules: { trailingActivationProfit: next },
+        },
+      });
+    }
+  }
+
+  if (fb.preferLooserFade && current.momentumFadeDropPct > 0) {
+    const next = clamp(
+      Number((current.momentumFadeDropPct * 1.05).toFixed(2)),
+      3,
+      25
+    );
+    if (next > current.momentumFadeDropPct + 0.05) {
+      out.push({
+        summary: `Timing: slightly looser momentum-fade ${current.momentumFadeDropPct}→${next}% (early-SL + shallow MAE)`,
+        patch: {
+          exitRules: {
+            exitPolicy: { momentumFadeDropPct: next },
+          },
+        },
+      });
+    }
+  } else if (
+    !fb.preferLooserFade &&
+    (fb.preferTighterTrail || leftOnTable >= 0.28) &&
+    current.momentumFadeDropPct > 0
+  ) {
+    const next = clamp(
+      Number((current.momentumFadeDropPct * 0.95).toFixed(2)),
+      3,
+      25
+    );
+    if (next < current.momentumFadeDropPct - 0.05) {
+      out.push({
+        summary: `Timing: slightly tighter momentum-fade ${current.momentumFadeDropPct}→${next}%`,
+        patch: {
+          exitRules: {
+            exitPolicy: { momentumFadeDropPct: next },
+          },
+        },
+      });
+    }
+  }
+
+  return out.slice(0, 3);
+}
+
 export function buildEntryLearningCandidates(
   profileId: string,
   episodes: ProfileLearningEpisode[],
@@ -1384,7 +1593,33 @@ export function clampLearningPatch(
         0.6
       );
     }
+    if (ep.trailTightenFactor != null) {
+      ep.trailTightenFactor = clampDeltaPct(
+        Number(ep.trailTightenFactor),
+        Number(catPol.trailTightenFactor) || 0.85,
+        0.4,
+        1
+      );
+    }
+    if (ep.momentumFadeDropPct != null) {
+      ep.momentumFadeDropPct = clampDeltaPct(
+        Number(ep.momentumFadeDropPct),
+        Number(catPol.momentumFadeDropPct) || 8,
+        3,
+        25
+      );
+    }
     exitRules.exitPolicy = ep;
+  }
+
+  if (exitRules.trailingActivationProfit != null) {
+    const cat = catalogExit.trailingActivationProfit ?? 12;
+    exitRules.trailingActivationProfit = clampDeltaPct(
+      Number(exitRules.trailingActivationProfit),
+      cat,
+      3,
+      80
+    );
   }
 
   if (match.minConviction != null) {
@@ -1577,6 +1812,9 @@ export function runSelfLearnTick(input: {
     momentumFadeDropPct: Number(pol.momentumFadeDropPct) || 8,
     hardTimeLimitSecMax: input.currentExit.hardTimeLimitSecMax,
     heikinAshiExitEnabled: pol.heikinAshiExitEnabled === true,
+    trailTightenFactor: Number(pol.trailTightenFactor) || 0.85,
+    trailingActivationProfit:
+      Number(input.currentExit.trailingActivationProfit) || 12,
   };
 
   // Global Micro-Bot TP: skip exit delta learning only; entry continues
@@ -1591,9 +1829,24 @@ export function runSelfLearnTick(input: {
     /* ignore */
   }
 
+  const softExit = buildSoftExitFeedback(episodes);
+  if (softExit.n >= 6) {
+    console.log(
+      `[learning-exit-feedback] ${input.profileId} n=${softExit.n} ` +
+        `giveback=${softExit.avgGivebackPct.toFixed(1)} large=${(softExit.largeGivebackRate * 100).toFixed(0)}% ` +
+        `dead=${(softExit.deadMarketShare * 100).toFixed(0)}%/${softExit.deadMarketAvgPnl.toFixed(1)}% ` +
+        `earlySl=${(softExit.earlySlRate * 100).toFixed(0)}% maeAbs=${softExit.avgMaeAbs.toFixed(1)} ` +
+        `entryQ=${softExit.avgEntryQuality != null ? softExit.avgEntryQuality.toFixed(0) : 'n/a'} ` +
+        `exitQ=${softExit.avgExitQuality != null ? softExit.avgExitQuality.toFixed(0) : 'n/a'}`
+    );
+  }
+
   const candidates = [
     ...(allowExitDeltas
       ? buildExitLearningCandidates(input.profileId, episodes, currentPolicy)
+      : []),
+    ...(allowExitDeltas
+      ? buildTimingLearningCandidates(episodes, currentPolicy, softExit)
       : []),
     ...(confidence.allowEntry
       ? buildEntryLearningCandidates(
@@ -1662,16 +1915,45 @@ export function runSelfLearnTick(input: {
       if (episodes.length < 150) nudge = Math.min(nudge, confidence.nudgeScale * 0.5);
     }
     const scaled = scaleLearningPatch(c.patch, nudge);
+    // Timing candidates stay milder until Level upgrades prove out
+    const timingMild = /^Timing:/i.test(c.summary);
+    const scaledFinal = timingMild
+      ? scaleLearningPatch(scaled, Math.min(nudge, 0.45))
+      : scaled;
     const clamped = clampLearningPatch(
       input.profileId,
       input.catalogExit,
       input.catalogMatch,
-      scaled
+      scaledFinal
     );
     if (!clamped.exitRules && !clamped.match) continue;
 
     const hAfter = shadowScoreCandidate(window, clamped, scoreBefore);
-    const hDelta = hAfter - scoreBefore;
+    let hDelta = hAfter - scoreBefore;
+    // Soft exit-feedback weights only (does not write patches by itself)
+    const sum = String(c.summary || '');
+    if (softExit.preferTightenGiveback && /giveback|profit-lock|partial/i.test(sum)) {
+      hDelta += 0.35;
+    }
+    if (softExit.preferTighterTrail && /tighten trail|momentum-fade.*tighter|Timing:/i.test(sum)) {
+      hDelta += 0.3;
+    }
+    if (softExit.preferLooserFade && /looser momentum-fade/i.test(sum)) {
+      hDelta += 0.25;
+    }
+    if (
+      softExit.preferEarlierTrailArm &&
+      /arm trail earlier/i.test(sum)
+    ) {
+      hDelta += 0.25;
+    }
+    if (
+      softExit.avgEntryQuality != null &&
+      softExit.avgEntryQuality < 40 &&
+      clamped.match
+    ) {
+      hDelta += 0.2;
+    }
 
     let mDelta = 0;
     let w = 0;
@@ -1766,6 +2048,12 @@ export function runSelfLearnTick(input: {
       0,
       microEvery - (state.tradesSinceMicro || 0)
     );
+    if (/^Timing:/i.test(best.summary)) {
+      console.log(
+        `[learning-timing] ${input.profileId} propose: ${best.summary} ` +
+          `Δ=${(best.scoreAfter - best.scoreBefore).toFixed(2)}`
+      );
+    }
     try {
       const { appendLearningSave } =
         require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
@@ -1853,6 +2141,12 @@ export function runSelfLearnTick(input: {
     }
 
     if (microPatch) {
+      if (/Timing:/i.test(microSummary)) {
+        console.log(
+          `[learning-timing] ${input.profileId} micro: ${microSummary} ` +
+            `Δ=${(microScoreAfter - scoreBefore).toFixed(2)}`
+        );
+      }
       state.pendingProposal = {
         at: Date.now(),
         summary: microSummary,

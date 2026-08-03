@@ -80,6 +80,10 @@ const FEATURE_NAMES = [
   'patch_timer_delta',
   'patch_has_exit',
   'patch_has_match',
+  // Optional enrichment (fail-open: old models ignore via Math.min dim)
+  'avg_timing_reward',
+  'avg_entry_quality',
+  'avg_exit_quality',
 ] as const;
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -154,6 +158,15 @@ export function buildWindowFeatures(
   const haShare =
     episodes.filter((e) => e.haExitEnabledAtOpen === true).length /
     episodes.length;
+  const timingRewards = episodes
+    .map((e) => e.timingReward)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const entryQs = episodes
+    .map((e) => e.entryQualityScore)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const exitQs = episodes
+    .map((e) => e.exitQualityScore)
+    .filter((v): v is number => v != null && Number.isFinite(v));
 
   return [
     mean(pnls) / 20, // scale
@@ -175,6 +188,10 @@ export function buildWindowFeatures(
     0,
     0,
     0,
+    // Fail-open: 0 when old episodes omit quality/reward fields
+    timingRewards.length ? mean(timingRewards) / 40 : 0,
+    entryQs.length ? mean(entryQs) / 100 : 0,
+    exitQs.length ? mean(exitQs) / 100 : 0,
   ];
 }
 

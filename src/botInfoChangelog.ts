@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.119',
+    title: 'Learning feedback enrichment (timing quality)',
+    sections: ['learning'],
+    items: [
+      'Closed trades now store entry/exit quality scores and a timingReward from MFE/MAE/giveback — feedback enrichment only; no live TP/SL or gate resets.',
+      'Self-Learn can propose tiny timing deltas (±3–5%) on trail tighten, momentum fade, and trail arm; soft exit feedback weights ranking only.',
+    ],
+  },
+  {
     version: '1.2.118',
     title: 'Zion chat sync across tab and popup',
     sections: ['zion'],

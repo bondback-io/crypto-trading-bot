@@ -391,6 +391,7 @@ function maybeRecordLearningEpisode(
     const {
       appendProfileLearningEpisode,
       deriveEpisodeMetrics,
+      computeEpisodeTimingQuality,
     } = require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
     const entry = position.entryPriceSol || 0;
     const exit = position.exitPriceSol || entry;
@@ -419,6 +420,22 @@ function maybeRecordLearningEpisode(
       position.closedAt && position.openedAt
         ? (position.closedAt - position.openedAt) / 1000
         : 0;
+    const timingQ = computeEpisodeTimingQuality({
+      pnlPct,
+      maxRunupPct: metrics.maxRunupPct,
+      maxDrawdownPct: metrics.maxDrawdownPct,
+      givebackFromPeakPct: metrics.givebackFromPeakPct,
+      exitUnrealizedPct: metrics.exitUnrealizedPct,
+      holdSec,
+      convictionScore: position.convictionScore,
+    });
+    console.log(
+      `[learning-episode] ${position.symbol || position.mint.slice(0, 8)} ` +
+        `pnl=${pnlPct.toFixed(1)}% MFE=${metrics.maxRunupPct.toFixed(1)} ` +
+        `MAE=${metrics.maxDrawdownPct.toFixed(1)} giveback=${metrics.givebackFromPeakPct.toFixed(1)} ` +
+        `entryQ=${timingQ.entryQualityScore} exitQ=${timingQ.exitQualityScore} ` +
+        `reward=${timingQ.timingReward.toFixed(2)}`
+    );
     let paramVersion = position.selfLearnVersion ?? 0;
     let microVersion = 0;
     try {
@@ -504,6 +521,9 @@ function maybeRecordLearningEpisode(
       learningStrictness: position.learningStrictness,
       learningFairnessApplied:
         position.learningFairnessApplied === true ? true : undefined,
+      entryQualityScore: timingQ.entryQualityScore,
+      exitQualityScore: timingQ.exitQualityScore,
+      timingReward: timingQ.timingReward,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');

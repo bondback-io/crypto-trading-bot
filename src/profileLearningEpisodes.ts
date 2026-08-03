@@ -62,6 +62,21 @@ export interface ProfileLearningEpisode {
   learningMode?: boolean;
   learningStrictness?: 'stricter' | 'middle' | 'looser';
   learningFairnessApplied?: boolean;
+  /**
+   * Entry timing quality 0–100 (cheap proxy from MAE depth vs hold / MFE path).
+   * Optional — older episode rings omit this.
+   */
+  entryQualityScore?: number;
+  /**
+   * Exit timing quality 0–100 (MFE capture ratio minus giveback penalty).
+   * Optional — older episode rings omit this.
+   */
+  exitQualityScore?: number;
+  /**
+   * Risk-adjusted timing reward: pnl + MFE-capture − MAE − giveback penalties.
+   * Optional — older episode rings omit this; scorers fall back to pnl/MFE.
+   */
+  timingReward?: number;
 }
 
 interface EpisodesFile {
@@ -174,6 +189,71 @@ export function deriveEpisodeMetrics(input: {
     givebackFromPeakPct: Math.max(0, givebackFromPeakPct),
     peakUnrealizedPct: Math.max(0, peakUnrealizedPct),
     exitUnrealizedPct,
+  };
+}
+
+/**
+ * Cheap entry/exit quality + risk-adjusted timing reward from MFE/MAE/giveback.
+ * No candle replay — safe for Paper / Live Sim / Live close path.
+ */
+export function computeEpisodeTimingQuality(input: {
+  pnlPct: number;
+  maxRunupPct: number;
+  maxDrawdownPct: number;
+  givebackFromPeakPct: number;
+  exitUnrealizedPct: number;
+  holdSec?: number;
+  convictionScore?: number | null;
+}): {
+  entryQualityScore: number;
+  exitQualityScore: number;
+  timingReward: number;
+} {
+  const pnl = Number(input.pnlPct) || 0;
+  const mfe = Math.max(0, Number(input.maxRunupPct) || 0);
+  const mae = Math.min(0, Number(input.maxDrawdownPct) || 0); // ≤0
+  const giveback = Math.max(0, Number(input.givebackFromPeakPct) || 0);
+  const exitU = Number.isFinite(input.exitUnrealizedPct)
+    ? Number(input.exitUnrealizedPct)
+    : pnl;
+  const holdSec = Math.max(0, Number(input.holdSec) || 0);
+  const conv =
+    input.convictionScore != null && Number.isFinite(input.convictionScore)
+      ? Number(input.convictionScore)
+      : null;
+
+  // Entry quality: shallow MAE + decent conviction → higher. Deep MAE early → lower.
+  const maeAbs = Math.abs(mae);
+  let entryQ = 72;
+  entryQ -= Math.min(40, maeAbs * 1.15);
+  if (holdSec > 0 && holdSec < 45 && maeAbs >= 8) entryQ -= 12;
+  if (mfe >= 15 && maeAbs <= 4) entryQ += 8;
+  if (conv != null) {
+    if (conv >= 55) entryQ += 6;
+    else if (conv < 30) entryQ -= 10;
+  }
+  entryQ = Math.max(0, Math.min(100, Math.round(entryQ)));
+
+  // Exit quality: capture of MFE; punish giveback after peak
+  const capture =
+    mfe > 0.5 ? Math.max(0, Math.min(1.2, exitU / mfe)) : exitU > 0 ? 1 : 0.4;
+  let exitQ = capture * 85;
+  exitQ -= Math.min(35, giveback * 0.85);
+  if (mfe >= 25 && exitU < mfe * 0.35) exitQ -= 15;
+  if (pnl > 0 && giveback < 5) exitQ += 5;
+  exitQ = Math.max(0, Math.min(100, Math.round(exitQ)));
+
+  // Risk-adjusted timing reward (same units-ish as pnl %)
+  const mfeCapturePts = mfe > 0 ? Math.min(mfe, Math.max(0, exitU)) * 0.35 : 0;
+  const maePenalty = maeAbs * 0.25;
+  const givebackPenalty = Math.min(20, giveback * 0.2);
+  const timingReward =
+    pnl + mfeCapturePts - maePenalty - givebackPenalty + (exitQ - 50) * 0.04;
+
+  return {
+    entryQualityScore: entryQ,
+    exitQualityScore: exitQ,
+    timingReward: Number(timingReward.toFixed(3)),
   };
 }
 
