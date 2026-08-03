@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.125',
+    title: 'Pin Node 22 for Render deploys',
+    sections: ['backup'],
+    items: [
+      'package.json engines now pin Node 22.x so Render no longer tries (and fails) to install Node 26 from a >=20 range.',
+    ],
+  },
+  {
     version: '1.2.124',
     title: 'Fix Full-trade Exit MC vs partials mismatch',
     sections: ['overview', 'execution'],
