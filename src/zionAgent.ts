@@ -173,7 +173,15 @@ function buildContextPack(): string {
   } catch {
     lines.push('Learning health: unavailable');
   }
-  return lines.join('\n').slice(0, 14_000);
+  try {
+    const { buildZionAnalystBrief } =
+      require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
+    const brief = buildZionAnalystBrief();
+    lines.push(...brief.contextLines);
+  } catch {
+    lines.push('Analyst brief: unavailable');
+  }
+  return lines.join('\n').slice(0, 18_000);
 }
 
 type ParsedBotFacts = {
@@ -201,6 +209,10 @@ const PROFILE_LABELS: Record<string, string> = {
   dip_buyer: 'Dip Buyer',
   migration_sniper: 'Migration Sniper',
   trend_rider: 'Trend Rider',
+  steady_compounder: 'Steady Compounder',
+  high_win_rate: 'High Win-Rate',
+  momentum_burst: 'Momentum Burst',
+  reversal_scalper: 'Reversal Scalper',
   compounder: 'Compounder',
   default: 'Default',
 };
@@ -505,6 +517,27 @@ function localAnalystReply(
         '.'
       : null;
   const leadLane = leadingWinsSummary(facts);
+
+  // Deep performance / proactive analyst path
+  try {
+    const {
+      buildZionAnalystBrief,
+      formatAnalystReply,
+      wantsPerformanceAnalysis,
+    } = require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
+    if (
+      wantsPerformanceAnalysis(q) ||
+      /health score|what has .+ learned|learning progress|system health/.test(q)
+    ) {
+      const brief = buildZionAnalystBrief();
+      return formatAnalystReply(brief, {
+        greet,
+        focus: overallStats || undefined,
+      });
+    }
+  } catch {
+    /* fall through */
+  }
 
   // Profile-specific “how is X doing?”
   const profileAsk = q.match(
@@ -994,45 +1027,49 @@ async function callZionLlm(
   return null;
 }
 
-const SYSTEM_PROMPT = `You are Zion Valton — a fun, smart trading teammate for this Solana copy/scanner bot dashboard. Read-only analyst with personality.
+const SYSTEM_PROMPT = `You are Zion Valton — a calm, friendly, sharp performance analyst for this Solana copy/scanner bot dashboard. Read-only teammate with personality.
 
 User:
 - Always address the user as **Isaac** (never “user”, never invent another name).
 
 Personality:
-- Fun, sharp, slightly technical, and optimistic — positive without being fake or reckless.
-- Talk like a clever human teammate, not a report generator or support bot.
-- Vary the vibe each reply (warm / witty / chill / coachy / lightly technical) so answers don’t feel copy-paste identical — still clearly Zion Valton.
-- Light wit is fine; never slang walls, never corporate filler.
+- Friendly, calm, clear — optimistic without being reckless or corporate.
+- Fun and slightly technical; talk like a clever teammate, not a report generator.
+- Vary the vibe lightly (warm / witty / chill / coachy / lightly technical) — still clearly Zion Valton.
+
+Core reasoning style (technical turns — follow this order):
+1. **Observe** — what the numbers show (WR/PF/net, health score, ML modes, MARL, skips).
+2. **Explain** — plain English why that matters.
+3. **Strengths & weak spots** — 1–3 each, specific bots when possible.
+4. **Next actions** — concrete, prioritized suggestions (profile focus, ML shadow→hybrid→lead advice, MARL/gates/Learning Mode, or data experiments).
 
 Length & readability (strict):
 - Social / smalltalk (hi, hello, bye, thanks, how’s your day, what’s up): **1–2 short sentences only**. No analysis, no stats, no bullet dumps.
-- Technical answers: tighter than before — aim ~3–6 short lines / ~60–100 words unless Isaac asks for depth. Lead with status/numbers/risks/next step.
-- Skimmable bullets OK when listing a few facts; avoid essays.
-- Do NOT dump a full dashboard recap (mode/risk/every filter/every profile) unless asked.
+- Technical answers: ~4–10 short lines unless Isaac asks for depth. Prefer skimmable bullets for Observe / Strengths / Actions.
+- Do NOT dump a full dashboard recap unless asked.
 - Do NOT re-introduce yourself every turn — only on a true first hello.
 - Do NOT list every micro-bot with essays. If asked about each bot: **one punchy sentence per bot**, then stop.
 - Skip raw ids like dip_buyer when a friendly name works (Dip Buyer).
 
-Response shape (technical turns):
+Response shape (technical / analysis turns):
 1. Quick ack to Isaac
-2. Direct answer (lead with the point + key numbers)
-3. One bright takeaway or risk note
-4. One optional short follow-up
+2. Observe → Explain → Strengths / Weak spots → Next actions
+3. One optional short follow-up
 
-If a profile is off or data is missing, say so simply and stay upbeat about next steps.
+If a profile is off or data is missing, say so simply and stay constructive about next steps.
 Never paste the context pack, raw logs, or huge config blocks unless Isaac asks for raw/snapshot/dump.
 
-Boundaries:
-- Never claim you changed micro-bot TP, SL, timers, or self-learning / delta learning.
+Boundaries (hard):
+- Never claim you changed micro-bot TP, SL, timers, ML mode, or self-learning / delta learning.
 - Never instruct Isaac to bypass hard safety (anti-rug, risk halt) without warning.
-- You may explain MARL soft coordination but must not control MARL directly.
-- If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
+- You may **recommend** ML Shadow / Hybrid / Lead and profile focus in plain English — Isaac (or auto-promote) applies ML on Micro Bots. You do **not** write mlMode.
+- You may explain MARL soft coordination; you do not silently flip it unless Semi-Autonomous Change Request is approved.
+- If Semi-Autonomous is ON and a high-level **allowlisted global** improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
 \`\`\`zion-change-request
 {"title":"...","what":"...","why":"...","expectedBenefit":"...","target":"global_gates","payload":{"path":"selective.minConvictionScore","value":55}}
 \`\`\`
-Only suggest allowlisted global paths (conviction floors, selective module toggles, dead-token / activity filters, marketScanner.requireTaSetup, marl.strength). Never payload profile exitRules.
-Use the provided context pack as internal reference only — interpret it; do not paste it.`;
+Only suggest allowlisted global paths (conviction floors, selective module toggles, activity / Pump.fun filters, marketScanner.requireTaSetup, marl.enabled / marl.strength / marl.lowMcUsd). Never payload profile exitRules, takeProfit, stopLoss, or mlMode.
+Use the provided context pack (incl. Analyst perf / timing / health lines) as internal reference — interpret it; do not paste it.`;
 
 function extractChangeRequest(
   text: string
@@ -1137,7 +1174,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey Isaac — ask about a profile, learning progress, MARL, or how the bots are doing.',
+        'Hey Isaac — ask about performance, learning health, MARL, or what a bot has learned.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
@@ -1206,24 +1243,39 @@ export async function zionAgentChat(userText: string): Promise<{
   if (st.semiAutonomous) {
     const extracted = extractChangeRequest(reply);
     if (extracted) {
-      changeRequest = queueImprovementRequest(extracted);
-      reply =
-        reply.replace(/```zion-change-request[\s\S]*?```/i, '').trim() +
-        `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**.`;
+      const path = String(extracted.payload?.path || '');
+      if (
+        ALLOWED_PATHS.has(path) &&
+        !/mlMode|exitRules|takeProfit|stopLoss|selfLearning/i.test(
+          JSON.stringify(extracted.payload || {})
+        )
+      ) {
+        changeRequest = queueImprovementRequest(extracted);
+        reply =
+          reply.replace(/```zion-change-request[\s\S]*?```/i, '').trim() +
+          `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**.`;
+      } else {
+        reply = reply.replace(/```zion-change-request[\s\S]*?```/i, '').trim();
+      }
     } else if (
-      /suggest|recommend|improve|raise conviction|tighten/i.test(text)
+      /suggest|recommend|improve|raise conviction|tighten|analys|performance|what should|next action/i.test(
+        text
+      )
     ) {
-      // Local heuristic CR when no LLM JSON
-      changeRequest = queueImprovementRequest({
-        title: 'Review global conviction floor',
-        what: 'Consider reviewing selective.minConvictionScore vs recent skip/WR mix (manual approve required).',
-        why: 'User asked for improvement ideas while Semi-Autonomous is ON.',
-        expectedBenefit:
-          'Fewer low-quality opens if conviction is too loose; more fills if too tight.',
-        target: 'global_gates',
-        payload: { path: 'selective.minConvictionScore', value: 55 },
-      });
-      reply += `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**. Approve or deny it below when you’re ready.`;
+      try {
+        const {
+          buildZionAnalystBrief,
+          pickAnalystChangeRequest,
+        } = require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
+        const brief = buildZionAnalystBrief();
+        const picked = pickAnalystChangeRequest(brief);
+        if (picked && ALLOWED_PATHS.has(String(picked.payload?.path || ''))) {
+          changeRequest = queueImprovementRequest(picked);
+          reply += `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**. Approve or deny it below when you’re ready.`;
+        }
+      } catch {
+        /* no CR */
+      }
     }
   }
 

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.122',
+    title: 'Zion proactive performance analyst',
+    sections: ['zion', 'learning'],
+    items: [
+      'Zion now reads micro-bot performance, learning health, timing quality, ML modes, MARL, and skip reasons, then answers in Observe → Explain → Strengths/Weak spots → Next actions.',
+      'Suggestions stay advisory for ML/profile knobs; with Semi-Autonomous ON, only allowlisted global gates can become reviewable Change Requests — never auto-applied, never ML/TP/SL writes.',
+    ],
+  },
+  {
     version: '1.2.121',
     title: 'Learning Progress & System Diagnostics',
     sections: ['learning', 'overview'],
