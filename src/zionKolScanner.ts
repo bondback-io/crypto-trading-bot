@@ -7,6 +7,10 @@
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
 import { getConnection, lanesShareEndpoint, runWithRpcRole, isRpcGateSkipError } from './connection';
+import {
+  shouldDeferBackgroundForCritical,
+  logBackgroundDeferred,
+} from './rpcGate';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
@@ -436,7 +440,12 @@ async function pollUniverseBatch(): Promise<number> {
     'zion'
   );
   } catch (err) {
-    if (isRpcGateSkipError(err)) return 0;
+    if (isRpcGateSkipError(err)) {
+      logBackgroundDeferred('Zion KOL Scanner', `lane gate ${err.kind}`, {
+        role: err.role,
+      });
+      return 0;
+    }
     throw err;
   }
 }
@@ -684,6 +693,12 @@ export async function runZionScannerPollOnce(): Promise<void> {
   if (!zionCfg()?.enabled || zionCfg().scanner?.enabled === false) return;
   if (Date.now() < rpcCooldownUntil) {
     lastError = `RPC cooldown until ${new Date(rpcCooldownUntil).toISOString()}`;
+    return;
+  }
+  const defer = shouldDeferBackgroundForCritical('scanner');
+  if (defer.defer) {
+    logBackgroundDeferred('Zion KOL Scanner', defer.reason || 'Critical busy');
+    lastError = `delayed — ${defer.reason}`;
     return;
   }
   pollInFlight = true;

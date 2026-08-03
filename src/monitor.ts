@@ -13,7 +13,11 @@ import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperS
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
 import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole, isRpcGateSkipError } from './connection';
-import { runDedupedRpcJob } from './rpcGate';
+import {
+  runDedupedRpcJob,
+  shouldDeferBackgroundForCritical,
+  logBackgroundDeferred,
+} from './rpcGate';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
@@ -800,18 +804,29 @@ function getWalletPollThrottle(rpcUrl: string): {
   cycleBudgetMs: number;
 } {
   const soft = shouldSoftThrottleWalletPoll(rpcUrl);
+  const share = Boolean(config.rpc?.shareLoad);
+  const envCap = Number(process.env.RPC_WALLET_POLL_PER_CYCLE);
+  const hardCycleCap = Number.isFinite(envCap)
+    ? Math.max(1, Math.min(40, Math.round(envCap)))
+    : share
+      ? 6
+      : 10;
+
   if (soft) {
-    const share = Boolean(config.rpc?.shareLoad);
     const cap = resolveSoftWatchCap().effectiveCap;
     // When cap is low, poll fewer wallets per cycle to keep Utility cool.
     const maxPerCycle =
       cap === 0
         ? 0
-        : Math.min(share ? 3 : 5, Math.max(1, Math.ceil(cap / 5)));
+        : Math.min(
+            hardCycleCap,
+            share ? 3 : 5,
+            Math.max(1, Math.ceil(cap / 5))
+          );
     return {
       soft: true,
       batchSize: 1,
-      batchGapMs: share ? 1_500 : 900,
+      batchGapMs: share ? 1_600 : 1_000,
       sigLimit: 5,
       maxParse: 1,
       pause429Ms: 25_000,
@@ -821,16 +836,17 @@ function getWalletPollThrottle(rpcUrl: string): {
       cycleBudgetMs: share ? 3_500 : 5_000,
     };
   }
+  // Paid / non-soft: still hard-cap + stagger — never blast every favourite at once.
   return {
     soft: false,
-    batchSize: 8,
-    batchGapMs: 80,
-    sigLimit: 20,
-    maxParse: 10,
-    pause429Ms: 200,
-    maxWalletsPerCycle: Number.POSITIVE_INFINITY,
+    batchSize: share ? 2 : 3,
+    batchGapMs: share ? 250 : 120,
+    sigLimit: 12,
+    maxParse: 4,
+    pause429Ms: 400,
+    maxWalletsPerCycle: hardCycleCap,
     abortCycleOn429: false,
-    cycleBudgetMs: 25_000,
+    cycleBudgetMs: share ? 8_000 : 15_000,
   };
 }
 
@@ -983,6 +999,13 @@ export function resetMonitorSession(): {
 }
 
 const ACTIVITY_REFRESH_MS = 30 * 60 * 1000; // re-check activity every 30 min (was 15)
+/** Min gap before re-checking the same wallet's activity on-chain/GMGN. */
+const ACTIVITY_PER_WALLET_MIN_MS = 45 * 60 * 1000;
+/** Cap how many wallets get a full activity refresh per timer tick. */
+const ACTIVITY_MAX_PER_CYCLE = 8;
+const activityRefreshAt = new Map<string, number>();
+let activityRotationOffset = 0;
+let lastFullActivityPassAt = 0;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function onSignal(handler: SignalHandler): void {
@@ -1181,6 +1204,15 @@ async function pollAllWallets(): Promise<void> {
     console.log('[monitor] Skipping poll — previous cycle still running');
     return;
   }
+
+  const deferCrit = shouldDeferBackgroundForCritical('utility');
+  if (deferCrit.defer) {
+    logBackgroundDeferred('Favourites wallet watch', deferCrit.reason || 'Critical busy', {
+      pollIntervalMs: config.pollIntervalMs,
+    });
+    return;
+  }
+
   pollInFlight = true;
   const cycleStarted = Date.now();
   try {
@@ -1226,6 +1258,12 @@ async function pollAllWallets(): Promise<void> {
       0,
       Math.min(orderedFull.length, maxWalletsPerCycle)
     );
+    if (orderedFull.length > ordered.length) {
+      console.log(
+        `[monitor] Wallet poll capped ${ordered.length}/${orderedFull.length} this cycle ` +
+          `(rotate remainder next tick — load protection)`
+      );
+    }
     // #region agent log
     try {
       const { agentDebugLog } =
@@ -1593,25 +1631,112 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
 
+  const defer = shouldDeferBackgroundForCritical('utility');
+  if (defer.defer) {
+    logBackgroundDeferred('Wallet activity refresh', defer.reason || 'load protection');
+    return reports;
+  }
+
+  // Skip a full pass if we just did one recently and nothing looks stale.
+  const now = Date.now();
+  if (
+    lastFullActivityPassAt > 0 &&
+    now - lastFullActivityPassAt < ACTIVITY_REFRESH_MS * 0.75
+  ) {
+    console.log(
+      `[monitor] Skipping activity refresh — last full pass ${Math.round(
+        (now - lastFullActivityPassAt) / 1000
+      )}s ago (no change expected)`
+    );
+    return reports;
+  }
+
+  const n = config.smartWallets.length;
+  if (n === 0) return reports;
+  const offset = ((activityRotationOffset % n) + n) % n;
+  const ordered =
+    offset === 0
+      ? [...config.smartWallets]
+      : config.smartWallets.slice(offset).concat(config.smartWallets.slice(0, offset));
+
+  const toRefresh: typeof config.smartWallets = [];
+  let skippedFresh = 0;
+  for (const wallet of ordered) {
+    if (toRefresh.length >= ACTIVITY_MAX_PER_CYCLE) break;
+    const last = activityRefreshAt.get(wallet.address) || 0;
+    const age = now - last;
+    // Still clearly active within filter window — skip redundant RPC/GMGN.
+    const lastTrade = wallet.lastTradedAt ?? wallet.lastActive ?? null;
+    const daysSince =
+      lastTrade != null ? (now - lastTrade) / MS_PER_DAY : null;
+    const clearlyActive =
+      daysSince != null &&
+      daysSince < Math.max(1, (config.filters.minActivityDays || 14) * 0.5) &&
+      (wallet.tradesLast30d ?? 0) >= Math.max(1, config.filters.minTradesLast30d || 1);
+    if (age < ACTIVITY_PER_WALLET_MIN_MS && clearlyActive) {
+      skippedFresh += 1;
+      continue;
+    }
+    if (age < ACTIVITY_PER_WALLET_MIN_MS * 0.5) {
+      skippedFresh += 1;
+      continue;
+    }
+    toRefresh.push(wallet);
+  }
+
+  if (toRefresh.length === 0) {
+    console.log(
+      `[monitor] Activity refresh: nothing due (${skippedFresh} still fresh) — skipping RPC`
+    );
+    activityRotationOffset = (offset + Math.max(1, ACTIVITY_MAX_PER_CYCLE)) % n;
+    return reports;
+  }
+
+  console.log(
+    `[monitor] Activity refresh: ${toRefresh.length}/${n} wallet(s)` +
+      (skippedFresh ? ` (skipped ${skippedFresh} fresh)` : '') +
+      ' — staggered'
+  );
+
   try {
     return await runWithRpcRole(
       getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad)),
       async () => {
-      for (let i = 0; i < config.smartWallets.length; i++) {
-        const wallet = config.smartWallets[i];
+      for (let i = 0; i < toRefresh.length; i++) {
+        const midDefer = shouldDeferBackgroundForCritical('utility');
+        if (midDefer.defer) {
+          logBackgroundDeferred(
+            'Wallet activity refresh',
+            midDefer.reason || 'load protection',
+            { done: i, remaining: toRefresh.length - i }
+          );
+          break;
+        }
+        const wallet = toRefresh[i];
         const report = await refreshWalletActivity(wallet);
         reports.push(report);
-        // Stagger on-chain sweeps so a shared RPC isn't hit with a full dump
-        if (i + 1 < config.smartWallets.length) {
-          await new Promise((r) => setTimeout(r, 150));
+        activityRefreshAt.set(wallet.address, Date.now());
+        // Stagger on-chain sweeps so Utility is not hit with a dump
+        if (i + 1 < toRefresh.length) {
+          await new Promise((r) => setTimeout(r, 220));
         }
       }
+      activityRotationOffset =
+        (offset + Math.max(toRefresh.length, 1)) % n;
+      lastFullActivityPassAt = Date.now();
       return reports;
     },
       'activity'
     );
   } catch (err) {
-    if (isRpcGateSkipError(err)) return reports;
+    if (isRpcGateSkipError(err)) {
+      logBackgroundDeferred(
+        'Wallet activity refresh',
+        `lane gate ${err.kind}`,
+        { role: err.role }
+      );
+      return reports;
+    }
     throw err;
   }
 }
@@ -2246,7 +2371,14 @@ async function pollWallet(
       { join: false }
     );
   } catch (err) {
-    if (isRpcGateSkipError(err)) return;
+    if (isRpcGateSkipError(err)) {
+      logBackgroundDeferred(
+        'Favourites wallet poll',
+        `lane gate ${err.kind}`,
+        { wallet: wallet.name, role: err.role }
+      );
+      return;
+    }
     throw err;
   }
 }

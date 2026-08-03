@@ -169,7 +169,7 @@ export async function acquireRpcLane(
     lane.hitRateLimit += 1;
     if (!critical) {
       lane.skipped += 1;
-      logGate(role, 'skipped (rate limit)', {
+      logGate(role, 'background delayed (rate limit / load protection)', {
         feature: feature || 'ungated',
         inFlight: lane.inFlight,
         queued: lane.waiters.length,
@@ -195,7 +195,7 @@ export async function acquireRpcLane(
     lane.hitConcurrency += 1;
     if (!critical && lane.waiters.length >= limits.maxQueue) {
       lane.skipped += 1;
-      logGate(role, 'skipped (concurrency saturated)', {
+      logGate(role, 'background delayed (concurrency / load protection)', {
         feature: feature || 'ungated',
         inFlight: lane.inFlight,
         queued: lane.waiters.length,
@@ -337,6 +337,74 @@ export function getRpcGateSnapshot(): RpcGateSnapshot {
     out.utility.queued > 0 ||
     out.utility.skipped > 0 ||
     out.secondary.queued > 2 ||
-    out.primary.hitConcurrency > 0;
+    out.primary.hitConcurrency > 0 ||
+    out.primary.queued > 0;
   return { lanes: out, backlog, stressed };
+}
+
+/**
+ * True when Critical (primary) is busy — scanners / Favourites should yield
+ * so trade entry keeps RPC headroom.
+ */
+export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = 'scanner'): {
+  defer: boolean;
+  reason: string | null;
+} {
+  const snap = getRpcGateSnapshot();
+  const p = snap.lanes.primary;
+  const s = snap.lanes.secondary;
+  const u = snap.lanes.utility;
+
+  if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
+    return {
+      defer: true,
+      reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
+    };
+  }
+  if (kind === 'scanner' && (s.queued >= 2 || s.inFlight >= s.maxConcurrent)) {
+    return {
+      defer: true,
+      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
+    };
+  }
+  if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {
+    return {
+      defer: true,
+      reason: `Utility lane stressed (inFlight ${u.inFlight}/${u.maxConcurrent}, queue ${u.queued}, skipped ${u.skipped})`,
+    };
+  }
+  return { defer: false, reason: null };
+}
+
+const deferLogAt = new Map<string, number>();
+
+/** Throttled operator-visible log when background work yields to load protection. */
+export function logBackgroundDeferred(
+  subsystem: string,
+  reason: string,
+  extra?: Record<string, unknown>
+): void {
+  const key = `${subsystem}:${reason.slice(0, 48)}`;
+  const now = Date.now();
+  const last = deferLogAt.get(key) || 0;
+  if (now - last < 12_000) return;
+  deferLogAt.set(key, now);
+  console.warn(
+    `[rpc-load] ${subsystem} delayed — load protection: ${reason}` +
+      (extra && Object.keys(extra).length
+        ? ` ${JSON.stringify(extra)}`
+        : '')
+  );
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('LOAD', 'rpcGate.ts:defer', `${subsystem} delayed`, {
+      reason,
+      ...extra,
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
 }

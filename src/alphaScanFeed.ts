@@ -7,6 +7,10 @@
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
 import { runWithRpcRole, isRpcGateSkipError } from './connection';
+import {
+  shouldDeferBackgroundForCritical,
+  logBackgroundDeferred,
+} from './rpcGate';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchBondingCurve,
@@ -288,7 +292,13 @@ async function enrichCurves(
       );
     }, 'alpha_scan');
   } catch (err) {
-    if (!isRpcGateSkipError(err)) throw err;
+    if (isRpcGateSkipError(err)) {
+      logBackgroundDeferred('AlphaScan', `lane gate ${err.kind}`, {
+        role: err.role,
+      });
+      return out;
+    }
+    throw err;
   }
   return out;
 }
@@ -433,6 +443,12 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   const interval = Math.max(15_000, Number(cfg.pollIntervalMs) || 45_000);
   if (passInFlight) return 0;
   if (lastPassAt && Date.now() - lastPassAt < interval * 0.85) {
+    return 0;
+  }
+
+  const defer = shouldDeferBackgroundForCritical('scanner');
+  if (defer.defer) {
+    logBackgroundDeferred('AlphaScan', defer.reason || 'Critical busy');
     return 0;
   }
 

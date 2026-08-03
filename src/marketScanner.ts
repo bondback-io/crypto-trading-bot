@@ -9,6 +9,10 @@
 import { config, HARD_FILTER_FLOORS } from './config';
 import { logger, errorToMeta } from './logger';
 import { runWithRpcRole } from './connection';
+import {
+  shouldDeferBackgroundForCritical,
+  logBackgroundDeferred,
+} from './rpcGate';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -1183,6 +1187,12 @@ export function handOffScannerCandidate(
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabled('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
+  const defer = shouldDeferBackgroundForCritical('scanner');
+  if (defer.defer) {
+    logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
+    lastSkipReason = `delayed — ${defer.reason}`;
+    return 0;
+  }
   const qDepth = pendingBuyQueueDepth();
   if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
     skippedForBuyQueue += 1;

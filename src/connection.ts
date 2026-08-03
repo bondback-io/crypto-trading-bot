@@ -542,6 +542,10 @@ export async function runWithRpcRole<T>(
 
 export { getRpcGateSnapshot, isRpcGateSkipError } from './rpcGate';
 export type { RpcGateSnapshot, RpcLaneGateStats } from './rpcGate';
+export {
+  shouldDeferBackgroundForCritical,
+  logBackgroundDeferred,
+} from './rpcGate';
 
 /** Tag current async context for HTTP call metering (health probes, etc.). */
 export async function runWithRpcFeature<T>(

@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.130',
+    title: 'Background RPC Pressure Cut',
+    sections: ['execution', 'copy', 'scanners'],
+    items: [
+      'Hard per-cycle wallet poll caps + stagger; Favourites/activity yield when Critical is busy.',
+      'Activity refresh skips fresh wallets and rotates ≤8 per tick; Market/Alpha/Zion skip ticks under load protection with clear [rpc-load] logs.',
+    ],
+  },
+  {
     version: '1.2.129',
     title: 'RPC Load Stabilisation',
     sections: ['execution', 'copy', 'knobs'],
