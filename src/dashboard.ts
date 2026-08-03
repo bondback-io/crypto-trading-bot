@@ -14903,6 +14903,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return groups;
     }
 
+    /** Full-trade Exit MC: cost-weighted across partials + final (not last bag only). */
+    function closedGroupDisplayExitMc(g) {
+      if (!g) return null;
+      const legs = [];
+      (g.partials || []).forEach(function (s) { legs.push(s); });
+      if (g.final) legs.push(g.final);
+      let costSum = 0;
+      let weighted = 0;
+      for (let i = 0; i < legs.length; i++) {
+        const s = legs[i];
+        const mc = Number(s && s.exitMarketCapUsd);
+        const cost = Number(s && s.costSol);
+        if (!(mc > 0) || !(cost > 0)) continue;
+        weighted += mc * cost;
+        costSum += cost;
+      }
+      if (costSum > 0 && weighted > 0) return weighted / costSum;
+      const entry = Number(g.parent && g.parent.entryMarketCapUsd);
+      const pct = Number(g.parent && g.parent.pnlPct);
+      if (entry > 0 && Number.isFinite(pct)) return entry * (1 + pct / 100);
+      return (
+        (g.final && g.final.exitMarketCapUsd) ||
+        (g.parent && g.parent.exitMarketCapUsd) ||
+        null
+      );
+    }
+
     function fmtTradeProfileBadge(p, opts) {
       opts = opts || {};
       const v = resolveProfileVisual(p);
@@ -15045,16 +15072,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<td>' + fmtMintCa(p.mint) + '</td>' +
           '<td class="mint" title="Market cap at your buy fill (scaled to entry price)">' + fmtUsdShort(p.entryMarketCapUsd) + '</td>' +
           '<td class="mint" title="' +
-            (p.liveExitMarketCapUsd != null &&
-            p.exitMarketCapUsd != null &&
-            Math.abs(Number(p.liveExitMarketCapUsd) - Number(p.exitMarketCapUsd)) /
-              Math.max(Number(p.exitMarketCapUsd), 1) >
-              0.05
-              ? 'Fill-scaled Exit MC (tracks PnL). Dex live showed ' +
-                fmtUsdShort(p.liveExitMarketCapUsd) +
-                ' — may disagree with your fill'
-              : 'Exit MC fill-scaled from Buy MC × exit/entry (tracks PnL)') +
-          '">' + fmtUsdShort(p.exitMarketCapUsd) + '</td>' +
+            (function () {
+              const exitMc =
+                opts.exitMarketCapUsd != null
+                  ? opts.exitMarketCapUsd
+                  : p.exitMarketCapUsd;
+              if (
+                opts.exitMcRolled === true
+              ) {
+                return 'Full-trade Exit MC (size-weighted across partials + final — tracks total PnL)';
+              }
+              if (
+                p.liveExitMarketCapUsd != null &&
+                exitMc != null &&
+                Math.abs(Number(p.liveExitMarketCapUsd) - Number(exitMc)) /
+                  Math.max(Number(exitMc), 1) >
+                  0.05
+              ) {
+                return (
+                  'Fill-scaled Exit MC (tracks PnL). Dex live showed ' +
+                  fmtUsdShort(p.liveExitMarketCapUsd) +
+                  ' — may disagree with your fill'
+                );
+              }
+              return 'Exit MC fill-scaled from Buy MC × exit/entry (tracks PnL)';
+            })() +
+          '">' +
+          fmtUsdShort(
+            opts.exitMarketCapUsd != null
+              ? opts.exitMarketCapUsd
+              : p.exitMarketCapUsd
+          ) +
+          '</td>' +
           '<td class="pos-cost-cell" title="Buy-in / cost basis">' +
             fmtCostSolUsd(p.costSol, p.costUsd, p.solUsd) +
           '</td>' +
@@ -15136,6 +15185,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
     function closedTradeMarketCap(group) {
+      const rolled = closedGroupDisplayExitMc(group);
+      if (rolled != null && Number.isFinite(Number(rolled)) && Number(rolled) > 0) {
+        return tradeSortNumber(rolled);
+      }
       const p = (group && group.parent) || {};
       const final = (group && group.final) || {};
       return tradeSortNumber(
@@ -15445,6 +15498,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<span class="trade-exit-label is-final">' +
             exitStyleIconHtml(classifyExitStyle(finalReason).key) +
             'Full trade</span><br/>',
+          exitMarketCapUsd: closedGroupDisplayExitMc(g),
+          exitMcRolled: true,
           pnlHtml:
             '<strong style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
             (pnlSol >= 0 ? '+' : '') + fmtSolShort(pnlSol) + ' SOL</strong>' +

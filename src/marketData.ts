@@ -418,6 +418,38 @@ export function resolveExitMarketCaps(
 }
 
 /**
+ * Full-trade Exit MC when a position closed in multiple legs (partials + final).
+ * Cost-weighted average of leg Exit MCs so the summary tracks realized PnL,
+ * not only the last bag's fade print. Falls back to Buy MC × (1 + totalPnl%).
+ */
+export function tradeLevelExitMarketCapUsd(input: {
+  entryMarketCapUsd?: number;
+  totalPnlPct?: number;
+  legs: Array<{ exitMarketCapUsd?: number | null; costSol?: number | null }>;
+}): number | undefined {
+  let costSum = 0;
+  let weighted = 0;
+  for (const leg of input.legs || []) {
+    const mc = Number(leg.exitMarketCapUsd);
+    const cost = Number(leg.costSol);
+    if (!(mc > 0) || !(cost > 0) || !Number.isFinite(mc) || !Number.isFinite(cost)) {
+      continue;
+    }
+    weighted += mc * cost;
+    costSum += cost;
+  }
+  if (costSum > 0 && weighted > 0) {
+    return weighted / costSum;
+  }
+  const entry = Number(input.entryMarketCapUsd);
+  const pct = Number(input.totalPnlPct);
+  if (entry > 0 && Number.isFinite(entry) && Number.isFinite(pct)) {
+    return entry * (1 + pct / 100);
+  }
+  return undefined;
+}
+
+/**
  * Exit MC tracks the PnL mark: entry×(exit/entry) when entry MC is known.
  */
 export function resolveExitMarketCapUsd(
@@ -466,6 +498,26 @@ export function alignClosedExitMarketCapToFill<T extends {
   }
 
   const display = pos.exitMarketCapUsd;
+  // Multi-leg rollups store a PnL/size-weighted Exit MC that intentionally
+  // differs from the last bag's fill — don't "repair" those back to last-fill.
+  const pnlPct = Number(pos.pnlPct);
+  if (
+    display != null &&
+    Number.isFinite(display) &&
+    display > 0 &&
+    Number.isFinite(pnlPct) &&
+    entryMc > 0
+  ) {
+    const pnlImplied = entryMc * (1 + pnlPct / 100);
+    const vsPnl =
+      Math.abs(display - pnlImplied) / Math.max(pnlImplied, 1);
+    const vsFill =
+      Math.abs(display - fillImplied) / Math.max(fillImplied, 1);
+    if (vsPnl <= 0.08 && vsFill > 0.12) {
+      return { pos, changed: false };
+    }
+  }
+
   const alreadyAligned =
     display != null &&
     Number.isFinite(display) &&

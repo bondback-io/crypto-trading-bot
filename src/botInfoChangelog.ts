@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.124',
+    title: 'Fix Full-trade Exit MC vs partials mismatch',
+    sections: ['overview', 'execution'],
+    items: [
+      'Closed Trades “Full trade” Exit MC is now size-weighted across partials + final (and stored that way on new closes), so it tracks total PnL instead of only the last bag’s fade print.',
+    ],
+  },
+  {
     version: '1.2.123',
     title: 'Zion chat: no mobile focus zoom',
     sections: ['zion'],

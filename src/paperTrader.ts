@@ -1825,12 +1825,52 @@ export class PaperTrader {
         ? position.initialAmountTokens
         : tokensToSell;
 
+    // If earlier partials exist, Full-trade Exit MC must reflect all legs —
+    // not only the last bag (often a fade back near entry while total PnL is green).
+    let displayExitMc = exitMc;
+    let displayImpliedMc = impliedExitMc;
+    try {
+      const { tradeLevelExitMarketCapUsd } =
+        require('./marketData') as typeof import('./marketData');
+      const priorLegs = this.closedPositions.filter(
+        (c) => c.parentPositionId === position.id
+      );
+      if (priorLegs.length > 0) {
+        const rolled = tradeLevelExitMarketCapUsd({
+          entryMarketCapUsd: position.entryMarketCapUsd,
+          totalPnlPct: totalPct,
+          legs: [
+            ...priorLegs.map((c) => ({
+              exitMarketCapUsd: c.exitMarketCapUsd,
+              costSol: c.costSol,
+            })),
+            { exitMarketCapUsd: exitMc, costSol: costBasisSold },
+          ],
+        });
+        if (rolled != null && rolled > 0) {
+          displayExitMc = rolled;
+          displayImpliedMc = rolled;
+        }
+      }
+    } catch {
+      /* optional */
+    }
+
     position.status = 'closed';
     position.closedAt = Date.now();
     position.exitPriceSol = exitPrice;
-    position.exitMarketCapUsd = exitMc;
-    position.impliedExitMarketCapUsd = impliedExitMc;
-    position.liveExitMarketCapUsd = liveExitMc;
+    position.exitMarketCapUsd = displayExitMc;
+    position.impliedExitMarketCapUsd = displayImpliedMc;
+    // Prefer Dex live; else last-leg fill MC when rollup differs (tooltip audit)
+    position.liveExitMarketCapUsd =
+      liveExitMc ??
+      (displayExitMc != null &&
+      exitMc != null &&
+      Math.abs(Number(exitMc) - Number(displayExitMc)) /
+        Math.max(Number(displayExitMc), 1) >
+        0.05
+        ? exitMc
+        : liveExitMc);
     position.pnlSol = totalPnl;
     position.pnlPct = totalPct;
     position.reason = reason;
