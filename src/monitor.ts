@@ -12,7 +12,8 @@ import {
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole } from './connection';
+import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole, isRpcGateSkipError } from './connection';
+import { runDedupedRpcJob } from './rpcGate';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
@@ -772,6 +773,19 @@ function isRpcRateLimitError(err: unknown): boolean {
   );
 }
 
+/**
+ * Soft-throttle Favourites poll when the resolved URL is free/public OR when
+ * Share ON routes wallet_poll to Utility (even after piggyback onto paid rpc-url).
+ * Without this, Utility failover to a custom RPC drops the soft-watch cap and
+ * floods Critical/Scanners fallbacks after ~30–60s.
+ */
+function shouldSoftThrottleWalletPoll(rpcUrl: string): boolean {
+  if (isSoftThrottleRpcUrl(rpcUrl)) return true;
+  const share = Boolean(config.rpc?.shareLoad);
+  if (!share) return false;
+  return getRpcRoleFor('wallet_poll', true) === 'utility';
+}
+
 /** Free Helius/Alchemy/public — gentle concurrency so boot seeding cannot crash Render. */
 function getWalletPollThrottle(rpcUrl: string): {
   soft: boolean;
@@ -785,20 +799,26 @@ function getWalletPollThrottle(rpcUrl: string): {
   abortCycleOn429: boolean;
   cycleBudgetMs: number;
 } {
-  const soft = isSoftThrottleRpcUrl(rpcUrl);
+  const soft = shouldSoftThrottleWalletPoll(rpcUrl);
   if (soft) {
     const share = Boolean(config.rpc?.shareLoad);
+    const cap = resolveSoftWatchCap().effectiveCap;
+    // When cap is low, poll fewer wallets per cycle to keep Utility cool.
+    const maxPerCycle =
+      cap === 0
+        ? 0
+        : Math.min(share ? 3 : 5, Math.max(1, Math.ceil(cap / 5)));
     return {
       soft: true,
       batchSize: 1,
-      batchGapMs: share ? 750 : 600,
+      batchGapMs: share ? 1_500 : 900,
       sigLimit: 5,
       maxParse: 1,
-      pause429Ms: 20_000,
-      maxWalletsPerCycle: share ? 6 : 8,
+      pause429Ms: 25_000,
+      maxWalletsPerCycle: maxPerCycle,
       abortCycleOn429: true,
       /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
-      cycleBudgetMs: 5_000,
+      cycleBudgetMs: share ? 3_500 : 5_000,
     };
   }
   return {
@@ -813,6 +833,102 @@ function getWalletPollThrottle(rpcUrl: string): {
     cycleBudgetMs: 25_000,
   };
 }
+
+let lastPollElapsedMs: number | null = null;
+
+/** Resolve Favourites soft-watch cap (env > config > code default). */
+export function resolveSoftWatchCap(): {
+  effectiveCap: number;
+  source: 'env' | 'config' | 'default';
+  paused: boolean;
+  shareLoad: boolean;
+  defaultCap: number;
+} {
+  const shareLoad = Boolean(config.rpc?.shareLoad);
+  const defaultCap = shareLoad ? 12 : 20;
+  if (
+    process.env.RPC_SOFT_WATCH_CAP != null &&
+    process.env.RPC_SOFT_WATCH_CAP !== '' &&
+    Number.isFinite(Number(process.env.RPC_SOFT_WATCH_CAP))
+  ) {
+    const effectiveCap = Math.max(
+      0,
+      Math.min(200, Math.round(Number(process.env.RPC_SOFT_WATCH_CAP)))
+    );
+    return {
+      effectiveCap,
+      source: 'env',
+      paused: effectiveCap === 0,
+      shareLoad,
+      defaultCap,
+    };
+  }
+  if (
+    config.rpc?.softWatchCap != null &&
+    Number.isFinite(Number(config.rpc.softWatchCap))
+  ) {
+    const effectiveCap = Math.max(
+      0,
+      Math.min(200, Math.round(Number(config.rpc.softWatchCap)))
+    );
+    return {
+      effectiveCap,
+      source: 'config',
+      paused: effectiveCap === 0,
+      shareLoad,
+      defaultCap,
+    };
+  }
+  return {
+    effectiveCap: defaultCap,
+    source: 'default',
+    paused: false,
+    shareLoad,
+    defaultCap,
+  };
+}
+
+export function getSoftWatchRuntimeSnapshot(): {
+  softWatchCap: number;
+  softWatchCapSource: 'env' | 'config' | 'default';
+  softWatchPaused: boolean;
+  softWatchDefault: number;
+  shareLoad: boolean;
+  enabledWallets: number;
+  watchPool: number;
+  lastPollAttempted: number;
+  lastPollCompleted: number;
+  lastPollRateLimited: boolean;
+  lastPollElapsedMs: number | null;
+  pollRole: string;
+  utilityHost: string | null;
+} {
+  const cap = resolveSoftWatchCap();
+  const pollRole = getRpcRoleFor('wallet_poll', cap.shareLoad);
+  let utilityHost: string | null = null;
+  try {
+    utilityHost = new URL(getRpcUrl(pollRole)).hostname;
+  } catch {
+    utilityHost = null;
+  }
+  return {
+    softWatchCap: cap.effectiveCap,
+    softWatchCapSource: cap.source,
+    softWatchPaused: cap.paused,
+    softWatchDefault: cap.defaultCap,
+    shareLoad: cap.shareLoad,
+    enabledWallets: config.smartWallets.filter((w) => w.enabled).length,
+    watchPool: getWalletsForPolling().length,
+    lastPollAttempted,
+    lastPollCompleted,
+    lastPollRateLimited,
+    lastPollElapsedMs: lastPollElapsedMs,
+    pollRole,
+    utilityHost,
+  };
+}
+
+/** Allow resume after operator acknowledges risk halt — soft watch helpers above */
 
 /**
  * Atomically reserve a mint before any slow await on the buy path.
@@ -866,7 +982,7 @@ export function resetMonitorSession(): {
   return { clearedActivity, clearedSizedSignals, clearedSignalTimestamps };
 }
 
-const ACTIVITY_REFRESH_MS = 15 * 60 * 1000; // re-check activity every 15 min
+const ACTIVITY_REFRESH_MS = 30 * 60 * 1000; // re-check activity every 30 min (was 15)
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function onSignal(handler: SignalHandler): void {
@@ -924,8 +1040,35 @@ export function startMonitor(): void {
 
   // Soft-throttle RPCs (free Helius/Alchemy): wait longer so Render health passes
   // before we seed wallets in small rotating batches.
-  const softBoot = isSoftThrottleRpcUrl(getRpcUrl());
-  const firstPollDelayMs = softBoot ? 15_000 : 5_000;
+  const shareBoot = Boolean(config.rpc?.shareLoad);
+  const softBoot =
+    isSoftThrottleRpcUrl(getRpcUrl()) ||
+    (shareBoot && getRpcRoleFor('wallet_poll', true) === 'utility');
+  // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
+  const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    const softSnap = getSoftWatchRuntimeSnapshot();
+    agentDebugLog('A/E', 'monitor.ts:startMonitor', 'monitor started — loaders scheduled', {
+      shareLoad: shareBoot,
+      softBoot,
+      firstPollDelayMs,
+      pollIntervalMs: config.pollIntervalMs,
+      softWatchCap: softSnap.softWatchCap,
+      softWatchPaused: softSnap.softWatchPaused,
+      watchPool: softSnap.watchPool,
+      enabledWallets: softSnap.enabledWallets,
+      trackedWallets: config.smartWallets.length,
+      marketScannerOn: true,
+      activityFilter: config.filters.enableActivityFilter,
+      uptimeMs: Math.round(process.uptime() * 1000),
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
   setTimeout(() => {
     void pollAllWallets();
   }, firstPollDelayMs);
@@ -961,7 +1104,14 @@ export function startMonitor(): void {
 
   activityTimer = setInterval(() => {
     if (paused || !config.filters.enableActivityFilter) return;
-    if (isSoftThrottleRpcUrl(getRpcUrl())) return;
+    // Soft / Share Utility: activity refresh burns the same lane as Favourites — skip.
+    if (
+      isSoftThrottleRpcUrl(getRpcUrl()) ||
+      (Boolean(config.rpc?.shareLoad) &&
+        getRpcRoleFor('activity', true) === 'utility')
+    ) {
+      return;
+    }
     void (async () => {
       await refreshAllWalletActivity();
       filterActiveWallets({ persistActiveOnly: false });
@@ -1076,6 +1226,52 @@ async function pollAllWallets(): Promise<void> {
       0,
       Math.min(orderedFull.length, maxWalletsPerCycle)
     );
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      const stats = getRpcStats();
+      const byRole = (role: string) =>
+        (stats.endpoints || []).find((e) => e.lane === role || e.role === role);
+      const p = byRole('primary');
+      const s = byRole('secondary');
+      const u = byRole('utility');
+      agentDebugLog('A/C/E', 'monitor.ts:pollAllWallets:start', 'poll cycle start', {
+        shareLoad: Boolean(config.rpc?.shareLoad),
+        pollRole,
+        rpcHost: (() => {
+          try {
+            return new URL(rpcUrl).hostname;
+          } catch {
+            return 'bad-url';
+          }
+        })(),
+        watchPool: wallets.length,
+        thisCycle: ordered.length,
+        softThrottle: throttle.soft,
+        batchSize,
+        batchGapMs,
+        maxWalletsPerCycle,
+        cycleBudgetMs,
+        pollIntervalMs: config.pollIntervalMs,
+        rateLimitedUntilLeftMs: Math.max(0, pollRateLimitedUntil - Date.now()),
+        enabledWallets: config.smartWallets.filter((w) => w.enabled).length,
+        trackedWallets: config.smartWallets.length,
+        primaryLat: p?.latencyMs ?? null,
+        secondaryLat: s?.latencyMs ?? null,
+        utilityLat: u?.latencyMs ?? null,
+        primaryLabel: stats.primary?.label ?? null,
+        secondaryLabel: stats.secondary?.label ?? null,
+        utilityLabel: stats.utility?.label ?? null,
+        primaryFailover: stats.primary?.failover === true,
+        secondaryFailover: stats.secondary?.failover === true,
+        utilityFailover: stats.utility?.failover === true,
+        warning: stats.warning,
+      });
+    } catch {
+      /* */
+    }
+    // #endregion
     let hitRateLimit = false;
     let completed = 0;
     let advanced = 0;
@@ -1144,6 +1340,40 @@ async function pollAllWallets(): Promise<void> {
     pruneOldBuys();
 
     const elapsed = Date.now() - cycleStarted;
+    lastPollElapsedMs = elapsed;
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      const stats = getRpcStats();
+      const byRole = (role: string) =>
+        (stats.endpoints || []).find((e) => e.lane === role || e.role === role);
+      const softSnap = getSoftWatchRuntimeSnapshot();
+      agentDebugLog('A/B/E', 'monitor.ts:pollAllWallets:end', 'poll cycle end', {
+        elapsedMs: elapsed,
+        attempted: ordered.length,
+        completed,
+        hitRateLimit,
+        budgetHit: elapsed > cycleBudgetMs,
+        slowVsInterval: elapsed > config.pollIntervalMs * 1.5,
+        pollIntervalMs: config.pollIntervalMs,
+        pollRole,
+        softThrottle: throttle.soft,
+        softWatchCap: softSnap.softWatchCap,
+        softWatchPaused: softSnap.softWatchPaused,
+        watchPool: softSnap.watchPool,
+        primaryLat: byRole('primary')?.latencyMs ?? null,
+        secondaryLat: byRole('secondary')?.latencyMs ?? null,
+        utilityLat: byRole('utility')?.latencyMs ?? null,
+        lastPollRateLimited,
+        primaryFailover: stats.primary?.failover === true,
+        secondaryFailover: stats.secondary?.failover === true,
+        utilityFailover: stats.utility?.failover === true,
+      });
+    } catch {
+      /* */
+    }
+    // #endregion
     if (elapsed > config.pollIntervalMs * 1.5) {
       console.warn(
         `[monitor] Poll cycle slow: ${elapsed}ms for ${ordered.length}/${wallets.length} wallet(s) ` +
@@ -1169,9 +1399,10 @@ export async function checkWalletLastTrade(
   failed?: boolean;
 }> {
   const role = getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(
-    role,
-    async () => {
+  try {
+    return await runWithRpcRole(
+      role,
+      async () => {
     try {
       const pubkey = new PublicKey(address);
       const conn = getConnection();
@@ -1205,8 +1436,14 @@ export async function checkWalletLastTrade(
       return { lastTradedAt: null, tradesLast30d: 0, failed: true };
     }
   },
-    'activity'
-  );
+      'activity'
+    );
+  } catch (err) {
+    if (isRpcGateSkipError(err)) {
+      return { lastTradedAt: null, tradesLast30d: 0, failed: true };
+    }
+    throw err;
+  }
 }
 
 /** Refresh activity metadata for one wallet (GMGN first, on-chain fallback) */
@@ -1356,22 +1593,27 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   console.log(`[monitor] Refreshing activity for ${config.smartWallets.length} wallet(s)…`);
   const reports: WalletActivityReport[] = [];
 
-  return runWithRpcRole(
-    getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad)),
-    async () => {
-    for (let i = 0; i < config.smartWallets.length; i++) {
-      const wallet = config.smartWallets[i];
-      const report = await refreshWalletActivity(wallet);
-      reports.push(report);
-      // Stagger on-chain sweeps so a shared RPC isn't hit with a full dump
-      if (i + 1 < config.smartWallets.length) {
-        await new Promise((r) => setTimeout(r, 80));
+  try {
+    return await runWithRpcRole(
+      getRpcRoleFor('activity', Boolean(config.rpc?.shareLoad)),
+      async () => {
+      for (let i = 0; i < config.smartWallets.length; i++) {
+        const wallet = config.smartWallets[i];
+        const report = await refreshWalletActivity(wallet);
+        reports.push(report);
+        // Stagger on-chain sweeps so a shared RPC isn't hit with a full dump
+        if (i + 1 < config.smartWallets.length) {
+          await new Promise((r) => setTimeout(r, 150));
+        }
       }
-    }
-    return reports;
-  },
-    'activity'
-  );
+      return reports;
+    },
+      'activity'
+    );
+  } catch (err) {
+    if (isRpcGateSkipError(err)) return reports;
+    throw err;
+  }
 }
 
 /**
@@ -1551,12 +1793,41 @@ export function getWalletsForPolling(): SmartWallet[] {
     return bT - aT;
   });
 
-  // Free Helius/Alchemy/public — rotate a capped watch set (Share: public utility lane default 30).
+  // Free Helius/Alchemy/public — rotate a capped watch set (Share: Utility default 12).
   // Keep ~60% sticky-hot (recent activity); rotate the rest so colder wallets still get cycles.
-  const softCapDefault = Boolean(config.rpc?.shareLoad) ? 30 : 40;
-  const softCap = Number(process.env.RPC_SOFT_WATCH_CAP || softCapDefault);
+  // Cap 0 = pause Favourites soft-watch (utility relief).
+  const capInfo = resolveSoftWatchCap();
+  const softCap = capInfo.effectiveCap;
+  const pollRoleForCap = getRpcRoleFor(
+    'wallet_poll',
+    Boolean(config.rpc?.shareLoad)
+  );
+  const rpcUrlForCap = getRpcUrl(pollRoleForCap);
+  const softUrl = isSoftThrottleRpcUrl(rpcUrlForCap);
+  // Cap must survive Utility failover onto paid rpc-url (softUrl becomes false).
+  const applySoftCap = shouldSoftThrottleWalletPoll(rpcUrlForCap);
+
+  if (softCap === 0) {
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      agentDebugLog('A', 'monitor.ts:getWalletsForPolling', 'soft-watch PAUSED (cap 0)', {
+        softCap,
+        source: capInfo.source,
+        shareLoad: capInfo.shareLoad,
+        enabledSorted: sorted.length,
+        pollRoleForCap,
+      });
+    } catch {
+      /* */
+    }
+    // #endregion
+    return [];
+  }
+
   if (
-    isSoftThrottleRpcUrl(getRpcUrl()) &&
+    applySoftCap &&
     Number.isFinite(softCap) &&
     softCap > 0 &&
     sorted.length > softCap
@@ -1576,8 +1847,69 @@ export function getWalletsForPolling(): SmartWallet[] {
       softWatchRotateOffset = (start + Math.max(take, 1)) % cold.length;
     }
     const capped = hot.concat(rotated);
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      agentDebugLog('A', 'monitor.ts:getWalletsForPolling', 'soft-watch cap applied', {
+        softCap,
+        source: capInfo.source,
+        defaultCap: capInfo.defaultCap,
+        shareLoad: Boolean(config.rpc?.shareLoad),
+        enabledSorted: sorted.length,
+        returned: capped.length,
+        stickyN,
+        rotateN,
+        softUrl,
+        applySoftCap,
+        pollRoleForCap,
+        rpcUrlHost: (() => {
+          try {
+            return new URL(rpcUrlForCap).hostname;
+          } catch {
+            return 'bad-url';
+          }
+        })(),
+      });
+    } catch {
+      /* */
+    }
+    // #endregion
     return capped;
   }
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('D', 'monitor.ts:getWalletsForPolling', 'soft-watch cap NOT applied', {
+      softCap,
+      source: capInfo.source,
+      shareLoad: Boolean(config.rpc?.shareLoad),
+      enabledSorted: sorted.length,
+      returned: sorted.length,
+      softUrl,
+      applySoftCap,
+      reason:
+        !applySoftCap
+          ? 'soft_cap_gate_off'
+          : softCap <= 0
+            ? 'softCap_lte_0'
+            : sorted.length <= softCap
+              ? 'under_cap'
+              : 'unknown',
+      pollRoleForCap,
+      rpcUrlHost: (() => {
+        try {
+          return new URL(rpcUrlForCap).hostname;
+        } catch {
+          return 'bad-url';
+        }
+      })(),
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
   return sorted;
 }
 
@@ -1907,7 +2239,16 @@ async function pollWallet(
   throttle?: ReturnType<typeof getWalletPollThrottle>
 ): Promise<void> {
   const role = getRpcRoleFor('wallet_poll', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(role, () => pollWalletInner(wallet, throttle), 'wallet_poll');
+  const key = `${role}:wallet_poll:${wallet.address}`;
+  try {
+    await runDedupedRpcJob(key, () =>
+      runWithRpcRole(role, () => pollWalletInner(wallet, throttle), 'wallet_poll'),
+      { join: false }
+    );
+  } catch (err) {
+    if (isRpcGateSkipError(err)) return;
+    throw err;
+  }
 }
 
 async function pollWalletInner(

@@ -47,6 +47,9 @@ export interface RpcLoadDiagnostic {
   secondary: RpcDiagLaneSnapshot;
   utility: RpcDiagLaneSnapshot;
   shareLoad: boolean;
+  softWatch?: ReturnType<
+    typeof import('./monitor').getSoftWatchRuntimeSnapshot
+  > | null;
   chokeHints: string[];
   loaders: RpcDiagLoader[];
   recommendations: RpcDiagRecommendation[];
@@ -169,10 +172,14 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     config.zion?.enabled === true && config.zion?.scanner?.enabled !== false;
 
   let lastPollRateLimited = false;
+  let softWatch: ReturnType<
+    typeof import('./monitor').getSoftWatchRuntimeSnapshot
+  > | null = null;
   try {
-    const { getMonitorStatus } =
+    const { getMonitorStatus, getSoftWatchRuntimeSnapshot } =
       require('./monitor') as typeof import('./monitor');
     lastPollRateLimited = Boolean(getMonitorStatus().lastPollRateLimited);
+    softWatch = getSoftWatchRuntimeSnapshot();
   } catch {
     /* monitor may not be loaded */
   }
@@ -193,6 +200,11 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   const scannerLane = shareLoad ? 'secondary' : 'primary';
   const activityLane = shareLoad ? 'utility' : 'secondary';
   const walletPollLane = shareLoad ? 'utility' : 'primary';
+  const softCapNote = softWatch
+    ? softWatch.softWatchPaused
+      ? 'Favourites soft-watch PAUSED (cap 0)'
+      : `soft watch cap ${softWatch.softWatchCap} (${softWatch.softWatchCapSource}), pool ${softWatch.watchPool}`
+    : 'soft watch';
 
   const loaders: RpcDiagLoader[] = [
     {
@@ -200,8 +212,8 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
       lane: walletPollLane,
       intervalMs: walletPoll,
       note: shareLoad
-        ? 'Copy / wallet buy detection on public utility (soft watch cap 30)'
-        : 'Copy / wallet buy detection (pollIntervalMs)',
+        ? `Copy / wallet buy detection on public utility (${softCapNote})`
+        : `Copy / wallet buy detection (${softCapNote})`,
     },
     {
       id: 'migration',
@@ -265,6 +277,23 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
   const walletPollStressed = shareLoad
     ? utilityStressed || lastPollRateLimited
     : primaryStressed || lastPollRateLimited || primary.public;
+
+  if (shareLoad && softWatch && !softWatch.softWatchPaused) {
+    if (utilityStressed || lastPollRateLimited) {
+      chokeHints.push(
+        `Utility soft-watch under pressure (cap ${softWatch.softWatchCap}, pool ${softWatch.watchPool}/${softWatch.enabledWallets}, last poll ${softWatch.lastPollElapsedMs ?? '—'}ms). Lower Soft watch cap in Config → MEV/RPC (try 8–12, or 0 to pause Favourites watch).`
+      );
+    } else if (softWatch.softWatchCap >= 25 && softWatch.enabledWallets > softWatch.softWatchCap) {
+      chokeHints.push(
+        `Soft watch cap ${softWatch.softWatchCap} still large vs ${softWatch.enabledWallets} enabled wallets — consider 8–12 to ease Utility.`
+      );
+    }
+  }
+  if (softWatch?.softWatchPaused) {
+    chokeHints.push(
+      'Favourites soft-watch is PAUSED (cap 0) — Utility wallet_poll idle; copy buys from Favourites will not fire until you raise the cap.'
+    );
+  }
 
   if (!primary.healthy) {
     chokeHints.push(
@@ -373,12 +402,39 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     );
   }
 
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('A/E', 'rpcDiagnostic.ts:getRpcLoadDiagnostic', 'rpc diagnostic snapshot', {
+      shareLoad,
+      softWatch,
+      utilityLat: utility.latencyMs,
+      utilityHealthy: utility.healthy,
+      utilityLabel: utility.label,
+      primaryLat: primary.latencyMs,
+      chokeHints: chokeHints.slice(0, 5),
+      lastPollRateLimited,
+      callTrafficTop: (rpc.callTraffic?.top || []).slice(0, 8).map((r: { feature: string; method: string; calls: number; role: string; avgMs: number }) => ({
+        feature: r.feature,
+        method: r.method,
+        calls: r.calls,
+        role: r.role,
+        avgMs: r.avgMs,
+      })),
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
+
   return {
     at: Date.now(),
     primary,
     secondary,
     utility,
     shareLoad: Boolean(config.rpc?.shareLoad),
+    softWatch,
     chokeHints,
     loaders,
     recommendations,

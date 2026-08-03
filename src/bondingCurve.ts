@@ -9,6 +9,7 @@ import {
   getConnection,
   hasRpcRoleContext,
   runWithRpcRole,
+  isRpcGateSkipError,
 } from './connection';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
@@ -424,11 +425,24 @@ export async function fetchBondingCurve(
       }
     };
     if (hasRpcRoleContext()) return body();
-    return runWithRpcRole(
-      getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
-      body,
-      'bonding_curve'
-    );
+    try {
+      return await runWithRpcRole(
+        getRpcRoleFor('market_scanner', Boolean(config.rpc?.shareLoad)),
+        body,
+        'bonding_curve'
+      );
+    } catch (err) {
+      if (isRpcGateSkipError(err)) {
+        const fail = emptyState(mint, 'rpc lane busy');
+        cache.set(mint, {
+          state: fail,
+          expiresAt: Date.now() + Math.min(cacheTtlMs(), 8_000),
+        });
+        inflight.delete(mint);
+        return fail;
+      }
+      throw err;
+    }
   })();
 
   inflight.set(mint, job);

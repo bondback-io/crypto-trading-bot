@@ -1352,6 +1352,20 @@ export function startMarketScanner(): void {
     `[marketScanner] Starting — poll every ${cfg.pollIntervalMs}ms, ` +
       `lookback ${cfg.lookbackHours}h, minScore ${cfg.minRankScore}`
   );
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('E', 'marketScanner.ts:start', 'market scanner scheduled', {
+      pollIntervalMs: cfg.pollIntervalMs,
+      firstPollDelayMs: 12_000,
+      enabled: cfg.enabled !== false,
+      uptimeMs: Math.round(process.uptime() * 1000),
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
   setTimeout(() => {
     void runScannerPollOnce();
   }, 12_000);

@@ -182,6 +182,20 @@ async function main(): Promise<void> {
       }
 
       startMonitor();
+      // #region agent log
+      try {
+        const { agentDebugLog } =
+          require('./agentDebugLog') as typeof import('./agentDebugLog');
+        agentDebugLog('E', 'index.ts:boot', 'post-listen: monitor started', {
+          uptimeMs: Math.round(process.uptime() * 1000),
+          shareLoad: Boolean(config.rpc?.shareLoad),
+          walletCount: config.smartWallets.length,
+          pollIntervalMs: config.pollIntervalMs,
+        });
+      } catch {
+        /* */
+      }
+      // #endregion
       try {
         const { syncZionKolScannerLifecycle } = await import('./zionKolScanner');
         syncZionKolScannerLifecycle();

@@ -776,11 +776,22 @@ export function createServer(): express.Application {
   });
 
   app.get('/api/rpc', (_req: Request, res: Response) => {
-    res.json({
-      ...getRpcStats(),
-      jito: getJitoStatus(),
-      mev: getMevStatus(),
-    });
+    try {
+      const { getSoftWatchRuntimeSnapshot } =
+        require('./monitor') as typeof import('./monitor');
+      res.json({
+        ...getRpcStats(),
+        jito: getJitoStatus(),
+        mev: getMevStatus(),
+        softWatch: getSoftWatchRuntimeSnapshot(),
+      });
+    } catch {
+      res.json({
+        ...getRpcStats(),
+        jito: getJitoStatus(),
+        mev: getMevStatus(),
+      });
+    }
   });
 
   app.post('/api/rpc/share-load', (req: Request, res: Response) => {
@@ -792,12 +803,96 @@ export function createServer(): express.Application {
         req.body?.enabled === 1 ||
         req.body?.shareLoad === true;
       const shareLoad = setRpcShareLoad(enabled);
+      let softWatch: unknown = null;
+      try {
+        const { getSoftWatchRuntimeSnapshot } =
+          require('./monitor') as typeof import('./monitor');
+        softWatch = getSoftWatchRuntimeSnapshot();
+      } catch {
+        /* */
+      }
       res.json({
         ...getRpcStats(),
         jito: getJitoStatus(),
         mev: getMevStatus(),
         ok: true,
         shareLoad,
+        softWatch,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/rpc/soft-watch-cap', (req: Request, res: Response) => {
+    try {
+      const { setRpcSoftWatchCap } =
+        require('./config') as typeof import('./config');
+      const { getSoftWatchRuntimeSnapshot } =
+        require('./monitor') as typeof import('./monitor');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      let next: number | null;
+      if (body.softWatchCap === null || body.softWatchCap === '') {
+        next = null;
+      } else if (body.softWatchCap != null && Number.isFinite(Number(body.softWatchCap))) {
+        next = Number(body.softWatchCap);
+      } else if (body.cap != null && Number.isFinite(Number(body.cap))) {
+        next = Number(body.cap);
+      } else {
+        next = null;
+      }
+      const saved = setRpcSoftWatchCap(next);
+      const softWatch = getSoftWatchRuntimeSnapshot();
+      // #region agent log
+      try {
+        const { agentDebugLog } =
+          require('./agentDebugLog') as typeof import('./agentDebugLog');
+        agentDebugLog('A', 'server.ts:soft-watch-cap', 'soft watch cap saved', {
+          saved,
+          softWatch,
+        });
+      } catch {
+        /* */
+      }
+      // #endregion
+      res.json({
+        ok: true,
+        softWatchCap: saved,
+        softWatch,
+        rpc: getRpcStats(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Debug session 8695ba — ring buffer (Render cannot POST to 127.0.0.1 ingest). */
+  app.get('/api/debug/agent-log', (req: Request, res: Response) => {
+    try {
+      const { getAgentDebugLogSnapshot } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      const limit = Number(req.query.limit) || 200;
+      const snap = getAgentDebugLogSnapshot(limit);
+      let softWatch: unknown = null;
+      try {
+        const { getSoftWatchRuntimeSnapshot } =
+          require('./monitor') as typeof import('./monitor');
+        softWatch = getSoftWatchRuntimeSnapshot();
+      } catch {
+        /* */
+      }
+      res.json({
+        ok: true,
+        ...snap,
+        softWatch,
+        uptimeMs: Math.round(process.uptime() * 1000),
+        callTraffic: getRpcStats().callTraffic,
       });
     } catch (err) {
       res.status(500).json({

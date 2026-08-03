@@ -1839,6 +1839,12 @@ export interface BotConfig {
      * public=utility (import/activity).
      */
     shareLoad: boolean;
+    /**
+     * Favourites soft-watch wallet cap (Utility lane when Share ON).
+     * 0 = pause Favourites RPC watch (utility relief).
+     * unset = default 12 (Share ON) / 20 (Share OFF). Env RPC_SOFT_WATCH_CAP wins if set.
+     */
+    softWatchCap: number | null;
     priorityFee: {
       minMicroLamports: number;
       maxMicroLamports: number;
@@ -2359,7 +2365,7 @@ export const config: BotConfig = {
 
   rpc: {
     endpoints: rpcEndpointsFromEnv(),
-    healthIntervalMs: 30_000,
+    healthIntervalMs: 45_000,
     failureThreshold: 3,
     failoverDownMs: Number(process.env.RPC_FAILOVER_DOWN_MS) || 30_000,
     shareLoad:
@@ -2373,6 +2379,12 @@ export const config: BotConfig = {
             process.env.HELIUS_API_KEY?.trim() &&
               process.env.ALCHEMY_API_KEY?.trim()
           ),
+    softWatchCap:
+      process.env.RPC_SOFT_WATCH_CAP != null &&
+      process.env.RPC_SOFT_WATCH_CAP !== '' &&
+      Number.isFinite(Number(process.env.RPC_SOFT_WATCH_CAP))
+        ? Math.max(0, Math.min(200, Math.round(Number(process.env.RPC_SOFT_WATCH_CAP))))
+        : null,
     priorityFee: {
       minMicroLamports: 1_000,
       maxMicroLamports: 500_000,
@@ -2530,7 +2542,7 @@ export const config: BotConfig = {
     useLiveData: true,
   },
 
-  pollIntervalMs: 8_000,
+  pollIntervalMs: 12_000,
   solMint: 'So11111111111111111111111111111111111111112',
   pumpFunProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
   pumpSwapProgramId: 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA',
@@ -2725,6 +2737,10 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     convergenceWindowMs: config.convergenceWindowMs,
     pollIntervalMs: config.pollIntervalMs,
     rpcShareLoad: Boolean(config.rpc.shareLoad),
+    rpcSoftWatchCap:
+      config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
+        ? config.rpc.softWatchCap
+        : null,
     learningMode: config.learningMode
       ? (cloneJson(config.learningMode) as PersistedBotSettings['learningMode'])
       : {
@@ -3296,6 +3312,16 @@ function applySettingsSnapshot(
   }
   if (typeof saved.rpcShareLoad === 'boolean') {
     config.rpc.shareLoad = saved.rpcShareLoad;
+  }
+  if (
+    saved.rpcSoftWatchCap === null ||
+    (typeof saved.rpcSoftWatchCap === 'number' &&
+      Number.isFinite(saved.rpcSoftWatchCap))
+  ) {
+    config.rpc.softWatchCap =
+      saved.rpcSoftWatchCap == null
+        ? null
+        : Math.max(0, Math.min(200, Math.round(Number(saved.rpcSoftWatchCap))));
   }
 
   if (saved.strategyToggles && typeof saved.strategyToggles === 'object') {
@@ -4725,6 +4751,32 @@ export function setRpcShareLoad(enabled: boolean): boolean {
   return config.rpc.shareLoad;
 }
 
+/**
+ * Favourites soft-watch wallet cap (Utility when Share ON).
+ * 0 = pause Favourites RPC watch. null clears to code default (12/20).
+ */
+export function setRpcSoftWatchCap(cap: number | null): number | null {
+  if (cap == null || !Number.isFinite(Number(cap))) {
+    config.rpc.softWatchCap = null;
+  } else {
+    config.rpc.softWatchCap = Math.max(
+      0,
+      Math.min(200, Math.round(Number(cap)))
+    );
+  }
+  persistUserSettings();
+  console.log(
+    `[rpc] Soft watch cap → ${
+      config.rpc.softWatchCap == null
+        ? 'default'
+        : config.rpc.softWatchCap === 0
+          ? '0 (Favourites watch PAUSED)'
+          : config.rpc.softWatchCap
+    }`
+  );
+  return config.rpc.softWatchCap;
+}
+
 export function updateTradeConfig(partial: Partial<TradeConfig>): void {
   Object.assign(config.trade, partial);
   // Keep base ↔ legacy tradeAmount aliases in sync
@@ -5439,6 +5491,10 @@ export function getConfigSnapshot() {
       healthIntervalMs: config.rpc.healthIntervalMs,
       failoverDownMs: config.rpc.failoverDownMs,
       shareLoad: Boolean(config.rpc.shareLoad),
+      softWatchCap:
+        config.rpc.softWatchCap != null && Number.isFinite(config.rpc.softWatchCap)
+          ? config.rpc.softWatchCap
+          : null,
     },
     mev: { ...config.mev },
     tokenMetrics: { ...config.tokenMetrics },

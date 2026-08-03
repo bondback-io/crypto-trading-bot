@@ -8176,10 +8176,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="mt-3"><button class="btn btn-primary" onclick="saveMevConfig()" title="Save MEV / tip settings">Save MEV</button></div>
           <div class="mt-4 section-title">RPC Status <span class="tip" tabindex="0" data-tip="Triple-lane Solana RPC when Share load is ON: Critical (Helius), Scanners (Alchemy), Utility (public). Failover piggybacks when a preferred lane is down or rate-limited."></span></div>
           <div class="toggle-row mb-2"><span title="Split workloads across Helius / Alchemy / public so one free key is not hammered">Share RPC load</span><label class="switch"><input type="checkbox" id="rpc-share-load" onchange="toggleRpcShareLoad(this.checked)" /><span class="slider"></span></label></div>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="Max Favourites wallets on Utility soft-watch. Lower = less Utility RPC. 0 = pause Favourites watch (copy buys from Favourites stop until raised). Default 12 when Share ON.">
+              <span>Soft watch cap</span>
+              <input type="number" id="rpc-soft-watch-cap" value="12" min="0" max="200" step="1" />
+            </label>
+            <button type="button" class="btn btn-secondary text-xs" onclick="saveRpcSoftWatchCap()" title="Save soft watch cap">Save soft watch</button>
+            <span class="mint text-xs" id="rpc-soft-watch-status">—</span>
+          </div>
           <div id="rpc-share-alloc" class="text-xs mb-3" style="line-height:1.45;color:#94a3b8;display:none">
             <div class="mb-1"><strong style="color:#34d399">Critical → Helius</strong> — trade entries, turbo profiles, migration sniper/parses</div>
             <div class="mb-1"><strong style="color:#38bdf8">Scanners → Alchemy</strong> — Market Scanner, AlphaScan, Zion KOL + Place Trade</div>
-            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch, import checks, activity refresh, light polls</div>
+            <div class="mb-1"><strong style="color:#fbbf24">Utility → Public</strong> — Favourites wallet watch (soft watch cap), import checks, activity refresh, light polls</div>
           </div>
           <div id="rpc-lane-docs" class="text-xs text-slate-400 mb-3" style="line-height:1.45">
             <div class="mb-2"><strong style="color:#e2e8f0">Free multi-RPC (priority)</strong> — Helius (<code>HELIUS_API_KEY</code>) → Alchemy (<code>ALCHEMY_API_KEY</code>) → <code>RPC_URL</code> → public Solana → <code>RPC_SECONDARY</code>. Health probes auto-failover; preferred lane recovers when healthy.</div>
@@ -8191,6 +8199,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
+          <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
           <div class="mt-3 flex flex-wrap gap-2 items-center">
             <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
@@ -19090,6 +19099,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         'Primary active: ' + (rpc.active || '—') +
         ' · Endpoints: ' + ((rpc.endpoints || []).length) +
         ' · Share load: ' + (rpc.shareLoad ? 'ON' : 'OFF') +
+        ' · Soft watch: ' + (function () {
+          const sw = rpc.softWatch || {};
+          if (sw.softWatchPaused) return 'PAUSED (0)';
+          if (sw.softWatchCap != null) return String(sw.softWatchCap) + ' pool ' + (sw.watchPool != null ? sw.watchPool : '—');
+          return '—';
+        })() +
         ' · Failover after: ' + (rpc.failoverDownMs != null
           ? (Number(rpc.failoverDownMs) < 60000
               ? Math.round(Number(rpc.failoverDownMs) / 1000) + 's'
@@ -19100,6 +19115,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (shareToggle) shareToggle.checked = rpc.shareLoad === true;
       const shareAlloc = document.getElementById('rpc-share-alloc');
       if (shareAlloc) shareAlloc.style.display = rpc.shareLoad ? 'block' : 'none';
+      const softCapEl = document.getElementById('rpc-soft-watch-cap');
+      if (softCapEl && rpc.softWatch && rpc.softWatch.softWatchCap != null) {
+        softCapEl.value = rpc.softWatch.softWatchCap;
+      }
+      const softSt = document.getElementById('rpc-soft-watch-status');
+      if (softSt && rpc.softWatch) {
+        softSt.textContent = rpc.softWatch.softWatchPaused
+          ? 'Paused — Favourites watch off'
+          : 'cap ' + rpc.softWatch.softWatchCap +
+            ' · pool ' + rpc.softWatch.watchPool +
+            '/' + rpc.softWatch.enabledWallets +
+            (rpc.softWatch.lastPollElapsedMs != null
+              ? ' · last poll ' + rpc.softWatch.lastPollElapsedMs + 'ms'
+              : '');
+      }
       const laneSt = document.getElementById('rpc-lane-status');
       if (laneSt) {
         const p = rpc.primary || {};
@@ -19116,6 +19146,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (u.failover ? ' (FAILOVER)' : '') +
           (u.healthy === false ? ' · preferred DOWN' : '') +
           (rpc.lanesShareEndpoint ? ' · SHARED ENDPOINT (set distinct RPC_SECONDARY)' : '');
+      }
+      const gateEl = document.getElementById('rpc-gate-status');
+      if (gateEl) {
+        const g = rpc.gate || {};
+        const L = g.lanes || {};
+        const fmt = (role) => {
+          const row = L[role] || {};
+          return role.charAt(0).toUpperCase() + role.slice(1) +
+            ' ' + (row.inFlight != null ? row.inFlight : '—') + '/' + (row.maxConcurrent != null ? row.maxConcurrent : '—') +
+            ' q' + (row.queued != null ? row.queued : 0) +
+            ' skip' + (row.skipped != null ? row.skipped : 0);
+        };
+        gateEl.textContent = g.lanes
+          ? ('Lane gate: ' + fmt('primary') + ' · ' + fmt('secondary') + ' · ' + fmt('utility') +
+            (g.stressed ? ' · STRESSED (background queued/skipped)' : ''))
+          : 'Lane gate: —';
+        gateEl.style.color = g.stressed ? '#fbbf24' : '#94a3b8';
       }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {
@@ -25161,6 +25208,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    async function saveRpcSoftWatchCap() {
+      const st = document.getElementById('rpc-soft-watch-status');
+      const inp = document.getElementById('rpc-soft-watch-cap');
+      const raw = inp ? Number(inp.value) : 12;
+      if (st) st.textContent = 'Saving…';
+      try {
+        const data = await fetchJSON('/api/rpc/soft-watch-cap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ softWatchCap: Number.isFinite(raw) ? raw : 12 }),
+        });
+        const sw = data.softWatch || {};
+        if (st) {
+          st.textContent = sw.softWatchPaused
+            ? 'Saved — Favourites watch PAUSED (cap 0)'
+            : 'Saved — cap ' + sw.softWatchCap + ' · pool ' + sw.watchPool;
+        }
+        if (typeof refresh === 'function') refresh();
+      } catch (err) {
+        if (st) st.textContent = err.message || String(err);
+      }
+    }
+    window.saveRpcSoftWatchCap = saveRpcSoftWatchCap;
+
     async function runRpcDiagnostic() {
       const st = document.getElementById('rpc-diag-status');
       const panel = document.getElementById('rpc-diag-panel');
@@ -25176,6 +25247,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const loaders = Array.isArray(data.loaders) ? data.loaders : [];
         const p = data.primary || {};
         const s = data.secondary || {};
+        const u = data.utility || {};
+        const sw = data.softWatch || {};
         const lines = [];
         lines.push(
           '<div style="color:#e2e8f0;margin-bottom:0.35rem"><strong>Primary</strong> ' +
@@ -25195,6 +25268,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (s.latencyMs != null ? ' · ' + s.latencyMs + 'ms' : '') +
             (s.successRate != null ? ' · ' + Number(s.successRate).toFixed(0) + '%' : '') +
             (s.public ? ' · public' : '') +
+            '</div>'
+        );
+        lines.push(
+          '<div style="color:#e2e8f0;margin-bottom:0.35rem"><strong>Utility</strong> ' +
+            escHtml(u.label || '—') +
+            ' · ' +
+            (u.healthy ? 'OK' : 'DOWN') +
+            (u.latencyMs != null ? ' · ' + u.latencyMs + 'ms' : '') +
+            (u.successRate != null ? ' · ' + Number(u.successRate).toFixed(0) + '%' : '') +
+            (u.public ? ' · public' : '') +
+            (sw.softWatchCap != null
+              ? ' · soft watch ' +
+                (sw.softWatchPaused ? 'PAUSED' : sw.softWatchCap) +
+                ' pool ' +
+                (sw.watchPool != null ? sw.watchPool : '—')
+              : '') +
             '</div>'
         );
         lines.push('<div style="margin:0.4rem 0 0.2rem;color:#cbd5e1">Choke hints</div>');

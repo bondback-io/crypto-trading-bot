@@ -6,7 +6,7 @@
 
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
-import { runWithRpcRole } from './connection';
+import { runWithRpcRole, isRpcGateSkipError } from './connection';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchBondingCurve,
@@ -256,36 +256,40 @@ async function enrichCurves(
   );
   const slice = pumpish.slice(0, CURVE_ENRICH_CAP);
   const role = getRpcRoleFor('alpha_scan', Boolean(config.rpc?.shareLoad));
-  await runWithRpcRole(role, async () => {
-    await Promise.all(
-      slice.map(async (t) => {
-        const mint = String(t.id || '').trim();
-        if (!mint) return;
-        try {
-          const cached = getCachedBondingCurve(mint);
-          const state = cached || (await fetchBondingCurve(mint));
-          if (!state || state.source === 'none') {
-            // Missing curve is not proof of graduation — do not synthesize 100%/complete.
+  try {
+    await runWithRpcRole(role, async () => {
+      await Promise.all(
+        slice.map(async (t) => {
+          const mint = String(t.id || '').trim();
+          if (!mint) return;
+          try {
+            const cached = getCachedBondingCurve(mint);
+            const state = cached || (await fetchBondingCurve(mint));
+            if (!state || state.source === 'none') {
+              // Missing curve is not proof of graduation — do not synthesize 100%/complete.
+              out.set(mint, {
+                progressPct: null,
+                complete: false,
+                nearMigration: false,
+                missing: true,
+              });
+              return;
+            }
             out.set(mint, {
-              progressPct: null,
-              complete: false,
-              nearMigration: false,
-              missing: true,
+              progressPct: state.progressPct,
+              complete: state.complete === true,
+              nearMigration: state.nearMigration === true,
+              missing: false,
             });
-            return;
+          } catch {
+            /* leave unset — stay New */
           }
-          out.set(mint, {
-            progressPct: state.progressPct,
-            complete: state.complete === true,
-            nearMigration: state.nearMigration === true,
-            missing: false,
-          });
-        } catch {
-          /* leave unset — stay New */
-        }
-      })
-    );
-  }, 'alpha_scan');
+        })
+      );
+    }, 'alpha_scan');
+  } catch (err) {
+    if (!isRpcGateSkipError(err)) throw err;
+  }
   return out;
 }
 

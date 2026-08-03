@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.129',
+    title: 'RPC Load Stabilisation',
+    sections: ['execution', 'copy', 'knobs'],
+    items: [
+      'Per-lane concurrency + rate limits (Critical / Scanners / Utility) with queue/skip so background polls cannot pile up a few minutes after boot.',
+      'Slower Favourites soft-watch + activity refresh; health probes less aggressive; dead endpoints (e.g. QuickNode) get a hard-fail cooldown; withRpc retries capped with backoff.',
+      'RPC Status shows Lane gate in-flight/queue/skip so overload vs provider issues are visible; Soft watch cap 0 still pauses Favourites watch.',
+    ],
+  },
+  {
     version: '1.2.128',
     title: 'Peak Profit Protection',
     sections: ['microbots', 'learning', 'execution'],

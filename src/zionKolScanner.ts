@@ -6,7 +6,7 @@
 
 import { PublicKey } from '@solana/web3.js';
 import { config } from './config';
-import { getConnection, lanesShareEndpoint, runWithRpcRole } from './connection';
+import { getConnection, lanesShareEndpoint, runWithRpcRole, isRpcGateSkipError } from './connection';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
@@ -387,9 +387,10 @@ async function pollUniverseBatch(): Promise<number> {
   rotationIndex = (start + batch.length) % Math.max(1, universe.length);
 
   const role = getRpcRoleFor('zion', Boolean(config.rpc?.shareLoad));
-  return runWithRpcRole(
-    role,
-    async () => {
+  try {
+    return await runWithRpcRole(
+      role,
+      async () => {
   const conn = getConnection();
   let buys = 0;
 
@@ -434,6 +435,10 @@ async function pollUniverseBatch(): Promise<number> {
     },
     'zion'
   );
+  } catch (err) {
+    if (isRpcGateSkipError(err)) return 0;
+    throw err;
+  }
 }
 
 function pruneAggs(): void {
@@ -774,6 +779,20 @@ export function startZionKolScanner(): void {
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')
   );
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('E', 'zionKolScanner.ts:start', 'zion scanner scheduled', {
+      pollIntervalMs: interval,
+      firstPollDelayMs: 18_000,
+      shareLane: share,
+      uptimeMs: Math.round(process.uptime() * 1000),
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
   setTimeout(() => {
     void runZionScannerPollOnce();
   }, 18_000);
