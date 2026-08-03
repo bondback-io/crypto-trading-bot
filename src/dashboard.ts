@@ -4030,14 +4030,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     */
     .tip::after {
       content: attr(data-tip);
-      position: absolute;
-      left: 50%;
-      bottom: calc(100% + 8px);
-      transform: translateX(-50%);
+      /*
+        Fixed positioning lets the bubble escape scroll/overflow containers.
+        --tip-x/--tip-y are measured from the trigger, while the clamp keeps
+        the widest permitted bubble inside the 12px viewport gutter.
+      */
+      position: fixed;
+      left: clamp(
+        calc(min(8.75rem, 50vw - 0.75rem) + 0.75rem),
+        var(--tip-x, 50vw),
+        calc(100vw - min(8.75rem, 50vw - 0.75rem) - 0.75rem)
+      );
+      top: var(--tip-y, 50vh);
+      bottom: auto;
+      transform: translate(-50%, -100%);
       box-sizing: border-box;
       width: max-content;
       min-width: 12.5rem; /* 200px */
       max-width: min(17.5rem, calc(100vw - 1.5rem)); /* 280px */
+      max-height: calc(100vh - 1.5rem);
       padding: 8px 10px;
       border-radius: 8px;
       background: #0f172a;
@@ -4049,6 +4060,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       text-transform: none;
       letter-spacing: 0;
       white-space: normal;
+      overflow-y: auto;
       overflow-wrap: break-word;
       word-wrap: break-word;
       text-align: left;
@@ -4071,10 +4083,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       opacity: 1;
       visibility: visible;
     }
-    /* Flip tip downward when near top of viewport (approx via tip-below) */
-    .tip.tip-below::after {
-      bottom: auto;
-      top: calc(100% + 8px);
+    /* Flip tip downward when near the top of the viewport. */
+    .tip.tip-below::after,
+    .tip.tip-auto-below::after {
+      transform: translateX(-50%);
     }
     /* Tip hosts: do not clip absolute ::after bubbles */
     .card,
@@ -5171,6 +5183,105 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-panel .zion-accent {
       color: #f2ae66;
     }
+    :root {
+      --zion-peach: #f2ae66;
+      --zion-peach-bright: #ffd19c;
+      --zion-peach-soft: rgba(242, 174, 102, 0.14);
+      --zion-peach-border: rgba(242, 174, 102, 0.38);
+    }
+    .zion-chat-card {
+      border-color: var(--zion-peach-border);
+      background: linear-gradient(145deg, rgba(80, 48, 18, 0.28), #0f172a 34%, #111827 100%);
+      box-shadow: inset 0 1px 0 rgba(242, 174, 102, 0.12), 0 12px 28px rgba(0, 0, 0, 0.16);
+    }
+    .zion-chat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-bottom: 0.8rem;
+      margin-bottom: 0.8rem;
+      border-bottom: 1px solid rgba(242, 174, 102, 0.18);
+    }
+    .zion-chat-identity { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+    .zion-chat-avatar {
+      display: grid;
+      place-items: center;
+      width: 2.4rem;
+      height: 2.4rem;
+      flex: 0 0 auto;
+      border-radius: 0.8rem;
+      color: #251607;
+      font-size: 1.05rem;
+      font-weight: 800;
+      background: linear-gradient(145deg, var(--zion-peach-bright), var(--zion-peach));
+      box-shadow: 0 5px 16px rgba(242, 174, 102, 0.22);
+    }
+    .zion-chat-title { color: #f8fafc; font-size: 0.92rem; font-weight: 750; line-height: 1.2; }
+    .zion-chat-presence { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.14rem; color: #94a3b8; font-size: 0.7rem; }
+    .zion-chat-presence::before { content: ''; width: 0.43rem; height: 0.43rem; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12); }
+    .zion-chat-thread {
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      min-height: 12rem;
+      max-height: 23rem;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 0.2rem 0.15rem 0.25rem;
+    }
+    .zion-chat-empty { margin: auto 0; color: #94a3b8; font-size: 0.82rem; text-align: center; }
+    .zion-chat-message { display: flex; gap: 0.45rem; max-width: 88%; }
+    .zion-chat-message.is-user { align-self: flex-end; flex-direction: row-reverse; }
+    .zion-chat-message-avatar {
+      display: grid; place-items: center; width: 1.55rem; height: 1.55rem; flex: 0 0 auto;
+      border-radius: 0.55rem; color: var(--zion-peach-bright); background: rgba(242, 174, 102, 0.12);
+      border: 1px solid rgba(242, 174, 102, 0.2); font-size: 0.65rem; font-weight: 800;
+    }
+    .zion-chat-message.is-user .zion-chat-message-avatar { color: #bae6fd; background: rgba(14, 165, 233, 0.12); border-color: rgba(56, 189, 248, 0.25); }
+    .zion-chat-bubble {
+      min-width: 0; padding: 0.58rem 0.7rem; border: 1px solid #26354a; border-radius: 0.75rem 0.75rem 0.75rem 0.22rem;
+      color: #dbeafe; background: #0b1220; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .zion-chat-message.is-user .zion-chat-bubble { border-color: rgba(56, 189, 248, 0.34); border-radius: 0.75rem 0.75rem 0.22rem 0.75rem; color: #e0f2fe; background: rgba(14, 116, 144, 0.3); }
+    .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
+    .zion-chat-composer input { min-width: 0; flex: 1; border: 0; outline: 0; color: #e2e8f0; background: transparent; padding: 0.48rem 0.4rem; }
+    .zion-chat-composer input::placeholder { color: #64748b; }
+    .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
+    .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
+    .zion-chat-refresh { flex: 0 0 auto; min-height: 2.2rem; padding: 0.35rem 0.55rem; color: #94a3b8; background: transparent; border: 0; border-radius: 0.5rem; }
+    .zion-chat-refresh:hover, .zion-chat-refresh:focus-visible { color: #f8fafc; background: #1e293b; outline: none; }
+    .zion-change-requests { margin-top: 0.8rem; }
+    .zion-change-request { border: 1px solid rgba(242, 174, 102, 0.26); border-radius: 0.7rem; padding: 0.65rem; margin-bottom: 0.5rem; background: rgba(11, 18, 32, 0.78); }
+    .zion-agent-widget { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 1100; }
+    .zion-agent-launcher { position: relative; display: inline-flex; align-items: center; gap: 0.45rem; min-height: 3.15rem; padding: 0.55rem 0.8rem; border: 1px solid rgba(255, 209, 156, 0.75); border-radius: 999px; color: #2b1807; background: linear-gradient(145deg, var(--zion-peach-bright), var(--zion-peach)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(242, 174, 102, 0.1); font-weight: 800; cursor: pointer; }
+    .zion-agent-launcher:hover, .zion-agent-launcher:focus-visible { transform: translateY(-1px); outline: none; }
+    .zion-agent-launcher-icon { display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 0.55rem; background: rgba(43, 24, 7, 0.14); }
+    .zion-agent-unread { position: absolute; top: -0.35rem; right: -0.22rem; display: none; min-width: 1.25rem; height: 1.25rem; padding: 0 0.25rem; place-items: center; border: 2px solid #0f172a; border-radius: 999px; color: #fff; background: #ef4444; font-size: 0.65rem; font-weight: 800; }
+    .zion-agent-widget.has-unread .zion-agent-unread { display: grid; animation: zion-widget-pulse 1.8s ease-in-out infinite; }
+    .zion-agent-widget.has-unread .zion-agent-launcher { animation: zion-widget-nudge 3s ease-in-out infinite; }
+    .zion-agent-nudge { position: absolute; right: 0; bottom: calc(100% + 0.65rem); width: max-content; max-width: min(18rem, calc(100vw - 32px)); padding: 0.48rem 0.7rem; border: 1px solid var(--zion-peach-border); border-radius: 0.65rem; color: #fde7cf; background: #172033; box-shadow: 0 8px 22px rgba(0,0,0,.32); font-size: 0.75rem; opacity: 0; transform: translateY(5px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+    .zion-agent-widget.has-unread .zion-agent-nudge { opacity: 1; transform: none; }
+    .zion-agent-panel { position: absolute; right: 0; bottom: calc(100% + 0.8rem); display: flex; flex-direction: column; width: min(25rem, calc(100vw - 32px)); max-height: min(40rem, calc(100dvh - 7rem)); padding: 0.85rem; border: 1px solid var(--zion-peach-border); border-radius: 1rem; background: linear-gradient(155deg, #172033, #0b1220); box-shadow: 0 20px 60px rgba(0,0,0,.5); opacity: 0; transform: translateY(10px) scale(.97); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+    .zion-agent-widget.is-open .zion-agent-panel { opacity: 1; transform: none; pointer-events: auto; }
+    .zion-agent-widget.is-open .zion-agent-launcher-label { display: none; }
+    .zion-agent-widget.is-open .zion-agent-launcher { min-width: 3.15rem; justify-content: center; }
+    .zion-agent-panel .zion-chat-header { margin-bottom: 0.55rem; padding-bottom: 0.55rem; }
+    .zion-agent-panel .zion-chat-thread { min-height: 10rem; max-height: min(22rem, calc(100dvh - 17rem)); }
+    .zion-agent-panel .zion-change-requests { max-height: 9rem; overflow-y: auto; }
+    @keyframes zion-widget-pulse { 50% { transform: scale(1.12); } }
+    @keyframes zion-widget-nudge { 0%, 84%, 100% { transform: none; } 88% { transform: translateX(-4px); } 92% { transform: translateX(3px); } }
+    @media (max-width: 640px) {
+      .zion-agent-widget { right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px)); left: max(8px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; align-items: flex-end; }
+      .zion-agent-panel { position: fixed; right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(72px, calc(env(safe-area-inset-bottom, 0px) + 64px)); left: max(8px, env(safe-area-inset-left, 0px)); width: auto; max-height: calc(100dvh - 88px - env(safe-area-inset-top, 0px)); border-radius: 1rem; }
+      .zion-chat-thread { max-height: 20rem; }
+      .zion-chat-message { max-width: 94%; }
+      .zion-chat-composer { gap: 0.25rem; }
+      .zion-chat-refresh { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .zion-agent-widget *, .zion-agent-widget { animation: none !important; transition: none !important; }
+    }
     .overflow-x-auto {
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-x: contain;
@@ -5499,8 +5610,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .chart-wrap { height: 180px; }
       /* Keep tip readable on narrow screens; % here was relative to 15px .tip */
       .tip::after {
-        left: 50%;
-        transform: translateX(-50%);
         width: min(15rem, calc(100vw - 1.5rem)); /* 240px */
         min-width: min(11.25rem, calc(100vw - 1.5rem)); /* 180px */
         max-width: min(17.5rem, calc(100vw - 1.5rem));
@@ -7126,6 +7235,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     <!-- ========== TAB: Zion ========== -->
     <section data-tab-panel="zion" class="zion-panel hidden space-y-4">
+      <div class="card zion-chat-card" id="zion-agent-card">
+        <div class="zion-chat-header">
+          <div class="zion-chat-identity">
+            <div class="zion-chat-avatar" aria-hidden="true">Z</div>
+            <div>
+              <div class="zion-chat-title">Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Change Requests for your Approve/Reject."></span></div>
+              <div class="zion-chat-presence">Online · Bot analyst</div>
+            </div>
+          </div>
+          <span id="zion-agent-mode-badge" class="badge status-badge" style="font-size:11px">Zion · Read-Only</span>
+        </div>
+        <div class="toggle-row">
+          <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Change Requests for global gates / system tips. Nothing applies without Approve."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-semi" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
+        <div class="zion-chat-composer">
+          <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
+          <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
+          <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+        </div>
+        <div id="zion-agent-crs" class="zion-change-requests text-sm"></div>
+      </div>
+
       <div class="card">
         <div class="section-title">KOL Token Scanner Feed</div>
         <div id="zion-scanner-feed" class="max-h-80 overflow-y-auto text-sm">—</div>
@@ -7178,26 +7311,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-status" class="mint text-xs mb-2 mt-2">—</div>
       </div>
 
-      <div class="card" id="zion-agent-card">
-        <div class="section-title" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;justify-content:space-between">
-          <span>Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Change Requests for your Approve/Reject."></span></span>
-          <span id="zion-agent-mode-badge" class="badge status-badge" style="font-size:11px">Zion · Read-Only</span>
-        </div>
-        <div class="toggle-row">
-          <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Change Requests for global gates / system tips. Nothing applies without Approve."></span></span>
-          <label class="switch"><input type="checkbox" id="zion-agent-semi" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
-        </div>
-        <div id="zion-agent-chat" class="max-h-72 overflow-y-auto text-sm mb-2" style="background:#0b1220;border:1px solid #1e293b;border-radius:0.5rem;padding:0.65rem;min-height:8rem">—</div>
-        <div class="flex flex-wrap gap-2 items-end">
-          <label class="ctl" style="flex:1;min-width:12rem"><span>Ask Zion</span>
-            <input type="text" id="zion-agent-input" placeholder="How does Learning Mode interact with MARL?" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
-          </label>
-          <button type="button" class="btn btn-primary" onclick="sendZionAgentChat()">Send</button>
-          <button type="button" class="btn btn-secondary" onclick="loadZionAgent()">Refresh</button>
-        </div>
-        <div id="zion-agent-crs" class="mt-3 space-y-2 text-sm"></div>
-      </div>
-
       <div class="card">
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -7238,6 +7351,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </section>
 
     <div id="zion-offer-stack" class="zion-offer-stack" aria-live="polite" data-count="0"></div>
+    <aside id="zion-agent-widget" class="zion-agent-widget" aria-label="Zion Agent chat">
+      <div id="zion-agent-widget-panel" class="zion-agent-panel" aria-hidden="true">
+        <div class="zion-chat-header">
+          <div class="zion-chat-identity">
+            <div class="zion-chat-avatar" aria-hidden="true">Z</div>
+            <div><div class="zion-chat-title">Zion</div><div class="zion-chat-presence">Online · Bot analyst</div></div>
+          </div>
+          <button type="button" class="zion-chat-refresh" onclick="toggleZionAgentWidget(false)" aria-label="Close Zion chat" title="Close">✕</button>
+        </div>
+        <div id="zion-agent-widget-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
+        <div class="zion-chat-composer">
+          <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
+          <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
+          <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+        </div>
+        <div id="zion-agent-widget-crs" class="zion-change-requests text-sm"></div>
+      </div>
+      <div id="zion-agent-nudge" class="zion-agent-nudge" role="status">Zion has an update for you</div>
+      <button type="button" id="zion-agent-launcher" class="zion-agent-launcher" onclick="toggleZionAgentWidget()" aria-expanded="false" aria-controls="zion-agent-widget-panel">
+        <span class="zion-agent-launcher-icon" aria-hidden="true">Z</span><span class="zion-agent-launcher-label">Zion</span><span id="zion-agent-unread" class="zion-agent-unread">0</span>
+      </button>
+    </aside>
 
     <!-- ========== TAB: Micro Bots ========== -->
     <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
@@ -7245,30 +7380,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
       <div class="card" id="marl-card">
-        <div class="section-title" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;justify-content:space-between">
-          <span>Multi-Agent RL <span class="tip" tabindex="0" data-tip="Soft coordination only: reorders lane priority, trims size confidence, limits low-MC pile-ins. Never overwrites micro-bot TP/SL, timers, or self-learning. Disable anytime."></span></span>
-          <span id="marl-status-badge" class="badge status-badge" style="font-size:11px">MARL OFF</span>
-        </div>
-        <div class="toggle-row">
-          <span>Enable MARL</span>
-          <label class="switch"><input type="checkbox" id="marl-enabled" onchange="saveMarlConfig()" /><span class="slider"></span></label>
-        </div>
-        <div class="mb-2">
-          <div class="text-xs text-slate-400 mb-1">Influence Strength <span id="marl-strength-label" class="text-slate-200">Medium</span></div>
-          <div class="closed-filter" role="group" aria-label="MARL influence strength">
-            <button type="button" class="closed-filter-btn" data-marl-strength="low" onclick="setMarlStrength('low')">Low</button>
-            <button type="button" class="closed-filter-btn is-active" data-marl-strength="medium" onclick="setMarlStrength('medium')">Medium</button>
-            <button type="button" class="closed-filter-btn" data-marl-strength="high" onclick="setMarlStrength('high')">High</button>
+        <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Multi-Agent RL <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Soft coordination only: reorders lane priority, trims size confidence, limits low-MC pile-ins. Never overwrites micro-bot TP/SL, timers, or self-learning. Disable anytime."></span></span>
+              <span id="marl-status-badge" class="badge status-badge" style="font-size:11px">MARL OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Multi-Agent RL" onclick="event.stopPropagation()">
+              <input type="checkbox" id="marl-enabled" onchange="saveMarlConfig()" onclick="event.stopPropagation()" />
+              <span>Enable MARL</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Influence Strength <span id="marl-strength-label" class="text-slate-200">Medium</span></div>
+              <div class="closed-filter" role="group" aria-label="MARL influence strength">
+                <button type="button" class="closed-filter-btn" data-marl-strength="low" onclick="setMarlStrength('low')">Low</button>
+                <button type="button" class="closed-filter-btn is-active" data-marl-strength="medium" onclick="setMarlStrength('medium')">Medium</button>
+                <button type="button" class="closed-filter-btn" data-marl-strength="high" onclick="setMarlStrength('high')">High</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Low-MC threshold ($)</span><input type="number" id="marl-low-mc" value="175000" min="10000" step="5000" onchange="saveMarlConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
+            </div>
+            <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
+            <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
           </div>
-        </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
-          <label class="ctl ctl-sm"><span>Low-MC threshold ($)</span><input type="number" id="marl-low-mc" value="175000" min="10000" step="5000" onchange="saveMarlConfig()" /></label>
-          <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
-          <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
-        </div>
-        <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
-        <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
-        <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
+        </details>
       </div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
@@ -8956,6 +9097,44 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!wrap || wrap.contains(e.target)) return;
       closeNotifPanel();
     });
+    /*
+      Keep pseudo-element help bubbles out of parent overflow contexts and
+      inside the viewport. A 280px bubble can be safely centered within the
+      clamped range below; on narrower screens its CSS max-width shrinks to
+      retain the same 12px gutter.
+    */
+    function positionTip(tip) {
+      const rect = tip.getBoundingClientRect();
+      const estimatedHeight = 192;
+      const shouldOpenBelow =
+        tip.classList.contains('tip-below') ||
+        (rect.top < estimatedHeight + 8 && rect.bottom + estimatedHeight + 8 <= window.innerHeight);
+      tip.classList.toggle('tip-auto-below', shouldOpenBelow && !tip.classList.contains('tip-below'));
+      tip.style.setProperty('--tip-x', (rect.left + rect.width / 2) + 'px');
+      tip.style.setProperty('--tip-y', (shouldOpenBelow ? rect.bottom + 8 : rect.top - 8) + 'px');
+    }
+    function positionActiveTips() {
+      document.querySelectorAll('.tip:hover, .tip:focus').forEach(positionTip);
+    }
+    function tipFromEventTarget(target) {
+      return target instanceof Element ? target.closest('.tip') : null;
+    }
+    document.addEventListener('pointerover', (event) => {
+      const tip = tipFromEventTarget(event.target);
+      if (tip) positionTip(tip);
+    }, true);
+    document.addEventListener('focusin', (event) => {
+      const tip = tipFromEventTarget(event.target);
+      if (tip) positionTip(tip);
+    });
+    document.addEventListener('pointerdown', (event) => {
+      const tip = tipFromEventTarget(event.target);
+      if (!tip) return;
+      positionTip(tip);
+      if (event.pointerType === 'touch') tip.focus({ preventScroll: true });
+    }, true);
+    window.addEventListener('resize', positionActiveTips);
+    window.addEventListener('scroll', positionActiveTips, true);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeSettingsMenu();
@@ -23404,68 +23583,94 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.saveMarlConfig = saveMarlConfig;
     window.setMarlStrength = setMarlStrength;
 
+    const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
+    function renderZionAgentMessages(messages) {
+      if (!messages.length) {
+        return '<div class="zion-chat-empty">Ask about profiles, Learning Mode, MARL, skips, or performance.</div>';
+      }
+      return messages
+        .map((m) => {
+          const isUser = m.role === 'user';
+          return (
+            '<div class="zion-chat-message' + (isUser ? ' is-user' : '') + '">' +
+              '<div class="zion-chat-message-avatar">' + (isUser ? 'You' : 'Z') + '</div>' +
+              '<div class="zion-chat-bubble">' + escHtml(m.text || '') + '</div>' +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+    function renderZionChangeRequests(list) {
+      if (!list.length) return '';
+      return '<div class="text-xs font-semibold text-slate-300 mb-1">Change Requests</div>' +
+        list.map((c) => (
+          '<div class="zion-change-request">' +
+            '<div class="font-semibold text-slate-200">' + escHtml(c.title) + '</div>' +
+            '<div class="mint text-xs mt-1"><strong>What</strong> ' + escHtml(c.what) + '</div>' +
+            '<div class="mint text-xs"><strong>Why</strong> ' + escHtml(c.why || '') + '</div>' +
+            '<div class="mint text-xs"><strong>Benefit</strong> ' + escHtml(c.expectedBenefit || '') + '</div>' +
+            '<div class="mt-2 flex gap-2">' +
+              '<button type="button" class="btn btn-primary text-xs" onclick="decideZionChangeRequest(\\'' + escHtml(c.id) + '\\', true)">Approve</button>' +
+              '<button type="button" class="btn btn-secondary text-xs" onclick="decideZionChangeRequest(\\'' + escHtml(c.id) + '\\', false)">Reject</button>' +
+            '</div>' +
+          '</div>'
+        )).join('');
+    }
+    function renderZionAgentWidgetState() {
+      const widget = document.getElementById('zion-agent-widget');
+      const panel = document.getElementById('zion-agent-widget-panel');
+      const launcher = document.getElementById('zion-agent-launcher');
+      const unread = document.getElementById('zion-agent-unread');
+      if (!widget || !panel || !launcher || !unread) return;
+      widget.classList.toggle('is-open', zionAgentWidgetState.open);
+      widget.classList.toggle('has-unread', zionAgentWidgetState.unread > 0);
+      panel.setAttribute('aria-hidden', zionAgentWidgetState.open ? 'false' : 'true');
+      launcher.setAttribute('aria-expanded', zionAgentWidgetState.open ? 'true' : 'false');
+      unread.textContent = String(Math.min(99, zionAgentWidgetState.unread));
+    }
+    function toggleZionAgentWidget(forceOpen) {
+      zionAgentWidgetState.open = typeof forceOpen === 'boolean' ? forceOpen : !zionAgentWidgetState.open;
+      if (zionAgentWidgetState.open) {
+        zionAgentWidgetState.unread = 0;
+        setTimeout(function () {
+          const input = document.getElementById('zion-agent-widget-input');
+          if (input) input.focus();
+        }, 180);
+      }
+      renderZionAgentWidgetState();
+    }
     function renderZionAgentUi(data) {
       const st = data.status || {};
       const badge = document.getElementById('zion-agent-mode-badge');
       if (badge) badge.textContent = st.label || 'Zion · Read-Only';
       const semi = document.getElementById('zion-agent-semi');
       if (semi) semi.checked = !!st.semiAutonomous;
-      const chat = document.getElementById('zion-agent-chat');
-      if (chat) {
-        const msgs = data.messages || [];
-        chat.innerHTML = msgs.length
-          ? msgs
-              .map((m) => {
-                const who = m.role === 'user' ? 'You' : 'Zion';
-                const col = m.role === 'user' ? '#38bdf8' : '#a7f3d0';
-                return (
-                  '<div class="mb-2"><strong style="color:' +
-                  col +
-                  '">' +
-                  who +
-                  '</strong><div style="white-space:pre-wrap;color:#cbd5e1">' +
-                  escHtml(m.text || '') +
-                  '</div></div>'
-                );
-              })
-              .join('')
-          : '<span class="mint">Ask about profiles, Learning Mode, MARL, skips, or performance.</span>';
+      const msgs = Array.isArray(data.messages) ? data.messages : [];
+      const messageHtml = renderZionAgentMessages(msgs);
+      ['zion-agent-chat', 'zion-agent-widget-chat'].forEach((id) => {
+        const chat = document.getElementById(id);
+        if (!chat) return;
+        chat.innerHTML = messageHtml;
         chat.scrollTop = chat.scrollHeight;
+      });
+      const list = (data.changeRequests || []).filter((c) => c.status === 'pending');
+      const changeHtml = renderZionChangeRequests(list);
+      ['zion-agent-crs', 'zion-agent-widget-crs'].forEach((id) => {
+        const crs = document.getElementById(id);
+        if (crs) crs.innerHTML = changeHtml;
+      });
+      const assistantCount = msgs.filter((m) => m.role !== 'user').length;
+      if (zionAgentWidgetState.initialized && !zionAgentWidgetState.open) {
+        const additions = Math.max(0, assistantCount - zionAgentWidgetState.assistantCount) +
+          Math.max(0, list.length - zionAgentWidgetState.pendingCount);
+        if (additions) zionAgentWidgetState.unread = Math.min(99, zionAgentWidgetState.unread + additions);
       }
-      const crs = document.getElementById('zion-agent-crs');
-      if (crs) {
-        const list = (data.changeRequests || []).filter((c) => c.status === 'pending');
-        crs.innerHTML = list.length
-          ? '<div class="text-xs font-semibold text-slate-300 mb-1">Change Requests</div>' +
-            list
-              .map((c) => {
-                return (
-                  '<div class="rounded-md border border-slate-700 p-2 mb-2" style="background:#0b1220">' +
-                  '<div class="font-semibold text-slate-200">' +
-                  escHtml(c.title) +
-                  '</div>' +
-                  '<div class="mint text-xs mt-1"><strong>What</strong> ' +
-                  escHtml(c.what) +
-                  '</div>' +
-                  '<div class="mint text-xs"><strong>Why</strong> ' +
-                  escHtml(c.why || '') +
-                  '</div>' +
-                  '<div class="mint text-xs"><strong>Benefit</strong> ' +
-                  escHtml(c.expectedBenefit || '') +
-                  '</div>' +
-                  '<div class="mt-2 flex gap-2">' +
-                  '<button type="button" class="btn btn-primary text-xs" onclick="decideZionChangeRequest(\\'' +
-                  escHtml(c.id) +
-                  '\\', true)">Approve</button>' +
-                  '<button type="button" class="btn btn-secondary text-xs" onclick="decideZionChangeRequest(\\'' +
-                  escHtml(c.id) +
-                  '\\', false)">Reject</button>' +
-                  '</div></div>'
-                );
-              })
-              .join('')
-          : '';
-      }
+      zionAgentWidgetState.initialized = true;
+      zionAgentWidgetState.assistantCount = assistantCount;
+      zionAgentWidgetState.pendingCount = list.length;
+      const nudge = document.getElementById('zion-agent-nudge');
+      if (nudge) nudge.textContent = list.length ? list.length + ' Change Request' + (list.length === 1 ? '' : 's') + ' needs your review' : 'Zion has an update for you';
+      renderZionAgentWidgetState();
     }
     async function loadZionAgent() {
       try {
@@ -23484,8 +23689,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       await loadZionAgent();
     }
-    async function sendZionAgentChat() {
-      const inp = document.getElementById('zion-agent-input');
+    async function sendZionAgentChat(source) {
+      const inp = document.getElementById(source === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input');
       const msg = inp ? String(inp.value || '').trim() : '';
       if (!msg) return;
       if (inp) inp.value = '';
@@ -23518,6 +23723,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.saveZionAgentConfig = saveZionAgentConfig;
     window.sendZionAgentChat = sendZionAgentChat;
     window.decideZionChangeRequest = decideZionChangeRequest;
+    window.toggleZionAgentWidget = toggleZionAgentWidget;
 
     try {
       ensureZionStack();
@@ -23525,6 +23731,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         layoutZionOfferStack();
       });
     } catch (_) {}
+    setTimeout(function () {
+      if (typeof loadZionAgent === 'function') loadZionAgent();
+    }, 300);
 
 
     async function saveTechnicalLevelsConfig(silent) {

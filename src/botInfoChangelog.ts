@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.108',
+    title: 'Zion chat, tooltip clamp, MARL collapsed',
+    sections: ['zion', 'microbots', 'overview'],
+    items: [
+      'Zion’s polished, role-based chat is now the first surface in the Zion tab, with the existing Semi-Autonomous controls and Change Request approvals intact.',
+      'A compact peach Zion launcher now provides the same chat across the dashboard, with mobile sheet layout, unread nudges, and pending Change Request badges.',
+      'Sitewide ? tooltips use fixed positioning with viewport clamp so left-edge tips (e.g. MARL) are no longer clipped; right edge, mobile width, and tip-below still work.',
+      'Multi-Agent RL on Micro Bots starts collapsed by default (status badge + Enable stay in the header); expand via the summary like Automatic Profile Scoring.',
+    ],
+  },
+  {
     version: '1.2.107',
     title: 'Soft MARL + Zion chat agent',
     sections: ['microbots', 'zion', 'learning'],
