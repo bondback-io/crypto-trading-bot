@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.114',
+    title: 'Zion launcher peach theme',
+    sections: ['zion'],
+    items: [
+      'Floating Zion chat launcher now uses the solid peach theme gradient (#f2ae66) instead of any green fallback, with a matching peach online-dot in chat headers.',
+    ],
+  },
+  {
     version: '1.2.113',
     title: 'Fix dashboard script stall from Zion bubble formatting',
     sections: ['zion', 'overview'],

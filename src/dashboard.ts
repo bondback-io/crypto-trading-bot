@@ -5219,7 +5219,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .zion-chat-title { color: #f8fafc; font-size: 0.92rem; font-weight: 750; line-height: 1.2; }
     .zion-chat-presence { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.14rem; color: #94a3b8; font-size: 0.7rem; }
-    .zion-chat-presence::before { content: ''; width: 0.43rem; height: 0.43rem; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12); }
+    .zion-chat-presence::before { content: ''; width: 0.43rem; height: 0.43rem; border-radius: 50%; background: var(--zion-peach); box-shadow: 0 0 0 3px rgba(242, 174, 102, 0.16); }
     .zion-chat-thread {
       display: flex;
       flex-direction: column;
@@ -5347,9 +5347,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-improvement-history-item.is-denied { border-left: 3px solid #f87171; }
 
     .zion-agent-widget { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 1100; }
-    .zion-agent-launcher { position: relative; display: inline-flex; align-items: center; gap: 0.45rem; min-height: 3.15rem; padding: 0.55rem 0.8rem; border: 1px solid rgba(255, 209, 156, 0.75); border-radius: 999px; color: #2b1807; background: linear-gradient(145deg, var(--zion-peach-bright), var(--zion-peach)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(242, 174, 102, 0.1); font-weight: 800; cursor: pointer; }
-    .zion-agent-launcher:hover, .zion-agent-launcher:focus-visible { transform: translateY(-1px); outline: none; }
-    .zion-agent-launcher-icon { display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 0.55rem; background: rgba(43, 24, 7, 0.14); }
+    .zion-agent-launcher {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-height: 3.15rem;
+      padding: 0.55rem 0.8rem;
+      border: 1px solid rgba(255, 209, 156, 0.85) !important;
+      border-radius: 999px;
+      color: #2b1807 !important;
+      background: linear-gradient(145deg, #ffd19c, #f2ae66) !important;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(242, 174, 102, 0.12);
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .zion-agent-launcher:hover, .zion-agent-launcher:focus-visible { transform: translateY(-1px); outline: none; filter: brightness(1.05); }
+    .zion-agent-launcher-icon {
+      display: grid;
+      place-items: center;
+      width: 1.7rem;
+      height: 1.7rem;
+      border-radius: 0.55rem;
+      color: #2b1807;
+      background: rgba(43, 24, 7, 0.16);
+    }
     .zion-agent-unread { position: absolute; top: -0.35rem; right: -0.22rem; display: none; min-width: 1.25rem; height: 1.25rem; padding: 0 0.25rem; place-items: center; border: 2px solid #0f172a; border-radius: 999px; color: #fff; background: #ef4444; font-size: 0.65rem; font-weight: 800; }
     .zion-agent-widget.has-unread .zion-agent-unread { display: grid; animation: zion-widget-pulse 1.8s ease-in-out infinite; }
     .zion-agent-widget.has-unread .zion-agent-launcher { animation: zion-widget-nudge 3s ease-in-out infinite; }
