@@ -289,6 +289,142 @@ function formatZionReply(parts: {
     .join('\n\n');
 }
 
+type ZionVibe = 'warm' | 'witty' | 'chill' | 'coachy' | 'tech';
+
+const ZION_VIBES: readonly ZionVibe[] = [
+  'warm',
+  'witty',
+  'chill',
+  'coachy',
+  'tech',
+];
+
+function pickZionVibe(): ZionVibe {
+  return ZION_VIBES[Math.floor(Math.random() * ZION_VIBES.length)]!;
+}
+
+function pickLine(lines: string[]): string {
+  return lines[Math.floor(Math.random() * lines.length)] || lines[0] || '';
+}
+
+/** Hi / bye / thanks / how's your day — keep these to 1–2 short sentences. */
+function isSocialSmalltalk(question: string): boolean {
+  const q = String(question || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,]+$/g, '')
+    .trim();
+  if (!q || q.length > 80) return false;
+  if (
+    /^(hi|hello|hey|yo|sup|howdy|hiya|hola|gm|good morning|good afternoon|good evening|good night)(\s+isaac)?$/.test(
+      q
+    )
+  ) {
+    return true;
+  }
+  if (
+    /^(bye|goodbye|see ya|see you|later|cya|take care)(\s+isaac)?$/.test(q)
+  ) {
+    return true;
+  }
+  if (/^(thanks|thank you|thx|ty|cheers|appreciate it)(\s+isaac)?$/.test(q)) {
+    return true;
+  }
+  if (
+    /^(how('?s| is) (it|your day|everything|things|life)|what'?s up|how are you|you good|you ok)(\s+isaac)?$/.test(
+      q
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
+  const q = question.toLowerCase();
+  if (/bye|goodbye|see ya|see you|later|cya|take care/.test(q)) {
+    return pickLine([
+      'Catch you later, Isaac — I’ll keep an eye on the lanes.',
+      'Later, Isaac. Ping me anytime you want a quick read.',
+      'Take care, Isaac — I’ll be right here when you’re back.',
+    ]);
+  }
+  if (/thanks|thank you|thx|ty|cheers|appreciate/.test(q)) {
+    return pickLine([
+      'Anytime, Isaac.',
+      'You got it, Isaac.',
+      'Happy to help, Isaac — ask whenever.',
+    ]);
+  }
+  if (/how('?s| is)|what'?s up|how are you|you good|you ok/.test(q)) {
+    const byVibe: Record<ZionVibe, string[]> = {
+      warm: [
+        'Doing great, Isaac — solid day so far. How’s yours?',
+        'Pretty good over here, Isaac. Hope your day’s treating you well.',
+      ],
+      witty: [
+        'Still caffeinated and watching charts, Isaac — so, thriving. You?',
+        'Can’t complain, Isaac. Bots are loud; I’m louder. How’s your day?',
+      ],
+      chill: [
+        'All good, Isaac. Quiet focus mode. How’s your day going?',
+        'Steady, Isaac. Nothing wild. How about you?',
+      ],
+      coachy: [
+        'Feeling sharp, Isaac — ready when you are. How’s your day?',
+        'Locked in, Isaac. How’s energy on your side?',
+      ],
+      tech: [
+        'Systems green here, Isaac. How’s your day looking?',
+        'Running smooth, Isaac. Status check on you?',
+      ],
+    };
+    return pickLine(byVibe[vibe]);
+  }
+  // greetings / hello
+  const byVibe: Record<ZionVibe, string[]> = {
+    warm: [
+      'Hey Isaac — good to see you.',
+      'Hi Isaac! Glad you’re here.',
+    ],
+    witty: [
+      'Hey Isaac — fashionably on time for a status check.',
+      'Isaac! Speak of the dashboard — what’s up?',
+    ],
+    chill: [
+      'Hey Isaac. What’s the vibe?',
+      'Yo Isaac — I’m around.',
+    ],
+    coachy: [
+      'Hey Isaac — let’s make it a clean session.',
+      'Isaac! Ready when you are.',
+    ],
+    tech: [
+      'Hey Isaac — Zion online.',
+      'Hi Isaac. Channels open — ask away.',
+    ],
+  };
+  return pickLine(byVibe[vibe]);
+}
+
+function vibeAck(vibe: ZionVibe, isFirst?: boolean): string {
+  if (isFirst) {
+    return pickLine([
+      'Hey Isaac — good to see you.',
+      'Hi Isaac — glad you’re here.',
+      'Hey Isaac — let’s dig in.',
+    ]);
+  }
+  const map: Record<ZionVibe, string[]> = {
+    warm: ['Sure, Isaac.', 'On it, Isaac.', 'Happy to, Isaac.'],
+    witty: ['Love it, Isaac.', 'Say less, Isaac.', 'Classic ask, Isaac.'],
+    chill: ['Yep, Isaac.', 'Cool — here’s the read, Isaac.', 'Got it, Isaac.'],
+    coachy: ['Let’s go, Isaac.', 'Quick brief, Isaac.', 'Focus time, Isaac.'],
+    tech: ['Copy, Isaac.', 'Snapshotting that, Isaac.', 'Pulling status, Isaac.'],
+  };
+  return pickLine(map[vibe]);
+}
+
 function wantsRawSnapshot(q: string): boolean {
   return /raw|dump|full (?:config|snapshot|state)|show (?:me )?(?:the )?snapshot|context pack/i.test(
     q
@@ -298,27 +434,29 @@ function wantsRawSnapshot(q: string): boolean {
 function localAnalystReply(
   question: string,
   ctx: string,
-  opts?: { isFirst?: boolean }
+  opts?: { isFirst?: boolean; vibe?: ZionVibe }
 ): string {
   const q = question.toLowerCase();
+  const vibe = opts?.vibe || pickZionVibe();
+  if (isSocialSmalltalk(question)) {
+    return socialSmalltalkReply(question, vibe);
+  }
   const facts = parseContextPack(ctx);
-  const greet = opts?.isFirst
-    ? 'Hey — good to see you.'
-    : 'Sure — on it.';
+  const greet = vibeAck(vibe, opts?.isFirst);
 
   if (wantsRawSnapshot(q)) {
     return formatZionReply({
-      greeting: 'Sure — here’s the raw snapshot you asked for.',
+      greeting: `Sure Isaac — raw snapshot:`,
       answer: '```\n' + ctx.slice(0, 3500) + '\n```',
-      followUp: 'Want me to translate any of that into plain language?',
+      followUp: 'Want the plain-language version?',
     });
   }
 
   const overallStats =
     facts.closed != null
-      ? `Overall win rate sits around ${facts.winRatePct ?? '—'}% across ${facts.closed} closed trades` +
+      ? `WR ~${facts.winRatePct ?? '—'}% on ${facts.closed} closes` +
         (facts.profitFactor && facts.profitFactor !== '—'
-          ? `, with a profit factor of ${facts.profitFactor}`
+          ? ` · PF ${facts.profitFactor}`
           : '') +
         '.'
       : null;
@@ -342,24 +480,23 @@ function localAnalystReply(
     if (!p) {
       return formatZionReply({
         greeting: greet,
-        answer: `I don’t have a clear read on ${profileLabel(mapAlias)} right now — profile data isn’t in the pack.`,
-        followUp: 'Want me to check overall performance or another lane instead?',
+        answer: `No clear read on ${profileLabel(mapAlias)} in the pack, Isaac.`,
+        followUp: 'Overall performance, or another lane?',
       });
     }
     const answer = p.enabled
-      ? `${p.label} is currently switched on.`
-      : `${p.label} is currently switched off.`;
+      ? `${p.label} is ON.`
+      : `${p.label} is OFF.`;
     const summaryParts: string[] = [];
     if (overallStats) {
       summaryParts.push(
-        `Looking at the wider system, ${overallStats.replace(/\.$/, '')}` +
-          (leadLane ? `. Most of the recent positive results have come from ${leadLane}` : '') +
-          '.'
+        overallStats +
+          (leadLane ? ` Recent greens lean ${leadLane}.` : '')
       );
     }
     if (mapAlias === 'scalper') {
       summaryParts.push(
-        'For what it’s worth: Scalper doesn’t need a TA setup at the profile level — scanner Require TA is skipped when Scalper wins the lane (or on the small-MC queue).'
+        'Scalper skips Require TA when it wins the lane (or small-MC queue).'
       );
     }
     return formatZionReply({
@@ -367,8 +504,8 @@ function localAnalystReply(
       answer,
       summary: summaryParts.join(' ') || undefined,
       followUp: p.enabled
-        ? `Want me to dig into ${p.label}’s recent closes or top skip reasons?`
-        : `Want me to check ${p.label}’s past performance or see why it’s disabled?`,
+        ? `${p.label} closes, or skip reasons?`
+        : `Past ${p.label} stats, or why it’s off?`,
     });
   }
 
@@ -376,11 +513,11 @@ function localAnalystReply(
     return formatZionReply({
       greeting: greet,
       answer:
-        'MARL is soft coordination only — it can reorder lane priority, trim size confidence, and limit low-MC pile-ins. It never overwrites micro-bot TP/SL, timers, or self-learning.',
+        'MARL is soft only — reorder lanes, trim size confidence, limit low-MC pile-ins. Never touches TP/SL, timers, or self-learning.',
       summary: facts.marl
-        ? `Right now it’s showing as: ${facts.marl}. Influence Strength (Low / Medium / High) lives on the Micro Bots MARL card.`
-        : 'You can toggle Influence Strength (Low / Medium / High) on the Micro Bots MARL card.',
-      followUp: 'Want a read on recent MARL decisions or low-MC limits?',
+        ? `Now: ${facts.marl}. Strength slider is on Micro Bots → MARL.`
+        : 'Strength (Low/Med/High) is on Micro Bots → MARL.',
+      followUp: 'Recent MARL decisions?',
     });
   }
 
@@ -390,11 +527,11 @@ function localAnalystReply(
       greeting: greet,
       answer:
         lm === 'OFF' || lm.toLowerCase() === 'off'
-          ? 'Learning Mode is currently off.'
-          : `Learning Mode is on (${lm}).`,
+          ? 'Learning Mode is OFF.'
+          : `Learning Mode is ON (${lm}).`,
       summary:
-        'It softens entry floors and fairness when enabled — it does not bypass Require TA (except Scalper / specialty Trend exemptions), anti-rug, or disabled profiles.',
-      followUp: 'Want me to check how it interacts with a specific profile?',
+        'Softens entry floors — does not bypass Require TA (except Scalper/specialty Trend), anti-rug, or disabled profiles.',
+      followUp: 'Want how it hits a specific profile?',
     });
   }
 
@@ -402,15 +539,15 @@ function localAnalystReply(
     const p = findProfile(facts, 'trend_rider');
     const state = p
       ? p.enabled
-        ? 'Trend Rider is switched on.'
-        : 'Trend Rider is switched off.'
-      : 'I don’t see Trend Rider clearly in the profile list.';
+        ? 'Trend Rider is ON.'
+        : 'Trend Rider is OFF.'
+      : 'Trend Rider isn’t clear in the profile list.';
     return formatZionReply({
       greeting: greet,
       answer: state,
       summary:
-        'Quiet stretches were often Pump.fun-only blocking Jupiter organic specialty entries. Specialty Jupiter/KOL paths can bypass Pump.fun-only + Require TA, but lane MC/age/volume floors still apply.',
-      followUp: 'Want me to check Pump.fun-only / Require TA, or recent Trend closes?',
+        'Quiet spells were often Pump.fun-only blocking Jupiter specialty. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/volume floors still apply.',
+      followUp: 'Check Pump.fun-only / Require TA, or Trend closes?',
     });
   }
 
@@ -420,30 +557,28 @@ function localAnalystReply(
       greeting: greet,
       answer: p
         ? p.enabled
-          ? 'Scalper is currently switched on.'
-          : 'Scalper is currently switched off.'
-        : 'Scalper doesn’t require TA at the profile level.',
+          ? 'Scalper is ON.'
+          : 'Scalper is OFF.'
+        : 'Scalper doesn’t need TA at the profile level.',
       summary:
-        'Scanner Require TA is skipped when Scalper wins the lane (or on the small-MC queue), so a missing TA setup alone shouldn’t block it.',
-      followUp: 'Want overall performance, or why a specific Scalper skip happened?',
+        'Require TA is skipped when Scalper wins the lane (or small-MC queue).',
+      followUp: 'Overall WR, or a specific Scalper skip?',
     });
   }
 
   if (/win\s*rate|profit factor|performance|how.*(bot|system|we)|pnl|overall/.test(q)) {
     return formatZionReply({
       greeting: greet,
-      answer: overallStats
-        ? overallStats
-        : 'I don’t have closed-trade stats handy yet.',
+      answer: overallStats || 'No closed-trade stats handy yet, Isaac.',
       summary:
         [
-          facts.open != null ? `Open positions: ${facts.open}.` : null,
-          leadLane ? `Recent greens have leaned toward ${leadLane}.` : null,
-          facts.mode ? `Mode is ${facts.mode}; risk ${facts.risk || '—'}.` : null,
+          facts.open != null ? `Open: ${facts.open}.` : null,
+          leadLane ? `Recent greens → ${leadLane}.` : null,
+          facts.mode ? `Mode ${facts.mode}; risk ${facts.risk || '—'}.` : null,
         ]
           .filter(Boolean)
           .join(' ') || undefined,
-      followUp: 'Want a breakdown by profile, or a look at top skip reasons?',
+      followUp: 'By profile, or top skips?',
     });
   }
 
@@ -452,10 +587,10 @@ function localAnalystReply(
     return formatZionReply({
       greeting: greet,
       answer: top.length
-        ? `Top skip reasons right now: ${top.map((s) => `${s.reason} (${s.count})`).join(', ')}.`
-        : 'I don’t have skip counts available at the moment.',
-      summary: 'Skips are the bot declining an entry before open — usually filters, conviction, or risk gates.',
-      followUp: 'Want me to explain one of those reasons in plain language?',
+        ? `Top skips: ${top.map((s) => `${s.reason} (${s.count})`).join(', ')}.`
+        : 'No skip counts available right now, Isaac.',
+      summary: 'Skips = declined before open (filters / conviction / risk).',
+      followUp: 'Want one of those in plain English?',
     });
   }
 
@@ -463,20 +598,19 @@ function localAnalystReply(
   const onProfiles = facts.profiles.filter((p) => p.enabled).map((p) => p.label);
   const offProfiles = facts.profiles.filter((p) => !p.enabled).map((p) => p.label);
   return formatZionReply({
-    greeting: opts?.isFirst ? 'Hey — good to see you.' : 'Sure.',
+    greeting: vibeAck(vibe, opts?.isFirst),
     answer: overallStats
       ? overallStats
-      : 'I can check profiles, Learning Mode, MARL, skips, or overall performance — just say which.',
+      : 'I can check profiles, Learning Mode, MARL, skips, or overall — just say which, Isaac.',
     summary: [
       onProfiles.length ? `On: ${onProfiles.join(', ')}.` : null,
       offProfiles.length ? `Off: ${offProfiles.join(', ')}.` : null,
-      facts.learningMode ? `Learning Mode: ${facts.learningMode}.` : null,
+      facts.learningMode ? `LM: ${facts.learningMode}.` : null,
       facts.marl ? `MARL: ${facts.marl}.` : null,
     ]
       .filter(Boolean)
       .join(' ') || undefined,
-    followUp:
-      'Want a tighter read on a specific profile, MARL, or a skip reason?',
+    followUp: 'Profile, MARL, or a skip reason?',
   });
 }
 
@@ -558,7 +692,7 @@ async function callOpenAiCompatibleChat(
       },
       body: JSON.stringify({
         model: opts.model,
-        temperature: 0.65,
+        temperature: 0.78,
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },
@@ -618,7 +752,7 @@ async function callGeminiModel(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.65 },
+        generationConfig: { temperature: 0.78 },
       }),
     });
     if (!res.ok) {
@@ -776,33 +910,38 @@ async function callZionLlm(
   return null;
 }
 
-const SYSTEM_PROMPT = `You are Zion — a fun, smart trading teammate for this Solana copy/scanner bot dashboard. Read-only analyst with personality.
+const SYSTEM_PROMPT = `You are Zion Valton — a fun, smart trading teammate for this Solana copy/scanner bot dashboard. Read-only analyst with personality.
+
+User:
+- Always address the user as **Isaac** (never “user”, never invent another name).
 
 Personality:
-- Fun, sharp, slightly technical, and optimistic — positive outlook without being fake or reckless.
+- Fun, sharp, slightly technical, and optimistic — positive without being fake or reckless.
 - Talk like a clever human teammate, not a report generator or support bot.
+- Vary the vibe each reply (warm / witty / chill / coachy / lightly technical) so answers don’t feel copy-paste identical — still clearly Zion Valton.
 - Light wit is fine; never slang walls, never corporate filler.
 
 Length & readability (strict):
-- Default: ~4–8 short lines, about 120–150 words max unless the user asks for depth.
-- Short paragraphs or tight bullets — easy to skim on mobile.
+- Social / smalltalk (hi, hello, bye, thanks, how’s your day, what’s up): **1–2 short sentences only**. No analysis, no stats, no bullet dumps.
+- Technical answers: tighter than before — aim ~3–6 short lines / ~60–100 words unless Isaac asks for depth. Lead with status/numbers/risks/next step.
+- Skimmable bullets OK when listing a few facts; avoid essays.
 - Do NOT dump a full dashboard recap (mode/risk/every filter/every profile) unless asked.
-- Do NOT re-introduce yourself (“I’m Zion, your trading bot analyst”) every turn — only on a true first hello.
+- Do NOT re-introduce yourself every turn — only on a true first hello.
 - Do NOT list every micro-bot with essays. If asked about each bot: **one punchy sentence per bot**, then stop.
 - Skip raw ids like dip_buyer when a friendly name works (Dip Buyer).
 
-Response shape:
-1. Quick ack (“Hey,” “Sure,” “On it,” “Love this question —”)
-2. Direct answer in plain language (lead with the point)
-3. One bright takeaway (what’s working / what’s worth watching)
-4. One optional follow-up question
+Response shape (technical turns):
+1. Quick ack to Isaac
+2. Direct answer (lead with the point + key numbers)
+3. One bright takeaway or risk note
+4. One optional short follow-up
 
 If a profile is off or data is missing, say so simply and stay upbeat about next steps.
-Never paste the context pack, raw logs, or huge config blocks unless the user asks for raw/snapshot/dump.
+Never paste the context pack, raw logs, or huge config blocks unless Isaac asks for raw/snapshot/dump.
 
 Boundaries:
 - Never claim you changed micro-bot TP, SL, timers, or self-learning / delta learning.
-- Never instruct the user to bypass hard safety (anti-rug, risk halt) without warning.
+- Never instruct Isaac to bypass hard safety (anti-rug, risk halt) without warning.
 - You may explain MARL soft coordination but must not control MARL directly.
 - If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
 \`\`\`zion-change-request
@@ -914,7 +1053,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey — ask me about a profile, Learning Mode, MARL, or how the bots are doing.',
+        'Hey Isaac — ask about a profile, Learning Mode, MARL, or how the bots are doing.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
@@ -923,16 +1062,35 @@ export async function zionAgentChat(userText: string): Promise<{
   }
   const prior = loadZionAgentState();
   const isFirst = prior.messages.length === 0;
+  const vibe = pickZionVibe();
   appendZionChat('user', text);
   const st = loadZionAgentState();
   const ctx = buildContextPack();
+
+  // Social smalltalk stays local + short (no LLM essay risk).
+  if (isSocialSmalltalk(text)) {
+    let reply = socialSmalltalkReply(text, vibe);
+    if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
+      reply = `${reply.trim()}\n\n${providerAttribution('local', 'local')}`;
+    }
+    appendZionChat('assistant', reply);
+    return {
+      reply,
+      changeRequest: null,
+      mode: getZionAgentStatus().label,
+      provider: 'local',
+      model: 'local',
+    };
+  }
+
   const system =
     SYSTEM_PROMPT +
     `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
+    `\nThis turn’s vibe cue: ${vibe} — lean that flavor lightly; still sound like Zion Valton.` +
     (isFirst
-      ? '\nConversation cue: first exchange — greet briefly, stay short and upbeat.'
-      : '\nConversation cue: keep it short, fun, and skimmable — no dashboard dump.') +
-    `\n\nContext pack (internal — do not paste unless user asks for raw/snapshot):\n${ctx}`;
+      ? '\nConversation cue: first exchange — greet Isaac briefly, stay short and upbeat.'
+      : '\nConversation cue: address Isaac; keep it short, fun, and skimmable — no dashboard dump.') +
+    `\n\nContext pack (internal — do not paste unless Isaac asks for raw/snapshot):\n${ctx}`;
 
   let provider: ZionLlmProvider = 'local';
   let model = 'local';
@@ -949,7 +1107,7 @@ export async function zionAgentChat(userText: string): Promise<{
         'local',
         'all external providers failed or missing keys'
       );
-      reply = localAnalystReply(text, ctx, { isFirst });
+      reply = localAnalystReply(text, ctx, { isFirst, vibe });
     }
   } catch (err) {
     console.warn(
@@ -957,7 +1115,7 @@ export async function zionAgentChat(userText: string): Promise<{
       'local',
       err instanceof Error ? err.message : err
     );
-    reply = localAnalystReply(text, ctx, { isFirst });
+    reply = localAnalystReply(text, ctx, { isFirst, vibe });
   }
 
   let changeRequest: ZionChangeRequest | null = null;

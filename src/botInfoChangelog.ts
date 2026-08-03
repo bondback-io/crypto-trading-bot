@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.116',
+    title: 'MARL placement, Zion chat persist, Isaac voice',
+    sections: ['microbots', 'zion'],
+    items: [
+      'Micro Bots: Multi-Agent RL card now sits directly under Automatic Profile Scoring (same Enable MARL / collapsed-by-default row).',
+      'Zion chat: messages persist across hard refresh and tab switches (server DATA_DIR/zion-agent.json + localStorage mirror); popup and Zion tab share one thread with time/date stamps.',
+      'Zion chat history capped at 80 messages on disk (UI loads the latest 40) so the thread stays bounded.',
+      'Zion voice: always addresses Isaac; short 1–2 sentence replies for hi/bye/thanks/smalltalk; rotating warm/witty/chill/coachy/tech vibes; tighter technical answers.',
+    ],
+  },
+  {
     version: '1.2.115',
     title: 'Zion typing polish + Valton signature',
     sections: ['zion'],

@@ -5239,11 +5239,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       border: 1px solid rgba(242, 174, 102, 0.2); font-size: 0.65rem; font-weight: 800;
     }
     .zion-chat-message.is-user .zion-chat-message-avatar { color: #bae6fd; background: rgba(14, 165, 233, 0.12); border-color: rgba(56, 189, 248, 0.25); }
+    .zion-chat-message-body { min-width: 0; display: flex; flex-direction: column; gap: 0.18rem; }
+    .zion-chat-message.is-user .zion-chat-message-body { align-items: flex-end; }
     .zion-chat-bubble {
       min-width: 0; padding: 0.58rem 0.7rem; border: 1px solid #26354a; border-radius: 0.75rem 0.75rem 0.75rem 0.22rem;
       color: #dbeafe; background: #0b1220; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
     }
     .zion-chat-message.is-user .zion-chat-bubble { border-color: rgba(56, 189, 248, 0.34); border-radius: 0.75rem 0.75rem 0.22rem 0.75rem; color: #e0f2fe; background: rgba(14, 116, 144, 0.3); }
+    .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
+    .zion-chat-message.is-user .zion-chat-time { text-align: right; }
     .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
     .zion-chat-composer input { min-width: 0; flex: 1; border: 0; outline: 0; color: #e2e8f0; background: transparent; padding: 0.48rem 0.4rem; }
     .zion-chat-composer input::placeholder { color: #64748b; }
@@ -7505,39 +7509,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
-      <div class="card" id="marl-card">
-        <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
-          <summary>
-            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
-              <span class="text-sm font-semibold text-slate-200">Multi-Agent RL <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Soft coordination only: reorders lane priority, trims size confidence, limits low-MC pile-ins. Never overwrites micro-bot TP/SL, timers, or self-learning. Disable anytime."></span></span>
-              <span id="marl-status-badge" class="badge status-badge" style="font-size:11px">MARL OFF</span>
-            </span>
-            <label class="ctl-check" title="Enable Multi-Agent RL" onclick="event.stopPropagation()">
-              <input type="checkbox" id="marl-enabled" onchange="saveMarlConfig()" onclick="event.stopPropagation()" />
-              <span>Enable MARL</span>
-            </label>
-          </summary>
-          <div class="strat-adv-body">
-            <div class="mb-2">
-              <div class="text-xs text-slate-400 mb-1">Influence Strength <span id="marl-strength-label" class="text-slate-200">Medium</span></div>
-              <div class="closed-filter" role="group" aria-label="MARL influence strength">
-                <button type="button" class="closed-filter-btn" data-marl-strength="low" onclick="setMarlStrength('low')">Low</button>
-                <button type="button" class="closed-filter-btn is-active" data-marl-strength="medium" onclick="setMarlStrength('medium')">Medium</button>
-                <button type="button" class="closed-filter-btn" data-marl-strength="high" onclick="setMarlStrength('high')">High</button>
-              </div>
-            </div>
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
-              <label class="ctl ctl-sm"><span>Low-MC threshold ($)</span><input type="number" id="marl-low-mc" value="175000" min="10000" step="5000" onchange="saveMarlConfig()" /></label>
-              <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
-              <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
-            </div>
-            <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
-            <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
-            <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
-          </div>
-        </details>
-      </div>
-
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
           <div style="min-width:0;flex:1">
@@ -7615,6 +7586,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </div>
           </details>
         </div>
+      </div>
+
+      <div class="card" id="marl-card">
+        <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Multi-Agent RL <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Soft coordination only: reorders lane priority, trims size confidence, limits low-MC pile-ins. Never overwrites micro-bot TP/SL, timers, or self-learning. Disable anytime."></span></span>
+              <span id="marl-status-badge" class="badge status-badge" style="font-size:11px">MARL OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Multi-Agent RL" onclick="event.stopPropagation()">
+              <input type="checkbox" id="marl-enabled" onchange="saveMarlConfig()" onclick="event.stopPropagation()" />
+              <span>Enable MARL</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Influence Strength <span id="marl-strength-label" class="text-slate-200">Medium</span></div>
+              <div class="closed-filter" role="group" aria-label="MARL influence strength">
+                <button type="button" class="closed-filter-btn" data-marl-strength="low" onclick="setMarlStrength('low')">Low</button>
+                <button type="button" class="closed-filter-btn is-active" data-marl-strength="medium" onclick="setMarlStrength('medium')">Medium</button>
+                <button type="button" class="closed-filter-btn" data-marl-strength="high" onclick="setMarlStrength('high')">High</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Low-MC threshold ($)</span><input type="number" id="marl-low-mc" value="175000" min="10000" step="5000" onchange="saveMarlConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
+            </div>
+            <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
+            <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
+          </div>
+        </details>
       </div>
 
       <div class="card mt-4" id="microbot-performance-teaser">
@@ -23728,6 +23732,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
     let _zionImprovementCache = [];
     let _zionImprovementHistoryCache = [];
+    const ZION_CHAT_CACHE_KEY = 'zionAgentChatMessages_v1';
+    function cacheZionChatMessages(messages) {
+      try {
+        localStorage.setItem(ZION_CHAT_CACHE_KEY, JSON.stringify({
+          savedAt: Date.now(),
+          messages: Array.isArray(messages) ? messages.slice(-40) : [],
+        }));
+      } catch (_) {}
+    }
+    function loadCachedZionChatMessages() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(ZION_CHAT_CACHE_KEY) || 'null');
+        if (raw && Array.isArray(raw.messages)) return raw.messages;
+      } catch (_) {}
+      return null;
+    }
+    function paintZionChatThreads(messages) {
+      const messageHtml = renderZionAgentMessages(Array.isArray(messages) ? messages : []);
+      ['zion-agent-chat', 'zion-agent-widget-chat'].forEach(function (id) {
+        const chat = document.getElementById(id);
+        if (!chat) return;
+        chat.innerHTML = messageHtml;
+        chat.scrollTop = chat.scrollHeight;
+      });
+    }
+    function fmtZionChatWhen(ts) {
+      if (ts == null || ts === '') return '';
+      try {
+        const d = new Date(Number(ts) || ts);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+      } catch (_) {
+        return '';
+      }
+    }
     function formatZionBubbleHtml(text, isUser) {
       let raw = String(text || '');
       if (!isUser) {
@@ -23791,10 +23835,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return messages
         .map((m) => {
           const isUser = m.role === 'user';
+          const when = fmtZionChatWhen(m.at);
           return (
             '<div class="zion-chat-message' + (isUser ? ' is-user' : '') + '">' +
               '<div class="zion-chat-message-avatar">' + (isUser ? 'You' : 'Z') + '</div>' +
-              '<div class="zion-chat-bubble">' + formatZionBubbleHtml(m.text || '', isUser) + '</div>' +
+              '<div class="zion-chat-message-body">' +
+                '<div class="zion-chat-bubble">' + formatZionBubbleHtml(m.text || '', isUser) + '</div>' +
+                (when ? '<div class="zion-chat-time">' + escHtml(when) + '</div>' : '') +
+              '</div>' +
             '</div>'
           );
         })
@@ -24047,13 +24095,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const semi = document.getElementById('zion-agent-semi');
       if (semi) semi.checked = !!st.semiAutonomous;
       const msgs = Array.isArray(data.messages) ? data.messages : [];
-      const messageHtml = renderZionAgentMessages(msgs);
-      ['zion-agent-chat', 'zion-agent-widget-chat'].forEach((id) => {
-        const chat = document.getElementById(id);
-        if (!chat) return;
-        chat.innerHTML = messageHtml;
-        chat.scrollTop = chat.scrollHeight;
-      });
+      cacheZionChatMessages(msgs);
+      paintZionChatThreads(msgs);
       const list = Array.isArray(data.improvementRequests)
         ? data.improvementRequests
         : (data.changeRequests || []).filter((c) => c.status === 'pending');
@@ -24106,9 +24149,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const inp = document.getElementById(source === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input');
       const msg = inp ? String(inp.value || '').trim() : '';
       if (!msg) return;
-      if (inp) inp.value = '';
+      ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
       const started = Date.now();
       const minTypingMs = 2000;
+      const optimistic = (loadCachedZionChatMessages() || []).slice();
+      optimistic.push({ id: 'local-u-' + started, role: 'user', text: msg, at: started });
+      cacheZionChatMessages(optimistic);
+      paintZionChatThreads(optimistic);
       showZionTyping();
       setZionChatBusy(true);
       try {
@@ -24164,6 +24214,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window.addEventListener('resize', function () {
         layoutZionOfferStack();
       });
+    } catch (_) {}
+    try {
+      const cachedMsgs = loadCachedZionChatMessages();
+      if (cachedMsgs && cachedMsgs.length) paintZionChatThreads(cachedMsgs);
     } catch (_) {}
     setTimeout(function () {
       if (typeof loadZionAgent === 'function') loadZionAgent();
