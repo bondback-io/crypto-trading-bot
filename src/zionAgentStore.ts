@@ -1,5 +1,6 @@
 /**
- * Zion Agent chat history + Change Requests (DATA_DIR/zion-agent.json).
+ * Zion Agent chat history + Improvement Requests (DATA_DIR/zion-agent.json).
+ * Persists Semi-Autonomous Change Requests as Improvement Requests.
  */
 
 import fs from 'fs';
@@ -14,10 +15,15 @@ export interface ZionChatMessage {
   at: number;
 }
 
+export type ZionImprovementStatus = 'pending' | 'approved' | 'denied';
+
+/** @deprecated Prefer ZionImprovementStatus — kept for callers that still say Change Request */
+export type ZionChangeRequestStatus = ZionImprovementStatus;
+
 export interface ZionChangeRequest {
   id: string;
   createdAt: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: ZionImprovementStatus;
   title: string;
   what: string;
   why: string;
@@ -26,7 +32,12 @@ export interface ZionChangeRequest {
   payload: Record<string, unknown>;
   decidedAt?: number;
   decideNote?: string;
+  /** Set when approved — what the allowlisted apply did */
+  applyDetail?: string;
 }
+
+/** Alias for product naming */
+export type ZionImprovementRequest = ZionChangeRequest;
 
 export interface ZionAgentPersisted {
   version: 1;
@@ -57,20 +68,56 @@ function path(): string {
   return dataFile(FILE);
 }
 
+function normalizeStatus(raw: unknown): ZionImprovementStatus {
+  if (raw === 'approved') return 'approved';
+  if (raw === 'denied' || raw === 'rejected') return 'denied';
+  return 'pending';
+}
+
+function normalizeChangeRequest(raw: unknown): ZionChangeRequest | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const c = raw as Record<string, unknown>;
+  if (!c.id || !c.title) return null;
+  const target =
+    c.target === 'system' || c.target === 'global_gates'
+      ? c.target
+      : 'global_gates';
+  return {
+    id: String(c.id),
+    createdAt: Number(c.createdAt) || Date.now(),
+    status: normalizeStatus(c.status),
+    title: String(c.title || '').slice(0, 120),
+    what: String(c.what || '').slice(0, 800),
+    why: String(c.why || '').slice(0, 800),
+    expectedBenefit: String(c.expectedBenefit || '').slice(0, 400),
+    target,
+    payload:
+      c.payload && typeof c.payload === 'object'
+        ? (c.payload as Record<string, unknown>)
+        : {},
+    decidedAt: c.decidedAt != null ? Number(c.decidedAt) : undefined,
+    decideNote: c.decideNote != null ? String(c.decideNote) : undefined,
+    applyDetail: c.applyDetail != null ? String(c.applyDetail) : undefined,
+  };
+}
+
 export function loadZionAgentState(): ZionAgentPersisted {
   if (cache) return cache;
   try {
     const raw = fs.readFileSync(path(), 'utf8');
     const parsed = JSON.parse(raw) as ZionAgentPersisted;
     if (parsed?.version === 1) {
+      const crs = Array.isArray(parsed.changeRequests)
+        ? parsed.changeRequests
+            .map(normalizeChangeRequest)
+            .filter((c): c is ZionChangeRequest => !!c)
+        : [];
       cache = {
         version: 1,
         updatedAt: Number(parsed.updatedAt) || Date.now(),
         semiAutonomous: parsed.semiAutonomous === true,
         messages: Array.isArray(parsed.messages) ? parsed.messages : [],
-        changeRequests: Array.isArray(parsed.changeRequests)
-          ? parsed.changeRequests
-          : [],
+        changeRequests: crs,
       };
       return cache;
     }
@@ -140,10 +187,27 @@ export function addZionChangeRequest(
   return row;
 }
 
+export function getZionChangeRequest(id: string): ZionChangeRequest | null {
+  const st = loadZionAgentState();
+  return st.changeRequests.find((c) => c.id === id) || null;
+}
+
+export function listPendingZionImprovements(): ZionChangeRequest[] {
+  return loadZionAgentState().changeRequests.filter((c) => c.status === 'pending');
+}
+
+/** Approved + denied history (newest first). */
+export function listZionImprovementHistory(limit = 40): ZionChangeRequest[] {
+  return loadZionAgentState()
+    .changeRequests.filter((c) => c.status === 'approved' || c.status === 'denied')
+    .slice(0, Math.max(1, limit));
+}
+
 export function decideZionChangeRequest(
   id: string,
-  status: 'approved' | 'rejected',
-  note?: string
+  status: 'approved' | 'denied',
+  note?: string,
+  applyDetail?: string
 ): ZionChangeRequest | null {
   const st = loadZionAgentState();
   const row = st.changeRequests.find((c) => c.id === id);
@@ -151,6 +215,7 @@ export function decideZionChangeRequest(
   row.status = status;
   row.decidedAt = Date.now();
   row.decideNote = note || '';
+  if (applyDetail) row.applyDetail = applyDetail;
   saveZionAgentState(st);
   return row;
 }

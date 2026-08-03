@@ -5253,6 +5253,66 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-refresh:hover, .zion-chat-refresh:focus-visible { color: #f8fafc; background: #1e293b; outline: none; }
     .zion-change-requests { margin-top: 0.8rem; }
     .zion-change-request { border: 1px solid rgba(242, 174, 102, 0.26); border-radius: 0.7rem; padding: 0.65rem; margin-bottom: 0.5rem; background: rgba(11, 18, 32, 0.78); }
+    .zion-improvement-card-section {
+      border-color: rgba(248, 113, 113, 0.28);
+      background: linear-gradient(150deg, rgba(90, 24, 28, 0.22), #0f172a 38%, #111827 100%);
+    }
+    .zion-improvement-list { display: flex; flex-direction: column; gap: 0.55rem; }
+    .zion-improvement-row {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+      padding: 0.7rem 0.8rem; border: 1px solid rgba(248, 113, 113, 0.28);
+      border-radius: 0.7rem; background: rgba(11, 18, 32, 0.78);
+    }
+    .zion-improvement-row-title { color: #fecaca; font-weight: 700; font-size: 0.86rem; }
+    .zion-improvement-row-meta { color: #94a3b8; font-size: 0.72rem; margin-top: 0.2rem; line-height: 1.35; }
+    .zion-improvement-chip {
+      display: none; margin: 0.55rem 0 0; padding: 0.45rem 0.7rem;
+      border: 1px solid rgba(248, 113, 113, 0.4); border-radius: 0.55rem;
+      color: #fecaca; background: rgba(127, 29, 29, 0.35); font-size: 0.75rem;
+    }
+    .zion-improvement-chip.is-visible { display: block; animation: zion-widget-nudge 2.4s ease-in-out 1; }
+    .zion-improvement-popup {
+      pointer-events: auto;
+      position: relative;
+      flex: 0 0 auto;
+      width: 100%;
+      box-sizing: border-box;
+      background: linear-gradient(160deg, #2a0d12 0%, #1a1018 45%, #111827 100%);
+      border: 1px solid rgba(248, 113, 113, 0.55);
+      border-radius: 14px;
+      padding: 12px 14px 10px;
+      box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(248, 113, 113, 0.12);
+      transform-origin: bottom right;
+      animation: zion-card-in 0.38s cubic-bezier(.22,1,.36,1) both;
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: min(88dvh, 720px);
+      color: #e2e8f0;
+    }
+    .zion-improvement-popup.is-leaving {
+      opacity: 0;
+      transform: translateY(12px) scale(0.96);
+      transition: opacity .2s ease, transform .2s ease;
+      pointer-events: none;
+    }
+    .zion-improvement-popup .zion-offer-kicker {
+      color: #fca5a5;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      font-weight: 750;
+    }
+    .zion-improvement-popup .zion-offer-title { color: #fecaca; font-size: 1rem; font-weight: 750; margin-top: 0.15rem; }
+    .zion-improvement-popup .zion-offer-body { margin: 0.65rem 0 0.75rem; font-size: 0.82rem; line-height: 1.45; color: #e2e8f0; }
+    .zion-improvement-popup .zion-offer-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .zion-improvement-popup .btn-approve-ir { background: #16a34a !important; border-color: #16a34a; color: #fff; }
+    .zion-improvement-popup .btn-deny-ir { background: #b91c1c !important; border-color: #b91c1c; color: #fff; }
+    .zion-improvement-history-item {
+      border: 1px solid #334155; border-radius: 0.65rem; padding: 0.65rem 0.75rem; margin-bottom: 0.5rem; background: #0b1220;
+    }
+    .zion-improvement-history-item.is-approved { border-left: 3px solid #34d399; }
+    .zion-improvement-history-item.is-denied { border-left: 3px solid #f87171; }
+
     .zion-agent-widget { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(16px, env(safe-area-inset-bottom, 0px)); z-index: 1100; }
     .zion-agent-launcher { position: relative; display: inline-flex; align-items: center; gap: 0.45rem; min-height: 3.15rem; padding: 0.55rem 0.8rem; border: 1px solid rgba(255, 209, 156, 0.75); border-radius: 999px; color: #2b1807; background: linear-gradient(145deg, var(--zion-peach-bright), var(--zion-peach)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 4px rgba(242, 174, 102, 0.1); font-weight: 800; cursor: pointer; }
     .zion-agent-launcher:hover, .zion-agent-launcher:focus-visible { transform: translateY(-1px); outline: none; }
@@ -7240,23 +7300,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="zion-chat-identity">
             <div class="zion-chat-avatar" aria-hidden="true">Z</div>
             <div>
-              <div class="zion-chat-title">Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Change Requests for your Approve/Reject."></span></div>
+              <div class="zion-chat-title">Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Improvement Requests for your Approve/Deny."></span></div>
               <div class="zion-chat-presence">Online · Bot analyst</div>
             </div>
           </div>
           <span id="zion-agent-mode-badge" class="badge status-badge" style="font-size:11px">Zion · Read-Only</span>
         </div>
         <div class="toggle-row">
-          <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Change Requests for global gates / system tips. Nothing applies without Approve."></span></span>
+          <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Improvement Requests for global gates / system tips. Nothing applies without Approve."></span></span>
           <label class="switch"><input type="checkbox" id="zion-agent-semi" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
+        <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
           <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
         </div>
-        <div id="zion-agent-crs" class="zion-change-requests text-sm"></div>
+      </div>
+
+      <div class="card zion-improvement-card-section" id="zion-improvement-requests-card">
+        <div class="section-title">Zion Improvement Requests <span class="tip" tabindex="0" data-tip="Semi-Autonomous proposals from Zion. Open a request to Approve (apply allowlisted change), Deny (log only), or Close (keep pending)."></span></div>
+        <p class="mint text-xs mb-2">Pending proposals stay here until you Approve or Deny. Close the popup without deciding to reopen later. Denied / approved history lives in Config.</p>
+        <div id="zion-improvement-list" class="zion-improvement-list text-sm">—</div>
+        <div class="mt-2 flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-secondary text-xs" onclick="showZionImprovementHistory()">View denied / history</button>
+          <span class="mint text-xs" id="zion-improvement-list-status"></span>
+        </div>
       </div>
 
       <div class="card">
@@ -7361,6 +7431,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" class="zion-chat-refresh" onclick="toggleZionAgentWidget(false)" aria-label="Close Zion chat" title="Close">✕</button>
         </div>
         <div id="zion-agent-widget-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
+        <div id="zion-agent-widget-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
@@ -7941,6 +8012,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" class="btn btn-secondary" onclick="testNotificationEmail()" title="Send a test email via SMTP">Send test email</button>
           <span class="mint text-xs" id="notify-status"></span>
         </div>
+      </div>
+
+      <div class="config-section-label" id="config-zion-improvements-section">Zion improvements <span>Approved &amp; denied history</span></div>
+      <div class="card" id="zion-improvement-history-card">
+        <div class="section-title">Zion Improvement History <span class="tip" tabindex="0" data-tip="Durable log of Improvement Requests you Approved (what changed) or Denied (nothing applied). Pending items stay on the Zion tab."></span></div>
+        <p class="mint text-xs mb-2">Denied requests are hidden from the pending list but remain here. Emails use the same Resend/SMTP delivery as other alerts.</p>
+        <div id="zion-improvement-history" class="text-sm max-h-80 overflow-y-auto">—</div>
+        <div class="mt-2"><button type="button" class="btn btn-secondary text-xs" onclick="loadZionAgent()">Refresh history</button></div>
       </div>
 
       <div class="config-section-label" id="config-logs-section">Logs <span>Trade events + system / API errors</span></div>
@@ -22815,7 +22894,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function layoutZionOfferStack(focusCard) {
       const stack = ensureZionStack();
       const cards = Array.prototype.slice.call(
-        stack.querySelectorAll('.zion-offer-card:not(.is-leaving)')
+        stack.querySelectorAll('.zion-offer-card:not(.is-leaving), .zion-improvement-popup:not(.is-leaving)')
       );
       const n = cards.length;
       stack.setAttribute('data-count', String(Math.min(5, Math.max(0, n))));
@@ -23584,6 +23663,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.setMarlStrength = setMarlStrength;
 
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
+    let _zionImprovementCache = [];
+    let _zionImprovementHistoryCache = [];
     function renderZionAgentMessages(messages) {
       if (!messages.length) {
         return '<div class="zion-chat-empty">Ask about profiles, Learning Mode, MARL, skips, or performance.</div>';
@@ -23600,21 +23681,183 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         })
         .join('');
     }
-    function renderZionChangeRequests(list) {
-      if (!list.length) return '';
-      return '<div class="text-xs font-semibold text-slate-300 mb-1">Change Requests</div>' +
-        list.map((c) => (
-          '<div class="zion-change-request">' +
-            '<div class="font-semibold text-slate-200">' + escHtml(c.title) + '</div>' +
-            '<div class="mint text-xs mt-1"><strong>What</strong> ' + escHtml(c.what) + '</div>' +
-            '<div class="mint text-xs"><strong>Why</strong> ' + escHtml(c.why || '') + '</div>' +
-            '<div class="mint text-xs"><strong>Benefit</strong> ' + escHtml(c.expectedBenefit || '') + '</div>' +
-            '<div class="mt-2 flex gap-2">' +
-              '<button type="button" class="btn btn-primary text-xs" onclick="decideZionChangeRequest(\\'' + escHtml(c.id) + '\\', true)">Approve</button>' +
-              '<button type="button" class="btn btn-secondary text-xs" onclick="decideZionChangeRequest(\\'' + escHtml(c.id) + '\\', false)">Reject</button>' +
-            '</div>' +
+    function fmtZionIrWhen(ts) {
+      if (!ts) return '—';
+      try {
+        return new Date(ts).toLocaleString();
+      } catch (_) {
+        return String(ts);
+      }
+    }
+    function renderZionImprovementList(list) {
+      const el = document.getElementById('zion-improvement-list');
+      const status = document.getElementById('zion-improvement-list-status');
+      if (!el) return;
+      if (!list.length) {
+        el.innerHTML = '<div class="mint">No pending improvement requests.</div>';
+        if (status) status.textContent = '';
+        return;
+      }
+      el.innerHTML = list.map((c) => (
+        '<div class="zion-improvement-row">' +
+          '<div style="min-width:0;flex:1">' +
+            '<div class="zion-improvement-row-title">' + escHtml(c.title) + '</div>' +
+            '<div class="zion-improvement-row-meta">' + escHtml((c.what || '').slice(0, 140)) + (c.what && c.what.length > 140 ? '…' : '') + '</div>' +
+            '<div class="zion-improvement-row-meta">Queued ' + escHtml(fmtZionIrWhen(c.createdAt)) + '</div>' +
+          '</div>' +
+          '<button type="button" class="btn btn-primary text-xs" style="background:#b91c1c;border-color:#b91c1c;flex:0 0 auto" onclick="openZionImprovementPopup(\\'' + escAttr(c.id) + '\\')">Open</button>' +
+        '</div>'
+      )).join('');
+      if (status) status.textContent = list.length + ' pending';
+    }
+    function renderZionWidgetImprovements(list) {
+      const crs = document.getElementById('zion-agent-widget-crs');
+      if (!crs) return;
+      if (!list.length) {
+        crs.innerHTML = '';
+        return;
+      }
+      crs.innerHTML =
+        '<div class="text-xs font-semibold text-rose-300 mb-1">Improvement Requests</div>' +
+        list.slice(0, 4).map((c) => (
+          '<div class="zion-change-request" style="border-color:rgba(248,113,113,0.35)">' +
+            '<div class="font-semibold text-rose-100 text-xs">' + escHtml(c.title) + '</div>' +
+            '<div class="mt-2"><button type="button" class="btn btn-secondary text-xs" onclick="openZionImprovementPopup(\\'' + escAttr(c.id) + '\\')">Open</button></div>' +
           '</div>'
         )).join('');
+    }
+    function renderZionImprovementHistory(list) {
+      const el = document.getElementById('zion-improvement-history');
+      if (!el) return;
+      if (!list.length) {
+        el.innerHTML = '<div class="mint">No approved or denied improvement requests yet.</div>';
+        return;
+      }
+      el.innerHTML = list.map((c) => {
+        const denied = c.status === 'denied' || c.status === 'rejected';
+        const badge = denied ? 'Denied' : 'Approved';
+        const cls = denied ? 'is-denied' : 'is-approved';
+        return (
+          '<div class="zion-improvement-history-item ' + cls + '">' +
+            '<div class="flex items-start justify-between gap-2">' +
+              '<div class="font-semibold text-slate-200">' + escHtml(c.title) + '</div>' +
+              '<span class="badge status-badge text-xs">' + badge + '</span>' +
+            '</div>' +
+            '<div class="mint text-xs mt-1"><strong>What</strong> ' + escHtml(c.what || '') + '</div>' +
+            (c.why ? '<div class="mint text-xs"><strong>Why</strong> ' + escHtml(c.why) + '</div>' : '') +
+            (!denied && c.applyDetail ? '<div class="mint text-xs"><strong>Applied</strong> ' + escHtml(c.applyDetail) + '</div>' : '') +
+            '<div class="mint text-xs mt-1">' + escHtml(fmtZionIrWhen(c.decidedAt || c.createdAt)) + '</div>' +
+          '</div>'
+        );
+      }).join('');
+    }
+    function showZionIrNudgeChip(text) {
+      ['zion-agent-ir-chip', 'zion-agent-widget-ir-chip'].forEach((id) => {
+        const chip = document.getElementById(id);
+        if (!chip) return;
+        chip.textContent = text;
+        chip.classList.add('is-visible');
+        clearTimeout(chip._hideT);
+        chip._hideT = setTimeout(function () { chip.classList.remove('is-visible'); }, 8000);
+      });
+    }
+    function dismissZionImprovementPopup(id) {
+      const card = document.getElementById('zion-ir-card-' + id);
+      if (!card) return;
+      card.classList.add('is-leaving');
+      setTimeout(function () {
+        if (card.parentNode) card.parentNode.removeChild(card);
+        layoutZionOfferStack();
+      }, 220);
+    }
+    function openZionImprovementPopup(id, request) {
+      const find = function () {
+        if (request) return request;
+        return (_zionImprovementCache || []).find((c) => c.id === id) ||
+          (_zionImprovementHistoryCache || []).find((c) => c.id === id) ||
+          null;
+      };
+      let row = find();
+      if (!row) {
+        fetchJSON('/api/zion/agent/improvements/' + encodeURIComponent(id))
+          .then(function (res) {
+            if (res && res.request) openZionImprovementPopup(id, res.request);
+          })
+          .catch(function () {});
+        return;
+      }
+      try {
+        showTab('zion', document.querySelector('[data-tab="zion"]'));
+      } catch (_) {}
+      const existing = document.getElementById('zion-ir-card-' + row.id);
+      if (existing) {
+        existing.classList.remove('is-leaving');
+        layoutZionOfferStack(existing);
+        return;
+      }
+      const stack = ensureZionStack();
+      const pending = row.status === 'pending';
+      const card = document.createElement('div');
+      card.className = 'zion-improvement-popup';
+      card.id = 'zion-ir-card-' + row.id;
+      card.setAttribute('data-improvement-id', row.id);
+      card.style.pointerEvents = 'auto';
+      card.innerHTML =
+        '<div class="flex items-start justify-between gap-2">' +
+          '<div>' +
+            '<div class="zion-offer-kicker"><span aria-hidden="true">◈</span> Zion improvement request</div>' +
+            '<div class="zion-offer-title">' + escHtml(row.title) + '</div>' +
+          '</div>' +
+          '<button type="button" class="btn btn-secondary text-xs" data-zion-ir-close="' + escAttr(row.id) + '">Close</button>' +
+        '</div>' +
+        '<div class="zion-offer-body">' +
+          '<div><span class="mint">What</span> ' + escHtml(row.what || '—') + '</div>' +
+          '<div class="mt-1"><span class="mint">Why</span> ' + escHtml(row.why || '—') + '</div>' +
+          '<div class="mt-1"><span class="mint">Benefit</span> ' + escHtml(row.expectedBenefit || '—') + '</div>' +
+          '<div class="mt-1"><span class="mint">Target</span> ' + escHtml(row.target || 'global_gates') + '</div>' +
+          '<div class="mt-1"><span class="mint">Payload</span> <code class="text-xs">' + escHtml(JSON.stringify(row.payload || {})) + '</code></div>' +
+          '<div class="mt-1 mint text-xs">Queued ' + escHtml(fmtZionIrWhen(row.createdAt)) +
+            (pending ? '' : ' · ' + escHtml(String(row.status || ''))) +
+          '</div>' +
+        '</div>' +
+        (pending
+          ? '<div class="zion-offer-actions">' +
+              '<button type="button" class="btn btn-primary text-xs btn-approve-ir" data-zion-ir-approve="' + escAttr(row.id) + '">Approve</button>' +
+              '<button type="button" class="btn btn-secondary text-xs btn-deny-ir" data-zion-ir-deny="' + escAttr(row.id) + '">Deny</button>' +
+              '<button type="button" class="btn btn-secondary text-xs" data-zion-ir-close="' + escAttr(row.id) + '">Close</button>' +
+            '</div>' +
+            '<div class="mint text-xs mt-2">Approve applies the allowlisted change. Deny keeps a history log. Close leaves it pending.</div>'
+          : '<div class="mint text-xs mt-2">Already ' + escHtml(String(row.status)) +
+              (row.applyDetail ? ' — ' + escHtml(row.applyDetail) : '') + '</div>');
+      stack.appendChild(card);
+      layoutZionOfferStack(card);
+      card.addEventListener('click', function (ev) {
+        const t = ev.target;
+        if (!t || !t.getAttribute) return;
+        const closeId = t.getAttribute('data-zion-ir-close');
+        if (closeId) {
+          dismissZionImprovementPopup(closeId);
+          return;
+        }
+        const approveId = t.getAttribute('data-zion-ir-approve');
+        if (approveId) {
+          decideZionChangeRequest(approveId, true);
+          return;
+        }
+        const denyId = t.getAttribute('data-zion-ir-deny');
+        if (denyId) {
+          decideZionChangeRequest(denyId, false);
+        }
+      });
+    }
+    function showZionImprovementHistory() {
+      try {
+        showTab('config', document.querySelector('[data-settings-tab="config"]') || document.querySelector('[data-tab="config"]'));
+      } catch (_) {}
+      setTimeout(function () {
+        const el = document.getElementById('zion-improvement-history-card');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 120);
     }
     function renderZionAgentWidgetState() {
       const widget = document.getElementById('zion-agent-widget');
@@ -23653,23 +23896,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         chat.innerHTML = messageHtml;
         chat.scrollTop = chat.scrollHeight;
       });
-      const list = (data.changeRequests || []).filter((c) => c.status === 'pending');
-      const changeHtml = renderZionChangeRequests(list);
-      ['zion-agent-crs', 'zion-agent-widget-crs'].forEach((id) => {
-        const crs = document.getElementById(id);
-        if (crs) crs.innerHTML = changeHtml;
-      });
+      const list = Array.isArray(data.improvementRequests)
+        ? data.improvementRequests
+        : (data.changeRequests || []).filter((c) => c.status === 'pending');
+      const history = Array.isArray(data.improvementHistory)
+        ? data.improvementHistory
+        : (data.changeRequests || []).filter((c) => c.status === 'approved' || c.status === 'denied' || c.status === 'rejected');
+      _zionImprovementCache = list;
+      _zionImprovementHistoryCache = history;
+      renderZionImprovementList(list);
+      renderZionWidgetImprovements(list);
+      renderZionImprovementHistory(history);
       const assistantCount = msgs.filter((m) => m.role !== 'user').length;
       if (zionAgentWidgetState.initialized && !zionAgentWidgetState.open) {
         const additions = Math.max(0, assistantCount - zionAgentWidgetState.assistantCount) +
           Math.max(0, list.length - zionAgentWidgetState.pendingCount);
         if (additions) zionAgentWidgetState.unread = Math.min(99, zionAgentWidgetState.unread + additions);
       }
+      if (zionAgentWidgetState.initialized && list.length > zionAgentWidgetState.pendingCount) {
+        showZionIrNudgeChip('New improvement request ready to review');
+      }
       zionAgentWidgetState.initialized = true;
       zionAgentWidgetState.assistantCount = assistantCount;
       zionAgentWidgetState.pendingCount = list.length;
       const nudge = document.getElementById('zion-agent-nudge');
-      if (nudge) nudge.textContent = list.length ? list.length + ' Change Request' + (list.length === 1 ? '' : 's') + ' needs your review' : 'Zion has an update for you';
+      if (nudge) {
+        nudge.textContent = list.length
+          ? list.length + ' Improvement Request' + (list.length === 1 ? '' : 's') + ' needs your review'
+          : 'Zion has an update for you';
+      }
       renderZionAgentWidgetState();
     }
     async function loadZionAgent() {
@@ -23695,12 +23950,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!msg) return;
       if (inp) inp.value = '';
       try {
-        await fetchJSON('/api/zion/agent/chat', {
+        const out = await fetchJSON('/api/zion/agent/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: msg }),
         });
         await loadZionAgent();
+        if (out && out.changeRequest) {
+          showZionIrNudgeChip('New improvement request ready to review');
+        }
       } catch (err) {
         alert('Zion chat failed: ' + (err.message || err));
       }
@@ -23714,6 +23972,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (!out.ok) alert(out.detail || 'Decision failed');
         else if (approve && out.detail) console.log('[zion-agent]', out.detail);
+        dismissZionImprovementPopup(id);
         await loadZionAgent();
       } catch (err) {
         alert(err.message || String(err));
@@ -23724,6 +23983,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.sendZionAgentChat = sendZionAgentChat;
     window.decideZionChangeRequest = decideZionChangeRequest;
     window.toggleZionAgentWidget = toggleZionAgentWidget;
+    window.openZionImprovementPopup = openZionImprovementPopup;
+    window.showZionImprovementHistory = showZionImprovementHistory;
+    window.dismissZionImprovementPopup = dismissZionImprovementPopup;
 
     try {
       ensureZionStack();

@@ -497,6 +497,74 @@ export async function notifyZionTradeOffer(offer: {
   await sendMail({ subject, text, kind: 'zionTradeOffer' });
 }
 
+/**
+ * Zion Semi-Autonomous Improvement Request — always targets the configured
+ * notify email (default bondback2026@gmail.com). Uses sendCustomEmail so it
+ * is not gated by Zion trade-offer toggles.
+ */
+export async function notifyZionImprovementRequest(cr: {
+  id: string;
+  title: string;
+  what: string;
+  why?: string;
+  expectedBenefit?: string;
+  target?: string;
+  payload?: Record<string, unknown>;
+  createdAt?: number;
+}): Promise<{ ok: boolean; error?: string; provider?: string }> {
+  const { dashboardBaseUrl } =
+    require('./zion') as typeof import('./zion');
+  const DEFAULT_TO = 'bondback2026@gmail.com';
+  const to =
+    String(config.notifications?.email || '').trim() || DEFAULT_TO;
+  const link = `${dashboardBaseUrl()}/dashboard?tab=zion&improvement=${encodeURIComponent(cr.id)}`;
+  const payloadPreview =
+    cr.payload && Object.keys(cr.payload).length
+      ? JSON.stringify(cr.payload, null, 2)
+      : '(none)';
+  const subject = `[Zion] Improvement request — ${String(cr.title || 'Untitled').slice(0, 80)}`;
+  const text = [
+    `Zion queued a new Improvement Request. Review and Approve or Deny in the dashboard.`,
+    '',
+    `Title: ${cr.title}`,
+    `Id: ${cr.id}`,
+    cr.target ? `Target: ${cr.target}` : null,
+    '',
+    `What: ${cr.what}`,
+    cr.why ? `Why: ${cr.why}` : null,
+    cr.expectedBenefit ? `Expected benefit: ${cr.expectedBenefit}` : null,
+    '',
+    `Payload:`,
+    payloadPreview,
+    '',
+    `Open request: ${link}`,
+    `Time: ${new Date(cr.createdAt || Date.now()).toISOString()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const result = await sendCustomEmail({ to, subject, text });
+  if (result.ok) {
+    try {
+      const {
+        pushDashboardNotification,
+        emailKindLabel,
+      } = require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+      pushDashboardNotification({
+        kind: 'email',
+        title: emailKindLabel('zionImprovementRequest'),
+        body: subject,
+        emailKind: 'zionImprovementRequest',
+        href: `/dashboard?tab=zion&improvement=${encodeURIComponent(cr.id)}`,
+        meta: { improvementId: cr.id },
+      });
+    } catch {
+      /* optional */
+    }
+  }
+  return result;
+}
+
 /** Zion trade placed confirmation. */
 export async function notifyZionTradePlaced(
   offer: {

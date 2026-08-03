@@ -2772,14 +2772,23 @@ export function createServer(): express.Application {
 
   app.get('/api/zion/agent', (_req: Request, res: Response) => {
     try {
-      const { getZionAgentStatus, loadZionAgentState } =
-        require('./zionAgent') as typeof import('./zionAgent');
+      const {
+        getZionAgentStatus,
+        loadZionAgentState,
+        listPendingZionImprovements,
+        listZionImprovementHistory,
+      } = require('./zionAgent') as typeof import('./zionAgent');
       const st = loadZionAgentState();
+      const pending = listPendingZionImprovements();
+      const history = listZionImprovementHistory(40);
       res.json({
         ok: true,
         status: getZionAgentStatus(),
         messages: st.messages.slice(-40),
-        changeRequests: st.changeRequests.slice(0, 20),
+        changeRequests: st.changeRequests.slice(0, 40),
+        improvementRequests: pending,
+        improvementHistory: history,
+        pendingImprovementCount: pending.length,
       });
     } catch (err) {
       res.status(500).json({
@@ -2788,6 +2797,27 @@ export function createServer(): express.Application {
       });
     }
   });
+
+  app.get(
+    '/api/zion/agent/improvements/:id',
+    (req: Request, res: Response) => {
+      try {
+        const { getZionChangeRequest } =
+          require('./zionAgentStore') as typeof import('./zionAgentStore');
+        const row = getZionChangeRequest(String(req.params.id));
+        if (!row) {
+          res.status(404).json({ ok: false, error: 'Not found' });
+          return;
+        }
+        res.json({ ok: true, request: row });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
 
   app.post('/api/zion/agent/config', (req: Request, res: Response) => {
     try {

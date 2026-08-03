@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.109',
+    title: 'Zion personality + Improvement Requests',
+    sections: ['zion', 'alerts', 'knobs'],
+    items: [
+      'Zion speaks in a calm, friendly analyst voice: short greeting, direct answer, brief summary, and an optional follow-up — no more default raw Snapshot dumps (ask for raw/snapshot if you need it).',
+      'Local fallback and OpenAI prompts share the same style rules; profile off / missing data is stated simply.',
+      'Zion Improvement Requests: pending list under the agent, red review popup (Approve / Deny / Close), chat nudges, email to bondback2026@gmail.com, and approved/denied history on Config.',
+    ],
+  },
+  {
     version: '1.2.108',
     title: 'Zion chat, tooltip clamp, MARL collapsed',
     sections: ['zion', 'microbots', 'overview'],

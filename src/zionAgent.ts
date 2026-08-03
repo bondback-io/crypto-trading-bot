@@ -1,5 +1,5 @@
 /**
- * Zion Dashboard Agent — read-only analyst; Semi-Autonomous Change Requests only.
+ * Zion Dashboard Agent — read-only analyst; Semi-Autonomous Improvement Requests only.
  * Never writes micro-bot TP/SL or self-learning. Separated from MARL control.
  */
 
@@ -8,11 +8,49 @@ import {
   addZionChangeRequest,
   appendZionChat,
   decideZionChangeRequest,
+  listPendingZionImprovements,
+  listZionImprovementHistory,
   loadZionAgentState,
   saveZionAgentState,
   setZionSemiAutonomous,
   type ZionChangeRequest,
 } from './zionAgentStore';
+
+function notifyNewImprovementRequest(row: ZionChangeRequest): void {
+  void (async () => {
+    try {
+      const { notifyZionImprovementRequest } =
+        require('./emailNotifications') as typeof import('./emailNotifications');
+      await notifyZionImprovementRequest(row);
+    } catch (err) {
+      console.warn(
+        '[zion-agent] improvement email failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  })();
+  try {
+    const { pushDashboardNotification } =
+      require('./dashboardNotifications') as typeof import('./dashboardNotifications');
+    pushDashboardNotification({
+      kind: 'system',
+      title: 'Zion Improvement Request',
+      body: row.title,
+      href: `/dashboard?tab=zion&improvement=${encodeURIComponent(row.id)}`,
+      meta: { improvementId: row.id },
+    });
+  } catch {
+    /* optional */
+  }
+}
+
+function queueImprovementRequest(
+  cr: Omit<ZionChangeRequest, 'id' | 'createdAt' | 'status'>
+): ZionChangeRequest {
+  const row = addZionChangeRequest(cr);
+  notifyNewImprovementRequest(row);
+  return row;
+}
 
 export function getZionAgentStatus(): {
   mode: 'read_only' | 'semi_autonomous';
@@ -21,9 +59,11 @@ export function getZionAgentStatus(): {
   hasLlmKey: boolean;
   messageCount: number;
   pendingChangeRequests: number;
+  pendingImprovementRequests: number;
 } {
   const st = loadZionAgentState();
   const semi = st.semiAutonomous === true;
+  const pending = st.changeRequests.filter((c) => c.status === 'pending').length;
   return {
     mode: semi ? 'semi_autonomous' : 'read_only',
     label: semi ? 'Zion · Semi-Autonomous' : 'Zion · Read-Only',
@@ -33,8 +73,8 @@ export function getZionAgentStatus(): {
         (config as { zionAgent?: { apiKey?: string } }).zionAgent?.apiKey
     ),
     messageCount: st.messages.length,
-    pendingChangeRequests: st.changeRequests.filter((c) => c.status === 'pending')
-      .length,
+    pendingChangeRequests: pending,
+    pendingImprovementRequests: pending,
   };
 }
 
@@ -123,41 +163,315 @@ function buildContextPack(): string {
   return lines.join('\n').slice(0, 14_000);
 }
 
-function localAnalystReply(question: string, ctx: string): string {
-  const q = question.toLowerCase();
-  const bits: string[] = [];
-  bits.push('**(Local analysis mode — no OpenAI key)**');
-  bits.push('');
-  if (/marl|multi.?agent|coordination|influence/.test(q)) {
-    bits.push(
-      'MARL softly reorders lane scores and may trim size / skip pile-ins on low-MC tokens. It never edits micro-bot TP/SL or self-learning. Influence Strength is Low / Medium / High on the Micro Bots MARL card.'
-    );
+type ParsedBotFacts = {
+  mode?: string;
+  risk?: string;
+  learningMode?: string;
+  pumpFunOnly?: string;
+  requireTa?: string;
+  marl?: string;
+  profiles: Array<{ id: string; enabled: boolean; label: string }>;
+  open?: number;
+  closed?: number;
+  winRatePct?: string;
+  profitFactor?: string;
+  recentClosed: Array<{ symbol: string; profileId: string; pnl: number }>;
+  topSkips: Array<{ reason: string; count: string }>;
+};
+
+const PROFILE_LABELS: Record<string, string> = {
+  scalper: 'Scalper',
+  dip_buyer: 'Dip Buyer',
+  migration_sniper: 'Migration Sniper',
+  trend_rider: 'Trend Rider',
+  compounder: 'Compounder',
+  default: 'Default',
+};
+
+function profileLabel(id: string): string {
+  return PROFILE_LABELS[id] || id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function parseContextPack(ctx: string): ParsedBotFacts {
+  const facts: ParsedBotFacts = { profiles: [], recentClosed: [], topSkips: [] };
+  for (const raw of ctx.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    let m: RegExpMatchArray | null;
+    if ((m = line.match(/^Mode:\s*(.+)$/i))) facts.mode = m[1].trim();
+    else if ((m = line.match(/^Risk:\s*(.+)$/i))) facts.risk = m[1].trim();
+    else if ((m = line.match(/^Learning Mode:\s*(.+)$/i)))
+      facts.learningMode = m[1].trim();
+    else if ((m = line.match(/^Pump\.fun-only:\s*(.+)$/i)))
+      facts.pumpFunOnly = m[1].trim();
+    else if ((m = line.match(/^Require TA:\s*(.+)$/i)))
+      facts.requireTa = m[1].trim();
+    else if ((m = line.match(/^MARL:\s*(.+)$/i))) facts.marl = m[1].trim();
+    else if (
+      (m = line.match(
+        /^([a-z0-9_]+):\s*(ON|OFF)\s+lmOptIn=/i
+      ))
+    ) {
+      const id = m[1].toLowerCase();
+      facts.profiles.push({
+        id,
+        enabled: m[2].toUpperCase() === 'ON',
+        label: profileLabel(id),
+      });
+    } else if (
+      (m = line.match(
+        /^Open\s+(\d+)\s*·\s*Closed\s+(\d+)\s*·\s*WR\s+(.+?)%\s*·\s*PF\s+(.+)$/i
+      ))
+    ) {
+      facts.open = Number(m[1]);
+      facts.closed = Number(m[2]);
+      facts.winRatePct = m[3].trim();
+      facts.profitFactor = m[4].trim();
+    } else if (
+      (m = line.match(/^closed\s+(\S+)\s+(\S+)\s+pnl=([-\d.]+)/i))
+    ) {
+      facts.recentClosed.push({
+        symbol: m[1],
+        profileId: m[2],
+        pnl: Number(m[3]),
+      });
+    } else if ((m = line.match(/^([^:]+):\s*(\d+)$/)) && facts.topSkips) {
+      // skip lines after "Top skips:" — only count short reason lines
+      if (
+        !/^(Mode|Risk|Learning|Pump|Require|MARL|Smart|Open|Entries|agent|marl)/i.test(
+          m[1]
+        )
+      ) {
+        facts.topSkips.push({ reason: m[1].trim(), count: m[2] });
+      }
+    }
   }
-  if (/learning mode|loosest|looser/.test(q)) {
-    bits.push(
-      'Learning Mode softens entry floors and fairness; it does not bypass Require TA (except Scalper / specialty Trend exemptions), anti-rug, or disabled profiles.'
-    );
-  }
-  if (/trend|quiet|no trades|win/.test(q)) {
-    bits.push(
-      'Quiet Trend Rider was often Pump.fun-only vs Jupiter organic specialty. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/vol floors still apply.'
-    );
-  }
-  if (/scalper|ta setup/.test(q)) {
-    bits.push(
-      'Scalper does not require TA at the profile level; scanner Require TA is skipped when Scalper wins (or small-MC queue).'
-    );
-  }
-  bits.push('');
-  bits.push('### Snapshot');
-  bits.push('```');
-  bits.push(ctx.slice(0, 3500));
-  bits.push('```');
-  bits.push('');
-  bits.push(
-    'Ask about a profile, MARL decision, or skip reason for a tighter read. Semi-Autonomous mode can propose global gate Change Requests for your Approve/Reject — never auto-applied.'
+  return facts;
+}
+
+function findProfile(
+  facts: ParsedBotFacts,
+  ...aliases: string[]
+): ParsedBotFacts['profiles'][0] | undefined {
+  const keys = aliases.map((a) => a.toLowerCase().replace(/\s+/g, '_'));
+  return facts.profiles.find((p) =>
+    keys.some((k) => p.id === k || p.id.includes(k) || p.label.toLowerCase().includes(k.replace(/_/g, ' ')))
   );
-  return bits.join('\n');
+}
+
+function leadingWinsSummary(facts: ParsedBotFacts): string | null {
+  const wins = facts.recentClosed.filter((c) => c.pnl > 0);
+  if (!wins.length) return null;
+  const byProfile = new Map<string, number>();
+  for (const w of wins) {
+    const id = w.profileId === '?' ? 'unknown' : w.profileId;
+    byProfile.set(id, (byProfile.get(id) || 0) + 1);
+  }
+  const top = [...byProfile.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (!top) return null;
+  return profileLabel(top[0]);
+}
+
+function formatZionReply(parts: {
+  greeting?: string;
+  answer: string;
+  summary?: string;
+  followUp?: string;
+}): string {
+  return [parts.greeting, parts.answer, parts.summary, parts.followUp]
+    .filter((p) => p && String(p).trim())
+    .join('\n\n');
+}
+
+function wantsRawSnapshot(q: string): boolean {
+  return /raw|dump|full (?:config|snapshot|state)|show (?:me )?(?:the )?snapshot|context pack/i.test(
+    q
+  );
+}
+
+function localAnalystReply(
+  question: string,
+  ctx: string,
+  opts?: { isFirst?: boolean }
+): string {
+  const q = question.toLowerCase();
+  const facts = parseContextPack(ctx);
+  const greet = opts?.isFirst
+    ? 'Hey — happy to help.'
+    : 'Sure — happy to check.';
+
+  if (wantsRawSnapshot(q)) {
+    return formatZionReply({
+      greeting: 'Sure — here’s the raw snapshot you asked for.',
+      answer: '```\n' + ctx.slice(0, 3500) + '\n```',
+      followUp: 'Want me to translate any of that into plain language?',
+    });
+  }
+
+  const overallStats =
+    facts.closed != null
+      ? `Overall win rate sits around ${facts.winRatePct ?? '—'}% across ${facts.closed} closed trades` +
+        (facts.profitFactor && facts.profitFactor !== '—'
+          ? `, with a profit factor of ${facts.profitFactor}`
+          : '') +
+        '.'
+      : null;
+  const leadLane = leadingWinsSummary(facts);
+
+  // Profile-specific “how is X doing?”
+  const profileAsk = q.match(
+    /\b(scalper|dip\s*buyer|migration(?:\s*sniper)?|trend(?:\s*rider)?|compounder)\b/i
+  );
+  if (profileAsk && /how|doing|status|perform|enabled|on|off|running/.test(q)) {
+    const alias = profileAsk[1].toLowerCase().replace(/\s+/g, '_');
+    const mapAlias =
+      alias.startsWith('dip')
+        ? 'dip_buyer'
+        : alias.startsWith('migration')
+          ? 'migration_sniper'
+          : alias.startsWith('trend')
+            ? 'trend_rider'
+            : alias;
+    const p = findProfile(facts, mapAlias, alias);
+    if (!p) {
+      return formatZionReply({
+        greeting: greet,
+        answer: `I don’t have a clear read on ${profileLabel(mapAlias)} right now — profile data isn’t in the pack.`,
+        followUp: 'Want me to check overall performance or another lane instead?',
+      });
+    }
+    const answer = p.enabled
+      ? `${p.label} is currently switched on.`
+      : `${p.label} is currently switched off.`;
+    const summaryParts: string[] = [];
+    if (overallStats) {
+      summaryParts.push(
+        `Looking at the wider system, ${overallStats.replace(/\.$/, '')}` +
+          (leadLane ? `. Most of the recent positive results have come from ${leadLane}` : '') +
+          '.'
+      );
+    }
+    if (mapAlias === 'scalper') {
+      summaryParts.push(
+        'For what it’s worth: Scalper doesn’t need a TA setup at the profile level — scanner Require TA is skipped when Scalper wins the lane (or on the small-MC queue).'
+      );
+    }
+    return formatZionReply({
+      greeting: greet,
+      answer,
+      summary: summaryParts.join(' ') || undefined,
+      followUp: p.enabled
+        ? `Want me to dig into ${p.label}’s recent closes or top skip reasons?`
+        : `Want me to check ${p.label}’s past performance or see why it’s disabled?`,
+    });
+  }
+
+  if (/marl|multi.?agent|coordination|influence/.test(q)) {
+    return formatZionReply({
+      greeting: greet,
+      answer:
+        'MARL is soft coordination only — it can reorder lane priority, trim size confidence, and limit low-MC pile-ins. It never overwrites micro-bot TP/SL, timers, or self-learning.',
+      summary: facts.marl
+        ? `Right now it’s showing as: ${facts.marl}. Influence Strength (Low / Medium / High) lives on the Micro Bots MARL card.`
+        : 'You can toggle Influence Strength (Low / Medium / High) on the Micro Bots MARL card.',
+      followUp: 'Want a read on recent MARL decisions or low-MC limits?',
+    });
+  }
+
+  if (/learning mode|loosest|looser|stricter|middle/.test(q)) {
+    const lm = facts.learningMode || 'unknown';
+    return formatZionReply({
+      greeting: greet,
+      answer:
+        lm === 'OFF' || lm.toLowerCase() === 'off'
+          ? 'Learning Mode is currently off.'
+          : `Learning Mode is on (${lm}).`,
+      summary:
+        'It softens entry floors and fairness when enabled — it does not bypass Require TA (except Scalper / specialty Trend exemptions), anti-rug, or disabled profiles.',
+      followUp: 'Want me to check how it interacts with a specific profile?',
+    });
+  }
+
+  if (/trend\s*rider|quiet|why.*(no|few)\s*trades/.test(q)) {
+    const p = findProfile(facts, 'trend_rider');
+    const state = p
+      ? p.enabled
+        ? 'Trend Rider is switched on.'
+        : 'Trend Rider is switched off.'
+      : 'I don’t see Trend Rider clearly in the profile list.';
+    return formatZionReply({
+      greeting: greet,
+      answer: state,
+      summary:
+        'Quiet stretches were often Pump.fun-only blocking Jupiter organic specialty entries. Specialty Jupiter/KOL paths can bypass Pump.fun-only + Require TA, but lane MC/age/volume floors still apply.',
+      followUp: 'Want me to check Pump.fun-only / Require TA, or recent Trend closes?',
+    });
+  }
+
+  if (/scalper|ta setup/.test(q)) {
+    const p = findProfile(facts, 'scalper');
+    return formatZionReply({
+      greeting: greet,
+      answer: p
+        ? p.enabled
+          ? 'Scalper is currently switched on.'
+          : 'Scalper is currently switched off.'
+        : 'Scalper doesn’t require TA at the profile level.',
+      summary:
+        'Scanner Require TA is skipped when Scalper wins the lane (or on the small-MC queue), so a missing TA setup alone shouldn’t block it.',
+      followUp: 'Want overall performance, or why a specific Scalper skip happened?',
+    });
+  }
+
+  if (/win\s*rate|profit factor|performance|how.*(bot|system|we)|pnl|overall/.test(q)) {
+    return formatZionReply({
+      greeting: greet,
+      answer: overallStats
+        ? overallStats
+        : 'I don’t have closed-trade stats handy yet.',
+      summary:
+        [
+          facts.open != null ? `Open positions: ${facts.open}.` : null,
+          leadLane ? `Recent greens have leaned toward ${leadLane}.` : null,
+          facts.mode ? `Mode is ${facts.mode}; risk ${facts.risk || '—'}.` : null,
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined,
+      followUp: 'Want a breakdown by profile, or a look at top skip reasons?',
+    });
+  }
+
+  if (/skip|blocked|why.*(skip|reject)/.test(q)) {
+    const top = facts.topSkips.slice(0, 3);
+    return formatZionReply({
+      greeting: greet,
+      answer: top.length
+        ? `Top skip reasons right now: ${top.map((s) => `${s.reason} (${s.count})`).join(', ')}.`
+        : 'I don’t have skip counts available at the moment.',
+      summary: 'Skips are the bot declining an entry before open — usually filters, conviction, or risk gates.',
+      followUp: 'Want me to explain one of those reasons in plain language?',
+    });
+  }
+
+  // Generic helpful answer — no raw dump
+  const onProfiles = facts.profiles.filter((p) => p.enabled).map((p) => p.label);
+  const offProfiles = facts.profiles.filter((p) => !p.enabled).map((p) => p.label);
+  return formatZionReply({
+    greeting: opts?.isFirst ? 'Hey — happy to help.' : 'Sure.',
+    answer: overallStats
+      ? overallStats
+      : 'I can check profiles, Learning Mode, MARL, skips, or overall performance — just say which.',
+    summary: [
+      onProfiles.length ? `On: ${onProfiles.join(', ')}.` : null,
+      offProfiles.length ? `Off: ${offProfiles.join(', ')}.` : null,
+      facts.learningMode ? `Learning Mode: ${facts.learningMode}.` : null,
+      facts.marl ? `MARL: ${facts.marl}.` : null,
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined,
+    followUp:
+      'Want a tighter read on a specific profile, MARL, or a skip reason?',
+  });
 }
 
 async function callOpenAiChat(
@@ -188,7 +502,7 @@ async function callOpenAiChat(
       },
       body: JSON.stringify({
         model,
-        temperature: 0.3,
+        temperature: 0.45,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -214,16 +528,31 @@ async function callOpenAiChat(
 }
 
 const SYSTEM_PROMPT = `You are Zion, a read-only analyst for a Solana copy/scanner trading bot dashboard.
+
+Personality:
+- Calm, direct, and friendly-professional — like a helpful human trading analyst.
+- Slightly technical when needed, but always clear. Explain jargon in plain language.
+- Concise and easy to understand. Never dump raw logs, full config, or the context pack unless the user explicitly asks for raw/dump/snapshot/detail.
+
+Response structure (follow this):
+1. Short friendly greeting or acknowledgement when appropriate (especially first messages or starting a new analysis). Examples: "Hey,", "Hi,", "Sure,", "Here's a quick look…"
+2. Direct answer to the question first.
+3. Short clear summary with only the relevant facts.
+4. Offer one useful follow-up if relevant.
+
+If a profile is off or data is missing, say so simply.
+Never reply with large unbroken blocks of raw system state.
+
 Boundaries:
 - Never claim you changed micro-bot TP, SL, timers, or self-learning / delta learning.
 - Never instruct the user to bypass hard safety (anti-rug, risk halt) without warning.
 - You may explain MARL soft coordination but must not control MARL directly.
-- If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block:
+- If Semi-Autonomous is ON and a high-level global improvement is clear, you may append a single JSON block (not shown to the user as the main answer — keep the spoken reply natural, then append the block):
 \`\`\`zion-change-request
-{"title":"...","what":"...","why":"...","expectedBenefit":"...","target":"global_gates","payload":{"path":"filters.minConviction","value":55}}
+{"title":"...","what":"...","why":"...","expectedBenefit":"...","target":"global_gates","payload":{"path":"selective.minConvictionScore","value":55}}
 \`\`\`
 Only suggest allowlisted global paths (conviction floors, selective module toggles, dead-token / activity filters, marketScanner.requireTaSetup, marl.strength). Never payload profile exitRules.
-Be concise and practical. Use the provided context pack.`;
+Use the provided context pack as internal reference only — interpret it; do not paste it.`;
 
 function extractChangeRequest(
   text: string
@@ -325,40 +654,49 @@ export async function zionAgentChat(userText: string): Promise<{
   const text = String(userText || '').trim().slice(0, 4000);
   if (!text) {
     return {
-      reply: 'Ask a question about the bot, profiles, MARL, or performance.',
+      reply:
+        'Hey — ask me about a profile, Learning Mode, MARL, skips, or overall performance.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
     };
   }
+  const prior = loadZionAgentState();
+  const isFirst = prior.messages.length === 0;
   appendZionChat('user', text);
   const st = loadZionAgentState();
   const ctx = buildContextPack();
   const system =
     SYSTEM_PROMPT +
-    `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}\n\nContext pack:\n${ctx}`;
+    `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
+    (isFirst
+      ? '\nConversation cue: first exchange — greet briefly.'
+      : '') +
+    `\n\nContext pack (internal — do not paste unless user asks for raw/snapshot):\n${ctx}`;
   let reply =
-    (await callOpenAiChat(system, text)) || localAnalystReply(text, ctx);
+    (await callOpenAiChat(system, text)) ||
+    localAnalystReply(text, ctx, { isFirst });
   let changeRequest: ZionChangeRequest | null = null;
   if (st.semiAutonomous) {
     const extracted = extractChangeRequest(reply);
     if (extracted) {
-      changeRequest = addZionChangeRequest(extracted);
+      changeRequest = queueImprovementRequest(extracted);
       reply =
         reply.replace(/```zion-change-request[\s\S]*?```/i, '').trim() +
-        `\n\n_Change Request queued for your Approve/Reject: **${changeRequest.title}**_`;
+        `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**.`;
     } else if (
       /suggest|recommend|improve|raise conviction|tighten/i.test(text)
     ) {
       // Local heuristic CR when no LLM JSON
-      changeRequest = addZionChangeRequest({
+      changeRequest = queueImprovementRequest({
         title: 'Review global conviction floor',
-        what: 'Consider reviewing filters.minConviction vs recent skip/WR mix (manual approve required).',
+        what: 'Consider reviewing selective.minConvictionScore vs recent skip/WR mix (manual approve required).',
         why: 'User asked for improvement ideas while Semi-Autonomous is ON.',
-        expectedBenefit: 'Fewer low-quality opens if conviction is too loose; more fills if too tight.',
+        expectedBenefit:
+          'Fewer low-quality opens if conviction is too loose; more fills if too tight.',
         target: 'global_gates',
         payload: { path: 'selective.minConvictionScore', value: 55 },
       });
-      reply += `\n\n_Queued Change Request: **${changeRequest.title}** (Approve/Reject below)._`;
+      reply += `\n\nI’ve queued an improvement request for you to review: **${changeRequest.title}**. Approve or deny it below when you’re ready.`;
     }
   }
   appendZionChat('assistant', reply);
@@ -369,16 +707,29 @@ export function zionAgentDecideChangeRequest(
   id: string,
   approve: boolean
 ): { ok: boolean; detail: string; request: ZionChangeRequest | null } {
+  if (!approve) {
+    const row = decideZionChangeRequest(id, 'denied', 'user denied');
+    if (!row) return { ok: false, detail: 'Not found or not pending', request: null };
+    return {
+      ok: true,
+      detail: 'Denied — nothing applied (kept in history)',
+      request: row,
+    };
+  }
+  const st = loadZionAgentState();
+  const pending = st.changeRequests.find(
+    (c) => c.id === id && c.status === 'pending'
+  );
+  if (!pending) {
+    return { ok: false, detail: 'Not found or not pending', request: null };
+  }
+  const applied = applyZionChangePayload(pending.payload || {});
   const row = decideZionChangeRequest(
     id,
-    approve ? 'approved' : 'rejected',
-    approve ? 'user approved' : 'user rejected'
+    'approved',
+    applied.ok ? 'user approved' : `approved but apply failed: ${applied.detail}`,
+    applied.detail
   );
-  if (!row) return { ok: false, detail: 'Not found or not pending', request: null };
-  if (!approve) {
-    return { ok: true, detail: 'Rejected — nothing applied', request: row };
-  }
-  const applied = applyZionChangePayload(row.payload || {});
   return {
     ok: applied.ok,
     detail: applied.detail,
@@ -390,4 +741,6 @@ export {
   loadZionAgentState,
   setZionSemiAutonomous,
   saveZionAgentState,
+  listPendingZionImprovements,
+  listZionImprovementHistory,
 };

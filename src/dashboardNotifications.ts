@@ -208,6 +208,8 @@ export function emailKindLabel(kind: string): string {
       return 'Zion trade request email';
     case 'zionTradePlaced':
       return 'Zion trade placed email';
+    case 'zionImprovementRequest':
+      return 'Zion improvement request email';
     case 'test':
       return 'Test email';
     default:
