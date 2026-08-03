@@ -7748,6 +7748,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
               <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
             </div>
+            <label class="ctl-check mb-2" title="Soft lagging profile support">
+              <input type="checkbox" id="marl-lagging-support" onchange="saveMarlConfig()" />
+              <span>Lagging profile support <span class="tip" tabindex="0" data-tip="Soft only: nudges quiet/under-utilised micro-bots in lane ranking and low-MC sizing. Respects Influence Strength. Never forces trades past profile filters, ML, TP, or SL."></span></span>
+            </label>
+            <div id="marl-lagging" class="text-xs text-slate-400 mb-2"></div>
             <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
             <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
             <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
@@ -24069,24 +24074,68 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (win) win.value = m.lowMcWindowMin != null ? m.lowMcWindowMin : 10;
         const mx = document.getElementById('marl-max-agents');
         if (mx) mx.value = m.maxAgentsPerLowMc != null ? m.maxAgentsPerLowMc : 1;
+        const lagEn = document.getElementById('marl-lagging-support');
+        if (lagEn) lagEn.checked = m.laggingSupportEnabled !== false;
+        const lagMap = {};
+        (m.laggingProfiles || []).forEach((p) => {
+          if (p && p.profileId) lagMap[p.profileId] = p;
+        });
+        const lagEl = document.getElementById('marl-lagging');
+        if (lagEl) {
+          const lags = m.laggingProfiles || [];
+          lagEl.innerHTML = lags.length
+            ? '<div class="text-xs font-semibold text-slate-300 mb-1">Lagging support</div>' +
+              lags
+                .slice(0, 8)
+                .map((p) => {
+                  const st = escHtml(p.status || 'lagging');
+                  const reason = p.reason ? ' · ' + escHtml(p.reason) : '';
+                  return (
+                    '<div><span class="badge" style="font-size:10px;margin-right:4px">' +
+                    st +
+                    '</span><span style="color:#94a3b8">' +
+                    escHtml(p.profileId) +
+                    '</span>' +
+                    reason +
+                    '</div>'
+                  );
+                })
+                .join('')
+            : m.enabled && m.laggingSupportEnabled !== false
+              ? '<span class="mint">No lagging profiles right now</span>'
+              : '';
+        }
         const agentsEl = document.getElementById('marl-agents');
         if (agentsEl) {
           const agents = m.agents || [];
           agentsEl.innerHTML = agents.length
             ? agents
                 .slice(0, 10)
-                .map(
-                  (a) =>
+                .map((a) => {
+                  const lp = lagMap[a.profileId];
+                  const badge =
+                    lp &&
+                    (lp.status === 'lagging' ||
+                      lp.status === 'supported' ||
+                      lp.status === 'cooling')
+                      ? '<span class="badge" style="font-size:9px;margin-left:4px">' +
+                        escHtml(lp.status) +
+                        '</span>'
+                      : '';
+                  return (
                     '<div><span style="color:#94a3b8">' +
                     escHtml(a.profileId) +
-                    '</span> · w=' +
+                    '</span>' +
+                    badge +
+                    ' · w=' +
                     Number(a.weight || 0).toFixed(2) +
                     ' · n=' +
                     (a.trades || 0) +
                     ' · WR ' +
                     (a.winRatePct || 0) +
                     '%</div>'
-                )
+                  );
+                })
                 .join('')
             : '<span class="mint">No agent updates yet</span>';
         }
@@ -24120,6 +24169,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         lowMcUsd: Number(document.getElementById('marl-low-mc')?.value || 175000),
         lowMcWindowMin: Number(document.getElementById('marl-low-win')?.value || 10),
         maxAgentsPerLowMc: Number(document.getElementById('marl-max-agents')?.value || 1),
+        laggingSupportEnabled: document.getElementById('marl-lagging-support')
+          ? document.getElementById('marl-lagging-support').checked
+          : true,
       };
       await fetchJSON('/api/config/marl', {
         method: 'POST',

@@ -28,6 +28,16 @@ export interface MarlDecision {
   detail: string;
 }
 
+/** Soft lagging-profile support counters (see marlLaggingSupport.ts). */
+export interface MarlLaggingPersisted {
+  boost: number;
+  supportsGiven: number;
+  poorAfterSupport: number;
+  lastSupportAt: number;
+  coolingUntil: number;
+  status: 'normal' | 'lagging' | 'supported' | 'cooling';
+}
+
 export interface MarlPersistedState {
   version: 1;
   updatedAt: number;
@@ -35,6 +45,8 @@ export interface MarlPersistedState {
   decisions: MarlDecision[];
   /** Recent opens for low-MC coordination: mint → [{at, profileId}] */
   recentLowMcOpens: Record<string, Array<{ at: number; profileId: string }>>;
+  /** Optional per-profile lagging-support state */
+  lagging?: Record<string, MarlLaggingPersisted>;
 }
 
 const FILE = 'marl-state.json';
@@ -50,6 +62,7 @@ function emptyState(): MarlPersistedState {
     agents: {},
     decisions: [],
     recentLowMcOpens: {},
+    lagging: {},
   };
 }
 
@@ -72,6 +85,10 @@ export function loadMarlState(): MarlPersistedState {
         recentLowMcOpens:
           parsed.recentLowMcOpens && typeof parsed.recentLowMcOpens === 'object'
             ? parsed.recentLowMcOpens
+            : {},
+        lagging:
+          parsed.lagging && typeof parsed.lagging === 'object'
+            ? parsed.lagging
             : {},
       };
       return cache;

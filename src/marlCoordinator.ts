@@ -6,6 +6,15 @@
 
 import { config } from './config';
 import {
+  evaluateLaggingProfiles,
+  getLaggingProfile,
+  laggingScoreBoost,
+  listLaggingProfiles,
+  noteLaggingSupportApplied,
+  updateLaggingAfterTrade,
+  type LaggingProfileRuntime,
+} from './marlLaggingSupport';
+import {
   getMarlDecisions,
   getOrCreateAgent,
   getRecentLowMcOpens,
@@ -16,6 +25,16 @@ import {
   type MarlAgentState,
   type MarlStrength,
 } from './marlStore';
+
+export {
+  evaluateLaggingProfiles,
+  getLaggingProfile,
+  laggingScoreBoost,
+  listLaggingProfiles,
+  noteLaggingSupportApplied,
+  updateLaggingAfterTrade,
+};
+export type { LaggingProfileRuntime };
 
 export type MarlEventKind = 'entry_intent' | 'trade_result' | 'perf_snapshot';
 
@@ -54,6 +73,8 @@ export interface MarlConfig {
   lowMcUsd: number;
   lowMcWindowMin: number;
   maxAgentsPerLowMc: number;
+  /** Soft help for quiet/under-utilised profiles (default on when field unset). */
+  laggingSupportEnabled: boolean;
 }
 
 export const DEFAULT_MARL_CONFIG: MarlConfig = {
@@ -62,6 +83,7 @@ export const DEFAULT_MARL_CONFIG: MarlConfig = {
   lowMcUsd: 175_000,
   lowMcWindowMin: 10,
   maxAgentsPerLowMc: 1,
+  laggingSupportEnabled: true,
 };
 
 export function getMarlConfig(): MarlConfig {
@@ -79,6 +101,7 @@ export function getMarlConfig(): MarlConfig {
       1,
       Math.min(5, Math.round(Number(m?.maxAgentsPerLowMc) || 1))
     ),
+    laggingSupportEnabled: m?.laggingSupportEnabled !== false,
   };
 }
 
@@ -105,6 +128,10 @@ export function setMarlConfig(patch: Partial<MarlConfig>): MarlConfig {
       Number.isFinite(Number(patch.maxAgentsPerLowMc))
         ? Math.max(1, Math.min(5, Math.round(Number(patch.maxAgentsPerLowMc))))
         : cur.maxAgentsPerLowMc,
+    laggingSupportEnabled:
+      typeof patch.laggingSupportEnabled === 'boolean'
+        ? patch.laggingSupportEnabled
+        : cur.laggingSupportEnabled,
   };
   (config as { marl: MarlConfig }).marl = next;
   try {
@@ -115,7 +142,7 @@ export function setMarlConfig(patch: Partial<MarlConfig>): MarlConfig {
   }
   pushMarlDecision({
     kind: 'config',
-    detail: `MARL ${next.enabled ? 'ON' : 'OFF'} · strength ${next.strength} · lowMC $${Math.round(next.lowMcUsd)}`,
+    detail: `MARL ${next.enabled ? 'ON' : 'OFF'} · strength ${next.strength} · lowMC $${Math.round(next.lowMcUsd)} · lagSupport ${next.laggingSupportEnabled ? 'ON' : 'OFF'}`,
   });
   return next;
 }
@@ -200,7 +227,15 @@ export function evaluateMarlLowMcCoordination(input: {
   const best = bestId ? getOrCreateAgent(bestId) : null;
   if (best && me.weight + 0.05 < best.weight) {
     const scale = strengthScale(cfg.strength);
-    if (cfg.strength === 'high' || scale >= 1) {
+    const lagRt =
+      cfg.laggingSupportEnabled
+        ? getLaggingProfile(input.profileId)
+        : null;
+    const laggingSoft =
+      lagRt != null &&
+      (lagRt.status === 'lagging' || lagRt.status === 'supported');
+    // Lagging/supported: prefer size_down over hard skip at high strength
+    if ((cfg.strength === 'high' || scale >= 1) && !laggingSoft) {
       const detail = `MARL low-MC skip — prefer ${bestId} (w=${best.weight.toFixed(2)} > ${me.weight.toFixed(2)})`;
       pushMarlDecision({
         kind: 'low_mc_skip',
@@ -218,8 +253,18 @@ export function evaluateMarlLowMcCoordination(input: {
       });
       return { action: 'skip', sizeMult: 1, reason: detail };
     }
-    const sizeMult = cfg.strength === 'low' ? 0.7 : 0.55;
-    const detail = `MARL low-MC size×${sizeMult} — ${bestId} already in`;
+    const sizeMult = laggingSoft
+      ? cfg.strength === 'high'
+        ? 0.5
+        : cfg.strength === 'low'
+          ? 0.75
+          : 0.6
+      : cfg.strength === 'low'
+        ? 0.7
+        : 0.55;
+    const detail = laggingSoft
+      ? `MARL low-MC size×${sizeMult} — lagging ${input.profileId} soft route (${bestId} already in)`
+      : `MARL low-MC size×${sizeMult} — ${bestId} already in`;
     pushMarlDecision({
       kind: 'low_mc_size_down',
       mint: input.mint,
@@ -289,6 +334,13 @@ export function notifyMarlTradeClosed(input: {
     agent.weight = Math.max(-1, Math.min(1, agent.weight + delta));
   }
   saveMarlState();
+  if (cfg.laggingSupportEnabled) {
+    try {
+      updateLaggingAfterTrade(pid, reward);
+    } catch {
+      /* non-fatal */
+    }
+  }
   pushMarlDecision({
     kind: 'trade_result',
     mint: input.mint,
@@ -311,10 +363,12 @@ export function getMarlStatus(): {
   lowMcUsd: number;
   lowMcWindowMin: number;
   maxAgentsPerLowMc: number;
+  laggingSupportEnabled: boolean;
   label: string;
   agents: Array<
     MarlAgentState & { winRatePct: number; avgReward: number }
   >;
+  laggingProfiles: LaggingProfileRuntime[];
   decisions: ReturnType<typeof getMarlDecisions>;
 } {
   const cfg = getMarlConfig();
@@ -330,15 +384,26 @@ export function getMarlStatus(): {
           : 0,
     }))
     .sort((a, b) => b.weight - a.weight || b.trades - a.trades);
+  let laggingProfiles: LaggingProfileRuntime[] = [];
+  if (cfg.enabled && cfg.laggingSupportEnabled) {
+    try {
+      laggingProfiles = listLaggingProfiles();
+    } catch {
+      laggingProfiles = [];
+    }
+  }
   return {
     ...cfg,
     label: cfg.enabled
       ? `MARL · ${cfg.strength}`
       : 'MARL OFF',
     agents,
+    laggingProfiles,
     decisions: getMarlDecisions(40),
   };
 }
+
+const LAGGING_LEAPFROG_GAP = 5;
 
 /** Apply MARL ranking bump to lane results in-place (passed lanes only). */
 export function applyMarlLaneRanking<
@@ -353,6 +418,61 @@ export function applyMarlLaneRanking<
     row.score = Math.round((row.score + delta) * 10) / 10;
     row.reason = `${row.reason} · ${note}`;
   }
+
+  if (cfg.laggingSupportEnabled) {
+    const scale = strengthScale(cfg.strength);
+    const lagBoosts = new Map<string, { delta: number; note: string }>();
+    for (const row of results) {
+      if (!row.passed) continue;
+      const { delta, note } = laggingScoreBoost(row.profileId, scale);
+      if (delta > 0 && note) lagBoosts.set(row.profileId, { delta, note });
+    }
+    const nonLagMax = Math.max(
+      -Infinity,
+      ...results
+        .filter((r) => r.passed && !lagBoosts.has(r.profileId))
+        .map((r) => r.score)
+    );
+    const hasStrongNonLag = Number.isFinite(nonLagMax);
+    const applied: string[] = [];
+    for (const row of results) {
+      if (!row.passed) continue;
+      const boost = lagBoosts.get(row.profileId);
+      if (!boost) continue;
+      let delta = boost.delta;
+      // Cap leapfrog: lagging stays behind / closes gap modestly vs clear winner
+      if (hasStrongNonLag && nonLagMax - row.score > LAGGING_LEAPFROG_GAP) {
+        const maxClose = Math.max(0, nonLagMax - row.score - 0.5);
+        delta = Math.min(delta, Math.min(maxClose, 2.5));
+      } else if (hasStrongNonLag && row.score + delta > nonLagMax) {
+        delta = Math.max(0, Math.min(delta, nonLagMax - row.score + 0.3));
+      }
+      delta = Math.round(delta * 10) / 10;
+      if (delta < 0.15) continue;
+      row.score = Math.round((row.score + delta) * 10) / 10;
+      row.reason = `${row.reason} · MARL lag+${delta.toFixed(1)}`;
+      applied.push(`${row.profileId}+${delta.toFixed(1)}`);
+      try {
+        noteLaggingSupportApplied(row.profileId, '', { log: false });
+      } catch {
+        /* non-fatal */
+      }
+    }
+    if (applied.length) {
+      const detail = `Lane lag boost · ${applied.join(', ')} (scale ${scale.toFixed(2)})`;
+      try {
+        pushMarlDecision({
+          kind: 'lagging_support',
+          profileId: applied[0]?.split('+')[0],
+          detail: detail.slice(0, 280),
+        });
+        console.log(`[marl] lagging-support: ${detail}`);
+      } catch {
+        /* */
+      }
+    }
+  }
+
   results.sort(
     (a, b) =>
       Number(b.passed) - Number(a.passed) || b.score - a.score
@@ -427,6 +547,29 @@ export function buildMarlLaneFightThoughts(
     thoughts.push(
       `${verb} ${row.name} ${sign}${row.delta.toFixed(1)} (w=${row.weight.toFixed(2)})`
     );
+  }
+
+  if (cfg.laggingSupportEnabled) {
+    try {
+      const lagNames: string[] = [];
+      for (const row of passed) {
+        const rt = getLaggingProfile(row.id);
+        if (
+          rt &&
+          (rt.status === 'lagging' || rt.status === 'supported') &&
+          rt.boost >= 0.12
+        ) {
+          lagNames.push(row.name);
+        }
+      }
+      if (lagNames.length) {
+        thoughts.push(
+          `Lagging support soft-boost: ${lagNames.slice(0, 3).join(', ')}`
+        );
+      }
+    } catch {
+      /* */
+    }
   }
 
   const after = [...passed].sort((a, b) => b.score - a.score);

@@ -142,6 +142,7 @@ export interface PersistedBotSettings {
     lowMcUsd?: number;
     lowMcWindowMin?: number;
     maxAgentsPerLowMc?: number;
+    laggingSupportEnabled?: boolean;
   };
   zionAgent?: {
     semiAutonomous?: boolean;

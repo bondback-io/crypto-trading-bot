@@ -2234,6 +2234,7 @@ export const config: BotConfig = {
     lowMcUsd: 175_000,
     lowMcWindowMin: 10,
     maxAgentsPerLowMc: 1,
+    laggingSupportEnabled: true,
   },
 
   zionAgent: {
@@ -2726,6 +2727,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       lowMcUsd: 175_000,
       lowMcWindowMin: 10,
       maxAgentsPerLowMc: 1,
+      laggingSupportEnabled: true,
     }) as PersistedBotSettings['marl'],
     zionAgent: {
       semiAutonomous: config.zionAgent?.semiAutonomous === true,
@@ -3448,6 +3450,7 @@ function applySettingsSnapshot(
         1,
         Math.min(5, Math.round(Number(s.maxAgentsPerLowMc) || 1))
       ),
+      laggingSupportEnabled: s.laggingSupportEnabled !== false,
     };
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {

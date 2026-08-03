@@ -2760,6 +2760,10 @@ export function createServer(): express.Application {
           body.maxAgentsPerLowMc != null
             ? Number(body.maxAgentsPerLowMc)
             : undefined,
+        laggingSupportEnabled:
+          typeof body.laggingSupportEnabled === 'boolean'
+            ? body.laggingSupportEnabled
+            : undefined,
       });
       res.json({ ok: true, marl: getMarlStatus() });
     } catch (err) {

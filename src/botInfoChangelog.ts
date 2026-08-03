@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.127',
+    title: 'MARL Lagging Profile Support',
+    sections: ['microbots', 'learning'],
+    items: [
+      'MARL can soft-boost quiet or under-utilised micro-bot profiles in lane ranking and prefer size-down over hard skip on low-MC pile-ins — never forces past filters, ML, TP, or SL.',
+      'Micro Bots MARL card adds a Lagging profile support checkbox, lagging/supported/cooling badges, and a short status list; toggle defaults on when MARL is enabled.',
+    ],
+  },
+  {
     version: '1.2.126',
     title: 'Zion Clear chat with archive',
     sections: ['zion'],
