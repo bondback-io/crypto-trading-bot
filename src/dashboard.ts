@@ -6067,7 +6067,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
         <div class="section-title" style="margin-bottom:0.35rem">Lane fight log</div>
-        <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail. Shows winner, opened vs no-buy after cascade.</p>
+        <p class="text-xs text-slate-500 mb-1">Smart Bot micro-lane pass/fail. Shows winner, opened vs no-buy after cascade. When Multi-Agent RL is on, MARL thoughts show score boosts, reorder, and size/low-MC suggestions.</p>
         <div class="tp-decisions lane-decisions" id="lane-decisions-overview"><span class="mint">No lane fights yet</span></div>
       </div>
 
@@ -7599,7 +7599,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="tp-learning-panel" class="mt-3 hidden"></div>
         <div class="mt-3">
           <div class="text-xs font-semibold text-slate-300 mb-1">Lane fight log</div>
-          <p class="text-xs text-slate-500 mb-1">Same live log as Overview — useful while tuning profiles.</p>
+          <p class="text-xs text-slate-500 mb-1">Same live log as Overview — useful while tuning profiles. When Multi-Agent RL is on, MARL thoughts show score boosts, reorder, and size/low-MC suggestions.</p>
           <div class="tp-decisions lane-decisions" id="lane-decisions"><span class="mint">No lane fights yet</span></div>
         </div>
       </div>
@@ -12541,6 +12541,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const skipLine = d.cascadeSkipReason
               ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
               : '';
+            const marlThoughts = (d.marl && Array.isArray(d.marl.thoughts) ? d.marl.thoughts : []).filter(Boolean);
+            const marlLine = marlThoughts.length
+              ? '<div class="tp-decision-why" style="color:#5eead4" title="' + escHtml(marlThoughts.join(' · ')) + '">' +
+                  '<span style="font-weight:700;color:#2dd4bf">MARL</span> · ' +
+                  marlThoughts.slice(0, 5).map(function (t) { return escHtml(String(t).slice(0, 120)); }).join(' · ') +
+                '</div>'
+              : '';
             const tokenMeta =
               escHtml(d.symbol || '') +
               fmtLaneTokenActions(d.mint) +
@@ -12551,6 +12558,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<span class="tp-decision-meta">' + tokenMeta + '</span>' +
                 '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
                 '<div class="tp-decision-why">' + lanes + '</div>' +
+                marlLine +
                 skipLine +
               '</div>'
             );

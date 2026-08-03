@@ -22,6 +22,12 @@ export interface LaneOutcomeRecord {
   symbol: string;
   winnerId: string | null;
   lanes: LaneOutcomeLaneSnap[];
+  /** Soft MARL team-manager thoughts for this fight (optional). */
+  marl?: {
+    enabled: boolean;
+    strength?: string;
+    thoughts: string[];
+  };
   /** true when cascade stamped a buy; false when cascade skipped */
   opened?: boolean;
   /** Why cascade rejected after a lane win (compact) */
@@ -113,6 +119,11 @@ export function recordLaneFightOpen(input: {
   symbol: string;
   winnerId: string | null;
   lanes: LaneOutcomeLaneSnap[];
+  marl?: {
+    enabled: boolean;
+    strength?: string;
+    thoughts: string[];
+  };
 }): void {
   load();
   ring.push({
@@ -122,9 +133,36 @@ export function recordLaneFightOpen(input: {
     symbol: input.symbol,
     winnerId: input.winnerId,
     lanes: input.lanes,
+    marl: input.marl,
   });
   trimRing();
   persist();
+}
+
+/** Append a MARL thought to the newest open fight for this mint. */
+export function appendLaneFightMarlThought(input: {
+  mint: string;
+  thought: string;
+}): void {
+  load();
+  const mint = String(input.mint || '').trim();
+  const thought = String(input.thought || '').trim().slice(0, 200);
+  if (!mint || !thought) return;
+  for (let i = ring.length - 1; i >= 0; i--) {
+    const row = ring[i];
+    if (row.mint !== mint) continue;
+    if (row.closedAt != null) continue;
+    if (!row.marl) row.marl = { enabled: true, thoughts: [] };
+    row.marl.enabled = true;
+    if (!row.marl.thoughts.includes(thought)) {
+      row.marl.thoughts.push(thought);
+      if (row.marl.thoughts.length > 10) {
+        row.marl.thoughts = row.marl.thoughts.slice(-10);
+      }
+    }
+    persist();
+    return;
+  }
 }
 
 /**

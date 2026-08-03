@@ -2666,6 +2666,7 @@ async function executeSignalBuy(
       marketCapUsd: mcNum,
     });
     if (low.action === 'skip') {
+      appendMarlThoughtToLaneFight(signal.mint, low.reason);
       finishBuy(buy.mint, false);
       markLaneFightCascadeResult(signal.mint, false, low.reason);
       annotateActivityFeed(buy.mint, buy.signature, {
@@ -2679,6 +2680,11 @@ async function executeSignalBuy(
       markScannerCooldown(signal.mint, false);
       return;
     }
+    if (low.reason && low.action !== 'allow') {
+      appendMarlThoughtToLaneFight(signal.mint, low.reason);
+    } else if (low.action === 'allow' && low.reason.includes('low-MC slot')) {
+      appendMarlThoughtToLaneFight(signal.mint, low.reason);
+    }
     const sizedScan = applyTradeProfileSizing(
       buyOpts.solAmount ?? sizing.sizeSol,
       erScan
@@ -2691,10 +2697,15 @@ async function executeSignalBuy(
     if (marlSz.mult !== 1) {
       solAmt *= marlSz.mult;
       sizeExtra += ` · ${marlSz.note}`;
+      appendMarlThoughtToLaneFight(
+        signal.mint,
+        `Size confidence ×${marlSz.mult.toFixed(2)} for ${profileAssignment.name || profileAssignment.profileId}`
+      );
     }
     if (low.action === 'size_down' && low.sizeMult < 1) {
       solAmt *= low.sizeMult;
       sizeExtra += ` · ${low.reason}`;
+      appendMarlThoughtToLaneFight(signal.mint, low.reason);
     }
     buyOpts.solAmount = clampToMaxAllowedTradeSol(
       solAmt,
@@ -4316,6 +4327,11 @@ function isSoftPassableEarlyReason(reason: string): boolean {
 
 /** Compact lane fight log for learning / soak (ring buffer). */
 const LANE_DECISION_LOG_MAX = 200;
+type LaneFightMarlSnap = {
+  enabled: boolean;
+  strength?: string;
+  thoughts: string[];
+};
 const laneDecisionLog: Array<{
   at: number;
   mint: string;
@@ -4323,6 +4339,7 @@ const laneDecisionLog: Array<{
   winnerId: string | null;
   opened?: boolean;
   cascadeSkipReason?: string;
+  marl?: LaneFightMarlSnap;
   lanes: Array<{
     id: string;
     name: string;
@@ -4337,11 +4354,34 @@ function logLaneFightDecisions(
   lanes: TradeProfileLaneResult[]
 ): void {
   const winner = pickWinningTradeProfileLane(lanes);
+  let marl: LaneFightMarlSnap | undefined;
+  try {
+    const { buildMarlLaneFightThoughts } =
+      require('./marlCoordinator') as typeof import('./marlCoordinator');
+    const built = buildMarlLaneFightThoughts(
+      lanes.map((l) => ({
+        profileId: l.profileId,
+        name: l.name,
+        passed: l.passed,
+        score: l.score,
+      }))
+    );
+    if (built.enabled && built.thoughts.length) {
+      marl = {
+        enabled: true,
+        strength: built.strength,
+        thoughts: built.thoughts,
+      };
+    }
+  } catch {
+    /* optional */
+  }
   const entry = {
     at: Date.now(),
     mint: signal.mint,
     symbol: signal.symbol,
     winnerId: winner?.profileId ?? null,
+    marl,
     lanes: lanes.map((l) => ({
       id: l.profileId,
       name: l.name,
@@ -4361,9 +4401,38 @@ function logLaneFightDecisions(
       symbol: entry.symbol,
       winnerId: entry.winnerId,
       lanes: entry.lanes,
+      marl: entry.marl,
     });
   } catch {
     /* non-fatal */
+  }
+}
+
+/** Append a MARL thought to the latest fight row for this mint (size / low-MC). */
+export function appendMarlThoughtToLaneFight(
+  mint: string,
+  line: string
+): void {
+  const text = String(line || '').trim().slice(0, 200);
+  if (!mint || !text) return;
+  const hit = laneDecisionLog.find((e) => e.mint === mint);
+  if (!hit) return;
+  if (!hit.marl) {
+    hit.marl = { enabled: true, thoughts: [] };
+  }
+  hit.marl.enabled = true;
+  if (!hit.marl.thoughts.includes(text)) {
+    hit.marl.thoughts.push(text);
+    if (hit.marl.thoughts.length > 10) {
+      hit.marl.thoughts = hit.marl.thoughts.slice(-10);
+    }
+  }
+  try {
+    const { appendLaneFightMarlThought } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    appendLaneFightMarlThought({ mint, thought: text });
+  } catch {
+    /* optional */
   }
 }
 

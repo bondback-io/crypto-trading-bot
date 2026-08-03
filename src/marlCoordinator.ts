@@ -359,3 +359,112 @@ export function applyMarlLaneRanking<
   );
   return results;
 }
+
+export type MarlLaneFightThoughts = {
+  enabled: boolean;
+  strength?: MarlStrength;
+  thoughts: string[];
+};
+
+/**
+ * Human-readable team-manager narrative for a lane fight (after MARL ranking).
+ * Pure / observational — does not mutate lanes or TP/SL.
+ */
+export function buildMarlLaneFightThoughts(
+  lanes: Array<{
+    profileId?: string;
+    id?: string;
+    name?: string;
+    passed: boolean;
+    score: number;
+  }>
+): MarlLaneFightThoughts {
+  const cfg = getMarlConfig();
+  if (!cfg.enabled) {
+    return { enabled: false, thoughts: [] };
+  }
+  const strengthLabel =
+    cfg.strength === 'low'
+      ? 'Low'
+      : cfg.strength === 'high'
+        ? 'High'
+        : 'Medium';
+  const thoughts: string[] = [
+    `Strength ${strengthLabel} · team manager ON`,
+  ];
+
+  type Row = {
+    id: string;
+    name: string;
+    score: number;
+    base: number;
+    delta: number;
+    weight: number;
+  };
+  const passed: Row[] = [];
+  for (const lane of lanes) {
+    if (!lane.passed) continue;
+    const id = String(lane.profileId || lane.id || '');
+    if (!id) continue;
+    const { delta } = marlLaneScoreDelta(id);
+    const score = Number(lane.score) || 0;
+    const base = Math.round((score - delta) * 10) / 10;
+    const agent = getOrCreateAgent(id);
+    passed.push({
+      id,
+      name: String(lane.name || id),
+      score,
+      base,
+      delta,
+      weight: agent.weight,
+    });
+  }
+
+  for (const row of passed) {
+    if (Math.abs(row.delta) < 0.05) continue;
+    const sign = row.delta >= 0 ? '+' : '';
+    const verb = row.delta >= 0 ? 'Boost' : 'Trim';
+    thoughts.push(
+      `${verb} ${row.name} ${sign}${row.delta.toFixed(1)} (w=${row.weight.toFixed(2)})`
+    );
+  }
+
+  const after = [...passed].sort((a, b) => b.score - a.score);
+  if (after.length) {
+    thoughts.push(
+      `Priority after MARL: ${after
+        .slice(0, 4)
+        .map((r) => r.name)
+        .join(' > ')}`
+    );
+  }
+
+  const before = [...passed].sort((a, b) => b.base - a.base);
+  const beforeWinner = before[0];
+  const afterWinner = after[0];
+  if (
+    beforeWinner &&
+    afterWinner &&
+    beforeWinner.id !== afterWinner.id
+  ) {
+    thoughts.push(
+      `Suggestion: prefer ${afterWinner.name} over ${beforeWinner.name} this fight`
+    );
+  }
+
+  try {
+    pushMarlDecision({
+      kind: 'lane_rank',
+      profileId: afterWinner?.id,
+      detail: thoughts.slice(0, 4).join(' · ').slice(0, 280),
+    });
+  } catch {
+    /* non-fatal */
+  }
+
+  return {
+    enabled: true,
+    strength: cfg.strength,
+    thoughts: thoughts.slice(0, 8),
+  };
+}
