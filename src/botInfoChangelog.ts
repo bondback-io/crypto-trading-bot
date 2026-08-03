@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.111',
+    title: 'MARL thoughts in lane fight log',
+    sections: ['microbots', 'overview'],
+    items: [
+      'When Multi-Agent RL is on, each Lane fight log row shows MARL team-manager thoughts: score boosts/trims, priority after reorder, and preference suggestions.',
+      'Scanner size confidence and low-MC skip/size-down notes append to the same fight row so you can see how MARL steers micro-bots without changing TP/SL.',
+    ],
+  },
+  {
     version: '1.2.110',
     title: 'Zion free multi-provider LLM',
     sections: ['zion'],
