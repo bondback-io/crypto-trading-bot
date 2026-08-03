@@ -25587,12 +25587,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const qs = (() => { try { return new URLSearchParams(window.location.search); } catch (_) { return null; } })();
     const qsTab = normalizeTabName(qs && qs.get('tab'));
     const qsOffer = qs && qs.get('offer');
+    const qsImprovement = qs && qs.get('improvement');
     const rememberedTab = normalizeTabName(savedTab);
     const startTab = tabNames.includes(qsTab) ? qsTab : (tabNames.includes(rememberedTab) ? rememberedTab : 'overview');
     showTab(startTab, document.querySelector('[data-tab="' + startTab + '"]'));
     try { updateBotInfoSectionBadges(); } catch (_) {}
     if (qsOffer) {
       setTimeout(function () { openZionOfferModal(qsOffer); }, 400);
+    }
+    if (qsImprovement) {
+      setTimeout(function () {
+        if (typeof openZionImprovementPopup === 'function') openZionImprovementPopup(qsImprovement);
+      }, 500);
     }
   </script>
 
