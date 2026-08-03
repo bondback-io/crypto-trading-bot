@@ -46,8 +46,10 @@ import {
 } from './soakMetrics';
 import { isStrategyEnabledForProfile } from './strategies';
 import {
+  evaluateMigrationEventExit,
   evaluateScalpProtectiveTrail,
   evaluateShortTermExit,
+  getShortTermParams,
   seedShortTermPosition,
   shortTermExitLogTag,
   type ShortTermStrategyId,
@@ -239,6 +241,12 @@ export interface Position {
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
+  /** Migration Event lane: volume baseline at entry (USD) */
+  migVolumeBaselineUsd?: number | null;
+  /** Migration Event lane: wall-clock when migration first observed */
+  migDetectedAtMs?: number | null;
+  /** Migration Event lane: mark price when migration first observed */
+  migMarkSol?: number | null;
 }
 
 /** DexScreener short-window activity for dead-market exits */
@@ -1205,6 +1213,17 @@ export class PaperTrader {
       seedShortTermPosition
     );
 
+    if (position.shortTermStrategyId === 'migration_event') {
+      const act = this.marketActivityCache.get(position.mint);
+      if (act?.volumeH1Usd != null && act.volumeH1Usd > 0) {
+        position.migVolumeBaselineUsd = act.volumeH1Usd;
+      }
+      if (input.entrySource === 'migration') {
+        position.migDetectedAtMs = position.openedAt;
+        position.migMarkSol = position.entryPriceSol;
+      }
+    }
+
     if (
       !position.scalpMode &&
       position.convictionScore != null &&
@@ -1555,6 +1574,17 @@ export class PaperTrader {
       },
       seedShortTermPosition
     );
+
+    if (position.shortTermStrategyId === 'migration_event') {
+      const act = this.marketActivityCache.get(position.mint);
+      if (act?.volumeH1Usd != null && act.volumeH1Usd > 0) {
+        position.migVolumeBaselineUsd = act.volumeH1Usd;
+      }
+      if (meta?.entrySource === 'migration') {
+        position.migDetectedAtMs = position.openedAt;
+        position.migMarkSol = position.entryPriceSol;
+      }
+    }
 
     // Low-conviction: tighten trail at open
     if (
@@ -2024,7 +2054,8 @@ export class PaperTrader {
       | 'scalp_tp'
       | 'scalp_sl'
       | 'scalp_timer'
-      | 'scalp_signal_fail';
+      | 'scalp_signal_fail'
+      | 'mig_first_spike';
     reason: string;
     markPnlPct: number;
     stillOpen: boolean;
@@ -2201,20 +2232,67 @@ export class PaperTrader {
 
     // —— Quick Scalper / short-term timed exits (before tiered profit) ——
     if (position.scalpMode && position.scalpDeadlineMs != null) {
-      const scalpAction = evaluateShortTermExit({
-        strategyId:
-          (position.shortTermStrategyId as ShortTermStrategyId) || 'quick_scalper',
-        entryPriceSol: position.entryPriceSol,
-        currentPriceSol: markPrice,
-        highWaterMarkSol: position.highWaterMarkSol,
-        openedAt: position.openedAt,
-        nowMs,
-        deadlineMs: position.scalpDeadlineMs,
-        hardDeadlineMs: position.scalpHardDeadlineMs,
-        tpPct: effectivePositionTakeProfitPct(position),
-        slPct: position.scalpSlPct ?? position.stopLossPct,
-        momentumFailDropPct: position.scalpMomentumFailDropPct,
-      });
+      let scalpAction;
+      if (position.shortTermStrategyId === 'migration_event') {
+        let migrated = position.migDetectedAtMs != null;
+        let migAt = position.migDetectedAtMs ?? null;
+        try {
+          const { getMigrationEvent } =
+            require('./migrationListener') as typeof import('./migrationListener');
+          const ev = getMigrationEvent(position.mint);
+          if (ev?.detectedAt) {
+            migrated = true;
+            if (position.migDetectedAtMs == null) {
+              position.migDetectedAtMs = ev.detectedAt;
+              position.migMarkSol = markPrice;
+            }
+            migAt = position.migDetectedAtMs;
+          }
+        } catch {
+          /* optional */
+        }
+        if (!migrated && position.entrySource === 'migration') {
+          migrated = true;
+          if (position.migDetectedAtMs == null) {
+            position.migDetectedAtMs = position.openedAt;
+            position.migMarkSol = position.entryPriceSol;
+          }
+          migAt = position.migDetectedAtMs;
+        }
+        const params = getShortTermParams('migration_event');
+        scalpAction = evaluateMigrationEventExit({
+          entryPriceSol: position.entryPriceSol,
+          currentPriceSol: markPrice,
+          openedAt: position.openedAt,
+          nowMs,
+          deadlineMs: position.scalpDeadlineMs,
+          hardDeadlineMs: position.scalpHardDeadlineMs,
+          slPct: position.scalpSlPct ?? position.stopLossPct,
+          migrated,
+          migratedAtMs: migAt,
+          migrateMarkSol: position.migMarkSol,
+          volumeUsd: this.marketActivityCache.get(position.mint)?.volumeH1Usd ?? null,
+          volumeBaselineUsd: position.migVolumeBaselineUsd ?? null,
+          spikePct: params.spikePct,
+          volumeMult: params.volumeMult,
+          maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+        });
+      } else {
+        scalpAction = evaluateShortTermExit({
+          strategyId:
+            (position.shortTermStrategyId as ShortTermStrategyId) || 'quick_scalper',
+          entryPriceSol: position.entryPriceSol,
+          currentPriceSol: markPrice,
+          highWaterMarkSol: position.highWaterMarkSol,
+          openedAt: position.openedAt,
+          nowMs,
+          deadlineMs: position.scalpDeadlineMs,
+          hardDeadlineMs: position.scalpHardDeadlineMs,
+          tpPct: effectivePositionTakeProfitPct(position),
+          slPct: position.scalpSlPct ?? position.stopLossPct,
+          momentumFailDropPct: position.scalpMomentumFailDropPct,
+        });
+      }
       // Post-Run Dip: clear Fib/S zone break + volume invalidation
       if (
         scalpAction.type === 'none' &&
@@ -2939,21 +3017,69 @@ export class PaperTrader {
 
       // Quick Scalper / short-term timed exits (before tiered profit)
       if (position.scalpMode && position.scalpDeadlineMs != null) {
-        const scalpAction = evaluateShortTermExit({
-          strategyId:
-            (position.shortTermStrategyId as ShortTermStrategyId) ||
-            'quick_scalper',
-          entryPriceSol: position.entryPriceSol,
-          currentPriceSol: currentPrice,
-          highWaterMarkSol: position.highWaterMarkSol,
-          openedAt: position.openedAt,
-          nowMs: Date.now(),
-          deadlineMs: position.scalpDeadlineMs,
-          hardDeadlineMs: position.scalpHardDeadlineMs,
-          tpPct: effectivePositionTakeProfitPct(position),
-          slPct: position.scalpSlPct ?? position.stopLossPct,
-          momentumFailDropPct: position.scalpMomentumFailDropPct,
-        });
+        const nowMs = Date.now();
+        let scalpAction;
+        if (position.shortTermStrategyId === 'migration_event') {
+          let migrated = position.migDetectedAtMs != null;
+          let migAt = position.migDetectedAtMs ?? null;
+          try {
+            const { getMigrationEvent } =
+              require('./migrationListener') as typeof import('./migrationListener');
+            const ev = getMigrationEvent(position.mint);
+            if (ev?.detectedAt) {
+              migrated = true;
+              if (position.migDetectedAtMs == null) {
+                position.migDetectedAtMs = ev.detectedAt;
+                position.migMarkSol = currentPrice;
+              }
+              migAt = position.migDetectedAtMs;
+            }
+          } catch {
+            /* optional */
+          }
+          if (!migrated && position.entrySource === 'migration') {
+            migrated = true;
+            if (position.migDetectedAtMs == null) {
+              position.migDetectedAtMs = position.openedAt;
+              position.migMarkSol = position.entryPriceSol;
+            }
+            migAt = position.migDetectedAtMs;
+          }
+          const params = getShortTermParams('migration_event');
+          scalpAction = evaluateMigrationEventExit({
+            entryPriceSol: position.entryPriceSol,
+            currentPriceSol: currentPrice,
+            openedAt: position.openedAt,
+            nowMs,
+            deadlineMs: position.scalpDeadlineMs,
+            hardDeadlineMs: position.scalpHardDeadlineMs,
+            slPct: position.scalpSlPct ?? position.stopLossPct,
+            migrated,
+            migratedAtMs: migAt,
+            migrateMarkSol: position.migMarkSol,
+            volumeUsd: this.marketActivityCache.get(position.mint)?.volumeH1Usd ?? null,
+            volumeBaselineUsd: position.migVolumeBaselineUsd ?? null,
+            spikePct: params.spikePct,
+            volumeMult: params.volumeMult,
+            maxHoldAfterMigrateMs: params.maxHoldAfterMigrateMs,
+          });
+        } else {
+          scalpAction = evaluateShortTermExit({
+            strategyId:
+              (position.shortTermStrategyId as ShortTermStrategyId) ||
+              'quick_scalper',
+            entryPriceSol: position.entryPriceSol,
+            currentPriceSol: currentPrice,
+            highWaterMarkSol: position.highWaterMarkSol,
+            openedAt: position.openedAt,
+            nowMs,
+            deadlineMs: position.scalpDeadlineMs,
+            hardDeadlineMs: position.scalpHardDeadlineMs,
+            tpPct: effectivePositionTakeProfitPct(position),
+            slPct: position.scalpSlPct ?? position.stopLossPct,
+            momentumFailDropPct: position.scalpMomentumFailDropPct,
+          });
+        }
         if (
           scalpAction.type === 'none' &&
           position.shortTermStrategyId === 'post_run_dip'

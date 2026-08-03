@@ -6985,10 +6985,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
               <span class="setup-watch-title">Graduation watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch from ~80% curve · fire at ≥95% until complete · post-grad handoff within Post-grad max (s). Keeps volatile MC (only drops if &lt;$8k for 5m). Triggered rows stay visible briefly; expired/invalidated breadcrumb ~5m. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch ~80% · arm on quality · fire/enter from ~90% (no TA). Hold through migration · exit on first spike + volume. Keeps volatile MC (only drops if &lt;$8k for 5m). Unwatch cools 15m.</p>
             </div>
             <span id="grad-watch-count" class="setup-watch-count mint">—</span>
           </div>
+          <div id="mig-sniper-funnel" class="mint text-[11px] text-slate-400 mb-1">MS funnel: —</div>
           <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
         </div>
         <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
@@ -9925,7 +9926,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         elite_convergence:
           '<p class="mint text-xs mb-2">Requires multi-wallet clusters, blocks single-wallet entries, raises conviction/quality floors. (60%+ Win Rate Profile uses cluster ≥3 / quality ≥65 / conviction ≥75.)</p>',
         migration_sniper:
-          '<p class="mint text-xs mb-2">Pre-grad <strong>≥95%</strong> curve sniper (watch from ~80%, fires until complete). TP 15–25% · tight SL · seconds-scale hold. Post-grad handoff ≤120s when curve completes so armed watches still open.</p>',
+          '<p class="mint text-xs mb-2">Event lane: arm in the pre-mig sweet spot (~80–90%), enter <strong>without TA</strong>, hold through migration, exit on <strong>first spike + volume</strong>. SL ~15% · post-mig max ~4m. Soft conviction/buy-pressure on grad-watch. Conservative size (0.7×).</p>',
         profit_protected:
           '<p class="mint text-xs mb-2">Forces tiered profit + aggressive dead-market exit; raises quality/conviction floors.</p>',
         quick_scalper:
@@ -10870,6 +10871,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (gradCount || gradList) {
         const gw = data.gradWatch || { active: 0, entries: [] };
         if (gradCount) gradCount.textContent = (gw.active || 0) + ' active';
+        const funnelEl = document.getElementById('mig-sniper-funnel');
+        if (funnelEl) {
+          const f = data.migSniperFunnel || {};
+          funnelEl.textContent =
+            'MS funnel: watch ' +
+            (f.watchAdmit || 0) +
+            ' · armed ' +
+            (f.armed || 0) +
+            ' · triggered ' +
+            (f.triggered || 0) +
+            ' · fire≠arm ' +
+            (f.fireMissNotArmed || 0) +
+            ' · handoff fail ' +
+            (f.handoffFail || 0) +
+            ' · expired ' +
+            (f.expired || 0) +
+            ' · invalid ' +
+            (f.invalidated || 0) +
+            ' · live W/A ' +
+            (f.activeWatching || 0) +
+            '/' +
+            (f.activeArmed || 0);
+        }
         if (gradList) {
           const rows = (gw.entries || [])
             .filter(function (e) {
@@ -12027,11 +12051,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const color = profileColorFor(p.id) || p.color || '#94a3b8';
           const paused = !p.enabled && p.id !== 'default';
           const perfPausedHint =
-            paused && (p.id === 'migration_sniper' || p.id === 'reversal_scalper')
+            paused && p.id === 'reversal_scalper'
               ? ' title="Paused by default after performance review (v1.2.91) — not caused by Learning Mode. Toggle on to resume."'
               : '';
           const pausedBadge = paused
-            ? p.id === 'migration_sniper' || p.id === 'reversal_scalper'
+            ? p.id === 'reversal_scalper'
               ? '<span class="tp-override-badge" style="background:#7f1d1d;color:#fca5a5"' +
                 perfPausedHint +
                 '>Paused (perf)</span>'

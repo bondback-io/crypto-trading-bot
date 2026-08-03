@@ -76,8 +76,8 @@ export function classifyExitKey(reason: string | undefined | null): {
   ) {
     return { key: 'sl', label: 'Hard Stop-Loss' };
   }
-  if (/max\s*profit/i.test(r)) {
-    return { key: 'tp', label: 'Max Profit' };
+  if (/first\s*spike|mig_first_spike|migration\s*event/i.test(low)) {
+    return { key: 'tp', label: 'Mig First Spike' };
   }
   if (/take-?profit|full\s*tp|\btp\b/i.test(low) && !/partial/i.test(low)) {
     return { key: 'tp', label: 'Full TP' };

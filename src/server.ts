@@ -2897,11 +2897,12 @@ export function createServer(): express.Application {
     try {
       const { getDipSetupWatchStatus } =
         require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-      const { getMigrationGradWatchStatus } =
+      const { getMigrationGradWatchStatus, getMigrationSniperFunnel } =
         require('./migrationGradWatch') as typeof import('./migrationGradWatch');
       res.json({
         dipWatch: getDipSetupWatchStatus(16),
         gradWatch: getMigrationGradWatchStatus(16),
+        migSniperFunnel: getMigrationSniperFunnel(),
       });
     } catch (err) {
       res.status(500).json({
@@ -2909,6 +2910,7 @@ export function createServer(): express.Application {
         error: err instanceof Error ? err.message : String(err),
         dipWatch: { active: 0, entries: [] },
         gradWatch: { active: 0, entries: [] },
+        migSniperFunnel: null,
       });
     }
   });

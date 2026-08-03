@@ -34,6 +34,7 @@ export type ShortTermStrategyId =
   | 'micro_scalper'
   | 'momentum_burst'
   | 'post_migration_scalp'
+  | 'migration_event'
   | 'reversal_scalp'
   | 'post_run_dip';
 
@@ -73,6 +74,13 @@ export const SHORT_TERM_STRATEGIES: readonly ShortTermStrategyDefinition[] = [
     description:
       'Fresh migrations with meaningful volume only. Profile timer ~1.5–7 min, TP 25–45%, trail after modest green. Timer is a backstop.',
     frequencyNote: 'Migration-only · short post-grad holds',
+  },
+  {
+    id: 'migration_event',
+    label: 'Migration Event',
+    description:
+      'Pre-mig sweet-spot entry: hold through graduation, exit on first price spike + volume step-up. Wider SL; post-mig max hold is the backstop.',
+    frequencyNote: 'Event holds · minutes around migration',
   },
   {
     id: 'reversal_scalp',
@@ -149,7 +157,8 @@ export type ShortTermExitKind =
   | 'scalp_tp'
   | 'scalp_sl'
   | 'scalp_timer'
-  | 'scalp_signal_fail';
+  | 'scalp_signal_fail'
+  | 'mig_first_spike';
 
 export type ShortTermAction =
   | { type: 'none' }
@@ -192,6 +201,12 @@ export interface ShortTermParams {
   minDropFromPeakPct?: number;
   minConvictionScore?: number;
   requireMigration?: boolean;
+  /** Post-migration spike % vs entry (migration_event) */
+  spikePct?: number;
+  /** Volume multiple vs baseline to confirm spike (migration_event) */
+  volumeMult?: number;
+  /** Max hold after migration detected (migration_event) */
+  maxHoldAfterMigrateMs?: number;
 }
 
 const LABEL: Record<ShortTermStrategyId, string> = {
@@ -199,6 +214,7 @@ const LABEL: Record<ShortTermStrategyId, string> = {
   micro_scalper: 'Micro-Scalper',
   momentum_burst: 'Momentum Burst',
   post_migration_scalp: 'Post-Migration Scalp',
+  migration_event: 'Migration Event',
   reversal_scalp: 'Reversal Scalp',
   post_run_dip: 'Post-Run Dip',
 };
@@ -303,6 +319,21 @@ export function getShortTermParams(id: ShortTermStrategyId): ShortTermParams {
         requireMigration: true,
       };
     }
+    case 'migration_event': {
+      // Hold through migrate → first spike + volume. Defaults match MS catalog.
+      return {
+        id,
+        label: LABEL[id],
+        takeProfitPct: 12,
+        stopLossPct: -15,
+        minVolumeUsd: 0,
+        minBuyPressureUsd: 0,
+        maxHoldMs: 12 * 60_000,
+        spikePct: 10,
+        volumeMult: 1.45,
+        maxHoldAfterMigrateMs: 4 * 60_000,
+      };
+    }
     case 'reversal_scalp': {
       const c = config.reversalScalp ?? DEFAULT_REVERSAL_SCALP;
       const r = ranges.reversal_scalp;
@@ -396,6 +427,9 @@ export function isShortTermStrategyActive(id: ShortTermStrategyId): boolean {
       return config.momentumBurst?.enabled === true || isToggleOn(id);
     case 'post_migration_scalp':
       return config.postMigrationScalp?.enabled === true || isToggleOn(id);
+    case 'migration_event':
+      // Always available when Migration Sniper profile seeds it (no separate toggle).
+      return true;
     case 'reversal_scalp':
       return config.reversalScalp?.enabled === true || isToggleOn(id);
     case 'post_run_dip':
@@ -637,6 +671,137 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
   return seedShortTermPosition('quick_scalper', openedAtMs);
 }
 
+/** View for Migration Sniper event-lane exit (hold → spike + volume). */
+export interface MigrationEventExitView {
+  entryPriceSol: number;
+  currentPriceSol: number;
+  openedAt: number;
+  nowMs: number;
+  /** Absolute safety deadline (total hold) */
+  deadlineMs: number;
+  hardDeadlineMs?: number;
+  slPct: number;
+  /** True once bonding curve complete / migration listener saw mint */
+  migrated: boolean;
+  migratedAtMs: number | null;
+  /** Mark price when migration first detected (optional) */
+  migrateMarkSol?: number | null;
+  /** Recent / H1 volume USD */
+  volumeUsd?: number | null;
+  /** Volume baseline stamped at entry */
+  volumeBaselineUsd?: number | null;
+  spikePct?: number;
+  volumeMult?: number;
+  maxHoldAfterMigrateMs?: number;
+}
+
+/**
+ * Migration Event exit: SL always → hold pre-mig → first spike+volume post-mig
+ * → post-mig max hold → total safety timer.
+ */
+export function evaluateMigrationEventExit(
+  view: MigrationEventExitView
+): ShortTermAction {
+  if (!(view.entryPriceSol > 0) || !(view.currentPriceSol > 0)) {
+    return { type: 'none' };
+  }
+  const label = LABEL.migration_event;
+  const pnlPct =
+    ((view.currentPriceSol - view.entryPriceSol) / view.entryPriceSol) * 100;
+  const ageMs = Math.max(0, view.nowMs - view.openedAt);
+  const SL_GRACE_MS = 15_000;
+  const SL_GRACE_RUG_PCT = -35;
+  const slPct = view.slPct > 0 ? -Math.abs(view.slPct) : view.slPct;
+  const spikePct =
+    view.spikePct != null && view.spikePct > 0 ? view.spikePct : 10;
+  const volumeMult =
+    view.volumeMult != null && view.volumeMult > 1 ? view.volumeMult : 1.45;
+  const maxAfter =
+    view.maxHoldAfterMigrateMs != null && view.maxHoldAfterMigrateMs > 0
+      ? view.maxHoldAfterMigrateMs
+      : 4 * 60_000;
+  const hardDeadlineMs =
+    view.hardDeadlineMs != null && view.hardDeadlineMs > view.deadlineMs
+      ? view.hardDeadlineMs
+      : view.deadlineMs;
+
+  if (pnlPct <= slPct) {
+    const inGrace = ageMs < SL_GRACE_MS && pnlPct > SL_GRACE_RUG_PCT;
+    if (!inGrace) {
+      return {
+        type: 'full',
+        exitKind: 'scalp_sl',
+        reason: `${label} SL ${slPct}% (mark ${pnlPct.toFixed(1)}%)`,
+      };
+    }
+  }
+
+  if (!view.migrated) {
+    // Pre-migration: hold (no spike exit yet). Total safety still applies.
+    if (view.nowMs >= hardDeadlineMs) {
+      const heldSec = Math.max(0, Math.round(ageMs / 1000));
+      return {
+        type: 'full',
+        exitKind: 'scalp_timer',
+        reason: `${label} safety timer ${heldSec}s — never migrated (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+      };
+    }
+    return { type: 'none' };
+  }
+
+  const migAt = view.migratedAtMs != null ? view.migratedAtMs : view.openedAt;
+  const sinceMig = Math.max(0, view.nowMs - migAt);
+  const migrateMark =
+    view.migrateMarkSol != null && view.migrateMarkSol > 0
+      ? view.migrateMarkSol
+      : view.entryPriceSol;
+  const spikeFromEntry = pnlPct >= spikePct;
+  const spikeFromMig =
+    ((view.currentPriceSol - migrateMark) / migrateMark) * 100 >= spikePct;
+  const priceSpike = spikeFromEntry || spikeFromMig;
+
+  const vol = view.volumeUsd;
+  const base = view.volumeBaselineUsd;
+  const volKnown =
+    vol != null &&
+    Number.isFinite(vol) &&
+    vol > 0 &&
+    base != null &&
+    Number.isFinite(base) &&
+    base > 0;
+  const volumeOk = !volKnown || vol! >= base! * volumeMult;
+  // If volume unknown for >20s post-mig, allow price-only spike
+  const volumeBypass = !volKnown && sinceMig >= 20_000;
+
+  if (priceSpike && (volumeOk || volumeBypass)) {
+    return {
+      type: 'full',
+      exitKind: 'mig_first_spike',
+      reason: `${label} first spike +${pnlPct.toFixed(1)}%${volKnown ? ` · vol $${Math.round(vol!)}` : ''}`,
+    };
+  }
+
+  if (sinceMig >= maxAfter) {
+    const heldSec = Math.max(0, Math.round(sinceMig / 1000));
+    return {
+      type: 'full',
+      exitKind: 'scalp_timer',
+      reason: `${label} post-mig max hold ${heldSec}s (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+    };
+  }
+
+  if (view.nowMs >= hardDeadlineMs) {
+    const heldSec = Math.max(0, Math.round(ageMs / 1000));
+    return {
+      type: 'full',
+      exitKind: 'scalp_timer',
+      reason: `${label} safety timer ${heldSec}s (mark ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`,
+    };
+  }
+
+  return { type: 'none' };
+}
+
 /**
  * Evaluate short-term exit: SL → TP → momentum fail → underwater stall → timer.
  * Stall only cuts slightly-red marks with no pop (never green marks / fee traps).
@@ -648,8 +813,23 @@ export function seedQuickScalperPosition(openedAtMs: number): ShortTermSeedField
  * Soft timer: Momentum Burst / post-migration defer any green or near-flat
  * mark (pnl ≥ −2%) until hardDeadline; other strategies still require a
  * meaningful soft-green pop (~25% of TP) before deferring to trail.
+ *
+ * For Migration Sniper event lane use evaluateMigrationEventExit instead.
  */
 export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction {
+  if (view.strategyId === 'migration_event') {
+    return evaluateMigrationEventExit({
+      entryPriceSol: view.entryPriceSol,
+      currentPriceSol: view.currentPriceSol,
+      openedAt: view.openedAt,
+      nowMs: view.nowMs,
+      deadlineMs: view.deadlineMs,
+      hardDeadlineMs: view.hardDeadlineMs,
+      slPct: view.slPct,
+      migrated: false,
+      migratedAtMs: null,
+    });
+  }
   if (!(view.entryPriceSol > 0) || !(view.currentPriceSol > 0)) {
     return { type: 'none' };
   }
@@ -833,6 +1013,8 @@ export function shortTermExitLogTag(exitKind: ShortTermExitKind): string {
       return 'SCALP_TIMER';
     case 'scalp_signal_fail':
       return 'SCALP_SIGNAL_FAIL';
+    case 'mig_first_spike':
+      return 'MIG_FIRST_SPIKE';
     default:
       return 'SCALP_EXIT';
   }

@@ -4473,6 +4473,17 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  // Migration Sniper event lane retune (sweet-spot → hold → spike exit).
+  try {
+    const { migrateMigSniperEventLaneV1 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateMigSniperEventLaneV1();
+  } catch (err) {
+    console.warn(
+      '[config] migSniperEventLane_v1 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
   // Widen Trend Rider age/MC floors when still on old 2h / $100k bake.
   try {
     const { migrateTrendEntryWidenV1105 } =

@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.117',
+    title: 'Migration Sniper event lane (hold → spike exit)',
+    sections: ['microbots', 'scanners'],
+    items: [
+      'Migration Sniper retuned as an event lane: no TA affinity; watch ~80% → arm → enter from ~90% when armed; hold through migration; exit on first spike + volume (reason MIG_FIRST_SPIKE).',
+      'Replaces the old 8–45s post_migration_scalp micro-timer with wider SL (~15%), post-mig max hold ~4m, and total safety ~8–12m; conservative size 0.7× / 0.15 SOL cap; default ON via migSniperEventLane_v1.',
+      'MS funnel strip on Graduation watchlist: watch / armed / triggered / fire≠arm / handoff fail / expired / invalid tallies for diagnosis.',
+      'Relaxed MS conviction/wallet floors and soft buy-pressure on grad-watch; chart/pattern modules off for this profile.',
+    ],
+  },
+  {
     version: '1.2.116',
     title: 'MARL placement, Zion chat persist, Isaac voice',
     sections: ['microbots', 'zion'],

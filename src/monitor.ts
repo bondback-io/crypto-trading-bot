@@ -531,7 +531,11 @@ function resolveScalpBuyFlag(signal: {
   console.log(
     `[scalp] ENTRY strategy=${resolved.id}${suite} — ${resolved.reason}`
   );
-  logStrategyDecision(resolved.id, 'take', resolved.reason);
+  logStrategyDecision(
+    resolved.id === 'migration_event' ? 'migration_sniper' : resolved.id,
+    'take',
+    resolved.reason
+  );
   return { scalpMode: true, shortTermStrategyId: resolved.id };
 }
 
@@ -5069,10 +5073,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       conviction.reasons.some((r) =>
         /chart|pattern|bull.?flag|fib|technical/i.test(r)
       );
-    // Grad-watch / dip-watch handoffs are synthetic — soft-pass chart/vol hard vetoes
-    if (setupWatchHandoff && chartOrVolHard && !socialHit && !sessionHit) {
+    // Grad-watch / dip-watch handoffs are synthetic — soft-pass chart/vol hard vetoes.
+    // Migration Sniper event lane also soft-passes low conviction (still blocks social/session).
+    const migEventHandoff =
+      setupWatchHandoff &&
+      (signal.candidateTradeProfileId === 'migration_sniper' ||
+        /grad-watch/i.test(reasonBitsEarly));
+    if (
+      setupWatchHandoff &&
+      ((chartOrVolHard && !socialHit && !sessionHit) ||
+        (migEventHandoff && !socialHit && !sessionHit))
+    ) {
       console.log(
-        `[monitor] Setup-watch soft-pass conviction chart/vol for ${signal.symbol}: ${detail}`
+        `[monitor] Setup-watch soft-pass conviction${migEventHandoff ? ' (MS event)' : ' chart/vol'} for ${signal.symbol}: ${detail}`
       );
     } else {
     logStrategyDecision(

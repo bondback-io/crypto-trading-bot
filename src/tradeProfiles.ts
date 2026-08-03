@@ -708,34 +708,34 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '🚀',
     color: TRADE_PROFILE_COLORS.migration_sniper,
     description:
-      'Pre-grad pump.fun sniper: watch ~80% curve, fire at 95–98% for a quick migration scalp.',
+      'Event lane: arm in the pre-mig sweet spot (~80–90% curve), enter without TA, hold through migration, exit on first spike + volume.',
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
-      'Enter at 95–98% bonding curve (watch from ~80%)',
-      'TP 15–25% · SL 6–10% · hard timer 8–45s',
-      'In/out scalp — catch the graduation pump',
-      'Quality: growing holders + buy pressure',
-      'Fallback: ultra-fresh post-grad ≤30s if curve window missed',
+      'Watch ~80% curve · fire / enter from ~90% when armed (no TA setup)',
+      'Hold through migration · exit on first spike + volume step-up',
+      'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
+      'Soft quality: holders / buy pressure / volume (not chart patterns)',
+      'Fallback: ultra-fresh post-grad ≤120s if curve window missed',
       'MC cap ~$200k — not mature DEX tokens',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
-    /** Paused by default — live book showed ~10% WR / PF ~0.1 (re-enable after retune). */
-    defaultEnabled: false,
+    /** Enabled with conservative size — event lane (not the old 8–45s scalp). */
+    defaultEnabled: true,
     match: {
       preferMigration: true,
       preferSmartMoney: true,
       preferHolderGrowth: true,
-      primaryPatternIds: ['bull_flag'],
+      primaryPatternIds: [],
       patternSensitivity: 'high',
-      minVolumeH1Usd: 1_500,
-      minBuyPressureUsd: 400,
-      minConviction: 28,
-      minWalletQuality: 30,
+      minVolumeH1Usd: 1_000,
+      minBuyPressureUsd: 200,
+      minConviction: 22,
+      minWalletQuality: 25,
       minWalletCount: 1,
       requireCluster: false,
-      minCurveProgressPct: 95,
+      minCurveProgressPct: 90,
       maxCurveProgressPct: 99,
       gradWatchPct: 80,
       maxMigrationAgeSec: 120,
@@ -743,19 +743,20 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       maxMarketCapUsd: 200_000,
     },
     exitRules: {
-      takeProfitPctMin: 15,
-      takeProfitPctMax: 25,
-      stopLossPctMin: 6,
-      stopLossPctMax: 10,
-      trailingStopPct: 8,
-      trailingActivationProfit: 10,
-      hardTimeLimitSecMin: 8,
-      hardTimeLimitSecMax: 45,
-      momentumFailDropPct: 8,
+      takeProfitPctMin: 10,
+      takeProfitPctMax: 18,
+      stopLossPctMin: 12,
+      stopLossPctMax: 18,
+      trailingStopPct: 10,
+      trailingActivationProfit: 12,
+      hardTimeLimitSecMin: 480,
+      hardTimeLimitSecMax: 720,
+      momentumFailDropPct: 0,
       forceScalp: true,
-      shortTermStrategyId: 'post_migration_scalp',
+      shortTermStrategyId: 'migration_event',
       overrideScalpParams: true,
-      sizeMultiplier: 1.15,
+      sizeMultiplier: 0.7,
+      maxTradeOverrideSol: 0.15,
       turboMode: true,
     },
     modules: {
@@ -765,18 +766,18 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       near_migration_curve: true,
       early_curve_smart_money: true,
       migration_sniper: true,
-      post_migration_scalp: true,
-      volume_spike_filter: true,
-      momentum_confirmation: true,
+      post_migration_scalp: false,
+      volume_spike_filter: false,
+      momentum_confirmation: false,
       time_based_entry: true,
       early_entry_only: true,
       wallet_quality_scoring: true,
       smart_money_flow_weighting: true,
-      chart_patterns: true,
-      pattern_bull_flag: true,
+      chart_patterns: false,
+      pattern_bull_flag: false,
       tiered_profit_taking: true,
       dead_market_exit: true,
-      quick_scalper: true,
+      quick_scalper: false,
     },
   },
 
@@ -2869,7 +2870,7 @@ function scoreProfile(
     ctx.scalpMode === true &&
     ctx.shortTermStrategyId != null &&
     ctx.shortTermStrategyId !== 'post_run_dip';
-  // Pre-grad fire band (95–98%) or ultra-fresh post-grad — owns Migration Sniper
+  // Pre-grad fire band (~90%+) or ultra-fresh post-grad — owns Migration Sniper
   // and makes other lanes defer via isMig / hostileArmed.
   const freshMig = evaluateFreshMigrationEligibility(ctx, {
     maxTokenAgeHours: m.maxTokenAgeHours ?? FRESH_MIGRATION_MAX_AGE_HOURS,
@@ -2926,10 +2927,20 @@ function scoreProfile(
     buyPressureUsd != null &&
     buyPressureUsd < m.minBuyPressureUsd
   ) {
-    return {
-      score: 0,
-      reason: `buy pressure $${Math.round(buyPressureUsd)} < $${m.minBuyPressureUsd}`,
-    };
+    // Migration Sniper event lane: soft-fail low pressure on grad-watch / prefer path
+    if (
+      def.id === 'migration_sniper' &&
+      (feedPrefer || ctx.preferProfileId === 'migration_sniper')
+    ) {
+      bits.push(
+        `buy pressure soft $${Math.round(buyPressureUsd)}<$${m.minBuyPressureUsd}`
+      );
+    } else {
+      return {
+        score: 0,
+        reason: `buy pressure $${Math.round(buyPressureUsd)} < $${m.minBuyPressureUsd}`,
+      };
+    }
   }
 
   if (m.preferDip) {
@@ -3089,7 +3100,7 @@ function scoreProfile(
       ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
         ? Number(ctx.curveProgressPct)
         : null;
-    if (curvePct != null && curvePct >= 95 && curvePct < 100) {
+    if (curvePct != null && curvePct >= 90 && curvePct < 100) {
       score += 14;
       bits.push(`fire-band ${curvePct.toFixed(1)}%`);
     }
@@ -3876,7 +3887,7 @@ function finalizeExitRulesForWinner(
   if (def.id === 'migration_sniper') {
     exitRules.forceScalp = true;
     exitRules.overrideScalpParams = true;
-    exitRules.shortTermStrategyId = 'post_migration_scalp';
+    exitRules.shortTermStrategyId = 'migration_event';
   }
 
   if (def.id === 'momentum_burst') {
@@ -5724,6 +5735,81 @@ export function migratePerformanceAllocV191(): boolean {
   }
   console.log(
     `[trade-profiles] Applied ${MIGRATION_ID} — paused migration_sniper + reversal_scalper; dip size↑; scalper/MB tightened; daily loss ≤0.5 SOL`
+  );
+  return true;
+}
+
+/**
+ * Retune Migration Sniper to event lane: sweet-spot fire ~90%, no TA modules,
+ * hold-through-migrate + spike exit, relax perfAlloc conviction floors.
+ */
+export function migrateMigSniperEventLaneV1(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'migSniperEventLane_v1';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const state = ensureState();
+  if (!state.profiles) state.profiles = {} as TradeProfileRuntimeState['profiles'];
+  if (!state.overrides) state.overrides = {};
+
+  state.profiles.migration_sniper = true;
+
+  const prev = state.overrides.migration_sniper || {};
+  state.overrides.migration_sniper = {
+    exitRules: {
+      ...(prev.exitRules || {}),
+      sizeMultiplier: 0.7,
+      maxTradeOverrideSol: 0.15,
+      forceScalp: true,
+      shortTermStrategyId: 'migration_event',
+      overrideScalpParams: true,
+      takeProfitPctMin: 10,
+      takeProfitPctMax: 18,
+      stopLossPctMin: 12,
+      stopLossPctMax: 18,
+      hardTimeLimitSecMin: 480,
+      hardTimeLimitSecMax: 720,
+      momentumFailDropPct: 0,
+      trailingStopPct: 10,
+      trailingActivationProfit: 12,
+      turboMode: true,
+    },
+    match: {
+      ...(prev.match || {}),
+      minConviction: 22,
+      minWalletQuality: 25,
+      minCurveProgressPct: 90,
+      maxCurveProgressPct: 99,
+      gradWatchPct: 80,
+      minBuyPressureUsd: 200,
+      minVolumeH1Usd: 1_000,
+      primaryPatternIds: [],
+    },
+    modules: {
+      ...(prev.modules || {}),
+      chart_patterns: false,
+      pattern_bull_flag: false,
+      volume_spike_filter: false,
+      momentum_confirmation: false,
+      post_migration_scalp: false,
+      quick_scalper: false,
+      migration_sniper: true,
+    },
+  };
+
+  writeTradeProfilesState(state);
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    `[trade-profiles] Applied ${MIGRATION_ID} — Migration Sniper event lane (arm→hold→spike exit)`
   );
   return true;
 }

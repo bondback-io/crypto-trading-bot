@@ -100,9 +100,9 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.profilesGrid}
         <ul>
           <li><strong>Watchlists</strong> — Dip setup watch and Graduation (migration) watch live on the Micro Bots tab.</li>
-          <li><strong>Migration Sniper / Reversal Scalper</strong> — may show <em>Paused (perf)</em> after the v1.2.91 allocation review (weak paper WR/PF). That pause is not from Learning Mode; toggle the profile on to resume.</li>
+          <li><strong>Migration Sniper / Reversal Scalper</strong> — Reversal may show <em>Paused (perf)</em> after the v1.2.91 review. Migration Sniper is an <strong>event lane</strong> (default ON at conservative size): no TA required.</li>
           <li><strong>Trend Rider</strong> — mature continuation (age ≥1.5h · MC ≥$75k · holders/vol floors). Quiet wins were often Pump.fun-only blocking Jupiter <code>toporganicscore</code> (non-<code>pump</code> mints), not Learning Mode. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA.</li>
-          <li><strong>Migration Sniper</strong> — watch ~80% → fire ≥95% until complete → post-grad handoff (default ≤120s). Armed watches no longer vanish without a buy attempt on curve complete.</li>
+          <li><strong>Migration Sniper</strong> — watch ~80% → arm on quality → enter from ~90% → hold through migration → exit on first spike + volume (SL ~15%, post-mig max ~4m). Grad-watch funnel tallies show watch/arm/trigger blockers.</li>
           <li><strong>Turbo Mode</strong> — default ON for Scalper / Migration Sniper / Momentum Burst / Reversal (Exit &amp; sizing). Live: prefer Jito + higher prio/tip + wider buy slip. Paper &amp; Live Sim: same slip + TURBO log/stamp (no real bundles). Safer profiles stay OFF.</li>
           <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
           <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>

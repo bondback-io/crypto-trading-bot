@@ -1,8 +1,14 @@
 /**
- * Migration Sniper graduation watchlist: watch (≥80%) → arm → trigger (≥95% until
- * complete) → post-grad handoff on curve complete. Hands setups to the Market
- * Scanner with preferredProfileId: migration_sniper. Fast-polls bonding curve
- * on active watches.
+ * Migration Sniper graduation watchlist: watch (~80%) → arm → trigger (≥~90% fire
+ * band until complete) → post-grad handoff on curve complete. Hands setups to the
+ * Market Scanner with preferredProfileId: migration_sniper. Fast-polls bonding
+ * curve on active watches.
+ *
+ * Event lane (not TA): enter in the pre-mig sweet spot when armed/quality, hold
+ * through migration, exit on first spike + volume (see migration_event scalp).
+ *
+ * Historical choke points (pre-retune): profile Paused (perf), fire ≥95%, and
+ * raised conviction/wallet floors from perfAlloc_v191.
  *
  * Low-MC grace: once watching, keep through volatile 25k↔10k swings; only
  * invalidate for MC after continuous < $8k for 5 minutes (curve rules still apply).
@@ -72,6 +78,42 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
 
+/** Live MS funnel tallies (process lifetime) — watch → arm → trigger → blockers */
+export interface MigrationSniperFunnel {
+  watchAdmit: number;
+  armed: number;
+  triggered: number;
+  fireMissNotArmed: number;
+  handoffFail: number;
+  expired: number;
+  invalidated: number;
+  postGradTriggered: number;
+}
+
+const funnel: MigrationSniperFunnel = {
+  watchAdmit: 0,
+  armed: 0,
+  triggered: 0,
+  fireMissNotArmed: 0,
+  handoffFail: 0,
+  expired: 0,
+  invalidated: 0,
+  postGradTriggered: 0,
+};
+
+export function getMigrationSniperFunnel(): MigrationSniperFunnel & {
+  activeWatching: number;
+  activeArmed: number;
+} {
+  let activeWatching = 0;
+  let activeArmed = 0;
+  for (const w of watches.values()) {
+    if (w.status === 'watching') activeWatching += 1;
+    if (w.status === 'armed') activeArmed += 1;
+  }
+  return { ...funnel, activeWatching, activeArmed };
+}
+
 function isManualUnwatchCooldown(mint: string): boolean {
   const until = unwatchCooldownUntil.get(mint) ?? 0;
   if (until <= Date.now()) {
@@ -104,7 +146,7 @@ function fireMin(): number {
   const m = migMatch();
   return m.minCurveProgressPct != null && Number.isFinite(m.minCurveProgressPct)
     ? Number(m.minCurveProgressPct)
-    : 95;
+    : 90;
 }
 
 function fireMax(): number {
@@ -144,6 +186,7 @@ function applyMcGrace(w: GradWatchEntry, now: number): boolean {
     w.status = 'invalidated';
     w.updatedAt = now;
     w.lastReason = `MC < $${LOW_MC_USD} for ${LOW_MC_GRACE_MS / 60_000}m`;
+    funnel.invalidated += 1;
     console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
     return true;
   }
@@ -312,6 +355,8 @@ export function considerMigrationGradWatch(input: {
   };
   watches.set(input.mint, entry);
   peakProgress.set(input.mint, progress);
+  funnel.watchAdmit += 1;
+  if (entry.status === 'armed') funnel.armed += 1;
   console.log(
     `[grad-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
       `curve=${progress.toFixed(1)}%`
@@ -405,11 +450,14 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
     w.status = 'triggered';
     w.updatedAt = now;
     w.lastReason = `post-grad handoff ${Math.round(ageMs / 1000)}s`;
+    funnel.triggered += 1;
+    funnel.postGradTriggered += 1;
     console.log(
       `[grad-watch] TRIGGERED ${w.symbol} → migration_sniper post-grad @ ${Math.round(ageMs / 1000)}s`
     );
     return true;
   }
+  funnel.handoffFail += 1;
   w.lastReason = 'post-grad handoff failed — retrying';
   w.updatedAt = now;
   return false;
@@ -433,6 +481,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = 'TTL expired';
+      funnel.expired += 1;
       console.log(`[grad-watch] EXPIRED ${w.symbol}`);
       continue;
     }
@@ -471,6 +520,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.status = 'invalidated';
       w.updatedAt = now;
       w.lastReason = `curve dump ${peak.toFixed(0)}→${progress.toFixed(0)}%`;
+      funnel.invalidated += 1;
       console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
       continue;
     }
@@ -480,6 +530,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.status = 'invalidated';
       w.updatedAt = now;
       w.lastReason = `fell below watch (${progress.toFixed(0)}%)`;
+      funnel.invalidated += 1;
       console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
       continue;
     }
@@ -490,6 +541,7 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.armedAt = now;
       w.updatedAt = now;
       w.lastReason = `armed @ ${progress.toFixed(0)}%`;
+      funnel.armed += 1;
       console.log(`[grad-watch] ARMED ${w.symbol}`);
     }
 
@@ -498,6 +550,19 @@ export async function tickMigrationGradWatches(): Promise<number> {
     if (!inFire) {
       w.updatedAt = now;
       continue;
+    }
+
+    // Require armed OR quality soft-ok (junk watches in fire band do not buy)
+    if (w.status !== 'armed' && !quality) {
+      funnel.fireMissNotArmed += 1;
+      w.lastReason = `fire ${progress.toFixed(0)}% — waiting quality arm`;
+      w.updatedAt = now;
+      continue;
+    }
+    if (w.status === 'watching' && quality) {
+      w.status = 'armed';
+      w.armedAt = w.armedAt ?? now;
+      funnel.armed += 1;
     }
 
     if (isScannerMintOnCooldown(w.mint)) {
@@ -511,9 +576,14 @@ export async function tickMigrationGradWatches(): Promise<number> {
     const c = buildHandoff(w);
     if (handOffScannerCandidate(c)) {
       handed += 1;
+      funnel.triggered += 1;
       console.log(
         `[grad-watch] TRIGGERED ${w.symbol} → migration_sniper @ ${progress.toFixed(1)}%`
       );
+    } else {
+      funnel.handoffFail += 1;
+      w.status = 'armed';
+      w.lastReason = 'handoff failed — retrying';
     }
   }
 
