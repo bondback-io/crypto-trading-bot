@@ -2335,7 +2335,8 @@ export function createServer(): express.Application {
     try {
       const alpha =
         require('./alphaScanFeed') as typeof import('./alphaScanFeed');
-      // Refresh display cache when enabled (non-blocking handoff still on scanner poll)
+      // Serve cache; refresh only when stale (dashboard polls ~5s — must not
+      // re-run bonding-curve RPC on every hit).
       if (config.alphaScan?.enabled) {
         await alpha.refreshAlphaScanBuckets().catch(() => null);
       }

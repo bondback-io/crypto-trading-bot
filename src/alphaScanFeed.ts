@@ -87,6 +87,12 @@ let cachedNew: AlphaScanRow[] = [];
 let cachedSoon: AlphaScanRow[] = [];
 let cachedBonded: AlphaScanRow[] = [];
 let passInFlight = false;
+let bucketsRefreshInFlight: Promise<{
+  new: AlphaScanRow[];
+  soon: AlphaScanRow[];
+  bonded: AlphaScanRow[];
+}> | null = null;
+let lastThrottleLogAt = 0;
 
 function asCfg() {
   return config.alphaScan || {
@@ -322,8 +328,12 @@ async function enrichCurves(
 
 /**
  * Refresh New/Soon/Bonded caches from Jupiter /recent + curve enrich.
+ * Throttled — dashboard polls /api/alphascan every ~5s and must NOT re-hit RPC.
  */
-export async function refreshAlphaScanBuckets(): Promise<{
+export async function refreshAlphaScanBuckets(opts?: {
+  /** Bypass throttle (background feed pass). */
+  force?: boolean;
+}): Promise<{
   new: AlphaScanRow[];
   soon: AlphaScanRow[];
   bonded: AlphaScanRow[];
@@ -334,6 +344,37 @@ export async function refreshAlphaScanBuckets(): Promise<{
     return { new: cachedNew, soon: cachedSoon, bonded: cachedBonded };
   }
 
+  const minGap = Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000);
+  if (
+    !opts?.force &&
+    lastPollAt != null &&
+    Date.now() - lastPollAt < minGap
+  ) {
+    // #region agent log
+    try {
+      const nowLog = Date.now();
+      if (nowLog - lastThrottleLogAt > 15_000) {
+        lastThrottleLogAt = nowLog;
+        const { agentDebugLog } =
+          require('./agentDebugLog') as typeof import('./agentDebugLog');
+        agentDebugLog('C2', 'alphaScanFeed.ts:refresh', 'curve enrich throttled', {
+          runId: 'post-fix',
+          ageMs: Date.now() - lastPollAt,
+          minGap,
+        });
+      }
+    } catch {
+      /* */
+    }
+    // #endregion
+    return { new: cachedNew, soon: cachedSoon, bonded: cachedBonded };
+  }
+
+  if (bucketsRefreshInFlight && !opts?.force) {
+    return bucketsRefreshInFlight;
+  }
+
+  const doRefresh = async () => {
   const tokens = await fetchJupiterRecentTokens(cfg.recentLimit || 40);
   const curves = await enrichCurves(tokens);
   const now = Date.now();
@@ -441,6 +482,15 @@ export async function refreshAlphaScanBuckets(): Promise<{
   lastPollAt = Date.now();
   lastError = null;
   return { new: cachedNew, soon: cachedSoon, bonded: cachedBonded };
+  };
+
+  if (opts?.force) {
+    return doRefresh();
+  }
+  bucketsRefreshInFlight = doRefresh().finally(() => {
+    bucketsRefreshInFlight = null;
+  });
+  return bucketsRefreshInFlight;
 }
 
 /**
@@ -477,7 +527,7 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   passInFlight = true;
   let handed = 0;
   try {
-    const buckets = await refreshAlphaScanBuckets();
+    const buckets = await refreshAlphaScanBuckets({ force: true });
     const preferOrganic =
       config.marketScanner?.preferOrganicVolume !== false;
     const sol = solUsd();

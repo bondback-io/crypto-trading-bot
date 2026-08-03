@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.134',
+    title: 'AlphaScan Dashboard RPC Throttle',
+    sections: ['scanners', 'execution'],
+    items: [
+      'Dashboard /api/alphascan no longer re-runs bonding-curve enrich every ~5s — respects the AlphaScan poll interval and serves cache when fresh.',
+      'Background AlphaScan feed pass still force-refreshes on its own schedule.',
+    ],
+  },
+  {
     version: '1.2.133',
     title: 'RPC Skip Loop + AlphaScan Burst Fix',
     sections: ['execution', 'scanners'],
