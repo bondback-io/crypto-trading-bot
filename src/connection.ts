@@ -86,10 +86,14 @@ interface EndpointState {
   /** Skip this endpoint until this time after a 429 (immediate failover). */
   rateLimitedUntil: number;
   /**
-   * Hard-fail cooldown (timeouts / repeated hard errors). Stop probe/retry storms
+   * Hard-fail / quarantine until this time. Stop probe/retry storms
    * against dead QuickNode/fallbacks so healthy lanes stay clear.
    */
   hardFailUntil: number;
+  /** Escalating quarantine streak (longer cooldown each re-entry). */
+  quarantineStreak: number;
+  /** Last time we logged quarantine enter/exit. */
+  lastQuarantineLogAt: number;
   /** Last time we logged "marked unhealthy" for this endpoint. */
   lastUnhealthyLogAt: number;
   /** When EWMA first crossed LATENCY_STRESS_MS (null when not stressed). */
@@ -282,8 +286,9 @@ const DEFAULT_FAILOVER_DOWN_MS = 30_000;
 const MIN_FAILOVER_DOWN_MS = 5_000;
 /** After a 429, leave the hot endpoint alone so failover can breathe. */
 const RATE_LIMIT_COOLDOWN_MS = 60_000;
-/** Dead/failing endpoints: back off probes + withRpc retries. */
-const HARD_FAIL_COOLDOWN_MS = 120_000;
+/** Dead/failing endpoints: base quarantine (escalates with streak). */
+const HARD_FAIL_COOLDOWN_MS = 5 * 60_000;
+const HARD_FAIL_COOLDOWN_MAX_MS = 20 * 60_000;
 /** Cap withRpc endpoint walks — avoid retry storms across every fallback. */
 const WITH_RPC_MAX_ATTEMPTS_CRITICAL = 4;
 const WITH_RPC_MAX_ATTEMPTS_OTHER = 3;
@@ -329,6 +334,65 @@ function isEndpointRateLimited(state: EndpointState | undefined): boolean {
 
 function isEndpointHardFailed(state: EndpointState | undefined): boolean {
   return Boolean(state && state.hardFailUntil > Date.now());
+}
+
+function quarantineMsFor(state: EndpointState): number {
+  const streak = Math.max(1, state.quarantineStreak || 1);
+  return Math.min(
+    HARD_FAIL_COOLDOWN_MAX_MS,
+    HARD_FAIL_COOLDOWN_MS * Math.pow(2, Math.min(3, streak - 1))
+  );
+}
+
+function enterQuarantine(state: EndpointState, reason: string): void {
+  const wasQuarantined = state.hardFailUntil > Date.now();
+  if (!wasQuarantined) {
+    state.quarantineStreak = Math.min(8, (state.quarantineStreak || 0) + 1);
+  }
+  const ms = quarantineMsFor(state);
+  state.hardFailUntil = Date.now() + ms;
+  state.healthy = false;
+  const now = Date.now();
+  if (now - state.lastQuarantineLogAt >= 15_000) {
+    state.lastQuarantineLogAt = now;
+    console.warn(
+      `[rpc-quarantine] ENTER ${state.endpoint.label} for ${Math.round(ms / 1000)}s ` +
+        `(streak ${state.quarantineStreak}) — ${reason}`
+    );
+  }
+}
+
+/** Official mainnet-beta / publicnode — chronically slow from cloud hosts. */
+export function isWeakPublicUtilityUrl(url: string | null | undefined): boolean {
+  const u = (url || '').toLowerCase();
+  if (!u) return true;
+  if (isOfficialMainnetBetaRpcUrl(u)) return true;
+  if (u.includes('publicnode.com')) return true;
+  if (!isPublicRpcUrl(u)) return false;
+  // Keyed / paid hosts are not "weak public" even if classified public by mistake.
+  if (
+    u.includes('helius') ||
+    u.includes('alchemy') ||
+    u.includes('quiknode') ||
+    u.includes('quicknode') ||
+    u.includes('triton') ||
+    u.includes('rpcpool')
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True when the Utility lane is actively on a weak public endpoint
+ * (favourites/activity should slow hard).
+ */
+export function isUtilityOnWeakPublic(): boolean {
+  ensureEndpoints();
+  const idx = resolveIndexForRole('utility');
+  const state = endpoints[idx];
+  if (!state) return true;
+  return isWeakPublicUtilityUrl(state.endpoint.url);
 }
 
 /**
@@ -417,6 +481,8 @@ function ensureEndpoints(): void {
       role,
       rateLimitedUntil: 0,
       hardFailUntil: 0,
+      quarantineStreak: 0,
+      lastQuarantineLogAt: 0,
       lastUnhealthyLogAt: 0,
       latencyStressedSince: null,
       lastLatencyFailoverLogAt: 0,
@@ -704,15 +770,17 @@ function resolveIndexForRole(role: RpcRole): number {
   const shareLoad = Boolean(config.rpc?.shareLoad);
   const avoidPublicForCritical = shareLoad && role === 'primary';
 
-  // Utility + public preferred is slow: try another public/fallback (e.g. publicnode)
+  // Utility + public preferred is slow: try another public/fallback
   // before burning Alchemy/Helius/QuickNode CU on wallet polls.
+  // Prefer stronger utility (rpc-url) over weak publicnode when both healthy.
   if (latencySoft && role === 'utility' && pref) {
     let bestIdx = -1;
-    let bestMs = Number.POSITIVE_INFINITY;
+    let bestScore = Number.POSITIVE_INFINITY;
     for (let i = 0; i < endpoints.length; i++) {
       if (i === preferred) continue;
       const e = endpoints[i];
-      if (!e?.healthy || isEndpointRateLimited(e)) continue;
+      if (!e?.healthy || isEndpointRateLimited(e) || isEndpointHardFailed(e))
+        continue;
       if (
         e.endpoint.label === 'quicknode' ||
         isQuicknodeRpcUrl(e.endpoint.url)
@@ -728,10 +796,12 @@ function resolveIndexForRole(role: RpcRole): number {
         e.role === 'fallback' ||
         e.role === 'utility';
       if (!isAltPublic) continue;
-      if (!isFasterAlternate(pref, e)) continue;
-      const ms = e.latencyMs ?? Number.POSITIVE_INFINITY;
-      if (ms < bestMs) {
-        bestMs = ms;
+      if (!isFasterAlternate(pref, e) && isWeakPublicUtilityUrl(e.endpoint.url))
+        continue;
+      const weakPenalty = isWeakPublicUtilityUrl(e.endpoint.url) ? 450 : 0;
+      const score = (e.latencyMs ?? 2_000) + weakPenalty;
+      if (score < bestScore) {
+        bestScore = score;
         bestIdx = i;
       }
     }
@@ -756,8 +826,11 @@ function resolveIndexForRole(role: RpcRole): number {
         }
         // #endregion
         console.warn(
-          `[rpc] utility lane piggybacking on ${other.endpoint.label} ` +
-            `(public rpc-url EWMA ${pref.latencyMs ?? '—'}ms — prefer faster public/fallback before paid)`
+          `[rpc] utility lane failover → ${other.endpoint.label}` +
+            (isWeakPublicUtilityUrl(other.endpoint.url)
+              ? ' (weak public — Favourites/activity will slow)'
+              : '') +
+            ` (from ${pref.endpoint.label} EWMA ${pref.latencyMs ?? '—'}ms)`
         );
       }
       setActiveForRole(role, bestIdx);
@@ -950,7 +1023,24 @@ function recordSuccess(index: number, latencyMs: number): void {
   if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
     state.rateLimitedUntil = 0;
   }
-  state.hardFailUntil = 0;
+  if (state.hardFailUntil) {
+    const wasQ = state.hardFailUntil > 0;
+    if (wasQ) {
+      const now = Date.now();
+      if (now - state.lastQuarantineLogAt >= 5_000) {
+        state.lastQuarantineLogAt = now;
+        console.log(
+          `[rpc-quarantine] EXIT ${state.endpoint.label} — probe/call succeeded` +
+            (state.quarantineStreak
+              ? ` (streak was ${state.quarantineStreak})`
+              : '')
+        );
+      }
+    }
+    state.hardFailUntil = 0;
+    // Decay streak on success so temporary blips don't lock forever.
+    state.quarantineStreak = Math.max(0, (state.quarantineStreak || 0) - 1);
+  }
 }
 
 function updateLatencyStress(state: EndpointState): void {
@@ -1016,14 +1106,17 @@ function recordFailure(index: number, error: string): void {
   if (isRateLimit) {
     state.rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
   } else if (
-    /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed/i.test(
+    /timeout|timed out|ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up|fetch failed|probe timeout/i.test(
       error
     )
   ) {
-    // Hard network/timeout failures — cool the endpoint so health/withRpc stop hammering it.
+    // Hard network/timeout failures — quarantine so health/withRpc stop hammering it.
     if (state.consecutiveFailures >= 2) {
-      state.hardFailUntil = Date.now() + HARD_FAIL_COOLDOWN_MS;
+      enterQuarantine(state, error.slice(0, 120));
     }
+  } else if (state.consecutiveFailures >= (config.rpc?.failureThreshold ?? 3)) {
+    // Persistent hard failures (e.g. QuickNode 0% success) — quarantine too.
+    enterQuarantine(state, error.slice(0, 120));
   }
 
   const threshold = isRateLimit ? 1 : config.rpc?.failureThreshold ?? 3;
@@ -1276,6 +1369,18 @@ export function getRpcStats(): {
   callTraffic: ReturnType<typeof getRpcCallTraffic>;
   /** Per-lane concurrency / rate-limit backlog (overload vs provider). */
   gate: ReturnType<typeof getRpcGateSnapshot>;
+  /** Quarantined (hard-failed) endpoints — not probed until cooldown ends. */
+  quarantine: Array<{
+    label: string;
+    remainingMs: number;
+    streak: number;
+    lastError?: string;
+  }>;
+  /** Adaptive scanner/utility backoff snapshot. */
+  loadControl: ReturnType<
+    typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
+  > | null;
+  utilityWeakPublic: boolean;
 } {
   ensureEndpoints();
   const pIdx = resolveIndexForRole('primary');
@@ -1319,6 +1424,41 @@ export function getRpcStats(): {
     warning =
       'RPC lane gate stressed — background work is being queued/skipped to protect Critical. ' +
       `Utility queue ${gate.lanes.utility.queued}, skipped ${gate.lanes.utility.skipped}.`;
+  }
+  if (!warning && gate.lanes.secondary.skipped >= 3) {
+    warning =
+      `Scanners lane high skips (${gate.lanes.secondary.skipped}) — Market/Alpha/Zion auto-slowed.`;
+  }
+
+  const quarantine = endpoints
+    .filter((e) => isEndpointHardFailed(e))
+    .map((e) => ({
+      label: e.endpoint.label,
+      remainingMs: Math.max(0, e.hardFailUntil - Date.now()),
+      streak: e.quarantineStreak || 0,
+      lastError: e.lastError,
+    }));
+
+  let loadControl: ReturnType<
+    typeof import('./rpcLoadControl').getRpcLoadControlSnapshot
+  > | null = null;
+  try {
+    const {
+      updateRpcLoadSignals,
+      getRpcLoadControlSnapshot,
+    } = require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    updateRpcLoadSignals({
+      primaryLatencyMs: pActive?.latencyMs ?? null,
+      secondaryLatencyMs: sActive?.latencyMs ?? null,
+      utilityLatencyMs: uActive?.latencyMs ?? null,
+      utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+      utilityFailover: uIdx !== preferredUtility,
+      primaryQueued: gate.lanes.primary.queued,
+      secondarySkipped: gate.lanes.secondary.skipped,
+    });
+    loadControl = getRpcLoadControlSnapshot();
+  } catch {
+    /* */
   }
 
   const maskUrl = (url: string) => {
@@ -1405,6 +1545,9 @@ export function getRpcStats(): {
     warning,
     callTraffic: getRpcCallTraffic(40),
     gate,
+    quarantine,
+    loadControl,
+    utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
   };
 }
 
@@ -1700,14 +1843,15 @@ export function startRpcHealthMonitor(): void {
   /** Share load: keep public/utility hot for diagnostics; probe paid lanes sparsely. */
   function shouldProbeIndex(index: number, cycle: number): boolean {
     if (!Boolean(config.rpc?.shareLoad)) {
-      // Non-share: still skip hard-failed endpoints most of the time.
+      // Non-share: never probe while quarantined (window must elapse first).
       const st = endpoints[index];
-      if (st && isEndpointHardFailed(st)) return cycle % 4 === 0;
+      if (st && isEndpointHardFailed(st)) return false;
       return true;
     }
     const state = endpoints[index];
     if (!state) return false;
-    if (isEndpointHardFailed(state)) return cycle % 6 === 0;
+    // Quarantine: no probes until cooldown elapses (prevents retry storms).
+    if (isEndpointHardFailed(state)) return false;
     const isPublic = isPublicRpcUrl(state.endpoint.url);
     const isUtil = index === preferredUtility;
     const isPrimary = index === preferredPrimary;
@@ -1743,14 +1887,14 @@ export function startRpcHealthMonitor(): void {
     if (isPrimary) return cycle % 3 === 0;
     // Alchemy (scanners): every 2nd cycle (~90s)
     if (isSecondary) return cycle % 2 === 0;
-    // QuickNode: rare when failing; otherwise every 3rd (~135s) — avoid retry storms
+    // QuickNode: rare when failing; otherwise every 4th (~180s) — avoid retry storms
     if (
       index === preferredQuicknode ||
       state.endpoint.label === 'quicknode' ||
       isQuicknodeRpcUrl(state.endpoint.url)
     ) {
-      if (!state.healthy) return cycle % 6 === 0;
-      return cycle % 3 === 0;
+      if (!state.healthy) return cycle % 8 === 0;
+      return cycle % 4 === 0;
     }
     // Inactive fallback: rare
     return cycle % 5 === 0;

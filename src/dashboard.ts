@@ -7883,6 +7883,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="text-xs text-slate-500 mt-2 mb-0">Does not change position sizing. Snapshot captured on first OFF→ON; Reset restores it.</p>
         </div>
 
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="trade-caps-card">
+          <div class="section-title !text-sm mb-1">Trade Caps <span class="tip" tabindex="0" data-tip="Rolling hourly buy limit and min gap between opens. This is what Lane Fight shows as “trade cap N/M per hour”. Raise Max/hr to allow more opens (e.g. 24–48). 0 = unlimited. Cooldown 0 = no gap. Learning Mode may soften these slightly when ON."></span></div>
+          <p class="text-xs text-slate-400 mb-2">Stops “no buy: trade cap 16/16 per hour” style blocks when you want more volume. Same knobs as Config → Selective Trading.</p>
+          <div class="filters-row mb-2" style="gap:0.5rem;align-items:flex-end;flex-wrap:wrap">
+            <label class="ctl ctl-sm" title="Max buys in a rolling 60 minutes (0 = off)">
+              <span>Max trades / hour</span>
+              <input type="number" id="settings-max-per-hour" value="16" min="0" max="120" step="1" />
+            </label>
+            <label class="ctl ctl-sm" title="Minimum seconds between buys (0 = off)">
+              <span>Cooldown (sec)</span>
+              <input type="number" id="settings-cooldown-sec" value="90" min="0" max="600" step="5" />
+            </label>
+            <button type="button" class="btn btn-primary text-xs" onclick="saveTradeCapsFromSettings()" title="Save hourly trade cap and cooldown">Save trade caps</button>
+            <span class="mint text-xs" id="settings-trade-caps-status">—</span>
+          </div>
+          <div class="mint text-xs" id="settings-trade-caps-live">Live rate: —</div>
+        </div>
+
         <details id="module-tune-card">
           <summary>
             <span class="module-tune-summary-main">
@@ -8089,8 +8107,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Min conviction <span class="tip" tabindex="0" data-tip="Score 0–100 required to execute (after anti-rug)."></span></span><input type="number" id="sel-min-conviction" value="55" min="20" max="90" step="5" /></label>
             <label class="ctl ctl-sm"><span>Min wallets <span class="tip" tabindex="0" data-tip="Floor on distinct smart wallets."></span></span><input type="number" id="sel-min-wallets" value="2" min="1" max="5" step="1" /></label>
-            <label class="ctl ctl-sm"><span>Max/hr <span class="tip" tabindex="0" data-tip="Max buys per rolling hour (0=off)."></span></span><input type="number" id="sel-max-per-hour" value="6" min="0" max="30" step="1" /></label>
-            <label class="ctl ctl-md"><span>Cooldown sec <span class="tip" tabindex="0" data-tip="Min seconds between buys."></span></span><input type="number" id="sel-cooldown-sec" value="90" min="0" max="600" step="15" /></label>
+            <label class="ctl ctl-sm"><span>Max/hr <span class="tip" tabindex="0" data-tip="Max buys per rolling hour (0=off). Also on Settings → Trade Caps."></span></span><input type="number" id="sel-max-per-hour" value="16" min="0" max="120" step="1" /></label>
+            <label class="ctl ctl-md"><span>Cooldown sec <span class="tip" tabindex="0" data-tip="Min seconds between buys. Also on Settings → Trade Caps."></span></span><input type="number" id="sel-cooldown-sec" value="90" min="0" max="600" step="5" /></label>
             <label class="ctl ctl-sm"><span>Risk size @ <span class="tip" tabindex="0" data-tip="Risk score where size scaling starts."></span></span><input type="number" id="sel-risk-cutoff" value="35" min="0" max="80" step="5" /></label>
             <label class="ctl ctl-sm"><span>Min size × <span class="tip" tabindex="0" data-tip="Position size multiplier at max risk score."></span></span><input type="number" id="sel-min-size-mult" value="0.3" min="0.1" max="1" step="0.05" /></label>
           </div>
@@ -8200,6 +8218,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="rpc-summary" class="mint mb-2">—</div>
           <div id="rpc-lane-status" class="mint text-xs mb-2">—</div>
           <div id="rpc-gate-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
+          <div id="rpc-load-status" class="mint text-xs mb-2" style="color:#94a3b8">—</div>
           <div class="overflow-x-auto"><table id="rpc-table"><thead><tr><th>Endpoint</th><th>Lane</th><th>OK</th><th>Latency</th><th>Success</th><th>Active</th></tr></thead><tbody></tbody></table></div>
           <div class="mt-3 flex flex-wrap gap-2 items-center">
             <button type="button" class="btn btn-secondary" id="btn-rpc-diagnostic" onclick="runRpcDiagnostic()" title="Scan primary/secondary load and recommend Poll (ms) changes">Run RPC diagnostic</button>
@@ -19164,6 +19183,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : 'Lane gate: —';
         gateEl.style.color = g.stressed ? '#fbbf24' : '#94a3b8';
       }
+      const loadEl = document.getElementById('rpc-load-status');
+      if (loadEl) {
+        const lc = rpc.loadControl || {};
+        const q = rpc.quarantine || [];
+        const parts = [];
+        if (lc.scannerSlowFactor != null || lc.utilitySlowFactor != null) {
+          parts.push(
+            'Adaptive: scanner×' + (lc.scannerSlowFactor || 1) +
+            ' utility×' + (lc.utilitySlowFactor || 1) +
+            (lc.shedBackground ? ' shedON' : '')
+          );
+        }
+        if (rpc.utilityWeakPublic) parts.push('Utility=weak public (Favourites slowed)');
+        if (q.length) {
+          parts.push(
+            'Quarantine: ' + q.map(function (row) {
+              return row.label + ' ' + Math.ceil((row.remainingMs || 0) / 1000) + 's';
+            }).join(', ')
+          );
+        }
+        if (lc.reasons && lc.reasons.length) {
+          parts.push(lc.reasons[0]);
+        }
+        loadEl.textContent = parts.length ? parts.join(' · ') : 'Load control: normal';
+        loadEl.style.color = (lc.shedBackground || q.length || rpc.utilityWeakPublic) ? '#fbbf24' : '#94a3b8';
+      }
       const rpcBanner = document.getElementById('rpc-banner');
       if (rpcBanner) {
         if (rpc.ok === false) {
@@ -19383,6 +19428,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         trEl.textContent = tr.maxTradesPerHour > 0
           ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
           : tr.tradesLastHour + '/hr';
+      }
+      const capsLive = document.getElementById('settings-trade-caps-live');
+      if (capsLive && tr) {
+        capsLive.textContent = tr.maxTradesPerHour > 0
+          ? ('Live rate: ' + tr.tradesLastHour + '/' + tr.maxTradesPerHour + ' this hour' +
+            (tr.tradesLastHour >= tr.maxTradesPerHour ? ' — CAP HIT (raise Max/hr to open more)' : ''))
+          : ('Live rate: ' + tr.tradesLastHour + '/hr (unlimited)');
+        capsLive.style.color = (tr.maxTradesPerHour > 0 && tr.tradesLastHour >= tr.maxTradesPerHour)
+          ? '#fbbf24'
+          : '#94a3b8';
       }
       const pnlEl = document.getElementById('stat-pnl');
       const realized = status.portfolio?.realizedPnlSol != null
@@ -19752,6 +19807,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           setN('sel-min-wallets', sel.minWalletsForTrade);
           setN('sel-max-per-hour', sel.maxTradesPerHour);
           setN('sel-cooldown-sec', Math.round((sel.minMsBetweenTrades ?? 0) / 1000));
+          setN('settings-max-per-hour', sel.maxTradesPerHour);
+          setN('settings-cooldown-sec', Math.round((sel.minMsBetweenTrades ?? 0) / 1000));
           setN('sel-risk-cutoff', sel.riskScoreSizeCutoff);
           setN('sel-min-size-mult', sel.minRiskSizeMultiplier);
         }
@@ -20695,6 +20752,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function saveSelectiveConfig(silent) {
+      // Keep Settings ↔ Config Max/hr + cooldown fields in sync when either is saved.
+      const maxEl = document.getElementById('sel-max-per-hour');
+      const cdEl = document.getElementById('sel-cooldown-sec');
+      const sMax = document.getElementById('settings-max-per-hour');
+      const sCd = document.getElementById('settings-cooldown-sec');
+      if (sMax && maxEl && document.activeElement === sMax) maxEl.value = sMax.value;
+      if (sCd && cdEl && document.activeElement === sCd) cdEl.value = sCd.value;
+      if (maxEl && sMax && document.activeElement === maxEl) sMax.value = maxEl.value;
+      if (cdEl && sCd && document.activeElement === cdEl) sCd.value = cdEl.value;
+      // Prefer Settings values when present (explicit Trade Caps card).
+      const maxHr = Number((sMax && sMax.value !== '') ? sMax.value : (maxEl ? maxEl.value : 16));
+      const coolSec = Number((sCd && sCd.value !== '') ? sCd.value : (cdEl ? cdEl.value : 90));
+      if (maxEl) maxEl.value = String(maxHr);
+      if (sMax) sMax.value = String(maxHr);
+      if (cdEl) cdEl.value = String(coolSec);
+      if (sCd) sCd.value = String(coolSec);
+
       await fetchJSON('/api/config/selective', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -20703,14 +20777,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           allowSingleWalletMigration: document.getElementById('sel-allow-single-mig').checked,
           minConvictionScore: Number(document.getElementById('sel-min-conviction').value),
           minWalletsForTrade: Number(document.getElementById('sel-min-wallets').value),
-          maxTradesPerHour: Number(document.getElementById('sel-max-per-hour').value),
-          minMsBetweenTrades: Number(document.getElementById('sel-cooldown-sec').value) * 1000,
+          maxTradesPerHour: maxHr,
+          minMsBetweenTrades: coolSec * 1000,
           riskScoreSizeCutoff: Number(document.getElementById('sel-risk-cutoff').value),
           minRiskSizeMultiplier: Number(document.getElementById('sel-min-size-mult').value),
         }),
       });
+      const st = document.getElementById('settings-trade-caps-status');
+      if (st) st.textContent = 'Saved · max ' + maxHr + '/hr · cooldown ' + coolSec + 's';
       if (!silent) alert('Selective trading settings saved');
     }
+
+    async function saveTradeCapsFromSettings() {
+      const sMax = document.getElementById('settings-max-per-hour');
+      const sCd = document.getElementById('settings-cooldown-sec');
+      const maxEl = document.getElementById('sel-max-per-hour');
+      const cdEl = document.getElementById('sel-cooldown-sec');
+      if (sMax && maxEl) maxEl.value = sMax.value;
+      if (sCd && cdEl) cdEl.value = sCd.value;
+      await saveSelectiveConfig(true);
+      const st = document.getElementById('settings-trade-caps-status');
+      if (st) {
+        st.textContent =
+          'Saved · max ' + (sMax ? sMax.value : '—') + '/hr · cooldown ' +
+          (sCd ? sCd.value : '—') + 's';
+      }
+    }
+    window.saveTradeCapsFromSettings = saveTradeCapsFromSettings;
 
     function onDiscoverSourceChange() {
       const source = (document.getElementById('discover-source') || {}).value;

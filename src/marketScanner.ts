@@ -13,6 +13,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
+import { shouldSkipScannerTick } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -1193,6 +1194,12 @@ export async function runScannerPollOnce(): Promise<number> {
     lastSkipReason = `delayed — ${defer.reason}`;
     return 0;
   }
+  const adapt = shouldSkipScannerTick('market_scanner');
+  if (adapt.skip) {
+    logBackgroundDeferred('Market Scanner', adapt.reason || 'adaptive');
+    lastSkipReason = `delayed — ${adapt.reason}`;
+    return 0;
+  }
   const qDepth = pendingBuyQueueDepth();
   if (qDepth > SCANNER_YIELD_QUEUE_DEPTH) {
     skippedForBuyQueue += 1;
@@ -1381,7 +1388,7 @@ export function startMarketScanner(): void {
   }, 12_000);
   pollTimer = setInterval(() => {
     void runScannerPollOnce();
-  }, Math.max(15_000, cfg.pollIntervalMs));
+  }, Math.max(25_000, cfg.pollIntervalMs));
 }
 
 export function stopMarketScanner(): void {

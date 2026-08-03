@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.131',
+    title: 'RPC Adaptive Stabilisation',
+    sections: ['execution', 'scanners', 'copy', 'knobs'],
+    items: [
+      'Adaptive backoff: high Secondary skips / Helius latency / weak Utility auto-slow scanners and Favourites; Critical stays protected.',
+      'Dead endpoints (e.g. QuickNode) enter escalating quarantine — no probe storms; Utility prefers stronger publics and cuts load on publicnode failover.',
+      'RPC Status shows quarantine + adaptive scanner/utility multipliers and clear [rpc-load]/[rpc-quarantine] logs.',
+      'Settings → Trade Caps: raise Max trades/hour (and cooldown) so Lane Fight “trade cap N/M per hour” stops blocking when you want more opens.',
+    ],
+  },
+  {
     version: '1.2.130',
     title: 'Background RPC Pressure Cut',
     sections: ['execution', 'copy', 'scanners'],

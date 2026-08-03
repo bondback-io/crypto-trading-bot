@@ -11,6 +11,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
+import { shouldSkipScannerTick } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta } from './logger';
 import {
@@ -701,6 +702,12 @@ export async function runZionScannerPollOnce(): Promise<void> {
     lastError = `delayed — ${defer.reason}`;
     return;
   }
+  const adapt = shouldSkipScannerTick('zion');
+  if (adapt.skip) {
+    logBackgroundDeferred('Zion KOL Scanner', adapt.reason || 'adaptive');
+    lastError = `delayed — ${adapt.reason}`;
+    return;
+  }
   pollInFlight = true;
   try {
     if (!universe.length) loadUniverseCache();
@@ -785,11 +792,11 @@ export function startZionKolScanner(): void {
   loadUniverseCache();
   const share = lanesShareEndpoint();
   const configured = Math.max(
-    30_000,
+    45_000,
     Number(zionCfg().scanner.pollIntervalMs) || 60_000
   );
-  // Shared primary/secondary URL: enforce ≥90s so Zion yields CU to copy
-  const interval = share ? Math.max(90_000, configured) : configured;
+  // Shared primary/secondary URL: enforce ≥120s so Zion yields CU to copy
+  const interval = share ? Math.max(120_000, configured) : configured;
   console.log(
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')

@@ -81,17 +81,17 @@ function laneLimits(role: RpcGateRole): {
   }
   if (role === 'secondary') {
     return {
-      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 4, 1, 24),
-      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 10, 1, 80),
-      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 12, 0, 100),
-      maxWaitMs: 4_000,
+      maxConcurrent: envInt('RPC_LANE_CONCURRENCY_SECONDARY', 3, 1, 24),
+      maxRps: envInt('RPC_LANE_RPS_SECONDARY', 6, 1, 80),
+      maxQueue: envInt('RPC_LANE_QUEUE_SECONDARY', 6, 0, 100),
+      maxWaitMs: 3_000,
     };
   }
   return {
     maxConcurrent: envInt('RPC_LANE_CONCURRENCY_UTILITY', 2, 1, 12),
-    maxRps: envInt('RPC_LANE_RPS_UTILITY', 5, 1, 40),
-    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 8, 0, 80),
-    maxWaitMs: 2_500,
+    maxRps: envInt('RPC_LANE_RPS_UTILITY', 4, 1, 40),
+    maxQueue: envInt('RPC_LANE_QUEUE_UTILITY', 4, 0, 80),
+    maxWaitMs: 2_000,
   };
 }
 
@@ -169,6 +169,13 @@ export async function acquireRpcLane(
     lane.hitRateLimit += 1;
     if (!critical) {
       lane.skipped += 1;
+      try {
+        const { noteBackgroundRpcSkip } =
+          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+        noteBackgroundRpcSkip(role, feature);
+      } catch {
+        /* */
+      }
       logGate(role, 'background delayed (rate limit / load protection)', {
         feature: feature || 'ungated',
         inFlight: lane.inFlight,
@@ -195,6 +202,13 @@ export async function acquireRpcLane(
     lane.hitConcurrency += 1;
     if (!critical && lane.waiters.length >= limits.maxQueue) {
       lane.skipped += 1;
+      try {
+        const { noteBackgroundRpcSkip } =
+          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+        noteBackgroundRpcSkip(role, feature);
+      } catch {
+        /* */
+      }
       logGate(role, 'background delayed (concurrency / load protection)', {
         feature: feature || 'ungated',
         inFlight: lane.inFlight,
@@ -205,6 +219,13 @@ export async function acquireRpcLane(
     }
     if (!critical && limits.maxQueue <= 0) {
       lane.skipped += 1;
+      try {
+        const { noteBackgroundRpcSkip } =
+          require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+        noteBackgroundRpcSkip(role, feature);
+      } catch {
+        /* */
+      }
       throw new RpcGateSkipError('busy', role, feature);
     }
 
@@ -355,16 +376,42 @@ export function shouldDeferBackgroundForCritical(kind: 'scanner' | 'utility' = '
   const s = snap.lanes.secondary;
   const u = snap.lanes.utility;
 
+  try {
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const load = getRpcLoadControlSnapshot();
+    if (load.shedBackground && kind === 'scanner') {
+      return {
+        defer: true,
+        reason: load.reasons[0] || 'adaptive shed for Critical',
+      };
+    }
+    if (kind === 'scanner' && load.scannerSlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: `scanner adaptive×${load.scannerSlowFactor}`,
+      };
+    }
+    if (kind === 'utility' && load.utilitySlowFactor >= 3) {
+      return {
+        defer: true,
+        reason: `utility adaptive×${load.utilitySlowFactor}`,
+      };
+    }
+  } catch {
+    /* */
+  }
+
   if (p.queued > 0 || p.inFlight >= Math.max(1, p.maxConcurrent - 1)) {
     return {
       defer: true,
       reason: `Critical lane busy (inFlight ${p.inFlight}/${p.maxConcurrent}, queue ${p.queued})`,
     };
   }
-  if (kind === 'scanner' && (s.queued >= 2 || s.inFlight >= s.maxConcurrent)) {
+  if (kind === 'scanner' && (s.queued >= 1 || s.skipped >= 3 || s.inFlight >= s.maxConcurrent)) {
     return {
       defer: true,
-      reason: `Scanners lane saturated (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued})`,
+      reason: `Scanners lane overloaded (inFlight ${s.inFlight}/${s.maxConcurrent}, queue ${s.queued}, skips ${s.skipped})`,
     };
   }
   if (kind === 'utility' && (u.queued >= 2 || snap.stressed)) {

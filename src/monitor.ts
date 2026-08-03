@@ -12,12 +12,20 @@ import {
 import { config, SmartWallet, persistWallets, isScalperSuiteProfile, getScalperSuiteVariantLabel } from './config';
 import { normalizeSkipReason } from './soakMetrics';
 import { isDeniedCopyMint } from './deniedMints';
-import { getConnection, getRpcStats, getRpcUrl, runWithRpcRole, isRpcGateSkipError } from './connection';
+import {
+  getConnection,
+  getRpcStats,
+  getRpcUrl,
+  runWithRpcRole,
+  isRpcGateSkipError,
+  isUtilityOnWeakPublic,
+} from './connection';
 import {
   runDedupedRpcJob,
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
+import { utilityPollScale } from './rpcLoadControl';
 import { isSoftThrottleRpcUrl } from './rpcUrl';
 import { getRpcRoleFor } from './rpcRouting';
 import { executeBuy, refreshPositionPrices, resolveSourceEntryMcUsd } from './trade';
@@ -806,11 +814,14 @@ function getWalletPollThrottle(rpcUrl: string): {
   const soft = shouldSoftThrottleWalletPoll(rpcUrl);
   const share = Boolean(config.rpc?.shareLoad);
   const envCap = Number(process.env.RPC_WALLET_POLL_PER_CYCLE);
+  const scale = utilityPollScale();
+  const weakUtil = share && isUtilityOnWeakPublic();
   const hardCycleCap = Number.isFinite(envCap)
     ? Math.max(1, Math.min(40, Math.round(envCap)))
-    : share
-      ? 6
-      : 10;
+    : Math.max(
+        1,
+        Math.round((share ? 5 : 8) * scale.cycleCapScale * (weakUtil ? 0.6 : 1))
+      );
 
   if (soft) {
     const cap = resolveSoftWatchCap().effectiveCap;
@@ -820,27 +831,27 @@ function getWalletPollThrottle(rpcUrl: string): {
         ? 0
         : Math.min(
             hardCycleCap,
-            share ? 3 : 5,
+            share ? (weakUtil ? 2 : 3) : 4,
             Math.max(1, Math.ceil(cap / 5))
           );
     return {
       soft: true,
       batchSize: 1,
-      batchGapMs: share ? 1_600 : 1_000,
+      batchGapMs: Math.round((share ? 1_800 : 1_100) * scale.gapScale),
       sigLimit: 5,
       maxParse: 1,
       pause429Ms: 25_000,
       maxWalletsPerCycle: maxPerCycle,
       abortCycleOn429: true,
       /** Hard stop so pollInFlight cannot block the next tick / starve /health. */
-      cycleBudgetMs: share ? 3_500 : 5_000,
+      cycleBudgetMs: share ? (weakUtil ? 2_500 : 3_500) : 5_000,
     };
   }
   // Paid / non-soft: still hard-cap + stagger — never blast every favourite at once.
   return {
     soft: false,
     batchSize: share ? 2 : 3,
-    batchGapMs: share ? 250 : 120,
+    batchGapMs: Math.round((share ? 280 : 140) * scale.gapScale),
     sigLimit: 12,
     maxParse: 4,
     pause429Ms: 400,
@@ -861,7 +872,7 @@ export function resolveSoftWatchCap(): {
   defaultCap: number;
 } {
   const shareLoad = Boolean(config.rpc?.shareLoad);
-  const defaultCap = shareLoad ? 12 : 20;
+  const defaultCap = shareLoad ? 8 : 16;
   if (
     process.env.RPC_SOFT_WATCH_CAP != null &&
     process.env.RPC_SOFT_WATCH_CAP !== '' &&
@@ -1634,6 +1645,18 @@ export async function refreshAllWalletActivity(): Promise<WalletActivityReport[]
   const defer = shouldDeferBackgroundForCritical('utility');
   if (defer.defer) {
     logBackgroundDeferred('Wallet activity refresh', defer.reason || 'load protection');
+    return reports;
+  }
+
+  const utilScale = utilityPollScale();
+  if (utilScale.skipActivity || isUtilityOnWeakPublic()) {
+    console.log(
+      '[monitor] Skipping activity refresh — Utility on weak public / adaptive slowdown'
+    );
+    logBackgroundDeferred(
+      'Wallet activity refresh',
+      'utility weak public or adaptive× high'
+    );
     return reports;
   }
 

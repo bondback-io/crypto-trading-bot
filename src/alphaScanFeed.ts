@@ -11,6 +11,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
+import { shouldSkipScannerTick } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchBondingCurve,
@@ -440,7 +441,7 @@ export async function runAlphaScanFeedPass(): Promise<number> {
     return 0;
   }
 
-  const interval = Math.max(15_000, Number(cfg.pollIntervalMs) || 45_000);
+  const interval = Math.max(30_000, Number(cfg.pollIntervalMs) || 45_000);
   if (passInFlight) return 0;
   if (lastPassAt && Date.now() - lastPassAt < interval * 0.85) {
     return 0;
@@ -449,6 +450,11 @@ export async function runAlphaScanFeedPass(): Promise<number> {
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
     logBackgroundDeferred('AlphaScan', defer.reason || 'Critical busy');
+    return 0;
+  }
+  const adapt = shouldSkipScannerTick('alpha_scan');
+  if (adapt.skip) {
+    logBackgroundDeferred('AlphaScan', adapt.reason || 'adaptive');
     return 0;
   }
 
