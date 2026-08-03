@@ -197,15 +197,19 @@ export function shouldSkipScannerTick(subsystem: string): {
   reason: string | null;
 } {
   const snap = getRpcLoadControlSnapshot();
-  if (snap.shedBackground && snap.scannerSlowFactor >= 3) {
+  // ×3+ means Secondary is already shedding — always skip the tick so we
+  // do not keep acquiring (and re-noting skips) every 22s.
+  if (snap.scannerSlowFactor >= 3) {
     return {
       skip: true,
-      reason: `adaptive shed for Critical (${snap.reasons[0] || 'load'})`,
+      reason: snap.shedBackground
+        ? `adaptive shed for Critical (${snap.reasons[0] || 'load'})`
+        : `adaptive scanner×${snap.scannerSlowFactor} (${subsystem})`,
     };
   }
-  // Probabilistic skip only when mild slowdown (×2). Full shed uses defer gate.
-  // Cap skip chance so Market Scanner cannot go quiet for long stretches.
-  if (snap.scannerSlowFactor >= 2 && snap.scannerSlowFactor < 3) {
+  // Probabilistic skip when mild slowdown (×2). Cap so Market Scanner cannot
+  // go quiet for long stretches.
+  if (snap.scannerSlowFactor >= 2) {
     const skipChance = Math.min(0.35, 1 - 1 / snap.scannerSlowFactor);
     if (Math.random() < skipChance) {
       return {

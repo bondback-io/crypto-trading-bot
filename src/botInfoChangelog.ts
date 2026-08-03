@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.135',
+    title: 'Market Scanner Load Backoff',
+    sections: ['scanners', 'execution'],
+    items: [
+      'Adaptive scanner×3 now actually skips Market/Alpha/Zion ticks (previously only Critical shed did).',
+      'Market Scanner respects adaptive poll interval; enrich + grad-watch budgets cut (16 @ concurrency 2) so Secondary RPS is not blown.',
+    ],
+  },
+  {
     version: '1.2.134',
     title: 'AlphaScan Dashboard RPC Throttle',
     sections: ['scanners', 'execution'],

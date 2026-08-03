@@ -13,7 +13,7 @@ import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
-import { shouldSkipScannerTick } from './rpcLoadControl';
+import { shouldSkipScannerTick, adaptiveScannerIntervalMs } from './rpcLoadControl';
 import { getRpcRoleFor } from './rpcRouting';
 import {
   enrichLaunchWithRealCandles,
@@ -929,8 +929,8 @@ export async function selectScannerCandidates(
   const cfg = scannerCfg();
   const now = Date.now();
   const maxOut = Math.max(1, cfg.maxCandidatesPerPoll);
-  // Enrich budget: 2× final cap, hard ceiling 40 to protect shared APIs
-  const enrichBudget = Math.min(40, Math.max(maxOut * 2, maxOut));
+  // Enrich budget: keep Secondary (Alchemy ~6 RPS) breathing room
+  const enrichBudget = Math.min(16, Math.max(maxOut * 2, maxOut));
 
   // Prefetch regime (cached)
   try {
@@ -967,7 +967,7 @@ export async function selectScannerCandidates(
     .slice(0, enrichBudget);
 
   type Enriched = ScannerCandidate & { launch: LaunchEvent };
-  const enriched = await mapPool(prefiltered, 3, async (raw) => {
+  const enriched = await mapPool(prefiltered, 2, async (raw) => {
     // Re-check queue mid-enrich so wallet path stays priority under real backlog
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return null;
 
@@ -1110,13 +1110,13 @@ async function offerGradWatchesCurveFirst(
   });
 
   // Broader than TA enrich budget; still capped for RPC health
-  const budget = Math.min(64, Math.max(28, Math.min(pumpish.length, 64)));
+  const budget = Math.min(16, Math.max(8, Math.min(pumpish.length, 16)));
   const sample = [...pumpish]
     .sort((a, b) => crudeLiqVolScore(b) - crudeLiqVolScore(a))
     .slice(0, budget);
 
   let offered = 0;
-  await mapPool(sample, 4, async (event) => {
+  await mapPool(sample, 2, async (event) => {
     if (pendingBuyQueueDepth() > SCANNER_MID_ENRICH_YIELD_DEPTH) return;
     const curve = await enrichCurve(event);
     const progress = curve.progressPct;
@@ -1193,6 +1193,30 @@ export function handOffScannerCandidate(
 export async function runScannerPollOnce(): Promise<number> {
   if (!isStrategyEnabled('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
+  const cfg = scannerCfg();
+  const baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);
+  const interval = adaptiveScannerIntervalMs(baseInterval);
+  if (lastPollAt != null && Date.now() - lastPollAt < interval * 0.85) {
+    return 0;
+  }
+  // #region agent log
+  try {
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    const { getRpcLoadControlSnapshot } =
+      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
+    const load = getRpcLoadControlSnapshot();
+    agentDebugLog('C3', 'marketScanner.ts:poll', 'market scanner poll gate', {
+      runId: 'post-fix',
+      baseInterval,
+      adaptiveInterval: interval,
+      scannerSlowFactor: load.scannerSlowFactor,
+      recentSkips: load.secondarySkipsRecent,
+    });
+  } catch {
+    /* */
+  }
+  // #endregion
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
@@ -1398,7 +1422,7 @@ export function startMarketScanner(): void {
   }, 12_000);
   pollTimer = setInterval(() => {
     void runScannerPollOnce();
-  }, Math.max(22_000, cfg.pollIntervalMs));
+  }, 5_000);
 }
 
 export function stopMarketScanner(): void {
