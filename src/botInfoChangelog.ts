@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.133',
+    title: 'RPC Skip Loop + AlphaScan Burst Fix',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Adaptive scanner× no longer locks forever on lifetime Secondary skip counts — only a rolling 60s window drives backoff.',
+      'AlphaScan curve enrich capped (16) with concurrency 2 instead of Promise.all(40), so Alchemy Secondary RPS is not blown at boot.',
+      'RPC Status warning uses recent skips/60s, not the lifetime gate counter.',
+    ],
+  },
+  {
     version: '1.2.132',
     title: 'Fair Soft-Watch + Safer Scanners',
     sections: ['execution', 'copy', 'scanners'],

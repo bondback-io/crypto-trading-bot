@@ -1505,10 +1505,7 @@ export function getRpcStats(): {
       'RPC lane gate stressed — background work is being queued/skipped to protect Critical. ' +
       `Utility queue ${gate.lanes.utility.queued}, skipped ${gate.lanes.utility.skipped}.`;
   }
-  if (!warning && gate.lanes.secondary.skipped >= 3) {
-    warning =
-      `Scanners lane high skips (${gate.lanes.secondary.skipped}) — Market/Alpha/Zion auto-slowed.`;
-  }
+  // Lifetime skip counter is diagnostic only — do not warn/slow from it.
 
   const quarantine = endpoints
     .filter((e) => isEndpointHardFailed(e))
@@ -1534,9 +1531,68 @@ export function getRpcStats(): {
       utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
       utilityFailover: uIdx !== preferredUtility,
       primaryQueued: gate.lanes.primary.queued,
-      secondarySkipped: gate.lanes.secondary.skipped,
+      // Do NOT pass lifetime gate.skipped — it never resets and locked adaptive ×3.
     });
     loadControl = getRpcLoadControlSnapshot();
+    if (
+      !warning &&
+      loadControl &&
+      loadControl.secondarySkipsRecent >= 8
+    ) {
+      warning =
+        `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) — Market/Alpha/Zion auto-slowed.`;
+    }
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      const nowDbg = Date.now();
+      const lastDbg = (getRpcStats as { _dbgAt?: number })._dbgAt || 0;
+      if (nowDbg - lastDbg > 10_000) {
+        (getRpcStats as { _dbgAt?: number })._dbgAt = nowDbg;
+        const samePaid =
+          pActive?.endpoint.url &&
+          sActive?.endpoint.url &&
+          pActive.endpoint.url === sActive.endpoint.url;
+        agentDebugLog('B/D/E', 'connection.ts:getRpcStats', 'lane + adaptive snapshot', {
+          runId: 'post-fix',
+          primaryLabel: pActive?.endpoint.label ?? null,
+          secondaryLabel: sActive?.endpoint.label ?? null,
+          utilityLabel: uActive?.endpoint.label ?? null,
+          primaryFailover: pIdx !== preferredPrimary,
+          secondaryFailover: sIdx !== preferredSecondary,
+          utilityFailover: uIdx !== preferredUtility,
+          samePaidEndpoint: Boolean(samePaid),
+          heliusHealthy: endpoints.find((e) => e.endpoint.label === 'helius')
+            ?.healthy,
+          heliusLat: endpoints.find((e) => e.endpoint.label === 'helius')
+            ?.latencyMs,
+          lifetimeSecondarySkipped: gate.lanes.secondary.skipped,
+          secondaryInFlight: gate.lanes.secondary.inFlight,
+          secondaryQueued: gate.lanes.secondary.queued,
+          adaptive: loadControl
+            ? {
+                scanner: loadControl.scannerSlowFactor,
+                utility: loadControl.utilitySlowFactor,
+                recentSkips: loadControl.secondarySkipsRecent,
+                reasons: loadControl.reasons.slice(0, 4),
+              }
+            : null,
+          utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
+          mainnetBetaLat: endpoints.find((e) =>
+            /mainnet-beta/i.test(e.endpoint.label)
+          )?.latencyMs,
+          rpcUrlLat: endpoints.find((e) => e.endpoint.label === 'rpc-url')
+            ?.latencyMs,
+          publicnodeLat: endpoints.find((e) =>
+            /publicnode/i.test(e.endpoint.label)
+          )?.latencyMs,
+        });
+      }
+    } catch {
+      /* */
+    }
+    // #endregion
   } catch {
     /* */
   }

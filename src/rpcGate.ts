@@ -182,7 +182,24 @@ export async function acquireRpcLane(
         queued: lane.waiters.length,
         tokens: Number(lane.tokens.toFixed(2)),
         maxRps: limits.maxRps,
+        lifetimeSkipped: lane.skipped,
       });
+      // #region agent log
+      try {
+        const { agentDebugLog } =
+          require('./agentDebugLog') as typeof import('./agentDebugLog');
+        agentDebugLog('C', 'rpcGate.ts:acquire:rate', 'lane skip rate', {
+          role,
+          feature: feature || 'ungated',
+          lifetimeSkipped: lane.skipped,
+          tokens: Number(lane.tokens.toFixed(2)),
+          maxRps: limits.maxRps,
+          inFlight: lane.inFlight,
+        });
+      } catch {
+        /* */
+      }
+      // #endregion
       throw new RpcGateSkipError('rate', role, feature);
     }
     const waitForTokenMs = Math.min(1_500, limits.maxWaitMs);

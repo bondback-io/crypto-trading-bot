@@ -49,9 +49,13 @@ function recompute(external?: {
   utilityWeakPublic?: boolean;
   utilityFailover?: boolean;
   primaryQueued?: number;
+  /** @deprecated Lifetime gate skips — ignored (was locking scanner×3 forever). */
   secondarySkipped?: number;
 }): void {
   const now = Date.now();
+  while (skipSamples.length && now - skipSamples[0].at > SKIP_WINDOW_MS) {
+    skipSamples.shift();
+  }
   const secondarySkipsRecent = skipSamples.filter(
     (s) => s.role === 'secondary' && now - s.at <= SKIP_WINDOW_MS
   ).length;
@@ -61,10 +65,40 @@ function recompute(external?: {
   let shedBackground = false;
   const reasons: string[] = [];
 
-  const secSkip = Math.max(
-    secondarySkipsRecent,
-    external?.secondarySkipped ?? 0
-  );
+  // Only the rolling 60s window — never lifetime lane.skipped (that never resets
+  // and permanently pinned scanner×3 after the first boot burst).
+  const lifetimeSecSkip = external?.secondarySkipped ?? 0;
+  const secSkip = secondarySkipsRecent;
+  // #region agent log
+  if (lifetimeSecSkip > 0 || secondarySkipsRecent > 0 || secSkip >= 3) {
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      const nowLog = Date.now();
+      const last = (recompute as { _dbgAt?: number })._dbgAt || 0;
+      if (nowLog - last > 8_000) {
+        (recompute as { _dbgAt?: number })._dbgAt = nowLog;
+        agentDebugLog('A', 'rpcLoadControl.ts:recompute', 'skip window vs lifetime', {
+          runId: 'post-fix',
+          secondarySkipsRecent,
+          lifetimeSecSkip,
+          secSkipUsed: secSkip,
+          lifetimeIgnored: true,
+          lifetimeDominates: false,
+          primaryLatencyMs: external?.primaryLatencyMs ?? null,
+          secondaryLatencyMs: external?.secondaryLatencyMs ?? null,
+          utilityLatencyMs: external?.utilityLatencyMs ?? null,
+          utilityWeakPublic: external?.utilityWeakPublic ?? false,
+          utilityFailover: external?.utilityFailover ?? false,
+          primaryQueued: external?.primaryQueued ?? 0,
+          sampleCount: skipSamples.length,
+        });
+      }
+    } catch {
+      /* */
+    }
+  }
+  // #endregion
   if (secSkip >= 8) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
     reasons.push(`secondary skips ${secSkip}/60s → scanner×3`);

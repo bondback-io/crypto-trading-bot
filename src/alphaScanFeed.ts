@@ -6,13 +6,12 @@
 
 import { config } from './config';
 import { logger, errorToMeta } from './logger';
-import { runWithRpcRole, isRpcGateSkipError } from './connection';
+import { isRpcGateSkipError } from './connection';
 import {
   shouldDeferBackgroundForCritical,
   logBackgroundDeferred,
 } from './rpcGate';
 import { shouldSkipScannerTick } from './rpcLoadControl';
-import { getRpcRoleFor } from './rpcRouting';
 import {
   fetchBondingCurve,
   getCachedBondingCurve,
@@ -75,8 +74,10 @@ export interface AlphaScanSnapshot {
 }
 
 const MAX_ROWS_PER_COLUMN = 40;
-/** Enrich bonding curves for all recent pump mints (was 18 — starved Soon). */
-const CURVE_ENRICH_CAP = 40;
+/** Cap curve RPCs per AlphaScan refresh — parallel 40 blew Secondary (Alchemy) RPS. */
+const CURVE_ENRICH_CAP = 16;
+/** Max in-flight bonding-curve fetches (Secondary lane is ~3 concurrent / 6 RPS). */
+const CURVE_ENRICH_CONCURRENCY = 2;
 
 let lastPollAt: number | null = null;
 let lastError: string | null = null;
@@ -260,47 +261,62 @@ async function enrichCurves(
         .endsWith('pump')
   );
   const slice = pumpish.slice(0, CURVE_ENRICH_CAP);
-  const role = getRpcRoleFor('alpha_scan', Boolean(config.rpc?.shareLoad));
+  // #region agent log
   try {
-    await runWithRpcRole(role, async () => {
-      await Promise.all(
-        slice.map(async (t) => {
-          const mint = String(t.id || '').trim();
-          if (!mint) return;
-          try {
-            const cached = getCachedBondingCurve(mint);
-            const state = cached || (await fetchBondingCurve(mint));
-            if (!state || state.source === 'none') {
-              // Missing curve is not proof of graduation — do not synthesize 100%/complete.
-              out.set(mint, {
-                progressPct: null,
-                complete: false,
-                nearMigration: false,
-                missing: true,
-              });
-              return;
-            }
-            out.set(mint, {
-              progressPct: state.progressPct,
-              complete: state.complete === true,
-              nearMigration: state.nearMigration === true,
-              missing: false,
-            });
-          } catch {
-            /* leave unset — stay New */
-          }
-        })
-      );
-    }, 'alpha_scan');
-  } catch (err) {
-    if (isRpcGateSkipError(err)) {
-      logBackgroundDeferred('AlphaScan', `lane gate ${err.kind}`, {
-        role: err.role,
-      });
-      return out;
-    }
-    throw err;
+    const { agentDebugLog } =
+      require('./agentDebugLog') as typeof import('./agentDebugLog');
+    agentDebugLog('C', 'alphaScanFeed.ts:enrichCurves', 'curve enrich start', {
+      runId: 'post-fix',
+      slice: slice.length,
+      cap: CURVE_ENRICH_CAP,
+      concurrency: CURVE_ENRICH_CONCURRENCY,
+    });
+  } catch {
+    /* */
   }
+  // #endregion
+  // No outer runWithRpcRole + Promise.all(40) — that held one gate slot while
+  // firing dozens of parallel getAccountInfo and starved Secondary RPS.
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(CURVE_ENRICH_CONCURRENCY, Math.max(1, slice.length)) },
+    async () => {
+      while (cursor < slice.length) {
+        const t = slice[cursor++];
+        if (!t) continue;
+        const mint = String(t.id || '').trim();
+        if (!mint) continue;
+        try {
+          const cached = getCachedBondingCurve(mint);
+          const state = cached || (await fetchBondingCurve(mint));
+          if (!state || state.source === 'none') {
+            out.set(mint, {
+              progressPct: null,
+              complete: false,
+              nearMigration: false,
+              missing: true,
+            });
+            continue;
+          }
+          out.set(mint, {
+            progressPct: state.progressPct,
+            complete: state.complete === true,
+            nearMigration: state.nearMigration === true,
+            missing: false,
+          });
+        } catch (err) {
+          if (isRpcGateSkipError(err)) {
+            logBackgroundDeferred('AlphaScan', `lane gate ${err.kind}`, {
+              role: err.role,
+            });
+            continue;
+          }
+          /* leave unset — stay New */
+        }
+      }
+    }
+  );
+  await Promise.all(workers);
   return out;
 }
 
