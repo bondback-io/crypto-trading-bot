@@ -5366,6 +5366,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-composer input::placeholder { color: #64748b; font-size: 16px; }
     .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
+    .zion-chat-clear {
+      flex: 0 0 auto;
+      min-height: 2.2rem;
+      padding: 0.35rem 0.65rem;
+      border: 1px solid #334155;
+      border-radius: 0.55rem;
+      color: #94a3b8;
+      background: transparent;
+      font-size: 0.72rem;
+      font-weight: 650;
+    }
+    .zion-chat-clear:hover, .zion-chat-clear:focus-visible {
+      color: #f8fafc;
+      border-color: #64748b;
+      background: #1e293b;
+      outline: none;
+    }
     .zion-chat-refresh { flex: 0 0 auto; min-height: 2.2rem; padding: 0.35rem 0.55rem; color: #94a3b8; background: transparent; border: 0; border-radius: 0.5rem; }
     .zion-chat-refresh:hover, .zion-chat-refresh:focus-visible { color: #f8fafc; background: #1e293b; outline: none; }
     .zion-chat-typing {
@@ -5510,6 +5527,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .zion-chat-message { max-width: 94%; }
       .zion-chat-composer { gap: 0.25rem; }
       .zion-chat-refresh { display: none; }
+      .zion-chat-clear { font-size: 0.68rem; padding: 0.35rem 0.5rem; }
     }
     @media (prefers-reduced-motion: reduce) {
       .zion-agent-widget *, .zion-agent-widget { animation: none !important; transition: none !important; }
@@ -7488,6 +7506,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
+          <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
           <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
         </div>
       </div>
@@ -7608,6 +7627,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
+          <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
           <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
         </div>
         <div id="zion-agent-widget-crs" class="zion-change-requests text-sm"></div>
@@ -24574,6 +24594,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         syncZionChatSurfaces();
       }
     }
+    async function clearZionAgentChat() {
+      if (_zionChatBusy) {
+        alert('Wait for Zion to finish replying, then clear.');
+        return;
+      }
+      if (
+        !confirm(
+          'Clear Zion chat?\\n\\nThe current thread is saved on the server (DATA_DIR/zion-chat-archives.json), then the live chat is emptied. Improvement Requests are kept.'
+        )
+      ) {
+        return;
+      }
+      try {
+        stopZionTypewriter();
+        clearZionTyping();
+        const out = await fetchJSON('/api/zion/agent/clear-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        cacheZionChatMessages([]);
+        _zionChatMessagesLive = [];
+        paintZionChatThreads([]);
+        await loadZionAgent();
+        if (out && out.archived) {
+          console.log(
+            '[zion-agent] cleared ' +
+              (out.cleared || 0) +
+              ' messages; archived as ' +
+              (out.archiveId || '—')
+          );
+        }
+      } catch (err) {
+        alert('Clear chat failed: ' + (err.message || err));
+      }
+    }
+    window.clearZionAgentChat = clearZionAgentChat;
     async function saveZionAgentConfig() {
       const semi = document.getElementById('zion-agent-semi');
       await fetchJSON('/api/zion/agent/config', {

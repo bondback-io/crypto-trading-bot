@@ -2840,6 +2840,25 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Archive live chat to DATA_DIR/zion-chat-archives.json, then clear the thread. */
+  app.post('/api/zion/agent/clear-chat', (_req: Request, res: Response) => {
+    try {
+      const { clearZionChat, listZionChatArchives } =
+        require('./zionAgentStore') as typeof import('./zionAgentStore');
+      const result = clearZionChat();
+      res.json({
+        ok: true,
+        ...result,
+        archives: listZionChatArchives(10),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/zion/agent/chat', async (req: Request, res: Response) => {
     try {
       const { zionAgentChat } =

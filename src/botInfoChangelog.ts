@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.126',
+    title: 'Zion Clear chat with archive',
+    sections: ['zion'],
+    items: [
+      'Zion tab and floating chat have a Clear button — the live thread is archived under DATA_DIR/zion-chat-archives.json (up to 40 clears), then emptied. Improvement Requests stay.',
+    ],
+  },
+  {
     version: '1.2.125',
     title: 'Pin Node 22 for Render deploys',
     sections: ['backup'],

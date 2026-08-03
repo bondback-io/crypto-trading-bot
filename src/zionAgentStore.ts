@@ -166,6 +166,109 @@ export function appendZionChat(
   return msg;
 }
 
+export interface ZionChatArchiveEntry {
+  id: string;
+  clearedAt: number;
+  messageCount: number;
+  messages: ZionChatMessage[];
+}
+
+interface ZionChatArchivesFile {
+  version: 1;
+  updatedAt: number;
+  archives: ZionChatArchiveEntry[];
+}
+
+const ARCHIVE_FILE = 'zion-chat-archives.json';
+const MAX_ARCHIVES = 40;
+
+function archivePath(): string {
+  ensureDataDir();
+  return dataFile(ARCHIVE_FILE);
+}
+
+function loadChatArchives(): ZionChatArchivesFile {
+  try {
+    const raw = fs.readFileSync(archivePath(), 'utf8');
+    const parsed = JSON.parse(raw) as ZionChatArchivesFile;
+    if (parsed?.version === 1 && Array.isArray(parsed.archives)) {
+      return {
+        version: 1,
+        updatedAt: Number(parsed.updatedAt) || Date.now(),
+        archives: parsed.archives.filter(
+          (a) => a && Array.isArray(a.messages) && a.id
+        ),
+      };
+    }
+  } catch {
+    /* */
+  }
+  return { version: 1, updatedAt: Date.now(), archives: [] };
+}
+
+function saveChatArchives(file: ZionChatArchivesFile): void {
+  file.updatedAt = Date.now();
+  try {
+    fs.writeFileSync(archivePath(), JSON.stringify(file, null, 2), 'utf8');
+  } catch (err) {
+    console.warn(
+      '[zion-agent] archive persist failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/**
+ * Archive the current thread to DATA_DIR/zion-chat-archives.json, then clear
+ * the live chat. Improvement Requests are untouched.
+ */
+export function clearZionChat(): {
+  cleared: number;
+  archived: boolean;
+  archiveId: string | null;
+} {
+  const st = loadZionAgentState();
+  const msgs = Array.isArray(st.messages) ? st.messages.slice() : [];
+  let archiveId: string | null = null;
+  let archived = false;
+  if (msgs.length > 0) {
+    archiveId = `zarch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const file = loadChatArchives();
+    file.archives.unshift({
+      id: archiveId,
+      clearedAt: Date.now(),
+      messageCount: msgs.length,
+      messages: msgs,
+    });
+    while (file.archives.length > MAX_ARCHIVES) file.archives.pop();
+    saveChatArchives(file);
+    archived = true;
+  }
+  st.messages = [];
+  saveZionAgentState(st);
+  return { cleared: msgs.length, archived, archiveId };
+}
+
+export function listZionChatArchives(limit = 20): Array<{
+  id: string;
+  clearedAt: number;
+  messageCount: number;
+}> {
+  return loadChatArchives()
+    .archives.slice(0, Math.max(1, limit))
+    .map((a) => ({
+      id: a.id,
+      clearedAt: a.clearedAt,
+      messageCount: a.messageCount,
+    }));
+}
+
+export function getZionChatArchive(
+  id: string
+): ZionChatArchiveEntry | null {
+  return loadChatArchives().archives.find((a) => a.id === id) || null;
+}
+
 export function addZionChangeRequest(
   cr: Omit<ZionChangeRequest, 'id' | 'createdAt' | 'status'>
 ): ZionChangeRequest {
