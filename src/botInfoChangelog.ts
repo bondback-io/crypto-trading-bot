@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.113',
+    title: 'Fix dashboard script stall from Zion bubble formatting',
+    sections: ['zion', 'overview'],
+    items: [
+      'Fixed a syntax break in Zion chat bubble formatting (`**bold**` / newlines) that lived inside the dashboard HTML template literal and stopped the whole page script — refresh polls and UI updates look frozen until reload after deploy.',
+    ],
+  },
+  {
     version: '1.2.112',
     title: 'Zion voice v2 + typing indicator',
     sections: ['zion'],
