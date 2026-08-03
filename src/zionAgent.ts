@@ -1137,7 +1137,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey Isaac — ask about a profile, Learning Mode, MARL, or how the bots are doing.',
+        'Hey Isaac — ask about a profile, learning progress, MARL, or how the bots are doing.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
