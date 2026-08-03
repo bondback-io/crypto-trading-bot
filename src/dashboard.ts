@@ -3119,6 +3119,108 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .mbp-streak-flat { color: #94a3b8; }
     .mbp-lm-on { color: #F1BB72; font-weight: 600; }
     .mbp-lm-off { color: #64748b; }
+    .lsd-health {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 1rem 1.5rem;
+      margin-bottom: 0.85rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 0.55rem;
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(16, 185, 129, 0.08));
+      border: 1px solid #1e293b;
+    }
+    .lsd-score-num {
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+    }
+    .lsd-score-label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #4ade80;
+      margin-top: 0.2rem;
+    }
+    .lsd-score-label.is-partial { color: #fbbf24; }
+    .lsd-score-label.is-low { color: #f87171; }
+    .lsd-blurb { font-size: 0.78rem; color: #94a3b8; line-height: 1.45; max-width: 36rem; }
+    .lsd-setup { margin: 0 0 0.75rem; padding-left: 1.1rem; font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }
+    .lsd-setup li { margin: 0.2rem 0; }
+    .lsd-warn {
+      font-size: 0.72rem;
+      color: #fbbf24;
+      margin: 0 0 0.85rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 0.4rem;
+      background: rgba(251, 191, 36, 0.08);
+      border: 1px solid rgba(251, 191, 36, 0.25);
+    }
+    .lsd-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
+      gap: 0.65rem;
+    }
+    .lsd-card {
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      background: #020617;
+      padding: 0.55rem 0.65rem;
+      min-width: 0;
+    }
+    .lsd-card-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+      margin-bottom: 0.35rem;
+    }
+    .lsd-card-name { font-size: 0.8rem; font-weight: 700; color: #e2e8f0; }
+    .lsd-chip {
+      font-size: 0.58rem;
+      font-weight: 700;
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.25rem;
+      letter-spacing: 0.02em;
+    }
+    .lsd-chip-active { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
+    .lsd-chip-advisor { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+    .lsd-chip-frozen { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+    .lsd-chip-paused { background: rgba(100, 116, 139, 0.25); color: #94a3b8; }
+    .lsd-chip-trend-up { color: #4ade80; }
+    .lsd-chip-trend-down { color: #f87171; }
+    .lsd-chip-trend-flat { color: #94a3b8; }
+    .lsd-bar-track {
+      height: 0.35rem;
+      border-radius: 999px;
+      background: #1e293b;
+      overflow: hidden;
+      margin: 0.25rem 0 0.35rem;
+    }
+    .lsd-bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #34d399, #10b981);
+    }
+    .lsd-meta { font-size: 0.65rem; color: #64748b; line-height: 1.35; }
+    .lsd-summary { font-size: 0.72rem; color: #cbd5e1; line-height: 1.4; margin: 0.4rem 0 0.3rem; }
+    .lsd-activity { font-size: 0.62rem; color: #64748b; line-height: 1.35; }
+    .lsd-spark {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 1.35rem;
+      margin-top: 0.4rem;
+    }
+    .lsd-spark span {
+      flex: 1;
+      min-width: 3px;
+      border-radius: 1px 1px 0 0;
+      background: #334155;
+    }
+    .lsd-spark span.pos { background: #34d399; }
+    .lsd-spark span.neg { background: #f87171; }
     .tp-perf-chip {
       display: inline-flex;
       align-items: center;
@@ -5965,7 +6067,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
           </button>
-          <button type="button" role="menuitem" data-settings-tab="botperf" onclick="showTab('botperf')" title="Per-micro-bot rankings, streaks, profit factor, drawdown, and Learning Mode participate">
+          <button type="button" role="menuitem" data-settings-tab="botperf" onclick="showTab('botperf')" title="Per-micro-bot rankings, learning progress, and system health diagnostics">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/><circle cx="18" cy="6" r="2"/></svg></span>
             Bot Performance
           </button>
@@ -8167,6 +8269,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <tr><td colspan="11" class="mint">Loading…</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="card" id="learning-system-diagnostics-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Learning Progress &amp; System Diagnostics <span class="tip" tabindex="0" data-tip="Read-only view of how each micro-bot is learning, what it has learned in plain English, ML + MARL + Learning Mode setup, and an overall System Health Score. Does not change any knobs."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Ask Zion about learning progress or system health — same snapshot feeds the agent. Refreshes when this tab is open.</p>
+          </div>
+          <span class="mint text-xs" id="lsd-updated-at">—</span>
+        </div>
+        <div id="lsd-health-hero" class="lsd-health">
+          <div>
+            <div class="lsd-score-num" id="lsd-score-num">—</div>
+            <div class="lsd-score-label" id="lsd-score-label">Loading…</div>
+          </div>
+          <p class="lsd-blurb mb-0" id="lsd-health-blurb">Loading learning diagnostics…</p>
+        </div>
+        <ul class="lsd-setup" id="lsd-setup-list"></ul>
+        <div class="lsd-warn hidden" id="lsd-warnings"></div>
+        <div class="section-title !text-sm mb-2">Learning by Micro-Bot</div>
+        <div class="lsd-grid" id="lsd-profile-grid">
+          <p class="mint text-xs">Loading…</p>
         </div>
       </div>
     </section>
@@ -12106,6 +12231,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const botperf = document.querySelector('[data-tab-panel="botperf"]');
         if (botperf && !botperf.classList.contains('hidden')) {
           loadMicroBotPerformance();
+          try { loadLearningDiagnostics(); } catch (_) {}
         }
       } catch (_) {}
       renderAutoScoringUi(tp);
@@ -12432,6 +12558,172 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadMicroBotPerformance = loadMicroBotPerformance;
+
+    function lsdStatusChipClass(status) {
+      if (status === 'Active') return 'lsd-chip-active';
+      if (status === 'Advisor-only') return 'lsd-chip-advisor';
+      if (status === 'Frozen') return 'lsd-chip-frozen';
+      return 'lsd-chip-paused';
+    }
+
+    function lsdTrendClass(trend) {
+      if (trend === 'Improving') return 'lsd-chip-trend-up';
+      if (trend === 'Declining') return 'lsd-chip-trend-down';
+      return 'lsd-chip-trend-flat';
+    }
+
+    function renderLearningSpark(spark) {
+      const vals = Array.isArray(spark) ? spark : [];
+      if (!vals.length) {
+        return '<div class="lsd-spark" title="No trend yet">' +
+          '<span style="height:20%"></span><span style="height:20%"></span><span style="height:20%"></span>' +
+          '</div>';
+      }
+      let maxAbs = 0.01;
+      for (let i = 0; i < vals.length; i++) {
+        const a = Math.abs(Number(vals[i]) || 0);
+        if (a > maxAbs) maxAbs = a;
+      }
+      return (
+        '<div class="lsd-spark" title="Recent reward / PnL trend">' +
+        vals
+          .map(function (v) {
+            const n = Number(v) || 0;
+            const h = Math.max(12, Math.round((Math.abs(n) / maxAbs) * 100));
+            const cls = n > 0.15 ? 'pos' : n < -0.15 ? 'neg' : '';
+            return (
+              '<span class="' +
+              cls +
+              '" style="height:' +
+              h +
+              '%"></span>'
+            );
+          })
+          .join('') +
+        '</div>'
+      );
+    }
+
+    function renderLearningDiagnostics(diag) {
+      const scoreEl = document.getElementById('lsd-score-num');
+      const labelEl = document.getElementById('lsd-score-label');
+      const blurbEl = document.getElementById('lsd-health-blurb');
+      const setupEl = document.getElementById('lsd-setup-list');
+      const warnEl = document.getElementById('lsd-warnings');
+      const gridEl = document.getElementById('lsd-profile-grid');
+      const atEl = document.getElementById('lsd-updated-at');
+      if (!diag || !scoreEl) return;
+      const score = Math.round(Number(diag.healthScore) || 0);
+      scoreEl.textContent = String(score);
+      const label = String(diag.healthLabel || '—');
+      labelEl.textContent = label;
+      labelEl.classList.remove('is-partial', 'is-low');
+      if (score < 50) labelEl.classList.add('is-low');
+      else if (score < 75) labelEl.classList.add('is-partial');
+      blurbEl.textContent = String(diag.healthBlurb || '');
+      if (atEl && diag.generatedAt) {
+        try {
+          atEl.textContent = 'Updated ' + new Date(diag.generatedAt).toLocaleTimeString();
+        } catch (_) {
+          atEl.textContent = '';
+        }
+      }
+      const setup = Array.isArray(diag.setupLines) ? diag.setupLines : [];
+      setupEl.innerHTML = setup
+        .map(function (line) {
+          return '<li>' + escHtml(String(line)) + '</li>';
+        })
+        .join('');
+      const warnings = Array.isArray(diag.warnings) ? diag.warnings : [];
+      if (warnings.length) {
+        warnEl.classList.remove('hidden');
+        warnEl.innerHTML =
+          '<strong>Watch:</strong> ' +
+          warnings.map(function (w) { return escHtml(String(w)); }).join(' · ');
+      } else {
+        warnEl.classList.add('hidden');
+        warnEl.innerHTML = '';
+      }
+      const profiles = Array.isArray(diag.profiles) ? diag.profiles : [];
+      if (!profiles.length) {
+        gridEl.innerHTML = '<p class="mint text-xs">No micro-bot profiles found.</p>';
+        return;
+      }
+      gridEl.innerHTML = profiles
+        .map(function (p) {
+          const pct = Math.max(0, Math.min(100, Number(p.progressPct) || 0));
+          const status = String(p.status || 'Paused');
+          const trend = String(p.trend || 'Stable');
+          const reward =
+            p.avgTimingReward != null && Number.isFinite(Number(p.avgTimingReward))
+              ? ' · reward ' + Number(p.avgTimingReward).toFixed(1)
+              : '';
+          const activity = p.lastActivity
+            ? '<div class="lsd-activity">' + escHtml(String(p.lastActivity)) + '</div>'
+            : '';
+          return (
+            '<div class="lsd-card">' +
+            '<div class="lsd-card-head">' +
+            '<span class="lsd-card-name">' +
+            escHtml(String(p.name || p.id)) +
+            (p.botEnabled === false ? ' <span class="mint">(off)</span>' : '') +
+            '</span>' +
+            '<span class="lsd-chip ' +
+            lsdStatusChipClass(status) +
+            '">' +
+            escHtml(status) +
+            '</span>' +
+            '<span class="lsd-chip ' +
+            lsdTrendClass(trend) +
+            '">' +
+            escHtml(trend) +
+            '</span>' +
+            '</div>' +
+            '<div class="lsd-meta">' +
+            escHtml(String(pct)) +
+            '% toward goal · ' +
+            escHtml(String(p.episodes || 0)) +
+            ' trades · L' +
+            escHtml(String(p.level || 0)) +
+            ' · ML ' +
+            escHtml(String(p.mlMode || 'shadow')) +
+            (p.mlModeSource === 'auto' ? ' auto' : '') +
+            reward +
+            '</div>' +
+            '<div class="lsd-bar-track"><div class="lsd-bar-fill" style="width:' +
+            pct +
+            '%"></div></div>' +
+            '<p class="lsd-summary mb-0">' +
+            escHtml(String(p.learnedSummary || '')) +
+            '</p>' +
+            activity +
+            renderLearningSpark(p.spark) +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+
+    async function loadLearningDiagnostics() {
+      try {
+        const data = await fetchJSON('/api/learning-diagnostics');
+        const diag = (data && data.diagnostics) || data;
+        window.__learningDiagnostics = diag;
+        renderLearningDiagnostics(diag);
+      } catch (err) {
+        const blurb = document.getElementById('lsd-health-blurb');
+        const grid = document.getElementById('lsd-profile-grid');
+        if (blurb) {
+          blurb.textContent =
+            'Diagnostics unavailable: ' + (err.message || String(err));
+        }
+        if (grid) {
+          grid.innerHTML =
+            '<p class="mint text-xs">Could not load learning diagnostics.</p>';
+        }
+      }
+    }
+    window.loadLearningDiagnostics = loadLearningDiagnostics;
 
     function setMicroBotPerfWindow(win) {
       const next =
@@ -13791,6 +14083,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'botperf') {
         try { loadMicroBotPerformance(); } catch (_) {}
+        try { loadLearningDiagnostics(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {

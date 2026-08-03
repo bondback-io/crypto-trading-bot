@@ -2993,6 +2993,19 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/learning-diagnostics', (_req: Request, res: Response) => {
+    try {
+      const { getLearningSystemDiagnostics } =
+        require('./learningSystemDiagnostics') as typeof import('./learningSystemDiagnostics');
+      const diagnostics = getLearningSystemDiagnostics();
+      res.json({ ok: true, diagnostics });
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/trade-profiles/learning', (req: Request, res: Response) => {
     const {
       applyTradeProfileLearning,

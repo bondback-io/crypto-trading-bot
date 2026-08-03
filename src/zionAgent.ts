@@ -166,6 +166,13 @@ function buildContextPack(): string {
   } catch {
     /* */
   }
+  try {
+    const { formatLearningDiagnosticsForZion } =
+      require('./learningSystemDiagnostics') as typeof import('./learningSystemDiagnostics');
+    lines.push(...formatLearningDiagnosticsForZion());
+  } catch {
+    lines.push('Learning health: unavailable');
+  }
   return lines.join('\n').slice(0, 14_000);
 }
 
@@ -176,6 +183,10 @@ type ParsedBotFacts = {
   pumpFunOnly?: string;
   requireTa?: string;
   marl?: string;
+  learningHealth?: string;
+  learningBlurb?: string;
+  learningWarns: string[];
+  learnProfiles: Array<{ name: string; detail: string }>;
   profiles: Array<{ id: string; enabled: boolean; label: string }>;
   open?: number;
   closed?: number;
@@ -199,7 +210,13 @@ function profileLabel(id: string): string {
 }
 
 function parseContextPack(ctx: string): ParsedBotFacts {
-  const facts: ParsedBotFacts = { profiles: [], recentClosed: [], topSkips: [] };
+  const facts: ParsedBotFacts = {
+    profiles: [],
+    recentClosed: [],
+    topSkips: [],
+    learningWarns: [],
+    learnProfiles: [],
+  };
   for (const raw of ctx.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
@@ -213,6 +230,12 @@ function parseContextPack(ctx: string): ParsedBotFacts {
     else if ((m = line.match(/^Require TA:\s*(.+)$/i)))
       facts.requireTa = m[1].trim();
     else if ((m = line.match(/^MARL:\s*(.+)$/i))) facts.marl = m[1].trim();
+    else if ((m = line.match(/^Learning health:\s*(.+)$/i)))
+      facts.learningHealth = m[1].trim();
+    else if ((m = line.match(/^warn:\s*(.+)$/i)))
+      facts.learningWarns.push(m[1].trim());
+    else if ((m = line.match(/^learn\s+(.+?):\s*(.+)$/i)))
+      facts.learnProfiles.push({ name: m[1].trim(), detail: m[2].trim() });
     else if (
       (m = line.match(
         /^([a-z0-9_]+):\s*(ON|OFF)\s+lmOptIn=/i
@@ -241,15 +264,36 @@ function parseContextPack(ctx: string): ParsedBotFacts {
         profileId: m[2],
         pnl: Number(m[3]),
       });
+    } else if (
+      line.startsWith('ML is') ||
+      line.startsWith('Self-Learn') ||
+      (line.includes('MARL') && line.includes('influence'))
+    ) {
+      // health blurb line under Learning health
+      if (!facts.learningBlurb && facts.learningHealth) {
+        facts.learningBlurb = line.replace(/^\s+/, '');
+      }
     } else if ((m = line.match(/^([^:]+):\s*(\d+)$/)) && facts.topSkips) {
       // skip lines after "Top skips:" — only count short reason lines
       if (
-        !/^(Mode|Risk|Learning|Pump|Require|MARL|Smart|Open|Entries|agent|marl)/i.test(
+        !/^(Mode|Risk|Learning|Pump|Require|MARL|Smart|Open|Entries|agent|marl|warn|learn)/i.test(
           m[1]
         )
       ) {
         facts.topSkips.push({ reason: m[1].trim(), count: m[2] });
       }
+    }
+  }
+  // Capture indented blurb after Learning health
+  for (const raw of ctx.split('\n')) {
+    const t = raw.trim();
+    if (
+      !facts.learningBlurb &&
+      facts.learningHealth &&
+      /^(ML is|Self-Learn|MARL is)/i.test(t)
+    ) {
+      facts.learningBlurb = t;
+      break;
     }
   }
   return facts;
@@ -594,6 +638,46 @@ function localAnalystReply(
     });
   }
 
+  if (
+    /learning (progress|health)|system health|what has .+ learned|self-?learn|ml mode|diagnostics/.test(
+      q
+    ) ||
+    (/learned|learning/.test(q) && /scalper|dip|migration|trend|momentum|burst|steady|high.?win|reversal|bot/.test(q))
+  ) {
+    const named = facts.learnProfiles.find((p) =>
+      q.toLowerCase().includes(p.name.toLowerCase().split(' ')[0] || '')
+    );
+    if (named && /what|learned|progress|how/.test(q)) {
+      return formatZionReply({
+        greeting: greet,
+        answer: `${named.name}: ${named.detail}`,
+        summary: facts.learningHealth
+          ? `System: ${facts.learningHealth}.`
+          : undefined,
+        followUp: 'Another bot, or overall system health?',
+      });
+    }
+    const topLearn = facts.learnProfiles.slice(0, 4);
+    return formatZionReply({
+      greeting: greet,
+      answer: facts.learningHealth
+        ? `System Health ${facts.learningHealth}.`
+        : 'Learning diagnostics aren’t loaded yet, Isaac.',
+      summary: [
+        facts.learningBlurb,
+        facts.learningWarns.length
+          ? `Watch: ${facts.learningWarns.slice(0, 3).join('; ')}.`
+          : null,
+        topLearn.length
+          ? topLearn.map((p) => `${p.name} — ${p.detail.split('—').pop()?.trim() || p.detail}`).join(' ')
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
+      followUp: 'Ask what a specific bot has learned, or open Bot Performance.',
+    });
+  }
+
   // Generic helpful answer — no raw dump
   const onProfiles = facts.profiles.filter((p) => p.enabled).map((p) => p.label);
   const offProfiles = facts.profiles.filter((p) => !p.enabled).map((p) => p.label);
@@ -601,7 +685,7 @@ function localAnalystReply(
     greeting: vibeAck(vibe, opts?.isFirst),
     answer: overallStats
       ? overallStats
-      : 'I can check profiles, Learning Mode, MARL, skips, or overall — just say which, Isaac.',
+      : 'I can check profiles, learning progress, MARL, skips, or overall — just say which, Isaac.',
     summary: [
       onProfiles.length ? `On: ${onProfiles.join(', ')}.` : null,
       offProfiles.length ? `Off: ${offProfiles.join(', ')}.` : null,

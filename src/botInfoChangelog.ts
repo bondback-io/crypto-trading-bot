@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.121',
+    title: 'Learning Progress & System Diagnostics',
+    sections: ['learning', 'overview'],
+    items: [
+      'Bot Performance adds a Learning Progress & System Diagnostics panel: System Health Score, plain-English setup/warnings, and per-bot learning cards with progress, status, trend, and what each bot has learned.',
+      'Read-only snapshot (GET /api/learning-diagnostics) — no learning settings change. Zion can answer questions about learning progress and system health from the same data.',
+    ],
+  },
+  {
     version: '1.2.120',
     title: 'Auto-promote Self-Learn ML mode',
     sections: ['learning'],
