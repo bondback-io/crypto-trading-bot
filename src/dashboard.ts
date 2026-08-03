@@ -19145,6 +19145,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : 'cap ' + rpc.softWatch.softWatchCap +
             ' · pool ' + rpc.softWatch.watchPool +
             '/' + rpc.softWatch.enabledWallets +
+            (rpc.softWatch.coveragePct30m != null
+              ? ' · cover30m ' + rpc.softWatch.coveragePct30m + '%'
+              : '') +
+            (rpc.softWatch.stickySlots != null
+              ? ' · sticky/rot ' + rpc.softWatch.stickySlots + '/' + (rpc.softWatch.rotateSlots != null ? rpc.softWatch.rotateSlots : '—')
+              : '') +
             (rpc.softWatch.lastPollElapsedMs != null
               ? ' · last poll ' + rpc.softWatch.lastPollElapsedMs + 'ms'
               : '');

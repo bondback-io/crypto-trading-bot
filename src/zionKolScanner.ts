@@ -792,11 +792,11 @@ export function startZionKolScanner(): void {
   loadUniverseCache();
   const share = lanesShareEndpoint();
   const configured = Math.max(
-    45_000,
-    Number(zionCfg().scanner.pollIntervalMs) || 60_000
+    75_000,
+    Number(zionCfg().scanner.pollIntervalMs) || 75_000
   );
-  // Shared primary/secondary URL: enforce ≥120s so Zion yields CU to copy
-  const interval = share ? Math.max(120_000, configured) : configured;
+  // Shared primary/secondary URL: enforce ≥90s so Zion yields CU to copy
+  const interval = share ? Math.max(90_000, configured) : configured;
   console.log(
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')

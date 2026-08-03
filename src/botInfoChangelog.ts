@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.132',
+    title: 'Fair Soft-Watch + Safer Scanners',
+    sections: ['execution', 'copy', 'scanners'],
+    items: [
+      'Soft-watch rotates fairly across the full Favourites pool (least-recently-covered first) with a smaller sticky-hot slice; coverage % logged + shown in RPC Status.',
+      'Safer scanner floors: Market ~22s, AlphaScan ~55s, Zion ~75–90s — still on Secondary, still adaptive.',
+      'Utility prefers rpc-url / strong non-public routes; weak public failover stays sticky (less thrash) and keeps Favourites slowed.',
+      'Fix: Market Scanner no longer permanently self-defers after a few Secondary gate skips; “buy in progress” uses a 15s cooldown instead of 45m.',
+    ],
+  },
+  {
     version: '1.2.131',
     title: 'RPC Adaptive Stabilisation',
     sections: ['execution', 'scanners', 'copy', 'knobs'],

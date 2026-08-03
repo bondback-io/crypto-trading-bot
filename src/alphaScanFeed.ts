@@ -441,7 +441,7 @@ export async function runAlphaScanFeedPass(): Promise<number> {
     return 0;
   }
 
-  const interval = Math.max(30_000, Number(cfg.pollIntervalMs) || 45_000);
+  const interval = Math.max(50_000, Number(cfg.pollIntervalMs) || 55_000);
   if (passInFlight) return 0;
   if (lastPassAt && Date.now() - lastPassAt < interval * 0.85) {
     return 0;

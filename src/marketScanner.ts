@@ -143,7 +143,7 @@ let handler: ScannerHandler | null = null;
 function baseScannerCfg() {
   return (
     config.marketScanner ?? {
-      pollIntervalMs: 15_000,
+      pollIntervalMs: 22_000,
       lookbackHours: 6,
       maxCandidatesPerPoll: 15,
       cooldownMs: 45 * 60_000,
@@ -1142,10 +1142,15 @@ async function offerGradWatchesCurveFirst(
   return { scanned: sample.length, offered, triggered };
 }
 
-export function markScannerCooldown(mint: string, taken: boolean): void {
+export function markScannerCooldown(
+  mint: string,
+  taken: boolean,
+  opts?: { ms?: number }
+): void {
   const cfg = scannerCfg();
-  const base = cfg.cooldownMs ?? 45 * 60_000;
-  cooldowns.set(mint, Date.now() + (taken ? base * 2 : base));
+  const base = opts?.ms ?? cfg.cooldownMs ?? 45 * 60_000;
+  const wait = opts?.ms != null ? opts.ms : taken ? base * 2 : base;
+  cooldowns.set(mint, Date.now() + Math.max(0, wait));
   seenThisSession.add(mint);
 }
 
@@ -1192,12 +1197,17 @@ export async function runScannerPollOnce(): Promise<number> {
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
     lastSkipReason = `delayed — ${defer.reason}`;
+    // Still stamp lastPollAt so the UI does not look "frozen" while deferred.
+    lastPollAt = Date.now();
+    lastPollMs = 0;
     return 0;
   }
   const adapt = shouldSkipScannerTick('market_scanner');
   if (adapt.skip) {
     logBackgroundDeferred('Market Scanner', adapt.reason || 'adaptive');
     lastSkipReason = `delayed — ${adapt.reason}`;
+    lastPollAt = Date.now();
+    lastPollMs = 0;
     return 0;
   }
   const qDepth = pendingBuyQueueDepth();
@@ -1388,7 +1398,7 @@ export function startMarketScanner(): void {
   }, 12_000);
   pollTimer = setInterval(() => {
     void runScannerPollOnce();
-  }, Math.max(25_000, cfg.pollIntervalMs));
+  }, Math.max(22_000, cfg.pollIntervalMs));
 }
 
 export function stopMarketScanner(): void {

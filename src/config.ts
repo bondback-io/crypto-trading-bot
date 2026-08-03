@@ -2437,7 +2437,7 @@ export const config: BotConfig = {
 
   alphaScan: {
     enabled: false,
-    pollIntervalMs: 45_000,
+    pollIntervalMs: 55_000,
     feedNew: true,
     feedSoon: true,
     feedBonded: true,
@@ -2454,7 +2454,7 @@ export const config: BotConfig = {
 
   marketScanner: {
     enabled: true,
-    pollIntervalMs: 15_000,
+    pollIntervalMs: 22_000,
     lookbackHours: 6,
     maxCandidatesPerPoll: 15,
     cooldownMs: 45 * 60_000,
@@ -2506,7 +2506,7 @@ export const config: BotConfig = {
     enabled: true,
     scanner: {
       enabled: true,
-      pollIntervalMs: 30_000,
+      pollIntervalMs: 75_000,
       universeSize: 60,
       activityLookbackMinutes: 45,
       batchSize: 6,

@@ -762,6 +762,12 @@ let pollRotationOffset = 0;
  * through the non-sticky slots so Quiet wallets are not permanently ignored.
  */
 let softWatchRotateOffset = 0;
+/** address → last ms included in soft-watch set (fair coverage across full pool). */
+const softWatchLastCoveredAt = new Map<string, number>();
+let softWatchCoverageLogAt = 0;
+let lastSoftWatchCoveragePct: number | null = null;
+let lastSoftWatchStickyN = 0;
+let lastSoftWatchRotateN = 0;
 /** After a free-tier 429, skip poll cycles until this time (keeps /health responsive). */
 let pollRateLimitedUntil = 0;
 /** Last poll-cycle soak counters for /api/status. */
@@ -929,6 +935,10 @@ export function getSoftWatchRuntimeSnapshot(): {
   lastPollElapsedMs: number | null;
   pollRole: string;
   utilityHost: string | null;
+  /** % of enabled pool covered by soft-watch in last ~30 min. */
+  coveragePct30m: number | null;
+  stickySlots: number;
+  rotateSlots: number;
 } {
   const cap = resolveSoftWatchCap();
   const pollRole = getRpcRoleFor('wallet_poll', cap.shareLoad);
@@ -938,13 +948,26 @@ export function getSoftWatchRuntimeSnapshot(): {
   } catch {
     utilityHost = null;
   }
+  const enabledList = config.smartWallets.filter((w) => w.enabled);
+  const since = Date.now() - 30 * 60_000;
+  let covered = 0;
+  for (const w of enabledList) {
+    const t = softWatchLastCoveredAt.get(w.address);
+    if (t != null && t >= since) covered += 1;
+  }
+  const coveragePct30m =
+    enabledList.length > 0
+      ? Math.round((covered / enabledList.length) * 1000) / 10
+      : null;
+  lastSoftWatchCoveragePct = coveragePct30m;
+
   return {
     softWatchCap: cap.effectiveCap,
     softWatchCapSource: cap.source,
     softWatchPaused: cap.paused,
     softWatchDefault: cap.defaultCap,
     shareLoad: cap.shareLoad,
-    enabledWallets: config.smartWallets.filter((w) => w.enabled).length,
+    enabledWallets: enabledList.length,
     watchPool: getWalletsForPolling().length,
     lastPollAttempted,
     lastPollCompleted,
@@ -952,6 +975,9 @@ export function getSoftWatchRuntimeSnapshot(): {
     lastPollElapsedMs: lastPollElapsedMs,
     pollRole,
     utilityHost,
+    coveragePct30m,
+    stickySlots: lastSoftWatchStickyN,
+    rotateSlots: lastSoftWatchRotateN,
   };
 }
 
@@ -1941,8 +1967,9 @@ export function getWalletsForPolling(): SmartWallet[] {
     return bT - aT;
   });
 
-  // Free Helius/Alchemy/public — rotate a capped watch set (Share: Utility default 12).
-  // Keep ~60% sticky-hot (recent activity); rotate the rest so colder wallets still get cycles.
+  // Free Helius/Alchemy/public — rotate a capped watch set across the FULL pool.
+  // Small sticky-hot slice (recent/high-value); majority of slots rotate by least-recently-covered
+  // so Quiet wallets are not permanently starved. Weak Utility → more conservative.
   // Cap 0 = pause Favourites soft-watch (utility relief).
   const capInfo = resolveSoftWatchCap();
   const softCap = capInfo.effectiveCap;
@@ -1954,8 +1981,16 @@ export function getWalletsForPolling(): SmartWallet[] {
   const softUrl = isSoftThrottleRpcUrl(rpcUrlForCap);
   // Cap must survive Utility failover onto paid rpc-url (softUrl becomes false).
   const applySoftCap = shouldSoftThrottleWalletPoll(rpcUrlForCap);
+  let weakUtil = false;
+  try {
+    weakUtil = isUtilityOnWeakPublic();
+  } catch {
+    weakUtil = false;
+  }
 
   if (softCap === 0) {
+    lastSoftWatchStickyN = 0;
+    lastSoftWatchRotateN = 0;
     // #region agent log
     try {
       const { agentDebugLog } =
@@ -1980,10 +2015,27 @@ export function getWalletsForPolling(): SmartWallet[] {
     softCap > 0 &&
     sorted.length > softCap
   ) {
-    const stickyN = Math.max(1, Math.floor(softCap * 0.6));
-    const rotateN = softCap - stickyN;
+    // Sticky fraction: ~35% normal, ~25% on weak public utility (more rotation + lower pressure).
+    const stickyFrac = weakUtil ? 0.25 : 0.35;
+    const stickyN = Math.max(1, Math.floor(softCap * stickyFrac));
+    const rotateN = Math.max(0, softCap - stickyN);
     const hot = sorted.slice(0, stickyN);
-    const cold = sorted.slice(stickyN);
+    const hotSet = new Set(hot.map((w) => w.address));
+    // Fair coverage: least-recently covered first, then lower activity (spread the pool).
+    const cold = sorted
+      .filter((w) => !hotSet.has(w.address))
+      .slice()
+      .sort((a, b) => {
+        const aSeen = softWatchLastCoveredAt.get(a.address) ?? 0;
+        const bSeen = softWatchLastCoveredAt.get(b.address) ?? 0;
+        if (aSeen !== bSeen) return aSeen - bSeen;
+        const aQ = a.qualityScore ?? 0;
+        const bQ = b.qualityScore ?? 0;
+        if (bQ !== aQ) return bQ - aQ;
+        const aT = a.lastTradedAt ?? a.lastActive ?? 0;
+        const bT = b.lastTradedAt ?? b.lastActive ?? 0;
+        return aT - bT;
+      });
     const rotated: typeof sorted = [];
     if (cold.length > 0 && rotateN > 0) {
       const start =
@@ -1995,6 +2047,33 @@ export function getWalletsForPolling(): SmartWallet[] {
       softWatchRotateOffset = (start + Math.max(take, 1)) % cold.length;
     }
     const capped = hot.concat(rotated);
+    const now = Date.now();
+    for (const w of capped) {
+      softWatchLastCoveredAt.set(w.address, now);
+    }
+    lastSoftWatchStickyN = stickyN;
+    lastSoftWatchRotateN = rotated.length;
+
+    const since = now - 30 * 60_000;
+    let covered30 = 0;
+    for (const w of sorted) {
+      const t = softWatchLastCoveredAt.get(w.address);
+      if (t != null && t >= since) covered30 += 1;
+    }
+    const coveragePct =
+      sorted.length > 0
+        ? Math.round((covered30 / sorted.length) * 1000) / 10
+        : 0;
+    lastSoftWatchCoveragePct = coveragePct;
+
+    if (now - softWatchCoverageLogAt > 60_000) {
+      softWatchCoverageLogAt = now;
+      console.log(
+        `[monitor] Soft-watch rotation: cap ${softCap} · sticky ${stickyN} · rotate ${rotated.length} · ` +
+          `pool ${sorted.length} · coverage30m ${coveragePct}%` +
+          (weakUtil ? ' · weak Utility (conservative)' : '')
+      );
+    }
     // #region agent log
     try {
       const { agentDebugLog } =
@@ -2007,7 +2086,9 @@ export function getWalletsForPolling(): SmartWallet[] {
         enabledSorted: sorted.length,
         returned: capped.length,
         stickyN,
-        rotateN,
+        rotateN: rotated.length,
+        coveragePct30m: coveragePct,
+        weakUtil,
         softUrl,
         applySoftCap,
         pollRoleForCap,
@@ -2683,7 +2764,9 @@ async function handleScannerCandidate(
       tradeStatus: 'skipped',
       skipReason: 'buy in progress',
     });
-    markScannerCooldown(candidate.mint, false);
+    // Transient lock — do NOT apply the 45m scanner cooldown or the mint
+    // disappears from Market Scanner for the whole cooldown window.
+    markScannerCooldown(candidate.mint, false, { ms: 15_000 });
     return;
   }
   if (!beginBuy(candidate.mint)) {
@@ -2695,6 +2778,7 @@ async function handleScannerCandidate(
       tradeStatus: 'skipped',
       skipReason: 'buy in progress',
     });
+    markScannerCooldown(candidate.mint, false, { ms: 15_000 });
     return;
   }
 

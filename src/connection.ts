@@ -395,6 +395,56 @@ export function isUtilityOnWeakPublic(): boolean {
   return isWeakPublicUtilityUrl(state.endpoint.url);
 }
 
+/** Stronger utility candidate: configured rpc-url / utility role that is not weak public. */
+function isStrongUtilityEndpoint(state: EndpointState | undefined): boolean {
+  if (!state) return false;
+  if (isWeakPublicUtilityUrl(state.endpoint.url)) return false;
+  if (isEndpointHardFailed(state) || isEndpointRateLimited(state)) return false;
+  const label = (state.endpoint.label || '').toLowerCase();
+  if (state.role === 'utility') return true;
+  if (label === 'rpc-url' || state.role === 'fallback') {
+    // Custom RPC_URL / mid-tier fallback — prefer over publicnode/mainnet-beta.
+    return !isPublicRpcUrl(state.endpoint.url) || label === 'rpc-url';
+  }
+  return false;
+}
+
+function pickPreferredUtilityIndex(): number {
+  // 1) Dedicated utility role that is not weak public
+  for (let i = 0; i < endpoints.length; i++) {
+    const e = endpoints[i];
+    if (e?.role === 'utility' && isStrongUtilityEndpoint(e)) return i;
+  }
+  // 2) rpc-url / non-public fallback
+  for (let i = 0; i < endpoints.length; i++) {
+    const e = endpoints[i];
+    if (!e) continue;
+    const label = (e.endpoint.label || '').toLowerCase();
+    if (
+      (label === 'rpc-url' || e.role === 'fallback') &&
+      isStrongUtilityEndpoint(e)
+    ) {
+      return i;
+    }
+  }
+  // 3) Any non-weak, non-primary/secondary public-ish
+  for (let i = 0; i < endpoints.length; i++) {
+    if (i === preferredPrimary || i === preferredSecondary) continue;
+    if (isStrongUtilityEndpoint(endpoints[i])) return i;
+  }
+  // 4) Classic: first utility role, else first public
+  const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
+  if (utilIdx >= 0) return utilIdx;
+  const pub = endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url));
+  if (pub >= 0) return pub;
+  return preferredSecondary;
+}
+
+/** Sticky window so Utility does not thrash between weak publics. */
+const UTILITY_FAILOVER_STICKY_MS = 45_000;
+let lastUtilityFailoverAt = 0;
+let lastUtilityFailoverIdx = -1;
+
 /**
  * True when every configured endpoint is in a 429 cooldown — callers should
  * skip non-critical RPC (migration parse, wallet seed) so /health stays alive.
@@ -496,12 +546,13 @@ function ensureEndpoints(): void {
   const secIdx = endpoints.findIndex((e) => e.role === 'secondary');
   preferredSecondary = secIdx >= 0 ? secIdx : preferredPrimary;
   const utilIdx = endpoints.findIndex((e) => e.role === 'utility');
-  preferredUtility =
-    utilIdx >= 0
-      ? utilIdx
-      : endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url)) >= 0
-        ? endpoints.findIndex((e) => isPublicRpcUrl(e.endpoint.url))
-        : preferredSecondary;
+  preferredUtility = pickPreferredUtilityIndex();
+  if (utilIdx >= 0 && preferredUtility !== utilIdx) {
+    console.log(
+      `[rpc] Utility preferred ${endpoints[preferredUtility]?.endpoint.label} ` +
+        `(stronger than role-utility ${endpoints[utilIdx]?.endpoint.label})`
+    );
+  }
   preferredQuicknode = endpoints.findIndex(
     (e) =>
       e.endpoint.label === 'quicknode' || isQuicknodeRpcUrl(e.endpoint.url)
@@ -750,6 +801,18 @@ function resolveIndexForRole(role: RpcRole): number {
   const preferred = preferredIndexFor(role);
   const pref = endpoints[preferred];
   const latencySoft = latencyFailoverReady(pref);
+
+  // Utility: if preferred is weak public but a stronger non-public/rpc-url is healthy, prefer it.
+  if (role === 'utility' && pref && isWeakPublicUtilityUrl(pref.endpoint.url)) {
+    for (let i = 0; i < endpoints.length; i++) {
+      if (i === preferred) continue;
+      const e = endpoints[i];
+      if (!e?.healthy || !isStrongUtilityEndpoint(e)) continue;
+      setActiveForRole(role, i);
+      return i;
+    }
+  }
+
   if (pref?.healthy && !isEndpointRateLimited(pref) && !latencySoft) {
     setActiveForRole(role, preferred);
     return preferred;
@@ -799,7 +862,8 @@ function resolveIndexForRole(role: RpcRole): number {
       if (!isFasterAlternate(pref, e) && isWeakPublicUtilityUrl(e.endpoint.url))
         continue;
       const weakPenalty = isWeakPublicUtilityUrl(e.endpoint.url) ? 450 : 0;
-      const score = (e.latencyMs ?? 2_000) + weakPenalty;
+      const strongBonus = isStrongUtilityEndpoint(e) ? -300 : 0;
+      const score = (e.latencyMs ?? 2_000) + weakPenalty + strongBonus;
       if (score < bestScore) {
         bestScore = score;
         bestIdx = i;
@@ -808,6 +872,17 @@ function resolveIndexForRole(role: RpcRole): number {
     if (bestIdx >= 0) {
       const other = endpoints[bestIdx]!;
       const now = Date.now();
+      // Anti-thrash: stay on current weak failover instead of hopping publicnode↔mainnet-beta.
+      if (
+        isWeakPublicUtilityUrl(other.endpoint.url) &&
+        isWeakPublicUtilityUrl(endpoints[activeUtility]?.endpoint.url || '') &&
+        activeUtility !== preferred &&
+        activeUtility >= 0 &&
+        now - lastUtilityFailoverAt < UTILITY_FAILOVER_STICKY_MS
+      ) {
+        setActiveForRole(role, activeUtility);
+        return activeUtility;
+      }
       if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
         pref.lastLatencyFailoverLogAt = now;
         // #region agent log
@@ -820,6 +895,7 @@ function resolveIndexForRole(role: RpcRole): number {
             toLabel: other.endpoint.label,
             toLat: other.latencyMs ?? null,
             uptimeMs: Math.round(process.uptime() * 1000),
+            strong: isStrongUtilityEndpoint(other),
           });
         } catch {
           /* */
@@ -829,10 +905,14 @@ function resolveIndexForRole(role: RpcRole): number {
           `[rpc] utility lane failover → ${other.endpoint.label}` +
             (isWeakPublicUtilityUrl(other.endpoint.url)
               ? ' (weak public — Favourites/activity will slow)'
-              : '') +
+              : isStrongUtilityEndpoint(other)
+                ? ' (strong utility preferred)'
+                : '') +
             ` (from ${pref.endpoint.label} EWMA ${pref.latencyMs ?? '—'}ms)`
         );
       }
+      lastUtilityFailoverAt = now;
+      lastUtilityFailoverIdx = bestIdx;
       setActiveForRole(role, bestIdx);
       return bestIdx;
     }

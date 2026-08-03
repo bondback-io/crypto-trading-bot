@@ -169,9 +169,10 @@ export function shouldSkipScannerTick(subsystem: string): {
       reason: `adaptive shed for Critical (${snap.reasons[0] || 'load'})`,
     };
   }
-  // Probabilistic skip: factor 2 → ~50% ticks, factor 3 → ~67%
-  if (snap.scannerSlowFactor >= 2) {
-    const skipChance = 1 - 1 / snap.scannerSlowFactor;
+  // Probabilistic skip only when mild slowdown (×2). Full shed uses defer gate.
+  // Cap skip chance so Market Scanner cannot go quiet for long stretches.
+  if (snap.scannerSlowFactor >= 2 && snap.scannerSlowFactor < 3) {
+    const skipChance = Math.min(0.35, 1 - 1 / snap.scannerSlowFactor);
     if (Math.random() < skipChance) {
       return {
         skip: true,
