@@ -2646,18 +2646,77 @@ async function executeSignalBuy(
   buyOpts.tradeProfileReason = profileAssignment.reason;
   const erScan = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, erScan);
-  const sizedScan = applyTradeProfileSizing(
-    buyOpts.solAmount ?? sizing.sizeSol,
-    erScan
-  );
-  buyOpts.solAmount = clampToMaxAllowedTradeSol(
-    sizedScan.sizeSol,
-    sizedScan.usedOverride ? 'profileOverride' : 'scannerProfileSize'
-  );
-  if (sizedScan.sizeNote) {
-    buyOpts.sizeReason =
-      (buyOpts.sizeReason || sizing.reason) +
-      ` · profile ${profileAssignment.name} ${sizedScan.sizeNote}`;
+
+  // Soft MARL low-MC coordination (skip / size-down) — never touches TP/SL.
+  try {
+    const {
+      evaluateMarlLowMcCoordination,
+      marlSizeMultiplier,
+    } = require('./marlCoordinator') as typeof import('./marlCoordinator');
+    const mcNum =
+      signal.sourceEntryMcUsd != null
+        ? Number(signal.sourceEntryMcUsd)
+        : signal.metrics?.marketCapUsd != null
+          ? Number(signal.metrics.marketCapUsd)
+          : null;
+    const low = evaluateMarlLowMcCoordination({
+      mint: signal.mint,
+      symbol: signal.symbol,
+      profileId: String(profileAssignment.profileId || 'default'),
+      marketCapUsd: mcNum,
+    });
+    if (low.action === 'skip') {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, low.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: low.reason,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: low.reason,
+      });
+      markScannerCooldown(signal.mint, false);
+      return;
+    }
+    const sizedScan = applyTradeProfileSizing(
+      buyOpts.solAmount ?? sizing.sizeSol,
+      erScan
+    );
+    let solAmt = sizedScan.sizeSol;
+    let sizeExtra = sizedScan.sizeNote
+      ? ` · profile ${profileAssignment.name} ${sizedScan.sizeNote}`
+      : '';
+    const marlSz = marlSizeMultiplier(profileAssignment.profileId);
+    if (marlSz.mult !== 1) {
+      solAmt *= marlSz.mult;
+      sizeExtra += ` · ${marlSz.note}`;
+    }
+    if (low.action === 'size_down' && low.sizeMult < 1) {
+      solAmt *= low.sizeMult;
+      sizeExtra += ` · ${low.reason}`;
+    }
+    buyOpts.solAmount = clampToMaxAllowedTradeSol(
+      solAmt,
+      sizedScan.usedOverride ? 'profileOverride' : 'scannerProfileSize'
+    );
+    if (sizeExtra) {
+      buyOpts.sizeReason = (buyOpts.sizeReason || sizing.reason) + sizeExtra;
+    }
+  } catch {
+    const sizedScan = applyTradeProfileSizing(
+      buyOpts.solAmount ?? sizing.sizeSol,
+      erScan
+    );
+    buyOpts.solAmount = clampToMaxAllowedTradeSol(
+      sizedScan.sizeSol,
+      sizedScan.usedOverride ? 'profileOverride' : 'scannerProfileSize'
+    );
+    if (sizedScan.sizeNote) {
+      buyOpts.sizeReason =
+        (buyOpts.sizeReason || sizing.reason) +
+        ` · profile ${profileAssignment.name} ${sizedScan.sizeNote}`;
+    }
   }
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
@@ -2665,6 +2724,23 @@ async function executeSignalBuy(
   if (result.success) {
     markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
+    try {
+      const { notifyMarlEntryOpened } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      notifyMarlEntryOpened({
+        mint: signal.mint,
+        symbol: signal.symbol,
+        profileId: String(profileAssignment.profileId || 'default'),
+        marketCapUsd:
+          signal.sourceEntryMcUsd != null
+            ? Number(signal.sourceEntryMcUsd)
+            : signal.metrics?.marketCapUsd != null
+              ? Number(signal.metrics.marketCapUsd)
+              : null,
+      });
+    } catch {
+      /* */
+    }
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'taken',
       skipReason: undefined,

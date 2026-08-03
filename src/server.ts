@@ -2712,6 +2712,137 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Soft MARL coordinator */
+  app.get('/api/marl/status', (_req: Request, res: Response) => {
+    try {
+      const { getMarlStatus } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      res.json({ ok: true, marl: getMarlStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/marl/decisions', (req: Request, res: Response) => {
+    try {
+      const { getMarlDecisions } =
+        require('./marlStore') as typeof import('./marlStore');
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+      res.json({ ok: true, decisions: getMarlDecisions(limit) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/marl', (req: Request, res: Response) => {
+    try {
+      const { setMarlConfig, getMarlStatus } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      setMarlConfig({
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        strength:
+          body.strength === 'low' ||
+          body.strength === 'medium' ||
+          body.strength === 'high'
+            ? body.strength
+            : undefined,
+        lowMcUsd: body.lowMcUsd != null ? Number(body.lowMcUsd) : undefined,
+        lowMcWindowMin:
+          body.lowMcWindowMin != null ? Number(body.lowMcWindowMin) : undefined,
+        maxAgentsPerLowMc:
+          body.maxAgentsPerLowMc != null
+            ? Number(body.maxAgentsPerLowMc)
+            : undefined,
+      });
+      res.json({ ok: true, marl: getMarlStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/zion/agent', (_req: Request, res: Response) => {
+    try {
+      const { getZionAgentStatus, loadZionAgentState } =
+        require('./zionAgent') as typeof import('./zionAgent');
+      const st = loadZionAgentState();
+      res.json({
+        ok: true,
+        status: getZionAgentStatus(),
+        messages: st.messages.slice(-40),
+        changeRequests: st.changeRequests.slice(0, 20),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/zion/agent/config', (req: Request, res: Response) => {
+    try {
+      const { setZionSemiAutonomous, getZionAgentStatus } =
+        require('./zionAgent') as typeof import('./zionAgent');
+      const { persistUserSettings, config: cfg } =
+        require('./config') as typeof import('./config');
+      const body = (req.body ?? {}) as { semiAutonomous?: boolean };
+      if (typeof body.semiAutonomous === 'boolean') {
+        setZionSemiAutonomous(body.semiAutonomous);
+        cfg.zionAgent = { semiAutonomous: body.semiAutonomous };
+        persistUserSettings();
+      }
+      res.json({ ok: true, status: getZionAgentStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/zion/agent/chat', async (req: Request, res: Response) => {
+    try {
+      const { zionAgentChat } =
+        require('./zionAgent') as typeof import('./zionAgent');
+      const text = String((req.body ?? {}).message || '');
+      const out = await zionAgentChat(text);
+      res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post(
+    '/api/zion/agent/change-requests/:id/decide',
+    (req: Request, res: Response) => {
+      try {
+        const { zionAgentDecideChangeRequest } =
+          require('./zionAgent') as typeof import('./zionAgent');
+        const approve = (req.body ?? {}).approve === true;
+        const out = zionAgentDecideChangeRequest(String(req.params.id), approve);
+        res.json(out);
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
+
   app.get('/api/strategies', (_req: Request, res: Response) => {
     const { getStrategiesStatus, ensureStrategyToggles } = require('./strategies') as typeof import('./strategies');
     ensureStrategyToggles();

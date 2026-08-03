@@ -1801,6 +1801,19 @@ export class PaperTrader {
     maybeRecordScannerOutcome(position, totalPct);
     maybeRecordLaneOutcome(position, totalPnl, totalPct);
     maybeRecordLearningEpisode(position, totalPnl, totalPct);
+    try {
+      const { notifyMarlTradeClosed } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      notifyMarlTradeClosed({
+        profileId: position.tradeProfileId,
+        pnlSol: totalPnl,
+        costSol: closedCostSol,
+        mint: position.mint,
+        symbol: position.symbol,
+      });
+    } catch {
+      /* */
+    }
 
     const perf = this.getStats();
     this.log(

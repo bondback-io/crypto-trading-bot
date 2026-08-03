@@ -2040,6 +2040,10 @@ export interface BotConfig {
    * Default OFF. Does not change position sizing.
    */
   learningMode: import('./learningMode').LearningModeConfig;
+  /** Soft MARL coordinator (lane ranking / size confidence / low-MC). */
+  marl: import('./marlCoordinator').MarlConfig;
+  /** Zion chat agent (semi-autonomous toggle only; secrets via env). */
+  zionAgent: { semiAutonomous: boolean };
 }
 
 export const config: BotConfig = {
@@ -2222,6 +2226,18 @@ export const config: BotConfig = {
     strictness: 'middle',
     snapshot: null,
     fairnessBoost: true,
+  },
+
+  marl: {
+    enabled: false,
+    strength: 'medium',
+    lowMcUsd: 175_000,
+    lowMcWindowMin: 10,
+    maxAgentsPerLowMc: 1,
+  },
+
+  zionAgent: {
+    semiAutonomous: false,
   },
 
   profitStrategy: {
@@ -2704,6 +2720,16 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
           snapshot: null,
           fairnessBoost: true,
         },
+    marl: cloneJson(config.marl || {
+      enabled: false,
+      strength: 'medium',
+      lowMcUsd: 175_000,
+      lowMcWindowMin: 10,
+      maxAgentsPerLowMc: 1,
+    }) as PersistedBotSettings['marl'],
+    zionAgent: {
+      semiAutonomous: config.zionAgent?.semiAutonomous === true,
+    },
     migrations: { ...settingsMigrations },
   };
 }
@@ -3406,6 +3432,34 @@ function applySettingsSnapshot(
             : null,
         fairnessBoost: saved.learningMode.fairnessBoost !== false,
       };
+    }
+  }
+  if (saved.marl && typeof saved.marl === 'object') {
+    const s = saved.marl;
+    config.marl = {
+      enabled: s.enabled === true,
+      strength:
+        s.strength === 'low' || s.strength === 'high' || s.strength === 'medium'
+          ? s.strength
+          : 'medium',
+      lowMcUsd: Math.max(10_000, Number(s.lowMcUsd) || 175_000),
+      lowMcWindowMin: Math.max(1, Math.min(120, Number(s.lowMcWindowMin) || 10)),
+      maxAgentsPerLowMc: Math.max(
+        1,
+        Math.min(5, Math.round(Number(s.maxAgentsPerLowMc) || 1))
+      ),
+    };
+  }
+  if (saved.zionAgent && typeof saved.zionAgent === 'object') {
+    config.zionAgent = {
+      semiAutonomous: saved.zionAgent.semiAutonomous === true,
+    };
+    try {
+      const { setZionSemiAutonomous } =
+        require('./zionAgent') as typeof import('./zionAgent');
+      setZionSemiAutonomous(config.zionAgent.semiAutonomous);
+    } catch {
+      /* */
     }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)

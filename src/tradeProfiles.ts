@@ -2717,6 +2717,15 @@ export function evaluateTradeProfileLanes(
       b.priority - a.priority
   );
 
+  // Soft MARL ranking — additive only; never mutates TP/SL or learning overrides.
+  try {
+    const { applyMarlLaneRanking } =
+      require('./marlCoordinator') as typeof import('./marlCoordinator');
+    applyMarlLaneRanking(results);
+  } catch {
+    /* optional */
+  }
+
   // Grad-watch / preferred Migration Sniper: if stamped preferred and eligibility
   // would pass under post-grad / fire context, ensure the lane is a passer.
   if (ctx.preferProfileId === 'migration_sniper') {

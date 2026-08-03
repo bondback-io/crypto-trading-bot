@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.107',
+    title: 'Soft MARL + Zion chat agent',
+    sections: ['microbots', 'zion', 'learning'],
+    items: [
+      'Multi-Agent RL (Micro Bots): soft lane ranking, size confidence, and low-MC coordination with Low/Medium/High Influence Strength — never edits micro-bot TP/SL or self-learning.',
+      'Zion tab Agent chat: read-only analyst (OpenAI-compatible or local). Semi-Autonomous queues global Change Requests for Approve/Reject only.',
+    ],
+  },
+  {
     version: '1.2.106',
     title: 'Contained mint table actions',
     sections: ['overview'],

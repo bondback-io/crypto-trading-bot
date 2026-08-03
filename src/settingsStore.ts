@@ -135,6 +135,17 @@ export interface PersistedBotSettings {
     snapshot?: Record<string, unknown> | null;
     fairnessBoost?: boolean;
   };
+  /** Soft MARL coordinator */
+  marl?: {
+    enabled?: boolean;
+    strength?: 'low' | 'medium' | 'high';
+    lowMcUsd?: number;
+    lowMcWindowMin?: number;
+    maxAgentsPerLowMc?: number;
+  };
+  zionAgent?: {
+    semiAutonomous?: boolean;
+  };
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

@@ -7178,6 +7178,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-status" class="mint text-xs mb-2 mt-2">—</div>
       </div>
 
+      <div class="card" id="zion-agent-card">
+        <div class="section-title" style="display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;justify-content:space-between">
+          <span>Zion Agent <span class="tip" tabindex="0" data-tip="Read-only analyst for the whole bot. Uses OPENAI_API_KEY when set; otherwise local analysis from bot data. Never edits micro-bot TP/SL or learning. Semi-Autonomous only queues Change Requests for your Approve/Reject."></span></span>
+          <span id="zion-agent-mode-badge" class="badge status-badge" style="font-size:11px">Zion · Read-Only</span>
+        </div>
+        <div class="toggle-row">
+          <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Change Requests for global gates / system tips. Nothing applies without Approve."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-semi" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div id="zion-agent-chat" class="max-h-72 overflow-y-auto text-sm mb-2" style="background:#0b1220;border:1px solid #1e293b;border-radius:0.5rem;padding:0.65rem;min-height:8rem">—</div>
+        <div class="flex flex-wrap gap-2 items-end">
+          <label class="ctl" style="flex:1;min-width:12rem"><span>Ask Zion</span>
+            <input type="text" id="zion-agent-input" placeholder="How does Learning Mode interact with MARL?" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
+          </label>
+          <button type="button" class="btn btn-primary" onclick="sendZionAgentChat()">Send</button>
+          <button type="button" class="btn btn-secondary" onclick="loadZionAgent()">Refresh</button>
+        </div>
+        <div id="zion-agent-crs" class="mt-3 space-y-2 text-sm"></div>
+      </div>
+
       <div class="card">
         <div class="section-title">Safeguards</div>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
@@ -7223,6 +7243,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
+
+      <div class="card" id="marl-card">
+        <div class="section-title" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;justify-content:space-between">
+          <span>Multi-Agent RL <span class="tip" tabindex="0" data-tip="Soft coordination only: reorders lane priority, trims size confidence, limits low-MC pile-ins. Never overwrites micro-bot TP/SL, timers, or self-learning. Disable anytime."></span></span>
+          <span id="marl-status-badge" class="badge status-badge" style="font-size:11px">MARL OFF</span>
+        </div>
+        <div class="toggle-row">
+          <span>Enable MARL</span>
+          <label class="switch"><input type="checkbox" id="marl-enabled" onchange="saveMarlConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="mb-2">
+          <div class="text-xs text-slate-400 mb-1">Influence Strength <span id="marl-strength-label" class="text-slate-200">Medium</span></div>
+          <div class="closed-filter" role="group" aria-label="MARL influence strength">
+            <button type="button" class="closed-filter-btn" data-marl-strength="low" onclick="setMarlStrength('low')">Low</button>
+            <button type="button" class="closed-filter-btn is-active" data-marl-strength="medium" onclick="setMarlStrength('medium')">Medium</button>
+            <button type="button" class="closed-filter-btn" data-marl-strength="high" onclick="setMarlStrength('high')">High</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+          <label class="ctl ctl-sm"><span>Low-MC threshold ($)</span><input type="number" id="marl-low-mc" value="175000" min="10000" step="5000" onchange="saveMarlConfig()" /></label>
+          <label class="ctl ctl-sm"><span>Low-MC window (min)</span><input type="number" id="marl-low-win" value="10" min="1" max="120" step="1" onchange="saveMarlConfig()" /></label>
+          <label class="ctl ctl-sm"><span>Max agents / low-MC</span><input type="number" id="marl-max-agents" value="1" min="1" max="5" step="1" onchange="saveMarlConfig()" /></label>
+        </div>
+        <div id="marl-agents" class="text-xs text-slate-400 mb-2">—</div>
+        <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
+        <div id="marl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
+      </div>
 
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
@@ -13399,7 +13446,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadMarketScannerConfig();
         if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
       }
-      if (name === 'zion') loadZion();
+      if (name === 'zion') {
+        loadZion();
+        if (typeof loadZionAgent === 'function') loadZionAgent();
+      }
+      if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') {
         try { syncBotInfoVersionLabels(); } catch (_) {}
@@ -23264,6 +23315,210 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.declineZionOffer = declineZionOffer;
     window.placeZionTrade = placeZionTrade;
     window.renderZionOpenTrades = renderZionOpenTrades;
+
+    let _marlStrength = 'medium';
+    async function loadMarlStatus() {
+      try {
+        const data = await fetchJSON('/api/marl/status');
+        const m = data.marl || {};
+        const en = document.getElementById('marl-enabled');
+        if (en) en.checked = !!m.enabled;
+        _marlStrength = m.strength === 'low' || m.strength === 'high' ? m.strength : 'medium';
+        document.querySelectorAll('[data-marl-strength]').forEach((btn) => {
+          btn.classList.toggle('is-active', btn.getAttribute('data-marl-strength') === _marlStrength);
+        });
+        const lab = document.getElementById('marl-strength-label');
+        if (lab) lab.textContent = _marlStrength.charAt(0).toUpperCase() + _marlStrength.slice(1);
+        const badge = document.getElementById('marl-status-badge');
+        if (badge) badge.textContent = m.label || (m.enabled ? 'MARL ON' : 'MARL OFF');
+        const low = document.getElementById('marl-low-mc');
+        if (low) low.value = m.lowMcUsd != null ? m.lowMcUsd : 175000;
+        const win = document.getElementById('marl-low-win');
+        if (win) win.value = m.lowMcWindowMin != null ? m.lowMcWindowMin : 10;
+        const mx = document.getElementById('marl-max-agents');
+        if (mx) mx.value = m.maxAgentsPerLowMc != null ? m.maxAgentsPerLowMc : 1;
+        const agentsEl = document.getElementById('marl-agents');
+        if (agentsEl) {
+          const agents = m.agents || [];
+          agentsEl.innerHTML = agents.length
+            ? agents
+                .slice(0, 10)
+                .map(
+                  (a) =>
+                    '<div><span style="color:#94a3b8">' +
+                    escHtml(a.profileId) +
+                    '</span> · w=' +
+                    Number(a.weight || 0).toFixed(2) +
+                    ' · n=' +
+                    (a.trades || 0) +
+                    ' · WR ' +
+                    (a.winRatePct || 0) +
+                    '%</div>'
+                )
+                .join('')
+            : '<span class="mint">No agent updates yet</span>';
+        }
+        const decEl = document.getElementById('marl-decisions');
+        if (decEl) {
+          const dec = m.decisions || [];
+          decEl.innerHTML = dec.length
+            ? dec
+                .slice(0, 20)
+                .map(
+                  (d) =>
+                    '<div class="mb-1"><span style="color:#64748b">' +
+                    escHtml(d.kind) +
+                    '</span> ' +
+                    escHtml(d.detail || '') +
+                    '</div>'
+                )
+                .join('')
+            : '—';
+        }
+      } catch (err) {
+        console.warn('loadMarlStatus', err);
+      }
+    }
+    async function saveMarlConfig() {
+      const body = {
+        enabled: document.getElementById('marl-enabled')
+          ? document.getElementById('marl-enabled').checked
+          : false,
+        strength: _marlStrength,
+        lowMcUsd: Number(document.getElementById('marl-low-mc')?.value || 175000),
+        lowMcWindowMin: Number(document.getElementById('marl-low-win')?.value || 10),
+        maxAgentsPerLowMc: Number(document.getElementById('marl-max-agents')?.value || 1),
+      };
+      await fetchJSON('/api/config/marl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadMarlStatus();
+    }
+    function setMarlStrength(s) {
+      _marlStrength = s === 'low' || s === 'high' ? s : 'medium';
+      saveMarlConfig();
+    }
+    window.loadMarlStatus = loadMarlStatus;
+    window.saveMarlConfig = saveMarlConfig;
+    window.setMarlStrength = setMarlStrength;
+
+    function renderZionAgentUi(data) {
+      const st = data.status || {};
+      const badge = document.getElementById('zion-agent-mode-badge');
+      if (badge) badge.textContent = st.label || 'Zion · Read-Only';
+      const semi = document.getElementById('zion-agent-semi');
+      if (semi) semi.checked = !!st.semiAutonomous;
+      const chat = document.getElementById('zion-agent-chat');
+      if (chat) {
+        const msgs = data.messages || [];
+        chat.innerHTML = msgs.length
+          ? msgs
+              .map((m) => {
+                const who = m.role === 'user' ? 'You' : 'Zion';
+                const col = m.role === 'user' ? '#38bdf8' : '#a7f3d0';
+                return (
+                  '<div class="mb-2"><strong style="color:' +
+                  col +
+                  '">' +
+                  who +
+                  '</strong><div style="white-space:pre-wrap;color:#cbd5e1">' +
+                  escHtml(m.text || '') +
+                  '</div></div>'
+                );
+              })
+              .join('')
+          : '<span class="mint">Ask about profiles, Learning Mode, MARL, skips, or performance.</span>';
+        chat.scrollTop = chat.scrollHeight;
+      }
+      const crs = document.getElementById('zion-agent-crs');
+      if (crs) {
+        const list = (data.changeRequests || []).filter((c) => c.status === 'pending');
+        crs.innerHTML = list.length
+          ? '<div class="text-xs font-semibold text-slate-300 mb-1">Change Requests</div>' +
+            list
+              .map((c) => {
+                return (
+                  '<div class="rounded-md border border-slate-700 p-2 mb-2" style="background:#0b1220">' +
+                  '<div class="font-semibold text-slate-200">' +
+                  escHtml(c.title) +
+                  '</div>' +
+                  '<div class="mint text-xs mt-1"><strong>What</strong> ' +
+                  escHtml(c.what) +
+                  '</div>' +
+                  '<div class="mint text-xs"><strong>Why</strong> ' +
+                  escHtml(c.why || '') +
+                  '</div>' +
+                  '<div class="mint text-xs"><strong>Benefit</strong> ' +
+                  escHtml(c.expectedBenefit || '') +
+                  '</div>' +
+                  '<div class="mt-2 flex gap-2">' +
+                  '<button type="button" class="btn btn-primary text-xs" onclick="decideZionChangeRequest(\\'' +
+                  escHtml(c.id) +
+                  '\\', true)">Approve</button>' +
+                  '<button type="button" class="btn btn-secondary text-xs" onclick="decideZionChangeRequest(\\'' +
+                  escHtml(c.id) +
+                  '\\', false)">Reject</button>' +
+                  '</div></div>'
+                );
+              })
+              .join('')
+          : '';
+      }
+    }
+    async function loadZionAgent() {
+      try {
+        const data = await fetchJSON('/api/zion/agent');
+        renderZionAgentUi(data);
+      } catch (err) {
+        console.warn('loadZionAgent', err);
+      }
+    }
+    async function saveZionAgentConfig() {
+      const semi = document.getElementById('zion-agent-semi');
+      await fetchJSON('/api/zion/agent/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ semiAutonomous: !!(semi && semi.checked) }),
+      });
+      await loadZionAgent();
+    }
+    async function sendZionAgentChat() {
+      const inp = document.getElementById('zion-agent-input');
+      const msg = inp ? String(inp.value || '').trim() : '';
+      if (!msg) return;
+      if (inp) inp.value = '';
+      try {
+        await fetchJSON('/api/zion/agent/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg }),
+        });
+        await loadZionAgent();
+      } catch (err) {
+        alert('Zion chat failed: ' + (err.message || err));
+      }
+    }
+    async function decideZionChangeRequest(id, approve) {
+      try {
+        const out = await fetchJSON('/api/zion/agent/change-requests/' + encodeURIComponent(id) + '/decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approve: !!approve }),
+        });
+        if (!out.ok) alert(out.detail || 'Decision failed');
+        else if (approve && out.detail) console.log('[zion-agent]', out.detail);
+        await loadZionAgent();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.loadZionAgent = loadZionAgent;
+    window.saveZionAgentConfig = saveZionAgentConfig;
+    window.sendZionAgentChat = sendZionAgentChat;
+    window.decideZionChangeRequest = decideZionChangeRequest;
+
     try {
       ensureZionStack();
       window.addEventListener('resize', function () {
