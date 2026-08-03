@@ -4921,10 +4921,11 @@ export function setProfileSelfLearningMlMode(
   const next = normalizeSelfLearning({
     ...prev,
     mlMode: normalizeMlMode(mlMode),
+    mlModeSource: 'manual',
   });
   writeProfileSelfLearning(id, next, {
     kind: 'toggle',
-    summary: `ML mode → ${next.mlMode}`,
+    summary: `ML mode → ${next.mlMode} (manual)`,
   });
   return getTradeProfilesStatus();
 }

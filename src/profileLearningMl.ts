@@ -613,3 +613,81 @@ export function normalizeMlMode(raw: unknown): MlLearnMode {
   }
   return 'shadow';
 }
+
+export type MlModeSource = 'auto' | 'manual';
+
+export function normalizeMlModeSource(raw: unknown): MlModeSource {
+  return raw === 'auto' ? 'auto' : 'manual';
+}
+
+/**
+ * Auto-promote shadow→hybrid→lead from episode/model gates.
+ * Soft-demotes lead→hybrid only; never auto-sets off; skips when off.
+ */
+export function maybeAutoAdvanceMlMode(input: {
+  enabled: boolean;
+  mlMode: MlLearnMode;
+  mlValidatedInPaper: boolean;
+  level: number;
+  episodeCount: number;
+  holdoutAuc: number;
+  hasModel: boolean;
+  stale: boolean;
+}): { mlMode: MlLearnMode; from: MlLearnMode; reason: string } | null {
+  if (!input.enabled || input.mlMode === 'off') return null;
+
+  const n = Math.max(0, Math.round(Number(input.episodeCount) || 0));
+  const auc = Number(input.holdoutAuc) || 0;
+  const level = Math.max(0, Math.round(Number(input.level) || 0));
+  const from = input.mlMode;
+
+  // Soft demote: lead only when model healthy
+  if (from === 'lead') {
+    if (!input.hasModel || input.stale || auc < 0.52) {
+      return {
+        mlMode: 'hybrid',
+        from,
+        reason: !input.hasModel
+          ? 'model missing'
+          : input.stale
+            ? 'model stale'
+            : `holdoutAuc ${auc.toFixed(2)} < 0.52`,
+      };
+    }
+    return null;
+  }
+
+  // Promote hybrid → lead
+  if (from === 'hybrid') {
+    if (
+      n >= 200 &&
+      auc >= 0.58 &&
+      input.hasModel &&
+      !input.stale &&
+      level >= 3
+    ) {
+      return {
+        mlMode: 'lead',
+        from,
+        reason: `n=${n} auc=${auc.toFixed(2)} level=${level}`,
+      };
+    }
+    return null;
+  }
+
+  // Promote shadow → hybrid (default / soak path)
+  if (from === 'shadow') {
+    const aucOk = auc >= 0.52 || input.mlValidatedInPaper;
+    if (n >= 50 && input.hasModel && aucOk) {
+      return {
+        mlMode: 'hybrid',
+        from,
+        reason: input.mlValidatedInPaper
+          ? `n=${n} validated`
+          : `n=${n} auc=${auc.toFixed(2)}`,
+      };
+    }
+  }
+
+  return null;
+}

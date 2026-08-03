@@ -11864,6 +11864,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                           (sl.version ? ' · Level ' + sl.version : ' · Level 0') +
                           (sl.microVersion ? ' · micro m' + sl.microVersion : '') +
                           ' · ML ' + escHtml(String(sl.mlMode || 'shadow')) +
+                          (sl.mlModeSource === 'auto' ? ' · auto' : '') +
                           '</p>'
                         : '<p class="mint text-xs" style="margin:0.25rem 0">Off — bot stays on fixed card knobs</p>') +
                       (function () {
@@ -11876,7 +11877,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                             ' min trades · mode ' +
                             escHtml(String(sl.mode || 'auto')) +
                             ' · ML ' +
-                            escHtml(String(sl.mlMode || 'shadow'))
+                            escHtml(String(sl.mlMode || 'shadow')) +
+                            (sl.mlModeSource === 'auto' ? ' · auto' : '')
                         );
                         if (sl.mlAdvice && sl.mlAdvice.summary) {
                           bits.push(

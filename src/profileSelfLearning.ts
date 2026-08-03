@@ -110,6 +110,8 @@ export interface ProfileSelfLearningState {
   mode: SelfLearnMode;
   /** ML advisor: off | shadow advice | hybrid blend | lead deltas */
   mlMode: MlLearnMode;
+  /** Who last set mlMode — auto-promote vs operator UI/API */
+  mlModeSource: 'auto' | 'manual';
   minTrades: number;
   upgradeCooldownTrades: number;
   lastUpgradedAt: number | null;
@@ -143,6 +145,7 @@ export const DEFAULT_SELF_LEARNING: ProfileSelfLearningState = {
   enabled: true,
   mode: 'auto',
   mlMode: 'shadow',
+  mlModeSource: 'manual',
   minTrades: 8,
   upgradeCooldownTrades: 6,
   lastUpgradedAt: null,
@@ -315,9 +318,12 @@ export function normalizeSelfLearning(
     v === 'hybrid' || v === 'lead' || v === 'off' || v === 'shadow'
       ? v
       : 'shadow';
+  let normalizeMlModeSource: (v: unknown) => 'auto' | 'manual' = (v) =>
+    v === 'auto' ? 'auto' : 'manual';
   try {
     const ml = require('./profileLearningMl') as typeof import('./profileLearningMl');
     normalizeMlMode = ml.normalizeMlMode;
+    normalizeMlModeSource = ml.normalizeMlModeSource;
   } catch {
     /* bootstrap */
   }
@@ -331,6 +337,9 @@ export function normalizeSelfLearning(
         : 'shadow'
       : d.mode,
     mlMode: normalizeMlMode(raw.mlMode),
+    mlModeSource: normalizeMlModeSource(
+      (raw as { mlModeSource?: unknown }).mlModeSource
+    ),
     minTrades: clamp(Number(raw.minTrades) || d.minTrades, 6, 40),
     upgradeCooldownTrades: clamp(
       Number(raw.upgradeCooldownTrades) || d.upgradeCooldownTrades,
@@ -1857,9 +1866,40 @@ export function runSelfLearnTick(input: {
       : []),
   ] as Array<{ summary: string; patch: LearningProposalPatch }>;
 
-  // ML lead mode: add tiny continuous delta candidates (still clamped)
+  // Auto-promote ML mode (shadow→hybrid→lead) before lead candidates / scoring
   try {
     const mlMod = require('./profileLearningMl') as typeof import('./profileLearningMl');
+    const model = mlMod.maybeRetrainProfileMl(input.profileId);
+    const stale = mlMod.isModelStale(model, episodes.length);
+    const advanced = mlMod.maybeAutoAdvanceMlMode({
+      enabled: state.enabled,
+      mlMode: state.mlMode,
+      mlValidatedInPaper: state.mlValidatedInPaper,
+      level: state.version,
+      episodeCount: episodes.length,
+      holdoutAuc: model?.holdoutAuc ?? 0,
+      hasModel: !!model,
+      stale,
+    });
+    if (advanced) {
+      state.mlMode = advanced.mlMode;
+      state.mlModeSource = 'auto';
+      console.log(
+        `[learning-ml] ${input.profileId} ${advanced.from}→${advanced.mlMode} (${advanced.reason})`
+      );
+      try {
+        const { appendLearningSave } =
+          require('./profileLearningSaveLog') as typeof import('./profileLearningSaveLog');
+        appendLearningSave({
+          profileId: input.profileId,
+          kind: 'toggle',
+          summary: `ML auto ${advanced.from}→${advanced.mlMode} (${advanced.reason})`,
+          version: state.version,
+        });
+      } catch {
+        /* optional */
+      }
+    }
     if (state.mlMode === 'lead' && allowExitDeltas) {
       candidates.push(
         ...mlMod.buildMlLedCandidates(episodes, {
@@ -1868,7 +1908,6 @@ export function runSelfLearnTick(input: {
         })
       );
     }
-    mlMod.maybeRetrainProfileMl(input.profileId);
   } catch {
     /* ML optional */
   }

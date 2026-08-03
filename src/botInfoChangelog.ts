@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.120',
+    title: 'Auto-promote Self-Learn ML mode',
+    sections: ['learning'],
+    items: [
+      'Each micro-bot ML field now auto-advances shadow → hybrid → lead from episode count, holdout quality, and Level (end state is lead when healthy).',
+      'Soft demote lead → hybrid if the model goes stale or holdout collapses; operator can still set off/manual. MARL and Mode (shadow/auto apply) are unchanged.',
+    ],
+  },
+  {
     version: '1.2.119',
     title: 'Learning feedback enrichment (timing quality)',
     sections: ['learning'],
