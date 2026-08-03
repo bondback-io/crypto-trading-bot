@@ -532,11 +532,8 @@ function preferredProviderFromKeys(): {
   return { provider: 'local', label: 'Local analysis' };
 }
 
-function providerAttribution(provider: ZionLlmProvider, model: string): string {
-  if (provider === 'local') return '_Local analysis mode — no API key_';
-  const name =
-    provider === 'gemini' ? 'Gemini' : provider === 'groq' ? 'Groq' : 'OpenAI';
-  return `_via ${name} · ${model}_`;
+function providerAttribution(_provider: ZionLlmProvider, _model: string): string {
+  return '~ Zion Valton';
 }
 
 type OpenAiCompatOpts = {
@@ -988,9 +985,13 @@ export async function zionAgentChat(userText: string): Promise<{
     }
   }
 
-  // Attribution footer for history (source of truth in chat bubbles)
-  if (!/_via (?:Gemini|Groq|OpenAI)/i.test(reply) && !/_Local analysis mode/i.test(reply)) {
-    reply = `${reply.trim()}\n\n${providerAttribution(provider, model)}`;
+  // Signature footer (provider stays on API fields only)
+  if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
+    reply = reply
+      .replace(/\n*_via (?:Gemini|Groq|OpenAI)[^\n]*_?\s*$/i, '')
+      .replace(/\n*_Local analysis mode[^\n]*_?\s*$/i, '')
+      .trim();
+    reply = `${reply}\n\n${providerAttribution(provider, model)}`;
   }
 
   appendZionChat('assistant', reply);

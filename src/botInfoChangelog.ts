@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.115',
+    title: 'Zion typing polish + Valton signature',
+    sections: ['zion'],
+    items: [
+      '“Zion is typing…” now holds for about 2 seconds before the reply starts.',
+      'Assistant replies type out quickly (about 1–2s, up to ~4s for long answers) instead of appearing all at once.',
+      'Reply footer is now “~ Zion Valton” (provider/model attribution removed from the chat bubble).',
+    ],
+  },
+  {
     version: '1.2.114',
     title: 'Zion launcher peach theme',
     sections: ['zion'],

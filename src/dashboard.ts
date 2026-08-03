@@ -23729,13 +23729,60 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionImprovementCache = [];
     let _zionImprovementHistoryCache = [];
     function formatZionBubbleHtml(text, isUser) {
-      const raw = String(text || '');
+      let raw = String(text || '');
+      if (!isUser) {
+        raw = raw
+          .replace(/\\n*_via (?:Gemini|Groq|OpenAI)[^\\n]*_?\\s*$/i, '\\n\\n~ Zion Valton')
+          .replace(/\\n*_Local analysis mode[^\\n]*_?\\s*$/i, '\\n\\n~ Zion Valton');
+      }
       let html = escHtml(raw);
       if (isUser) return html;
       // NOTE: inside _DASHBOARD_HTML_RAW template literal — double-escape so browser gets real bold/newline regexes.
       html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\n/g, '<br>');
       return html;
+    }
+    function typewriterZionBubbles(fullText) {
+      return new Promise(function (resolve) {
+        let text = String(fullText || '');
+        text = text
+          .replace(/\\n*_via (?:Gemini|Groq|OpenAI)[^\\n]*_?\\s*$/i, '\\n\\n~ Zion Valton')
+          .replace(/\\n*_Local analysis mode[^\\n]*_?\\s*$/i, '\\n\\n~ Zion Valton');
+        const bubbles = [];
+        ['zion-agent-chat', 'zion-agent-widget-chat'].forEach(function (id) {
+          const chat = document.getElementById(id);
+          if (!chat) return;
+          const msgs = chat.querySelectorAll('.zion-chat-message:not(.is-user) .zion-chat-bubble');
+          if (msgs.length) bubbles.push({ chat: chat, el: msgs[msgs.length - 1] });
+        });
+        if (!bubbles.length || !text) {
+          resolve();
+          return;
+        }
+        const len = text.length;
+        let duration = 1200;
+        if (len > 280) duration = 2200;
+        if (len > 700) duration = 3400;
+        if (len > 1200) duration = 4000;
+        duration = Math.max(1000, Math.min(4000, duration));
+        const stepMs = 16;
+        const steps = Math.max(1, Math.ceil(duration / stepMs));
+        let step = 0;
+        bubbles.forEach(function (b) { b.el.innerHTML = ''; });
+        const timer = setInterval(function () {
+          step += 1;
+          const n = Math.min(len, Math.ceil((step / steps) * len));
+          const slice = text.slice(0, n);
+          bubbles.forEach(function (b) {
+            b.el.innerHTML = formatZionBubbleHtml(slice, false);
+            b.chat.scrollTop = b.chat.scrollHeight;
+          });
+          if (n >= len) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, stepMs);
+      });
     }
     function renderZionAgentMessages(messages) {
       if (!messages.length) {
@@ -24061,7 +24108,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!msg) return;
       if (inp) inp.value = '';
       const started = Date.now();
-      const minTypingMs = 900;
+      const minTypingMs = 2000;
       showZionTyping();
       setZionChatBusy(true);
       try {
@@ -24069,11 +24116,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: msg }),
+          timeoutMs: 90000,
         });
         const waitMore = Math.max(0, minTypingMs - (Date.now() - started));
         if (waitMore) await new Promise(function (resolve) { setTimeout(resolve, waitMore); });
         clearZionTyping();
         await loadZionAgent();
+        if (out && out.reply) {
+          await typewriterZionBubbles(out.reply);
+        }
         if (out && out.changeRequest) {
           showZionIrNudgeChip('New improvement request ready to review');
         }
