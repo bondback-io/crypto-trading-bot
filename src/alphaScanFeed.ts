@@ -92,7 +92,6 @@ let bucketsRefreshInFlight: Promise<{
   soon: AlphaScanRow[];
   bonded: AlphaScanRow[];
 }> | null = null;
-let lastThrottleLogAt = 0;
 
 function asCfg() {
   return config.alphaScan || {
@@ -267,20 +266,6 @@ async function enrichCurves(
         .endsWith('pump')
   );
   const slice = pumpish.slice(0, CURVE_ENRICH_CAP);
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('C', 'alphaScanFeed.ts:enrichCurves', 'curve enrich start', {
-      runId: 'post-fix',
-      slice: slice.length,
-      cap: CURVE_ENRICH_CAP,
-      concurrency: CURVE_ENRICH_CONCURRENCY,
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   // No outer runWithRpcRole + Promise.all(40) — that held one gate slot while
   // firing dozens of parallel getAccountInfo and starved Secondary RPS.
   let cursor = 0;
@@ -350,23 +335,6 @@ export async function refreshAlphaScanBuckets(opts?: {
     lastPollAt != null &&
     Date.now() - lastPollAt < minGap
   ) {
-    // #region agent log
-    try {
-      const nowLog = Date.now();
-      if (nowLog - lastThrottleLogAt > 15_000) {
-        lastThrottleLogAt = nowLog;
-        const { agentDebugLog } =
-          require('./agentDebugLog') as typeof import('./agentDebugLog');
-        agentDebugLog('C2', 'alphaScanFeed.ts:refresh', 'curve enrich throttled', {
-          runId: 'post-fix',
-          ageMs: Date.now() - lastPollAt,
-          minGap,
-        });
-      }
-    } catch {
-      /* */
-    }
-    // #endregion
     return { new: cachedNew, soon: cachedSoon, bonded: cachedBonded };
   }
 

@@ -846,53 +846,11 @@ export function createServer(): express.Application {
       }
       const saved = setRpcSoftWatchCap(next);
       const softWatch = getSoftWatchRuntimeSnapshot();
-      // #region agent log
-      try {
-        const { agentDebugLog } =
-          require('./agentDebugLog') as typeof import('./agentDebugLog');
-        agentDebugLog('A', 'server.ts:soft-watch-cap', 'soft watch cap saved', {
-          saved,
-          softWatch,
-        });
-      } catch {
-        /* */
-      }
-      // #endregion
       res.json({
         ok: true,
         softWatchCap: saved,
         softWatch,
         rpc: getRpcStats(),
-      });
-    } catch (err) {
-      res.status(500).json({
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  });
-
-  /** Debug session 8695ba — ring buffer (Render cannot POST to 127.0.0.1 ingest). */
-  app.get('/api/debug/agent-log', (req: Request, res: Response) => {
-    try {
-      const { getAgentDebugLogSnapshot } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      const limit = Number(req.query.limit) || 200;
-      const snap = getAgentDebugLogSnapshot(limit);
-      let softWatch: unknown = null;
-      try {
-        const { getSoftWatchRuntimeSnapshot } =
-          require('./monitor') as typeof import('./monitor');
-        softWatch = getSoftWatchRuntimeSnapshot();
-      } catch {
-        /* */
-      }
-      res.json({
-        ok: true,
-        ...snap,
-        softWatch,
-        uptimeMs: Math.round(process.uptime() * 1000),
-        callTraffic: getRpcStats().callTraffic,
       });
     } catch (err) {
       res.status(500).json({

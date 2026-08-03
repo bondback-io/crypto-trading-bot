@@ -762,24 +762,6 @@ function acceptFailoverTarget(
       now - (pref?.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS
     ) {
       if (pref && latencySoft) pref.lastLatencyFailoverLogAt = now;
-      // #region agent log
-      try {
-        const { agentDebugLog } =
-          require('./agentDebugLog') as typeof import('./agentDebugLog');
-        agentDebugLog('B', 'connection.ts:resolveIndexForRole', 'lane piggyback', {
-          role,
-          reason,
-          preferredLabel: pref?.endpoint.label ?? null,
-          preferredLat: pref?.latencyMs ?? null,
-          otherLabel: other.endpoint.label,
-          otherLat: other.latencyMs ?? null,
-          rateLimited,
-          latencySoft,
-        });
-      } catch {
-        /* */
-      }
-      // #endregion
       console.warn(
         `[rpc] ${role} lane piggybacking on ${other.endpoint.label} (${reason})`
       );
@@ -885,22 +867,6 @@ function resolveIndexForRole(role: RpcRole): number {
       }
       if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
         pref.lastLatencyFailoverLogAt = now;
-        // #region agent log
-        try {
-          const { agentDebugLog } =
-            require('./agentDebugLog') as typeof import('./agentDebugLog');
-          agentDebugLog('B', 'connection.ts:utilityPublicFailover', 'utility → public/fallback', {
-            fromLabel: pref.endpoint.label,
-            fromLat: pref.latencyMs ?? null,
-            toLabel: other.endpoint.label,
-            toLat: other.latencyMs ?? null,
-            uptimeMs: Math.round(process.uptime() * 1000),
-            strong: isStrongUtilityEndpoint(other),
-          });
-        } catch {
-          /* */
-        }
-        // #endregion
         console.warn(
           `[rpc] utility lane failover → ${other.endpoint.label}` +
             (isWeakPublicUtilityUrl(other.endpoint.url)
@@ -922,20 +888,6 @@ function resolveIndexForRole(role: RpcRole): number {
       const now = Date.now();
       if (now - (pref.lastLatencyFailoverLogAt || 0) >= LATENCY_FAILOVER_LOG_THROTTLE_MS) {
         pref.lastLatencyFailoverLogAt = now;
-        // #region agent log
-        try {
-          const { agentDebugLog } =
-            require('./agentDebugLog') as typeof import('./agentDebugLog');
-          agentDebugLog('B', 'connection.ts:utilityQnSoft', 'utility → quicknode soft', {
-            fromLabel: pref.endpoint.label,
-            fromLat: pref.latencyMs ?? null,
-            toLabel: qn.endpoint.label,
-            uptimeMs: Math.round(process.uptime() * 1000),
-          });
-        } catch {
-          /* */
-        }
-        // #endregion
         console.warn(
           `[rpc] utility lane piggybacking on ${qn.endpoint.label} ` +
             `(EWMA ${pref.latencyMs ?? '—'}ms ≥ ${UTILITY_QUICKNODE_STRESS_MS}ms — ` +
@@ -1546,57 +1498,6 @@ export function getRpcStats(): {
       warning =
         `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) — Market/Alpha/Zion auto-slowed.`;
     }
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      const nowDbg = Date.now();
-      const lastDbg = (getRpcStats as { _dbgAt?: number })._dbgAt || 0;
-      if (nowDbg - lastDbg > 10_000) {
-        (getRpcStats as { _dbgAt?: number })._dbgAt = nowDbg;
-        const samePaid =
-          pActive?.endpoint.url &&
-          sActive?.endpoint.url &&
-          pActive.endpoint.url === sActive.endpoint.url;
-        agentDebugLog('B/D/E', 'connection.ts:getRpcStats', 'lane + adaptive snapshot', {
-          runId: 'post-fix',
-          primaryLabel: pActive?.endpoint.label ?? null,
-          secondaryLabel: sActive?.endpoint.label ?? null,
-          utilityLabel: uActive?.endpoint.label ?? null,
-          primaryFailover: pIdx !== preferredPrimary,
-          secondaryFailover: sIdx !== preferredSecondary,
-          utilityFailover: uIdx !== preferredUtility,
-          samePaidEndpoint: Boolean(samePaid),
-          heliusHealthy: endpoints.find((e) => e.endpoint.label === 'helius')
-            ?.healthy,
-          heliusLat: endpoints.find((e) => e.endpoint.label === 'helius')
-            ?.latencyMs,
-          lifetimeSecondarySkipped: gate.lanes.secondary.skipped,
-          secondaryInFlight: gate.lanes.secondary.inFlight,
-          secondaryQueued: gate.lanes.secondary.queued,
-          adaptive: loadControl
-            ? {
-                scanner: loadControl.scannerSlowFactor,
-                utility: loadControl.utilitySlowFactor,
-                recentSkips: loadControl.secondarySkipsRecent,
-                reasons: loadControl.reasons.slice(0, 4),
-              }
-            : null,
-          utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
-          mainnetBetaLat: endpoints.find((e) =>
-            /mainnet-beta/i.test(e.endpoint.label)
-          )?.latencyMs,
-          rpcUrlLat: endpoints.find((e) => e.endpoint.label === 'rpc-url')
-            ?.latencyMs,
-          publicnodeLat: endpoints.find((e) =>
-            /publicnode/i.test(e.endpoint.label)
-          )?.latencyMs,
-        });
-      }
-    } catch {
-      /* */
-    }
-    // #endregion
   } catch {
     /* */
   }
@@ -2082,43 +1983,6 @@ export function startRpcHealthMonitor(): void {
         await new Promise((r) => setTimeout(r, gateSnap.stressed ? 400 : 250));
       }
       await maybeSwitchEndpoints();
-      // #region agent log
-      // First ~3 min after boot: snapshot call rates so we can name the choke culprit.
-      try {
-        const uptimeMs = Math.round(process.uptime() * 1000);
-        if (uptimeMs <= 210_000 && healthCycle % 1 === 0) {
-          const { agentDebugLog } =
-            require('./agentDebugLog') as typeof import('./agentDebugLog');
-          const traffic = getRpcCallTraffic(12);
-          const byFeature = traffic.byFeature || {};
-          agentDebugLog('E/F', 'connection.ts:healthTick', 'rpc traffic + lane snapshot', {
-            uptimeMs,
-            healthCycle,
-            intervalMs: interval,
-            totalCalls: traffic.totalCalls,
-            sinceMs: traffic.sinceMs,
-            byFeature,
-            top: traffic.top.slice(0, 8).map((r) => ({
-              feature: r.feature,
-              method: r.method,
-              calls: r.calls,
-              role: r.role,
-              avgMs: r.avgMs,
-              endpoint: r.endpoint,
-            })),
-            primaryLabel: getActiveEndpointLabel('primary'),
-            secondaryLabel: getActiveEndpointLabel('secondary'),
-            utilityLabel: getActiveEndpointLabel('utility'),
-            utilityFailover: activeUtility !== preferredUtility,
-            primaryFailover: activePrimary !== preferredPrimary,
-            secondaryFailover: activeSecondary !== preferredSecondary,
-            gate: getRpcGateSnapshot(),
-          });
-        }
-      } catch {
-        /* */
-      }
-      // #endregion
     })();
   }, interval);
 

@@ -40,6 +40,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.137',
+    title: 'RPC Debug Cleanup',
+    sections: ['execution'],
+    items: [
+      'Removed temporary RPC debug instrumentation after verifying adaptive skip heal and scanner load fixes (1.2.133–1.2.136).',
+    ],
+  },
+  {
     version: '1.2.136',
     title: 'Adaptive Skip Heal',
     sections: ['execution', 'scanners'],

@@ -1106,29 +1106,6 @@ export function startMonitor(): void {
     (shareBoot && getRpcRoleFor('wallet_poll', true) === 'utility');
   // Share+Utility: delay first soft-watch so Critical/Scanners stay clean after deploy.
   const firstPollDelayMs = softBoot ? (shareBoot ? 45_000 : 15_000) : 5_000;
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    const softSnap = getSoftWatchRuntimeSnapshot();
-    agentDebugLog('A/E', 'monitor.ts:startMonitor', 'monitor started — loaders scheduled', {
-      shareLoad: shareBoot,
-      softBoot,
-      firstPollDelayMs,
-      pollIntervalMs: config.pollIntervalMs,
-      softWatchCap: softSnap.softWatchCap,
-      softWatchPaused: softSnap.softWatchPaused,
-      watchPool: softSnap.watchPool,
-      enabledWallets: softSnap.enabledWallets,
-      trackedWallets: config.smartWallets.length,
-      marketScannerOn: true,
-      activityFilter: config.filters.enableActivityFilter,
-      uptimeMs: Math.round(process.uptime() * 1000),
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   setTimeout(() => {
     void pollAllWallets();
   }, firstPollDelayMs);
@@ -1301,52 +1278,6 @@ async function pollAllWallets(): Promise<void> {
           `(rotate remainder next tick — load protection)`
       );
     }
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      const stats = getRpcStats();
-      const byRole = (role: string) =>
-        (stats.endpoints || []).find((e) => e.lane === role || e.role === role);
-      const p = byRole('primary');
-      const s = byRole('secondary');
-      const u = byRole('utility');
-      agentDebugLog('A/C/E', 'monitor.ts:pollAllWallets:start', 'poll cycle start', {
-        shareLoad: Boolean(config.rpc?.shareLoad),
-        pollRole,
-        rpcHost: (() => {
-          try {
-            return new URL(rpcUrl).hostname;
-          } catch {
-            return 'bad-url';
-          }
-        })(),
-        watchPool: wallets.length,
-        thisCycle: ordered.length,
-        softThrottle: throttle.soft,
-        batchSize,
-        batchGapMs,
-        maxWalletsPerCycle,
-        cycleBudgetMs,
-        pollIntervalMs: config.pollIntervalMs,
-        rateLimitedUntilLeftMs: Math.max(0, pollRateLimitedUntil - Date.now()),
-        enabledWallets: config.smartWallets.filter((w) => w.enabled).length,
-        trackedWallets: config.smartWallets.length,
-        primaryLat: p?.latencyMs ?? null,
-        secondaryLat: s?.latencyMs ?? null,
-        utilityLat: u?.latencyMs ?? null,
-        primaryLabel: stats.primary?.label ?? null,
-        secondaryLabel: stats.secondary?.label ?? null,
-        utilityLabel: stats.utility?.label ?? null,
-        primaryFailover: stats.primary?.failover === true,
-        secondaryFailover: stats.secondary?.failover === true,
-        utilityFailover: stats.utility?.failover === true,
-        warning: stats.warning,
-      });
-    } catch {
-      /* */
-    }
-    // #endregion
     let hitRateLimit = false;
     let completed = 0;
     let advanced = 0;
@@ -1416,39 +1347,6 @@ async function pollAllWallets(): Promise<void> {
 
     const elapsed = Date.now() - cycleStarted;
     lastPollElapsedMs = elapsed;
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      const stats = getRpcStats();
-      const byRole = (role: string) =>
-        (stats.endpoints || []).find((e) => e.lane === role || e.role === role);
-      const softSnap = getSoftWatchRuntimeSnapshot();
-      agentDebugLog('A/B/E', 'monitor.ts:pollAllWallets:end', 'poll cycle end', {
-        elapsedMs: elapsed,
-        attempted: ordered.length,
-        completed,
-        hitRateLimit,
-        budgetHit: elapsed > cycleBudgetMs,
-        slowVsInterval: elapsed > config.pollIntervalMs * 1.5,
-        pollIntervalMs: config.pollIntervalMs,
-        pollRole,
-        softThrottle: throttle.soft,
-        softWatchCap: softSnap.softWatchCap,
-        softWatchPaused: softSnap.softWatchPaused,
-        watchPool: softSnap.watchPool,
-        primaryLat: byRole('primary')?.latencyMs ?? null,
-        secondaryLat: byRole('secondary')?.latencyMs ?? null,
-        utilityLat: byRole('utility')?.latencyMs ?? null,
-        lastPollRateLimited,
-        primaryFailover: stats.primary?.failover === true,
-        secondaryFailover: stats.secondary?.failover === true,
-        utilityFailover: stats.utility?.failover === true,
-      });
-    } catch {
-      /* */
-    }
-    // #endregion
     if (elapsed > config.pollIntervalMs * 1.5) {
       console.warn(
         `[monitor] Poll cycle slow: ${elapsed}ms for ${ordered.length}/${wallets.length} wallet(s) ` +
@@ -1991,21 +1889,6 @@ export function getWalletsForPolling(): SmartWallet[] {
   if (softCap === 0) {
     lastSoftWatchStickyN = 0;
     lastSoftWatchRotateN = 0;
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      agentDebugLog('A', 'monitor.ts:getWalletsForPolling', 'soft-watch PAUSED (cap 0)', {
-        softCap,
-        source: capInfo.source,
-        shareLoad: capInfo.shareLoad,
-        enabledSorted: sorted.length,
-        pollRoleForCap,
-      });
-    } catch {
-      /* */
-    }
-    // #endregion
     return [];
   }
 
@@ -2074,71 +1957,8 @@ export function getWalletsForPolling(): SmartWallet[] {
           (weakUtil ? ' · weak Utility (conservative)' : '')
       );
     }
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      agentDebugLog('A', 'monitor.ts:getWalletsForPolling', 'soft-watch cap applied', {
-        softCap,
-        source: capInfo.source,
-        defaultCap: capInfo.defaultCap,
-        shareLoad: Boolean(config.rpc?.shareLoad),
-        enabledSorted: sorted.length,
-        returned: capped.length,
-        stickyN,
-        rotateN: rotated.length,
-        coveragePct30m: coveragePct,
-        weakUtil,
-        softUrl,
-        applySoftCap,
-        pollRoleForCap,
-        rpcUrlHost: (() => {
-          try {
-            return new URL(rpcUrlForCap).hostname;
-          } catch {
-            return 'bad-url';
-          }
-        })(),
-      });
-    } catch {
-      /* */
-    }
-    // #endregion
     return capped;
   }
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('D', 'monitor.ts:getWalletsForPolling', 'soft-watch cap NOT applied', {
-      softCap,
-      source: capInfo.source,
-      shareLoad: Boolean(config.rpc?.shareLoad),
-      enabledSorted: sorted.length,
-      returned: sorted.length,
-      softUrl,
-      applySoftCap,
-      reason:
-        !applySoftCap
-          ? 'soft_cap_gate_off'
-          : softCap <= 0
-            ? 'softCap_lte_0'
-            : sorted.length <= softCap
-              ? 'under_cap'
-              : 'unknown',
-      pollRoleForCap,
-      rpcUrlHost: (() => {
-        try {
-          return new URL(rpcUrlForCap).hostname;
-        } catch {
-          return 'bad-url';
-        }
-      })(),
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   return sorted;
 }
 

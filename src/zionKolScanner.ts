@@ -801,20 +801,6 @@ export function startZionKolScanner(): void {
     `[zion] KOL Token Scanner starting — poll every ${interval}ms, universe≤${zionCfg().scanner.universeSize}` +
       (share ? ' (shared RPC lane — throttled)' : '')
   );
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('E', 'zionKolScanner.ts:start', 'zion scanner scheduled', {
-      pollIntervalMs: interval,
-      firstPollDelayMs: 18_000,
-      shareLane: share,
-      uptimeMs: Math.round(process.uptime() * 1000),
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   setTimeout(() => {
     void runZionScannerPollOnce();
   }, 18_000);

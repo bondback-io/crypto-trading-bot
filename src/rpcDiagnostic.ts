@@ -402,31 +402,6 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
     );
   }
 
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('A/E', 'rpcDiagnostic.ts:getRpcLoadDiagnostic', 'rpc diagnostic snapshot', {
-      shareLoad,
-      softWatch,
-      utilityLat: utility.latencyMs,
-      utilityHealthy: utility.healthy,
-      utilityLabel: utility.label,
-      primaryLat: primary.latencyMs,
-      chokeHints: chokeHints.slice(0, 5),
-      lastPollRateLimited,
-      callTrafficTop: (rpc.callTraffic?.top || []).slice(0, 8).map((r: { feature: string; method: string; calls: number; role: string; avgMs: number }) => ({
-        feature: r.feature,
-        method: r.method,
-        calls: r.calls,
-        role: r.role,
-        avgMs: r.avgMs,
-      })),
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
 
   return {
     at: Date.now(),

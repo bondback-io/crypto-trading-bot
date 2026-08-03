@@ -139,15 +139,6 @@ function logGate(
   if (now - lane.lastLogAt < 8_000) return;
   lane.lastLogAt = now;
   console.warn(`[rpc-gate] ${role}: ${message}`, data);
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('GATE', 'rpcGate.ts', message, { role, ...data });
-  } catch {
-    /* */
-  }
-  // #endregion
 }
 
 /**
@@ -184,22 +175,6 @@ export async function acquireRpcLane(
         maxRps: limits.maxRps,
         lifetimeSkipped: lane.skipped,
       });
-      // #region agent log
-      try {
-        const { agentDebugLog } =
-          require('./agentDebugLog') as typeof import('./agentDebugLog');
-        agentDebugLog('C', 'rpcGate.ts:acquire:rate', 'lane skip rate', {
-          role,
-          feature: feature || 'ungated',
-          lifetimeSkipped: lane.skipped,
-          tokens: Number(lane.tokens.toFixed(2)),
-          maxRps: limits.maxRps,
-          inFlight: lane.inFlight,
-        });
-      } catch {
-        /* */
-      }
-      // #endregion
       throw new RpcGateSkipError('rate', role, feature);
     }
     const waitForTokenMs = Math.min(1_500, limits.maxWaitMs);
@@ -461,16 +436,4 @@ export function logBackgroundDeferred(
         ? ` ${JSON.stringify(extra)}`
         : '')
   );
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('LOAD', 'rpcGate.ts:defer', `${subsystem} delayed`, {
-      reason,
-      ...extra,
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
 }

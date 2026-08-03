@@ -83,41 +83,8 @@ function recompute(external?: {
 
   // Only the rolling 60s window — never lifetime lane.skipped (that never resets
   // and permanently pinned scanner×3 after the first boot burst).
-  const lifetimeSecSkip = external?.secondarySkipped ?? 0;
   const secSkip = secondarySkipsRecent;
   const laneIdle = external?.secondaryIdle === true;
-  // #region agent log
-  if (lifetimeSecSkip > 0 || secondarySkipsRecent > 0 || secSkip >= 3 || laneIdle) {
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      const nowLog = Date.now();
-      const last = (recompute as { _dbgAt?: number })._dbgAt || 0;
-      if (nowLog - last > 8_000) {
-        (recompute as { _dbgAt?: number })._dbgAt = nowLog;
-        agentDebugLog('A', 'rpcLoadControl.ts:recompute', 'skip window vs lifetime', {
-          runId: 'post-fix',
-          secondarySkipsRecent,
-          secondarySkipsHot,
-          lifetimeSecSkip,
-          secSkipUsed: secSkip,
-          lifetimeIgnored: true,
-          lifetimeDominates: false,
-          secondaryIdle: laneIdle,
-          primaryLatencyMs: external?.primaryLatencyMs ?? null,
-          secondaryLatencyMs: external?.secondaryLatencyMs ?? null,
-          utilityLatencyMs: external?.utilityLatencyMs ?? null,
-          utilityWeakPublic: external?.utilityWeakPublic ?? false,
-          utilityFailover: external?.utilityFailover ?? false,
-          primaryQueued: external?.primaryQueued ?? 0,
-          sampleCount: skipSamples.length,
-        });
-      }
-    } catch {
-      /* */
-    }
-  }
-  // #endregion
   // Higher bars + idle heal: micro-skips must not pin scanners at ×3 while
   // Secondary is already empty.
   if (!laneIdle && secondarySkipsHot >= 6) {
@@ -133,20 +100,6 @@ function recompute(external?: {
         ? `secondary idle — soft ×${scannerSlowFactor} (${secSkip}/60s)`
         : `secondary skips ${secSkip}/60s → scanner×2`
     );
-  } else if (laneIdle && secSkip > 0) {
-    // #region agent log
-    try {
-      const { agentDebugLog } =
-        require('./agentDebugLog') as typeof import('./agentDebugLog');
-      agentDebugLog('C4', 'rpcLoadControl.ts:recompute', 'secondary idle heal', {
-        runId: 'post-fix',
-        secSkip,
-        secondarySkipsHot,
-      });
-    } catch {
-      /* */
-    }
-    // #endregion
   }
 
   const pLat = external?.primaryLatencyMs;

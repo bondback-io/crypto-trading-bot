@@ -1199,24 +1199,6 @@ export async function runScannerPollOnce(): Promise<number> {
   if (lastPollAt != null && Date.now() - lastPollAt < interval * 0.85) {
     return 0;
   }
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    const { getRpcLoadControlSnapshot } =
-      require('./rpcLoadControl') as typeof import('./rpcLoadControl');
-    const load = getRpcLoadControlSnapshot();
-    agentDebugLog('C3', 'marketScanner.ts:poll', 'market scanner poll gate', {
-      runId: 'post-fix',
-      baseInterval,
-      adaptiveInterval: interval,
-      scannerSlowFactor: load.scannerSlowFactor,
-      recentSkips: load.secondarySkipsRecent,
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   const defer = shouldDeferBackgroundForCritical('scanner');
   if (defer.defer) {
     logBackgroundDeferred('Market Scanner', defer.reason || 'Critical busy');
@@ -1403,20 +1385,6 @@ export function startMarketScanner(): void {
     `[marketScanner] Starting — poll every ${cfg.pollIntervalMs}ms, ` +
       `lookback ${cfg.lookbackHours}h, minScore ${cfg.minRankScore}`
   );
-  // #region agent log
-  try {
-    const { agentDebugLog } =
-      require('./agentDebugLog') as typeof import('./agentDebugLog');
-    agentDebugLog('E', 'marketScanner.ts:start', 'market scanner scheduled', {
-      pollIntervalMs: cfg.pollIntervalMs,
-      firstPollDelayMs: 12_000,
-      enabled: cfg.enabled !== false,
-      uptimeMs: Math.round(process.uptime() * 1000),
-    });
-  } catch {
-    /* */
-  }
-  // #endregion
   setTimeout(() => {
     void runScannerPollOnce();
   }, 12_000);
