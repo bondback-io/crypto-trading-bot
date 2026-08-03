@@ -7760,6 +7760,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="ppp-card">
+        <details class="strat-adv-pack" id="ppp-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Peak Profit Protection <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Soft exit layer: arms at a % of target TP, then full-exits on proportional giveback from peak. Never overwrites hard TP/SL, trail, or dead-market. Scalpers use tighter defaults. Self-Learn may nudge arm/giveback only."></span></span>
+              <span id="ppp-status-badge" class="badge status-badge" style="font-size:11px">PPP OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Peak Profit Protection" onclick="event.stopPropagation()">
+              <input type="checkbox" id="ppp-enabled" onchange="savePeakProfitProtection()" onclick="event.stopPropagation()" />
+              <span>Enable</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="text-xs text-slate-400 mb-2">Arm when peak reaches a share of target TP; exit if price gives back a share of that peak. Target TP stays the ceiling.</p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Arm % of TP</span><input type="number" id="ppp-arm" value="50" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Giveback % of peak</span><input type="number" id="ppp-giveback" value="33" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Stale peak (sec)</span><input type="number" id="ppp-stale" value="45" min="0" max="600" step="5" onchange="savePeakProfitProtection()" title="0 = off. Tighten giveback if no new peak after arm." /></label>
+            </div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Scalper-style (more aggressive)</div>
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Scalper arm % of TP</span><input type="number" id="ppp-scalper-arm" value="40" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Scalper giveback %</span><input type="number" id="ppp-scalper-giveback" value="30" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
+            </div>
+            <p class="text-xs mint mb-0">Fast profiles: Scalper, Momentum Burst, Reversal Scalper, Migration Sniper.</p>
+          </div>
+        </details>
+      </div>
+
       <div class="card mt-4" id="microbot-performance-teaser">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div style="min-width:0;flex:1">
@@ -10817,6 +10846,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         profitLockArmPct: 'profit lock arm %',
         profitGivebackPts: 'giveback pts',
         profitFloorPct: 'profit floor %',
+        peakProtectArmOfTpPct: 'peak protect arm % of TP',
+        peakProtectGivebackOfPeakPct: 'peak protect giveback % of peak',
         earlyPartialTpPct: 'early partial TP %',
         earlyPartialFraction: 'early partial fraction',
         momentumFadeDropPct: 'momentum fade drop %',
@@ -11945,6 +11976,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   '<label title="Once armed, never let unrealized fall below this % (0 = off)">Profit floor %' +
                     '<input type="number" data-policy="profitFloorPct" step="1" min="0" placeholder="default" value="' +
                     escHtml(String(pol.profitFloorPct != null ? pol.profitFloorPct : (offPol.profitFloorPct != null ? offPol.profitFloorPct : ''))) +
+                  '" /></label>' +
+                  '<p class="tp-param-title" style="grid-column:1/-1;margin-top:0.5rem">Peak Profit Protection</p>' +
+                  '<p class="tp-param-hint" style="grid-column:1/-1">When global Peak Profit Protection is ON: arm at % of this bot&apos;s target TP; exit on giveback as % of peak. Overrides global scalper/non-scalper defaults when set. Leave blank for global defaults.</p>' +
+                  '<label title="Arm when peak reaches this % of target TP">Arm % of TP' +
+                    '<input type="number" data-policy="peakProtectArmOfTpPct" step="1" min="0" max="95" placeholder="global" value="' +
+                    escHtml(String(pol.peakProtectArmOfTpPct != null ? pol.peakProtectArmOfTpPct : (offPol.peakProtectArmOfTpPct != null ? offPol.peakProtectArmOfTpPct : ''))) +
+                  '" /></label>' +
+                  '<label title="Full exit when giveback reaches this % of peak">Giveback % of peak' +
+                    '<input type="number" data-policy="peakProtectGivebackOfPeakPct" step="1" min="0" max="80" placeholder="global" value="' +
+                    escHtml(String(pol.peakProtectGivebackOfPeakPct != null ? pol.peakProtectGivebackOfPeakPct : (offPol.peakProtectGivebackOfPeakPct != null ? offPol.peakProtectGivebackOfPeakPct : ''))) +
                   '" /></label>' +
                   '<label title="Early partial take-profit %">Early partial %' +
                     '<input type="number" data-policy="earlyPartialTpPct" step="1" min="0" placeholder="default" value="' +
@@ -14133,6 +14174,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
+      if (name === 'microbots' && typeof loadPeakProfitProtection === 'function') loadPeakProfitProtection();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') {
         try { syncBotInfoVersionLabels(); } catch (_) {}
@@ -14538,6 +14580,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Trailing</span>'
         );
       }
+      if (p.peakProtectArmed) {
+        badges.push(
+          '<span class="pos-status-badge" style="background:#14532d;color:#86efac;border:1px solid #22c55e80" title="Peak Profit Protection armed — will exit on giveback from peak">' +
+            'Peak Protect</span>'
+        );
+      }
       if (p.tradeMode === 'live') {
         badges.push(
           '<span class="pos-status-badge is-live" title="Live tracked position">Live</span>'
@@ -14706,6 +14754,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (/stalled|stall\\b|underwater after/i.test(low)) {
         return { key: 'stall', label: 'Stall' };
+      }
+      if (/peak\\s*protection/i.test(low)) {
+        return { key: 'fade', label: 'Peak Protection' };
       }
       if (
         /momentum\\s*(fail|fade)|fade\\s*from\\s*peak|drop\\s*from\\s*peak|from\\s*peak/i.test(
@@ -16046,6 +16097,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           trailText += ' · peak ' + Number(p.highWaterMarkSol).toExponential(2);
         }
         lines.push({ label: 'Trailing stop', text: trailText });
+      }
+
+      if (p.peakProtectArmed || p.peakProtectArmAtPct != null) {
+        let pppText = p.peakProtectArmed ? 'Armed' : 'Waiting';
+        if (p.peakProtectArmAtPct != null && Number.isFinite(Number(p.peakProtectArmAtPct))) {
+          pppText += ' · arms at +' + Number(p.peakProtectArmAtPct).toFixed(1) + '%';
+        }
+        if (p.peakProtectPeakAtArm != null && Number.isFinite(Number(p.peakProtectPeakAtArm))) {
+          pppText += ' · armed peak +' + Number(p.peakProtectPeakAtArm).toFixed(1) + '%';
+        }
+        lines.push({ label: 'Peak protect', text: pppText });
       }
 
       if (p.convictionScore != null && Number.isFinite(Number(p.convictionScore))) {
@@ -24187,6 +24249,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadMarlStatus = loadMarlStatus;
     window.saveMarlConfig = saveMarlConfig;
     window.setMarlStrength = setMarlStrength;
+
+    async function loadPeakProfitProtection() {
+      try {
+        const data = await fetchJSON('/api/peak-profit-protection');
+        const m = data.peakProfitProtection || {};
+        const en = document.getElementById('ppp-enabled');
+        if (en) en.checked = m.enabled !== false;
+        const badge = document.getElementById('ppp-status-badge');
+        if (badge) badge.textContent = m.enabled !== false ? 'PPP ON' : 'PPP OFF';
+        const arm = document.getElementById('ppp-arm');
+        if (arm) arm.value = m.armOfTpPct != null ? m.armOfTpPct : 50;
+        const gb = document.getElementById('ppp-giveback');
+        if (gb) gb.value = m.givebackOfPeakPct != null ? m.givebackOfPeakPct : 33;
+        const stale = document.getElementById('ppp-stale');
+        if (stale) stale.value = m.stalePeakTightenSec != null ? m.stalePeakTightenSec : 45;
+        const sArm = document.getElementById('ppp-scalper-arm');
+        if (sArm) sArm.value = m.scalperArmOfTpPct != null ? m.scalperArmOfTpPct : 40;
+        const sGb = document.getElementById('ppp-scalper-giveback');
+        if (sGb) sGb.value = m.scalperGivebackOfPeakPct != null ? m.scalperGivebackOfPeakPct : 30;
+      } catch (err) {
+        console.warn('loadPeakProfitProtection', err);
+      }
+    }
+    async function savePeakProfitProtection() {
+      const body = {
+        enabled: document.getElementById('ppp-enabled')
+          ? document.getElementById('ppp-enabled').checked
+          : true,
+        armOfTpPct: Number(document.getElementById('ppp-arm')?.value || 50),
+        givebackOfPeakPct: Number(document.getElementById('ppp-giveback')?.value || 33),
+        stalePeakTightenSec: Number(document.getElementById('ppp-stale')?.value || 45),
+        scalperArmOfTpPct: Number(document.getElementById('ppp-scalper-arm')?.value || 40),
+        scalperGivebackOfPeakPct: Number(
+          document.getElementById('ppp-scalper-giveback')?.value || 30
+        ),
+      };
+      await fetchJSON('/api/config/peak-profit-protection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadPeakProfitProtection();
+    }
+    window.loadPeakProfitProtection = loadPeakProfitProtection;
+    window.savePeakProfitProtection = savePeakProfitProtection;
 
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
     let _zionImprovementCache = [];

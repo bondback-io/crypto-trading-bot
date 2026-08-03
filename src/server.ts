@@ -2774,6 +2774,62 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/peak-profit-protection', (_req: Request, res: Response) => {
+    try {
+      const { getPeakProfitProtectionConfig } =
+        require('./peakProfitProtection') as typeof import('./peakProfitProtection');
+      res.json({ ok: true, peakProfitProtection: getPeakProfitProtectionConfig() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
+    try {
+      const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =
+        require('./peakProfitProtection') as typeof import('./peakProfitProtection');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      setPeakProfitProtectionConfig({
+        enabled:
+          typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        armOfTpPct:
+          body.armOfTpPct != null ? Number(body.armOfTpPct) : undefined,
+        givebackOfPeakPct:
+          body.givebackOfPeakPct != null
+            ? Number(body.givebackOfPeakPct)
+            : undefined,
+        scalperArmOfTpPct:
+          body.scalperArmOfTpPct != null
+            ? Number(body.scalperArmOfTpPct)
+            : undefined,
+        scalperGivebackOfPeakPct:
+          body.scalperGivebackOfPeakPct != null
+            ? Number(body.scalperGivebackOfPeakPct)
+            : undefined,
+        stalePeakTightenSec:
+          body.stalePeakTightenSec != null
+            ? Number(body.stalePeakTightenSec)
+            : undefined,
+        staleGivebackTightenMult:
+          body.staleGivebackTightenMult != null
+            ? Number(body.staleGivebackTightenMult)
+            : undefined,
+      });
+      res.json({
+        ok: true,
+        peakProfitProtection: getPeakProfitProtectionConfig(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/zion/agent', (_req: Request, res: Response) => {
     try {
       const {

@@ -535,6 +535,8 @@ const PATCH_LABELS: Record<string, string> = {
   profitLockArmPct: 'profit lock arm %',
   profitGivebackPts: 'giveback pts',
   profitFloorPct: 'profit floor %',
+  peakProtectArmOfTpPct: 'peak protect arm % of TP',
+  peakProtectGivebackOfPeakPct: 'peak protect giveback % of peak',
   earlyPartialTpPct: 'early partial TP %',
   earlyPartialFraction: 'early partial fraction',
   momentumFadeDropPct: 'momentum fade drop %',
@@ -1242,6 +1244,8 @@ export function buildTimingLearningCandidates(
     trailTightenFactor: number;
     momentumFadeDropPct: number;
     trailingActivationProfit: number;
+    peakProtectArmOfTpPct?: number;
+    peakProtectGivebackOfPeakPct?: number;
   },
   soft?: SoftExitFeedbackReport | null
 ): Array<{ summary: string; patch: LearningProposalPatch }> {
@@ -1318,6 +1322,68 @@ export function buildTimingLearningCandidates(
         patch: {
           exitRules: {
             exitPolicy: { momentumFadeDropPct: next },
+          },
+        },
+      });
+    }
+  }
+
+  // Peak Profit Protection — ±3–5% on arm % of TP / giveback % of peak only
+  const pppLeft =
+    episodes.filter((e) => e.peakProtectBeatFullTp === false).length /
+    episodes.length;
+  const pppBanked =
+    episodes.filter((e) => e.peakProtectBeatFullTp === true).length /
+    episodes.length;
+  const pppExits =
+    episodes.filter((e) =>
+      /peak\s*protection/i.test(String(e.exitReason || ''))
+    ).length / episodes.length;
+  const curArm =
+    current.peakProtectArmOfTpPct != null &&
+    Number.isFinite(current.peakProtectArmOfTpPct) &&
+    current.peakProtectArmOfTpPct > 0
+      ? Number(current.peakProtectArmOfTpPct)
+      : 50;
+  const curGive =
+    current.peakProtectGivebackOfPeakPct != null &&
+    Number.isFinite(current.peakProtectGivebackOfPeakPct) &&
+    current.peakProtectGivebackOfPeakPct > 0
+      ? Number(current.peakProtectGivebackOfPeakPct)
+      : 33;
+
+  if (pppLeft >= 0.18 || (fb.preferTightenGiveback && pppExits >= 0.12)) {
+    const nextGive = clamp(Math.round(curGive * 0.95), 10, 80);
+    if (nextGive !== Math.round(curGive)) {
+      out.push({
+        summary: `Timing: tighten peak-protect giveback ${curGive}→${nextGive}% of peak`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectGivebackOfPeakPct: nextGive },
+          },
+        },
+      });
+    }
+  } else if (pppBanked >= 0.2 && pppExits >= 0.15) {
+    const nextArm = clamp(Math.round(curArm * 0.95), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `Timing: arm peak-protect earlier ${curArm}→${nextArm}% of TP`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
+  } else if (pppExits >= 0.28 && leftOnTable < 0.15) {
+    const nextGive = clamp(Math.round(curGive * 1.05), 10, 80);
+    if (nextGive !== Math.round(curGive)) {
+      out.push({
+        summary: `Timing: slightly looser peak-protect giveback ${curGive}→${nextGive}% of peak`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectGivebackOfPeakPct: nextGive },
           },
         },
       });
@@ -1824,6 +1890,9 @@ export function runSelfLearnTick(input: {
     trailTightenFactor: Number(pol.trailTightenFactor) || 0.85,
     trailingActivationProfit:
       Number(input.currentExit.trailingActivationProfit) || 12,
+    peakProtectArmOfTpPct: Number(pol.peakProtectArmOfTpPct) || 0,
+    peakProtectGivebackOfPeakPct:
+      Number(pol.peakProtectGivebackOfPeakPct) || 0,
   };
 
   // Global Micro-Bot TP: skip exit delta learning only; entry continues
@@ -1971,7 +2040,7 @@ export function runSelfLearnTick(input: {
     let hDelta = hAfter - scoreBefore;
     // Soft exit-feedback weights only (does not write patches by itself)
     const sum = String(c.summary || '');
-    if (softExit.preferTightenGiveback && /giveback|profit-lock|partial/i.test(sum)) {
+    if (softExit.preferTightenGiveback && /giveback|profit-lock|partial|peak.?protect/i.test(sum)) {
       hDelta += 0.35;
     }
     if (softExit.preferTighterTrail && /tighten trail|momentum-fade.*tighter|Timing:/i.test(sum)) {

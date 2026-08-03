@@ -147,6 +147,16 @@ export interface PersistedBotSettings {
   zionAgent?: {
     semiAutonomous?: boolean;
   };
+  /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
+  peakProfitProtection?: {
+    enabled?: boolean;
+    armOfTpPct?: number;
+    givebackOfPeakPct?: number;
+    scalperArmOfTpPct?: number;
+    scalperGivebackOfPeakPct?: number;
+    stalePeakTightenSec?: number;
+    staleGivebackTightenMult?: number;
+  };
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

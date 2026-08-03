@@ -77,6 +77,17 @@ export interface ProfileLearningEpisode {
    * Optional — older episode rings omit this; scorers fall back to pnl/MFE.
    */
   timingReward?: number;
+  /** Peak Profit Protection — arm threshold (% unrealized) at open / resolved */
+  peakProtectArmAtPct?: number;
+  /** Peak Profit Protection — giveback % of peak configured at open */
+  peakProtectGivebackOfPeakPct?: number;
+  /** Whether protection was armed during the trade */
+  peakProtectArmed?: boolean;
+  /**
+   * Soft heuristic: protection exit banked vs never-hit-TP (true),
+   * or left TP on table after peaking at/above TP (false).
+   */
+  peakProtectBeatFullTp?: boolean;
 }
 
 interface EpisodesFile {

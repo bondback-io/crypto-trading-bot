@@ -84,6 +84,8 @@ const FEATURE_NAMES = [
   'avg_timing_reward',
   'avg_entry_quality',
   'avg_exit_quality',
+  'ppp_armed_share',
+  'ppp_beat_tp_share',
 ] as const;
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -167,6 +169,14 @@ export function buildWindowFeatures(
   const exitQs = episodes
     .map((e) => e.exitQualityScore)
     .filter((v): v is number => v != null && Number.isFinite(v));
+  const pppArmedShare =
+    episodes.filter((e) => e.peakProtectArmed === true).length /
+    episodes.length;
+  const pppBeat = episodes.filter((e) => e.peakProtectBeatFullTp != null);
+  const pppBeatShare = pppBeat.length
+    ? pppBeat.filter((e) => e.peakProtectBeatFullTp === true).length /
+      pppBeat.length
+    : 0;
 
   return [
     mean(pnls) / 20, // scale
@@ -192,6 +202,8 @@ export function buildWindowFeatures(
     timingRewards.length ? mean(timingRewards) / 40 : 0,
     entryQs.length ? mean(entryQs) / 100 : 0,
     exitQs.length ? mean(exitQs) / 100 : 0,
+    pppArmedShare,
+    pppBeatShare,
   ];
 }
 

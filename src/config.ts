@@ -2044,6 +2044,8 @@ export interface BotConfig {
   marl: import('./marlCoordinator').MarlConfig;
   /** Zion chat agent (semi-autonomous toggle only; secrets via env). */
   zionAgent: { semiAutonomous: boolean };
+  /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
+  peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 }
 
 export const config: BotConfig = {
@@ -2239,6 +2241,16 @@ export const config: BotConfig = {
 
   zionAgent: {
     semiAutonomous: false,
+  },
+
+  peakProfitProtection: {
+    enabled: true,
+    armOfTpPct: 50,
+    givebackOfPeakPct: 33,
+    scalperArmOfTpPct: 40,
+    scalperGivebackOfPeakPct: 30,
+    stalePeakTightenSec: 45,
+    staleGivebackTightenMult: 0.75,
   },
 
   profitStrategy: {
@@ -2732,6 +2744,17 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     zionAgent: {
       semiAutonomous: config.zionAgent?.semiAutonomous === true,
     },
+    peakProfitProtection: cloneJson(
+      config.peakProfitProtection || {
+        enabled: true,
+        armOfTpPct: 50,
+        givebackOfPeakPct: 33,
+        scalperArmOfTpPct: 40,
+        scalperGivebackOfPeakPct: 30,
+        stalePeakTightenSec: 45,
+        staleGivebackTightenMult: 0.75,
+      }
+    ) as PersistedBotSettings['peakProfitProtection'],
     migrations: { ...settingsMigrations },
   };
 }
@@ -3464,6 +3487,28 @@ function applySettingsSnapshot(
     } catch {
       /* */
     }
+  }
+  if (saved.peakProfitProtection && typeof saved.peakProfitProtection === 'object') {
+    const s = saved.peakProfitProtection;
+    const clamp = (n: number, lo: number, hi: number) =>
+      Math.min(hi, Math.max(lo, n));
+    config.peakProfitProtection = {
+      enabled: s.enabled !== false,
+      armOfTpPct: clamp(Number(s.armOfTpPct) || 50, 10, 95),
+      givebackOfPeakPct: clamp(Number(s.givebackOfPeakPct) || 33, 10, 80),
+      scalperArmOfTpPct: clamp(Number(s.scalperArmOfTpPct) || 40, 10, 95),
+      scalperGivebackOfPeakPct: clamp(
+        Number(s.scalperGivebackOfPeakPct) || 30,
+        10,
+        80
+      ),
+      stalePeakTightenSec: clamp(Number(s.stalePeakTightenSec ?? 45), 0, 600),
+      staleGivebackTightenMult: clamp(
+        Number(s.staleGivebackTightenMult) || 0.75,
+        0.4,
+        1
+      ),
+    };
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
   {

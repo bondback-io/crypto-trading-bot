@@ -44,6 +44,15 @@ export interface ProfileExitPolicy {
    * 0 = off.
    */
   profitFloorPct: number;
+  /**
+   * Peak Profit Protection — arm at this % of target TP (0 = use global default).
+   */
+  peakProtectArmOfTpPct: number;
+  /**
+   * Peak Profit Protection — exit when giveback reaches this % of peak
+   * (0 = use global default).
+   */
+  peakProtectGivebackOfPeakPct: number;
   /** Swing bots: defer soft timer when Fib/support/pattern still valid */
   extendHoldIfTaOk: boolean;
   /** Swing bots: full exit when structure breaks while still green */
@@ -66,6 +75,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 28,
     profitGivebackPts: 14,
     profitFloorPct: 0,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -80,6 +91,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 22,
     profitGivebackPts: 12,
     profitFloorPct: 0,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -94,6 +107,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 35,
     profitGivebackPts: 18,
     profitFloorPct: 0,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -108,6 +123,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 40,
     profitGivebackPts: 22,
     profitFloorPct: 8,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: false,
@@ -122,6 +139,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 25,
     profitGivebackPts: 12,
     profitFloorPct: 5,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
@@ -136,6 +155,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 18,
     profitGivebackPts: 8,
     profitFloorPct: 3,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
@@ -150,6 +171,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 45,
     profitGivebackPts: 20,
     profitFloorPct: 10,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
@@ -164,6 +187,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 40,
     profitGivebackPts: 22,
     profitFloorPct: 8,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -178,6 +203,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 30,
     profitGivebackPts: 16,
     profitFloorPct: 0,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -192,6 +219,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 0,
     profitGivebackPts: 0,
     profitFloorPct: 0,
+    peakProtectArmOfTpPct: 0,
+    peakProtectGivebackOfPeakPct: 0,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -248,6 +277,16 @@ export function resolveExitPolicy(
       ep.profitFloorPct != null && Number.isFinite(Number(ep.profitFloorPct))
         ? Math.max(0, Number(ep.profitFloorPct))
         : base.profitFloorPct,
+    peakProtectArmOfTpPct:
+      ep.peakProtectArmOfTpPct != null &&
+      Number.isFinite(Number(ep.peakProtectArmOfTpPct))
+        ? Math.max(0, Number(ep.peakProtectArmOfTpPct))
+        : base.peakProtectArmOfTpPct,
+    peakProtectGivebackOfPeakPct:
+      ep.peakProtectGivebackOfPeakPct != null &&
+      Number.isFinite(Number(ep.peakProtectGivebackOfPeakPct))
+        ? Math.max(0, Number(ep.peakProtectGivebackOfPeakPct))
+        : base.peakProtectGivebackOfPeakPct,
     extendHoldIfTaOk:
       typeof ep.extendHoldIfTaOk === 'boolean'
         ? ep.extendHoldIfTaOk
@@ -469,6 +508,9 @@ export function evaluateAdaptiveProfileExit(input: {
   softTimerDue?: boolean;
   /** Quality tier from conviction at entry — drives dynamic TP aggression */
   qualityTier?: 'low' | 'medium' | 'high';
+  tradeProfileId?: string | null;
+  peakProtectArmedAt?: number | null;
+  peakProtectLastPeakAt?: number | null;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const tier = input.qualityTier || 'medium';
@@ -483,24 +525,69 @@ export function evaluateAdaptiveProfileExit(input: {
           100
         : Math.max(0, pnl);
 
-  // 1) Profit-lock giveback / floor (once peak armed) — before partial
-  if (
-    pol.profitLockArmPct > 0 &&
-    (pol.profitGivebackPts > 0 || pol.profitFloorPct > 0) &&
-    peakUnrealized >= pol.profitLockArmPct
-  ) {
-    const givebackPts = peakUnrealized - pnl;
-    if (pol.profitGivebackPts > 0 && givebackPts >= pol.profitGivebackPts) {
-      return {
-        type: 'full',
-        reason: `Profile profit-lock giveback −${givebackPts.toFixed(1)} pts from peak +${peakUnrealized.toFixed(0)}% (policy ${pol.profitGivebackPts} pts)`,
-      };
+  // 1a) Peak Profit Protection (TP-relative arm + proportional giveback)
+  try {
+    const { evaluatePeakProfitProtection, getPeakProfitProtectionConfig } =
+      require('./peakProfitProtection') as typeof import('./peakProfitProtection');
+    if (getPeakProfitProtectionConfig().enabled) {
+      const ppp = evaluatePeakProfitProtection({
+        peakUnrealizedPct: peakUnrealized,
+        pnlPct: pnl,
+        takeProfitPct: input.takeProfitPct,
+        profileId: input.tradeProfileId,
+        policyArmOfTpPct:
+          pol.peakProtectArmOfTpPct > 0 ? pol.peakProtectArmOfTpPct : null,
+        policyGivebackOfPeakPct:
+          pol.peakProtectGivebackOfPeakPct > 0
+            ? pol.peakProtectGivebackOfPeakPct
+            : null,
+        peakProtectArmedAt: input.peakProtectArmedAt,
+        peakProtectLastPeakAt: input.peakProtectLastPeakAt,
+        nowMs: now,
+      });
+      if (ppp.shouldExit && ppp.reason) {
+        return { type: 'full', reason: ppp.reason };
+      }
+    } else if (
+      // 1b) Legacy absolute profit-lock when PPP is off
+      pol.profitLockArmPct > 0 &&
+      (pol.profitGivebackPts > 0 || pol.profitFloorPct > 0) &&
+      peakUnrealized >= pol.profitLockArmPct
+    ) {
+      const givebackPts = peakUnrealized - pnl;
+      if (pol.profitGivebackPts > 0 && givebackPts >= pol.profitGivebackPts) {
+        return {
+          type: 'full',
+          reason: `Profile profit-lock giveback −${givebackPts.toFixed(1)} pts from peak +${peakUnrealized.toFixed(0)}% (policy ${pol.profitGivebackPts} pts)`,
+        };
+      }
+      if (pol.profitFloorPct > 0 && pnl < pol.profitFloorPct) {
+        return {
+          type: 'full',
+          reason: `Profile profit-lock floor +${pnl.toFixed(1)}% < +${pol.profitFloorPct}% (armed @ ${pol.profitLockArmPct}%)`,
+        };
+      }
     }
-    if (pol.profitFloorPct > 0 && pnl < pol.profitFloorPct) {
-      return {
-        type: 'full',
-        reason: `Profile profit-lock floor +${pnl.toFixed(1)}% < +${pol.profitFloorPct}% (armed @ ${pol.profitLockArmPct}%)`,
-      };
+  } catch {
+    /* fail-open to legacy below */
+    if (
+      pol.profitLockArmPct > 0 &&
+      (pol.profitGivebackPts > 0 || pol.profitFloorPct > 0) &&
+      peakUnrealized >= pol.profitLockArmPct
+    ) {
+      const givebackPts = peakUnrealized - pnl;
+      if (pol.profitGivebackPts > 0 && givebackPts >= pol.profitGivebackPts) {
+        return {
+          type: 'full',
+          reason: `Profile profit-lock giveback −${givebackPts.toFixed(1)} pts from peak +${peakUnrealized.toFixed(0)}% (policy ${pol.profitGivebackPts} pts)`,
+        };
+      }
+      if (pol.profitFloorPct > 0 && pnl < pol.profitFloorPct) {
+        return {
+          type: 'full',
+          reason: `Profile profit-lock floor +${pnl.toFixed(1)}% < +${pol.profitFloorPct}% (armed @ ${pol.profitLockArmPct}%)`,
+        };
+      }
     }
   }
 

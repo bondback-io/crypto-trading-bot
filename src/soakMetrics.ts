@@ -62,10 +62,13 @@ export function classifyExitKey(reason: string | undefined | null): {
     return { key: 'stall', label: 'Stall' };
   }
   if (
-    /momentum\s*(fail|fade)|fade\s*from\s*peak|drop\s*from\s*peak|from\s*peak/i.test(
+    /momentum\s*(fail|fade)|fade\s*from\s*peak|drop\s*from\s*peak|from\s*peak|peak\s*protection/i.test(
       low
     )
   ) {
+    if (/peak\s*protection/i.test(low)) {
+      return { key: 'fade', label: 'Peak Protection' };
+    }
     return { key: 'fade', label: 'Momentum Fade' };
   }
   if (/trailing\s*stop|trail\s*exit|bag exit/i.test(r)) {

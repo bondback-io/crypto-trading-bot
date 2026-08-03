@@ -224,6 +224,13 @@ export interface TradeProfileExitRules {
     profitLockArmPct?: number;
     profitGivebackPts?: number;
     profitFloorPct?: number;
+    /**
+     * Peak Profit Protection — arm when peak reaches this % of target TP
+     * (overrides global scalper/non-scalper defaults when set).
+     */
+    peakProtectArmOfTpPct?: number;
+    /** Peak Profit Protection — exit when giveback reaches this % of peak. */
+    peakProtectGivebackOfPeakPct?: number;
     extendHoldIfTaOk?: boolean;
     cutIfStructureBroken?: boolean;
     /** Swing: exit on confirmed Heikin-Ashi red flip after ≥2 green HA candles */

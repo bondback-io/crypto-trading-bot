@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.128',
+    title: 'Peak Profit Protection',
+    sections: ['microbots', 'learning', 'execution'],
+    items: [
+      'Soft Peak Profit Protection arms at a share of target TP (default 50%; scalpers 40%) and full-exits on proportional giveback from peak (default 33%/30%) — additive only; never overwrites hard TP/SL, trail, or dead-market.',
+      'Micro Bots card toggle + scalper vs non-scalper knobs; per-profile Arm % of TP / Giveback % of peak; open trades show Peak Protect when armed; Self-Learn may nudge those two knobs only (±3–5%) with rollback.',
+    ],
+  },
+  {
     version: '1.2.127',
     title: 'MARL Lagging Profile Support',
     sections: ['microbots', 'learning'],

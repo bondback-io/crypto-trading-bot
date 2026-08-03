@@ -83,6 +83,52 @@ function isGlobalMicroBotTpOverrideActive(position: {
   );
 }
 
+/** Stamp Peak Profit Protection arm state on the position (no RPC). */
+function updatePeakProtectArmState(
+  position: Position,
+  peakUnrealizedPct: number,
+  nowMs: number,
+  hwmAdvanced: boolean
+): void {
+  if (hwmAdvanced) {
+    position.peakProtectLastPeakAt = nowMs;
+  }
+  try {
+    const {
+      getPeakProfitProtectionConfig,
+      resolvePeakProtectParams,
+    } = require('./peakProfitProtection') as typeof import('./peakProfitProtection');
+    if (!getPeakProfitProtectionConfig().enabled) return;
+    const pol = (position.profileExitPolicy || {}) as {
+      peakProtectArmOfTpPct?: number;
+      peakProtectGivebackOfPeakPct?: number;
+    };
+    const resolved = resolvePeakProtectParams({
+      profileId: position.tradeProfileId,
+      takeProfitPct: effectivePositionTakeProfitPct(position),
+      policyArmOfTpPct: pol.peakProtectArmOfTpPct,
+      policyGivebackOfPeakPct: pol.peakProtectGivebackOfPeakPct,
+    });
+    position.peakProtectArmAtPct = resolved.armAtPct;
+    if (
+      resolved.enabled &&
+      peakUnrealizedPct >= resolved.armAtPct &&
+      !position.peakProtectArmed
+    ) {
+      position.peakProtectArmed = true;
+      position.peakProtectArmedAt = nowMs;
+      position.peakProtectPeakAtArm = peakUnrealizedPct;
+      position.peakProtectLastPeakAt = nowMs;
+      console.log(
+        `[peak-protect] armed ${position.symbol || position.mint.slice(0, 8)} ` +
+          `peak +${peakUnrealizedPct.toFixed(1)}% (arm @ +${resolved.armAtPct.toFixed(1)}% = ${resolved.armOfTpPct}% of TP)`
+      );
+    }
+  } catch {
+    /* optional */
+  }
+}
+
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
 const MAX_EXIT_PRICE_MULTIPLE = 50;
 
@@ -221,6 +267,15 @@ export interface Position {
   profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
   /** Trail already tightened once by adaptive policy */
   profileTrailTightened?: boolean;
+  /** Peak Profit Protection armed (soft layer) */
+  peakProtectArmed?: boolean;
+  peakProtectArmedAt?: number;
+  /** Peak unrealized % when protection first armed */
+  peakProtectPeakAtArm?: number;
+  /** Last time HWM / peak advanced (for stale-peak tighten) */
+  peakProtectLastPeakAt?: number;
+  /** Resolved arm threshold (% of equity) at last eval */
+  peakProtectArmAtPct?: number;
   /** Quality tier derived from conviction at entry (drives dynamic TP) */
   qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
@@ -451,7 +506,38 @@ function maybeRecordLearningEpisode(
     const pol = (position.profileExitPolicy || {}) as {
       profitLockArmPct?: number;
       profitGivebackPts?: number;
+      peakProtectArmOfTpPct?: number;
+      peakProtectGivebackOfPeakPct?: number;
     };
+    let peakProtectArmAtPct: number | undefined =
+      position.peakProtectArmAtPct != null &&
+      Number.isFinite(position.peakProtectArmAtPct)
+        ? Number(position.peakProtectArmAtPct)
+        : undefined;
+    let peakProtectGivebackOfPeakPct: number | undefined;
+    let peakProtectBeatFullTp: boolean | undefined;
+    try {
+      const { resolvePeakProtectParams, peakProtectBeatFullTpHeuristic } =
+        require('./peakProfitProtection') as typeof import('./peakProfitProtection');
+      const resolved = resolvePeakProtectParams({
+        profileId,
+        takeProfitPct: effectivePositionTakeProfitPct(position),
+        policyArmOfTpPct: pol.peakProtectArmOfTpPct,
+        policyGivebackOfPeakPct: pol.peakProtectGivebackOfPeakPct,
+      });
+      if (peakProtectArmAtPct == null && resolved.armAtPct > 0) {
+        peakProtectArmAtPct = resolved.armAtPct;
+      }
+      peakProtectGivebackOfPeakPct = resolved.givebackOfPeakPct;
+      peakProtectBeatFullTp = peakProtectBeatFullTpHeuristic({
+        exitReason: position.reason,
+        peakUnrealizedPct: metrics.peakUnrealizedPct,
+        exitUnrealizedPct: metrics.exitUnrealizedPct,
+        takeProfitPct: effectivePositionTakeProfitPct(position),
+      });
+    } catch {
+      /* optional */
+    }
     const opened = position.openedAt || Date.now();
     appendProfileLearningEpisode({
       profileId,
@@ -524,6 +610,10 @@ function maybeRecordLearningEpisode(
       entryQualityScore: timingQ.entryQualityScore,
       exitQualityScore: timingQ.exitQualityScore,
       timingReward: timingQ.timingReward,
+      peakProtectArmAtPct,
+      peakProtectGivebackOfPeakPct,
+      peakProtectArmed: position.peakProtectArmed === true ? true : undefined,
+      peakProtectBeatFullTp,
     });
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
@@ -2151,6 +2241,10 @@ export class PaperTrader {
     if (markPrice > position.highWaterMarkSol) {
       position.highWaterMarkSol = markPrice;
     }
+    const hwmAdvancedSync =
+      markPrice >= position.highWaterMarkSol - 1e-18 &&
+      ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100 >=
+        (position.maxRunupPct ?? -Infinity);
     if (
       position.lowWaterMarkSol == null ||
       !(position.lowWaterMarkSol > 0)
@@ -2162,11 +2256,13 @@ export class PaperTrader {
     }
     const markPnlPct =
       ((markPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+    let peakAdvanced = false;
     if (
       position.maxRunupPct == null ||
       markPnlPct > position.maxRunupPct
     ) {
       position.maxRunupPct = markPnlPct;
+      peakAdvanced = true;
     }
     if (
       position.maxDrawdownPct == null ||
@@ -2174,6 +2270,18 @@ export class PaperTrader {
     ) {
       position.maxDrawdownPct = markPnlPct;
     }
+    const peakUnrealizedForArm =
+      position.entryPriceSol > 0
+        ? ((position.highWaterMarkSol - position.entryPriceSol) /
+            position.entryPriceSol) *
+          100
+        : Math.max(0, markPnlPct);
+    updatePeakProtectArmState(
+      position,
+      peakUnrealizedForArm,
+      nowMs,
+      peakAdvanced || hwmAdvancedSync
+    );
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
     // Adaptive profile exit (sync / backtest)
@@ -2190,12 +2298,7 @@ export class PaperTrader {
         const policy =
           position.profileExitPolicy ||
           resolveExitPolicy(position.tradeProfileId, null);
-        const peakUnrealizedPct =
-          position.entryPriceSol > 0
-            ? ((position.highWaterMarkSol - position.entryPriceSol) /
-                position.entryPriceSol) *
-              100
-            : Math.max(0, markPnlPct);
+        const peakUnrealizedPct = peakUnrealizedForArm;
         const taOk =
           position.nearKeyFib === true ||
           position.nearSupport === true ||
@@ -2217,7 +2320,7 @@ export class PaperTrader {
           trailingStopPct: position.trailingStopPct ?? 0,
           partialSellDone: position.partialSellDone,
           bagTrimDone: position.bagTrimDone,
-          takeProfitPct: position.takeProfitPct,
+          takeProfitPct: effectivePositionTakeProfitPct(position),
           convictionScore: position.convictionScore,
           openedAt: position.openedAt,
           nowMs,
@@ -2225,6 +2328,9 @@ export class PaperTrader {
           taStructureOk: taOk,
           taStructureBroken: taBroken,
           qualityTier: position.qualityTier,
+          tradeProfileId: position.tradeProfileId,
+          peakProtectArmedAt: position.peakProtectArmedAt,
+          peakProtectLastPeakAt: position.peakProtectLastPeakAt,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -2245,6 +2351,10 @@ export class PaperTrader {
             stillOpen: this.positions.has(positionId),
           };
         } else if (adapt.type === 'full' && adapt.reason) {
+          if (/peak\s*protection/i.test(adapt.reason)) {
+            console.log(`[peak-protect] 🔴 ${label} — ${adapt.reason}`);
+            this.log('sell', `${label}: [PEAK_PROTECT] ${adapt.reason}`);
+          }
           this.simulateSell(position.id, markPrice, adapt.reason);
           return {
             kind: 'full',
@@ -2951,11 +3061,13 @@ export class PaperTrader {
       }
       const markPnlPctAsync =
         ((currentPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
+      let peakAdvancedAsync = false;
       if (
         position.maxRunupPct == null ||
         markPnlPctAsync > position.maxRunupPct
       ) {
         position.maxRunupPct = markPnlPctAsync;
+        peakAdvancedAsync = true;
       }
       if (
         position.maxDrawdownPct == null ||
@@ -2963,6 +3075,18 @@ export class PaperTrader {
       ) {
         position.maxDrawdownPct = markPnlPctAsync;
       }
+      const peakUnrealizedForArmAsync =
+        position.entryPriceSol > 0
+          ? ((position.highWaterMarkSol - position.entryPriceSol) /
+              position.entryPriceSol) *
+            100
+          : Math.max(0, markPnlPctAsync);
+      updatePeakProtectArmState(
+        position,
+        peakUnrealizedForArmAsync,
+        Date.now(),
+        peakAdvancedAsync
+      );
 
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
@@ -3043,13 +3167,16 @@ export class PaperTrader {
             trailingStopPct: position.trailingStopPct ?? 0,
             partialSellDone: position.partialSellDone,
             bagTrimDone: position.bagTrimDone,
-            takeProfitPct: position.takeProfitPct,
+            takeProfitPct: effectivePositionTakeProfitPct(position),
             convictionScore: position.convictionScore,
             openedAt: position.openedAt,
             peakUnrealizedPct,
             taStructureOk: taOk,
             taStructureBroken: taBroken,
             qualityTier: position.qualityTier,
+            tradeProfileId: position.tradeProfileId,
+            peakProtectArmedAt: position.peakProtectArmedAt,
+            peakProtectLastPeakAt: position.peakProtectLastPeakAt,
           });
           if (adapt.type === 'tighten_trail' && adapt.newTrailingStopPct != null) {
             if (!position.profileTrailTightened) {
@@ -3067,6 +3194,10 @@ export class PaperTrader {
             this.log('sell', `${label}: [PROFILE_EARLY_PARTIAL] ${adapt.reason}`);
             continue;
           } else if (adapt.type === 'full' && adapt.reason) {
+            if (/peak\s*protection/i.test(adapt.reason)) {
+              console.log(`[peak-protect] 🔴 ${label} — ${adapt.reason}`);
+              this.log('sell', `${label}: [PEAK_PROTECT] ${adapt.reason}`);
+            }
             await this.closePositionByRules(position, currentPrice, adapt.reason);
             continue;
           }
