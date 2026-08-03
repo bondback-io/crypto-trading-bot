@@ -1531,13 +1531,17 @@ export function getRpcStats(): {
       utilityWeakPublic: isWeakPublicUtilityUrl(uActive?.endpoint.url),
       utilityFailover: uIdx !== preferredUtility,
       primaryQueued: gate.lanes.primary.queued,
+      secondaryIdle:
+        gate.lanes.secondary.inFlight === 0 &&
+        gate.lanes.secondary.queued === 0,
       // Do NOT pass lifetime gate.skipped — it never resets and locked adaptive ×3.
     });
     loadControl = getRpcLoadControlSnapshot();
     if (
       !warning &&
       loadControl &&
-      loadControl.secondarySkipsRecent >= 8
+      loadControl.scannerSlowFactor >= 3 &&
+      loadControl.secondarySkipsRecent >= 6
     ) {
       warning =
         `Scanners lane high skips (${loadControl.secondarySkipsRecent}/60s) — Market/Alpha/Zion auto-slowed.`;

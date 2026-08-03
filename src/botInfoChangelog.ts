@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.136',
+    title: 'Adaptive Skip Heal',
+    sections: ['execution', 'scanners'],
+    items: [
+      'Gate skip samples are rate-limited (per lane) so bonding-curve micro-skips cannot pin scanner×3 forever.',
+      'When Secondary is idle (0 in-flight / empty queue), adaptive heals instead of staying locked at ×3 from an aging 60s window.',
+    ],
+  },
+  {
     version: '1.2.135',
     title: 'Market Scanner Load Backoff',
     sections: ['scanners', 'execution'],

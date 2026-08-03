@@ -19,6 +19,9 @@ type SkipSample = { at: number; role: RpcGateRole };
 
 const skipSamples: SkipSample[] = [];
 const SKIP_WINDOW_MS = 60_000;
+/** Cap how often skip samples can refresh the adaptive window (per role). */
+const SKIP_NOTE_MIN_GAP_MS = 2_500;
+const lastSkipNoteAt: Partial<Record<RpcGateRole, number>> = {};
 
 let lastSnapshot: RpcLoadControlSnapshot = {
   scannerSlowFactor: 1,
@@ -34,6 +37,14 @@ let lastLogAt = 0;
 /** Record a non-critical skip so adaptive backoff can react. */
 export function noteBackgroundRpcSkip(role: RpcGateRole, feature?: string): void {
   const now = Date.now();
+  const last = lastSkipNoteAt[role] || 0;
+  // bonding_curve / token_metrics can skip dozens of times in one enrich burst —
+  // one sample per gap keeps adaptive from locking ×3 forever.
+  if (now - last < SKIP_NOTE_MIN_GAP_MS) {
+    void feature;
+    return;
+  }
+  lastSkipNoteAt[role] = now;
   skipSamples.push({ at: now, role });
   while (skipSamples.length && now - skipSamples[0].at > SKIP_WINDOW_MS) {
     skipSamples.shift();
@@ -51,6 +62,8 @@ function recompute(external?: {
   primaryQueued?: number;
   /** @deprecated Lifetime gate skips — ignored (was locking scanner×3 forever). */
   secondarySkipped?: number;
+  /** Secondary lane currently idle (heal skip-based ×3). */
+  secondaryIdle?: boolean;
 }): void {
   const now = Date.now();
   while (skipSamples.length && now - skipSamples[0].at > SKIP_WINDOW_MS) {
@@ -58,6 +71,9 @@ function recompute(external?: {
   }
   const secondarySkipsRecent = skipSamples.filter(
     (s) => s.role === 'secondary' && now - s.at <= SKIP_WINDOW_MS
+  ).length;
+  const secondarySkipsHot = skipSamples.filter(
+    (s) => s.role === 'secondary' && now - s.at <= 15_000
   ).length;
 
   let scannerSlowFactor = 1;
@@ -69,8 +85,9 @@ function recompute(external?: {
   // and permanently pinned scanner×3 after the first boot burst).
   const lifetimeSecSkip = external?.secondarySkipped ?? 0;
   const secSkip = secondarySkipsRecent;
+  const laneIdle = external?.secondaryIdle === true;
   // #region agent log
-  if (lifetimeSecSkip > 0 || secondarySkipsRecent > 0 || secSkip >= 3) {
+  if (lifetimeSecSkip > 0 || secondarySkipsRecent > 0 || secSkip >= 3 || laneIdle) {
     try {
       const { agentDebugLog } =
         require('./agentDebugLog') as typeof import('./agentDebugLog');
@@ -81,10 +98,12 @@ function recompute(external?: {
         agentDebugLog('A', 'rpcLoadControl.ts:recompute', 'skip window vs lifetime', {
           runId: 'post-fix',
           secondarySkipsRecent,
+          secondarySkipsHot,
           lifetimeSecSkip,
           secSkipUsed: secSkip,
           lifetimeIgnored: true,
           lifetimeDominates: false,
+          secondaryIdle: laneIdle,
           primaryLatencyMs: external?.primaryLatencyMs ?? null,
           secondaryLatencyMs: external?.secondaryLatencyMs ?? null,
           utilityLatencyMs: external?.utilityLatencyMs ?? null,
@@ -99,12 +118,35 @@ function recompute(external?: {
     }
   }
   // #endregion
-  if (secSkip >= 8) {
+  // Higher bars + idle heal: micro-skips must not pin scanners at ×3 while
+  // Secondary is already empty.
+  if (!laneIdle && secondarySkipsHot >= 6) {
+    scannerSlowFactor = Math.max(scannerSlowFactor, 3);
+    reasons.push(`secondary skips ${secondarySkipsHot}/15s → scanner×3`);
+  } else if (!laneIdle && secSkip >= 10) {
     scannerSlowFactor = Math.max(scannerSlowFactor, 3);
     reasons.push(`secondary skips ${secSkip}/60s → scanner×3`);
-  } else if (secSkip >= 3) {
-    scannerSlowFactor = Math.max(scannerSlowFactor, 2);
-    reasons.push(`secondary skips ${secSkip}/60s → scanner×2`);
+  } else if (secSkip >= 4) {
+    scannerSlowFactor = Math.max(scannerSlowFactor, laneIdle ? 1.5 : 2);
+    reasons.push(
+      laneIdle
+        ? `secondary idle — soft ×${scannerSlowFactor} (${secSkip}/60s)`
+        : `secondary skips ${secSkip}/60s → scanner×2`
+    );
+  } else if (laneIdle && secSkip > 0) {
+    // #region agent log
+    try {
+      const { agentDebugLog } =
+        require('./agentDebugLog') as typeof import('./agentDebugLog');
+      agentDebugLog('C4', 'rpcLoadControl.ts:recompute', 'secondary idle heal', {
+        runId: 'post-fix',
+        secSkip,
+        secondarySkipsHot,
+      });
+    } catch {
+      /* */
+    }
+    // #endregion
   }
 
   const pLat = external?.primaryLatencyMs;
@@ -177,6 +219,7 @@ export function updateRpcLoadSignals(signals: {
   utilityFailover?: boolean;
   primaryQueued?: number;
   secondarySkipped?: number;
+  secondaryIdle?: boolean;
 }): void {
   recompute(signals);
 }
