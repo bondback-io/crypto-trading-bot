@@ -23710,8 +23710,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const raw = String(text || '');
       let html = escHtml(raw);
       if (isUser) return html;
-      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-      html = html.replace(/\n/g, '<br>');
+      // NOTE: inside _DASHBOARD_HTML_RAW template literal — double-escape so browser gets real bold/newline regexes.
+      html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+      html = html.replace(/\\n/g, '<br>');
       return html;
     }
     function renderZionAgentMessages(messages) {
