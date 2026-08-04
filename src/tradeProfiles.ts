@@ -2734,6 +2734,14 @@ export function evaluateTradeProfileLanes(
     /* optional */
   }
 
+  try {
+    const { applyProfileRlLaneRanking } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    applyProfileRlLaneRanking(results);
+  } catch {
+    /* optional */
+  }
+
   // Grad-watch / preferred Migration Sniper: if stamped preferred and eligibility
   // would pass under post-grad / fire context, ensure the lane is a passer.
   if (ctx.preferProfileId === 'migration_sniper') {

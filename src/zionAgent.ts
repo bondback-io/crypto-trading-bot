@@ -1109,6 +1109,10 @@ const ALLOWED_PATHS = new Set([
   'marl.strength',
   'marl.enabled',
   'marl.lowMcUsd',
+  'profileRl.enabled',
+  'profileRl.strength',
+  'learningAccelerators.enabled',
+  'learningAccelerators.strength',
 ]);
 
 export function applyZionChangePayload(
@@ -1147,6 +1151,29 @@ export function applyZionChangePayload(
         setMarlConfig({ lowMcUsd: value });
       } else {
         return { ok: false, detail: `Unsupported marl value for ${path}` };
+      }
+    } else if (path.startsWith('profileRl.')) {
+      const { setProfileRlConfig } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      if (path === 'profileRl.enabled') setProfileRlConfig({ enabled: value === true });
+      else if (path === 'profileRl.strength') {
+        if (value === 'low' || value === 'medium' || value === 'high') {
+          setProfileRlConfig({ strength: value });
+        }
+      } else {
+        return { ok: false, detail: `Unsupported profileRl value for ${path}` };
+      }
+    } else if (path.startsWith('learningAccelerators.')) {
+      const { setLearningAcceleratorsConfig } =
+        require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+      if (path === 'learningAccelerators.enabled') {
+        setLearningAcceleratorsConfig({ enabled: value === true });
+      } else if (path === 'learningAccelerators.strength') {
+        if (value === 'low' || value === 'medium' || value === 'high') {
+          setLearningAcceleratorsConfig({ strength: value });
+        }
+      } else {
+        return { ok: false, detail: `Unsupported learningAccelerators value for ${path}` };
       }
     } else {
       return { ok: false, detail: `Unhandled path ${path}` };

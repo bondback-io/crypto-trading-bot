@@ -206,6 +206,28 @@ export function getLearningSystemDiagnostics(opts?: {
     require('./learningMode') as typeof import('./learningMode');
   const { getMarlStatus } =
     require('./marlCoordinator') as typeof import('./marlCoordinator');
+  let profileRlLabel = 'Profile RL OFF';
+  let accelLabel = 'Accelerators OFF';
+  try {
+    const { getProfileRlStatus } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const prl = getProfileRlStatus();
+    profileRlLabel = prl.enabled
+      ? `Profile RL ON (${prl.strength}) — soft lane/confidence/TA/exit hints only`
+      : 'Profile RL OFF';
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getLearningAcceleratorsStatus } =
+      require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+    const acc = getLearningAcceleratorsStatus();
+    accelLabel = acc.config.enabled
+      ? `Accelerators ON — replay ${acc.config.replayEnabled ? 'ON' : 'OFF'} · CF ${acc.config.counterfactualEnabled ? 'ON' : 'OFF'} · teacher ${acc.config.teacherStudentEnabled ? 'ON' : 'OFF'}`
+      : 'Learning Accelerators OFF';
+  } catch {
+    /* optional */
+  }
 
   const tp = getTradeProfilesStatus();
   const lm = getLearningModeStatus();
@@ -308,6 +330,8 @@ export function getLearningSystemDiagnostics(opts?: {
       ? `MARL is ON at ${marl.strength} influence — soft lane ranking / size / low-MC limits only (never TP/SL).`
       : 'MARL is OFF — lane order and size are not soft-coordinated.'
   );
+  setupLines.push(profileRlLabel);
+  setupLines.push(accelLabel);
   setupLines.push(
     mlHybridOrLead.length
       ? `ML delta learning is active on ${mlHybridOrLead.length} bot(s) (hybrid ${mlHybridOrLead.filter((p) => p.mlMode === 'hybrid').length}, lead ${mlLead.length}).`
@@ -321,7 +345,7 @@ export function getLearningSystemDiagnostics(opts?: {
     );
   }
   setupLines.push(
-    'Together: Self-Learn mutates exit/entry knobs from closed trades; ML ranks those ideas; MARL only steers who gets the mint; Learning Mode only softens entries.'
+    'Together: Self-Learn mutates exit/entry knobs from closed trades; ML ranks those ideas; MARL coordinates lanes; Profile RL nudges per-bot quality; Accelerators add offline replay/CF/teacher hints; Learning Mode only softens entries.'
   );
   if (globalTp != null) {
     setupLines.push(

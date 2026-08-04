@@ -146,6 +146,22 @@ export interface PersistedBotSettings {
     maxAgentsPerLowMc?: number;
     laggingSupportEnabled?: boolean;
   };
+  /** Per-profile RL soft agents */
+  profileRl?: {
+    enabled?: boolean;
+    strength?: 'low' | 'medium' | 'high';
+  };
+  /** Learning accelerators trio */
+  learningAccelerators?: {
+    enabled?: boolean;
+    replayEnabled?: boolean;
+    counterfactualEnabled?: boolean;
+    counterfactualApplyHints?: boolean;
+    teacherStudentEnabled?: boolean;
+    strength?: 'low' | 'medium' | 'high';
+    replayBatchSize?: number;
+    replayMaxPerHour?: number;
+  };
   zionAgent?: {
     semiAutonomous?: boolean;
   };

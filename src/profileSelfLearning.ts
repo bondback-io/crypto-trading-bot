@@ -1919,7 +1919,42 @@ export function runSelfLearnTick(input: {
   }
 
   const softExit = buildSoftExitFeedback(episodes);
-  if (softExit.n >= 6) {
+  let accelSoftExit = softExit;
+  try {
+    const { applyReplayBatchHints } =
+      require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+    const { refreshCounterfactualHints } =
+      require('./learningCounterfactual') as typeof import('./learningCounterfactual');
+    const { getTeacherStudentHints } =
+      require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+    const replay = applyReplayBatchHints(input.profileId);
+    const cf = refreshCounterfactualHints(input.profileId, episodes);
+    const ts = getTeacherStudentHints(input.profileId);
+    if (replay || cf?.summary || ts) {
+      accelSoftExit = {
+        ...softExit,
+        preferTightenGiveback:
+          softExit.preferTightenGiveback ||
+          replay?.preferTightenGiveback ||
+          cf?.preferTightenGiveback ||
+          ts?.preferTightenGiveback ||
+          false,
+        preferTighterTrail:
+          softExit.preferTighterTrail ||
+          replay?.preferTighterTrail ||
+          cf?.preferTighterTrail ||
+          ts?.preferTighterTrail ||
+          false,
+        preferEarlierTrailArm:
+          softExit.preferEarlierTrailArm ||
+          cf?.preferEarlierTp ||
+          false,
+      };
+    }
+  } catch {
+    /* accelerators optional */
+  }
+  if (accelSoftExit.n >= 6) {
     console.log(
       `[learning-exit-feedback] ${input.profileId} n=${softExit.n} ` +
         `giveback=${softExit.avgGivebackPct.toFixed(1)} large=${(softExit.largeGivebackRate * 100).toFixed(0)}% ` +
@@ -1935,7 +1970,7 @@ export function runSelfLearnTick(input: {
       ? buildExitLearningCandidates(input.profileId, episodes, currentPolicy)
       : []),
     ...(allowExitDeltas
-      ? buildTimingLearningCandidates(episodes, currentPolicy, softExit)
+      ? buildTimingLearningCandidates(episodes, currentPolicy, accelSoftExit)
       : []),
     ...(confidence.allowEntry
       ? buildEntryLearningCandidates(
@@ -2054,8 +2089,14 @@ export function runSelfLearnTick(input: {
     if (softExit.preferTightenGiveback && /giveback|profit-lock|partial|peak.?protect/i.test(sum)) {
       hDelta += 0.35;
     }
+    if (accelSoftExit.preferTightenGiveback && !softExit.preferTightenGiveback && /giveback|peak.?protect/i.test(sum)) {
+      hDelta += 0.2;
+    }
     if (softExit.preferTighterTrail && /tighten trail|momentum-fade.*tighter|Timing:/i.test(sum)) {
       hDelta += 0.3;
+    }
+    if (accelSoftExit.preferTighterTrail && !softExit.preferTighterTrail && /tighten|trail|Timing:/i.test(sum)) {
+      hDelta += 0.15;
     }
     if (softExit.preferLooserFade && /looser momentum-fade/i.test(sum)) {
       hDelta += 0.25;

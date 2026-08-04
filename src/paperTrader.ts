@@ -557,7 +557,7 @@ function maybeRecordLearningEpisode(
       /* optional */
     }
     const opened = position.openedAt || Date.now();
-    appendProfileLearningEpisode({
+    const episodeRow = appendProfileLearningEpisode({
       profileId,
       mint: position.mint,
       symbol: position.symbol,
@@ -664,6 +664,48 @@ function maybeRecordLearningEpisode(
       peakProtectArmed: position.peakProtectArmed === true ? true : undefined,
       peakProtectBeatFullTp,
     });
+    if (episodeRow) {
+      try {
+        const { computeAndStampCounterfactuals } =
+          require('./learningCounterfactual') as typeof import('./learningCounterfactual');
+        computeAndStampCounterfactuals({
+          episode: episodeRow,
+          takeProfitPct: effectivePositionTakeProfitPct(position),
+          stopLossPct: position.trailingStopPct ?? undefined,
+          peakProtectGivebackOfPeakPct,
+        });
+      } catch {
+        /* optional */
+      }
+      try {
+        const { recordReplayTransition, maybeRunReplayBatch } =
+          require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+        recordReplayTransition(episodeRow);
+        maybeRunReplayBatch(profileId);
+      } catch {
+        /* optional */
+      }
+      try {
+        const { notifyProfileRlTradeClosed } =
+          require('./profileRlAgent') as typeof import('./profileRlAgent');
+        notifyProfileRlTradeClosed({
+          episode: episodeRow,
+          costSol: Math.abs(Number(pnlSol)) || undefined,
+        });
+      } catch {
+        /* optional */
+      }
+      try {
+        const {
+          noteTeacherStudentClose,
+          maybeTeacherStudentTransfer,
+        } = require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+        noteTeacherStudentClose(profileId);
+        maybeTeacherStudentTransfer(profileId);
+      } catch {
+        /* optional */
+      }
+    }
     const { onProfileTradeClosedForSelfLearn } =
       require('./tradeProfiles') as typeof import('./tradeProfiles');
     onProfileTradeClosedForSelfLearn(profileId);

@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.149',
+    title: 'Profile RL Agents + Learning Accelerators',
+    sections: ['microbots', 'learning', 'knobs'],
+    items: [
+      'Profile RL Agents: per-lane soft policy (setup-worth, confidence/size, TA sensitivity, exit-hint aggressiveness) in shadow/hybrid/lead — PPO-style updates with policy history and rollback. Default OFF.',
+      'Learning Accelerators: experience replay batches, counterfactual peak/PPP/TP-SL what-ifs on episodes, and teacher→student soft TA weight transfer with auto-rollback if student worsens.',
+      'Micro Bots cards for Profile RL and Learning Accelerators; APIs and diagnostics/Zion plain language. Never overwrites TP/SL, Peak Protect, or self-learn hard overrides.',
+    ],
+  },
+  {
     version: '1.2.148',
     title: 'Profile TA Full Indicators + Weight Learning',
     sections: ['microbots', 'learning', 'scanners', 'knobs'],

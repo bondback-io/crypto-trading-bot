@@ -3060,6 +3060,146 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Per-profile RL soft agents */
+  app.get('/api/profile-rl/status', (_req: Request, res: Response) => {
+    try {
+      const { getProfileRlStatus } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      res.json({ ok: true, profileRl: getProfileRlStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/profile-rl/decisions', (req: Request, res: Response) => {
+    try {
+      const { getProfileRlDecisions } =
+        require('./profileRlStore') as typeof import('./profileRlStore');
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+      res.json({ ok: true, decisions: getProfileRlDecisions(limit) });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/profile-rl', (req: Request, res: Response) => {
+    try {
+      const { setProfileRlConfig, getProfileRlStatus, setProfileRlAgentMode } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      setProfileRlConfig({
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        strength:
+          body.strength === 'low' ||
+          body.strength === 'medium' ||
+          body.strength === 'high'
+            ? body.strength
+            : undefined,
+      });
+      if (
+        typeof body.profileId === 'string' &&
+        (body.mode === 'shadow' || body.mode === 'hybrid' || body.mode === 'lead')
+      ) {
+        setProfileRlAgentMode(body.profileId, body.mode);
+      }
+      res.json({ ok: true, profileRl: getProfileRlStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/profile-rl/rollback', (req: Request, res: Response) => {
+    try {
+      const { rollbackProfileRlPolicyTo, getProfileRlStatus } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const profileId = String(body.profileId || '');
+      const result = rollbackProfileRlPolicyTo(profileId, Number(body.index) || 0);
+      res.json({ ok: result.ok, detail: result.detail, profileRl: getProfileRlStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Learning accelerators trio */
+  app.get('/api/learning-accelerators', (_req: Request, res: Response) => {
+    try {
+      const { getLearningAcceleratorsStatus } =
+        require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+      const { getTeacherStudentStatus } =
+        require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+      res.json({
+        ok: true,
+        accelerators: getLearningAcceleratorsStatus(),
+        teacherStudent: getTeacherStudentStatus(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/learning-accelerators', (req: Request, res: Response) => {
+    try {
+      const { setLearningAcceleratorsConfig, getLearningAcceleratorsStatus } =
+        require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+      const { getTeacherStudentStatus } =
+        require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      setLearningAcceleratorsConfig({
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        replayEnabled:
+          typeof body.replayEnabled === 'boolean' ? body.replayEnabled : undefined,
+        counterfactualEnabled:
+          typeof body.counterfactualEnabled === 'boolean'
+            ? body.counterfactualEnabled
+            : undefined,
+        counterfactualApplyHints:
+          typeof body.counterfactualApplyHints === 'boolean'
+            ? body.counterfactualApplyHints
+            : undefined,
+        teacherStudentEnabled:
+          typeof body.teacherStudentEnabled === 'boolean'
+            ? body.teacherStudentEnabled
+            : undefined,
+        strength:
+          body.strength === 'low' ||
+          body.strength === 'medium' ||
+          body.strength === 'high'
+            ? body.strength
+            : undefined,
+        replayBatchSize:
+          body.replayBatchSize != null ? Number(body.replayBatchSize) : undefined,
+        replayMaxPerHour:
+          body.replayMaxPerHour != null ? Number(body.replayMaxPerHour) : undefined,
+      });
+      res.json({
+        ok: true,
+        accelerators: getLearningAcceleratorsStatus(),
+        teacherStudent: getTeacherStudentStatus(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/peak-profit-protection', (_req: Request, res: Response) => {
     try {
       const { getPeakProfitProtectionConfig } =

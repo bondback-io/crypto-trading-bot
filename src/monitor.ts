@@ -3139,6 +3139,8 @@ async function executeSignalBuy(
       evaluateMarlLowMcCoordination,
       marlSizeMultiplier,
     } = require('./marlCoordinator') as typeof import('./marlCoordinator');
+    const { profileRlSizeMultiplier } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
     const mcNum =
       signal.sourceEntryMcUsd != null
         ? Number(signal.sourceEntryMcUsd)
@@ -3186,6 +3188,15 @@ async function executeSignalBuy(
       appendMarlThoughtToLaneFight(
         signal.mint,
         `Size confidence ×${marlSz.mult.toFixed(2)} for ${profileAssignment.name || profileAssignment.profileId}`
+      );
+    }
+    const rlSz = profileRlSizeMultiplier(profileAssignment.profileId);
+    if (rlSz.mult !== 1) {
+      solAmt *= rlSz.mult;
+      sizeExtra += ` · ${rlSz.note}`;
+      appendMarlThoughtToLaneFight(
+        signal.mint,
+        `Profile RL size ×${rlSz.mult.toFixed(2)} for ${profileAssignment.name || profileAssignment.profileId}`
       );
     }
     if (low.action === 'size_down' && low.sizeMult < 1) {

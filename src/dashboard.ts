@@ -7831,6 +7831,65 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="profile-rl-card">
+        <details class="strat-adv-pack" id="profile-rl-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Profile RL Agents <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Per-profile soft policy: setup-worth lane bump, confidence/size, TA sensitivity, exit-hint aggressiveness. Shadow/hybrid/lead modes. Never TP/SL, Peak Protect, or self-learn overrides. Default OFF."></span></span>
+              <span id="profile-rl-status-badge" class="badge status-badge" style="font-size:11px">Profile RL OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Profile RL" onclick="event.stopPropagation()">
+              <input type="checkbox" id="profile-rl-enabled" onchange="saveProfileRlConfig()" onclick="event.stopPropagation()" />
+              <span>Enable</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Strength <span id="profile-rl-strength-label" class="text-slate-200">Medium</span></div>
+              <div class="closed-filter" role="group" aria-label="Profile RL strength">
+                <button type="button" class="closed-filter-btn" data-profile-rl-strength="low" onclick="setProfileRlStrength('low')">Low</button>
+                <button type="button" class="closed-filter-btn is-active" data-profile-rl-strength="medium" onclick="setProfileRlStrength('medium')">Medium</button>
+                <button type="button" class="closed-filter-btn" data-profile-rl-strength="high" onclick="setProfileRlStrength('high')">High</button>
+              </div>
+            </div>
+            <div id="profile-rl-agents" class="text-xs text-slate-400 mb-2">—</div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
+            <div id="profile-rl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
+          </div>
+        </details>
+      </div>
+
+      <div class="card" id="learning-accel-card">
+        <details class="strat-adv-pack" id="learning-accel-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Learning Accelerators <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Offline replay batches, counterfactual exit what-ifs, and teacher→student soft TA transfer. Feeds self-learn ranking and Profile RL rewards — never hard TP/SL. Default OFF."></span></span>
+              <span id="learning-accel-status-badge" class="badge status-badge" style="font-size:11px">Accelerators OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Learning Accelerators" onclick="event.stopPropagation()">
+              <input type="checkbox" id="learning-accel-enabled" onchange="saveLearningAccelerators()" onclick="event.stopPropagation()" />
+              <span>Master</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-accel-replay" onchange="saveLearningAccelerators()" /><span>Experience replay</span></label>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-accel-cf" onchange="saveLearningAccelerators()" /><span>Counterfactual eval (compute)</span></label>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-accel-cf-apply" onchange="saveLearningAccelerators()" /><span>Apply CF soft hints</span></label>
+            <label class="ctl-check mb-2"><input type="checkbox" id="learning-accel-ts" onchange="saveLearningAccelerators()" /><span>Teacher–Student transfer</span></label>
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Strength <span id="learning-accel-strength-label" class="text-slate-200">Low</span></div>
+              <div class="closed-filter" role="group">
+                <button type="button" class="closed-filter-btn" data-learning-accel-strength="low" onclick="setLearningAccelStrength('low')">Low</button>
+                <button type="button" class="closed-filter-btn is-active" data-learning-accel-strength="medium" onclick="setLearningAccelStrength('medium')">Medium</button>
+                <button type="button" class="closed-filter-btn" data-learning-accel-strength="high" onclick="setLearningAccelStrength('high')">High</button>
+              </div>
+            </div>
+            <div id="learning-accel-events" class="text-xs text-slate-400 mb-2">—</div>
+            <div id="learning-accel-transfers" class="text-xs mint">—</div>
+          </div>
+        </details>
+      </div>
+
       <div class="card" id="ppp-card">
         <details class="strat-adv-pack" id="ppp-details" style="margin-top:0;border:none;background:transparent">
           <summary>
@@ -14680,6 +14739,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
+      if (name === 'microbots' && typeof loadProfileRlStatus === 'function') loadProfileRlStatus();
+      if (name === 'microbots' && typeof loadLearningAccelerators === 'function') loadLearningAccelerators();
       if (name === 'microbots' && typeof loadPeakProfitProtection === 'function') loadPeakProfitProtection();
       if (name === 'microbots' && typeof loadProfileTaPlaybooks === 'function') loadProfileTaPlaybooks();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
@@ -24948,6 +25009,139 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadMarlStatus = loadMarlStatus;
     window.saveMarlConfig = saveMarlConfig;
+
+    let _profileRlStrength = 'medium';
+    async function loadProfileRlStatus() {
+      try {
+        const data = await fetchJSON('/api/profile-rl/status');
+        const r = data.profileRl || {};
+        const en = document.getElementById('profile-rl-enabled');
+        if (en) en.checked = !!r.enabled;
+        _profileRlStrength = r.strength === 'low' || r.strength === 'high' ? r.strength : 'medium';
+        document.querySelectorAll('[data-profile-rl-strength]').forEach((btn) => {
+          btn.classList.toggle('is-active', btn.getAttribute('data-profile-rl-strength') === _profileRlStrength);
+        });
+        const lab = document.getElementById('profile-rl-strength-label');
+        if (lab) lab.textContent = _profileRlStrength.charAt(0).toUpperCase() + _profileRlStrength.slice(1);
+        const badge = document.getElementById('profile-rl-status-badge');
+        if (badge) badge.textContent = r.label || (r.enabled ? 'Profile RL ON' : 'Profile RL OFF');
+        const agentsEl = document.getElementById('profile-rl-agents');
+        if (agentsEl) {
+          const agents = r.agents || [];
+          agentsEl.innerHTML = agents.length
+            ? agents.slice(0, 8).map((a) =>
+                '<div class="mb-1"><span style="color:#94a3b8">' + escHtml(a.profileId) + '</span> · ' +
+                escHtml(a.mode || 'shadow') + ' · EMA ' + (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
+                ' · n=' + (a.trades || 0) +
+                (a.plainLanguage ? '<div class="mint" style="margin-top:2px">' + escHtml(a.plainLanguage) + '</div>' : '') +
+                '</div>'
+              ).join('')
+            : '<span class="mint">No agents yet</span>';
+        }
+        const decEl = document.getElementById('profile-rl-decisions');
+        if (decEl) {
+          const dec = r.decisions || [];
+          decEl.innerHTML = dec.length
+            ? dec.slice(0, 20).map((d) => '<div class="mb-0.5">' + escHtml(d.detail || '') + '</div>').join('')
+            : '<span class="mint">No decisions yet</span>';
+        }
+      } catch (err) {
+        console.warn('loadProfileRlStatus', err);
+      }
+    }
+    async function saveProfileRlConfig() {
+      const en = document.getElementById('profile-rl-enabled');
+      await fetchJSON('/api/config/profile-rl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: en ? en.checked : false, strength: _profileRlStrength }),
+      });
+      await loadProfileRlStatus();
+    }
+    function setProfileRlStrength(s) {
+      _profileRlStrength = s;
+      document.querySelectorAll('[data-profile-rl-strength]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-profile-rl-strength') === s);
+      });
+      const lab = document.getElementById('profile-rl-strength-label');
+      if (lab) lab.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+      saveProfileRlConfig();
+    }
+    window.loadProfileRlStatus = loadProfileRlStatus;
+    window.saveProfileRlConfig = saveProfileRlConfig;
+    window.setProfileRlStrength = setProfileRlStrength;
+
+    let _learningAccelStrength = 'low';
+    async function loadLearningAccelerators() {
+      try {
+        const data = await fetchJSON('/api/learning-accelerators');
+        const c = (data.accelerators && data.accelerators.config) || {};
+        const en = document.getElementById('learning-accel-enabled');
+        if (en) en.checked = !!c.enabled;
+        const rp = document.getElementById('learning-accel-replay');
+        if (rp) rp.checked = !!c.replayEnabled;
+        const cf = document.getElementById('learning-accel-cf');
+        if (cf) cf.checked = c.counterfactualEnabled !== false;
+        const cfa = document.getElementById('learning-accel-cf-apply');
+        if (cfa) cfa.checked = !!c.counterfactualApplyHints;
+        const ts = document.getElementById('learning-accel-ts');
+        if (ts) ts.checked = !!c.teacherStudentEnabled;
+        _learningAccelStrength = c.strength === 'medium' || c.strength === 'high' ? c.strength : 'low';
+        document.querySelectorAll('[data-learning-accel-strength]').forEach((btn) => {
+          btn.classList.toggle('is-active', btn.getAttribute('data-learning-accel-strength') === _learningAccelStrength);
+        });
+        const lab = document.getElementById('learning-accel-strength-label');
+        if (lab) lab.textContent = _learningAccelStrength.charAt(0).toUpperCase() + _learningAccelStrength.slice(1);
+        const badge = document.getElementById('learning-accel-status-badge');
+        if (badge) badge.textContent = (data.accelerators && data.accelerators.label) || (c.enabled ? 'Accelerators ON' : 'Accelerators OFF');
+        const ev = document.getElementById('learning-accel-events');
+        if (ev) {
+          const dec = (data.accelerators && data.accelerators.decisions) || [];
+          ev.innerHTML = dec.length
+            ? dec.slice(0, 8).map((d) => '<div>' + escHtml(d.detail || '') + '</div>').join('')
+            : '<span class="mint">No events yet</span>';
+        }
+        const tr = document.getElementById('learning-accel-transfers');
+        if (tr) {
+          const transfers = (data.teacherStudent && data.teacherStudent.transfers) || [];
+          tr.innerHTML = transfers.length
+            ? transfers.slice(0, 5).map((t) =>
+                '<div>' + escHtml(t.summary || '') + ' · ' + escHtml(t.status || '') + '</div>'
+              ).join('')
+            : '';
+        }
+      } catch (err) {
+        console.warn('loadLearningAccelerators', err);
+      }
+    }
+    async function saveLearningAccelerators() {
+      const body = {
+        enabled: document.getElementById('learning-accel-enabled')?.checked === true,
+        replayEnabled: document.getElementById('learning-accel-replay')?.checked === true,
+        counterfactualEnabled: document.getElementById('learning-accel-cf')?.checked !== false,
+        counterfactualApplyHints: document.getElementById('learning-accel-cf-apply')?.checked === true,
+        teacherStudentEnabled: document.getElementById('learning-accel-ts')?.checked === true,
+        strength: _learningAccelStrength,
+      };
+      await fetchJSON('/api/learning-accelerators', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadLearningAccelerators();
+    }
+    function setLearningAccelStrength(s) {
+      _learningAccelStrength = s;
+      document.querySelectorAll('[data-learning-accel-strength]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-learning-accel-strength') === s);
+      });
+      const lab = document.getElementById('learning-accel-strength-label');
+      if (lab) lab.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+      saveLearningAccelerators();
+    }
+    window.loadLearningAccelerators = loadLearningAccelerators;
+    window.saveLearningAccelerators = saveLearningAccelerators;
+    window.setLearningAccelStrength = setLearningAccelStrength;
     window.setMarlStrength = setMarlStrength;
 
     async function loadPeakProfitProtection() {

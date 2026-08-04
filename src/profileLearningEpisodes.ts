@@ -109,6 +109,13 @@ export interface ProfileLearningEpisode {
    * or left TP on table after peaking at/above TP (false).
    */
   peakProtectBeatFullTp?: boolean;
+  /** Counterfactual exit evaluation (additive — learning accelerators) */
+  cfPeakExitPnlPct?: number;
+  cfActualVsPeakGapPct?: number;
+  cfTighterPppBetter?: boolean;
+  cfEarlierTpBetter?: boolean;
+  cfSlWiderWouldSurvive?: boolean;
+  cfSummary?: string;
 }
 
 interface EpisodesFile {
@@ -342,6 +349,21 @@ export function appendProfileLearningEpisode(
     /* optional journal */
   }
   return row;
+}
+
+/** Patch fields on an existing episode (e.g. counterfactual stamps). */
+export function patchProfileLearningEpisode(
+  profileId: string,
+  episodeId: string,
+  patch: Partial<ProfileLearningEpisode>
+): boolean {
+  const ring = loadProfile(profileId);
+  const idx = ring.findIndex((e) => e.id === episodeId);
+  if (idx < 0) return false;
+  ring[idx] = { ...ring[idx]!, ...patch, id: episodeId, profileId };
+  cache.set(profileId, ring);
+  persistProfile(profileId);
+  return true;
 }
 
 export function getProfileLearningEpisodes(

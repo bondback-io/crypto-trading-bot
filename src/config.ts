@@ -2048,6 +2048,10 @@ export interface BotConfig {
   learningMode: import('./learningMode').LearningModeConfig;
   /** Soft MARL coordinator (lane ranking / size confidence / low-MC). */
   marl: import('./marlCoordinator').MarlConfig;
+  /** Per-profile RL soft agents (setup-worth / confidence / TA / exit hints). */
+  profileRl: import('./profileRlAgent').ProfileRlConfig;
+  /** Learning accelerators: replay, counterfactuals, teacher-student. */
+  learningAccelerators: import('./learningReplayBuffer').LearningAcceleratorsConfig;
   /** Zion chat agent (semi-autonomous toggle only; secrets via env). */
   zionAgent: { semiAutonomous: boolean };
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
@@ -2243,6 +2247,22 @@ export const config: BotConfig = {
     lowMcWindowMin: 10,
     maxAgentsPerLowMc: 1,
     laggingSupportEnabled: true,
+  },
+
+  profileRl: {
+    enabled: false,
+    strength: 'medium',
+  },
+
+  learningAccelerators: {
+    enabled: false,
+    replayEnabled: false,
+    counterfactualEnabled: true,
+    counterfactualApplyHints: false,
+    teacherStudentEnabled: false,
+    strength: 'low',
+    replayBatchSize: 12,
+    replayMaxPerHour: 6,
   },
 
   zionAgent: {
@@ -2757,6 +2777,20 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       maxAgentsPerLowMc: 1,
       laggingSupportEnabled: true,
     }) as PersistedBotSettings['marl'],
+    profileRl: cloneJson(config.profileRl || {
+      enabled: false,
+      strength: 'medium',
+    }) as PersistedBotSettings['profileRl'],
+    learningAccelerators: cloneJson(config.learningAccelerators || {
+      enabled: false,
+      replayEnabled: false,
+      counterfactualEnabled: true,
+      counterfactualApplyHints: false,
+      teacherStudentEnabled: false,
+      strength: 'low',
+      replayBatchSize: 12,
+      replayMaxPerHour: 6,
+    }) as PersistedBotSettings['learningAccelerators'],
     zionAgent: {
       semiAutonomous: config.zionAgent?.semiAutonomous === true,
     },
@@ -3500,6 +3534,32 @@ function applySettingsSnapshot(
         Math.min(5, Math.round(Number(s.maxAgentsPerLowMc) || 1))
       ),
       laggingSupportEnabled: s.laggingSupportEnabled !== false,
+    };
+  }
+  if (saved.profileRl && typeof saved.profileRl === 'object') {
+    const s = saved.profileRl;
+    config.profileRl = {
+      enabled: s.enabled === true,
+      strength:
+        s.strength === 'low' || s.strength === 'high' || s.strength === 'medium'
+          ? s.strength
+          : 'medium',
+    };
+  }
+  if (saved.learningAccelerators && typeof saved.learningAccelerators === 'object') {
+    const s = saved.learningAccelerators;
+    config.learningAccelerators = {
+      enabled: s.enabled === true,
+      replayEnabled: s.replayEnabled === true,
+      counterfactualEnabled: s.counterfactualEnabled !== false,
+      counterfactualApplyHints: s.counterfactualApplyHints === true,
+      teacherStudentEnabled: s.teacherStudentEnabled === true,
+      strength:
+        s.strength === 'low' || s.strength === 'high' || s.strength === 'medium'
+          ? s.strength
+          : 'low',
+      replayBatchSize: Math.max(4, Math.min(24, Math.round(Number(s.replayBatchSize) || 12))),
+      replayMaxPerHour: Math.max(1, Math.min(12, Math.round(Number(s.replayMaxPerHour) || 6))),
     };
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {

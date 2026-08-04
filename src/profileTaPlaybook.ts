@@ -621,8 +621,16 @@ export function evaluateProfileTaEntry(
 ): ProfileTaEntryResult {
   const mode = playbook.taMode || 'off';
   const learned = playbook.learned || defaultLearned();
+  let rlTaScale = 1;
+  try {
+    const { profileRlTaSensitivityScale } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    rlTaScale = profileRlTaSensitivityScale(playbook.profileId).scale;
+  } catch {
+    /* optional */
+  }
   const minScore = clamp(
-    playbook.minConfluenceScore + (learned.minConfDelta || 0),
+    (playbook.minConfluenceScore + (learned.minConfDelta || 0)) / rlTaScale,
     0,
     100
   );
@@ -1001,25 +1009,27 @@ export function evaluateProfileTaEntry(
 
   if (mode === 'soft') {
     allowed = true;
-    if (score < minScore) {
-      convictionMult = clamp(0.75 + (score / Math.max(1, minScore)) * 0.2, 0.7, 1);
-      reason = `TA Soft below min (${score}/${minScore}) — conviction ×${convictionMult.toFixed(2)}`;
+    const effScore = score * rlTaScale;
+    if (effScore < minScore) {
+      convictionMult = clamp(0.75 + (effScore / Math.max(1, minScore)) * 0.2, 0.7, 1);
+      reason = `TA Soft below min (${Math.round(effScore)}/${Math.round(minScore)}) — conviction ×${convictionMult.toFixed(2)}`;
     } else {
-      convictionMult = clamp(1 + (score - minScore) / 200, 1, 1.12);
-      reason = `TA Soft pass (${score}/${minScore})`;
+      convictionMult = clamp(1 + (effScore - minScore) / 200, 1, 1.12);
+      reason = `TA Soft pass (${Math.round(effScore)}/${Math.round(minScore)})`;
     }
   } else {
     // hard
+    const effScore = score * rlTaScale;
     if (requiredFailed.length > 0) {
       allowed = false;
       reason = `TA Hard blocked — required failed: ${requiredFailed.map((c) => c.id).join(',')}`;
-    } else if (score < minScore) {
+    } else if (effScore < minScore) {
       allowed = false;
-      reason = `TA Hard blocked — confluence ${score} < ${minScore}`;
+      reason = `TA Hard blocked — confluence ${Math.round(effScore)} < ${Math.round(minScore)}`;
     } else {
       allowed = true;
-      convictionMult = clamp(1 + (score - minScore) / 250, 1, 1.1);
-      reason = `TA Hard pass (${score}/${minScore})`;
+      convictionMult = clamp(1 + (effScore - minScore) / 250, 1, 1.1);
+      reason = `TA Hard pass (${Math.round(effScore)}/${Math.round(minScore)})`;
     }
   }
 
@@ -1031,7 +1041,7 @@ export function evaluateProfileTaEntry(
     : undefined;
 
   const plainLanguage = [
-    `TA ${mode === 'hard' ? 'Hard' : 'Soft'} ${score}/${minScore}`,
+    `TA ${mode === 'hard' ? 'Hard' : 'Soft'} ${Math.round(score * rlTaScale)}/${Math.round(minScore)}`,
     ha.available ? `HA ${ha.bias} ${ha.consecutiveBull || ha.consecutiveBear}` : null,
     nearSupport ? 'near support' : null,
     nearResistance ? 'near resistance' : null,
@@ -1108,13 +1118,22 @@ export function evaluateProfileTaExitHints(
     0.5,
     1.5
   );
+  let rlExitShift = 0;
+  try {
+    const { profileRlExitAggressivenessShift } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    rlExitShift = profileRlExitAggressivenessShift(playbook.profileId).shift;
+  } catch {
+    /* optional */
+  }
+  const adjSens = clamp(sens * (1 + rlExitShift), 0.5, 1.5);
   const divSens = clamp(
-    playbook.learned?.divergenceSensitivity ?? 1,
+    (playbook.learned?.divergenceSensitivity ?? 1) * (1 + rlExitShift * 0.5),
     0.5,
     1.5
   );
   const histSens = clamp(
-    playbook.learned?.histSlopeSensitivity ?? 1,
+    (playbook.learned?.histSlopeSensitivity ?? 1) * (1 + rlExitShift * 0.5),
     0.5,
     1.5
   );
@@ -1137,9 +1156,9 @@ export function evaluateProfileTaExitHints(
     ctx.nearResistance === true
   ) {
     conditions.push('near resistance');
-    if (sens >= 1 && playbook.taMode === 'hard') {
+    if (adjSens >= 1 && playbook.taMode === 'hard') {
       tightenTrail = true;
-      if (sens >= 1.2) suggestExit = true;
+      if (adjSens >= 1.2) suggestExit = true;
     } else {
       tightenTrail = true;
     }
