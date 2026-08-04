@@ -95,6 +95,71 @@ export type TradeFrequencyImpact =
   | 'slightly_more'
   | 'more';
 
+/**
+ * Which entry signal source this module mainly gates.
+ * - copy: tracked smart-wallet copy path (weak/no effect if Smart Money Copy is OFF)
+ * - scanner: Market Scanner / TA / AlphaScan path
+ * - both: shared entry filters that apply to copy and scanner buys
+ * - mgmt: exits, sizing, profit — not tied to how the signal arrived
+ */
+export type StrategySignalLane = 'copy' | 'scanner' | 'both' | 'mgmt';
+
+/** Per-module signal-source affinity for Settings → Modules icons. */
+export const STRATEGY_SIGNAL_LANE: Record<StrategyKey, StrategySignalLane> = {
+  smart_money_copy: 'copy',
+  wallet_convergence: 'copy',
+  wallet_quality_scoring: 'copy',
+  elite_convergence: 'copy',
+  early_curve_smart_money: 'copy',
+  smart_money_flow_weighting: 'copy',
+  hard_quality_gate: 'copy',
+  min_holders_activity: 'copy', // wallet activity poll filter
+
+  ta_market_scanner: 'scanner',
+  technical_levels: 'scanner',
+  chart_patterns: 'scanner',
+  heikin_ashi: 'scanner',
+  pattern_volume_dryup_return: 'scanner',
+  pattern_falling_wedge: 'scanner',
+  pattern_structured_pullback: 'scanner',
+  pattern_bull_flag: 'scanner',
+  pattern_trend_continuation: 'scanner',
+  volume_spike_filter: 'scanner',
+  momentum_confirmation: 'scanner',
+  market_session_filter: 'scanner',
+  post_run_dip: 'scanner',
+
+  anti_rug_honeypot: 'both',
+  bonding_curve_health: 'both',
+  volume_liquidity_filters: 'both',
+  sniper_bundler_filters: 'both',
+  mev_protection: 'both',
+  multi_factor_conviction: 'both',
+  confirmation_layer: 'both',
+  time_based_entry: 'both',
+  early_entry_only: 'both',
+  migration_priority: 'both',
+  near_migration_curve: 'both',
+  migration_sniper: 'both',
+  rebuy_on_dip: 'both',
+  social_sentiment_filter: 'both',
+  trending_narrative_boost: 'both',
+  quick_scalper: 'both',
+  micro_scalper: 'both',
+  momentum_burst: 'both',
+  post_migration_scalp: 'both',
+  reversal_scalp: 'both',
+
+  dead_market_exit: 'mgmt',
+  dynamic_position_sizing: 'mgmt',
+  tiered_profit_taking: 'mgmt',
+  profit_protected: 'mgmt',
+};
+
+export function strategySignalLane(key: StrategyKey): StrategySignalLane {
+  return STRATEGY_SIGNAL_LANE[key] ?? 'both';
+}
+
 export type StrategyProfileId =
   | 'high_win_rate'
   | 'win_rate_55_60'
@@ -3693,6 +3758,7 @@ export function getStrategiesStatus() {
         status: enabled ? 'ON' : 'OFF',
         badge,
         recipeExpected,
+        signalLane: strategySignalLane(s.key),
       };
     }),
     groups: STRATEGY_GROUP_ORDER.map((g) => ({

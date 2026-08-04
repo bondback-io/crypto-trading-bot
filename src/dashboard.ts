@@ -3119,6 +3119,66 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .mbp-streak-flat { color: #94a3b8; }
     .mbp-lm-on { color: #F1BB72; font-weight: 600; }
     .mbp-lm-off { color: #64748b; }
+    .strat-lane-badges {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.28rem;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+    }
+    .strat-lane-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.22rem;
+      padding: 0.08rem 0.4rem 0.08rem 0.28rem;
+      border-radius: 999px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .strat-lane-badge svg {
+      width: 0.72rem;
+      height: 0.72rem;
+      flex-shrink: 0;
+    }
+    .strat-lane-copy {
+      color: #7dd3fc;
+      background: rgba(14, 165, 233, 0.12);
+      border-color: rgba(56, 189, 248, 0.35);
+    }
+    .strat-lane-scan {
+      color: #5eead4;
+      background: rgba(20, 184, 166, 0.12);
+      border-color: rgba(45, 212, 191, 0.35);
+    }
+    .strat-lane-both-note {
+      color: #cbd5e1;
+      background: rgba(100, 116, 139, 0.18);
+      border-color: rgba(148, 163, 184, 0.35);
+    }
+    .strat-lane-legend {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem 1rem;
+      margin: 0 0 0.85rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.55rem;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      font-size: 0.72rem;
+      color: #94a3b8;
+      line-height: 1.35;
+    }
+    .strat-lane-legend .leg {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
     .lsd-health {
       display: flex;
       flex-wrap: wrap;
@@ -10215,6 +10275,58 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.querySelectorAll('#strategies-grid [data-strategy-setting]').forEach(el => stash.appendChild(el));
     }
 
+    function strategyLaneIconSvg(kind) {
+      if (kind === 'copy') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+      }
+      if (kind === 'scan') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12a10 10 0 0 1 20 0"/><path d="M5 12a7 7 0 0 1 14 0"/><path d="M8 12a4 4 0 0 1 8 0"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>';
+      }
+      return '';
+    }
+
+    function strategySignalLaneBadgesHtml(lane) {
+      const l = String(lane || 'both');
+      if (l === 'mgmt') return '';
+      const parts = [];
+      if (l === 'copy' || l === 'both') {
+        parts.push(
+          '<span class="strat-lane-badge strat-lane-copy" title="Smart copy / tracked wallets — mainly affects entries when Smart Money Copy is ON">' +
+            strategyLaneIconSvg('copy') +
+            'Copy</span>'
+        );
+      }
+      if (l === 'scanner' || l === 'both') {
+        parts.push(
+          '<span class="strat-lane-badge strat-lane-scan" title="Market Scanner / TA / AlphaScan — mainly affects scanner-sourced entries">' +
+            strategyLaneIconSvg('scan') +
+            'Scan</span>'
+        );
+      }
+      if (!parts.length) return '';
+      return '<span class="strat-lane-badges">' + parts.join('') + '</span>';
+    }
+
+    function strategiesSignalLaneLegendHtml() {
+      return (
+        '<div class="strat-lane-legend" id="strategies-lane-legend">' +
+          '<span class="leg">' +
+            '<span class="strat-lane-badge strat-lane-copy">' +
+              strategyLaneIconSvg('copy') +
+              'Copy</span>' +
+            '<span>Smart Money Copy / tracked wallets</span>' +
+          '</span>' +
+          '<span class="leg">' +
+            '<span class="strat-lane-badge strat-lane-scan">' +
+              strategyLaneIconSvg('scan') +
+              'Scan</span>' +
+            '<span>Market Scanner / TA signals</span>' +
+          '</span>' +
+          '<span class="leg mint">Both badges = shared entry filters. No badge = exits / sizing (any open trade).</span>' +
+        '</div>'
+      );
+    }
+
     const SETTINGS_MODULE_GROUPS = [
       {
         label: 'Global & Safety',
@@ -10543,7 +10655,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!grid) return;
       stashStrategyControls();
       const registry = data.registry || [];
-      grid.innerHTML = buildSettingsModuleGroups(registry).map(group => {
+      grid.innerHTML =
+        strategiesSignalLaneLegendHtml() +
+        buildSettingsModuleGroups(registry).map(group => {
         const rows = group.rows || [];
         const isTradeMgmt =
           group.label === 'Trade Management & Micro-Bot Engines';
@@ -10612,10 +10726,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     ? 'Differs from current Risk recipe'
                     : 'Optional / advanced — not set by Risk') +
               '">' + badgeLabel + '</span>';
+            const laneBadges = strategySignalLaneBadgesHtml(s.signalLane);
             const hasSettings = (STRATEGY_SETTING_IDS[s.key] || []).length > 0 || !!extraStrategySettingsHtml(s.key);
             return '<div class="strategy-row border-t border-slate-700/70 first:border-t-0">' +
               '<div class="flex items-center justify-between gap-3">' +
-                '<div class="font-medium text-slate-100">' + s.name + badge + safety + '</div>' +
+                '<div class="font-medium text-slate-100">' + s.name + laneBadges + badge + safety + '</div>' +
                 '<label class="switch"><input type="checkbox" ' + (s.enabled ? 'checked ' : '') +
                   'onchange="toggleStrategy(\\'' + s.key + '\\', this.checked)" /><span class="slider"></span></label>' +
               '</div>' +
