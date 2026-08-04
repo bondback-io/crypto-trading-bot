@@ -92,6 +92,15 @@ export function solUsdFromPair(pair: Record<string, unknown>): number | undefine
 
 let cachedSolUsd: { value: number; at: number } | null = null;
 
+/** Forward-declared for Dex snapshot cache (full interface later). */
+type LiveTokenSnapshotEarly = {
+  priceSol: number | null;
+  marketCapUsd: number | null;
+  volumeH1Usd: number | null;
+  volumeH24Usd: number | null;
+  txnsH1: number | null;
+};
+
 /** Last known SOL/USD (sync). Falls back to 150 until a live fetch succeeds. */
 export function getCachedSolUsdPrice(): number {
   return cachedSolUsd?.value ?? 150;
@@ -872,26 +881,107 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Fetch JSON with retries + backoff (fixes transient "failed to fetch") */
+/** —— DexScreener rate-limit guard (shared across mark / activity callers) —— */
+const DEX_SNAPSHOT_CACHE_TTL_MS = 75_000;
+const DEX_FALLBACK_REFRESH_MS = 100_000;
+const DEX_HEALTHY_REFRESH_MS = 55_000;
+const DEX_COOLDOWN_BASE_MS = 15_000;
+const DEX_COOLDOWN_CAP_MS = 4 * 60_000;
+const DEX_DEBUG =
+  String(process.env.DEXSCREENER_DEBUG || '').toLowerCase() === '1' ||
+  String(process.env.DEXSCREENER_DEBUG || '').toLowerCase() === 'true';
+
+let dexRateLimitedUntil = 0;
+let dexCooldownStreak = 0;
+let lastDexCooldownLogAt = 0;
+let lastJupiterFallbackLogAt = 0;
+let lastJupiterFailLogAt = 0;
+
+const dexSnapshotCache = new Map<
+  string,
+  { snap: LiveTokenSnapshotEarly; at: number }
+>();
+const dexSnapshotInflight = new Map<
+  string,
+  Promise<LiveTokenSnapshotEarly | null>
+>();
+
+export function isDexScreenerInCooldown(): boolean {
+  return Date.now() < dexRateLimitedUntil;
+}
+
+export function getDexScreenerCooldownRemainingMs(): number {
+  return Math.max(0, dexRateLimitedUntil - Date.now());
+}
+
+export function getDexScreenerStatus(): {
+  inCooldown: boolean;
+  remainingMs: number;
+  streak: number;
+} {
+  return {
+    inCooldown: isDexScreenerInCooldown(),
+    remainingMs: getDexScreenerCooldownRemainingMs(),
+    streak: dexCooldownStreak,
+  };
+}
+
+function enterDexCooldown(reason = '429'): void {
+  dexCooldownStreak += 1;
+  const ms = Math.min(
+    DEX_COOLDOWN_CAP_MS,
+    DEX_COOLDOWN_BASE_MS * Math.pow(2, Math.min(dexCooldownStreak - 1, 4))
+  );
+  const until = Date.now() + ms;
+  if (until > dexRateLimitedUntil) dexRateLimitedUntil = until;
+  const now = Date.now();
+  if (now - lastDexCooldownLogAt >= 60_000) {
+    lastDexCooldownLogAt = now;
+    console.warn(
+      `[DexScreener] rate-limited — cooldown ${Math.round(ms / 1000)}s (${reason})`
+    );
+  }
+}
+
+function clearDexCooldownOnSuccess(): void {
+  if (dexCooldownStreak > 0 || dexRateLimitedUntil > 0) {
+    dexCooldownStreak = 0;
+    dexRateLimitedUntil = 0;
+  }
+}
+
+function isDexUrl(url: string): boolean {
+  return url.includes('dexscreener.com');
+}
+
+/** Fetch JSON with retries + backoff. Dex paths use cooldown + quieter 429 logs. */
 async function fetchJson(
   url: string,
   timeoutMs = 12_000,
   maxAttempts = 3
 ): Promise<unknown | null> {
-  const context = url.includes('dexscreener')
+  const isDex = isDexUrl(url);
+  const context = isDex
     ? 'DexScreener'
     : url.includes('gmgn')
       ? 'GMGN'
       : 'MarketData';
+
+  if (isDex && isDexScreenerInCooldown()) {
+    return null;
+  }
+
+  const attempts = isDex ? Math.min(2, maxAttempts) : maxAttempts;
   let lastErr = '';
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       const res = await loggedFetch(url, {
         context,
         label: 'marketData',
         timeoutMs,
         attempt: attempt + 1,
-        maxAttempts,
+        maxAttempts: attempts,
+        logBodyOnError: isDex ? DEX_DEBUG : true,
         headers: {
           Accept: 'application/json',
           'User-Agent': 'solana-smart-copy-bot/1.0',
@@ -899,6 +989,10 @@ async function fetchJson(
       });
       if (res.status === 429) {
         lastErr = '429';
+        if (isDex) {
+          enterDexCooldown('429');
+          return null;
+        }
         logger.warn(context, 'rate limited — retrying', {
           attempt: attempt + 1,
           url: url.slice(0, 120),
@@ -915,23 +1009,27 @@ async function fetchJson(
         lastErr = `HTTP ${res.status}`;
         return null;
       }
-      return await res.json();
+      const json = await res.json();
+      if (isDex) clearDexCooldownOnSuccess();
+      return json;
     } catch (err) {
       lastErr = err instanceof Error ? err.message : String(err);
-      logger.error(context, 'fetch attempt failed', {
-        attempt: attempt + 1,
-        maxAttempts,
-        url: url.slice(0, 120),
-        ...errorToMeta(err),
-      });
+      if (!isDex || DEX_DEBUG) {
+        logger.error(context, 'fetch attempt failed', {
+          attempt: attempt + 1,
+          maxAttempts: attempts,
+          url: url.slice(0, 120),
+          ...errorToMeta(err),
+        });
+      }
       await sleep(300 * (attempt + 1) + Math.random() * 200);
     }
   }
-  if (lastErr) {
+  if (lastErr && (!isDex || DEX_DEBUG)) {
     logger.warn(context, 'fetch exhausted', {
       url: url.slice(0, 120),
       lastErr,
-      maxAttempts,
+      maxAttempts: attempts,
     });
   }
   return null;
@@ -1530,23 +1628,32 @@ export interface LiveTokenSnapshot {
   txnsH1: number | null;
 }
 
-/**
- * DexScreener snapshot: price + market cap + short-window activity.
- * Picks the deepest Solana pool; MC prefers circulating over FDV.
- */
-export async function fetchLiveTokenSnapshot(
-  mint: string
-): Promise<LiveTokenSnapshot | null> {
-  if (!isCopyTargetMint(mint)) return null;
-  const data = await fetchJson(
-    `https://api.dexscreener.com/latest/dex/tokens/${mint}`
-  );
+export type OpenTradeMarkSource =
+  | 'dex'
+  | 'dex_cache'
+  | 'jupiter_tokens'
+  | 'jupiter_quote'
+  | 'last_good'
+  | 'none';
+
+export interface OpenTradeMarkResult {
+  priceSol: number | null;
+  marketCapUsd: number | null;
+  volumeH1Usd: number | null;
+  volumeH24Usd: number | null;
+  txnsH1: number | null;
+  source: OpenTradeMarkSource;
+  stale: boolean;
+  at: number;
+}
+
+function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
   const pairs =
     (data as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
   const solPairs = pairs.filter((p) => String(p.chainId) === 'solana');
   if (solPairs.length === 0) return null;
 
-  let best = solPairs[0];
+  let best = solPairs[0]!;
   let bestLiq = Number(
     (best.liquidity as { usd?: number } | undefined)?.usd ??
       best.liquidityUsd ??
@@ -1574,8 +1681,6 @@ export async function fetchLiveTokenSnapshot(
   const priceFromUsd =
     priceUsd > 0 && solUsd > 0 ? priceUsd / solUsd : null;
 
-  // Prefer SOL-native when close to USD-implied; on divergence prefer USD, else
-  // the more conservative (lower) mark so phantom pumps cannot invent Full TP.
   let priceSol: number | null = null;
   if (priceNative > 0 && priceFromUsd != null && priceFromUsd > 0) {
     const r = priceNative / priceFromUsd;
@@ -1612,6 +1717,214 @@ export async function fetchLiveTokenSnapshot(
   };
 }
 
+async function fetchDexSnapshotUncached(
+  mint: string
+): Promise<LiveTokenSnapshot | null> {
+  const data = await fetchJson(
+    `https://api.dexscreener.com/latest/dex/tokens/${mint}`
+  );
+  if (!data) return null;
+  return parseDexSnapshot(data);
+}
+
+/**
+ * DexScreener snapshot: price + market cap + short-window activity.
+ * Cached + in-flight deduped; serves last good during cooldown.
+ */
+export async function fetchLiveTokenSnapshot(
+  mint: string
+): Promise<LiveTokenSnapshot | null> {
+  if (!isCopyTargetMint(mint)) return null;
+  const key = String(mint);
+  const now = Date.now();
+  const cached = dexSnapshotCache.get(key);
+  if (cached && now - cached.at < DEX_SNAPSHOT_CACHE_TTL_MS) {
+    return cached.snap;
+  }
+  if (isDexScreenerInCooldown()) {
+    return cached?.snap ?? null;
+  }
+
+  const existing = dexSnapshotInflight.get(key);
+  if (existing) return existing;
+
+  const job = (async () => {
+    try {
+      const snap = await fetchDexSnapshotUncached(key);
+      if (snap && (snap.priceSol == null || snap.priceSol > 0)) {
+        dexSnapshotCache.set(key, { snap, at: Date.now() });
+      }
+      return snap ?? cached?.snap ?? null;
+    } catch {
+      return cached?.snap ?? null;
+    } finally {
+      dexSnapshotInflight.delete(key);
+    }
+  })();
+  dexSnapshotInflight.set(key, job);
+  return job;
+}
+
+async function fetchJupiterTokenMark(
+  mint: string
+): Promise<{ priceSol: number; marketCapUsd: number | null } | null> {
+  try {
+    const { fetchJupiterTokenByMint, hasJupiterApiKey } =
+      require('./jupiterTokens') as typeof import('./jupiterTokens');
+    if (!hasJupiterApiKey()) return null;
+    const tok = await fetchJupiterTokenByMint(mint);
+    const usd = Number(tok?.usdPrice ?? 0);
+    const solUsd = getCachedSolUsdPrice();
+    if (!(usd > 0) || !(solUsd > 0)) return null;
+    const priceSol = usd / solUsd;
+    if (!(priceSol > 0) || !Number.isFinite(priceSol)) return null;
+    const mcap = Number(tok?.mcap ?? tok?.fdv ?? 0);
+    return {
+      priceSol,
+      marketCapUsd: mcap > 0 ? mcap : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchJupiterQuoteMark(
+  mint: string
+): Promise<number | null> {
+  try {
+    const { getQuote, quoteToPriceSol } =
+      require('./trade') as typeof import('./trade');
+    const quote = await Promise.race([
+      getQuote(mint, 0.01, undefined, { quiet: true }),
+      sleep(8_000).then(() => null),
+    ]);
+    if (!quote) return null;
+    const px = quoteToPriceSol(quote);
+    return px > 0 && Number.isFinite(px) ? px : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open-trade mark resolver: Dex (healthy) → Jupiter Tokens → Jupiter quote → last good.
+ */
+export async function resolveOpenTradeMark(
+  mint: string,
+  opts?: { lastGoodPriceSol?: number | null }
+): Promise<OpenTradeMarkResult> {
+  const now = Date.now();
+  const empty = (): OpenTradeMarkResult => ({
+    priceSol: null,
+    marketCapUsd: null,
+    volumeH1Usd: null,
+    volumeH24Usd: null,
+    txnsH1: null,
+    source: 'none',
+    stale: true,
+    at: now,
+  });
+
+  if (!isCopyTargetMint(mint)) return empty();
+
+  const cached = dexSnapshotCache.get(mint);
+  const dexOk = !isDexScreenerInCooldown();
+
+  if (dexOk) {
+    const snap = await fetchLiveTokenSnapshot(mint);
+    if (snap?.priceSol != null && snap.priceSol > 0) {
+      return {
+        ...snap,
+        source: cached && now - cached.at < 5_000 ? 'dex_cache' : 'dex',
+        stale: false,
+        at: now,
+      };
+    }
+  } else if (cached?.snap?.priceSol != null && cached.snap.priceSol > 0) {
+    const age = now - cached.at;
+    if (age < DEX_SNAPSHOT_CACHE_TTL_MS * 2) {
+      return {
+        ...cached.snap,
+        source: 'dex_cache',
+        stale: age > DEX_SNAPSHOT_CACHE_TTL_MS,
+        at: cached.at,
+      };
+    }
+  }
+
+  if (now - lastJupiterFallbackLogAt >= 60_000) {
+    lastJupiterFallbackLogAt = now;
+    console.warn(
+      '[mark] DexScreener unavailable — using Jupiter fallback'
+    );
+  }
+
+  const jTok = await fetchJupiterTokenMark(mint);
+  if (jTok) {
+    const base = cached?.snap;
+    return {
+      priceSol: jTok.priceSol,
+      marketCapUsd: jTok.marketCapUsd ?? base?.marketCapUsd ?? null,
+      volumeH1Usd: base?.volumeH1Usd ?? null,
+      volumeH24Usd: base?.volumeH24Usd ?? null,
+      txnsH1: base?.txnsH1 ?? null,
+      source: 'jupiter_tokens',
+      stale: false,
+      at: now,
+    };
+  }
+
+  const jQuote = await fetchJupiterQuoteMark(mint);
+  if (jQuote != null) {
+    const base = cached?.snap;
+    return {
+      priceSol: jQuote,
+      marketCapUsd: base?.marketCapUsd ?? null,
+      volumeH1Usd: base?.volumeH1Usd ?? null,
+      volumeH24Usd: base?.volumeH24Usd ?? null,
+      txnsH1: base?.txnsH1 ?? null,
+      source: 'jupiter_quote',
+      stale: false,
+      at: now,
+    };
+  }
+
+  const last =
+    opts?.lastGoodPriceSol != null && opts.lastGoodPriceSol > 0
+      ? opts.lastGoodPriceSol
+      : cached?.snap?.priceSol != null && cached.snap.priceSol > 0
+        ? cached.snap.priceSol
+        : null;
+
+  if (last != null) {
+    if (now - lastJupiterFailLogAt >= 60_000) {
+      lastJupiterFailLogAt = now;
+      console.warn(
+        '[mark] Jupiter fallback failed — using last good mark'
+      );
+    }
+    const base = cached?.snap;
+    return {
+      priceSol: last,
+      marketCapUsd: base?.marketCapUsd ?? null,
+      volumeH1Usd: base?.volumeH1Usd ?? null,
+      volumeH24Usd: base?.volumeH24Usd ?? null,
+      txnsH1: base?.txnsH1 ?? null,
+      source: 'last_good',
+      stale: true,
+      at: cached?.at ?? now,
+    };
+  }
+
+  if (now - lastJupiterFailLogAt >= 60_000) {
+    lastJupiterFailLogAt = now;
+    console.warn(
+      '[mark] Jupiter fallback failed — using last good mark'
+    );
+  }
+  return empty();
+}
+
 /** Fetch symbol + name for a mint from DexScreener (best-effort) */
 export async function fetchTokenInfo(
   mint: string
@@ -1635,16 +1948,17 @@ export async function fetchTokenInfo(
   };
 }
 
-const MARKET_ACTIVITY_MIN_REFRESH_MS = 55_000;
 const lastActivityFetchAt = new Map<string, number>();
+const OPEN_MARK_BUDGET_MS = 6_000;
 
 /**
- * Refresh DexScreener 1h volume / txn activity for open positions.
- * Rate-limits per mint (~1/min) so monitor polls don't spam the API.
+ * Refresh open-position marks + activity.
+ * Dex when healthy; Jupiter fallback during cooldown; per-mint fail-open.
  */
 export async function refreshOpenMarketActivity(
   trader: {
     getOpenPositions: () => Array<{ mint: string }>;
+    getTokenPrice?: (mint: string) => number | undefined;
     setMarketActivity: (
       mint: string,
       sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
@@ -1652,14 +1966,18 @@ export async function refreshOpenMarketActivity(
     setTokenPrice?: (
       mint: string,
       priceSol: number,
-      meta?: { marketCapUsd?: number | null }
+      meta?: {
+        marketCapUsd?: number | null;
+        markSource?: string;
+        stale?: boolean;
+      }
     ) => void;
     setMarkMarketCapUsd?: (
       mint: string,
       marketCapUsd: number | null | undefined
     ) => void;
   },
-  options: { force?: boolean } = {}
+  options: { force?: boolean; budgetMs?: number } = {}
 ): Promise<number> {
   const open = trader.getOpenPositions();
   if (open.length === 0) return 0;
@@ -1667,42 +1985,55 @@ export async function refreshOpenMarketActivity(
   const now = Date.now();
   const mints = [...new Set(open.map((p) => p.mint))];
   let updated = 0;
+  const minGap = isDexScreenerInCooldown()
+    ? DEX_FALLBACK_REFRESH_MS
+    : DEX_HEALTHY_REFRESH_MS;
+  const budgetMs = Math.max(2_000, options.budgetMs ?? OPEN_MARK_BUDGET_MS);
+  const deadline = now + budgetMs;
 
-  // Keep SOL/USD fresh for cost USD display (cached ~5m inside fetch)
   void fetchSolUsdPrice();
 
   for (const mint of mints) {
+    if (Date.now() > deadline) break;
     const last = lastActivityFetchAt.get(mint) ?? 0;
-    if (!options.force && now - last < MARKET_ACTIVITY_MIN_REFRESH_MS) {
+    if (!options.force && now - last < minGap) {
       continue;
     }
-    lastActivityFetchAt.set(mint, now);
+    lastActivityFetchAt.set(mint, Date.now());
 
     try {
-      const snap = await fetchLiveTokenSnapshot(mint);
-      if (!snap) continue;
-
-      trader.setMarketActivity(mint, {
-        volumeH1Usd: snap.volumeH1Usd ?? 0,
-        txnsH1: snap.txnsH1 ?? 0,
-        updatedAt: now,
+      const lastGood =
+        typeof trader.getTokenPrice === 'function'
+          ? trader.getTokenPrice(mint)
+          : undefined;
+      const mark = await resolveOpenTradeMark(mint, {
+        lastGoodPriceSol: lastGood,
       });
+      if (!mark || mark.source === 'none') continue;
+
+      if (mark.volumeH1Usd != null || mark.txnsH1 != null) {
+        trader.setMarketActivity(mint, {
+          volumeH1Usd: mark.volumeH1Usd ?? 0,
+          txnsH1: mark.txnsH1 ?? 0,
+          updatedAt: mark.at,
+        });
+      }
       if (
-        snap.priceSol != null &&
-        snap.priceSol > 0 &&
+        mark.priceSol != null &&
+        mark.priceSol > 0 &&
         typeof trader.setTokenPrice === 'function'
       ) {
-        // Prefer setTokenPrice (reconciles MC + price together). Only fall back
-        // to setMarkMarketCapUsd when price is missing.
-        trader.setTokenPrice(mint, snap.priceSol, {
-          marketCapUsd: snap.marketCapUsd,
+        trader.setTokenPrice(mint, mark.priceSol, {
+          marketCapUsd: mark.marketCapUsd,
+          markSource: mark.source,
+          stale: mark.stale,
         });
-      } else if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
-        trader.setMarkMarketCapUsd?.(mint, snap.marketCapUsd);
+      } else if (mark.marketCapUsd != null && mark.marketCapUsd > 0) {
+        trader.setMarkMarketCapUsd?.(mint, mark.marketCapUsd);
       }
       updated += 1;
     } catch {
-      // best-effort — keep prior cache
+      /* best-effort — keep prior cache */
     }
   }
 

@@ -916,6 +916,11 @@ export class PaperTrader {
   private lifetimeLosses = 0;
   private logs: TradeLog[] = [];
   private priceCache: Map<string, number> = new Map();
+  /** Last accepted mark metadata (source + time) for staleness / health */
+  private markMetaCache: Map<
+    string,
+    { at: number; source?: string; stale?: boolean }
+  > = new Map();
   /** Latest observed market-cap USD per mint (from Dex/curve refresh) */
   private marketCapCache: Map<string, number> = new Map();
   /** Latest DexScreener activity per mint (for dead-volume exits) */
@@ -1053,7 +1058,11 @@ export class PaperTrader {
   setTokenPrice(
     mint: string,
     priceSol: number,
-    meta?: { marketCapUsd?: number | null }
+    meta?: {
+      marketCapUsd?: number | null;
+      markSource?: string;
+      stale?: boolean;
+    }
   ): void {
     if (!(priceSol > 0) || !Number.isFinite(priceSol)) return;
 
@@ -1068,6 +1077,17 @@ export class PaperTrader {
     let acceptedMc: number | undefined;
     let sawOpen = false;
     const prevMark = this.priceCache.get(mint);
+
+    // Stale fallback must not invent pumps vs last good mark
+    if (
+      meta?.stale === true &&
+      prevMark != null &&
+      prevMark > 0 &&
+      priceSol > prevMark * 1.02
+    ) {
+      return;
+    }
+
     for (const pos of this.positions.values()) {
       if (pos.mint !== mint || pos.status === 'closed') continue;
       if (!(pos.entryPriceSol > 0)) break;
@@ -1118,6 +1138,11 @@ export class PaperTrader {
       break;
     }
     this.priceCache.set(mint, mark);
+    this.markMetaCache.set(mint, {
+      at: Date.now(),
+      source: meta?.markSource,
+      stale: meta?.stale === true,
+    });
     recordPriceTick(mint, mark);
     if (acceptedMc != null) {
       this.marketCapCache.set(mint, acceptedMc);
@@ -1125,6 +1150,25 @@ export class PaperTrader {
       // No open position to sanity-check against — still cache for discovery UI
       this.marketCapCache.set(mint, candidateMc);
     }
+  }
+
+  /** Age / freshness of last accepted mark (ms). */
+  getMarkMeta(mint: string): {
+    at: number;
+    source?: string;
+    stale?: boolean;
+    ageMs: number;
+  } | null {
+    const m = this.markMetaCache.get(mint);
+    if (!m) return null;
+    return { ...m, ageMs: Math.max(0, Date.now() - m.at) };
+  }
+
+  isMarkStale(mint: string, maxAgeMs = 4 * 60_000): boolean {
+    const m = this.markMetaCache.get(mint);
+    if (!m) return true;
+    if (m.stale) return true;
+    return Date.now() - m.at > maxAgeMs;
   }
 
   /** Cache latest live market-cap USD for a mint (Live MC column / exit MC). */
@@ -3348,7 +3392,10 @@ export class PaperTrader {
       position.bagTrimDone = position.bagTrimDone ?? false;
       position.solReturned = position.solReturned ?? 0;
 
-      if (currentPrice > position.highWaterMarkSol) {
+      const markStale = this.isMarkStale(position.mint);
+      // Stale marks: still allow protective exits (SL/PPP/dead), but do not
+      // invent new peaks that would postpone trailing / invent Full TP.
+      if (!markStale && currentPrice > position.highWaterMarkSol) {
         position.highWaterMarkSol = currentPrice;
       }
       if (
@@ -3364,8 +3411,9 @@ export class PaperTrader {
         ((currentPrice - position.entryPriceSol) / position.entryPriceSol) * 100;
       let peakAdvancedAsync = false;
       if (
-        position.maxRunupPct == null ||
-        markPnlPctAsync > position.maxRunupPct
+        !markStale &&
+        (position.maxRunupPct == null ||
+          markPnlPctAsync > position.maxRunupPct)
       ) {
         position.maxRunupPct = markPnlPctAsync;
         peakAdvancedAsync = true;

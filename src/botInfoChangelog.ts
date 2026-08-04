@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.159',
+    title: 'DexScreener + Jupiter Mark Resilience',
+    sections: ['execution', 'alerts', 'overview', 'zion'],
+    items: [
+      'DexScreener 429s enter a shared cooldown with backoff, in-flight dedupe, and cached snapshots — no more retry storms or Cloudflare body spam.',
+      'Open-trade marks fall back Dex → Jupiter Tokens → quiet Jupiter quote → last good; monitor mark refresh has a hard timeout so wallet polls cannot hang.',
+      'Fixed false “poll stalled” health warning (was treating wallet count as a timestamp); Dex cooldown now shows as market-data degraded Watch instead.',
+    ],
+  },
+  {
     version: '1.2.158',
     title: 'Dashboard Script Fix (Agent Decision Log)',
     sections: ['overview', 'coaches', 'microbots'],

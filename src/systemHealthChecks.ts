@@ -187,18 +187,39 @@ function checkTrading(): HealthIssue[] {
         Number(config.pollIntervalMs) || 15_000
       );
       const stallMs = Math.max(3 * pollInterval, 10 * 60_000);
-      const lastDone = Number(ms.lastPollCompleted) || 0;
+      const lastDone =
+        Number((ms as { lastPollCompletedAt?: number }).lastPollCompletedAt) ||
+        0;
       if (lastDone > 0 && Date.now() - lastDone > stallMs) {
         out.push({
           key: 'poll_stall',
           area: 'trading',
           severity: 'watch',
           title: 'Open-trade / wallet poll appears stalled',
-          detail: `lastPollCompleted ${Math.round((Date.now() - lastDone) / 1000)}s ago (threshold ${Math.round(stallMs / 1000)}s)`,
+          detail: `lastPollCompletedAt ${Math.round((Date.now() - lastDone) / 1000)}s ago (threshold ${Math.round(stallMs / 1000)}s)`,
           recommendation:
             'Check Logs for hung polls or RPC quarantine. Restart monitor if it persists next check.',
         });
       }
+    }
+
+    try {
+      const { isDexScreenerInCooldown, getDexScreenerCooldownRemainingMs } =
+        require('./marketData') as typeof import('./marketData');
+      if (isDexScreenerInCooldown()) {
+        const rem = getDexScreenerCooldownRemainingMs();
+        out.push({
+          key: 'market_data_degraded',
+          area: 'trading',
+          severity: 'watch',
+          title: 'Market data degraded (DexScreener cooldown)',
+          detail: `Dex cooldown ${Math.round(rem / 1000)}s — marks use Jupiter / last good`,
+          recommendation:
+            'Temporary rate-limit. Open-trade monitoring continues via Jupiter fallback; no action if marks keep updating.',
+        });
+      }
+    } catch {
+      /* optional */
     }
 
     const topSkip = ms.skipReasonCounts?.[0];

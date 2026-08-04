@@ -94,9 +94,11 @@ function solToLamports(sol: number): number {
 export async function getQuote(
   outputMint: string,
   solAmount?: number,
-  slippageBps?: number
+  slippageBps?: number,
+  opts?: { quiet?: boolean }
 ): Promise<SwapQuote | null> {
   const amount = solToLamports(solAmount ?? config.trade.tradeAmountSol);
+  const quiet = opts?.quiet === true;
 
   const params: QuoteGetRequest = {
     inputMint: config.solMint,
@@ -106,23 +108,29 @@ export async function getQuote(
   };
 
   try {
-    logger.info('Jupiter', 'quoteGet buy', {
-      outputMint: outputMint.slice(0, 12),
-      amount,
-      slippageBps: params.slippageBps,
-    });
+    if (!quiet) {
+      logger.info('Jupiter', 'quoteGet buy', {
+        outputMint: outputMint.slice(0, 12),
+        amount,
+        slippageBps: params.slippageBps,
+      });
+    }
     const quote = await jupiter.quoteGet(params);
-    logger.info('Jupiter', 'quoteGet buy ok', {
-      outAmount: (quote as SwapQuote).outAmount,
-      priceImpactPct: (quote as SwapQuote).priceImpactPct,
-    });
+    if (!quiet) {
+      logger.info('Jupiter', 'quoteGet buy ok', {
+        outAmount: (quote as SwapQuote).outAmount,
+        priceImpactPct: (quote as SwapQuote).priceImpactPct,
+      });
+    }
     return quote as SwapQuote;
   } catch (err) {
-    logger.error('Jupiter', 'quoteGet buy failed', {
-      outputMint: outputMint.slice(0, 12),
-      amount,
-      ...errorToMeta(err),
-    });
+    if (!quiet) {
+      logger.error('Jupiter', 'quoteGet buy failed', {
+        outputMint: outputMint.slice(0, 12),
+        amount,
+        ...errorToMeta(err),
+      });
+    }
     return null;
   }
 }
@@ -1243,10 +1251,30 @@ async function executeLiveSwap(
 }
 
 export async function refreshPositionPrices(mints: string[]): Promise<void> {
+  const {
+    isDexScreenerInCooldown,
+    resolveOpenTradeMark,
+  } = require('./marketData') as typeof import('./marketData');
+  // When Dex is healthy, activity refresh will mark via Dex — avoid Jupiter stampede.
+  // During Dex cooldown, resolveOpenTradeMark prefers Jupiter Tokens then quiet quote.
+  if (!isDexScreenerInCooldown()) return;
+
   for (const mint of mints) {
-    const quote = await getQuote(mint, 0.01);
-    if (quote) {
-      paperTrader.setTokenPrice(mint, quoteToPriceSol(quote));
+    try {
+      const lastGood = paperTrader.getTokenPrice(mint);
+      const mark = await Promise.race([
+        resolveOpenTradeMark(mint, { lastGoodPriceSol: lastGood }),
+        new Promise<null>((r) => setTimeout(() => r(null), 8_000)),
+      ]);
+      if (mark && mark.priceSol != null && mark.priceSol > 0) {
+        paperTrader.setTokenPrice(mint, mark.priceSol, {
+          marketCapUsd: mark.marketCapUsd,
+          markSource: mark.source,
+          stale: mark.stale,
+        });
+      }
+    } catch {
+      /* fail-open per mint */
     }
   }
 }

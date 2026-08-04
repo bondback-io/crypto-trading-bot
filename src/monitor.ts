@@ -853,6 +853,9 @@ let pollRateLimitedUntil = 0;
 /** Last poll-cycle soak counters for /api/status. */
 let lastPollAttempted = 0;
 let lastPollCompleted = 0;
+/** Unix ms when the last poll cycle finished (health stall detection). */
+let lastPollCompletedAt = 0;
+let lastOpenMarkRefreshAt = 0;
 let lastPollRateLimited = false;
 let onSignalHandler: SignalHandler | null = null;
 let lastSoftThrottleLogAt = 0;
@@ -1011,6 +1014,9 @@ export function getSoftWatchRuntimeSnapshot(): {
   watchPool: number;
   lastPollAttempted: number;
   lastPollCompleted: number;
+  /** Unix ms — when last poll cycle finished (0 = never). */
+  lastPollCompletedAt: number;
+  lastOpenMarkRefreshAt: number;
   lastPollRateLimited: boolean;
   lastPollElapsedMs: number | null;
   pollRole: string;
@@ -1051,6 +1057,8 @@ export function getSoftWatchRuntimeSnapshot(): {
     watchPool: getWalletsForPolling().length,
     lastPollAttempted,
     lastPollCompleted,
+    lastPollCompletedAt,
+    lastOpenMarkRefreshAt,
     lastPollRateLimited,
     lastPollElapsedMs: lastPollElapsedMs,
     pollRole,
@@ -1403,6 +1411,7 @@ async function pollAllWallets(): Promise<void> {
       }
     }
     lastPollCompleted = completed;
+    lastPollCompletedAt = Date.now();
     if (n > 0) {
       // Advance by wallets actually attempted so seeding rotates across cycles
       pollRotationOffset = (offset + Math.max(advanced, 1)) % n;
@@ -1416,8 +1425,26 @@ async function pollAllWallets(): Promise<void> {
 
     const openMints = paperTrader.getOpenPositions().map((p) => p.mint);
     if (openMints.length > 0) {
-      await refreshPositionPrices(openMints);
-      await refreshOpenMarketActivity(paperTrader);
+      const markBudgetMs = 6_000;
+      try {
+        await Promise.race([
+          (async () => {
+            await refreshPositionPrices(openMints);
+            await refreshOpenMarketActivity(paperTrader, {
+              budgetMs: markBudgetMs,
+            });
+          })(),
+          new Promise<void>((resolve) =>
+            setTimeout(() => resolve(), markBudgetMs + 500)
+          ),
+        ]);
+        lastOpenMarkRefreshAt = Date.now();
+      } catch (err) {
+        console.warn(
+          '[monitor] Open-trade mark refresh failed:',
+          err instanceof Error ? err.message : err
+        );
+      }
       paperTrader.checkPositions();
     }
 
@@ -6512,6 +6539,8 @@ export function getMonitorStatus(): {
   pendingBuyQueueDepth: number;
   lastPollAttempted: number;
   lastPollCompleted: number;
+  lastPollCompletedAt: number;
+  lastOpenMarkRefreshAt: number;
   lastPollRateLimited: boolean;
   pollRotationOffset: number;
 } {
@@ -6563,6 +6592,8 @@ export function getMonitorStatus(): {
     pendingBuyQueueDepth: pendingBuyEvents.length,
     lastPollAttempted,
     lastPollCompleted,
+    lastPollCompletedAt,
+    lastOpenMarkRefreshAt,
     lastPollRateLimited,
     pollRotationOffset,
   };
