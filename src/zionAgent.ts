@@ -299,6 +299,17 @@ function buildContextPack(opts?: { slim?: boolean }): string {
   } catch {
     /* optional */
   }
+  try {
+    const { getZionSupervisionStatus } =
+      require('./zionSupervision') as typeof import('./zionSupervision');
+    const plain = getZionSupervisionStatus().plainLines || [];
+    if (plain.length) {
+      lines.push('System health supervision:');
+      lines.push(...plain.slice(0, slim ? 3 : 5));
+    }
+  } catch {
+    /* optional */
+  }
   return lines.join('\n').slice(0, slim ? 8_000 : 18_000);
 }
 

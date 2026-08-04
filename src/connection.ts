@@ -359,6 +359,13 @@ function enterQuarantine(state: EndpointState, reason: string): void {
       `[rpc-quarantine] ENTER ${state.endpoint.label} for ${Math.round(ms / 1000)}s ` +
         `(streak ${state.quarantineStreak}) — ${reason}`
     );
+    try {
+      const { requestZionSupervisionEventCheck } =
+        require('./zionSupervision') as typeof import('./zionSupervision');
+      requestZionSupervisionEventCheck('rpc_quarantine');
+    } catch {
+      /* optional */
+    }
   }
 }
 

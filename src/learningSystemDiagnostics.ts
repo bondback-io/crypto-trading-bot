@@ -46,6 +46,8 @@ export interface LearningSystemDiagnostics {
   healthBlurb: string;
   setupLines: string[];
   warnings: string[];
+  /** Top system health lines from Zion supervision (RPC/trading/risk/learning). */
+  systemHealthLines: string[];
   profiles: ProfileLearningDiag[];
 }
 
@@ -446,6 +448,26 @@ export function getLearningSystemDiagnostics(opts?: {
     return `${mlBit}, ${marlBit}, and ${dataBit}.`;
   })();
 
+  let systemHealthLines: string[] = [];
+  try {
+    const { getZionSupervisionStatus } =
+      require('./zionSupervision') as typeof import('./zionSupervision');
+    const st = getZionSupervisionStatus();
+    systemHealthLines = Array.isArray(st.plainLines)
+      ? st.plainLines.slice(0, 6)
+      : [];
+    if (!systemHealthLines.length && st.classification) {
+      systemHealthLines = [
+        `System health: ${String(st.classification)}` +
+          (st.lastCheckAt
+            ? ` (checked ${new Date(st.lastCheckAt).toLocaleTimeString()})`
+            : ''),
+      ];
+    }
+  } catch {
+    /* optional */
+  }
+
   const snap: LearningSystemDiagnostics = {
     generatedAt: now,
     healthScore: score,
@@ -453,6 +475,7 @@ export function getLearningSystemDiagnostics(opts?: {
     healthBlurb,
     setupLines,
     warnings,
+    systemHealthLines,
     profiles,
   };
   cache = { at: now, snap };
@@ -468,6 +491,9 @@ export function formatLearningDiagnosticsForZion(
     `Learning health: ${d.healthScore}/100 — ${d.healthLabel}`,
     `  ${d.healthBlurb}`,
   ];
+  for (const h of (d.systemHealthLines || []).slice(0, 5)) {
+    lines.push(`  sys: ${h}`);
+  }
   for (const w of d.warnings.slice(0, 5)) {
     lines.push(`  warn: ${w}`);
   }

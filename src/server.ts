@@ -3458,15 +3458,17 @@ export function createServer(): express.Application {
     }
   });
 
-  app.get('/api/zion/supervision', (_req: Request, res: Response) => {
+  const sendZionSupervisionStatus = (_req: Request, res: Response) => {
     try {
       const { getZionSupervisionStatus, runZionSupervisionCheck } =
         require('./zionSupervision') as typeof import('./zionSupervision');
       const force = String((_req.query ?? {}).force || '') === '1';
       const snap = force ? runZionSupervisionCheck() : null;
+      const status = getZionSupervisionStatus();
       res.json({
         ok: true,
-        ...getZionSupervisionStatus(),
+        ...status,
+        state: status.classification,
         lastRun: snap
           ? {
               classification: snap.classification,
@@ -3481,7 +3483,9 @@ export function createServer(): express.Application {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  });
+  };
+  app.get('/api/zion/supervision', sendZionSupervisionStatus);
+  app.get('/api/health/system', sendZionSupervisionStatus);
 
   app.get(
     '/api/zion/agent/improvements/:id',
@@ -3541,6 +3545,12 @@ export function createServer(): express.Application {
           typeof body.supervisionEmailEnabled === 'boolean'
             ? body.supervisionEmailEnabled
             : cfg.zionAgent?.supervisionEmailEnabled !== false,
+        healthCheckIntervalMsHealthy:
+          Number(cfg.zionAgent?.healthCheckIntervalMsHealthy) || 900_000,
+        healthCheckIntervalMsWatch:
+          Number(cfg.zionAgent?.healthCheckIntervalMsWatch) || 600_000,
+        healthCheckIntervalMsAction:
+          Number(cfg.zionAgent?.healthCheckIntervalMsAction) || 300_000,
       };
       if (typeof body.semiAutonomous === 'boolean') {
         setZionSemiAutonomous(body.semiAutonomous);

@@ -352,6 +352,13 @@ function triggerHalt(
 
   console.warn(`[risk] ⛔ AUTO-PAUSE — ${msg}`);
   pauseHandler?.(msg);
+  try {
+    const { requestZionSupervisionEventCheck } =
+      require('./zionSupervision') as typeof import('./zionSupervision');
+    requestZionSupervisionEventCheck('risk_halt');
+  } catch {
+    /* optional */
+  }
 }
 
 export function getRiskStatus(input: {

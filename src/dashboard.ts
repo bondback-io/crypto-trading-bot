@@ -3208,6 +3208,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .lsd-blurb { font-size: 0.78rem; color: #94a3b8; line-height: 1.45; max-width: 36rem; }
     .lsd-setup { margin: 0 0 0.75rem; padding-left: 1.1rem; font-size: 0.72rem; color: #94a3b8; line-height: 1.45; }
     .lsd-setup li { margin: 0.2rem 0; }
+    .lsd-syshealth {
+      margin: 0 0 0.75rem;
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      font-size: 0.72rem;
+      color: #bae6fd;
+      line-height: 1.45;
+    }
+    .lsd-syshealth strong { color: #e0f2fe; }
     .lsd-warn {
       font-size: 0.72rem;
       color: #fbbf24;
@@ -7577,7 +7588,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-agent-personality" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Supervision <span class="tip" tabindex="0" data-tip="Periodic RPC/risk/learning checks (~2.5 min)."></span></span>
+          <span>Supervision <span class="tip" tabindex="0" data-tip="Adaptive system health checks: ~15 min when healthy, ~10 min on Watch, ~5 min after Action. RPC / trading / learning / risk — recommendations only."></span></span>
           <label class="switch"><input type="checkbox" id="zion-agent-supervision" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -7585,10 +7596,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-agent-fightlog" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Supervision emails <span class="tip" tabindex="0" data-tip="Email Dad on Action needed (rate-limited). Requires notify email configured."></span></span>
+          <span>Supervision emails <span class="tip" tabindex="0" data-tip="Email Dad on Action needed (rate-limited ~3h/key). Requires notify email configured."></span></span>
           <label class="switch"><input type="checkbox" id="zion-agent-supervision-email" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="mint text-xs mb-2" id="zion-agent-supervision-status">—</div>
+        <div class="text-xs mb-2" id="zion-agent-supervision-detail" style="color:#94a3b8;line-height:1.45"></div>
         <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
@@ -8632,6 +8644,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="lsd-blurb mb-0" id="lsd-health-blurb">Loading learning diagnostics…</p>
         </div>
         <ul class="lsd-setup" id="lsd-setup-list"></ul>
+        <div class="lsd-syshealth hidden" id="lsd-system-health"></div>
         <div class="lsd-warn hidden" id="lsd-warnings"></div>
         <div class="section-title !text-sm mb-2">Learning by Micro-Bot</div>
         <div class="lsd-grid" id="lsd-profile-grid">
@@ -13050,6 +13063,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return '<li>' + escHtml(String(line)) + '</li>';
         })
         .join('');
+      const sysEl = document.getElementById('lsd-system-health');
+      const sysLines = Array.isArray(diag.systemHealthLines)
+        ? diag.systemHealthLines
+        : [];
+      if (sysEl) {
+        if (sysLines.length) {
+          sysEl.classList.remove('hidden');
+          sysEl.innerHTML =
+            '<strong>System health:</strong> ' +
+            sysLines.map(function (l) { return escHtml(String(l)); }).join(' · ');
+        } else {
+          sysEl.classList.add('hidden');
+          sysEl.innerHTML = '';
+        }
+      }
       const warnings = Array.isArray(diag.warnings) ? diag.warnings : [];
       if (warnings.length) {
         warnEl.classList.remove('hidden');
@@ -26009,10 +26037,79 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const supEm = document.getElementById('zion-agent-supervision-email');
       if (supEm) supEm.checked = st.supervisionEmailEnabled !== false;
       const supStat = document.getElementById('zion-agent-supervision-status');
+      const supDetail = document.getElementById('zion-agent-supervision-detail');
+      const supervision = data.supervision || {};
       if (supStat) {
-        const cls = (data.supervision && data.supervision.classification) || st.supervisionClassification || '—';
+        const cls =
+          supervision.classification ||
+          st.supervisionClassification ||
+          '—';
         const score = typeof st.familyMemoryScore === 'number' ? st.familyMemoryScore : '—';
-        supStat.textContent = 'Supervision: ' + cls + ' · Family memory score: ' + score + '/100';
+        let checked = '';
+        if (supervision.lastCheckAt) {
+          try {
+            checked = ' · last ' + new Date(supervision.lastCheckAt).toLocaleTimeString();
+          } catch (_) {}
+        }
+        let next = '';
+        if (supervision.nextCheckAt) {
+          const mins = Math.max(
+            0,
+            Math.round((Number(supervision.nextCheckAt) - Date.now()) / 60000)
+          );
+          next = ' · next ~' + mins + 'm';
+        }
+        const openN = Array.isArray(supervision.openIssues)
+          ? supervision.openIssues.length
+          : Array.isArray(supervision.issues)
+            ? supervision.issues.length
+            : 0;
+        const openPart = openN ? ' · ' + openN + ' open' : '';
+        supStat.textContent =
+          'Supervision: ' +
+          cls +
+          openPart +
+          checked +
+          next +
+          ' · Family memory: ' +
+          score +
+          '/100';
+      }
+      if (supDetail) {
+        const lines = [];
+        const opens = Array.isArray(supervision.openIssues)
+          ? supervision.openIssues
+          : Array.isArray(supervision.issues)
+            ? supervision.issues
+            : [];
+        for (let i = 0; i < Math.min(3, opens.length); i++) {
+          const o = opens[i];
+          const rec = o.recommendation || o.why || '';
+          lines.push(
+            (o.summary || o.key || 'Issue') + (rec ? ' — ' + rec : '')
+          );
+        }
+        const recovered = Array.isArray(supervision.resolvedKeys)
+          ? supervision.resolvedKeys.slice(0, 2)
+          : [];
+        for (let i = 0; i < recovered.length; i++) {
+          lines.push('Recovered: ' + (recovered[i].summary || recovered[i].key));
+        }
+        const plain = Array.isArray(supervision.plainLines)
+          ? supervision.plainLines
+          : [];
+        if (!lines.length && plain.length) {
+          for (let i = 0; i < Math.min(3, plain.length); i++) lines.push(plain[i]);
+        }
+        if (lines.length) {
+          supDetail.innerHTML = lines
+            .map(function (l) {
+              return '<div>' + escHtml(String(l)) + '</div>';
+            })
+            .join('');
+        } else {
+          supDetail.innerHTML = '';
+        }
       }
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       stopZionTypewriter();

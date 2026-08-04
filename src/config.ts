@@ -2061,6 +2061,10 @@ export interface BotConfig {
     supervisionEnabled: boolean;
     fightLogCommentsEnabled: boolean;
     supervisionEmailEnabled: boolean;
+    /** Adaptive health check intervals (ms) */
+    healthCheckIntervalMsHealthy: number;
+    healthCheckIntervalMsWatch: number;
+    healthCheckIntervalMsAction: number;
   };
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
@@ -2290,6 +2294,9 @@ export const config: BotConfig = {
     supervisionEnabled: true,
     fightLogCommentsEnabled: true,
     supervisionEmailEnabled: true,
+    healthCheckIntervalMsHealthy: 900_000,
+    healthCheckIntervalMsWatch: 600_000,
+    healthCheckIntervalMsAction: 300_000,
   },
 
   peakProfitProtection: {
@@ -2830,6 +2837,12 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       supervisionEnabled: config.zionAgent?.supervisionEnabled !== false,
       fightLogCommentsEnabled: config.zionAgent?.fightLogCommentsEnabled !== false,
       supervisionEmailEnabled: config.zionAgent?.supervisionEmailEnabled !== false,
+      healthCheckIntervalMsHealthy:
+        Number(config.zionAgent?.healthCheckIntervalMsHealthy) || 900_000,
+      healthCheckIntervalMsWatch:
+        Number(config.zionAgent?.healthCheckIntervalMsWatch) || 600_000,
+      healthCheckIntervalMsAction:
+        Number(config.zionAgent?.healthCheckIntervalMsAction) || 300_000,
     },
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
@@ -3623,6 +3636,18 @@ function applySettingsSnapshot(
       supervisionEnabled: s.supervisionEnabled !== false,
       fightLogCommentsEnabled: s.fightLogCommentsEnabled !== false,
       supervisionEmailEnabled: s.supervisionEmailEnabled !== false,
+      healthCheckIntervalMsHealthy: Math.max(
+        60_000,
+        Number(s.healthCheckIntervalMsHealthy) || 900_000
+      ),
+      healthCheckIntervalMsWatch: Math.max(
+        60_000,
+        Number(s.healthCheckIntervalMsWatch) || 600_000
+      ),
+      healthCheckIntervalMsAction: Math.max(
+        60_000,
+        Number(s.healthCheckIntervalMsAction) || 300_000
+      ),
     };
     try {
       const { setZionSemiAutonomous } =

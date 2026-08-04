@@ -1,5 +1,7 @@
 /**
- * Zion system supervision — periodic health classification + Dad-friendly alerts.
+ * Zion system supervision — classifies collectSystemHealthIssues() into
+ * Normal / Watch / Action needed with sustained escalation, adaptive schedule,
+ * rate-limited email. Additive monitoring only — no mutations.
  * DATA_DIR/zion-supervision.json
  */
 
@@ -7,6 +9,12 @@ import fs from 'fs';
 import { config } from './config';
 import { dataFile, ensureDataDir } from './dataDir';
 import { logger } from './logger';
+import {
+  collectSystemHealthIssues,
+  formatHealthIssuesForZion,
+  type HealthIssue,
+  type HealthSeverity,
+} from './systemHealthChecks';
 
 export type ZionSupervisionLevel = 'Normal' | 'Watch' | 'Action needed';
 
@@ -15,41 +23,81 @@ export interface ZionSupervisionIssue {
   summary: string;
   why: string;
   recommendation: string;
+  area?: string;
+  severity?: HealthSeverity;
+}
+
+export interface ZionSupervisionOpenIssue extends ZionSupervisionIssue {
+  firstSeenAt: number;
+  lastSeenAt: number;
+  tickCount: number;
 }
 
 export interface ZionSupervisionState {
-  version: 1;
+  version: 2;
   updatedAt: number;
   classification: ZionSupervisionLevel;
   issues: ZionSupervisionIssue[];
+  openIssues: ZionSupervisionOpenIssue[];
+  resolvedKeys: Array<{ key: string; at: number; summary: string }>;
   lastCheckAt: number;
+  nextCheckAt: number;
   lastActionEmailAt: number;
   lastActionEmailKey: string;
   checkCount: number;
+  actionRechecksLeft: number;
+  lastEventCheckAt: number;
 }
 
 const FILE = 'zion-supervision.json';
-const CHECK_MS = 150_000; // ~2.5 min
-const EMAIL_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 3 hours between action emails
+const EMAIL_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+const EVENT_DEBOUNCE_MS = 60_000;
+const DEFAULT_HEALTHY_MS = 900_000; // 15m
+const DEFAULT_WATCH_MS = 600_000; // 10m
+const DEFAULT_ACTION_MS = 300_000; // 5m
 
 let cache: ZionSupervisionState | null = null;
-let timer: ReturnType<typeof setInterval> | null = null;
+let timer: ReturnType<typeof setTimeout> | null = null;
 
 function path(): string {
   ensureDataDir();
   return dataFile(FILE);
 }
 
+function intervalHealthy(): number {
+  return Math.max(
+    60_000,
+    Number(config.zionAgent?.healthCheckIntervalMsHealthy) || DEFAULT_HEALTHY_MS
+  );
+}
+function intervalWatch(): number {
+  return Math.max(
+    60_000,
+    Number(config.zionAgent?.healthCheckIntervalMsWatch) || DEFAULT_WATCH_MS
+  );
+}
+function intervalAction(): number {
+  return Math.max(
+    60_000,
+    Number(config.zionAgent?.healthCheckIntervalMsAction) || DEFAULT_ACTION_MS
+  );
+}
+
 function empty(): ZionSupervisionState {
   return {
-    version: 1,
+    version: 2,
     updatedAt: Date.now(),
     classification: 'Normal',
     issues: [],
+    openIssues: [],
+    resolvedKeys: [],
     lastCheckAt: 0,
+    nextCheckAt: 0,
     lastActionEmailAt: 0,
     lastActionEmailKey: '',
     checkCount: 0,
+    actionRechecksLeft: 0,
+    lastEventCheckAt: 0,
   };
 }
 
@@ -57,9 +105,19 @@ export function loadZionSupervisionState(): ZionSupervisionState {
   if (cache) return cache;
   try {
     const raw = fs.readFileSync(path(), 'utf8');
-    const parsed = JSON.parse(raw) as ZionSupervisionState;
-    if (parsed?.version === 1) {
-      cache = { ...empty(), ...parsed };
+    const parsed = JSON.parse(raw) as Partial<
+      Omit<ZionSupervisionState, 'version'>
+    > & { version?: number };
+    if (parsed && (parsed.version === 1 || parsed.version === 2)) {
+      cache = {
+        ...empty(),
+        ...parsed,
+        version: 2,
+        openIssues: Array.isArray(parsed.openIssues) ? parsed.openIssues : [],
+        resolvedKeys: Array.isArray(parsed.resolvedKeys)
+          ? parsed.resolvedKeys
+          : [],
+      };
       return cache;
     }
   } catch {
@@ -82,122 +140,115 @@ function save(state: ZionSupervisionState): void {
   }
 }
 
-function isShortLatencySpike(snap: {
-  healthy: boolean;
-  latencyMs: number | null;
-  downForMs: number;
-}): boolean {
-  if (snap.healthy) return true;
-  if (snap.downForMs > 0 && snap.downForMs < 90_000) return true;
-  if (snap.latencyMs != null && snap.latencyMs < 800 && snap.downForMs < 60_000) {
-    return true;
-  }
-  return false;
+function toIssue(h: HealthIssue): ZionSupervisionIssue {
+  return {
+    key: h.key,
+    summary: h.title,
+    why: h.detail || h.title,
+    recommendation: h.recommendation,
+    area: h.area,
+    severity: h.severity,
+  };
 }
 
-export function runZionSupervisionCheck(): ZionSupervisionState {
+function classifyOverall(
+  open: ZionSupervisionOpenIssue[],
+  collected: HealthIssue[]
+): ZionSupervisionLevel {
+  const byKey = new Map(collected.map((c) => [c.key, c]));
+  let hasAction = false;
+  let hasWatch = false;
+  for (const o of open) {
+    const src = byKey.get(o.key);
+    const sev = src?.severity || o.severity || 'watch';
+    const sustained = (o.tickCount >= 2 || src?.sustainedHint === true) && sev === 'action';
+    const hardAction =
+      sev === 'action' &&
+      (src?.sustainedHint === true ||
+        o.key === 'risk_halt' ||
+        o.key === 'rpc_multi_lane_down');
+    if (hardAction || sustained) hasAction = true;
+    else if (sev === 'action' && o.tickCount < 2) hasWatch = true; // first sighting
+    else if (sev === 'watch') hasWatch = true;
+  }
+  if (hasAction) return 'Action needed';
+  if (hasWatch || open.length > 0) return 'Watch';
+  return 'Normal';
+}
+
+function scheduleNext(st: ZionSupervisionState): void {
+  let ms = intervalHealthy();
+  if (st.classification === 'Action needed' || st.actionRechecksLeft > 0) {
+    ms = intervalAction();
+  } else if (st.classification === 'Watch') {
+    ms = intervalWatch();
+  }
+  st.nextCheckAt = Date.now() + ms;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    try {
+      runZionSupervisionCheck();
+    } catch {
+      /* */
+    }
+  }, ms);
+}
+
+export function runZionSupervisionCheck(opts?: {
+  reason?: 'schedule' | 'event' | 'force';
+}): ZionSupervisionState {
   const st = loadZionSupervisionState();
-  st.lastCheckAt = Date.now();
+  const now = Date.now();
+  st.lastCheckAt = now;
   st.checkCount += 1;
 
-  const issues: ZionSupervisionIssue[] = [];
+  const collected = collectSystemHealthIssues();
+  const collectedKeys = new Set(collected.map((c) => c.key));
+  const prevOpen = new Map(st.openIssues.map((o) => [o.key, o]));
 
-  try {
-    const { getRpcLoadDiagnostic } =
-      require('./rpcDiagnostic') as typeof import('./rpcDiagnostic');
-    const rpc = getRpcLoadDiagnostic();
-    const lanes = [rpc.primary, rpc.secondary, rpc.utility];
-    const badLanes = lanes.filter(
-      (l) => !l.healthy && !isShortLatencySpike(l)
-    );
-    if (badLanes.length >= 2) {
-      issues.push({
-        key: 'rpc_multi_lane_down',
-        summary: `${badLanes.length} RPC lanes unhealthy (sustained)`,
-        why: 'Entries, scans, and wallet polls depend on RPC — sustained failures stall the bot.',
-        recommendation:
-          'Check Config → RPC: verify endpoints, failover, and Poll intervals. Consider pausing entries until primary recovers.',
-      });
-    } else if (badLanes.length === 1) {
-      issues.push({
-        key: `rpc_lane_${badLanes[0]!.label}`,
-        summary: `RPC lane "${badLanes[0]!.label}" degraded`,
-        why: 'One lane down increases load on others and may cause skips or stale quotes.',
-        recommendation:
-          'Watch the RPC diagnostic card; if it persists >5 min, review endpoint health or enable share-load.',
-      });
-    }
-  } catch {
-    /* optional */
+  const nextOpen: ZionSupervisionOpenIssue[] = [];
+  for (const h of collected) {
+    const prev = prevOpen.get(h.key);
+    nextOpen.push({
+      ...toIssue(h),
+      firstSeenAt: prev?.firstSeenAt ?? now,
+      lastSeenAt: now,
+      tickCount: (prev?.tickCount ?? 0) + 1,
+    });
   }
 
-  try {
-    const { getMonitorStatus } =
-      require('./monitor') as typeof import('./monitor');
-    const ms = getMonitorStatus();
-    if (ms.risk?.halted) {
-      issues.push({
-        key: 'risk_halt',
-        summary: `Risk halt active: ${ms.risk.haltReason || 'unknown'}`,
-        why: 'New entries are blocked until the halt clears — protects capital during drawdown or limits.',
-        recommendation:
-          'Review Overview risk / daily PnL. Clear halt only after you understand the trigger (POST /api/risk/clear-halt).',
-      });
+  // Recoveries
+  for (const [key, prev] of prevOpen) {
+    if (!collectedKeys.has(key)) {
+      st.resolvedKeys = [
+        { key, at: now, summary: prev.summary },
+        ...st.resolvedKeys,
+      ].slice(0, 20);
+      logger.info('Zion', `Supervision recovered: ${prev.summary}`);
     }
-    if (ms.paused && !ms.risk?.halted) {
-      issues.push({
-        key: 'monitor_paused',
-        summary: 'Monitor is paused',
-        why: 'Wallet polling and new signals are not running.',
-        recommendation: 'Resume monitor from the dashboard when you are ready to trade again.',
-      });
-    }
-    const topSkip = ms.skipReasonCounts?.[0];
-    if (topSkip && topSkip.count >= 25) {
-      issues.push({
-        key: `skip_spike_${topSkip.reason.slice(0, 40)}`,
-        summary: `High skip volume: ${topSkip.reason} (${topSkip.count})`,
-        why: 'Many candidates are failing the same gate — opportunity cost or mis-tuned filters.',
-        recommendation:
-          'Ask Zion about top skips, or review Learning Mode / Require TA / conviction floors in Config.',
-      });
-    }
-  } catch {
-    /* optional */
   }
 
-  try {
-    const { getLearningSystemDiagnostics } =
-      require('./learningSystemDiagnostics') as typeof import('./learningSystemDiagnostics');
-    const diag = getLearningSystemDiagnostics();
-    for (const w of diag.warnings || []) {
-      const text = String(w || '');
-      if (!text) continue;
-      issues.push({
-        key: `learn_${text.slice(0, 36).replace(/\W+/g, '_')}`,
-        summary: `Learning warning: ${text.slice(0, 120)}`,
-        why: 'Learning subsystems may be starved, stuck, or rolling back — affects soft policy quality.',
-        recommendation:
-          'Open Bot Performance / Micro Bots learning cards; consider shadow mode or pausing auto-promote until stable.',
-      });
-      if (issues.length >= 6) break;
-    }
-  } catch {
-    /* optional */
-  }
+  st.openIssues = nextOpen;
+  st.issues = nextOpen.slice(0, 8).map((o) => ({
+    key: o.key,
+    summary: o.summary,
+    why: o.why,
+    recommendation: o.recommendation,
+    area: o.area,
+    severity: o.severity,
+  }));
 
-  let classification: ZionSupervisionLevel = 'Normal';
-  const hasAction = issues.some(
-    (i) =>
-      i.key === 'risk_halt' ||
-      i.key === 'rpc_multi_lane_down' ||
-      i.key.startsWith('learn_')
-  );
-  if (hasAction) classification = 'Action needed';
-  else if (issues.length > 0) classification = 'Watch';
-
+  const classification = classifyOverall(nextOpen, collected);
+  const wasAction = st.classification === 'Action needed';
   st.classification = classification;
-  st.issues = issues.slice(0, 8);
+  if (classification === 'Action needed') {
+    st.actionRechecksLeft = 3;
+  } else if (st.actionRechecksLeft > 0) {
+    st.actionRechecksLeft -= 1;
+  }
+
+  scheduleNext(st);
   save(st);
 
   if (
@@ -208,31 +259,47 @@ export function runZionSupervisionCheck(): ZionSupervisionState {
     void maybeSendActionEmail(st);
   }
 
-  if (st.checkCount % 5 === 0) {
+  if (st.checkCount % 3 === 0 || classification !== 'Normal' || wasAction) {
     logger.info(
       'Zion',
-      `Supervision: ${classification}${issues.length ? ` (${issues.length} issue${issues.length === 1 ? '' : 's'})` : ''}`
+      `Supervision: ${classification}${st.issues.length ? ` (${st.issues.length} open)` : ''} · next ${Math.round((st.nextCheckAt - now) / 60000)}m` +
+        (opts?.reason ? ` · ${opts.reason}` : '')
     );
   }
 
   return st;
 }
 
+/** Debounced event-triggered check (risk halt / quarantine enter). */
+export function requestZionSupervisionEventCheck(reason: string): void {
+  if (config.zionAgent?.supervisionEnabled === false) return;
+  const st = loadZionSupervisionState();
+  const now = Date.now();
+  if (now - st.lastEventCheckAt < EVENT_DEBOUNCE_MS) return;
+  st.lastEventCheckAt = now;
+  save(st);
+  try {
+    runZionSupervisionCheck({ reason: 'event' });
+  } catch {
+    /* */
+  }
+  void reason;
+}
+
 async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
-  const primary = st.issues[0];
+  // Prefer issues that are sustained Action
+  const primary =
+    st.openIssues.find(
+      (i) =>
+        (i.severity === 'action' && (i.tickCount >= 2 || i.key === 'risk_halt')) ||
+        i.key === 'rpc_multi_lane_down'
+    ) || st.issues[0];
   if (!primary) return;
 
   const now = Date.now();
   const sameKey = st.lastActionEmailKey === primary.key;
-  if (
-    sameKey &&
-    now - st.lastActionEmailAt < EMAIL_COOLDOWN_MS
-  ) {
-    return;
-  }
-  if (!sameKey && now - st.lastActionEmailAt < EMAIL_COOLDOWN_MS / 2) {
-    return;
-  }
+  if (sameKey && now - st.lastActionEmailAt < EMAIL_COOLDOWN_MS) return;
+  if (!sameKey && now - st.lastActionEmailAt < EMAIL_COOLDOWN_MS / 2) return;
 
   try {
     const { sendCustomEmail } =
@@ -242,7 +309,7 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
       'bondback2026@gmail.com';
 
     const body = [
-      'Hey Dad — Zion here with a system heads-up.',
+      'Hey — Zion here with a system heads-up.',
       '',
       `**Problem:** ${primary.summary}`,
       '',
@@ -251,7 +318,10 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
       `**Recommended fix:** ${primary.recommendation}`,
       '',
       st.issues.length > 1
-        ? `Also watching: ${st.issues.slice(1, 4).map((i) => i.summary).join('; ')}`
+        ? `Also watching: ${st.issues
+            .slice(1, 4)
+            .map((i) => i.summary)
+            .join('; ')}`
         : '',
       '',
       '— Zion Valton (supervision alert; no changes were made automatically)',
@@ -282,15 +352,31 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
 export function getZionSupervisionStatus(): {
   classification: ZionSupervisionLevel;
   issues: ZionSupervisionIssue[];
+  openIssues: ZionSupervisionOpenIssue[];
+  resolvedKeys: ZionSupervisionState['resolvedKeys'];
   lastCheckAt: number;
+  nextCheckAt: number;
   enabled: boolean;
+  plainLines: string[];
 } {
   const st = loadZionSupervisionState();
+  const healthish: HealthIssue[] = st.openIssues.map((o) => ({
+    key: o.key,
+    area: (o.area as HealthIssue['area']) || 'trading',
+    severity: o.severity || 'watch',
+    title: o.summary,
+    detail: o.why,
+    recommendation: o.recommendation,
+  }));
   return {
     classification: st.classification,
     issues: st.issues,
+    openIssues: st.openIssues,
+    resolvedKeys: st.resolvedKeys.slice(0, 8),
     lastCheckAt: st.lastCheckAt,
+    nextCheckAt: st.nextCheckAt,
     enabled: config.zionAgent?.supervisionEnabled !== false,
+    plainLines: formatHealthIssuesForZion(healthish, st.classification),
   };
 }
 
@@ -300,24 +386,16 @@ export function startZionSupervisionScheduler(): void {
 
   setTimeout(() => {
     try {
-      runZionSupervisionCheck();
+      runZionSupervisionCheck({ reason: 'schedule' });
     } catch {
       /* */
     }
-  }, 8000);
-
-  timer = setInterval(() => {
-    try {
-      runZionSupervisionCheck();
-    } catch {
-      /* */
-    }
-  }, CHECK_MS);
+  }, 12_000);
 }
 
 export function stopZionSupervisionScheduler(): void {
   if (timer) {
-    clearInterval(timer);
+    clearTimeout(timer);
     timer = null;
   }
 }

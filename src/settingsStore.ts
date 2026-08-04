@@ -179,6 +179,9 @@ export interface PersistedBotSettings {
     supervisionEnabled?: boolean;
     fightLogCommentsEnabled?: boolean;
     supervisionEmailEnabled?: boolean;
+    healthCheckIntervalMsHealthy?: number;
+    healthCheckIntervalMsWatch?: number;
+    healthCheckIntervalMsAction?: number;
   };
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {

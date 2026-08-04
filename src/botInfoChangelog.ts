@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.156',
+    title: 'Automated System Health Checks',
+    sections: ['zion', 'alerts', 'overview', 'learning'],
+    items: [
+      'Automated system health checks cover RPC, trading, learning, and risk via a collector plus Zion supervision — recommendations only, no auto-mutations.',
+      'Adaptive cadence 15m / 10m / 5m (Healthy / Watch / Action), sustained-only Action escalation, and rate-limited Action emails.',
+      'Dashboard, Zion, and APIs expose status: GET /api/zion/supervision and alias GET /api/health/system.',
+    ],
+  },
+  {
     version: '1.2.155',
     title: 'Learning Enhancements — Additive Soft Layer',
     sections: ['microbots', 'learning', 'coaches'],
