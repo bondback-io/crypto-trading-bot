@@ -145,6 +145,9 @@ function plainLearnedSummary(input: {
   if (/timer|hold|dead.?volume|dead.?market/.test(blob)) {
     return `${name} is learning to leave quiet or stalled trades sooner.`;
   }
+  if (/ta playbook|macd|zigzag|divergence|hist slope|tool weight|minconf/i.test(blob)) {
+    return `${name} is fine-tuning TA tool weights and confluence from closed trades.`;
+  }
   if (/timing:/.test(blob)) {
     return `${name} is fine-tuning when trails arm and tighten after green.`;
   }
@@ -241,6 +244,14 @@ export function getLearningSystemDiagnostics(opts?: {
       humanizeLearningPatch(sl.pendingProposal?.patch) ||
       '';
     const name = String(p.name || p.id);
+    let taLearnLine = '';
+    try {
+      const { formatProfileTaLearnedPlainLanguage } =
+        require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+      taLearnLine = formatProfileTaLearnedPlainLanguage(p.id) || '';
+    } catch {
+      /* optional */
+    }
     profiles.push({
       id: p.id,
       name,
@@ -267,7 +278,7 @@ export function getLearningSystemDiagnostics(opts?: {
         name,
         episodes: Number(prog.episodes) || 0,
         status,
-        lastSummary,
+        lastSummary: [lastSummary, taLearnLine].filter(Boolean).join(' '),
         lastChanges,
         mlMode,
       }),

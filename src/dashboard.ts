@@ -7864,7 +7864,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <details class="strat-adv-pack" id="profile-ta-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
-              <span class="text-sm font-semibold text-slate-200">Profile TA Playbooks <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Per-lane Off / Soft / Hard TA identity using Heikin Ashi, Fib/S-R, RSI/EMA/VWAP, patterns, and optional whale confirmation. Soft never hard-blocks; Hard can. Global Require TA stays the scanner master preference. Learning may nudge tool weights only — never TP/SL."></span></span>
+              <span class="text-sm font-semibold text-slate-200">Profile TA Playbooks <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Per-lane Off / Soft / Hard TA identity: Heikin Ashi, Fib/S-R, RSI/EMA/VWAP, MACD 12/26/9, Bollinger 20/2, ZigZag structure, RSI/volume divergence, patterns, and optional whale. Soft never hard-blocks; Hard can. Global Require TA stays the scanner master. Learning nudges per-tool weights (±0.05), divergence/hist sensitivity, and coarse knobs — never TP/SL. Roll back the last learned nudge from the hint row."></span></span>
               <span id="profile-ta-status-badge" class="badge status-badge" style="font-size:11px">TA Playbooks</span>
             </span>
           </summary>
@@ -7927,6 +7927,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="flex flex-wrap gap-2 mt-2">
               <button type="button" class="btn btn-secondary text-xs" onclick="saveProfileTaPlaybook()">Save playbook</button>
               <button type="button" class="btn btn-secondary text-xs" onclick="resetProfileTaPlaybook()">Reset this profile</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="rollbackProfileTaLearned()">Rollback last learned</button>
             </div>
             <p class="text-xs mint mt-2 mb-0" id="pta-learned-hint">Learned weights: —</p>
           </div>
@@ -25057,6 +25058,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const hint = document.getElementById('pta-learned-hint');
       if (hint) {
         const L = pb.learned || {};
+        const tw = L.toolWeights || {};
+        const twBits = Object.keys(tw)
+          .filter(function (k) {
+            return tw[k] != null && Math.abs(Number(tw[k]) - 1) > 0.01;
+          })
+          .slice(0, 5)
+          .map(function (k) {
+            return k + '×' + Number(tw[k]).toFixed(2);
+          });
         hint.textContent =
           'Learned: minConfΔ ' +
           (L.minConfDelta || 0) +
@@ -25065,7 +25075,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ' · whale×' +
           Number(L.whaleWeight != null ? L.whaleWeight : 1).toFixed(2) +
           ' · resist×' +
-          Number(L.resistanceExitSensitivity != null ? L.resistanceExitSensitivity : 1).toFixed(2);
+          Number(L.resistanceExitSensitivity != null ? L.resistanceExitSensitivity : 1).toFixed(2) +
+          ' · div×' +
+          Number(L.divergenceSensitivity != null ? L.divergenceSensitivity : 1).toFixed(2) +
+          ' · hist×' +
+          Number(L.histSlopeSensitivity != null ? L.histSlopeSensitivity : 1).toFixed(2) +
+          (twBits.length ? ' · tools ' + twBits.join(', ') : '');
       }
       const badge = document.getElementById('profile-ta-status-badge');
       if (badge) {
@@ -25170,10 +25185,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       _ptaCache = data;
       paintProfileTaForm(data.playbook || (data.playbooks && data.playbooks[_ptaSelected]));
     }
+    async function rollbackProfileTaLearned() {
+      if (!confirm('Rollback the last TA learned nudge for ' + (_ptaSelected || 'profile') + '?')) return;
+      const data = await fetchJSON('/api/profile-ta-playbooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId: _ptaSelected, rollbackLearned: true }),
+      });
+      if (!data.ok && data.rollback && !data.rollback.ok) {
+        alert('No learned nudge to roll back for this profile.');
+        return;
+      }
+      _ptaCache = data;
+      paintProfileTaForm(data.playbook || (data.playbooks && data.playbooks[_ptaSelected]));
+    }
     window.loadProfileTaPlaybooks = loadProfileTaPlaybooks;
     window.onProfileTaProfileChange = onProfileTaProfileChange;
     window.saveProfileTaPlaybook = saveProfileTaPlaybook;
     window.resetProfileTaPlaybook = resetProfileTaPlaybook;
+    window.rollbackProfileTaLearned = rollbackProfileTaLearned;
 
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
     let _zionImprovementCache = [];

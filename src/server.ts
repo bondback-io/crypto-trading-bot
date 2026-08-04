@@ -3143,6 +3143,7 @@ export function createServer(): express.Application {
         resetProfileTaPlaybook,
         resetAllProfileTaPlaybooks,
         getProfileTaPlaybooksPublic,
+        rollbackProfileTaLearned,
       } = require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
       const body = (req.body ?? {}) as Record<string, unknown>;
       if (body.resetAll === true) {
@@ -3153,6 +3154,16 @@ export function createServer(): express.Application {
       const profileId = String(body.profileId || '').trim();
       if (!profileId) {
         res.status(400).json({ ok: false, error: 'profileId required' });
+        return;
+      }
+      if (body.rollbackLearned === true) {
+        const result = rollbackProfileTaLearned(profileId);
+        res.json({
+          ok: result.ok,
+          rollback: result,
+          playbook: result.playbook,
+          ...getProfileTaPlaybooksPublic(),
+        });
         return;
       }
       if (body.reset === true) {

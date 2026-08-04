@@ -247,6 +247,8 @@ export interface BuyOptions {
   /** Profile TA playbook stamp at open */
   taModeAtOpen?: 'off' | 'soft' | 'hard';
   taToolsAtOpen?: string[];
+  taToolsPassedAtEntry?: string[];
+  taToolScoresAtEntry?: Record<string, number>;
   taConfluenceAtEntry?: number;
   haBiasAtEntry?: string | null;
   haConsecutiveAtEntry?: number;
@@ -254,6 +256,11 @@ export interface BuyOptions {
   nearResistanceAtEntry?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
+  zigzagStructureAtEntry?: string;
+  macdCrossAtEntry?: string;
+  macdHistSlopeAtEntry?: string;
+  rsiDivergenceAtEntry?: string;
+  volumeDivergenceAtEntry?: string;
 }
 
 /**
@@ -843,6 +850,8 @@ export async function executeBuy(
         candleSource: meta?.candleSource,
         taModeAtOpen: meta?.taModeAtOpen,
         taToolsAtOpen: meta?.taToolsAtOpen,
+        taToolsPassedAtEntry: meta?.taToolsPassedAtEntry,
+        taToolScoresAtEntry: meta?.taToolScoresAtEntry,
         taConfluenceAtEntry: meta?.taConfluenceAtEntry,
         haBiasAtEntry: meta?.haBiasAtEntry,
         haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
@@ -850,6 +859,11 @@ export async function executeBuy(
         nearResistanceAtEntry: meta?.nearResistanceAtEntry,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
+        zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
+        macdCrossAtEntry: meta?.macdCrossAtEntry,
+        macdHistSlopeAtEntry: meta?.macdHistSlopeAtEntry,
+        rsiDivergenceAtEntry: meta?.rsiDivergenceAtEntry,
+        volumeDivergenceAtEntry: meta?.volumeDivergenceAtEntry,
         top10HoldPct,
         tokenAgeHours: meta?.tokenAgeHours,
       }
@@ -976,6 +990,8 @@ export async function executeBuy(
         tokenAgeHours: meta?.tokenAgeHours,
         taModeAtOpen: meta?.taModeAtOpen,
         taToolsAtOpen: meta?.taToolsAtOpen,
+        taToolsPassedAtEntry: meta?.taToolsPassedAtEntry,
+        taToolScoresAtEntry: meta?.taToolScoresAtEntry,
         taConfluenceAtEntry: meta?.taConfluenceAtEntry,
         haBiasAtEntry: meta?.haBiasAtEntry,
         haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
@@ -983,6 +999,11 @@ export async function executeBuy(
         nearResistanceAtEntry: meta?.nearResistanceAtEntry,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
+        zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
+        macdCrossAtEntry: meta?.macdCrossAtEntry,
+        macdHistSlopeAtEntry: meta?.macdHistSlopeAtEntry,
+        rsiDivergenceAtEntry: meta?.rsiDivergenceAtEntry,
+        volumeDivergenceAtEntry: meta?.volumeDivergenceAtEntry,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

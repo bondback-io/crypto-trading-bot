@@ -61,12 +61,20 @@ export interface ProfileLearningEpisode {
   /** Profile TA playbook snapshot at entry */
   taModeAtOpen?: 'off' | 'soft' | 'hard';
   taToolsAtOpen?: string[];
+  taToolsPassedAtEntry?: string[];
+  taToolScoresAtEntry?: Record<string, number>;
   taConfluenceAtEntry?: number;
   haBiasAtEntry?: string | null;
   haConsecutiveAtEntry?: number;
   nearSupportAtEntry?: boolean;
   nearResistanceAtEntry?: boolean;
   whaleStateAtEntry?: string;
+  profileTaPlainLanguage?: string;
+  zigzagStructureAtEntry?: string;
+  macdCrossAtEntry?: string;
+  macdHistSlopeAtEntry?: string;
+  rsiDivergenceAtEntry?: string;
+  volumeDivergenceAtEntry?: string;
   /** Whether TA/whale conditions still looked favorable while trade was green */
   taConditionsHeldIntoProfit?: boolean;
   /** Soft heuristic: TA exit banked vs holding longer */

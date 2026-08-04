@@ -11,6 +11,14 @@ import {
   type HaState,
 } from './heikinAshi';
 import type { IndicatorReport } from './indicators';
+import type {
+  ProfileTaIndicatorReport,
+  MacdCross,
+  HistSlope,
+  ZigZagStructure,
+  DivergenceBias,
+} from './profileTaIndicators';
+import { evaluateProfileTaIndicators } from './profileTaIndicators';
 import type { TradeProfileId } from './tradeProfiles';
 
 export type ProfileTaMode = 'off' | 'soft' | 'hard';
@@ -26,7 +34,13 @@ export type ProfileTaToolId =
   | 'vwap'
   | 'volumeExpansion'
   | 'patterns'
-  | 'whale';
+  | 'whale'
+  | 'macd'
+  | 'macdHistSlope'
+  | 'zigzag'
+  | 'rsiDivergence'
+  | 'volumeDivergence'
+  | 'bollinger';
 
 export const PROFILE_TA_TOOL_IDS: readonly ProfileTaToolId[] = [
   'ha',
@@ -38,6 +52,12 @@ export const PROFILE_TA_TOOL_IDS: readonly ProfileTaToolId[] = [
   'volumeExpansion',
   'patterns',
   'whale',
+  'macd',
+  'macdHistSlope',
+  'zigzag',
+  'rsiDivergence',
+  'volumeDivergence',
+  'bollinger',
 ] as const;
 
 export const PROFILE_TA_TOOL_LABELS: Record<ProfileTaToolId, string> = {
@@ -50,6 +70,12 @@ export const PROFILE_TA_TOOL_LABELS: Record<ProfileTaToolId, string> = {
   volumeExpansion: 'Volume expansion',
   patterns: 'Chart patterns',
   whale: 'Whale / smart money',
+  macd: 'MACD 12/26/9',
+  macdHistSlope: 'MACD hist slope',
+  zigzag: 'ZigZag structure',
+  rsiDivergence: 'RSI divergence',
+  volumeDivergence: 'Volume divergence',
+  bollinger: 'Bollinger 20/2',
 };
 
 export interface ProfileTaToolFlags {
@@ -62,6 +88,12 @@ export interface ProfileTaToolFlags {
   volumeExpansion: boolean;
   patterns: boolean;
   whale: boolean;
+  macd: boolean;
+  macdHistSlope: boolean;
+  zigzag: boolean;
+  rsiDivergence: boolean;
+  volumeDivergence: boolean;
+  bollinger: boolean;
 }
 
 export interface ProfileTaHeikinPrefs {
@@ -88,6 +120,10 @@ export interface ProfileTaLearnedWeights {
   resistanceExitSensitivity: number;
   /** Whale tool multiplier (0.5…1.5) */
   whaleWeight: number;
+  /** RSI/volume divergence score multiplier (0.5…1.5) */
+  divergenceSensitivity: number;
+  /** MACD histogram slope score multiplier (0.5…1.5) */
+  histSlopeSensitivity: number;
 }
 
 export interface ProfileTaPlaybook {
@@ -121,6 +157,8 @@ export interface ProfileTaEntryContext {
   smartMoneyScore?: number | null;
   volumeExpanding?: boolean | null;
   holdersExpanding?: boolean | null;
+  /** Precomputed Profile TA pack (MACD/BB/ZigZag/div) — computed from candles if missing */
+  profileTaIndicators?: ProfileTaIndicatorReport | null;
 }
 
 export interface ProfileTaCondition {
@@ -185,6 +223,12 @@ function emptyTools(allOff = true): ProfileTaToolFlags {
     volumeExpansion: on,
     patterns: on,
     whale: on,
+    macd: on,
+    macdHistSlope: on,
+    zigzag: on,
+    rsiDivergence: on,
+    volumeDivergence: on,
+    bollinger: on,
   };
 }
 
@@ -199,6 +243,8 @@ function defaultLearned(): ProfileTaLearnedWeights {
     haConsecutiveDelta: 0,
     resistanceExitSensitivity: 1,
     whaleWeight: 1,
+    divergenceSensitivity: 1,
+    histSlopeSensitivity: 1,
   };
 }
 
@@ -249,8 +295,8 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
   }),
   migration_sniper: basePlaybook('migration_sniper', {
     taMode: 'soft',
-    entryTools: tools({ volumeExpansion: true, rsi: true }),
-    exitTools: tools({ volumeExpansion: true }),
+    entryTools: tools({ volumeExpansion: true, macd: true, rsi: true }),
+    exitTools: tools({ volumeExpansion: true, macd: true }),
     timeframes: ['5m', '15m'],
     minConfluenceScore: 30,
     whaleMode: 'soft',
@@ -260,11 +306,17 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
     taMode: 'soft',
     entryTools: tools({
       volumeExpansion: true,
+      macd: true,
+      macdHistSlope: true,
       ha: true,
       rsi: true,
-      ema: true,
     }),
-    exitTools: tools({ ha: true, volumeExpansion: true, rsi: true }),
+    exitTools: tools({
+      ha: true,
+      volumeExpansion: true,
+      macdHistSlope: true,
+      macd: true,
+    }),
     timeframes: ['5m', '15m', '1h'],
     minConfluenceScore: 40,
     heikinAshi: { minConsecutive: 1, preferStrengthening: true },
@@ -279,8 +331,15 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       fib: true,
       rsi: true,
       ha: true,
+      rsiDivergence: true,
+      bollinger: true,
     }),
-    exitTools: tools({ patterns: true, ha: true, supportResistance: true }),
+    exitTools: tools({
+      patterns: true,
+      ha: true,
+      supportResistance: true,
+      rsiDivergence: true,
+    }),
     timeframes: ['5m', '15m', '1h'],
     minConfluenceScore: 50,
     heikinAshi: { minConsecutive: 1, preferStrengthening: false },
@@ -299,12 +358,16 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       supportResistance: true,
       ha: true,
       rsi: true,
+      rsiDivergence: true,
+      volumeDivergence: true,
       whale: true,
+      bollinger: true,
     }),
     exitTools: tools({
       ha: true,
       supportResistance: true,
       fib: true,
+      rsiDivergence: true,
     }),
     timeframes: ['15m', '1h', '4h'],
     minConfluenceScore: 55,
@@ -321,17 +384,21 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
     taMode: 'hard',
     entryTools: tools({
       ha: true,
+      zigzag: true,
+      macdHistSlope: true,
       volumeExpansion: true,
-      supportResistance: true,
       ema: true,
       rsi: true,
       vwap: true,
+      macd: true,
     }),
     exitTools: tools({
       ha: true,
       supportResistance: true,
-      rsi: true,
-      volumeExpansion: true,
+      macd: true,
+      macdHistSlope: true,
+      rsiDivergence: true,
+      volumeDivergence: true,
     }),
     timeframes: ['15m', '1h', '4h'],
     minConfluenceScore: 55,
@@ -354,11 +421,16 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       rsi: true,
       vwap: true,
       patterns: true,
+      macd: true,
+      zigzag: true,
+      bollinger: true,
     }),
     exitTools: tools({
       ha: true,
       supportResistance: true,
       rsi: true,
+      macd: true,
+      rsiDivergence: true,
     }),
     timeframes: ['1h', '4h'],
     minConfluenceScore: 60,
@@ -382,12 +454,22 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       vwap: true,
       patterns: true,
       whale: true,
+      macd: true,
+      macdHistSlope: true,
+      zigzag: true,
+      rsiDivergence: true,
+      volumeDivergence: true,
+      bollinger: true,
     }),
     exitTools: tools({
       ha: true,
       supportResistance: true,
       rsi: true,
       whale: true,
+      macd: true,
+      macdHistSlope: true,
+      rsiDivergence: true,
+      volumeDivergence: true,
     }),
     timeframes: ['1h', '4h'],
     minConfluenceScore: 65,
@@ -407,8 +489,9 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       volumeExpansion: true,
       ha: true,
       rsi: true,
+      macd: true,
     }),
-    exitTools: tools({ whale: true, ha: true }),
+    exitTools: tools({ whale: true, ha: true, macd: true }),
     timeframes: ['15m', '1h'],
     minConfluenceScore: 35,
     heikinAshi: { minConsecutive: 1, preferStrengthening: false },
@@ -516,6 +599,18 @@ function resolveWhaleState(ctx: ProfileTaEntryContext): {
   return { state: 'unavailable', available: false };
 }
 
+function resolveProfileTaIndicators(
+  ctx: ProfileTaEntryContext
+): ProfileTaIndicatorReport {
+  if (ctx.profileTaIndicators?.available === true) {
+    return ctx.profileTaIndicators;
+  }
+  if (ctx.candles && ctx.candles.length >= 20) {
+    return evaluateProfileTaIndicators(ctx.candles);
+  }
+  return ctx.profileTaIndicators ?? evaluateProfileTaIndicators(null);
+}
+
 /**
  * Evaluate per-profile TA confluence for entry.
  * Soft never hard-blocks; Hard blocks below min when required tools fail or score low.
@@ -582,6 +677,9 @@ export function evaluateProfileTaEntry(
   const patterns = Array.isArray(ctx.chartPatternIds)
     ? ctx.chartPatternIds.filter(Boolean)
     : [];
+  const pta = resolveProfileTaIndicators(ctx);
+  const divSens = clamp(learned.divergenceSensitivity ?? 1, 0.5, 1.5);
+  const histSens = clamp(learned.histSlopeSensitivity ?? 1, 0.5, 1.5);
 
   const et = playbook.entryTools;
 
@@ -778,6 +876,119 @@ export function evaluateProfileTaEntry(
     }
   }
 
+  if (et.macd) {
+    enabledTools.push('macd');
+    const m = pta.macd;
+    const ok =
+      m.available &&
+      (m.cross === 'bull' ||
+        m.histSlope === 'rising' ||
+        (m.histogram != null && m.histogram > 0 && m.expansion === 'expanding'));
+    const pts = toolWeight(playbook, 'macd', ok ? 14 : 0);
+    score += ok ? pts : mode === 'soft' && m.available && m.cross === 'bear' ? -4 : 0;
+    conditions.push({
+      id: 'macd',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: m.available
+        ? `MACD ${m.cross !== 'none' ? m.cross : 'flat'} hist ${m.histSlope}`
+        : 'MACD unavailable',
+      required: false,
+    });
+  }
+
+  if (et.macdHistSlope) {
+    enabledTools.push('macdHistSlope');
+    const m = pta.macd;
+    const ok =
+      m.available &&
+      m.histSlope === 'rising' &&
+      (m.expansion === 'expanding' || m.expansion === 'steady');
+    const base = Math.round(12 * histSens);
+    const pts = toolWeight(playbook, 'macdHistSlope', ok ? base : 0);
+    score += ok ? pts : 0;
+    const required =
+      mode === 'hard' &&
+      (playbook.profileId === 'trend_rider' ||
+        playbook.profileId === 'high_win_rate');
+    conditions.push({
+      id: 'macdHistSlope',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: m.available ? `hist ${m.histSlope} ${m.expansion}` : 'hist slope n/a',
+      required,
+    });
+  }
+
+  if (et.zigzag) {
+    enabledTools.push('zigzag');
+    const zz = pta.zigzag;
+    const ok = zz.available && zz.intact && (zz.structure === 'HH' || zz.structure === 'HL');
+    const pts = toolWeight(playbook, 'zigzag', ok ? 16 : zz.available && zz.structure !== 'unknown' ? 6 : 0);
+    score += ok ? pts : zz.available && zz.structure === 'LL' && mode === 'soft' ? -5 : 0;
+    const required = mode === 'hard' && playbook.profileId === 'trend_rider';
+    conditions.push({
+      id: 'zigzag',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: zz.available
+        ? `ZZ ${zz.structure}${zz.intact ? ' intact' : ''}`
+        : 'ZigZag unavailable',
+      required,
+    });
+  }
+
+  if (et.rsiDivergence) {
+    enabledTools.push('rsiDivergence');
+    const div = pta.rsiDivergence;
+    const ok = div.available && div.bias === 'bullish';
+    const base = Math.round(14 * divSens);
+    const pts = toolWeight(playbook, 'rsiDivergence', ok ? base : 0);
+    score += ok ? pts : 0;
+    conditions.push({
+      id: 'rsiDivergence',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: div.available ? div.detail : 'RSI div n/a',
+      required: false,
+    });
+  }
+
+  if (et.volumeDivergence) {
+    enabledTools.push('volumeDivergence');
+    const div = pta.volumeDivergence;
+    const ok = div.available && div.bias === 'bullish';
+    const base = Math.round(12 * divSens);
+    const pts = toolWeight(playbook, 'volumeDivergence', ok ? base : 0);
+    score += ok ? pts : 0;
+    conditions.push({
+      id: 'volumeDivergence',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: div.available ? div.detail : 'vol div n/a',
+      required: false,
+    });
+  }
+
+  if (et.bollinger) {
+    enabledTools.push('bollinger');
+    const bb = pta.bollinger;
+    const ok = bb.available && bb.bullishBias;
+    const pts = toolWeight(playbook, 'bollinger', ok ? 8 : 0);
+    score += ok ? pts : 0;
+    conditions.push({
+      id: 'bollinger',
+      passed: ok,
+      score: ok ? pts : 0,
+      detail: bb.available
+        ? bb.bullishBias
+          ? 'BB soft-bull (mid/lower reclaim)'
+          : `BB pos ${bb.bandPos != null ? bb.bandPos.toFixed(2) : 'n/a'}`
+        : 'Bollinger unavailable',
+      required: false,
+    });
+  }
+
   score = clamp(Math.round(score), 0, 100);
 
   const passed = conditions.filter((c) => c.passed).map((c) => c.id);
@@ -824,6 +1035,14 @@ export function evaluateProfileTaEntry(
     ha.available ? `HA ${ha.bias} ${ha.consecutiveBull || ha.consecutiveBear}` : null,
     nearSupport ? 'near support' : null,
     nearResistance ? 'near resistance' : null,
+    pta.macd.available
+      ? `MACD ${pta.macd.cross !== 'none' ? pta.macd.cross : 'flat'}`
+      : null,
+    pta.zigzag.available && pta.zigzag.structure !== 'unknown'
+      ? `ZZ ${pta.zigzag.structure}`
+      : null,
+    pta.rsiDivergence.bias !== 'none' ? `RSI ${pta.rsiDivergence.bias} div` : null,
+    pta.volumeDivergence.bias !== 'none' ? `Vol ${pta.volumeDivergence.bias} div` : null,
     whale.available ? `whale ${whale.state}` : null,
     allowed ? 'allowed' : 'blocked',
   ]
@@ -889,7 +1108,18 @@ export function evaluateProfileTaExitHints(
     0.5,
     1.5
   );
+  const divSens = clamp(
+    playbook.learned?.divergenceSensitivity ?? 1,
+    0.5,
+    1.5
+  );
+  const histSens = clamp(
+    playbook.learned?.histSlopeSensitivity ?? 1,
+    0.5,
+    1.5
+  );
   const whale = resolveWhaleState(ctx);
+  const pta = resolveProfileTaIndicators(ctx);
 
   if (xt.ha && ha.available) {
     if (ha.flip === 'to_bear' || (ha.bias === 'bearish' && ha.momentum === 'strengthening')) {
@@ -924,6 +1154,52 @@ export function evaluateProfileTaExitHints(
   if (xt.rsi && ctx.indicators?.flags?.includes('rsi_overbought')) {
     conditions.push('RSI overbought');
     tightenTrail = true;
+  }
+
+  if (xt.macd && pta.macd.available) {
+    if (pta.macd.cross === 'bear') {
+      conditions.push('MACD bear cross');
+      if (playbook.taMode === 'hard') suggestExit = true;
+      else tightenTrail = true;
+    } else if (pta.macd.histSlope === 'falling' && (pta.macd.histogram ?? 0) < 0) {
+      conditions.push('MACD hist falling');
+      tightenTrail = true;
+    }
+  }
+
+  if (xt.macdHistSlope && pta.macd.available) {
+    if (
+      pta.macd.histSlope === 'falling' ||
+      (pta.macd.expansion === 'contracting' && (pta.macd.histogram ?? 0) <= 0)
+    ) {
+      conditions.push('MACD hist slope fail');
+      if (playbook.taMode === 'hard' && histSens >= 1) {
+        tightenTrail = true;
+        if (histSens >= 1.2) suggestExit = true;
+      } else {
+        tightenTrail = true;
+      }
+    }
+  }
+
+  if (xt.rsiDivergence && pta.rsiDivergence.available) {
+    if (pta.rsiDivergence.bias === 'bearish') {
+      conditions.push('RSI bearish div');
+      if (playbook.taMode === 'hard' && divSens >= 1) {
+        tightenTrail = true;
+        if (divSens >= 1.2) suggestExit = true;
+      } else {
+        tightenTrail = true;
+      }
+    }
+  }
+
+  if (xt.volumeDivergence && pta.volumeDivergence.available) {
+    if (pta.volumeDivergence.bias === 'bearish') {
+      conditions.push('volume bearish div');
+      tightenTrail = true;
+      if (playbook.taMode === 'hard' && divSens >= 1.15) suggestExit = true;
+    }
   }
 
   const reason =
@@ -993,6 +1269,16 @@ export function clampLearnedWeights(
       0.5,
       1.5
     ),
+    divergenceSensitivity: clamp(
+      Number(patch.divergenceSensitivity ?? cur.divergenceSensitivity) || 1,
+      0.5,
+      1.5
+    ),
+    histSlopeSensitivity: clamp(
+      Number(patch.histSlopeSensitivity ?? cur.histSlopeSensitivity) || 1,
+      0.5,
+      1.5
+    ),
   };
 }
 
@@ -1000,6 +1286,8 @@ export function clampLearnedWeights(
 export interface ProfileTaOpenStamp {
   taModeAtOpen?: ProfileTaMode;
   taToolsAtOpen?: ProfileTaToolId[];
+  taToolsPassedAtEntry?: ProfileTaToolId[];
+  taToolScoresAtEntry?: Partial<Record<ProfileTaToolId | string, number>>;
   taConfluenceAtEntry?: number;
   haBiasAtEntry?: HaBias | null;
   haConsecutiveAtEntry?: number;
@@ -1007,6 +1295,11 @@ export interface ProfileTaOpenStamp {
   nearResistanceAtEntry?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
+  zigzagStructureAtEntry?: ZigZagStructure | string;
+  macdCrossAtEntry?: MacdCross | string;
+  macdHistSlopeAtEntry?: HistSlope | string;
+  rsiDivergenceAtEntry?: DivergenceBias | string;
+  volumeDivergenceAtEntry?: DivergenceBias | string;
 }
 
 export interface ProfileTaGateResult {
@@ -1029,10 +1322,22 @@ export function runProfileTaEntryGate(
   const id = String(profileId || 'default');
   try {
     const playbook = getPlaybook(id);
-    const result = evaluateProfileTaEntry(playbook, ctx);
+    const pta = resolveProfileTaIndicators(ctx);
+    const result = evaluateProfileTaEntry(playbook, { ...ctx, profileTaIndicators: pta });
+    const passedTools = result.passed.filter((id): id is ProfileTaToolId =>
+      (PROFILE_TA_TOOL_IDS as readonly string[]).includes(id)
+    );
+    const toolScores: Partial<Record<ProfileTaToolId | string, number>> = {};
+    for (const c of result.conditions) {
+      if (typeof c.score === 'number' && Number.isFinite(c.score)) {
+        toolScores[c.id] = c.score;
+      }
+    }
     const stamp: ProfileTaOpenStamp = {
       taModeAtOpen: result.snapshot.taMode,
       taToolsAtOpen: result.snapshot.tools,
+      taToolsPassedAtEntry: passedTools,
+      taToolScoresAtEntry: toolScores,
       taConfluenceAtEntry: result.snapshot.confluence,
       haBiasAtEntry: result.snapshot.haBias,
       haConsecutiveAtEntry: result.snapshot.haConsecutive,
@@ -1040,6 +1345,11 @@ export function runProfileTaEntryGate(
       nearResistanceAtEntry: result.snapshot.nearResistance,
       whaleStateAtEntry: result.snapshot.whaleState,
       profileTaPlainLanguage: result.plainLanguage,
+      zigzagStructureAtEntry: pta.zigzag.structure,
+      macdCrossAtEntry: pta.macd.cross,
+      macdHistSlopeAtEntry: pta.macd.histSlope,
+      rsiDivergenceAtEntry: pta.rsiDivergence.bias,
+      volumeDivergenceAtEntry: pta.volumeDivergence.bias,
     };
     if (!result.allowed) {
       return {

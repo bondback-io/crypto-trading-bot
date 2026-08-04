@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.148',
+    title: 'Profile TA Full Indicators + Weight Learning',
+    sections: ['microbots', 'learning', 'scanners', 'knobs'],
+    items: [
+      'Profile TA playbooks now score MACD 12/26/9, Bollinger 20/2, ZigZag structure, and RSI/volume divergence alongside HA, Fib/S-R, and whale tools.',
+      'Closed trades stamp which TA tools passed at entry plus MACD/ZigZag/div snapshots — learning correlates per-tool weights (±0.05, max 3/cycle) and divergence/hist sensitivity.',
+      'Micro Bots → Profile TA Playbooks shows learned tool weights, div/hist multipliers, and Rollback last learned; auto-rollback if a nudge underperforms.',
+    ],
+  },
+  {
     version: '1.2.147',
     title: 'Overview Trade Import + Live Wallet Gate',
     sections: ['overview', 'execution', 'modes'],

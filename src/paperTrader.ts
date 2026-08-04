@@ -289,6 +289,8 @@ export interface Position {
   /** Profile TA playbook snapshot at open */
   taModeAtOpen?: 'off' | 'soft' | 'hard';
   taToolsAtOpen?: string[];
+  taToolsPassedAtEntry?: string[];
+  taToolScoresAtEntry?: Record<string, number>;
   taConfluenceAtEntry?: number;
   haBiasAtEntry?: string | null;
   haConsecutiveAtEntry?: number;
@@ -296,6 +298,11 @@ export interface Position {
   nearResistanceAtEntry?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
+  zigzagStructureAtEntry?: string;
+  macdCrossAtEntry?: string;
+  macdHistSlopeAtEntry?: string;
+  rsiDivergenceAtEntry?: string;
+  volumeDivergenceAtEntry?: string;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
   nearKeyFib?: boolean;
   nearSupport?: boolean;
@@ -616,12 +623,20 @@ function maybeRecordLearningEpisode(
           ?.heikinAshiExitEnabled === true,
       taModeAtOpen: position.taModeAtOpen,
       taToolsAtOpen: position.taToolsAtOpen,
+      taToolsPassedAtEntry: position.taToolsPassedAtEntry,
+      taToolScoresAtEntry: position.taToolScoresAtEntry,
       taConfluenceAtEntry: position.taConfluenceAtEntry,
       haBiasAtEntry: position.haBiasAtEntry,
       haConsecutiveAtEntry: position.haConsecutiveAtEntry,
       nearSupportAtEntry: position.nearSupportAtEntry,
       nearResistanceAtEntry: position.nearResistanceAtEntry,
       whaleStateAtEntry: position.whaleStateAtEntry,
+      profileTaPlainLanguage: position.profileTaPlainLanguage,
+      zigzagStructureAtEntry: position.zigzagStructureAtEntry,
+      macdCrossAtEntry: position.macdCrossAtEntry,
+      macdHistSlopeAtEntry: position.macdHistSlopeAtEntry,
+      rsiDivergenceAtEntry: position.rsiDivergenceAtEntry,
+      volumeDivergenceAtEntry: position.volumeDivergenceAtEntry,
       taConditionsHeldIntoProfit:
         metrics.maxRunupPct >= 8 &&
         (position.taConfluenceAtEntry == null ||
@@ -1304,6 +1319,8 @@ export class PaperTrader {
     tokenAgeHours?: number | null;
     taModeAtOpen?: Position['taModeAtOpen'];
     taToolsAtOpen?: string[];
+    taToolsPassedAtEntry?: string[];
+    taToolScoresAtEntry?: Record<string, number>;
     taConfluenceAtEntry?: number;
     haBiasAtEntry?: string | null;
     haConsecutiveAtEntry?: number;
@@ -1311,6 +1328,11 @@ export class PaperTrader {
     nearResistanceAtEntry?: boolean;
     whaleStateAtEntry?: string;
     profileTaPlainLanguage?: string;
+    zigzagStructureAtEntry?: string;
+    macdCrossAtEntry?: string;
+    macdHistSlopeAtEntry?: string;
+    rsiDivergenceAtEntry?: string;
+    volumeDivergenceAtEntry?: string;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -1391,6 +1413,8 @@ export class PaperTrader {
       candleSource: input.candleSource,
       taModeAtOpen: input.taModeAtOpen,
       taToolsAtOpen: input.taToolsAtOpen,
+      taToolsPassedAtEntry: input.taToolsPassedAtEntry,
+      taToolScoresAtEntry: input.taToolScoresAtEntry,
       taConfluenceAtEntry: input.taConfluenceAtEntry,
       haBiasAtEntry: input.haBiasAtEntry,
       haConsecutiveAtEntry: input.haConsecutiveAtEntry,
@@ -1398,6 +1422,11 @@ export class PaperTrader {
       nearResistanceAtEntry: input.nearResistanceAtEntry,
       whaleStateAtEntry: input.whaleStateAtEntry,
       profileTaPlainLanguage: input.profileTaPlainLanguage,
+      zigzagStructureAtEntry: input.zigzagStructureAtEntry,
+      macdCrossAtEntry: input.macdCrossAtEntry,
+      macdHistSlopeAtEntry: input.macdHistSlopeAtEntry,
+      rsiDivergenceAtEntry: input.rsiDivergenceAtEntry,
+      volumeDivergenceAtEntry: input.volumeDivergenceAtEntry,
       top10HoldPct:
         input.top10HoldPct != null && Number.isFinite(input.top10HoldPct)
           ? input.top10HoldPct
@@ -1656,6 +1685,8 @@ export class PaperTrader {
       tokenAgeHours?: number | null;
       taModeAtOpen?: Position['taModeAtOpen'];
       taToolsAtOpen?: string[];
+      taToolsPassedAtEntry?: string[];
+      taToolScoresAtEntry?: Record<string, number>;
       taConfluenceAtEntry?: number;
       haBiasAtEntry?: string | null;
       haConsecutiveAtEntry?: number;
@@ -1663,6 +1694,11 @@ export class PaperTrader {
       nearResistanceAtEntry?: boolean;
       whaleStateAtEntry?: string;
       profileTaPlainLanguage?: string;
+      zigzagStructureAtEntry?: string;
+      macdCrossAtEntry?: string;
+      macdHistSlopeAtEntry?: string;
+      rsiDivergenceAtEntry?: string;
+      volumeDivergenceAtEntry?: string;
     }
   ): Position | null {
     const spendSol = clampToMaxAllowedTradeSol(
@@ -1829,6 +1865,8 @@ export class PaperTrader {
       candleSource: meta?.candleSource,
       taModeAtOpen: meta?.taModeAtOpen,
       taToolsAtOpen: meta?.taToolsAtOpen,
+      taToolsPassedAtEntry: meta?.taToolsPassedAtEntry,
+      taToolScoresAtEntry: meta?.taToolScoresAtEntry,
       taConfluenceAtEntry: meta?.taConfluenceAtEntry,
       haBiasAtEntry: meta?.haBiasAtEntry,
       haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
@@ -1836,6 +1874,11 @@ export class PaperTrader {
       nearResistanceAtEntry: meta?.nearResistanceAtEntry,
       whaleStateAtEntry: meta?.whaleStateAtEntry,
       profileTaPlainLanguage: meta?.profileTaPlainLanguage,
+      zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
+      macdCrossAtEntry: meta?.macdCrossAtEntry,
+      macdHistSlopeAtEntry: meta?.macdHistSlopeAtEntry,
+      rsiDivergenceAtEntry: meta?.rsiDivergenceAtEntry,
+      volumeDivergenceAtEntry: meta?.volumeDivergenceAtEntry,
       top10HoldPct:
         meta?.top10HoldPct != null && Number.isFinite(meta.top10HoldPct)
           ? meta.top10HoldPct
