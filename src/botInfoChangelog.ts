@@ -40,6 +40,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.138',
+    title: 'Daily Loss Off + Lifetime Counters',
+    sections: ['risk', 'overview', 'microbots'],
+    items: [
+      'Daily Loss SOL can be set to 0 (Off) — no buy block and no daily auto-pause; Risk card now shows Daily Loss next to Weekly.',
+      'Turning Auto-pause OFF clears sticky halt; Clear halt adds a short same-reason re-arm grace so trading can resume.',
+      'Overview Win Rate / Trades use lifetime closed counts (monotonic) — no longer shrink when the 200-row closed list rotates; subtitle is wins W / losses L.',
+      'Micro-bot progress shows durable learning episodes plus session closed for that profile (Scalper episodes can exceed Overview trades by design).',
+    ],
+  },
+  {
     version: '1.2.137',
     title: 'RPC Debug Cleanup',
     sections: ['execution'],

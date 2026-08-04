@@ -6219,7 +6219,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="ov-meta-strip mt-2.5 sm:mt-3">
         <div class="card">
-          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Percentage of closed trades that finished green."></span></div>
+          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Lifetime closed trades that finished green. Subtitle is wins W / losses L. Closed Trades list shows the last 200 rows only."></span></div>
           <div class="stat" id="win-rate">—</div>
           <div class="mint mt-1 text-xs" id="stat-wl">—</div>
         </div>
@@ -6243,7 +6243,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Open + closed paper/live trades."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Lifetime closed + currently open. Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Large number = currently open trades. Below: Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
           <div class="text-lg font-semibold" id="entries-open-count">—</div>
@@ -8059,7 +8059,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="config-filter-grid grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div class="field"><label title="Distinct smart wallets that must buy before you copy">Convergence — <span class="val" id="v-convergenceRequired">2</span></label><input type="range" id="convergenceRequired" min="1" max="5" step="1" value="2" /></div>
             <div class="field"><label title="Max open positions at once">Max Positions — <span class="val" id="v-maxConcurrentPositions">12</span></label><input type="range" id="maxConcurrentPositions" min="1" max="50" step="1" value="12" /></div>
-            <div class="field"><label title="Stop new buys after this much daily realized loss">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0.5" max="20" step="0.5" value="2" /></div>
+            <div class="field"><label title="Stop new buys after this much daily realized loss (0 = off)">Daily Loss SOL — <span class="val" id="v-dailyLossLimitSol">2</span></label><input type="range" id="dailyLossLimitSol" min="0" max="20" step="0.5" value="2" /></div>
             <div class="field"><label title="Skip source wallets below this win rate (0 = off)">Min Win Rate % — <span class="val" id="v-minWinRate">0</span></label><input type="range" id="minWinRate" min="0" max="100" step="5" value="0" /></div>
             <div class="field"><label title="Minimum pool liquidity USD. Absolute floor $8,000 (recommended $8k–$15k). Floor is non-bypassable.">Min Liquidity USD — <span class="val" id="v-minLiquidity">10000</span></label><input type="range" id="minLiquidity" min="8000" max="100000" step="500" value="10000" /></div>
             <div class="field"><label title="Minimum entry / buy market-cap USD. Absolute floor $8,000 — non-bypassable across Risk On/Off. Rejects post-dump ghosts under ~$8k MC.">Min Market Cap USD — <span class="val" id="v-minMarketCapUsd">8000</span></label><input type="range" id="minMarketCapUsd" min="8000" max="100000" step="500" value="8000" /></div>
@@ -8155,7 +8155,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <label class="ctl ctl-md"><span>Trail activate @+% <span class="tip" tabindex="0" data-tip="Profit % that arms the trailing stop."></span></span><input type="number" id="trailingActivationProfit" value="30" /></label>
             <label class="ctl ctl-sm"><span>Trail % <span class="tip" tabindex="0" data-tip="Trail distance from peak once armed."></span></span><input type="number" id="trailingStopPct" value="20" /></label>
             <label class="ctl ctl-sm"><span>Max DD % <span class="tip" tabindex="0" data-tip="Account max drawdown before risk halt."></span></span><input type="number" id="maxDrawdownPct" value="25" /></label>
-            <label class="ctl ctl-md"><span>Weekly loss SOL <span class="tip" tabindex="0" data-tip="Weekly realized loss cap."></span></span><input type="number" id="weeklyLossLimitSol" value="5" step="0.1" /></label>
+            <label class="ctl ctl-md"><span>Daily loss SOL <span class="tip" tabindex="0" data-tip="Daily realized loss cap (same as Filters). 0 = off — does not block buys or auto-pause."></span></span><input type="number" id="riskDailyLossLimitSol" value="2" min="0" max="50" step="0.5" /></label>
+            <label class="ctl ctl-md"><span>Weekly loss SOL <span class="tip" tabindex="0" data-tip="Weekly realized loss cap. 0 = off."></span></span><input type="number" id="weeklyLossLimitSol" value="5" step="0.1" /></label>
             <label class="ctl ctl-md"><span>Min trade SOL <span class="tip" tabindex="0" data-tip="Floor size after risk sizing."></span></span><input type="number" id="minTradeSol" value="0.02" step="0.01" /></label>
             <label class="ctl ctl-md"><span>Max trade SOL <span class="tip" tabindex="0" data-tip="Ceiling size after risk sizing."></span></span><input type="number" id="maxTradeSol" value="1" step="0.01" /></label>
             <label class="ctl ctl-md"><span>Normal risk % <span class="tip" tabindex="0" data-tip="Risk % for normal (non-migration) entries."></span></span><input type="number" id="normalRiskPct" value="1.5" step="0.1" /></label>
@@ -11303,6 +11304,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const slBadge = p.selfLearnBadge || '';
           const lp = p.learningProgress || {};
           const lpEpisodes = Math.max(0, Number(lp.episodes) || 0);
+          const lpSession = Math.max(0, Number(lp.sessionClosed) || 0);
           const lpGoal = Math.max(1, Number(lp.goal) || 400);
           const lpPct = Math.min(100, Math.max(0, Number(lp.pct) || 0));
           const lpWins = Math.max(0, Number(lp.wins) || 0);
@@ -11455,11 +11457,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 lpEpisodes +
                   ' / ' +
                   lpGoal +
-                  ' episodes · ' +
+                  ' learning episodes (durable) · ' +
+                  lpSession +
+                  ' session closed · ' +
                   lpWins +
                   ' wins / ' +
                   lpLosses +
-                  ' losses · goal 400 closed trades · Level = applied upgrades'
+                  ' losses · survives Clear list / Overview Reset / 200-row closed cap · Level = applied upgrades'
               ) +
             '">' +
               '<div class="tp-learn-progress-meta">' +
@@ -11467,7 +11471,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   escHtml(String(lpEpisodes)) +
                   ' / ' +
                   escHtml(String(lpGoal)) +
-                  ' episodes · ' +
+                  ' learning · ' +
+                  escHtml(String(lpSession)) +
+                  ' session · ' +
                   escHtml(String(lpPct)) +
                   '%' +
                 '</span>' +
@@ -14323,7 +14329,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           }
         }
         const v = document.getElementById('v-' + id);
-        if (v) v.textContent = el.value;
+        if (v) {
+          if (id === 'dailyLossLimitSol' && Number(el.value) === 0) {
+            v.textContent = 'Off';
+          } else {
+            v.textContent = el.value;
+          }
+        }
       });
     });
 
@@ -19384,7 +19396,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (tip) tip.setAttribute('data-tip',
           (openN || 0) + ' open · ' + (closedN ?? Math.max(0, (s.totalTrades || 0) - (openN || 0))) + ' closed');
       }
-      document.getElementById('stat-wl').textContent = (s.wins ?? 0) + ' / ' + (s.losses ?? 0);
+      document.getElementById('stat-wl').textContent =
+        (s.wins ?? 0) + 'W / ' + (s.losses ?? 0) + 'L';
       const ur = sumOpenUnrealized(positions.open);
       const pfUr = status.portfolio && status.portfolio.unrealizedPnlSol != null
         ? Number(status.portfolio.unrealizedPnlSol)
@@ -19524,7 +19537,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             if (el) el.checked = v;
           } else {
             const el = document.getElementById(k);
-            if (el) { el.value = v; const lab = document.getElementById('v-'+k); if (lab) lab.textContent = v; }
+            if (el) {
+              el.value = v;
+              const lab = document.getElementById('v-'+k);
+              if (lab) {
+                lab.textContent =
+                  k === 'dailyLossLimitSol' && Number(v) === 0 ? 'Off' : v;
+              }
+            }
           }
         });
         // Alias: minHolders preferred over minHolderCount in UI
@@ -19754,6 +19774,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           }
           document.getElementById('maxDrawdownPct').value = cfg.risk.maxDrawdownPct;
           document.getElementById('weeklyLossLimitSol').value = cfg.risk.weeklyLossLimitSol;
+          const riskDaily = document.getElementById('riskDailyLossLimitSol');
+          if (riskDaily) {
+            riskDaily.value =
+              cfg.filters && cfg.filters.dailyLossLimitSol != null
+                ? cfg.filters.dailyLossLimitSol
+                : 0;
+          }
           document.getElementById('minTradeSol').value = cfg.risk.minTradeSol;
           document.getElementById('maxTradeSol').value = cfg.risk.maxTradeSol;
           document.getElementById('normalRiskPct').value = cfg.risk.normal.riskPercentPerTrade;
@@ -22132,6 +22159,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function saveRiskConfig(silent) {
+      const dailyEl =
+        document.getElementById('riskDailyLossLimitSol') ||
+        document.getElementById('dailyLossLimitSol');
+      const dailyVal = Number(dailyEl && dailyEl.value);
       await fetchJSON('/api/risk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -22144,6 +22175,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           trailingStopPct: Number(document.getElementById('trailingStopPct').value),
           trailingActivationProfit: Number(document.getElementById('trailingActivationProfit').value),
           maxDrawdownPct: Number(document.getElementById('maxDrawdownPct').value),
+          dailyLossLimitSol: Number.isFinite(dailyVal) ? dailyVal : 0,
           weeklyLossLimitSol: Number(document.getElementById('weeklyLossLimitSol').value),
           minTradeSol: Number(document.getElementById('minTradeSol').value),
           maxTradeSol: Number(document.getElementById('maxTradeSol').value),
@@ -22160,6 +22192,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           },
         }),
       });
+      // Keep Filters slider in sync
+      const filtDaily = document.getElementById('dailyLossLimitSol');
+      const filtLab = document.getElementById('v-dailyLossLimitSol');
+      if (filtDaily && Number.isFinite(dailyVal)) {
+        filtDaily.value = String(dailyVal);
+        if (filtLab) filtLab.textContent = dailyVal === 0 ? 'Off' : String(dailyVal);
+      }
       if (!silent) alert('Risk settings saved');
       refresh();
     }

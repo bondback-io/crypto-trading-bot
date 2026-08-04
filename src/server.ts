@@ -1782,8 +1782,34 @@ export function createServer(): express.Application {
       partial.migration = body.migration as typeof config.risk.migration;
     }
 
+    const prevAutoPause = Boolean(config.risk?.autoPauseOnLimit);
     const risk = updateRiskConfig(partial);
-    res.json({ ok: true, risk });
+
+    // Risk card can also set Filters daily loss (0 = off)
+    if (body.dailyLossLimitSol !== undefined) {
+      const n = Number(body.dailyLossLimitSol);
+      if (Number.isFinite(n)) {
+        config.filters.dailyLossLimitSol = Math.max(0, Math.min(50, n));
+        persistUserSettings();
+      }
+    }
+
+    // Turning Auto-pause OFF must clear sticky halt so trading resumes
+    if (
+      body.autoPauseOnLimit !== undefined &&
+      prevAutoPause &&
+      risk.autoPauseOnLimit === false
+    ) {
+      clearRiskHalt();
+      clearMonitorRiskHalt();
+      resumeMonitor();
+    }
+
+    res.json({
+      ok: true,
+      risk,
+      filters: { dailyLossLimitSol: config.filters.dailyLossLimitSol },
+    });
   });
 
   app.get('/api/profit-strategy', (_req: Request, res: Response) => {

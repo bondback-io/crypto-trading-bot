@@ -789,6 +789,10 @@ export class PaperTrader {
   private mode: 'paper' | 'backtest';
   private positions: Map<string, Position> = new Map();
   private closedPositions: Position[] = [];
+  /** Monotonic Overview counters — not shrunk by the 200-row closed list. */
+  private lifetimeClosed = 0;
+  private lifetimeWins = 0;
+  private lifetimeLosses = 0;
   private logs: TradeLog[] = [];
   private priceCache: Map<string, number> = new Map();
   /** Latest observed market-cap USD per mint (from Dex/curve refresh) */
@@ -824,6 +828,9 @@ export class PaperTrader {
       startingBalanceSol: this.startingBalanceSol,
       positions: Array.from(this.positions.values()),
       closedPositions: this.closedPositions,
+      lifetimeClosed: this.lifetimeClosed,
+      lifetimeWins: this.lifetimeWins,
+      lifetimeLosses: this.lifetimeLosses,
     });
   }
 
@@ -869,12 +876,52 @@ export class PaperTrader {
       );
       this.persistState();
     }
+    // Lifetime counters: restore or seed from current representative closes
+    const savedLife = Math.max(0, Math.round(Number(saved.lifetimeClosed) || 0));
+    if (savedLife > 0) {
+      this.lifetimeClosed = savedLife;
+      this.lifetimeWins = Math.max(0, Math.round(Number(saved.lifetimeWins) || 0));
+      this.lifetimeLosses = Math.max(
+        0,
+        Math.round(Number(saved.lifetimeLosses) || 0)
+      );
+      // Heal inconsistent W+L vs closed
+      if (this.lifetimeWins + this.lifetimeLosses !== this.lifetimeClosed) {
+        const reps = representativeClosedTrades(this.closedPositions);
+        if (reps.length >= this.lifetimeClosed) {
+          this.seedLifetimeFromClosed();
+        } else {
+          this.lifetimeLosses = Math.max(
+            0,
+            this.lifetimeClosed - this.lifetimeWins
+          );
+        }
+      }
+    } else {
+      this.seedLifetimeFromClosed();
+    }
     resetPeakEquity(this.getEquitySol());
     console.log(
       `[paper] Loaded paperBalance.json — balance ${this.balanceSol.toFixed(4)} SOL, ` +
-        `${this.positions.size} open, ${this.closedPositions.length} closed`
+        `${this.positions.size} open, ${this.closedPositions.length} closed` +
+        ` · lifetime ${this.lifetimeClosed} (${this.lifetimeWins}W/${this.lifetimeLosses}L)`
     );
     return true;
+  }
+
+  /** Seed lifetime Overview counters from the current closed list (once). */
+  private seedLifetimeFromClosed(): void {
+    const reps = representativeClosedTrades(this.closedPositions);
+    this.lifetimeClosed = reps.length;
+    this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
+    this.lifetimeLosses = reps.filter((p) => (p.pnlSol ?? 0) <= 0).length;
+  }
+
+  /** Increment lifetime counters on a representative final close (not partials). */
+  private noteLifetimeFinalClose(pnlSol: number): void {
+    this.lifetimeClosed += 1;
+    if (pnlSol > 0) this.lifetimeWins += 1;
+    else this.lifetimeLosses += 1;
   }
 
   getStartingBalance(): number {
@@ -1977,6 +2024,7 @@ export class PaperTrader {
     if (this.closedPositions.length > 200) {
       this.closedPositions = this.closedPositions.slice(-200);
     }
+    this.noteLifetimeFinalClose(totalPnl);
 
     maybeRecordScannerOutcome(position, totalPct);
     maybeRecordLaneOutcome(position, totalPnl, totalPct);
@@ -2138,8 +2186,9 @@ export class PaperTrader {
   clearClosedHistory(): { cleared: number } {
     const cleared = this.closedPositions.length;
     this.closedPositions = [];
+    // Lifetime Overview counters are kept — Clear list only affects the table.
     this.persistState();
-    this.log('info', 'Closed trade history cleared (session)');
+    this.log('info', 'Closed trade history cleared (session; lifetime counters kept)');
     return { cleared };
   }
 
@@ -2161,6 +2210,9 @@ export class PaperTrader {
     if (clearHistory) {
       this.closedPositions = [];
       this.logs = [];
+      this.lifetimeClosed = 0;
+      this.lifetimeWins = 0;
+      this.lifetimeLosses = 0;
     }
 
     resetPeakEquity(this.balanceSol);
@@ -3686,6 +3738,10 @@ export class PaperTrader {
                   ? (position.realizedPnlSol / position.initialCostSol) * 100
                   : 0;
               this.closedPositions.push(position);
+              if (this.closedPositions.length > 200) {
+                this.closedPositions = this.closedPositions.slice(-200);
+              }
+              this.noteLifetimeFinalClose(position.pnlSol ?? 0);
             } else {
               position.status = 'partial';
               // Display/history slice so Closed Trades can group partial TPs
@@ -3784,6 +3840,10 @@ export class PaperTrader {
             100;
           position.pnlPct = pnlPct;
           this.closedPositions.push(position);
+          if (this.closedPositions.length > 200) {
+            this.closedPositions = this.closedPositions.slice(-200);
+          }
+          this.noteLifetimeFinalClose(position.pnlSol ?? 0);
           this.log(
             'sell',
             `Live trailing/exit ${formatTokenLabel(position.symbol, position.name, position.mint)} [${reason}]`,
@@ -3935,12 +3995,23 @@ export class PaperTrader {
     };
   }
 
-  /** Simple win-rate % from closed positions (for filter checks) */
+  /** Simple win-rate % — lifetime Overview counter (monotonic). */
   getWinRatePct(): number {
+    if (this.lifetimeClosed > 0) {
+      return (this.lifetimeWins / this.lifetimeClosed) * 100;
+    }
     const reps = representativeClosedTrades(this.closedPositions);
     if (reps.length === 0) return 0;
     const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
     return (wins / reps.length) * 100;
+  }
+
+  /** Session closed count for a trade profile (current 200-row list). */
+  getSessionClosedCountForProfile(profileId: string): number {
+    if (!profileId) return 0;
+    return representativeClosedTrades(this.closedPositions).filter(
+      (p) => p.tradeProfileId === profileId
+    ).length;
   }
 
   /** Soak / tuning baseline: opens/hr, exit mix, fee drag vs mark. */
@@ -4004,24 +4075,32 @@ export class PaperTrader {
   getStats() {
     const closedRaw = this.closedPositions;
     const closed = representativeClosedTrades(closedRaw);
-    const wins = closed.filter((p) => (p.pnlSol ?? 0) > 0);
-    const losses = closed.filter((p) => (p.pnlSol ?? 0) <= 0);
+    const sessionWins = closed.filter((p) => (p.pnlSol ?? 0) > 0);
+    const sessionLosses = closed.filter((p) => (p.pnlSol ?? 0) <= 0);
+    const useLife = this.lifetimeClosed > 0;
+    const winCount = useLife ? this.lifetimeWins : sessionWins.length;
+    const lossCount = useLife ? this.lifetimeLosses : sessionLosses.length;
+    const closedCount = useLife ? this.lifetimeClosed : closed.length;
     const netPnlSol = realizedPnlFromClosedHistory(closedRaw);
     const avgWinPct =
-      wins.length > 0
-        ? wins.reduce((s, p) => s + (p.pnlPct ?? 0), 0) / wins.length
+      sessionWins.length > 0
+        ? sessionWins.reduce((s, p) => s + (p.pnlPct ?? 0), 0) /
+          sessionWins.length
         : 0;
     const avgLossPct =
-      losses.length > 0
-        ? losses.reduce((s, p) => s + (p.pnlPct ?? 0), 0) / losses.length
+      sessionLosses.length > 0
+        ? sessionLosses.reduce((s, p) => s + (p.pnlPct ?? 0), 0) /
+          sessionLosses.length
         : 0;
     const avgWinSol =
-      wins.length > 0
-        ? wins.reduce((s, p) => s + (p.pnlSol ?? 0), 0) / wins.length
+      sessionWins.length > 0
+        ? sessionWins.reduce((s, p) => s + (p.pnlSol ?? 0), 0) /
+          sessionWins.length
         : 0;
     const avgLossSol =
-      losses.length > 0
-        ? losses.reduce((s, p) => s + (p.pnlSol ?? 0), 0) / losses.length
+      sessionLosses.length > 0
+        ? sessionLosses.reduce((s, p) => s + (p.pnlSol ?? 0), 0) /
+          sessionLosses.length
         : 0;
     const bestTrade = closed.reduce<Position | null>((best, p) => {
       if (!best || (p.pnlPct ?? -Infinity) > (best.pnlPct ?? -Infinity)) {
@@ -4037,9 +4116,9 @@ export class PaperTrader {
     }, null);
 
     const start = this.startingBalanceSol;
-    const grossWinSol = wins.reduce((s, p) => s + (p.pnlSol ?? 0), 0);
+    const grossWinSol = sessionWins.reduce((s, p) => s + (p.pnlSol ?? 0), 0);
     const grossLossSol = Math.abs(
-      losses.reduce((s, p) => s + (p.pnlSol ?? 0), 0)
+      sessionLosses.reduce((s, p) => s + (p.pnlSol ?? 0), 0)
     );
     const profitFactor =
       grossLossSol > 0
@@ -4069,12 +4148,16 @@ export class PaperTrader {
         : 0;
 
     return {
-      totalTrades: closed.length + this.positions.size,
-      closedTrades: closed.length,
+      totalTrades: closedCount + this.positions.size,
+      closedTrades: closedCount,
       openTrades: this.positions.size,
-      wins: wins.length,
-      losses: losses.length,
+      wins: winCount,
+      losses: lossCount,
       winRatePct: this.getWinRatePct(),
+      lifetimeClosed: this.lifetimeClosed,
+      lifetimeWins: this.lifetimeWins,
+      lifetimeLosses: this.lifetimeLosses,
+      sessionClosed: closed.length,
       profitFactor: Number(profitFactor.toFixed(2)),
       maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
       avgHoldSec: Number(avgHoldSec.toFixed(0)),

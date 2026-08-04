@@ -21,6 +21,10 @@ export interface PersistedPaperState {
   startingBalanceSol: number;
   positions: Position[];
   closedPositions: Position[];
+  /** Lifetime representative closed trade counts (survive 200-row list rotation). */
+  lifetimeClosed?: number;
+  lifetimeWins?: number;
+  lifetimeLosses?: number;
 }
 
 export function paperBalanceFilePath(): string {
@@ -44,6 +48,12 @@ export function loadPaperBalance(): PersistedPaperState | null {
     closedPositions: Array.isArray(parsed.closedPositions)
       ? parsed.closedPositions
       : [],
+    lifetimeClosed:
+      typeof parsed.lifetimeClosed === 'number' ? parsed.lifetimeClosed : undefined,
+    lifetimeWins:
+      typeof parsed.lifetimeWins === 'number' ? parsed.lifetimeWins : undefined,
+    lifetimeLosses:
+      typeof parsed.lifetimeLosses === 'number' ? parsed.lifetimeLosses : undefined,
   };
 }
 
@@ -52,6 +62,9 @@ export function savePaperBalance(state: {
   startingBalanceSol: number;
   positions: Position[];
   closedPositions: Position[];
+  lifetimeClosed?: number;
+  lifetimeWins?: number;
+  lifetimeLosses?: number;
 }): void {
   try {
     ensureDataDir();
@@ -63,6 +76,9 @@ export function savePaperBalance(state: {
       positions: state.positions,
       // Cap closed history on disk
       closedPositions: state.closedPositions.slice(-200),
+      lifetimeClosed: state.lifetimeClosed ?? 0,
+      lifetimeWins: state.lifetimeWins ?? 0,
+      lifetimeLosses: state.lifetimeLosses ?? 0,
     };
     atomicWriteJson(PAPER_FILE, payload);
   } catch (err) {

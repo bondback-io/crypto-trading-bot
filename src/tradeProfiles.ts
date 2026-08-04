@@ -5727,7 +5727,7 @@ export function migratePerformanceAllocV191(): boolean {
   try {
     const { config: cfg } = require('./config') as typeof import('./config');
     if (cfg.filters && Number(cfg.filters.dailyLossLimitSol) > 0.5) {
-      // Cap loose daily loss to ~5% of a 10 SOL book (operator can raise later)
+      // Cap loose daily loss once at migration — never force when operator set 0 (off)
       cfg.filters.dailyLossLimitSol = 0.5;
     }
   } catch {

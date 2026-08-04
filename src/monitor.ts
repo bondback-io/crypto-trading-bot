@@ -5183,7 +5183,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
 
   const dailyPnl = paperTrader.getDailyPnlSol();
-  if (dailyPnl <= -filters.dailyLossLimitSol) {
+  const dailyLimit = Number(filters.dailyLossLimitSol) || 0;
+  if (dailyLimit > 0 && dailyPnl <= -dailyLimit) {
     console.log(
       `[monitor] Signal rejected (${signalKind}) — daily loss limit hit (${dailyPnl.toFixed(4)} SOL)`
     );

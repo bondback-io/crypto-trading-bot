@@ -41,15 +41,30 @@ let peakEquitySol = 0;
 let halted = false;
 let haltReason: RiskHaltReason = null;
 let pauseHandler: ((reason: string) => void) | null = null;
+/** After Clear halt, suppress re-arming the same reason until this time. */
+let haltRearmBlockedUntil = 0;
+let haltRearmBlockedReason: RiskHaltReason = null;
+
+const HALT_REARM_GRACE_MS = 20 * 60_000;
 
 export function onRiskHalt(handler: (reason: string) => void): void {
   pauseHandler = handler;
 }
 
 export function clearRiskHalt(): void {
+  const prior = haltReason;
   halted = false;
   haltReason = null;
-  console.log('[risk] Halt cleared — trading may resume');
+  if (prior) {
+    haltRearmBlockedReason = prior;
+    haltRearmBlockedUntil = Date.now() + HALT_REARM_GRACE_MS;
+    console.log(
+      `[risk] Halt cleared — trading may resume ` +
+        `(${prior} re-arm grace ${Math.round(HALT_REARM_GRACE_MS / 60_000)}m)`
+    );
+  } else {
+    console.log('[risk] Halt cleared — trading may resume');
+  }
 }
 
 export function isRiskHalted(): boolean {
@@ -279,19 +294,25 @@ export function evaluateRiskLimits(input: {
   const risk = config.risk ?? DEFAULT_RISK;
   updatePeakEquity(input.equitySol);
   const drawdownPct = getDrawdownPct(input.equitySol);
-  const dailyLimit = config.filters.dailyLossLimitSol;
-  const weeklyLimit = risk.weeklyLossLimitSol;
+  const dailyLimit = Number(config.filters?.dailyLossLimitSol) || 0;
+  const weeklyLimit = Number(risk.weeklyLossLimitSol) || 0;
 
   let reason: RiskHaltReason = null;
 
   if (risk.enabled) {
-    if (input.dailyPnlSol <= -dailyLimit) reason = 'daily_loss';
-    else if (input.weeklyPnlSol <= -weeklyLimit) reason = 'weekly_loss';
+    if (dailyLimit > 0 && input.dailyPnlSol <= -dailyLimit) reason = 'daily_loss';
+    else if (weeklyLimit > 0 && input.weeklyPnlSol <= -weeklyLimit)
+      reason = 'weekly_loss';
     else if (drawdownPct >= risk.maxDrawdownPct) reason = 'max_drawdown';
   }
 
   if (reason && risk.autoPauseOnLimit) {
-    triggerHalt(reason, input, drawdownPct);
+    const now = Date.now();
+    const graceActive =
+      haltRearmBlockedReason === reason && now < haltRearmBlockedUntil;
+    if (!graceActive) {
+      triggerHalt(reason, input, drawdownPct);
+    }
   }
 
   return {

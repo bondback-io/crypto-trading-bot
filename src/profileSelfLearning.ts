@@ -103,6 +103,8 @@ export interface LearningProgressSnapshot {
   pct: number;
   level: number;
   upgrades: LearningUpgradeMilestone[];
+  /** Closed trades for this profile in the current session list (≤200 rows). */
+  sessionClosed?: number;
 }
 
 export interface ProfileSelfLearningState {
@@ -651,6 +653,15 @@ export function getLearningProgressSnapshot(
     pct,
     level: Math.max(0, state.version || 0),
     upgrades,
+    sessionClosed: (() => {
+      try {
+        const { paperTrader } =
+          require('./paperTrader') as typeof import('./paperTrader');
+        return paperTrader.getSessionClosedCountForProfile(profileId);
+      } catch {
+        return 0;
+      }
+    })(),
   };
 }
 
