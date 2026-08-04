@@ -155,6 +155,13 @@ export function setLearningAcceleratorsConfig(
 function pushAccelDecision(kind: string, profileId: string | undefined, detail: string): void {
   decisions.unshift({ at: Date.now(), kind, profileId, detail });
   if (decisions.length > 80) decisions = decisions.slice(0, 80);
+  try {
+    const { mirrorAccelDecision } =
+      require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+    mirrorAccelDecision(kind, profileId, detail);
+  } catch {
+    /* optional */
+  }
 }
 
 /** Shared decision ring hook for CF / teacher-student modules. */

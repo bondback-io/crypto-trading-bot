@@ -144,6 +144,19 @@ export function pushMarlDecision(d: Omit<MarlDecision, 'at'> & { at?: number }):
     st.decisions = st.decisions.slice(0, MAX_DECISIONS);
   }
   saveMarlState(st);
+  try {
+    const { mirrorMarlDecision } =
+      require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+    mirrorMarlDecision({
+      kind: d.kind,
+      detail: d.detail,
+      profileId: d.profileId,
+      mint: d.mint,
+      symbol: d.symbol,
+    });
+  } catch {
+    /* optional */
+  }
 }
 
 export function recordLowMcOpen(mint: string, profileId: string, at = Date.now()): void {

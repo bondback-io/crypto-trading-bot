@@ -590,9 +590,18 @@ export function buildMarlLaneFightThoughts(
     afterWinner &&
     beforeWinner.id !== afterWinner.id
   ) {
-    thoughts.push(
-      `Suggestion: prefer ${afterWinner.name} over ${beforeWinner.name} this fight`
-    );
+    const suggestion = `Suggestion: prefer ${afterWinner.name} over ${beforeWinner.name} this fight`;
+    thoughts.push(suggestion);
+    try {
+      const { recordMarlRankSuggestion } =
+        require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+      recordMarlRankSuggestion({
+        summary: `Preferred ${afterWinner.name} over ${beforeWinner.name} on this setup due to stronger MARL weight fit.`,
+        detail: suggestion,
+      });
+    } catch {
+      /* optional */
+    }
   }
 
   try {

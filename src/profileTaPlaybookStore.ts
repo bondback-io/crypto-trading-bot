@@ -420,9 +420,24 @@ export function maybeNudgeProfileTaFromEpisodes(profileId: string): {
               'ProfileTaPlaybooks',
               `${profileId}: auto-rollback TA weights (${afterAvg.toFixed(1)}% vs ${beforeAvg.toFixed(1)}%)`
             );
+            const summary = `Auto-rollback TA weights (${afterAvg.toFixed(1)}% vs ${beforeAvg.toFixed(1)}%)`;
+            try {
+              const { recordTaDecision } =
+                require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+              recordTaDecision({
+                profileId,
+                summary,
+                decisionType: 'warning',
+                applied: 'applied',
+                detail: 'auto-rollback',
+                dedupeKey: `ta-rb:${profileId}`,
+              });
+            } catch {
+              /* optional */
+            }
             return {
               applied: true,
-              summary: `Auto-rollback TA weights (${afterAvg.toFixed(1)}% vs ${beforeAvg.toFixed(1)}%)`,
+              summary,
               rolledBack: true,
             };
           }
@@ -633,6 +648,20 @@ export function maybeNudgeProfileTaFromEpisodes(profileId: string): {
       historySource: 'auto',
     });
     logger.info('ProfileTaPlaybooks', `${profileId}: ${summary}`);
+    try {
+      const { recordTaDecision } =
+        require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+      recordTaDecision({
+        profileId,
+        summary,
+        decisionType: 'soft_push',
+        applied: 'applied',
+        detail: 'ta weight nudge',
+        dedupeKey: `ta-nudge:${profileId}:${summary.slice(0, 40)}`,
+      });
+    } catch {
+      /* optional */
+    }
     return { applied: true, summary };
   } catch (err) {
     logger.warn('ProfileTaPlaybooks', 'nudge failed', errorToMeta(err));

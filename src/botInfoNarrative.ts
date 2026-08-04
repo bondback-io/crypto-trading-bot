@@ -212,9 +212,11 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         </ul>
 
         <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
-        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics. Controls: Micro Bots → Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed. Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (MARL, Profile RL, accelerators, TA, ML, sparse Zion) — logging only.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open Micro Bots coaches')}
+          ${btn('botperf', 'Open Bot Performance')}
           ${btn('backup', 'Open learning journal')}
         </div>
       </article>

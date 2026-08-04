@@ -3703,6 +3703,37 @@ export function createServer(): express.Application {
     res.json({ decisions: getLaneDecisionLog(limit) });
   });
 
+  app.get('/api/agent-decisions', (req: Request, res: Response) => {
+    try {
+      const { listAgentDecisions } =
+        require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+      const q = req.query || {};
+      const range = String(q.range || q.window || '').toLowerCase();
+      let since = Number(q.since) || 0;
+      if (!since && range && range !== 'all') {
+        const now = Date.now();
+        if (range === '1h') since = now - 3600_000;
+        else if (range === '24h') since = now - 86_400_000;
+        else if (range === '7d') since = now - 7 * 86_400_000;
+      }
+      const decisions = listAgentDecisions({
+        limit: Number(q.limit) || 50,
+        source: String(q.source || '') || undefined,
+        profileId: String(q.profileId || q.profile || '') || undefined,
+        decisionType: String(q.decisionType || q.type || '') || undefined,
+        applied: String(q.applied || '') || undefined,
+        since: since || undefined,
+        until: Number(q.until) || undefined,
+      });
+      res.json({ ok: true, decisions, generatedAt: Date.now() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/trade-profiles/intelligence', (req: Request, res: Response) => {
     try {
       const { parsePerformanceWindow } =

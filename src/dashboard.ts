@@ -3219,6 +3219,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       line-height: 1.45;
     }
     .lsd-syshealth strong { color: #e0f2fe; }
+    .adl-decisions .tp-decision-row.is-obs { opacity: 0.88; }
+    .adl-decisions .adl-agent { color: #38bdf8; font-weight: 600; }
+    .adl-decisions .adl-type { color: #94a3b8; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.03em; }
+    .adl-decisions .adl-applied { color: #64748b; font-size: 0.65rem; }
+    .adl-decisions .adl-detail {
+      display: none;
+      margin-top: 0.25rem;
+      font-size: 0.68rem;
+      color: #64748b;
+      white-space: pre-wrap;
+    }
+    .adl-decisions .tp-decision-row.is-open .adl-detail { display: block; }
     .lsd-warn {
       font-size: 0.72rem;
       color: #fbbf24;
@@ -8651,6 +8663,73 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs">Loading…</p>
         </div>
       </div>
+
+      <div class="card" id="agent-decision-log-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Agent Decision Log <span class="tip" tabindex="0" data-tip="Reasoning and advice feed from MARL, Profile RL, accelerators, TA, ML, and occasional Zion comments. Separate from the lane fight execution log on Overview / Micro Bots. Logging only — no trading side effects."></span></div>
+            <p class="text-xs text-slate-400 mb-0">How coaches advise, recommend, and soft-influence the stack. Newest first.</p>
+          </div>
+          <span class="mint text-xs" id="adl-updated-at">—</span>
+        </div>
+        <div class="filters-row mb-2 flex flex-wrap gap-2 items-end" id="adl-filters">
+          <label class="ctl ctl-sm">
+            <span>Agent</span>
+            <select id="adl-filter-source" onchange="loadAgentDecisionLog()">
+              <option value="all">All</option>
+              <option value="marl">MARL</option>
+              <option value="profile_rl">Profile RL</option>
+              <option value="ml">ML</option>
+              <option value="self_learn">Self-Learn</option>
+              <option value="ta_playbook">Profile TA</option>
+              <option value="accel_replay">Replay</option>
+              <option value="accel_cf">Counterfactual</option>
+              <option value="accel_teacher">Teacher–Student</option>
+              <option value="peak_protect">Peak Protect</option>
+              <option value="zion">Zion</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Type</span>
+            <select id="adl-filter-type" onchange="loadAgentDecisionLog()">
+              <option value="all">All</option>
+              <option value="advice">Advice</option>
+              <option value="soft_push">Soft push</option>
+              <option value="recommendation">Recommendation</option>
+              <option value="rank">Rank</option>
+              <option value="mode_change">Mode change</option>
+              <option value="hint">Hint</option>
+              <option value="warning">Warning</option>
+              <option value="comment">Comment</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Applied</span>
+            <select id="adl-filter-applied" onchange="loadAgentDecisionLog()">
+              <option value="all">All</option>
+              <option value="applied">Applied / queued</option>
+              <option value="observation_only">Observation only</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Range</span>
+            <select id="adl-filter-range" onchange="loadAgentDecisionLog()">
+              <option value="24h">24h</option>
+              <option value="1h">1h</option>
+              <option value="7d">7d</option>
+              <option value="all">All</option>
+            </select>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Profile</span>
+            <input type="text" id="adl-filter-profile" placeholder="id or name" onkeydown="if(event.key==='Enter'){event.preventDefault();loadAgentDecisionLog();}" />
+          </label>
+          <button type="button" class="btn btn-secondary text-xs" onclick="loadAgentDecisionLog()">Refresh</button>
+        </div>
+        <div class="tp-decisions adl-decisions" id="agent-decision-log" style="max-height:18rem">
+          <p class="mint text-xs">Loading…</p>
+        </div>
+      </div>
     </section>
 
     <!-- ========== TAB: Back Up ========== -->
@@ -12661,6 +12740,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (botperf && !botperf.classList.contains('hidden')) {
           loadMicroBotPerformance();
           try { loadLearningDiagnostics(); } catch (_) {}
+          try { loadAgentDecisionLog(); } catch (_) {}
         }
       } catch (_) {}
       renderAutoScoringUi(tp);
@@ -13168,6 +13248,125 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadLearningDiagnostics = loadLearningDiagnostics;
+
+    function adlAppliedLabel(a) {
+      if (a === 'applied') return 'Applied: soft influence';
+      if (a === 'queued') return 'Applied: queued';
+      if (a === 'rejected') return 'Applied: rejected';
+      return 'Applied: no live influence (observation only)';
+    }
+
+    function renderAgentDecisionLog(rows) {
+      const el = document.getElementById('agent-decision-log');
+      const atEl = document.getElementById('adl-updated-at');
+      if (!el) return;
+      if (atEl) {
+        try {
+          atEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        } catch (_) {
+          atEl.textContent = '';
+        }
+      }
+      const list = Array.isArray(rows) ? rows : [];
+      if (!list.length) {
+        el.innerHTML =
+          '<p class="mint text-xs">No agent decisions yet for these filters. Coaches write here when they advise, rank, or change modes.</p>';
+        return;
+      }
+      el.innerHTML = list
+        .map(function (d, idx) {
+          const t = d.at
+            ? new Date(d.at).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : '—';
+          const type = String(d.decisionType || 'advice').replace(/_/g, ' ');
+          const obs = d.applied === 'observation_only';
+          const count =
+            d.count && d.count > 1
+              ? ' <span class="mint">×' + d.count + '</span>'
+              : '';
+          const detail = d.detail
+            ? '<div class="adl-detail">' + escHtml(String(d.detail)) + '</div>'
+            : '';
+          const strength =
+            d.strength != null && Number.isFinite(Number(d.strength))
+              ? ' · conf ' + Math.round(Number(d.strength) * 100) + '%'
+              : '';
+          return (
+            '<div class="tp-decision-row' +
+            (obs ? ' is-obs' : '') +
+            '" onclick="this.classList.toggle(\'is-open\')" data-adl-idx="' +
+            idx +
+            '">' +
+            '<div class="tp-decision-meta">' +
+            '<span>[' +
+            escHtml(t) +
+            ']</span> ' +
+            '<span class="adl-agent">' +
+            escHtml(String(d.agent || 'Agent')) +
+            '</span> → ' +
+            '<span class="adl-type">' +
+            escHtml(type) +
+            '</span>' +
+            count +
+            strength +
+            '</div>' +
+            '<div class="tp-decision-why">' +
+            escHtml(String(d.summary || '')) +
+            '</div>' +
+            '<div class="adl-applied">' +
+            escHtml(adlAppliedLabel(d.applied)) +
+            (d.target ? ' · ' + escHtml(String(d.target)) : '') +
+            '</div>' +
+            detail +
+            '</div>'
+          );
+        })
+        .join('');
+    }
+
+    async function loadAgentDecisionLog() {
+      try {
+        const source =
+          (document.getElementById('adl-filter-source') || {}).value || 'all';
+        const type =
+          (document.getElementById('adl-filter-type') || {}).value || 'all';
+        const applied =
+          (document.getElementById('adl-filter-applied') || {}).value || 'all';
+        const range =
+          (document.getElementById('adl-filter-range') || {}).value || '24h';
+        const profile = String(
+          (document.getElementById('adl-filter-profile') || {}).value || ''
+        ).trim();
+        const qs =
+          '/api/agent-decisions?limit=60' +
+          '&source=' +
+          encodeURIComponent(source) +
+          '&decisionType=' +
+          encodeURIComponent(type) +
+          '&applied=' +
+          encodeURIComponent(applied) +
+          '&range=' +
+          encodeURIComponent(range) +
+          (profile
+            ? '&profileId=' + encodeURIComponent(profile)
+            : '');
+        const data = await fetchJSON(qs);
+        window.__agentDecisions = (data && data.decisions) || [];
+        renderAgentDecisionLog(window.__agentDecisions);
+      } catch (err) {
+        const el = document.getElementById('agent-decision-log');
+        if (el) {
+          el.innerHTML =
+            '<p class="mint text-xs">Agent Decision Log unavailable: ' +
+            escHtml(err.message || String(err)) +
+            '</p>';
+        }
+      }
+    }
+    window.loadAgentDecisionLog = loadAgentDecisionLog;
 
     function setMicroBotPerfWindow(win) {
       const next =
@@ -14800,6 +14999,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'botperf') {
         try { loadMicroBotPerformance(); } catch (_) {}
         try { loadLearningDiagnostics(); } catch (_) {}
+        try { loadAgentDecisionLog(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {

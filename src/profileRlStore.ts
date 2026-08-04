@@ -215,6 +215,19 @@ export function pushProfileRlDecision(
     st.decisions = st.decisions.slice(0, MAX_DECISIONS);
   }
   saveProfileRlState(st);
+  try {
+    const { mirrorProfileRlDecision } =
+      require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+    mirrorProfileRlDecision({
+      kind: d.kind,
+      detail: d.detail,
+      profileId: d.profileId,
+      mint: d.mint,
+      symbol: d.symbol,
+    });
+  } catch {
+    /* optional */
+  }
 }
 
 export function getProfileRlDecisions(limit = 40): ProfileRlDecision[] {

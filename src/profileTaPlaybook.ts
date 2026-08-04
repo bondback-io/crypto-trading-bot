@@ -1371,6 +1371,20 @@ export function runProfileTaEntryGate(
       volumeDivergenceAtEntry: pta.volumeDivergence.bias,
     };
     if (!result.allowed) {
+      try {
+        const { recordTaDecision } =
+          require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+        recordTaDecision({
+          profileId: id,
+          summary: `Hard block: ${result.reason || result.plainLanguage || 'TA gate'}`,
+          decisionType: 'warning',
+          applied: 'applied',
+          detail: result.plainLanguage,
+          dedupeKey: `ta-hard:${id}`,
+        });
+      } catch {
+        /* optional */
+      }
       return {
         skip: true,
         reason: result.reason,
@@ -1379,6 +1393,25 @@ export function runProfileTaEntryGate(
         plainLanguage: result.plainLanguage,
         result,
       };
+    }
+    if (
+      result.convictionMult < 0.92 ||
+      result.convictionMult > 1.08
+    ) {
+      try {
+        const { recordTaDecision } =
+          require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+        recordTaDecision({
+          profileId: id,
+          summary: `Soft conviction ×${result.convictionMult.toFixed(2)} — ${result.plainLanguage || result.reason}`,
+          decisionType: 'soft_push',
+          applied: 'applied',
+          detail: result.reason,
+          dedupeKey: `ta-soft:${id}:${result.convictionMult.toFixed(2)}`,
+        });
+      } catch {
+        /* optional */
+      }
     }
     return {
       skip: false,

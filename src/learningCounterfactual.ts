@@ -167,8 +167,51 @@ export function refreshCounterfactualHints(
   profileId: string,
   episodes: ProfileLearningEpisode[]
 ): CounterfactualHints {
+  const prev = cfHintCache.get(profileId);
   const hints = buildCounterfactualHints(episodes);
   cfHintCache.set(profileId, hints);
+  if (hints.summary && prev) {
+    const flips: string[] = [];
+    if (prev.preferTightenGiveback !== hints.preferTightenGiveback) {
+      flips.push(
+        hints.preferTightenGiveback
+          ? 'now prefers tighter PPP giveback'
+          : 'dropped tighter PPP preference'
+      );
+    }
+    if (prev.preferTighterTrail !== hints.preferTighterTrail) {
+      flips.push(
+        hints.preferTighterTrail
+          ? 'now prefers tighter trail'
+          : 'dropped tighter trail preference'
+      );
+    }
+    if (prev.preferEarlierTp !== hints.preferEarlierTp) {
+      flips.push(
+        hints.preferEarlierTp
+          ? 'now prefers earlier TP'
+          : 'dropped earlier TP preference'
+      );
+    }
+    if (
+      Math.abs((prev.weightBoost || 1) - (hints.weightBoost || 1)) >= 0.05
+    ) {
+      flips.push(`weight boost ${(hints.weightBoost || 1).toFixed(2)}`);
+    }
+    if (flips.length) {
+      try {
+        const { recordCfPreferenceFlip } =
+          require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+        recordCfPreferenceFlip({
+          profileId,
+          summary: flips.join('; '),
+          detail: hints.summary,
+        });
+      } catch {
+        /* optional */
+      }
+    }
+  }
   return hints;
 }
 

@@ -141,6 +141,18 @@ export function appendLearningSave(input: {
   const entries = loadEntries();
   entries.push(entry);
   persistEntries(entries);
+  try {
+    const { mirrorLearningSave } =
+      require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+    mirrorLearningSave({
+      kind: entry.kind,
+      summary: entry.summary,
+      profileId: entry.profileId,
+      botName: entry.botName,
+    });
+  } catch {
+    /* optional */
+  }
   return entry;
 }
 

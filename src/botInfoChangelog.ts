@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.157',
+    title: 'Agent Decision Log',
+    sections: ['coaches', 'learning', 'zion', 'overview', 'microbots'],
+    items: [
+      'New Agent Decision Log on Bot Performance: MARL, Profile RL, accelerators, TA, ML, Peak Protect tips, and sparse Zion commentary — separate from the lane fight execution log.',
+      'Filters for agent, decision type, applied vs observation-only, profile, and time range. Rate-limited + deduped; logging only (no trade/coach mutations).',
+      'API: GET /api/agent-decisions. Fight log stays on Overview / Micro Bots as the execution/conflict feed; ADL is the reasoning/advice feed.',
+    ],
+  },
+  {
     version: '1.2.156',
     title: 'Automated System Health Checks',
     sections: ['zion', 'alerts', 'overview', 'learning'],
