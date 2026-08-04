@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.140',
+    title: 'More Scanner Fills — Widen Mig MC + Softer H1 Vol',
+    sections: ['scanners', 'microbots', 'overview'],
+    items: [
+      'Migration Sniper max MC raised to $175k when still stuck on the old ~$55k override that rejected most mid-MC names.',
+      'Market Scanner min 1h volume default 5000 → 2500; scanner ON uses the global toggle so profile gates cannot false-OFF all scanner buys.',
+      'Stale tuning skip counters can be cleared; daily loss remains Off and is not the live blocker.',
+    ],
+  },
+  {
     version: '1.2.139',
     title: 'Auto-pause OFF Clears Daily Loss Gate',
     sections: ['risk', 'overview'],

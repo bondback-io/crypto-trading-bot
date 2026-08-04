@@ -166,7 +166,7 @@ function baseScannerCfg() {
       jupiterLimit: 100,
       jupiterMergeIntervals: true,
       minVolumeM5Usd: 1000,
-      minVolumeH1Usd: 5000,
+      minVolumeH1Usd: 2500,
       minVolumeH6Usd: 10000,
       minVolumeH24Usd: 15_000,
     }

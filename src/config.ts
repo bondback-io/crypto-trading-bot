@@ -2477,7 +2477,7 @@ export const config: BotConfig = {
     jupiterLimit: 100,
     jupiterMergeIntervals: true,
     minVolumeM5Usd: 1000,
-    minVolumeH1Usd: 5000,
+    minVolumeH1Usd: 2500,
     minVolumeH6Usd: 10000,
     minVolumeH24Usd: 15_000,
   },
@@ -4555,6 +4555,45 @@ export function initWallets(): void {
   } catch (err) {
     console.warn(
       '[config] migSniperEventLane_v1 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  // Widen Migration Sniper max MC when override still on old ~$55k ceiling.
+  try {
+    const { migrateMigSniperWidenMaxMcV1 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateMigSniperWidenMaxMcV1();
+  } catch (err) {
+    console.warn(
+      '[config] migSniperWidenMaxMc_v1 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  // Scanner 1h volume floor: old default 5000 → 2500 (modest fill-rate lift).
+  try {
+    const MIGRATION_ID = 'msMinVolH1_2500_v1';
+    if (!hasSettingsMigration(MIGRATION_ID)) {
+      const cur = Number(config.marketScanner?.minVolumeH1Usd);
+      if (!Number.isFinite(cur) || cur === 5000) {
+        config.marketScanner.minVolumeH1Usd = 2500;
+        try {
+          persistUserSettings();
+        } catch {
+          /* ignore */
+        }
+        console.log(
+          `[config] Applied ${MIGRATION_ID} — marketScanner.minVolumeH1Usd → 2500`
+        );
+      } else {
+        console.log(
+          `[config] Applied ${MIGRATION_ID} — left minVolumeH1Usd at ${cur}`
+        );
+      }
+      completeSettingsMigration(MIGRATION_ID);
+    }
+  } catch (err) {
+    console.warn(
+      '[config] msMinVolH1_2500_v1 failed:',
       err instanceof Error ? err.message : err
     );
   }

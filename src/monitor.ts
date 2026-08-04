@@ -166,6 +166,7 @@ import {
 } from './filterEffective';
 import {
   isStrategyEnabled,
+  isStrategyEnabledGlobal,
   logStrategyDecision,
   ensureStrategyToggles,
   getQualityModeOverlays,
@@ -2491,7 +2492,9 @@ async function handleScannerCandidate(
   candidate: ScannerCandidate & { launch: import('./marketData').LaunchEvent }
 ): Promise<void> {
   if (paused) return;
-  if (!isStrategyEnabled('ta_market_scanner')) {
+  // Global toggle only — profile gate must not false-OFF the whole scanner path
+  // when a lane without ta_market_scanner is mid-cascade.
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) {
     annotateScannerCandidate(candidate.mint, {
       status: 'skipped',
       skipReason: 'Market Scanner OFF',
@@ -4880,7 +4883,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       : 'normal';
 
   if (isMarketScannerSignal(signal)) {
-    if (!isStrategyEnabled('ta_market_scanner')) {
+    // Use global toggle before cascade — profile-scoped isStrategyEnabled can
+    // report OFF for lanes that omit ta_market_scanner and starve all scanner buys.
+    if (!isStrategyEnabledGlobal('ta_market_scanner')) {
       logStrategyDecision(
         'ta_market_scanner',
         'skip',
@@ -5904,7 +5909,7 @@ export function getEntryPathLightStatus(): {
     /* ignore */
   }
   const copyOn = isStrategyEnabled('smart_money_copy');
-  const scannerOn = isStrategyEnabled('ta_market_scanner');
+  const scannerOn = isStrategyEnabledGlobal('ta_market_scanner');
   const scanner = getScannerStatus();
   const rate = canExecuteTradeNow();
   const minTrade = Math.max(

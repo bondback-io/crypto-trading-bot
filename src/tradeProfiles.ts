@@ -724,7 +724,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
       'Soft quality: holders / buy pressure / volume (not chart patterns)',
       'Fallback: ultra-fresh post-grad ≤120s if curve window missed',
-      'MC cap ~$200k — not mature DEX tokens',
+      'MC cap ~$175k — not mature DEX tokens',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
@@ -747,7 +747,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       gradWatchPct: 80,
       maxMigrationAgeSec: 120,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
-      maxMarketCapUsd: 200_000,
+      maxMarketCapUsd: 175_000,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -5818,6 +5818,59 @@ export function migrateMigSniperEventLaneV1(): boolean {
   }
   console.log(
     `[trade-profiles] Applied ${MIGRATION_ID} — Migration Sniper event lane (arm→hold→spike exit)`
+  );
+  return true;
+}
+
+/**
+ * Widen Migration Sniper max MC when a persisted override still uses the old
+ * ~$55k ceiling (rejects most mid-MC scanner names before Scalper/MB can win).
+ * Match floors only — does not touch TP/SL/learning.
+ */
+export function migrateMigSniperWidenMaxMcV1(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'migSniperWidenMaxMc_v1';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const TARGET_MAX_MC = 175_000;
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+
+  const prev = state.overrides.migration_sniper || {};
+  const curMax = Number(prev.match?.maxMarketCapUsd);
+  const needsBump =
+    !Number.isFinite(curMax) || curMax <= 0 || curMax < TARGET_MAX_MC;
+
+  if (needsBump) {
+    state.overrides.migration_sniper = {
+      ...prev,
+      match: {
+        ...(prev.match || {}),
+        maxMarketCapUsd: TARGET_MAX_MC,
+        // Keep a sane lower bound if missing; do not raise an existing higher min.
+        minMarketCapUsd:
+          Number(prev.match?.minMarketCapUsd) > 0
+            ? Number(prev.match?.minMarketCapUsd)
+            : 17_500,
+      },
+    };
+    writeTradeProfilesState(state);
+  }
+
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    needsBump
+      ? `[trade-profiles] Applied ${MIGRATION_ID} — Migration Sniper max MC → $${TARGET_MAX_MC}`
+      : `[trade-profiles] Applied ${MIGRATION_ID} — max MC already ≥ $${TARGET_MAX_MC}`
   );
   return true;
 }
