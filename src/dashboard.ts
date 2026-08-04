@@ -6217,14 +6217,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="mint text-xs" id="ov-balance-mirror" style="display:none">—</div>
       </div>
 
+      <div class="mbp-window-row mt-2.5 sm:mt-3 mb-0" role="group" aria-label="Overview stats time window" id="overview-stats-window-row">
+        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="1h" onclick="setOverviewStatsWindow('1h')">1h</button>
+        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="24h" onclick="setOverviewStatsWindow('24h')">24h</button>
+        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="7d" onclick="setOverviewStatsWindow('7d')">7d</button>
+        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="30d" onclick="setOverviewStatsWindow('30d')">30d</button>
+        <button type="button" class="closed-filter-btn ov-window-btn is-active" data-ov-window="all" onclick="setOverviewStatsWindow('all')" aria-pressed="true">All</button>
+        <span class="mint text-xs ml-auto" id="ov-window-label" title="Win Rate, Max DD, Trades, and Status PF/avg win-loss use this window. Wallets, Signals, Trade Rate, and Entries stay live.">Stats: All</span>
+      </div>
       <div class="ov-meta-strip mt-2.5 sm:mt-3">
         <div class="card">
-          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Lifetime closed trades that finished green. Subtitle is wins W / losses L. Closed Trades list shows the last 200 rows only."></span></div>
+          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Closed trades that finished green in the selected window. Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
           <div class="stat" id="win-rate">—</div>
           <div class="mint mt-1 text-xs" id="stat-wl">—</div>
         </div>
         <div class="card">
-          <div class="stat-label">Max DD <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades."></span></div>
+          <div class="stat-label">Max DD <span class="tip tip-below" tabindex="0" data-tip="Worst peak-to-trough equity drop across closed trades in the selected window."></span></div>
           <div class="stat" id="stat-maxdd">—</div>
           <div class="mint mt-1 text-xs" id="stat-avg-hold">—</div>
         </div>
@@ -6243,8 +6251,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Lifetime closed + currently open. Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
-        <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Closed trades in the selected window (All also adds open). Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap (always live — not windowed)."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Large number = currently open trades. Below: Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
           <div class="text-lg font-semibold" id="entries-open-count">—</div>
           <div class="signal-light mt-1.5" id="entry-path-light" title="Green = path clear. Amber = soft limit. Red = abnormal blocker.">
@@ -6252,7 +6260,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span id="entry-path-light-label">—</span>
           </div>
         </div>
-        <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="Short health summary: monitor state, mode, and key blockers."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Status <span class="tip tip-below" tabindex="0" data-tip="PF / avg win / avg loss use the selected stats window. Other health bits stay live."></span></div><div class="text-sm text-slate-300 break-words" id="stat-detail">—</div></div>
       </div>
 
       <div class="card mt-2.5 sm:mt-3" id="lane-fight-overview-card">
@@ -12850,6 +12858,145 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.setMicroBotPerfWindow = setMicroBotPerfWindow;
 
+    window._ovStatsWindow = window._ovStatsWindow || (function () {
+      try {
+        const s = localStorage.getItem('ovStatsWindow');
+        if (s === '1h' || s === '24h' || s === '7d' || s === '30d' || s === 'all') return s;
+      } catch (_) {}
+      return 'all';
+    })();
+
+    function syncOverviewStatsWindowButtons() {
+      const cur = window._ovStatsWindow || 'all';
+      document.querySelectorAll('.ov-window-btn').forEach(function (btn) {
+        const w = btn.getAttribute('data-ov-window');
+        const on = w === cur;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      const lab = document.getElementById('ov-window-label');
+      if (lab) {
+        const labels = { '1h': '1h', '24h': '24h', '7d': '7d', '30d': '30d', all: 'All' };
+        lab.textContent = 'Stats: ' + (labels[cur] || cur);
+      }
+    }
+
+    function paintOverviewWindowStats(ov, ctx) {
+      if (!ov) return;
+      const wrEl = document.getElementById('win-rate');
+      if (wrEl) {
+        wrEl.textContent =
+          ov.closedTrades > 0 ? Number(ov.winRatePct).toFixed(0) + '%' : '—';
+        wrEl.style.color =
+          ov.closedTrades > 0 && Number(ov.winRatePct) >= 50
+            ? 'var(--green)'
+            : ov.closedTrades > 0 && Number(ov.winRatePct) < 40
+              ? 'var(--red)'
+              : '';
+      }
+      const wlEl = document.getElementById('stat-wl');
+      if (wlEl) {
+        wlEl.textContent =
+          ov.closedTrades > 0
+            ? (ov.wins ?? 0) + 'W / ' + (ov.losses ?? 0) + 'L'
+            : '0W / 0L';
+      }
+      const ddEl = document.getElementById('stat-maxdd');
+      const maxDd = Number(ov.maxDrawdownPct ?? 0);
+      if (ddEl) {
+        ddEl.textContent =
+          ov.sampleSize > 0 || ov.closedTrades > 0
+            ? maxDd.toFixed(1) + '%'
+            : '—';
+        ddEl.style.color =
+          maxDd <= 15 ? 'var(--green)' : maxDd <= 25 ? 'var(--muted)' : 'var(--red)';
+      }
+      const holdEl = document.getElementById('stat-avg-hold');
+      if (holdEl) {
+        if (ov.avgHoldSec > 0) {
+          const m = Math.round(ov.avgHoldSec / 60);
+          holdEl.textContent =
+            'Avg hold ' + (m >= 60 ? Math.round(m / 60) + 'h' : m + 'm');
+        } else {
+          holdEl.textContent = 'Avg hold —';
+        }
+      }
+      const tradesEl = document.getElementById('stat-trades');
+      if (tradesEl) {
+        tradesEl.textContent = String(
+          ov.window === 'all' ? ov.totalTrades ?? ov.closedTrades : ov.closedTrades ?? 0
+        );
+        const tip = tradesEl.parentElement && tradesEl.parentElement.querySelector('.tip');
+        if (tip) {
+          tip.setAttribute(
+            'data-tip',
+            (ov.openTrades || 0) +
+              ' open · ' +
+              (ov.closedTrades || 0) +
+              ' closed (' +
+              (ov.window || 'all') +
+              ')'
+          );
+        }
+      }
+      const detail = document.getElementById('stat-detail');
+      if (detail && ctx) {
+        const pf = Number(ov.profitFactor ?? 0);
+        detail.textContent =
+          'PF ' +
+          (pf >= 999 ? '∞' : pf.toFixed(2)) +
+          ' · maxDD ' +
+          maxDd.toFixed(1) +
+          '%' +
+          ' · Avg win ' +
+          Number(ov.avgWinPct ?? 0).toFixed(1) +
+          '% · Avg loss ' +
+          Number(ov.avgLossPct ?? 0).toFixed(1) +
+          '% · Migrations: ' +
+          (ctx.migrationsCount ?? 0) +
+          (ctx.selectiveOn ? ' · selective ON' : '') +
+          (ctx.wsMode ? ' (WS live)' : ' (poll)');
+      }
+    }
+
+    async function loadOverviewWindowStats() {
+      const win = window._ovStatsWindow || 'all';
+      syncOverviewStatsWindowButtons();
+      try {
+        const data = await fetchJSON(
+          '/api/overview-stats?window=' + encodeURIComponent(win)
+        );
+        if (data && data.ok && data.overview) {
+          window._lastOverviewWindowStats = data.overview;
+          paintOverviewWindowStats(
+            data.overview,
+            window._lastOverviewStatusCtx || {}
+          );
+        }
+      } catch (err) {
+        console.warn('overview-stats', err);
+      }
+    }
+    window.loadOverviewWindowStats = loadOverviewWindowStats;
+
+    function setOverviewStatsWindow(win) {
+      const next =
+        win === '1h' ||
+        win === '24h' ||
+        win === '7d' ||
+        win === '30d' ||
+        win === 'all'
+          ? win
+          : 'all';
+      window._ovStatsWindow = next;
+      try {
+        localStorage.setItem('ovStatsWindow', next);
+      } catch (_) {}
+      syncOverviewStatsWindowButtons();
+      loadOverviewWindowStats();
+    }
+    window.setOverviewStatsWindow = setOverviewStatsWindow;
+
     function scoreboardRowFor(id, intelligence) {
       const rows =
         (intelligence &&
@@ -19384,11 +19531,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (detail ? ' · ' + detail : '');
         }
       })();
-      document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';
-
       const s = status.stats || {};
+      // Provisional lifetime paint — overwritten by /api/overview-stats for the selected window
+      document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';
       document.getElementById('stat-trades').textContent = s.totalTrades ?? 0;
-      // Prefer showing open+closed breakdown when available
       const openN = s.openTrades ?? status.monitor?.openPositions ?? 0;
       const closedN = s.closedTrades;
       if (closedN != null || openN) {
@@ -19509,14 +19655,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const migLive = document.getElementById(id);
         if (migLive) migLive.textContent = migLiveText;
       });
-      const pf = Number(s.profitFactor ?? 0);
-      document.getElementById('stat-detail').textContent =
-        'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
-        ' · maxDD ' + maxDd.toFixed(1) + '%' +
-        ' · Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
-        '% · Migrations: ' + (migStatus.recentCount ?? 0) +
-        (status.monitor?.selectiveEnabled ? ' · selective ON' : '') +
-        (migStatus.wsMode ? ' (WS live)' : ' (poll)');
+      window._lastOverviewStatusCtx = {
+        migrationsCount: migStatus.recentCount ?? 0,
+        selectiveOn: Boolean(status.monitor?.selectiveEnabled),
+        wsMode: Boolean(migStatus.wsMode),
+      };
+      syncOverviewStatsWindowButtons();
+      if (typeof loadOverviewWindowStats === 'function') {
+        loadOverviewWindowStats();
+      } else {
+        const pf = Number(s.profitFactor ?? 0);
+        document.getElementById('stat-detail').textContent =
+          'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
+          ' · maxDD ' + maxDd.toFixed(1) + '%' +
+          ' · Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
+          '% · Migrations: ' + (migStatus.recentCount ?? 0) +
+          (status.monitor?.selectiveEnabled ? ' · selective ON' : '') +
+          (migStatus.wsMode ? ' (WS live)' : ' (poll)');
+      }
 
       if (!window._cfgLoaded) {
         window._cfgLoaded = true;

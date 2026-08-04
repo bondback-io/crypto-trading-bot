@@ -994,6 +994,58 @@ export function createServer(): express.Application {
     });
   });
 
+  /** Overview strip stats for a time window (1h / 24h / 7d / 30d / all). */
+  app.get('/api/overview-stats', (req: Request, res: Response) => {
+    try {
+      const {
+        buildOverviewWindowStats,
+        parseOverviewStatsWindow,
+      } = require('./microBotPerformance') as typeof import('./microBotPerformance');
+      const { getTradeProfilesStatus } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const window = parseOverviewStatsWindow(req.query.window, 'all');
+      const stats = paperTrader.getStats();
+      const closed = paperTrader.getClosedPositions();
+      const open = paperTrader.getOpenPositions();
+      let solUsd: number | null = null;
+      try {
+        const { getCachedSolUsdPrice } =
+          require('./marketData') as typeof import('./marketData');
+        const px = getCachedSolUsdPrice();
+        solUsd = Number.isFinite(px) && px > 0 ? px : null;
+      } catch {
+        solUsd = null;
+      }
+      let catalogIds: string[] = [];
+      try {
+        const tp = getTradeProfilesStatus();
+        catalogIds = (tp.profiles || [])
+          .map((p: { id?: string }) => String(p.id || ''))
+          .filter(Boolean);
+      } catch {
+        catalogIds = [];
+      }
+      const overview = buildOverviewWindowStats({
+        closed,
+        openCount: open.length,
+        window,
+        solUsd,
+        catalogIds,
+        lifetime: {
+          closed: Number(stats.lifetimeClosed) || Number(stats.closedTrades) || 0,
+          wins: Number(stats.lifetimeWins) || Number(stats.wins) || 0,
+          losses: Number(stats.lifetimeLosses) || Number(stats.losses) || 0,
+        },
+      });
+      res.json({ ok: true, overview });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   /** Backtest: replay recent launches/migrations through paper engine */
   app.post('/backtest', async (req: Request, res: Response) => {
     try {

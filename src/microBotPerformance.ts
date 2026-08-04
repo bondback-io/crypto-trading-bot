@@ -6,12 +6,25 @@
 import type { ProfileLearningEpisode } from './profileLearningEpisodes';
 import { getProfileLearningEpisodes } from './profileLearningEpisodes';
 
-export type PerformanceWindow = 'today' | '24h' | '7d' | 'all';
+export type PerformanceWindow = '1h' | 'today' | '24h' | '7d' | '30d' | 'all';
 
 export const PERFORMANCE_WINDOWS: readonly PerformanceWindow[] = [
+  '1h',
   'today',
   '24h',
   '7d',
+  '30d',
+  'all',
+] as const;
+
+/** Overview strip windows (same pill pattern as Micro Bot Performance). */
+export type OverviewStatsWindow = '1h' | '24h' | '7d' | '30d' | 'all';
+
+export const OVERVIEW_STATS_WINDOWS: readonly OverviewStatsWindow[] = [
+  '1h',
+  '24h',
+  '7d',
+  '30d',
   'all',
 ] as const;
 
@@ -122,7 +135,31 @@ export function parsePerformanceWindow(
   fallback: PerformanceWindow = '7d'
 ): PerformanceWindow {
   const s = String(raw || '').trim().toLowerCase();
-  if (s === 'today' || s === '24h' || s === '7d' || s === 'all') return s;
+  if (
+    s === '1h' ||
+    s === 'today' ||
+    s === '24h' ||
+    s === '7d' ||
+    s === '30d' ||
+    s === 'all'
+  ) {
+    return s;
+  }
+  if (s === 'hourly' || s === 'hour') return '1h';
+  if (s === 'monthly' || s === '30day' || s === 'month') return '30d';
+  return fallback;
+}
+
+export function parseOverviewStatsWindow(
+  raw: unknown,
+  fallback: OverviewStatsWindow = 'all'
+): OverviewStatsWindow {
+  const w = parsePerformanceWindow(raw, fallback);
+  if (w === '1h' || w === '24h' || w === '7d' || w === '30d' || w === 'all') {
+    return w;
+  }
+  // Map Micro Bot "today" → calendar day ≈ closer to 24h for overview
+  if (w === 'today') return '24h';
   return fallback;
 }
 
@@ -131,8 +168,10 @@ export function windowStartMs(
   nowMs = Date.now()
 ): number | null {
   if (window === 'all') return null;
+  if (window === '1h') return nowMs - 60 * 60 * 1000;
   if (window === '24h') return nowMs - 24 * 60 * 60 * 1000;
   if (window === '7d') return nowMs - 7 * 24 * 60 * 60 * 1000;
+  if (window === '30d') return nowMs - 30 * 24 * 60 * 60 * 1000;
   // today — UTC calendar day
   const d = new Date(nowMs);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -577,5 +616,140 @@ export function buildMicroBotPerformance(opts: {
     rankedAt: nowMs,
     solUsd,
     globalLearningMode: globalLm,
+  };
+}
+
+export interface OverviewWindowStats {
+  window: OverviewStatsWindow;
+  winRatePct: number;
+  wins: number;
+  losses: number;
+  closedTrades: number;
+  /** Closed in window + currently open (open only counted on `all`). */
+  totalTrades: number;
+  openTrades: number;
+  maxDrawdownPct: number;
+  avgHoldSec: number;
+  profitFactor: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  netPnlSol: number;
+  sampleSize: number;
+  rankedAt: number;
+}
+
+/**
+ * Aggregate overview strip metrics for a time window (closed + durable episodes).
+ */
+export function buildOverviewWindowStats(opts: {
+  closed: PerformanceTradeLike[];
+  openCount?: number;
+  window?: OverviewStatsWindow | string;
+  solUsd?: number | null;
+  catalogIds?: string[];
+  episodesByProfile?: Map<string, ProfileLearningEpisode[]>;
+  nowMs?: number;
+  /** When window=all, prefer these lifetime counters if larger than sample. */
+  lifetime?: { closed: number; wins: number; losses: number } | null;
+}): OverviewWindowStats {
+  const window = parseOverviewStatsWindow(opts.window, 'all');
+  const nowMs = opts.nowMs ?? Date.now();
+  const solUsd =
+    opts.solUsd != null && Number.isFinite(opts.solUsd) && opts.solUsd > 0
+      ? Number(opts.solUsd)
+      : null;
+  const openTrades = Math.max(0, Math.round(Number(opts.openCount) || 0));
+
+  const catalogIds =
+    opts.catalogIds && opts.catalogIds.length
+      ? opts.catalogIds
+      : Array.from(
+          new Set(
+            (opts.closed || [])
+              .map((t) => String(t.tradeProfileId || '').trim())
+              .filter(Boolean)
+          )
+        );
+
+  const episodesByProfile =
+    opts.episodesByProfile ??
+    (() => {
+      const m = new Map<string, ProfileLearningEpisode[]>();
+      for (const id of catalogIds) {
+        if (!id || id === 'default') continue;
+        try {
+          m.set(id, getProfileLearningEpisodes(id, 400));
+        } catch {
+          m.set(id, []);
+        }
+      }
+      return m;
+    })();
+
+  const merged = mergePerformanceTrades(
+    opts.closed || [],
+    episodesByProfile,
+    solUsd
+  );
+  const filtered = filterTradesByWindow(merged, window, nowMs).sort(
+    (a, b) => a.closedAt - b.closedAt
+  );
+
+  const wins = filtered.filter((t) => t.pnlSol > 0);
+  const losses = filtered.filter((t) => t.pnlSol <= 0);
+  let winCount = wins.length;
+  let lossCount = losses.length;
+  let closedTrades = filtered.length;
+
+  if (
+    window === 'all' &&
+    opts.lifetime &&
+    opts.lifetime.closed > closedTrades
+  ) {
+    closedTrades = Math.max(0, Math.round(opts.lifetime.closed));
+    winCount = Math.max(0, Math.round(opts.lifetime.wins));
+    lossCount = Math.max(0, Math.round(opts.lifetime.losses));
+  }
+
+  const winRatePct =
+    closedTrades > 0 ? (winCount / closedTrades) * 100 : 0;
+  const netPnlSol = filtered.reduce((s, t) => s + t.pnlSol, 0);
+  const grossWins = wins.reduce((s, t) => s + t.pnlSol, 0);
+  const grossLossesAbs = Math.abs(
+    losses.reduce((s, t) => s + Math.min(0, t.pnlSol), 0)
+  );
+  const avgWinPct =
+    wins.length > 0
+      ? wins.reduce((s, t) => s + t.pnlPct, 0) / wins.length
+      : 0;
+  const avgLossPct =
+    losses.length > 0
+      ? losses.reduce((s, t) => s + t.pnlPct, 0) / losses.length
+      : 0;
+  const holdTimes = filtered
+    .filter((t) => t.closedAt > t.openedAt)
+    .map((t) => (t.closedAt - t.openedAt) / 1000);
+  const avgHoldSec =
+    holdTimes.length > 0
+      ? holdTimes.reduce((a, b) => a + b, 0) / holdTimes.length
+      : 0;
+  const { maxDrawdownPct } = computeMaxDrawdown(filtered);
+
+  return {
+    window,
+    winRatePct,
+    wins: winCount,
+    losses: lossCount,
+    closedTrades,
+    totalTrades: closedTrades + (window === 'all' ? openTrades : 0),
+    openTrades,
+    maxDrawdownPct,
+    avgHoldSec,
+    profitFactor: profitFactor(grossWins, grossLossesAbs),
+    avgWinPct,
+    avgLossPct,
+    netPnlSol,
+    sampleSize: filtered.length,
+    rankedAt: nowMs,
   };
 }
