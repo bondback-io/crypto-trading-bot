@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.139',
+    title: 'Auto-pause OFF Clears Daily Loss Gate',
+    sections: ['risk', 'overview'],
+    items: [
+      'Turning Auto-pause OFF now also sets Daily Loss SOL to 0 (Off) — previously Auto-pause OFF still left Filters daily at 0.5 and fight-log showed “daily loss limit”.',
+      'Live Daily Loss was set to Off so entries are no longer blocked while day PnL is negative.',
+    ],
+  },
+  {
     version: '1.2.138',
     title: 'Daily Loss Off + Lifetime Counters',
     sections: ['risk', 'overview', 'microbots'],

@@ -1794,15 +1794,24 @@ export function createServer(): express.Application {
       }
     }
 
-    // Turning Auto-pause OFF must clear sticky halt so trading resumes
-    if (
-      body.autoPauseOnLimit !== undefined &&
-      prevAutoPause &&
-      risk.autoPauseOnLimit === false
-    ) {
-      clearRiskHalt();
-      clearMonitorRiskHalt();
-      resumeMonitor();
+    // Turning Auto-pause OFF must clear sticky halt so trading resumes.
+    // Also turn Daily Loss Off (0) — operators treat Auto-pause OFF as
+    // "stop daily blocking"; leaving filters.dailyLossLimitSol at 0.5 still
+    // rejects every buy while day PnL is underwater. Always zero even when
+    // the Risk card POSTs the old slider value alongside autoPauseOnLimit:false.
+    if (risk.autoPauseOnLimit === false) {
+      if (prevAutoPause) {
+        clearRiskHalt();
+        clearMonitorRiskHalt();
+        resumeMonitor();
+      }
+      if (config.filters.dailyLossLimitSol !== 0) {
+        config.filters.dailyLossLimitSol = 0;
+        persistUserSettings();
+        console.log(
+          '[risk] Auto-pause OFF → Daily Loss SOL set to 0 (Off) so buys are not filter-blocked'
+        );
+      }
     }
 
     res.json({

@@ -8149,7 +8149,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="section-title">Risk Management <span class="tip" tabindex="0" data-tip="Position sizing, trailing stops, drawdown limits, and auto-pause when limits hit."></span></div>
           <div class="toggle-row"><span title="Enable the risk engine (limits, sizing, trails)">Risk engine</span><label class="switch"><input type="checkbox" id="riskEnabled" checked /><span class="slider"></span></label></div>
           <div class="toggle-row"><span title="Scale out in tiers as profit grows">Tiered selling</span><label class="switch"><input type="checkbox" id="tieredSellEnabled" checked /><span class="slider"></span></label></div>
-          <div class="toggle-row"><span title="Pause the monitor when daily/weekly loss or DD limits trip">Auto-pause on limit</span><label class="switch"><input type="checkbox" id="autoPauseOnLimit" checked /><span class="slider"></span></label></div>
+          <div class="toggle-row"><span title="Pause the monitor when daily/weekly loss or DD limits trip. Turning OFF also sets Daily Loss SOL to 0 (Off) so buys are not filter-blocked.">Auto-pause on limit</span><label class="switch"><input type="checkbox" id="autoPauseOnLimit" checked /><span class="slider"></span></label></div>
           <div class="filters-row mt-2">
             <label class="ctl ctl-md"><span>Risk %/trade <span class="tip" tabindex="0" data-tip="% of bankroll risked per trade when risk-sizing is on."></span></span><input type="number" id="riskPercentPerTrade" value="1.5" step="0.1" /></label>
             <label class="ctl ctl-md"><span>Trail activate @+% <span class="tip" tabindex="0" data-tip="Profit % that arms the trailing stop."></span></span><input type="number" id="trailingActivationProfit" value="30" /></label>
@@ -22162,14 +22162,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const dailyEl =
         document.getElementById('riskDailyLossLimitSol') ||
         document.getElementById('dailyLossLimitSol');
-      const dailyVal = Number(dailyEl && dailyEl.value);
+      const autoPauseOn = document.getElementById('autoPauseOnLimit').checked;
+      // Auto-pause OFF ⇒ Daily Loss Off — same mental model as server /api/risk
+      let dailyVal = Number(dailyEl && dailyEl.value);
+      if (!autoPauseOn) dailyVal = 0;
+      if (dailyEl && !autoPauseOn) dailyEl.value = '0';
       await fetchJSON('/api/risk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           enabled: document.getElementById('riskEnabled').checked,
           tieredSellEnabled: document.getElementById('tieredSellEnabled').checked,
-          autoPauseOnLimit: document.getElementById('autoPauseOnLimit').checked,
+          autoPauseOnLimit: autoPauseOn,
           riskPercentPerTrade: Number(document.getElementById('riskPercentPerTrade').value),
           trailingStopPercent: Number(document.getElementById('trailingStopPct').value),
           trailingStopPct: Number(document.getElementById('trailingStopPct').value),
