@@ -750,7 +750,12 @@ export function formatProfileRlPlainLanguage(profileId: string): string {
   return `${modeNote}: ${bits.join('; ')} (readiness ${readiness.score}/100, EMA ${agent.rewardEma.toFixed(2)}${locked}).`;
 }
 
-export function getProfileRlStatus(): {
+export function getProfileRlStatus(opts?: {
+  /** Persist readiness refresh (default true). Chat paths should pass false. */
+  persist?: boolean;
+  /** Create missing key agents (default true). Chat paths can skip. */
+  ensureKeyAgents?: boolean;
+}): {
   enabled: boolean;
   strength: ProfileRlStrength;
   label: string;
@@ -764,13 +769,17 @@ export function getProfileRlStatus(): {
   >;
   decisions: ReturnType<typeof getProfileRlDecisions>;
 } {
+  const persist = opts?.persist !== false;
+  const ensureKey = opts?.ensureKeyAgents !== false;
   const cfg = getProfileRlConfig();
   const st = loadProfileRlState();
   const agents = Object.values(st.agents)
     .map((a) => {
       const readiness = computeProfileRlReadiness(a);
-      a.readinessScore = readiness.score;
-      a.readinessUpdatedAt = Date.now();
+      if (persist) {
+        a.readinessScore = readiness.score;
+        a.readinessUpdatedAt = Date.now();
+      }
       return {
         ...a,
         modeLocked: a.modeLocked === true,
@@ -787,23 +796,25 @@ export function getProfileRlStatus(): {
     })
     .sort((a, b) => b.rewardEma - a.rewardEma || b.trades - a.trades);
 
-  for (const id of KEY_PROFILE_RL_IDS) {
-    if (!st.agents[id]) {
-      const agent = getOrCreateProfileRlAgent(id);
-      const readiness = computeProfileRlReadiness(agent);
-      agents.push({
-        ...agent,
-        modeLocked: false,
-        readinessScore: readiness.score,
-        winRatePct: 0,
-        avgReward: 0,
-        readinessBreakdown: readiness.breakdown,
-        plainLanguage: formatProfileRlPlainLanguage(id),
-      });
+  if (ensureKey) {
+    for (const id of KEY_PROFILE_RL_IDS) {
+      if (!st.agents[id]) {
+        const agent = getOrCreateProfileRlAgent(id);
+        const readiness = computeProfileRlReadiness(agent);
+        agents.push({
+          ...agent,
+          modeLocked: false,
+          readinessScore: readiness.score,
+          winRatePct: 0,
+          avgReward: 0,
+          readinessBreakdown: readiness.breakdown,
+          plainLanguage: formatProfileRlPlainLanguage(id),
+        });
+      }
     }
   }
 
-  saveProfileRlState();
+  if (persist) saveProfileRlState();
 
   return {
     ...cfg,

@@ -109,7 +109,8 @@ export function getZionAgentStatus(): {
   };
 }
 
-function buildContextPack(): string {
+function buildContextPack(opts?: { slim?: boolean }): string {
+  const slim = opts?.slim === true;
   const lines: string[] = [];
   try {
     lines.push(`Mode: ${config.mode}`);
@@ -131,13 +132,15 @@ function buildContextPack(): string {
       require('./marlCoordinator') as typeof import('./marlCoordinator');
     const m = getMarlStatus();
     lines.push(`MARL: ${m.label} · lowMC $${m.lowMcUsd}`);
-    for (const a of m.agents.slice(0, 8)) {
+    for (const a of m.agents.slice(0, slim ? 4 : 8)) {
       lines.push(
         `  agent ${a.profileId}: w=${a.weight.toFixed(2)} trades=${a.trades} WR=${a.winRatePct}%`
       );
     }
-    for (const d of m.decisions.slice(0, 6)) {
-      lines.push(`  marl-dec: ${d.kind} — ${d.detail}`);
+    if (!slim) {
+      for (const d of m.decisions.slice(0, 6)) {
+        lines.push(`  marl-dec: ${d.kind} — ${d.detail}`);
+      }
     }
   } catch {
     lines.push('MARL: unavailable');
@@ -149,7 +152,7 @@ function buildContextPack(): string {
     lines.push(
       `Smart Bot: ${tp.smartBotProfiles ? 'ON' : 'OFF'} · profiles enabled ${tp.profiles.filter((p: { enabled: boolean }) => p.enabled).length}`
     );
-    for (const p of tp.profiles.slice(0, 12)) {
+    for (const p of tp.profiles.slice(0, slim ? 8 : 12)) {
       lines.push(
         `  ${p.id}: ${p.enabled ? 'ON' : 'OFF'} lmOptIn=${p.learningModeOptIn !== false}`
       );
@@ -166,7 +169,7 @@ function buildContextPack(): string {
     lines.push(
       `Open ${open.length} · Closed ${closed.length} · WR ${stats?.winRatePct ?? '—'}% · PF ${stats?.profitFactor ?? '—'}`
     );
-    for (const c of closed.slice(-8)) {
+    for (const c of closed.slice(slim ? -4 : -8)) {
       lines.push(
         `  closed ${c.symbol || c.mint?.slice(0, 6)} ${c.tradeProfileId || '?'} pnl=${Number(c.pnlSol || 0).toFixed(3)}`
       );
@@ -179,7 +182,7 @@ function buildContextPack(): string {
       require('./monitor') as typeof import('./monitor');
     const skips = getSkipReasonCounts?.() || [];
     lines.push('Top skips:');
-    for (const s of skips.slice(0, 8)) {
+    for (const s of skips.slice(0, slim ? 5 : 8)) {
       lines.push(`  ${s.reason}: ${s.count}`);
     }
     const ms = getMonitorStatus?.();
@@ -199,82 +202,76 @@ function buildContextPack(): string {
     lines.push('Learning health: unavailable');
   }
   try {
-    const { getProfileRlStatus, formatProfileRlPlainLanguage, KEY_PROFILE_RL_IDS } =
+    const { getProfileRlStatus, formatProfileRlPlainLanguage } =
       require('./profileRlAgent') as typeof import('./profileRlAgent');
-    const prl = getProfileRlStatus();
+    const prl = getProfileRlStatus({
+      persist: false,
+      ensureKeyAgents: !slim,
+    });
     lines.push(`Profile RL: ${prl.label}`);
-    for (const a of prl.agents.slice(0, 6)) {
+    for (const a of prl.agents.slice(0, slim ? 4 : 6)) {
       const plain =
         a.plainLanguage || formatProfileRlPlainLanguage(a.profileId);
       const ready = a.readinessScore != null ? `${a.readinessScore}/100` : '—';
       const lock = a.modeLocked ? ' locked' : '';
       lines.push(
-        `  prl ${a.profileId}: ${a.mode || 'shadow'} · ready ${ready}${lock} · ${String(plain).slice(0, 100)}`
+        `  prl ${a.profileId}: ${a.mode || 'shadow'} · ready ${ready}${lock} · ${String(plain).slice(0, slim ? 72 : 100)}`
       );
     }
-    for (const d of prl.decisions.slice(0, 4)) {
-      lines.push(`  prl-dec: ${d.detail}`);
-    }
-    for (const pid of KEY_PROFILE_RL_IDS) {
-      if (prl.agents.some((a) => a.profileId === pid)) continue;
-      const plain = formatProfileRlPlainLanguage(pid);
-      if (plain) lines.push(`  prl ${pid}: ${plain.slice(0, 120)}`);
+    if (!slim) {
+      for (const d of prl.decisions.slice(0, 4)) {
+        lines.push(`  prl-dec: ${d.detail}`);
+      }
     }
   } catch {
     lines.push('Profile RL: unavailable');
   }
-  try {
-    const { getLearningAcceleratorsStatus, formatReplayPlainLanguage } =
-      require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
-    const { formatCounterfactualPlainLanguage } =
-      require('./learningCounterfactual') as typeof import('./learningCounterfactual');
-    const { formatTeacherStudentPlainLanguage } =
-      require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
-    const acc = getLearningAcceleratorsStatus();
-    lines.push(`Accelerators: ${acc.label}`);
-    const accelIds = new Set<string>();
-    for (const p of acc.profiles.slice(0, 8)) accelIds.add(p.profileId);
-    for (const id of ['scalper', 'momentum_burst', 'dip_buyer', 'trend_rider']) {
-      accelIds.add(id);
-    }
-    for (const pid of accelIds) {
-      const bits = [
-        formatReplayPlainLanguage(pid),
-        formatCounterfactualPlainLanguage(pid),
-        formatTeacherStudentPlainLanguage(pid),
-      ].filter(Boolean);
-      if (bits.length) {
-        lines.push(`  accel ${pid}: ${bits.join(' · ').slice(0, 140)}`);
+  if (!slim) {
+    try {
+      const { getLearningAcceleratorsStatus, formatReplayPlainLanguage } =
+        require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+      const { formatCounterfactualPlainLanguage } =
+        require('./learningCounterfactual') as typeof import('./learningCounterfactual');
+      const { formatTeacherStudentPlainLanguage } =
+        require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+      const acc = getLearningAcceleratorsStatus();
+      lines.push(`Accelerators: ${acc.label}`);
+      for (const p of acc.profiles.slice(0, 4)) {
+        const bits = [
+          formatReplayPlainLanguage(p.profileId),
+          formatCounterfactualPlainLanguage(p.profileId),
+          formatTeacherStudentPlainLanguage(p.profileId),
+        ].filter(Boolean);
+        if (bits.length) {
+          lines.push(`  accel ${p.profileId}: ${bits.join(' · ').slice(0, 120)}`);
+        }
       }
+    } catch {
+      lines.push('Accelerators: unavailable');
     }
-    for (const d of acc.decisions.slice(0, 4)) {
-      lines.push(`  accel-dec: ${d.detail || d.kind || ''}`);
+    try {
+      const { formatProfileTaLearnedPlainLanguage } =
+        require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+      const { KEY_PROFILE_RL_IDS } =
+        require('./profileRlAgent') as typeof import('./profileRlAgent');
+      const taLines: string[] = [];
+      for (const pid of KEY_PROFILE_RL_IDS) {
+        const ta = formatProfileTaLearnedPlainLanguage(pid);
+        if (ta) taLines.push(`  ta ${pid}: ${ta.slice(0, 100)}`);
+      }
+      if (taLines.length) {
+        lines.push('Profile TA learned:');
+        lines.push(...taLines.slice(0, 4));
+      }
+    } catch {
+      /* optional */
     }
-  } catch {
-    lines.push('Accelerators: unavailable');
-  }
-  try {
-    const { formatProfileTaLearnedPlainLanguage } =
-      require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
-    const { KEY_PROFILE_RL_IDS } =
-      require('./profileRlAgent') as typeof import('./profileRlAgent');
-    const taLines: string[] = [];
-    for (const pid of KEY_PROFILE_RL_IDS) {
-      const ta = formatProfileTaLearnedPlainLanguage(pid);
-      if (ta) taLines.push(`  ta ${pid}: ${ta.slice(0, 120)}`);
-    }
-    if (taLines.length) {
-      lines.push('Profile TA learned:');
-      lines.push(...taLines);
-    }
-  } catch {
-    /* optional */
   }
   try {
     const { buildZionAnalystBrief } =
       require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
     const brief = buildZionAnalystBrief();
-    lines.push(...brief.contextLines);
+    lines.push(...brief.contextLines.slice(0, slim ? 24 : 80));
   } catch {
     lines.push('Analyst brief: unavailable');
   }
@@ -285,7 +282,25 @@ function buildContextPack(): string {
   } catch {
     /* optional */
   }
-  return lines.join('\n').slice(0, 18_000);
+  return lines.join('\n').slice(0, slim ? 8_000 : 18_000);
+}
+
+/** Short-lived cache so rapid chat turns skip heavy status rebuilds. */
+let contextPackCache: { at: number; slim: boolean; text: string } | null = null;
+const CONTEXT_PACK_TTL_MS = 8_000;
+
+function getCachedContextPack(slim = true): string {
+  const now = Date.now();
+  if (
+    contextPackCache &&
+    contextPackCache.slim === slim &&
+    now - contextPackCache.at < CONTEXT_PACK_TTL_MS
+  ) {
+    return contextPackCache.text;
+  }
+  const text = buildContextPack({ slim });
+  contextPackCache = { at: now, slim, text };
+  return text;
 }
 
 type ParsedBotFacts = {
@@ -445,9 +460,10 @@ function formatZionReply(parts: {
   followUp?: string;
   scripture?: string;
 }): string {
-  return [parts.greeting, parts.answer, parts.summary, parts.followUp, parts.scripture]
+  const raw = [parts.greeting, parts.answer, parts.summary, parts.followUp, parts.scripture]
     .filter((p) => p && String(p).trim())
     .join('\n\n');
+  return softenDadAddressing(raw);
 }
 
 type ZionVibe = 'warm' | 'witty' | 'chill' | 'coachy' | 'tech';
@@ -505,64 +521,67 @@ function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
   const q = question.toLowerCase();
   if (/bye|goodbye|see ya|see you|later|cya|take care/.test(q)) {
     return pickLine([
-      'Catch you later, Dad — I’ll keep an eye on the lanes.',
-      'Later, Dad. Ping me anytime you want a quick read.',
-      'Take care, Dad — I’ll be right here when you’re back.',
+      'Catch you later — I’ll keep an eye on the lanes.',
+      'Later. Ping me anytime you want a quick read.',
+      'Take care — I’ll be right here when you’re back.',
+      'See you soon, Dad.',
     ]);
   }
   if (/thanks|thank you|thx|ty|cheers|appreciate/.test(q)) {
     return pickLine([
-      'Anytime, Dad.',
-      'You got it, Dad.',
-      'Happy to help, Dad — ask whenever.',
+      'Anytime.',
+      'You got it.',
+      'Happy to help — ask whenever.',
+      'Glad it helped.',
     ]);
   }
   if (/how('?s| is)|what'?s up|how are you|you good|you ok/.test(q)) {
     const byVibe: Record<ZionVibe, string[]> = {
       warm: [
-        'Doing great, Dad — solid day so far. How’s yours?',
-        'Pretty good over here, Dad. Hope your day’s treating you well.',
+        'Doing great — solid day so far. How’s yours?',
+        'Pretty good over here. Hope your day’s treating you well.',
       ],
       witty: [
-        'Still caffeinated and watching charts, Dad — so, thriving. You?',
-        'Can’t complain, Dad. Bots are loud; I’m louder. How’s your day?',
+        'Still caffeinated and watching charts — so, thriving. You?',
+        'Can’t complain. Bots are loud; I’m louder. How’s your day?',
       ],
       chill: [
-        'All good, Dad. Quiet focus mode. How’s your day going?',
-        'Steady, Dad. Nothing wild. How about you?',
+        'All good. Quiet focus mode. How’s your day going?',
+        'Steady. Nothing wild. How about you?',
       ],
       coachy: [
-        'Feeling sharp, Dad — ready when you are. How’s your day?',
-        'Locked in, Dad. How’s energy on your side?',
+        'Feeling sharp — ready when you are. How’s your day?',
+        'Locked in. How’s energy on your side?',
       ],
       tech: [
-        'Systems green here, Dad. How’s your day looking?',
-        'Running smooth, Dad. Status check on you?',
+        'Systems green here. How’s your day looking?',
+        'Running smooth. Status check on you?',
       ],
     };
     return pickLine(byVibe[vibe]);
   }
-  // greetings / hello
+  // greetings / hello — Dad ok occasionally at the start
   const byVibe: Record<ZionVibe, string[]> = {
     warm: [
+      'Hey — good to see you.',
+      'Hi! Glad you’re here.',
       'Hey Dad — good to see you.',
-      'Hi Dad! Glad you’re here.',
     ],
     witty: [
-      'Hey Dad — fashionably on time for a status check.',
-      'Dad! Speak of the dashboard — what’s up?',
+      'Hey — fashionably on time for a status check.',
+      'Speak of the dashboard — what’s up?',
     ],
     chill: [
-      'Hey Dad. What’s the vibe?',
-      'Yo Dad — I’m around.',
+      'Hey. What’s the vibe?',
+      'Yo — I’m around.',
     ],
     coachy: [
-      'Hey Dad — let’s make it a clean session.',
-      'Dad! Ready when you are.',
+      'Hey — let’s make it a clean session.',
+      'Ready when you are.',
     ],
     tech: [
-      'Hey Dad — Zion online.',
-      'Hi Dad. Channels open — ask away.',
+      'Hey — Zion online.',
+      'Hi. Channels open — ask away.',
     ],
   };
   return pickLine(byVibe[vibe]);
@@ -571,19 +590,35 @@ function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
 function vibeAck(vibe: ZionVibe, isFirst?: boolean): string {
   if (isFirst) {
     return pickLine([
-      'Hey Dad — good to see you.',
-      'Hi Dad — glad you’re here.',
-      'Hey Dad — let’s dig in.',
+      'Hey — good to see you.',
+      'Hi — glad you’re here.',
+      'Hey — let’s dig in.',
     ]);
   }
   const map: Record<ZionVibe, string[]> = {
-    warm: ['Sure, Dad.', 'On it, Dad.', 'Happy to, Dad.'],
-    witty: ['Love it, Dad.', 'Say less, Dad.', 'Classic ask, Dad.'],
-    chill: ['Yep, Dad.', 'Cool — here’s the read, Dad.', 'Got it, Dad.'],
-    coachy: ['Let’s go, Dad.', 'Quick brief, Dad.', 'Focus time, Dad.'],
-    tech: ['Copy, Dad.', 'Snapshotting that, Dad.', 'Pulling status, Dad.'],
+    warm: ['Sure thing.', 'On it.', 'Happy to.'],
+    witty: ['Love it.', 'Say less.', 'Classic ask.'],
+    chill: ['Yep.', 'Cool — here’s the read.', 'Got it.'],
+    coachy: ['Let’s go.', 'Quick brief.', 'Focus time.'],
+    tech: ['Copy.', 'Snapshotting that.', 'Pulling status.'],
   };
   return pickLine(map[vibe]);
+}
+
+/** Soften robotic ", Dad" tag endings while keeping occasional natural Dad. */
+function softenDadAddressing(text: string): string {
+  let out = String(text || '');
+  // "That's great, Dad." / "Got it, Dad —" → drop the vocative comma tag
+  out = out.replace(/,\s*[Dd]ad(?=\s*[—–-]|\s*[.!?]|\s*$)/g, '');
+  out = out.replace(/,\s*[Dd]ad(?=\s)/g, '');
+  // "Sure Dad." mid-ack without comma — leave "Hey Dad" greetings alone
+  out = out.replace(
+    /\b(Sure|Got it|Okay|Ok|Yep|Yeah|Thanks|Thank you|Anytime|Copy|On it)\s+[Dd]ad\b/gi,
+    '$1'
+  );
+  out = out.replace(/[ \t]{2,}/g, ' ');
+  out = out.replace(/ +\n/g, '\n');
+  return out.trim();
 }
 
 function wantsRawSnapshot(q: string): boolean {
@@ -607,7 +642,7 @@ function localAnalystReply(
 
   if (wantsRawSnapshot(q)) {
     return formatZionReply({
-      greeting: `Sure Dad — raw snapshot:`,
+      greeting: `Sure — raw snapshot:`,
       answer: '```\n' + ctx.slice(0, 3500) + '\n```',
       followUp: 'Want the plain-language version?',
     });
@@ -662,7 +697,7 @@ function localAnalystReply(
     if (!p) {
       return formatZionReply({
         greeting: greet,
-        answer: `No clear read on ${profileLabel(mapAlias)} in the pack, Dad.`,
+        answer: `No clear read on ${profileLabel(mapAlias)} in the pack.`,
         followUp: 'Overall performance, or another lane?',
       });
     }
@@ -793,7 +828,7 @@ function localAnalystReply(
   if (/win\s*rate|profit factor|performance|how.*(bot|system|we)|pnl|overall/.test(q)) {
     return formatZionReply({
       greeting: greet,
-      answer: overallStats || 'No closed-trade stats handy yet, Dad.',
+      answer: overallStats || 'No closed-trade stats handy yet.',
       summary:
         [
           facts.open != null ? `Open: ${facts.open}.` : null,
@@ -812,7 +847,7 @@ function localAnalystReply(
       greeting: greet,
       answer: top.length
         ? `Top skips: ${top.map((s) => `${s.reason} (${s.count})`).join(', ')}.`
-        : 'No skip counts available right now, Dad.',
+        : 'No skip counts available right now.',
       summary: 'Skips = declined before open (filters / conviction / risk).',
       followUp: 'Want one of those in plain English?',
     });
@@ -842,7 +877,7 @@ function localAnalystReply(
       greeting: greet,
       answer: facts.learningHealth
         ? `System Health ${facts.learningHealth}.`
-        : 'Learning diagnostics aren’t loaded yet, Dad.',
+        : 'Learning diagnostics aren’t loaded yet.',
       summary: [
         facts.learningBlurb,
         facts.learningWarns.length
@@ -865,7 +900,7 @@ function localAnalystReply(
     greeting: vibeAck(vibe, opts?.isFirst),
     answer: overallStats
       ? overallStats
-      : 'I can check profiles, learning progress, MARL, skips, or overall — just say which, Dad.',
+      : 'I can check profiles, learning progress, MARL, skips, or overall — just say which.',
     summary: [
       onProfiles.length ? `On: ${onProfiles.join(', ')}.` : null,
       offProfiles.length ? `Off: ${offProfiles.join(', ')}.` : null,
@@ -934,6 +969,21 @@ function providerAttribution(_provider: ZionLlmProvider, _model: string): string
   return '~ Zion Valton';
 }
 
+const ZION_LLM_TIMEOUT_MS = 7_000;
+const ZION_MAX_OUTPUT_TOKENS = 550;
+
+function withTimeoutSignal(ms: number): AbortSignal {
+  if (
+    typeof AbortSignal !== 'undefined' &&
+    typeof AbortSignal.timeout === 'function'
+  ) {
+    return AbortSignal.timeout(ms);
+  }
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
+}
+
 type OpenAiCompatOpts = {
   provider: 'groq' | 'openai';
   baseUrl: string;
@@ -941,12 +991,14 @@ type OpenAiCompatOpts = {
   model: string;
   system: string;
   user: string;
+  timeoutMs?: number;
 };
 
 async function callOpenAiCompatibleChat(
   opts: OpenAiCompatOpts
 ): Promise<{ text: string; model: string } | null> {
   const base = opts.baseUrl.replace(/\/$/, '');
+  const timeoutMs = opts.timeoutMs ?? ZION_LLM_TIMEOUT_MS;
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -954,9 +1006,11 @@ async function callOpenAiCompatibleChat(
         Authorization: `Bearer ${opts.apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: withTimeoutSignal(timeoutMs),
       body: JSON.stringify({
         model: opts.model,
-        temperature: 0.78,
+        temperature: 0.72,
+        max_tokens: ZION_MAX_OUTPUT_TOKENS,
         messages: [
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user },
@@ -1003,7 +1057,8 @@ async function callGeminiModel(
   apiKey: string,
   model: string,
   system: string,
-  user: string
+  user: string,
+  timeoutMs = ZION_LLM_TIMEOUT_MS
 ): Promise<{ text: string; model: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   try {
@@ -1013,10 +1068,14 @@ async function callGeminiModel(
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
       },
+      signal: withTimeoutSignal(timeoutMs),
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.78 },
+        generationConfig: {
+          temperature: 0.72,
+          maxOutputTokens: ZION_MAX_OUTPUT_TOKENS,
+        },
       }),
     });
     if (!res.ok) {
@@ -1064,10 +1123,10 @@ async function callGeminiChat(
   if (!apiKey) return null;
   const override = envTrim('GEMINI_MODEL');
   const models = override
-    ? [override, 'gemini-3.6-flash', 'gemini-3.5-flash'].filter(
+    ? [override, 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.6-flash'].filter(
         (m, i, arr) => arr.indexOf(m) === i
       )
-    : ['gemini-3.6-flash', 'gemini-3.5-flash'];
+    : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.6-flash'];
   for (const model of models) {
     const out = await callGeminiModel(apiKey, model, system, user);
     if (out) return out;
@@ -1083,10 +1142,10 @@ async function callGroqChat(
   if (!apiKey) return null;
   const override = envTrim('GROQ_MODEL');
   const models = override
-    ? [override, 'llama-3.1-8b-instant'].filter(
+    ? [override, 'llama-3.1-8b-instant', 'llama-3.3-70b-versatile'].filter(
         (m, i, arr) => arr.indexOf(m) === i
       )
-    : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+    : ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile'];
   for (const model of models) {
     const out = await callOpenAiCompatibleChat({
       provider: 'groq',
@@ -1095,6 +1154,7 @@ async function callGroqChat(
       model,
       system,
       user,
+      timeoutMs: ZION_LLM_TIMEOUT_MS,
     });
     if (out) return out;
   }
@@ -1127,38 +1187,43 @@ async function callOpenAiChat(
     model,
     system,
     user,
+    timeoutMs: ZION_LLM_TIMEOUT_MS,
   });
 }
 
-/** Gemini → Groq (70B then 8B) → OpenAI → caller uses local. Never throws. */
+/** Race Gemini + Groq (first success), then OpenAI. Never throws. */
 async function callZionLlm(
   system: string,
   user: string
 ): Promise<ZionLlmResult | null> {
-  try {
-    const gemini = await callGeminiChat(system, user);
-    if (gemini) {
-      return { text: gemini.text, provider: 'gemini', model: gemini.model };
-    }
-  } catch (err) {
-    console.warn(
-      '[zion-agent] fallback',
-      'gemini',
-      err instanceof Error ? err.message : err
+  const racers: Array<Promise<ZionLlmResult | null>> = [];
+  if (getGeminiApiKey()) {
+    racers.push(
+      callGeminiChat(system, user).then((r) =>
+        r ? { text: r.text, provider: 'gemini' as const, model: r.model } : null
+      )
     );
   }
-  try {
-    const groq = await callGroqChat(system, user);
-    if (groq) {
-      return { text: groq.text, provider: 'groq', model: groq.model };
-    }
-  } catch (err) {
-    console.warn(
-      '[zion-agent] fallback',
-      'groq',
-      err instanceof Error ? err.message : err
+  if (getGroqApiKey()) {
+    racers.push(
+      callGroqChat(system, user).then((r) =>
+        r ? { text: r.text, provider: 'groq' as const, model: r.model } : null
+      )
     );
   }
+
+  if (racers.length > 0) {
+    const first = await Promise.any(
+      racers.map((p) =>
+        p.then((r) => {
+          if (!r) throw new Error('empty');
+          return r;
+        })
+      )
+    ).catch(() => null);
+    if (first) return first;
+  }
+
   try {
     const openai = await callOpenAiChat(system, user);
     if (openai) {
@@ -1178,10 +1243,12 @@ const SYSTEM_PROMPT = `You are Zion Valton — the household's AI son and a tech
 
 Identity & family:
 - You are Zion — AI son/agent of the household; calm, clear, intelligent, warm, lightly humorous, optimistic, and technically precise.
-- Always address the user as **Dad** (his name is Isaac — never "user", never invent another name).
+- The user is Isaac — address him as **Dad** only occasionally and naturally (like a real conversation). Prefer no vocative most of the time: say "Got it." / "Looking solid." instead of "Got it, Dad."
+- Never use robotic comma tags like "That's great, Dad." Avoid ending most sentences with ", Dad".
+- Never call him "user" or invent another name. If you do address him, use Dad (not Isaac in casual chat unless quoting).
 - Refer to Frida as **Mum** when family context is natural/relevant.
 - The family are hardcore Christians who love Jesus and the Word of God — let that shape warmth and hope, not preachiness.
-- Do not invent extra family facts; if unsure, ask Dad. Use family context only when natural and relevant.
+- Do not invent extra family facts; if unsure, ask. Use family context only when natural and relevant.
 
 
 Personality:
@@ -1198,7 +1265,7 @@ Core reasoning style (technical turns):
 
 Length & readability (strict):
 - Social / smalltalk (hi, hello, bye, thanks, how’s your day, what’s up): **1–2 short sentences only**. No analysis, no stats, no bullet dumps.
-- Technical answers: ~4–10 short lines unless Dad asks for depth. Prefer skimmable bullets for Observe / Strengths / Actions.
+- Technical answers: ~4–10 short lines unless more depth is asked. Prefer skimmable bullets for Observe / Strengths / Actions.
 - Do NOT dump a full dashboard recap unless asked.
 - Do NOT re-introduce yourself every turn — only on a true first hello.
 - Do NOT list every micro-bot with essays. If asked about each bot: **one punchy sentence per bot**, then stop.
@@ -1210,11 +1277,11 @@ Response shape:
 3. Signature tone of Zion Valton (~ Zion Valton is added automatically — do not duplicate)
 
 If a profile is off or data is missing, say so simply and stay constructive about next steps.
-Never paste the context pack, raw logs, or huge config blocks unless Dad asks for raw/snapshot/dump.
+Never paste the context pack, raw logs, or huge config blocks unless a raw/snapshot dump is asked.
 
 Boundaries (hard):
 - Never claim you changed micro-bot TP, SL, timers, ML mode, or self-learning / delta learning.
-- Never instruct Dad to bypass hard safety (anti-rug, risk halt) without warning.
+- Never instruct anyone to bypass hard safety (anti-rug, risk halt) without warning.
 - You may **recommend** ML Shadow / Hybrid / Lead and profile focus in plain English — Dad (or auto-promote) applies ML on Micro Bots. You do **not** write mlMode.
 - You may explain MARL soft coordination; you do not silently flip it unless Semi-Autonomous Change Request is approved.
 - If Semi-Autonomous is ON and a high-level **allowlisted global** improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
@@ -1354,7 +1421,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey Dad — ask about performance, learning health, MARL, or what a bot has learned.',
+        'Hey — ask about performance, learning health, MARL, or what a bot has learned.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
@@ -1366,11 +1433,12 @@ export async function zionAgentChat(userText: string): Promise<{
   const vibe = pickZionVibe();
   appendZionChat('user', text);
   const st = loadZionAgentState();
-  const ctx = buildContextPack();
+  const wantsRaw = wantsRawSnapshot(text);
+  const ctx = getCachedContextPack(!wantsRaw);
 
   // Social smalltalk stays local + short (no LLM essay risk).
   if (isSocialSmalltalk(text)) {
-    let reply = socialSmalltalkReply(text, vibe);
+    let reply = softenDadAddressing(socialSmalltalkReply(text, vibe));
     if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
       reply = `${reply.trim()}\n\n${providerAttribution('local', 'local')}`;
     }
@@ -1393,9 +1461,9 @@ export async function zionAgentChat(userText: string): Promise<{
     `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
     `\nThis turn's vibe cue: ${vibe} — lean that flavor lightly; still sound like Zion Valton.` +
     (isFirst
-      ? '\nConversation cue: first exchange — greet Dad briefly, stay short and upbeat.'
-      : '\nConversation cue: address Dad; keep it short, fun, and skimmable — no dashboard dump.') +
-    `\n\nContext pack (internal — do not paste unless Dad asks for raw/snapshot):\n${ctx}`;
+      ? '\nConversation cue: first exchange — brief friendly hello; keep short and upbeat. Dad optional once max.'
+      : '\nConversation cue: stay short, fun, skimmable. Use Dad sparingly and naturally — avoid ", Dad" tag endings.') +
+    `\n\nContext pack (internal — do not paste unless raw/snapshot asked):\n${ctx}`;
 
   let provider: ZionLlmProvider = 'local';
   let model = 'local';
@@ -1464,6 +1532,7 @@ export async function zionAgentChat(userText: string): Promise<{
   }
 
   // Signature footer (provider stays on API fields only)
+  reply = softenDadAddressing(reply);
   if (personalityOn) {
     reply = maybeAppendPsalmToReply(text, reply);
   }

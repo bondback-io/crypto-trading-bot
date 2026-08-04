@@ -354,7 +354,7 @@ export function buildZionAnalystBrief(opts?: {
   try {
     const { getProfileRlStatus, formatProfileRlPlainLanguage } =
       require('./profileRlAgent') as typeof import('./profileRlAgent');
-    const prl = getProfileRlStatus();
+    const prl = getProfileRlStatus({ persist: false, ensureKeyAgents: false });
     contextLines.push(`Analyst Profile RL: ${prl.label}`);
     for (const a of prl.agents.slice(0, 5)) {
       const plain =

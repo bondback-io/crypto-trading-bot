@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.154',
+    title: 'Zion Chat Faster + Natural Dad Tone',
+    sections: ['zion', 'alerts'],
+    items: [
+      'Zion chat is snappier: slim cached context pack, 7s provider timeouts, Gemini+Groq race (first win), faster flash/8B models first, capped output tokens.',
+      'Dad addressing is occasional and natural — drops robotic ", Dad" tags; still knows Isaac is Dad without saying it every sentence.',
+    ],
+  },
+  {
     version: '1.2.153',
     title: 'Bot Info — Coaches & Learning Stack',
     sections: ['coaches', 'learning', 'microbots', 'overview'],
