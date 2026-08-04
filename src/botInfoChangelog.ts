@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.151',
+    title: 'Zion Personality + Supervision',
+    sections: ['zion', 'alerts', 'microbots'],
+    items: [
+      'Zion family memory: durable household identity (Dad/Mum, Sunshine Coast household, faith context) with memory score in chat context — no invented facts.',
+      'Personality-aware chat: address Isaac as Dad, optional scripture cues (~15%), curated psalms on fitting intents; fight-log comments capped rare.',
+      'System supervision scheduler (~2.5 min): Normal / Watch / Action needed; rate-limited email alerts on Action needed; toggles on Zion tab.',
+    ],
+  },
+  {
     version: '1.2.150',
     title: 'Profile RL Polish — Wallet Sizing, Mode UI, Zion',
     sections: ['microbots', 'learning', 'execution'],

@@ -5112,6 +5112,13 @@ function logLaneFightDecisions(
   } catch {
     /* non-fatal */
   }
+  try {
+    const { maybeZionFightLogComment } =
+      require('./zionFightLog') as typeof import('./zionFightLog');
+    maybeZionFightLogComment({ mint: entry.mint, event: 'open', winnerId: entry.winnerId });
+  } catch {
+    /* optional */
+  }
 }
 
 /** Append a MARL thought to the latest fight row for this mint (size / low-MC). */
@@ -5142,6 +5149,35 @@ export function appendMarlThoughtToLaneFight(
   }
 }
 
+/** Append a Zion fight-log comment to the latest in-memory row for this mint. */
+export function appendZionThoughtToLaneFight(
+  mint: string,
+  line: string
+): void {
+  const text = String(line || '').trim().slice(0, 200);
+  if (!mint || !text) return;
+  const prefixed = /^Zion:\s/i.test(text) ? text : `Zion: ${text}`;
+  const hit = laneDecisionLog.find((e) => e.mint === mint);
+  if (!hit) return;
+  if (!hit.marl) {
+    hit.marl = { enabled: true, thoughts: [] };
+  }
+  hit.marl.enabled = true;
+  if (!hit.marl.thoughts.includes(prefixed)) {
+    hit.marl.thoughts.push(prefixed);
+    if (hit.marl.thoughts.length > 12) {
+      hit.marl.thoughts = hit.marl.thoughts.slice(-12);
+    }
+  }
+  try {
+    const { appendLaneFightZionThought } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    appendLaneFightZionThought({ mint, thought: prefixed });
+  } catch {
+    /* optional */
+  }
+}
+
 /** Mark the latest in-memory + persisted lane fight with cascade buy/skip. */
 function markLaneFightCascadeResult(
   mint: string,
@@ -5161,6 +5197,16 @@ function markLaneFightCascadeResult(
     recordLaneFightCascadeResult({ mint, opened, cascadeSkipReason });
   } catch {
     /* non-fatal */
+  }
+  try {
+    const { maybeZionFightLogComment } =
+      require('./zionFightLog') as typeof import('./zionFightLog');
+    maybeZionFightLogComment({
+      mint,
+      event: opened ? 'cascade_open' : 'cascade_skip',
+    });
+  } catch {
+    /* optional */
   }
 }
 

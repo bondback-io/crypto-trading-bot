@@ -2052,8 +2052,14 @@ export interface BotConfig {
   profileRl: import('./profileRlAgent').ProfileRlConfig;
   /** Learning accelerators: replay, counterfactuals, teacher-student. */
   learningAccelerators: import('./learningReplayBuffer').LearningAcceleratorsConfig;
-  /** Zion chat agent (semi-autonomous toggle only; secrets via env). */
-  zionAgent: { semiAutonomous: boolean };
+  /** Zion chat agent (personality + supervision toggles; secrets via env). */
+  zionAgent: {
+    semiAutonomous: boolean;
+    personalityEnabled: boolean;
+    supervisionEnabled: boolean;
+    fightLogCommentsEnabled: boolean;
+    supervisionEmailEnabled: boolean;
+  };
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 }
@@ -2267,6 +2273,10 @@ export const config: BotConfig = {
 
   zionAgent: {
     semiAutonomous: false,
+    personalityEnabled: true,
+    supervisionEnabled: true,
+    fightLogCommentsEnabled: true,
+    supervisionEmailEnabled: true,
   },
 
   peakProfitProtection: {
@@ -2793,6 +2803,10 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     }) as PersistedBotSettings['learningAccelerators'],
     zionAgent: {
       semiAutonomous: config.zionAgent?.semiAutonomous === true,
+      personalityEnabled: config.zionAgent?.personalityEnabled !== false,
+      supervisionEnabled: config.zionAgent?.supervisionEnabled !== false,
+      fightLogCommentsEnabled: config.zionAgent?.fightLogCommentsEnabled !== false,
+      supervisionEmailEnabled: config.zionAgent?.supervisionEmailEnabled !== false,
     },
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
@@ -3563,8 +3577,13 @@ function applySettingsSnapshot(
     };
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {
+    const s = saved.zionAgent;
     config.zionAgent = {
-      semiAutonomous: saved.zionAgent.semiAutonomous === true,
+      semiAutonomous: s.semiAutonomous === true,
+      personalityEnabled: s.personalityEnabled !== false,
+      supervisionEnabled: s.supervisionEnabled !== false,
+      fightLogCommentsEnabled: s.fightLogCommentsEnabled !== false,
+      supervisionEmailEnabled: s.supervisionEmailEnabled !== false,
     };
     try {
       const { setZionSemiAutonomous } =

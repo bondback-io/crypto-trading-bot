@@ -3349,17 +3349,53 @@ export function createServer(): express.Application {
         listPendingZionImprovements,
         listZionImprovementHistory,
       } = require('./zionAgent') as typeof import('./zionAgent');
+      const { formatFamilyMemoryForPrompt } =
+        require('./zionFamilyMemory') as typeof import('./zionFamilyMemory');
+      const { getZionSupervisionStatus } =
+        require('./zionSupervision') as typeof import('./zionSupervision');
       const st = loadZionAgentState();
       const pending = listPendingZionImprovements();
       const history = listZionImprovementHistory(40);
+      const status = getZionAgentStatus();
+      const supervision = getZionSupervisionStatus();
       res.json({
         ok: true,
-        status: getZionAgentStatus(),
+        status,
+        familyMemory: {
+          summary: formatFamilyMemoryForPrompt().slice(0, 1200),
+          score: status.familyMemoryScore,
+        },
+        supervision,
         messages: st.messages.slice(-40),
         changeRequests: st.changeRequests.slice(0, 40),
         improvementRequests: pending,
         improvementHistory: history,
         pendingImprovementCount: pending.length,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/zion/supervision', (_req: Request, res: Response) => {
+    try {
+      const { getZionSupervisionStatus, runZionSupervisionCheck } =
+        require('./zionSupervision') as typeof import('./zionSupervision');
+      const force = String((_req.query ?? {}).force || '') === '1';
+      const snap = force ? runZionSupervisionCheck() : null;
+      res.json({
+        ok: true,
+        ...getZionSupervisionStatus(),
+        lastRun: snap
+          ? {
+              classification: snap.classification,
+              issues: snap.issues,
+              at: snap.lastCheckAt,
+            }
+          : undefined,
       });
     } catch (err) {
       res.status(500).json({
@@ -3396,12 +3432,42 @@ export function createServer(): express.Application {
         require('./zionAgent') as typeof import('./zionAgent');
       const { persistUserSettings, config: cfg } =
         require('./config') as typeof import('./config');
-      const body = (req.body ?? {}) as { semiAutonomous?: boolean };
+      const body = (req.body ?? {}) as {
+        semiAutonomous?: boolean;
+        personalityEnabled?: boolean;
+        supervisionEnabled?: boolean;
+        fightLogCommentsEnabled?: boolean;
+        supervisionEmailEnabled?: boolean;
+      };
       if (typeof body.semiAutonomous === 'boolean') {
         setZionSemiAutonomous(body.semiAutonomous);
-        cfg.zionAgent = { semiAutonomous: body.semiAutonomous };
-        persistUserSettings();
       }
+      cfg.zionAgent = {
+        semiAutonomous:
+          typeof body.semiAutonomous === 'boolean'
+            ? body.semiAutonomous
+            : cfg.zionAgent?.semiAutonomous === true,
+        personalityEnabled:
+          typeof body.personalityEnabled === 'boolean'
+            ? body.personalityEnabled
+            : cfg.zionAgent?.personalityEnabled !== false,
+        supervisionEnabled:
+          typeof body.supervisionEnabled === 'boolean'
+            ? body.supervisionEnabled
+            : cfg.zionAgent?.supervisionEnabled !== false,
+        fightLogCommentsEnabled:
+          typeof body.fightLogCommentsEnabled === 'boolean'
+            ? body.fightLogCommentsEnabled
+            : cfg.zionAgent?.fightLogCommentsEnabled !== false,
+        supervisionEmailEnabled:
+          typeof body.supervisionEmailEnabled === 'boolean'
+            ? body.supervisionEmailEnabled
+            : cfg.zionAgent?.supervisionEmailEnabled !== false,
+      };
+      if (typeof body.semiAutonomous === 'boolean') {
+        setZionSemiAutonomous(body.semiAutonomous);
+      }
+      persistUserSettings();
       res.json({ ok: true, status: getZionAgentStatus() });
     } catch (err) {
       res.status(500).json({
@@ -6632,6 +6698,17 @@ export function startServer(port?: number, host?: string): void {
     logger.info('Server', `Dashboard → ${url}`, { health: '/health' });
     console.log(`[server] Dashboard → ${url}`);
     console.log(`[server] Health    → http://${listenHost === '0.0.0.0' ? 'localhost' : listenHost}:${listenPort}/health`);
+
+    try {
+      const { startZionSupervisionScheduler } =
+        require('./zionSupervision') as typeof import('./zionSupervision');
+      startZionSupervisionScheduler();
+    } catch (err) {
+      console.warn(
+        '[zion-supervision] scheduler start failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
 
     // Auto-import after listen so a slow GitHub restore cannot block the dashboard.
     setTimeout(() => {

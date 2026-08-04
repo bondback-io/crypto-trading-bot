@@ -446,6 +446,18 @@ function maybeRecordLaneOutcome(
       exitKey: classifyExitKey(position.reason || '').key,
       maxRunupPct: Math.max(0, maxRunupPct),
     });
+    try {
+      const { maybeZionFightLogComment } =
+        require('./zionFightLog') as typeof import('./zionFightLog');
+      maybeZionFightLogComment({
+        mint: position.mint,
+        event: 'close',
+        winnerId: position.tradeProfileId,
+        win: pnlSol > 0,
+      });
+    } catch {
+      /* optional */
+    }
   } catch {
     /* non-fatal */
   }

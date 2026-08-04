@@ -7572,6 +7572,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span>Semi-Autonomous Mode <span class="tip" tabindex="0" data-tip="OFF = answers only. ON = may queue Improvement Requests for global gates / system tips. Nothing applies without Approve."></span></span>
           <label class="switch"><input type="checkbox" id="zion-agent-semi" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
+        <div class="toggle-row">
+          <span>Personality <span class="tip" tabindex="0" data-tip="Family-aware tone, Dad/Mum addressing, optional scripture cues."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-personality" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Supervision <span class="tip" tabindex="0" data-tip="Periodic RPC/risk/learning checks (~2.5 min)."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-supervision" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Fight-log comments <span class="tip" tabindex="0" data-tip="Rare Zion quips on lane fights (max ~1 per 10 fights / 15 min)."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-fightlog" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Supervision emails <span class="tip" tabindex="0" data-tip="Email Dad on Action needed (rate-limited). Requires notify email configured."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-agent-supervision-email" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="mint text-xs mb-2" id="zion-agent-supervision-status">—</div>
         <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
@@ -25861,6 +25878,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const semi = document.getElementById('zion-agent-semi');
       if (semi) semi.checked = !!st.semiAutonomous;
+      const pers = document.getElementById('zion-agent-personality');
+      if (pers) pers.checked = st.personalityEnabled !== false;
+      const sup = document.getElementById('zion-agent-supervision');
+      if (sup) sup.checked = st.supervisionEnabled !== false;
+      const fl = document.getElementById('zion-agent-fightlog');
+      if (fl) fl.checked = st.fightLogCommentsEnabled !== false;
+      const supEm = document.getElementById('zion-agent-supervision-email');
+      if (supEm) supEm.checked = st.supervisionEmailEnabled !== false;
+      const supStat = document.getElementById('zion-agent-supervision-status');
+      if (supStat) {
+        const cls = (data.supervision && data.supervision.classification) || st.supervisionClassification || '—';
+        const score = typeof st.familyMemoryScore === 'number' ? st.familyMemoryScore : '—';
+        supStat.textContent = 'Supervision: ' + cls + ' · Family memory score: ' + score + '/100';
+      }
       const msgs = Array.isArray(data.messages) ? data.messages : [];
       stopZionTypewriter();
       clearZionTyping();
@@ -25953,10 +25984,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.clearZionAgentChat = clearZionAgentChat;
     async function saveZionAgentConfig() {
       const semi = document.getElementById('zion-agent-semi');
+      const pers = document.getElementById('zion-agent-personality');
+      const sup = document.getElementById('zion-agent-supervision');
+      const fl = document.getElementById('zion-agent-fightlog');
+      const supEm = document.getElementById('zion-agent-supervision-email');
       await fetchJSON('/api/zion/agent/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ semiAutonomous: !!(semi && semi.checked) }),
+        body: JSON.stringify({
+          semiAutonomous: !!(semi && semi.checked),
+          personalityEnabled: !!(pers && pers.checked),
+          supervisionEnabled: !!(sup && sup.checked),
+          fightLogCommentsEnabled: !!(fl && fl.checked),
+          supervisionEmailEnabled: !!(supEm && supEm.checked),
+        }),
       });
       await loadZionAgent();
     }

@@ -164,6 +164,10 @@ export interface PersistedBotSettings {
   };
   zionAgent?: {
     semiAutonomous?: boolean;
+    personalityEnabled?: boolean;
+    supervisionEnabled?: boolean;
+    fightLogCommentsEnabled?: boolean;
+    supervisionEmailEnabled?: boolean;
   };
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {

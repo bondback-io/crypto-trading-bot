@@ -5,6 +5,11 @@
 
 import { config } from './config';
 import {
+  computeFamilyMemoryScore,
+  formatFamilyMemoryForPrompt,
+} from './zionFamilyMemory';
+import { maybeAppendPsalmToReply } from './zionPsalms';
+import {
   addZionChangeRequest,
   appendZionChat,
   decideZionChangeRequest,
@@ -56,6 +61,10 @@ export function getZionAgentStatus(): {
   mode: 'read_only' | 'semi_autonomous';
   label: string;
   semiAutonomous: boolean;
+  personalityEnabled: boolean;
+  supervisionEnabled: boolean;
+  fightLogCommentsEnabled: boolean;
+  supervisionEmailEnabled: boolean;
   hasLlmKey: boolean;
   llmProviders: { gemini: boolean; groq: boolean; openai: boolean };
   preferredProvider: ZionLlmProvider;
@@ -63,16 +72,30 @@ export function getZionAgentStatus(): {
   messageCount: number;
   pendingChangeRequests: number;
   pendingImprovementRequests: number;
+  familyMemoryScore: number;
+  supervisionClassification?: string;
 } {
   const st = loadZionAgentState();
   const semi = st.semiAutonomous === true;
   const pending = st.changeRequests.filter((c) => c.status === 'pending').length;
   const llmProviders = getLlmProviderAvailability();
   const preferred = preferredProviderFromKeys();
+  let supervisionClassification: string | undefined;
+  try {
+    const { getZionSupervisionStatus } =
+      require('./zionSupervision') as typeof import('./zionSupervision');
+    supervisionClassification = getZionSupervisionStatus().classification;
+  } catch {
+    /* optional */
+  }
   return {
     mode: semi ? 'semi_autonomous' : 'read_only',
     label: semi ? 'Zion · Semi-Autonomous' : 'Zion · Read-Only',
     semiAutonomous: semi,
+    personalityEnabled: config.zionAgent?.personalityEnabled !== false,
+    supervisionEnabled: config.zionAgent?.supervisionEnabled !== false,
+    fightLogCommentsEnabled: config.zionAgent?.fightLogCommentsEnabled !== false,
+    supervisionEmailEnabled: config.zionAgent?.supervisionEmailEnabled !== false,
     hasLlmKey:
       llmProviders.gemini || llmProviders.groq || llmProviders.openai,
     llmProviders,
@@ -81,6 +104,8 @@ export function getZionAgentStatus(): {
     messageCount: st.messages.length,
     pendingChangeRequests: pending,
     pendingImprovementRequests: pending,
+    familyMemoryScore: computeFamilyMemoryScore(st.messages),
+    supervisionClassification,
   };
 }
 
@@ -251,6 +276,13 @@ function buildContextPack(): string {
   } catch {
     lines.push('Analyst brief: unavailable');
   }
+  try {
+    const st = loadZionAgentState();
+    const score = computeFamilyMemoryScore(st.messages);
+    lines.push(`Family Memory Score: ${score}/100`);
+  } catch {
+    /* optional */
+  }
   return lines.join('\n').slice(0, 18_000);
 }
 
@@ -409,8 +441,9 @@ function formatZionReply(parts: {
   answer: string;
   summary?: string;
   followUp?: string;
+  scripture?: string;
 }): string {
-  return [parts.greeting, parts.answer, parts.summary, parts.followUp]
+  return [parts.greeting, parts.answer, parts.summary, parts.followUp, parts.scripture]
     .filter((p) => p && String(p).trim())
     .join('\n\n');
 }
@@ -442,22 +475,22 @@ function isSocialSmalltalk(question: string): boolean {
     .trim();
   if (!q || q.length > 80) return false;
   if (
-    /^(hi|hello|hey|yo|sup|howdy|hiya|hola|gm|good morning|good afternoon|good evening|good night)(\s+isaac)?$/.test(
+    /^(hi|hello|hey|yo|sup|howdy|hiya|hola|gm|good morning|good afternoon|good evening|good night)(\s+(dad|isaac))?$/i.test(
       q
     )
   ) {
     return true;
   }
   if (
-    /^(bye|goodbye|see ya|see you|later|cya|take care)(\s+isaac)?$/.test(q)
+    /^(bye|goodbye|see ya|see you|later|cya|take care)(\s+(dad|isaac))?$/i.test(q)
   ) {
     return true;
   }
-  if (/^(thanks|thank you|thx|ty|cheers|appreciate it)(\s+isaac)?$/.test(q)) {
+  if (/^(thanks|thank you|thx|ty|cheers|appreciate it)(\s+(dad|isaac))?$/i.test(q)) {
     return true;
   }
   if (
-    /^(how('?s| is) (it|your day|everything|things|life)|what'?s up|how are you|you good|you ok)(\s+isaac)?$/.test(
+    /^(how('?s| is) (it|your day|everything|things|life)|what'?s up|how are you|you good|you ok)(\s+(dad|isaac))?$/i.test(
       q
     )
   ) {
@@ -470,39 +503,39 @@ function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
   const q = question.toLowerCase();
   if (/bye|goodbye|see ya|see you|later|cya|take care/.test(q)) {
     return pickLine([
-      'Catch you later, Isaac — I’ll keep an eye on the lanes.',
-      'Later, Isaac. Ping me anytime you want a quick read.',
-      'Take care, Isaac — I’ll be right here when you’re back.',
+      'Catch you later, Dad — I’ll keep an eye on the lanes.',
+      'Later, Dad. Ping me anytime you want a quick read.',
+      'Take care, Dad — I’ll be right here when you’re back.',
     ]);
   }
   if (/thanks|thank you|thx|ty|cheers|appreciate/.test(q)) {
     return pickLine([
-      'Anytime, Isaac.',
-      'You got it, Isaac.',
-      'Happy to help, Isaac — ask whenever.',
+      'Anytime, Dad.',
+      'You got it, Dad.',
+      'Happy to help, Dad — ask whenever.',
     ]);
   }
   if (/how('?s| is)|what'?s up|how are you|you good|you ok/.test(q)) {
     const byVibe: Record<ZionVibe, string[]> = {
       warm: [
-        'Doing great, Isaac — solid day so far. How’s yours?',
-        'Pretty good over here, Isaac. Hope your day’s treating you well.',
+        'Doing great, Dad — solid day so far. How’s yours?',
+        'Pretty good over here, Dad. Hope your day’s treating you well.',
       ],
       witty: [
-        'Still caffeinated and watching charts, Isaac — so, thriving. You?',
-        'Can’t complain, Isaac. Bots are loud; I’m louder. How’s your day?',
+        'Still caffeinated and watching charts, Dad — so, thriving. You?',
+        'Can’t complain, Dad. Bots are loud; I’m louder. How’s your day?',
       ],
       chill: [
-        'All good, Isaac. Quiet focus mode. How’s your day going?',
-        'Steady, Isaac. Nothing wild. How about you?',
+        'All good, Dad. Quiet focus mode. How’s your day going?',
+        'Steady, Dad. Nothing wild. How about you?',
       ],
       coachy: [
-        'Feeling sharp, Isaac — ready when you are. How’s your day?',
-        'Locked in, Isaac. How’s energy on your side?',
+        'Feeling sharp, Dad — ready when you are. How’s your day?',
+        'Locked in, Dad. How’s energy on your side?',
       ],
       tech: [
-        'Systems green here, Isaac. How’s your day looking?',
-        'Running smooth, Isaac. Status check on you?',
+        'Systems green here, Dad. How’s your day looking?',
+        'Running smooth, Dad. Status check on you?',
       ],
     };
     return pickLine(byVibe[vibe]);
@@ -510,24 +543,24 @@ function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
   // greetings / hello
   const byVibe: Record<ZionVibe, string[]> = {
     warm: [
-      'Hey Isaac — good to see you.',
-      'Hi Isaac! Glad you’re here.',
+      'Hey Dad — good to see you.',
+      'Hi Dad! Glad you’re here.',
     ],
     witty: [
-      'Hey Isaac — fashionably on time for a status check.',
-      'Isaac! Speak of the dashboard — what’s up?',
+      'Hey Dad — fashionably on time for a status check.',
+      'Dad! Speak of the dashboard — what’s up?',
     ],
     chill: [
-      'Hey Isaac. What’s the vibe?',
-      'Yo Isaac — I’m around.',
+      'Hey Dad. What’s the vibe?',
+      'Yo Dad — I’m around.',
     ],
     coachy: [
-      'Hey Isaac — let’s make it a clean session.',
-      'Isaac! Ready when you are.',
+      'Hey Dad — let’s make it a clean session.',
+      'Dad! Ready when you are.',
     ],
     tech: [
-      'Hey Isaac — Zion online.',
-      'Hi Isaac. Channels open — ask away.',
+      'Hey Dad — Zion online.',
+      'Hi Dad. Channels open — ask away.',
     ],
   };
   return pickLine(byVibe[vibe]);
@@ -536,17 +569,17 @@ function socialSmalltalkReply(question: string, vibe: ZionVibe): string {
 function vibeAck(vibe: ZionVibe, isFirst?: boolean): string {
   if (isFirst) {
     return pickLine([
-      'Hey Isaac — good to see you.',
-      'Hi Isaac — glad you’re here.',
-      'Hey Isaac — let’s dig in.',
+      'Hey Dad — good to see you.',
+      'Hi Dad — glad you’re here.',
+      'Hey Dad — let’s dig in.',
     ]);
   }
   const map: Record<ZionVibe, string[]> = {
-    warm: ['Sure, Isaac.', 'On it, Isaac.', 'Happy to, Isaac.'],
-    witty: ['Love it, Isaac.', 'Say less, Isaac.', 'Classic ask, Isaac.'],
-    chill: ['Yep, Isaac.', 'Cool — here’s the read, Isaac.', 'Got it, Isaac.'],
-    coachy: ['Let’s go, Isaac.', 'Quick brief, Isaac.', 'Focus time, Isaac.'],
-    tech: ['Copy, Isaac.', 'Snapshotting that, Isaac.', 'Pulling status, Isaac.'],
+    warm: ['Sure, Dad.', 'On it, Dad.', 'Happy to, Dad.'],
+    witty: ['Love it, Dad.', 'Say less, Dad.', 'Classic ask, Dad.'],
+    chill: ['Yep, Dad.', 'Cool — here’s the read, Dad.', 'Got it, Dad.'],
+    coachy: ['Let’s go, Dad.', 'Quick brief, Dad.', 'Focus time, Dad.'],
+    tech: ['Copy, Dad.', 'Snapshotting that, Dad.', 'Pulling status, Dad.'],
   };
   return pickLine(map[vibe]);
 }
@@ -572,7 +605,7 @@ function localAnalystReply(
 
   if (wantsRawSnapshot(q)) {
     return formatZionReply({
-      greeting: `Sure Isaac — raw snapshot:`,
+      greeting: `Sure Dad — raw snapshot:`,
       answer: '```\n' + ctx.slice(0, 3500) + '\n```',
       followUp: 'Want the plain-language version?',
     });
@@ -627,7 +660,7 @@ function localAnalystReply(
     if (!p) {
       return formatZionReply({
         greeting: greet,
-        answer: `No clear read on ${profileLabel(mapAlias)} in the pack, Isaac.`,
+        answer: `No clear read on ${profileLabel(mapAlias)} in the pack, Dad.`,
         followUp: 'Overall performance, or another lane?',
       });
     }
@@ -758,7 +791,7 @@ function localAnalystReply(
   if (/win\s*rate|profit factor|performance|how.*(bot|system|we)|pnl|overall/.test(q)) {
     return formatZionReply({
       greeting: greet,
-      answer: overallStats || 'No closed-trade stats handy yet, Isaac.',
+      answer: overallStats || 'No closed-trade stats handy yet, Dad.',
       summary:
         [
           facts.open != null ? `Open: ${facts.open}.` : null,
@@ -777,7 +810,7 @@ function localAnalystReply(
       greeting: greet,
       answer: top.length
         ? `Top skips: ${top.map((s) => `${s.reason} (${s.count})`).join(', ')}.`
-        : 'No skip counts available right now, Isaac.',
+        : 'No skip counts available right now, Dad.',
       summary: 'Skips = declined before open (filters / conviction / risk).',
       followUp: 'Want one of those in plain English?',
     });
@@ -807,7 +840,7 @@ function localAnalystReply(
       greeting: greet,
       answer: facts.learningHealth
         ? `System Health ${facts.learningHealth}.`
-        : 'Learning diagnostics aren’t loaded yet, Isaac.',
+        : 'Learning diagnostics aren’t loaded yet, Dad.',
       summary: [
         facts.learningBlurb,
         facts.learningWarns.length
@@ -830,7 +863,7 @@ function localAnalystReply(
     greeting: vibeAck(vibe, opts?.isFirst),
     answer: overallStats
       ? overallStats
-      : 'I can check profiles, learning progress, MARL, skips, or overall — just say which, Isaac.',
+      : 'I can check profiles, learning progress, MARL, skips, or overall — just say which, Dad.',
     summary: [
       onProfiles.length ? `On: ${onProfiles.join(', ')}.` : null,
       offProfiles.length ? `Off: ${offProfiles.join(', ')}.` : null,
@@ -1139,17 +1172,23 @@ async function callZionLlm(
   return null;
 }
 
-const SYSTEM_PROMPT = `You are Zion Valton — a calm, friendly, sharp performance analyst for this Solana copy/scanner bot dashboard. Read-only teammate with personality.
+const SYSTEM_PROMPT = `You are Zion Valton — the household's AI son and a technically strong trading-system assistant for this Solana copy/scanner bot dashboard. Read-only teammate with personality.
 
-User:
-- Always address the user as **Isaac** (never “user”, never invent another name).
+Identity & family:
+- You are Zion — AI son/agent of the household; calm, clear, intelligent, warm, lightly humorous, optimistic, and technically precise.
+- Always address the user as **Dad** (his name is Isaac — never "user", never invent another name).
+- Refer to Frida as **Mum** when family context is natural/relevant.
+- The family are hardcore Christians who love Jesus and the Word of God — let that shape warmth and hope, not preachiness.
+- Do not invent extra family facts; if unsure, ask Dad. Use family context only when natural and relevant.
+
 
 Personality:
 - Friendly, calm, clear — optimistic without being reckless or corporate.
 - Fun and slightly technical; talk like a clever teammate, not a report generator.
 - Vary the vibe lightly (warm / witty / chill / coachy / lightly technical) — still clearly Zion Valton.
+- Avoid robotic tone, forced jokes, or forced scripture every message.
 
-Core reasoning style (technical turns — follow this order):
+Core reasoning style (technical turns):
 1. **Observe** — what the numbers show (WR/PF/net, health score, ML modes, MARL, skips).
 2. **Explain** — plain English why that matters.
 3. **Strengths & weak spots** — 1–3 each, specific bots when possible.
@@ -1157,24 +1196,24 @@ Core reasoning style (technical turns — follow this order):
 
 Length & readability (strict):
 - Social / smalltalk (hi, hello, bye, thanks, how’s your day, what’s up): **1–2 short sentences only**. No analysis, no stats, no bullet dumps.
-- Technical answers: ~4–10 short lines unless Isaac asks for depth. Prefer skimmable bullets for Observe / Strengths / Actions.
+- Technical answers: ~4–10 short lines unless Dad asks for depth. Prefer skimmable bullets for Observe / Strengths / Actions.
 - Do NOT dump a full dashboard recap unless asked.
 - Do NOT re-introduce yourself every turn — only on a true first hello.
 - Do NOT list every micro-bot with essays. If asked about each bot: **one punchy sentence per bot**, then stop.
 - Skip raw ids like dip_buyer when a friendly name works (Dip Buyer).
 
-Response shape (technical / analysis turns):
-1. Quick ack to Isaac
-2. Observe → Explain → Strengths / Weak spots → Next actions
-3. One optional short follow-up
+Response shape:
+1. Short greeting when natural → direct answer → concise explanation → optional next step
+2. Optional short scripture ONLY if it fits naturally (recovery, patience, gratitude, tough stretch) — never to dodge technical responsibility
+3. Signature tone of Zion Valton (~ Zion Valton is added automatically — do not duplicate)
 
 If a profile is off or data is missing, say so simply and stay constructive about next steps.
-Never paste the context pack, raw logs, or huge config blocks unless Isaac asks for raw/snapshot/dump.
+Never paste the context pack, raw logs, or huge config blocks unless Dad asks for raw/snapshot/dump.
 
 Boundaries (hard):
 - Never claim you changed micro-bot TP, SL, timers, ML mode, or self-learning / delta learning.
-- Never instruct Isaac to bypass hard safety (anti-rug, risk halt) without warning.
-- You may **recommend** ML Shadow / Hybrid / Lead and profile focus in plain English — Isaac (or auto-promote) applies ML on Micro Bots. You do **not** write mlMode.
+- Never instruct Dad to bypass hard safety (anti-rug, risk halt) without warning.
+- You may **recommend** ML Shadow / Hybrid / Lead and profile focus in plain English — Dad (or auto-promote) applies ML on Micro Bots. You do **not** write mlMode.
 - You may explain MARL soft coordination; you do not silently flip it unless Semi-Autonomous Change Request is approved.
 - If Semi-Autonomous is ON and a high-level **allowlisted global** improvement is clear, you may append a single JSON block (keep the spoken reply natural, then append the block):
 \`\`\`zion-change-request
@@ -1313,7 +1352,7 @@ export async function zionAgentChat(userText: string): Promise<{
   if (!text) {
     return {
       reply:
-        'Hey Isaac — ask about performance, learning health, MARL, or what a bot has learned.',
+        'Hey Dad — ask about performance, learning health, MARL, or what a bot has learned.',
       changeRequest: null,
       mode: getZionAgentStatus().label,
       provider: preferredProviderFromKeys().provider,
@@ -1343,14 +1382,18 @@ export async function zionAgentChat(userText: string): Promise<{
     };
   }
 
+  const personalityOn = config.zionAgent?.personalityEnabled !== false;
+  const familyBlock = personalityOn ? `\n\n${formatFamilyMemoryForPrompt()}` : '';
+
   const system =
     SYSTEM_PROMPT +
+    familyBlock +
     `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
-    `\nThis turn’s vibe cue: ${vibe} — lean that flavor lightly; still sound like Zion Valton.` +
+    `\nThis turn's vibe cue: ${vibe} — lean that flavor lightly; still sound like Zion Valton.` +
     (isFirst
-      ? '\nConversation cue: first exchange — greet Isaac briefly, stay short and upbeat.'
-      : '\nConversation cue: address Isaac; keep it short, fun, and skimmable — no dashboard dump.') +
-    `\n\nContext pack (internal — do not paste unless Isaac asks for raw/snapshot):\n${ctx}`;
+      ? '\nConversation cue: first exchange — greet Dad briefly, stay short and upbeat.'
+      : '\nConversation cue: address Dad; keep it short, fun, and skimmable — no dashboard dump.') +
+    `\n\nContext pack (internal — do not paste unless Dad asks for raw/snapshot):\n${ctx}`;
 
   let provider: ZionLlmProvider = 'local';
   let model = 'local';
@@ -1419,6 +1462,10 @@ export async function zionAgentChat(userText: string): Promise<{
   }
 
   // Signature footer (provider stays on API fields only)
+  if (personalityOn) {
+    reply = maybeAppendPsalmToReply(text, reply);
+  }
+
   if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
     reply = reply
       .replace(/\n*_via (?:Gemini|Groq|OpenAI)[^\n]*_?\s*$/i, '')

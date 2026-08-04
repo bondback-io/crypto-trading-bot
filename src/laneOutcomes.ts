@@ -165,6 +165,33 @@ export function appendLaneFightMarlThought(input: {
   }
 }
 
+/** Append a Zion personality comment (prefixed) to the newest open fight for this mint. */
+export function appendLaneFightZionThought(input: {
+  mint: string;
+  thought: string;
+}): void {
+  load();
+  const mint = String(input.mint || '').trim();
+  let thought = String(input.thought || '').trim().slice(0, 200);
+  if (!mint || !thought) return;
+  if (!/^Zion:\s/i.test(thought)) thought = `Zion: ${thought}`;
+  for (let i = ring.length - 1; i >= 0; i--) {
+    const row = ring[i];
+    if (row.mint !== mint) continue;
+    if (row.closedAt != null) continue;
+    if (!row.marl) row.marl = { enabled: true, thoughts: [] };
+    row.marl.enabled = true;
+    if (!row.marl.thoughts.includes(thought)) {
+      row.marl.thoughts.push(thought);
+      if (row.marl.thoughts.length > 12) {
+        row.marl.thoughts = row.marl.thoughts.slice(-12);
+      }
+    }
+    persist();
+    return;
+  }
+}
+
 /**
  * Attach cascade outcome to the newest open lane record for this mint.
  */
