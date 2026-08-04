@@ -100,8 +100,14 @@ let lastUniverseMessage = '';
 /** Skip polls until this timestamp after RPC 429 (protects shared primary CU). */
 let rpcCooldownUntil = 0;
 let rpcCooldownMs = 60_000;
-const RPC_COOLDOWN_MIN_MS = 60_000;
+const RPC_COOLDOWN_MIN_MS = 90_000;
 const RPC_COOLDOWN_MAX_MS = 5 * 60_000;
+/** After 429, next successful polls use a tiny batch until one completes clean. */
+let throttleBatchAfter429 = false;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function isRpcRateLimitError(err: unknown): boolean {
   const msg =
@@ -118,14 +124,15 @@ function isRpcRateLimitError(err: unknown): boolean {
 function noteRpcRateLimit(err: unknown): void {
   const now = Date.now();
   rpcCooldownUntil = now + rpcCooldownMs;
+  throttleBatchAfter429 = true;
   lastError = err instanceof Error ? err.message : String(err);
   logger.warn(
     'ZionScanner',
     `RPC 429 — cooling down ${Math.round(rpcCooldownMs / 1000)}s ` +
-      `(sharedLane=${lanesShareEndpoint()})`,
+      `(sharedLane=${lanesShareEndpoint()}, nextBatch=throttled)`,
     errorToMeta(err)
   );
-  rpcCooldownMs = Math.min(RPC_COOLDOWN_MAX_MS, rpcCooldownMs * 2);
+  rpcCooldownMs = Math.min(RPC_COOLDOWN_MAX_MS, Math.max(rpcCooldownMs * 2, RPC_COOLDOWN_MIN_MS));
 }
 
 function clearRpcCooldownOnSuccess(): void {
@@ -135,6 +142,7 @@ function clearRpcCooldownOnSuccess(): void {
   if (rpcCooldownUntil > 0 && Date.now() >= rpcCooldownUntil) {
     rpcCooldownUntil = 0;
   }
+  throttleBatchAfter429 = false;
 }
 
 function zionCfg() {
@@ -378,12 +386,14 @@ async function parseBuysFromSig(
 async function pollUniverseBatch(): Promise<number> {
   if (!universe.length) return 0;
   const share = lanesShareEndpoint();
-  // Shared lane: cap concurrency so Zion does not starve copy/signals
+  // Default smaller batches — Alchemy scanner-lane CU/s is easy to blow with
+  // getSignatures + getParsedTransaction per wallet.
   const rawBatch = Math.max(
-    2,
-    Math.min(12, Number(zionCfg().scanner.batchSize) || 6)
+    1,
+    Math.min(8, Number(zionCfg().scanner.batchSize) || 3)
   );
-  const batchSize = share ? Math.min(3, rawBatch) : rawBatch;
+  let batchSize = share ? Math.min(2, rawBatch) : rawBatch;
+  if (throttleBatchAfter429) batchSize = Math.min(2, batchSize);
   const start = rotationIndex % universe.length;
   const batch: UniverseWallet[] = [];
   for (let i = 0; i < batchSize && i < universe.length; i++) {
@@ -399,10 +409,12 @@ async function pollUniverseBatch(): Promise<number> {
   const conn = getConnection();
   let buys = 0;
 
-  for (const wallet of batch) {
+  for (let wi = 0; wi < batch.length; wi++) {
+    const wallet = batch[wi]!;
+    if (wi > 0) await sleep(throttleBatchAfter429 ? 400 : 180);
     try {
       const pubkey = new PublicKey(wallet.address);
-      const sigs = await conn.getSignaturesForAddress(pubkey, { limit: 8 });
+      const sigs = await conn.getSignaturesForAddress(pubkey, { limit: 5 });
       if (!sigs.length) continue;
       const lastSeen = lastSignature.get(wallet.address);
       if (lastSeen == null) {
@@ -415,12 +427,13 @@ async function pollUniverseBatch(): Promise<number> {
         newer.push(s.signature);
       }
       if (!newer.length) continue;
-      const chronological = newer.reverse().slice(0, 3);
+      const chronological = newer.reverse().slice(0, 2);
       let lastOk: string | null = null;
       for (const sig of chronological) {
         const n = await parseBuysFromSig(wallet, sig);
         buys += n;
         lastOk = sig;
+        await sleep(throttleBatchAfter429 ? 250 : 80);
       }
       if (lastOk) lastSignature.set(wallet.address, lastOk);
     } catch (err) {
@@ -773,7 +786,13 @@ export function getZionScannerStatus(): {
   lastError: string | null;
   candidateCount: number;
   universeMessage: string;
+  /** Epoch ms; > now means polls are skipped after RPC 429. */
+  rpcCooldownUntil: number;
 } {
+  // Expire stale cooldown marker so status stays accurate between ticks
+  if (rpcCooldownUntil > 0 && Date.now() >= rpcCooldownUntil) {
+    rpcCooldownUntil = 0;
+  }
   return {
     running,
     enabled: zionCfg()?.enabled === true && zionCfg().scanner?.enabled !== false,
@@ -782,6 +801,7 @@ export function getZionScannerStatus(): {
     lastError,
     candidateCount: candidates.length,
     universeMessage: lastUniverseMessage,
+    rpcCooldownUntil,
   };
 }
 

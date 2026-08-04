@@ -23432,8 +23432,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (feed) {
         const cands = (data && data.candidates) || [];
         if (!cands.length) {
-          feed.innerHTML =
-            '<div class="mint">No KOL scanner candidates yet — enable Zion and wait for a poll.</div>';
+          const sc = (data && data.scanner) || {};
+          const zs = (data && data.status) || {};
+          let tip =
+            'No KOL scanner candidates yet — waiting for a successful poll.';
+          if (zs.enabled === false || sc.enabled === false) {
+            tip =
+              'No KOL scanner candidates — enable Zion and the KOL scanner, then wait for a poll.';
+          } else if (sc.rpcCooldownUntil && Number(sc.rpcCooldownUntil) > Date.now()) {
+            tip =
+              'KOL scanner paused (RPC rate-limit cooldown until ' +
+              new Date(Number(sc.rpcCooldownUntil)).toLocaleTimeString() +
+              '). Candidates will refresh after cooldown — not a Zion OFF issue.';
+          } else if (sc.lastError) {
+            tip =
+              'No KOL candidates — ' +
+              String(sc.lastError) +
+              (String(sc.lastError).indexOf('RPC') >= 0
+                ? ' (Alchemy/scanner lane 429 — not Zion disabled).'
+                : '');
+          } else if (!sc.lastPollAt) {
+            tip =
+              'KOL scanner is ON but has not completed a poll yet — wait one cycle.';
+          }
+          feed.innerHTML = '<div class="mint">' + tip + '</div>';
         } else {
           feed.innerHTML = cands
             .map(function (c) {

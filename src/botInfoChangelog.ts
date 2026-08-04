@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.141',
+    title: 'Zion KOL Scanner RPC Cooldown Fix',
+    sections: ['zion', 'scanners'],
+    items: [
+      'KOL feed empty state no longer says “enable Zion” when Zion is ON — it shows RPC 429 cooldown / last error instead.',
+      'Zion KOL polls use smaller batches, staggered RPC calls, and longer cool-downs after Alchemy CU/s 429s so lastPollAt can advance again.',
+    ],
+  },
+  {
     version: '1.2.140',
     title: 'More Scanner Fills — Widen Mig MC + Softer H1 Vol',
     sections: ['scanners', 'microbots', 'overview'],

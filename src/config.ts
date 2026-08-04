@@ -2509,7 +2509,7 @@ export const config: BotConfig = {
       pollIntervalMs: 75_000,
       universeSize: 60,
       activityLookbackMinutes: 45,
-      batchSize: 6,
+      batchSize: 3,
     },
     minKolWallets: 5,
     minWalletQuality: 40,
@@ -3785,7 +3785,7 @@ export function applyPersistedSettings(opts?: {
           pollIntervalMs: 30_000,
           universeSize: 60,
           activityLookbackMinutes: 45,
-          batchSize: 6,
+          batchSize: 3,
         };
       } else {
         config.zion.scanner.enabled = true;
@@ -3814,7 +3814,7 @@ export function applyPersistedSettings(opts?: {
         pollIntervalMs: 30_000,
         universeSize: 60,
         activityLookbackMinutes: 45,
-        batchSize: 6,
+        batchSize: 3,
       };
     } else {
       config.zion.scanner.pollIntervalMs = 30_000;
