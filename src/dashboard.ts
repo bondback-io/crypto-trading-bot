@@ -7852,6 +7852,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 <button type="button" class="closed-filter-btn" data-profile-rl-strength="high" onclick="setProfileRlStrength('high')">High</button>
               </div>
             </div>
+            <div class="mb-2">
+              <div class="text-xs font-semibold text-slate-300 mb-1">Per-profile mode</div>
+              <div id="profile-rl-modes" class="text-xs text-slate-400 mb-2">—</div>
+            </div>
             <div id="profile-rl-agents" class="text-xs text-slate-400 mb-2">—</div>
             <div class="text-xs font-semibold text-slate-300 mb-1">Recent decisions</div>
             <div id="profile-rl-decisions" class="max-h-40 overflow-y-auto text-xs mint">—</div>
@@ -25025,6 +25029,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (lab) lab.textContent = _profileRlStrength.charAt(0).toUpperCase() + _profileRlStrength.slice(1);
         const badge = document.getElementById('profile-rl-status-badge');
         if (badge) badge.textContent = r.label || (r.enabled ? 'Profile RL ON' : 'Profile RL OFF');
+        const modesEl = document.getElementById('profile-rl-modes');
+        if (modesEl) {
+          const agents = r.agents || [];
+          modesEl.innerHTML = agents.length
+            ? agents
+                .slice(0, 12)
+                .map((a) => {
+                  const pid = String(a.profileId || '');
+                  const mode = a.mode === 'hybrid' || a.mode === 'lead' ? a.mode : 'shadow';
+                  return (
+                    '<div class="mb-1" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">' +
+                    '<span style="color:#94a3b8;min-width:6rem">' +
+                    escHtml(pid) +
+                    '</span>' +
+                    '<select class="profile-rl-mode-select" data-profile-id="' +
+                    escHtml(pid) +
+                    '" onchange="saveProfileRlMode(this)" style="font-size:11px;padding:2px 4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px">' +
+                    ['shadow', 'hybrid', 'lead']
+                      .map(
+                        (m) =>
+                          '<option value="' +
+                          m +
+                          '"' +
+                          (mode === m ? ' selected' : '') +
+                          '>' +
+                          m +
+                          '</option>'
+                      )
+                      .join('') +
+                    '</select>' +
+                    '<span class="mint" style="flex:1;min-width:8rem">EMA ' +
+                    (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
+                    ' · n=' +
+                    (a.trades || 0) +
+                    '</span>' +
+                    '</div>'
+                  );
+                })
+                .join('')
+            : '<span class="mint">No agents yet</span>';
+        }
         const agentsEl = document.getElementById('profile-rl-agents');
         if (agentsEl) {
           const agents = r.agents || [];
@@ -25058,6 +25103,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       await loadProfileRlStatus();
     }
+    async function saveProfileRlMode(sel) {
+      const profileId = sel.getAttribute('data-profile-id');
+      const mode = sel.value;
+      if (!profileId || !mode) return;
+      await fetchJSON('/api/config/profile-rl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, mode }),
+      });
+      await loadProfileRlStatus();
+    }
     function setProfileRlStrength(s) {
       _profileRlStrength = s;
       document.querySelectorAll('[data-profile-rl-strength]').forEach((btn) => {
@@ -25070,6 +25126,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadProfileRlStatus = loadProfileRlStatus;
     window.saveProfileRlConfig = saveProfileRlConfig;
     window.setProfileRlStrength = setProfileRlStrength;
+    window.saveProfileRlMode = saveProfileRlMode;
 
     let _learningAccelStrength = 'low';
     async function loadLearningAccelerators() {

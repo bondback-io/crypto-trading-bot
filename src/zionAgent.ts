@@ -174,6 +174,76 @@ function buildContextPack(): string {
     lines.push('Learning health: unavailable');
   }
   try {
+    const { getProfileRlStatus, formatProfileRlPlainLanguage, KEY_PROFILE_RL_IDS } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const prl = getProfileRlStatus();
+    lines.push(`Profile RL: ${prl.label}`);
+    for (const a of prl.agents.slice(0, 6)) {
+      const plain =
+        a.plainLanguage || formatProfileRlPlainLanguage(a.profileId);
+      lines.push(
+        `  prl ${a.profileId}: ${a.mode || 'shadow'} · ${String(plain).slice(0, 120)}`
+      );
+    }
+    for (const d of prl.decisions.slice(0, 4)) {
+      lines.push(`  prl-dec: ${d.detail}`);
+    }
+    for (const pid of KEY_PROFILE_RL_IDS) {
+      if (prl.agents.some((a) => a.profileId === pid)) continue;
+      const plain = formatProfileRlPlainLanguage(pid);
+      if (plain) lines.push(`  prl ${pid}: ${plain.slice(0, 120)}`);
+    }
+  } catch {
+    lines.push('Profile RL: unavailable');
+  }
+  try {
+    const { getLearningAcceleratorsStatus, formatReplayPlainLanguage } =
+      require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+    const { formatCounterfactualPlainLanguage } =
+      require('./learningCounterfactual') as typeof import('./learningCounterfactual');
+    const { formatTeacherStudentPlainLanguage } =
+      require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+    const acc = getLearningAcceleratorsStatus();
+    lines.push(`Accelerators: ${acc.label}`);
+    const accelIds = new Set<string>();
+    for (const p of acc.profiles.slice(0, 8)) accelIds.add(p.profileId);
+    for (const id of ['scalper', 'momentum_burst', 'dip_buyer', 'trend_rider']) {
+      accelIds.add(id);
+    }
+    for (const pid of accelIds) {
+      const bits = [
+        formatReplayPlainLanguage(pid),
+        formatCounterfactualPlainLanguage(pid),
+        formatTeacherStudentPlainLanguage(pid),
+      ].filter(Boolean);
+      if (bits.length) {
+        lines.push(`  accel ${pid}: ${bits.join(' · ').slice(0, 140)}`);
+      }
+    }
+    for (const d of acc.decisions.slice(0, 4)) {
+      lines.push(`  accel-dec: ${d.detail || d.kind || ''}`);
+    }
+  } catch {
+    lines.push('Accelerators: unavailable');
+  }
+  try {
+    const { formatProfileTaLearnedPlainLanguage } =
+      require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+    const { KEY_PROFILE_RL_IDS } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const taLines: string[] = [];
+    for (const pid of KEY_PROFILE_RL_IDS) {
+      const ta = formatProfileTaLearnedPlainLanguage(pid);
+      if (ta) taLines.push(`  ta ${pid}: ${ta.slice(0, 120)}`);
+    }
+    if (taLines.length) {
+      lines.push('Profile TA learned:');
+      lines.push(...taLines);
+    }
+  } catch {
+    /* optional */
+  }
+  try {
     const { buildZionAnalystBrief } =
       require('./zionPerformanceAnalyst') as typeof import('./zionPerformanceAnalyst');
     const brief = buildZionAnalystBrief();
@@ -595,6 +665,48 @@ function localAnalystReply(
         ? `Now: ${facts.marl}. Strength slider is on Micro Bots → MARL.`
         : 'Strength (Low/Med/High) is on Micro Bots → MARL.',
       followUp: 'Recent MARL decisions?',
+    });
+  }
+
+  if (/profile\s*rl|per.?profile\s*rl|rl\s*agent/.test(q)) {
+    const prlLine = ctx
+      .split('\n')
+      .find((l) => l.startsWith('Profile RL:'));
+    const prlBits = ctx
+      .split('\n')
+      .filter((l) => l.startsWith('  prl ') || l.startsWith('  prl-dec:'))
+      .slice(0, 4);
+    return formatZionReply({
+      greeting: greet,
+      answer:
+        prlLine?.replace(/^Profile RL:\s*/, '') ||
+        'Profile RL is per-lane soft policy — setup-worth, size confidence, TA sensitivity, exit hints. Never TP/SL.',
+      summary:
+        prlBits.length > 0
+          ? prlBits.map((l) => l.trim()).join(' ')
+          : 'Shadow/hybrid/lead per profile on Micro Bots → Profile RL. Default OFF.',
+      followUp: 'A specific lane’s RL mode or recent decisions?',
+    });
+  }
+
+  if (/accelerator|replay|counterfactual|teacher.?student/.test(q)) {
+    const accLine = ctx
+      .split('\n')
+      .find((l) => l.startsWith('Accelerators:'));
+    const accBits = ctx
+      .split('\n')
+      .filter((l) => l.startsWith('  accel ') || l.startsWith('  accel-dec:'))
+      .slice(0, 4);
+    return formatZionReply({
+      greeting: greet,
+      answer:
+        accLine?.replace(/^Accelerators:\s*/, '') ||
+        'Learning Accelerators: offline replay, counterfactual exit what-ifs, teacher→student TA transfer. Soft only.',
+      summary:
+        accBits.length > 0
+          ? accBits.map((l) => l.trim()).join(' ')
+          : 'Master toggle on Micro Bots → Learning Accelerators. Feeds self-learn and Profile RL rewards.',
+      followUp: 'Learning health score, or a profile’s TA learned weights?',
     });
   }
 

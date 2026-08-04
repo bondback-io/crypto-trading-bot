@@ -3019,6 +3019,97 @@ async function handleScannerCandidate(
   }
 }
 
+type MarlRlSoftSizingInput = {
+  profileId: string;
+  profileName?: string;
+  mint: string;
+  symbol?: string;
+  marketCapUsd: number | null;
+  solAmount: number;
+  sizeReason: string;
+  clampTag: string;
+  logThoughts?: boolean;
+};
+
+type MarlRlSoftSizingResult =
+  | { ok: true; solAmount: number; sizeReason: string }
+  | { ok: false; skipReason: string };
+
+/** Soft MARL low-MC + MARL/Profile RL size multipliers (fail-open). */
+function applyMarlRlSoftSizing(
+  input: MarlRlSoftSizingInput
+): MarlRlSoftSizingResult {
+  try {
+    const {
+      evaluateMarlLowMcCoordination,
+      marlSizeMultiplier,
+    } = require('./marlCoordinator') as typeof import('./marlCoordinator');
+    const { profileRlSizeMultiplier } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const low = evaluateMarlLowMcCoordination({
+      mint: input.mint,
+      symbol: input.symbol,
+      profileId: String(input.profileId || 'default'),
+      marketCapUsd: input.marketCapUsd,
+    });
+    if (low.action === 'skip') {
+      if (input.logThoughts) {
+        appendMarlThoughtToLaneFight(input.mint, low.reason);
+      }
+      return { ok: false, skipReason: low.reason };
+    }
+    if (input.logThoughts) {
+      if (low.reason && low.action !== 'allow') {
+        appendMarlThoughtToLaneFight(input.mint, low.reason);
+      } else if (low.action === 'allow' && low.reason.includes('low-MC slot')) {
+        appendMarlThoughtToLaneFight(input.mint, low.reason);
+      }
+    }
+    let solAmt = input.solAmount;
+    let sizeExtra = '';
+    const marlSz = marlSizeMultiplier(input.profileId);
+    if (marlSz.mult !== 1) {
+      solAmt *= marlSz.mult;
+      sizeExtra += ` · ${marlSz.note}`;
+      if (input.logThoughts) {
+        appendMarlThoughtToLaneFight(
+          input.mint,
+          `Size confidence ×${marlSz.mult.toFixed(2)} for ${input.profileName || input.profileId}`
+        );
+      }
+    }
+    const rlSz = profileRlSizeMultiplier(input.profileId);
+    if (rlSz.mult !== 1) {
+      solAmt *= rlSz.mult;
+      sizeExtra += ` · ${rlSz.note}`;
+      if (input.logThoughts) {
+        appendMarlThoughtToLaneFight(
+          input.mint,
+          `Profile RL size ×${rlSz.mult.toFixed(2)} for ${input.profileName || input.profileId}`
+        );
+      }
+    }
+    if (low.action === 'size_down' && low.sizeMult < 1) {
+      solAmt *= low.sizeMult;
+      sizeExtra += ` · ${low.reason}`;
+      if (input.logThoughts) {
+        appendMarlThoughtToLaneFight(input.mint, low.reason);
+      }
+    }
+    return {
+      ok: true,
+      solAmount: clampToMaxAllowedTradeSol(solAmt, input.clampTag),
+      sizeReason: sizeExtra ? input.sizeReason + sizeExtra : input.sizeReason,
+    };
+  } catch {
+    return {
+      ok: true,
+      solAmount: clampToMaxAllowedTradeSol(input.solAmount, input.clampTag),
+      sizeReason: input.sizeReason,
+    };
+  }
+}
+
 /**
  * Shared execute after passesFilters for scanner (and reusable later).
  */
@@ -3462,15 +3553,38 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
       buyOpts.solAmount ?? sizing.sizeSol,
       profileAssignment.exitRules
     );
-    buyOpts.solAmount = clampToMaxAllowedTradeSol(
-      sized.sizeSol,
-      sized.usedOverride ? 'profileOverride' : 'migrationProfileSize'
-    );
+    let migSizeReason = buyOpts.sizeReason || sizing.reason;
     if (sized.sizeNote) {
-      buyOpts.sizeReason =
-        (buyOpts.sizeReason || sizing.reason) +
-        ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
+      migSizeReason += ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
     }
+    const migMc =
+      signal.sourceEntryMcUsd != null
+        ? Number(signal.sourceEntryMcUsd)
+        : signal.metrics?.marketCapUsd != null
+          ? Number(signal.metrics.marketCapUsd)
+          : null;
+    const migMarlRl = applyMarlRlSoftSizing({
+      profileId: String(profileAssignment.profileId || 'default'),
+      profileName: profileAssignment.name,
+      mint: signal.mint,
+      symbol: signal.symbol,
+      marketCapUsd: migMc,
+      solAmount: sized.sizeSol,
+      sizeReason: migSizeReason,
+      clampTag: sized.usedOverride ? 'profileOverride' : 'migrationProfileSize',
+      logThoughts: true,
+    });
+    if (!migMarlRl.ok) {
+      finishBuy(event.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, migMarlRl.skipReason);
+      annotateActivityFeedByMint(event.mint, {
+        tradeStatus: 'skipped',
+        skipReason: migMarlRl.skipReason,
+      });
+      return;
+    }
+    buyOpts.solAmount = migMarlRl.solAmount;
+    buyOpts.sizeReason = migMarlRl.sizeReason;
     console.log(
       `[monitor] Profile ${profileAssignment.icon} ${profileAssignment.name} → ${signal.symbol}` +
         ` · score ${profileAssignment.score.toFixed(1)} (migration priority)`
@@ -4321,15 +4435,38 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   const er = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, er);
   const sized = applyTradeProfileSizing(buyOpts.solAmount ?? sizing.sizeSol, er);
-  buyOpts.solAmount = clampToMaxAllowedTradeSol(
-    sized.sizeSol,
-    sized.usedOverride ? 'profileOverride' : 'profileSize'
-  );
+  let walletSizeReason = buyOpts.sizeReason || 'Dynamic size';
   if (sized.sizeNote) {
-    buyOpts.sizeReason =
-      (buyOpts.sizeReason || 'Dynamic size') +
-      ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
+    walletSizeReason += ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
   }
+  const walletMc =
+    signal.sourceEntryMcUsd != null
+      ? Number(signal.sourceEntryMcUsd)
+      : signal.metrics?.marketCapUsd != null
+        ? Number(signal.metrics.marketCapUsd)
+        : null;
+  const walletMarlRl = applyMarlRlSoftSizing({
+    profileId: String(profileAssignment.profileId || 'default'),
+    profileName: profileAssignment.name,
+    mint: signal.mint,
+    symbol: signal.symbol,
+    marketCapUsd: walletMc,
+    solAmount: sized.sizeSol,
+    sizeReason: walletSizeReason,
+    clampTag: sized.usedOverride ? 'profileOverride' : 'profileSize',
+    logThoughts: true,
+  });
+  if (!walletMarlRl.ok) {
+    finishBuy(buy.mint, false);
+    markLaneFightCascadeResult(signal.mint, false, walletMarlRl.skipReason);
+    annotateActivityFeed(buy.mint, buy.signature, {
+      tradeStatus: 'skipped',
+      skipReason: walletMarlRl.skipReason,
+    });
+    return;
+  }
+  buyOpts.solAmount = walletMarlRl.solAmount;
+  buyOpts.sizeReason = walletMarlRl.sizeReason;
 
   recordSignalSizing(signal, sizing, true);
   console.log(`[monitor] ${sizing.reason}`);

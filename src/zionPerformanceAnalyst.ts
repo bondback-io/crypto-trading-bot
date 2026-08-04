@@ -350,6 +350,54 @@ export function buildZionAnalystBrief(opts?: {
     /* */
   }
 
+  // --- Profile RL + Learning Accelerators ---
+  try {
+    const { getProfileRlStatus, formatProfileRlPlainLanguage } =
+      require('./profileRlAgent') as typeof import('./profileRlAgent');
+    const prl = getProfileRlStatus();
+    contextLines.push(`Analyst Profile RL: ${prl.label}`);
+    for (const a of prl.agents.slice(0, 5)) {
+      const plain =
+        a.plainLanguage || formatProfileRlPlainLanguage(a.profileId);
+      contextLines.push(
+        `  prl ${a.profileId}: ${a.mode} · ${String(plain).slice(0, 100)}`
+      );
+    }
+    if (!prl.enabled) {
+      actions.push({
+        kind: 'profile',
+        title: 'Consider Profile RL (soft)',
+        detail:
+          'Per-lane confidence/size and TA sensitivity — shadow first. Never TP/SL. Enable on Micro Bots → Profile RL.',
+        advisoryOnly: true,
+      });
+    }
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getLearningAcceleratorsStatus, formatReplayPlainLanguage } =
+      require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
+    const { formatCounterfactualPlainLanguage } =
+      require('./learningCounterfactual') as typeof import('./learningCounterfactual');
+    const { formatTeacherStudentPlainLanguage } =
+      require('./learningTeacherStudent') as typeof import('./learningTeacherStudent');
+    const acc = getLearningAcceleratorsStatus();
+    contextLines.push(`Analyst Accelerators: ${acc.label}`);
+    for (const pid of ['scalper', 'dip_buyer', 'trend_rider', 'momentum_burst']) {
+      const bits = [
+        formatReplayPlainLanguage(pid),
+        formatCounterfactualPlainLanguage(pid),
+        formatTeacherStudentPlainLanguage(pid),
+      ].filter(Boolean);
+      if (bits.length) {
+        contextLines.push(`  accel ${pid}: ${bits.join(' · ').slice(0, 120)}`);
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
   // --- Skips ---
   try {
     const { getSkipReasonCounts } =

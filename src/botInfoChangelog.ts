@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.150',
+    title: 'Profile RL Polish — Wallet Sizing, Mode UI, Zion',
+    sections: ['microbots', 'learning', 'execution'],
+    items: [
+      'Wallet-copy and migration-priority buys now apply the same soft MARL and Profile RL size multipliers as scanner entries — Paper, Live Sim, and Live stay consistent.',
+      'Micro Bots → Profile RL: per-profile shadow/hybrid/lead mode selector wired to /api/config/profile-rl; global enable and strength unchanged.',
+      'Zion chat context enriched with Profile RL, Learning Accelerators (replay/counterfactual/teacher-student), and Profile TA learned summaries — concise plain language only.',
+    ],
+  },
+  {
     version: '1.2.149',
     title: 'Profile RL Agents + Learning Accelerators',
     sections: ['microbots', 'learning', 'knobs'],
