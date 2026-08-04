@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.146',
+    title: 'Overview Stats Flicker Fix',
+    sections: ['overview'],
+    items: [
+      'Overview Win Rate / Max DD / Trades / Status PF stay on the selected time window across status polls — no more flashing lifetime totals then windowed values.',
+      'Windowed stats refresh is throttled; last painted values hold until the next overview-stats fetch completes.',
+    ],
+  },
+  {
     version: '1.2.145',
     title: 'Profile TA Playbooks',
     sections: ['microbots', 'learning', 'scanners', 'knobs'],

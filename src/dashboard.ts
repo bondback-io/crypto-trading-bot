@@ -13197,6 +13197,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadOverviewWindowStats = function () {
       refreshOverviewWindowStats({ force: true });
     };
+    window.refreshOverviewWindowStats = refreshOverviewWindowStats;
 
     function setOverviewStatsWindow(win) {
       const next =
@@ -19758,8 +19759,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       })();
       const s = status.stats || {};
-      // Do NOT paint win-rate, trades, W/L, maxDD, avg hold from status.stats —
-      // those cards are owned by refreshOverviewWindowStats() for the selected window.
+      // Do NOT paint win-rate, trades, W/L, maxDD, avg hold, or Status PF from
+      // status.stats — those cards are owned by refreshOverviewWindowStats() for
+      // the selected window (avoids lifetime ↔ window flicker on every poll).
       const ur = sumOpenUnrealized(positions.open);
       const pfUr = status.portfolio && status.portfolio.unrealizedPnlSol != null
         ? Number(status.portfolio.unrealizedPnlSol)
@@ -19791,17 +19793,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         urHint.textContent = openNUr === 0
           ? 'No open trades'
           : markedUr + '/' + openNUr + ' marked';
-      }
-      const ddEl = document.getElementById('stat-maxdd');
-      const maxDd = s.maxDrawdownPct ?? 0;
-      if (ddEl) {
-        ddEl.textContent = maxDd.toFixed(1) + '%';
-        ddEl.style.color = maxDd <= 15 ? 'var(--green)' : maxDd <= 25 ? 'var(--muted)' : 'var(--red)';
-      }
-      const holdEl = document.getElementById('stat-avg-hold');
-      if (holdEl && s.avgHoldSec) {
-        const m = Math.round(s.avgHoldSec / 60);
-        holdEl.textContent = 'Avg hold ' + (m >= 60 ? Math.round(m / 60) + 'h' : m + 'm');
       }
       const trEl = document.getElementById('stat-trade-rate');
       const tr = status.monitor?.tradeRate;
@@ -19877,17 +19868,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         wsMode: Boolean(migStatus.wsMode),
       };
       syncOverviewStatsWindowButtons();
-      if (typeof loadOverviewWindowStats === 'function') {
+      // Throttled + cache-stable — do NOT force on every /api/status tick
+      if (typeof window.refreshOverviewWindowStats === 'function') {
+        window.refreshOverviewWindowStats();
+      } else if (typeof loadOverviewWindowStats === 'function') {
         loadOverviewWindowStats();
       } else {
+        const maxDd = Number(s.maxDrawdownPct ?? 0);
         const pf = Number(s.profitFactor ?? 0);
-        document.getElementById('stat-detail').textContent =
-          'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
-          ' · maxDD ' + maxDd.toFixed(1) + '%' +
-          ' · Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
-          '% · Migrations: ' + (migStatus.recentCount ?? 0) +
-          (status.monitor?.selectiveEnabled ? ' · selective ON' : '') +
-          (migStatus.wsMode ? ' (WS live)' : ' (poll)');
+        const detailEl = document.getElementById('stat-detail');
+        if (detailEl) {
+          detailEl.textContent =
+            'PF ' + (pf >= 999 ? '∞' : pf.toFixed(2)) +
+            ' · maxDD ' + maxDd.toFixed(1) + '%' +
+            ' · Avg win ' + (s.avgWinPct ?? 0).toFixed(1) + '% · Avg loss ' + (s.avgLossPct ?? 0).toFixed(1) +
+            '% · Migrations: ' + (migStatus.recentCount ?? 0) +
+            (status.monitor?.selectiveEnabled ? ' · selective ON' : '') +
+            (migStatus.wsMode ? ' (WS live)' : ' (poll)');
+        }
       }
 
       if (!window._cfgLoaded) {
