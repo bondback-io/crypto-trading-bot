@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.161',
+    title: 'External Market-Data API Resilience',
+    sections: ['scanners', 'alerts', 'overview', 'zion'],
+    items: [
+      'GMGN 403/401 enter provider cooldown (no aggressive retries); 404 paths are quarantined with concise logs instead of Cloudflare body spam.',
+      'GeckoTerminal 429s use exponential cooldown, in-flight OHLCV dedupe, and stale cache reuse so enrichment keeps moving.',
+      'Pump.fun coin 404s mark the mint unavailable briefly; Health Watch distinguishes external market-data degradation from RPC/poll stalls.',
+    ],
+  },
+  {
     version: '1.2.160',
     title: 'Configurable Profit Emails',
     sections: ['alerts', 'overview', 'knobs'],

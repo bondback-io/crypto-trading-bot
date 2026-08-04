@@ -13,6 +13,12 @@ import {
 } from './connection';
 import { getRpcRoleFor } from './rpcRouting';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import {
+  applyCooldown,
+  formatCooldownSecs,
+  QuietLogGate,
+  QuarantineMap,
+} from './httpProviderGate';
 
 /** Canonical initial real token reserves (raw, 6 decimals) from Pump.fun Global */
 const DEFAULT_INITIAL_REAL_TOKEN_RESERVES = 793_100_000_000_000n;
@@ -61,6 +67,44 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<BondingCurveState>>();
+
+const PUMP_MINT_UNAVAILABLE_MS = 10 * 60_000;
+const PUMP_API_COOLDOWN_BASE_MS = 15_000;
+const PUMP_API_COOLDOWN_CAP_MS = 4 * 60_000;
+const mintUnavailable = new QuarantineMap();
+let pumpApiRateLimitedUntil = 0;
+let pumpApiCooldownStreak = 0;
+const pump404Log = new QuietLogGate(60_000);
+const pump429Log = new QuietLogGate(60_000);
+
+function isPumpApiInCooldown(): boolean {
+  return Date.now() < pumpApiRateLimitedUntil;
+}
+
+function enterPumpApiCooldown(reason: string): void {
+  pumpApiCooldownStreak += 1;
+  const { until, durationMs } = applyCooldown({
+    streak: pumpApiCooldownStreak,
+    baseMs: PUMP_API_COOLDOWN_BASE_MS,
+    capMs: PUMP_API_COOLDOWN_CAP_MS,
+    currentUntil: pumpApiRateLimitedUntil,
+  });
+  pumpApiRateLimitedUntil = until;
+  if (pump429Log.allow()) {
+    logger.warn(
+      'Pump',
+      `429 — cooldown ${formatCooldownSecs(durationMs)}`,
+      { reason, streak: pumpApiCooldownStreak }
+    );
+  }
+}
+
+function clearPumpApiCooldownOnSuccess(): void {
+  if (pumpApiCooldownStreak > 0 || pumpApiRateLimitedUntil > 0) {
+    pumpApiCooldownStreak = 0;
+    pumpApiRateLimitedUntil = 0;
+  }
+}
 
 function cacheTtlMs(): number {
   return config.bondingCurve?.cacheTtlMs ?? 12_000;
@@ -404,8 +448,13 @@ export async function fetchBondingCurve(
       try {
         let state = await fetchBondingCurveOnChain(mint);
         if (state.source === 'none' || state.error) {
-          const api = await fetchBondingCurveFromApi(mint).catch(() => null);
-          if (api) state = api;
+          if (
+            !mintUnavailable.isQuarantined(mint) &&
+            !isPumpApiInCooldown()
+          ) {
+            const api = await fetchBondingCurveFromApi(mint).catch(() => null);
+            if (api) state = api;
+          }
         }
         cache.set(mint, {
           state,
@@ -486,6 +535,13 @@ async function fetchBondingCurveOnChain(
 async function fetchBondingCurveFromApi(
   mint: string
 ): Promise<BondingCurveState | null> {
+  if (mintUnavailable.isQuarantined(mint)) {
+    return null;
+  }
+  if (isPumpApiInCooldown()) {
+    return null;
+  }
+
   const urls = [
     `https://frontend-api.pump.fun/coins/${mint}`,
     `https://frontend-api-v3.pump.fun/coins/${mint}`,
@@ -497,8 +553,24 @@ async function fetchBondingCurveFromApi(
         context: 'Pump',
         label: 'bonding-curve api',
         timeoutMs: 6_000,
+        logBodyOnError: false,
         headers: { Accept: 'application/json' },
       });
+      if (res.status === 404) {
+        mintUnavailable.quarantine(mint, PUMP_MINT_UNAVAILABLE_MS);
+        if (pump404Log.allow()) {
+          logger.warn(
+            'Pump',
+            '404 — coin not found / unavailable',
+            { mint: mint.slice(0, 12) }
+          );
+        }
+        return null; // do not hammer second URL for same miss
+      }
+      if (res.status === 429) {
+        enterPumpApiCooldown('429');
+        return null;
+      }
       if (!res.ok) {
         logger.warn('Pump', 'bonding-curve api HTTP', {
           status: res.status,
@@ -551,9 +623,10 @@ async function fetchBondingCurveFromApi(
         state.nearMigration =
           complete || state.progressPct >= nearMigrationPct();
       }
+      clearPumpApiCooldownOnSuccess();
       return state;
     } catch (err) {
-      logger.error('Pump', 'bonding-curve api failed', {
+      logger.warn('Pump', 'bonding-curve api failed', {
         url: url.slice(0, 100),
         ...errorToMeta(err),
       });

@@ -12,6 +12,12 @@ import dotenv from 'dotenv';
 import { addSmartWallet, config, upsertSmartWallet, persistUserSettings } from './config';
 import { inferWalletCategory } from './walletStore';
 import { logger, errorToMeta } from './logger';
+import {
+  applyCooldown,
+  formatCooldownSecs,
+  QuietLogGate,
+  QuarantineMap,
+} from './httpProviderGate';
 
 dotenv.config();
 
@@ -544,6 +550,80 @@ export interface SniperThresholds {
 let lastRequestAt = 0;
 let rateLimitedUntil = 0;
 let consecutiveErrors = 0;
+/** Separate streak for 403/429 provider cooldowns (Dex-style). */
+let providerCooldownStreak = 0;
+
+const GMGN_COOLDOWN_BASE_MS = 30_000;
+const GMGN_COOLDOWN_CAP_MS = 5 * 60_000;
+const GMGN_429_BASE_MS = 15_000;
+const GMGN_429_CAP_MS = 4 * 60_000;
+const GMGN_PATH_QUARANTINE_MS = 20 * 60_000;
+const GMGN_DEBUG =
+  process.env.GMGN_DEBUG === '1' || process.env.GMGN_DEBUG === 'true';
+
+const pathQuarantine = new QuarantineMap();
+const gmgnCooldownLog = new QuietLogGate(60_000);
+const gmgn404Log = new QuietLogGate(60_000);
+
+export function isGmgnInCooldown(): boolean {
+  return Date.now() < rateLimitedUntil;
+}
+
+export function getGmgnCooldownRemainingMs(): number {
+  return Math.max(0, rateLimitedUntil - Date.now());
+}
+
+function enterGmgnProviderCooldown(
+  reason: '403' | '401' | '429',
+  status: number
+): number {
+  providerCooldownStreak += 1;
+  const base =
+    reason === '429' ? GMGN_429_BASE_MS : GMGN_COOLDOWN_BASE_MS;
+  const cap = reason === '429' ? GMGN_429_CAP_MS : GMGN_COOLDOWN_CAP_MS;
+  const { until, durationMs } = applyCooldown({
+    streak: providerCooldownStreak,
+    baseMs: base,
+    capMs: cap,
+    currentUntil: rateLimitedUntil,
+  });
+  rateLimitedUntil = until;
+  consecutiveErrors += 1;
+  if (gmgnCooldownLog.allow()) {
+    logger.warn(
+      'GMGN',
+      `${status} — provider cooldown ${formatCooldownSecs(durationMs)}`,
+      { reason, streak: providerCooldownStreak }
+    );
+  }
+  touchDiscovery({
+    lastError: `HTTP ${status} (cooldown ${formatCooldownSecs(durationMs)})`,
+    consecutiveFailures: consecutiveErrors,
+  });
+  return durationMs;
+}
+
+function clearGmgnCooldownOnSuccess(): void {
+  if (providerCooldownStreak > 0 || rateLimitedUntil > 0) {
+    providerCooldownStreak = 0;
+    rateLimitedUntil = 0;
+  }
+  consecutiveErrors = 0;
+}
+
+/** Normalize path key for quarantine (strip query). */
+function gmgnPathKey(path: string): string {
+  try {
+    if (path.startsWith('http')) {
+      const u = new URL(path);
+      return u.pathname;
+    }
+  } catch {
+    /* fall through */
+  }
+  const q = path.indexOf('?');
+  return q >= 0 ? path.slice(0, q) : path;
+}
 
 /** Shared discovery health (dashboard) */
 const discoveryStatus: GmgnDiscoveryStatus = {
@@ -690,6 +770,8 @@ function buildHeaders(forOpenApi = true): Record<string, string> {
  * and prefers openapi.gmgn.ai with exist-auth (X-APIKEY + timestamp + client_id).
  *
  * Keep discovery budgets short so the dashboard never hangs waiting on GMGN.
+ * 403/401 enter provider cooldown (no aggressive base/path fan-out).
+ * 404 quarantines the path and fails soft without body dumps.
  */
 async function gmgnFetch(
   path: string,
@@ -709,10 +791,22 @@ async function gmgnFetch(
   const maxAttempts = opts.maxAttempts ?? 2;
   const maxBases = opts.maxBases ?? 2;
   const deadlineAt = opts.deadlineAt ?? Date.now() + 12_000;
+  const pathKey = gmgnPathKey(path);
 
   touchDiscovery({ lastFetchAt: Date.now() });
   let lastError = 'Unknown error';
   let lastStatus = 0;
+
+  if (pathQuarantine.isQuarantined(pathKey)) {
+    const rem = pathQuarantine.remainingMs(pathKey);
+    lastError = `Path quarantined (${formatCooldownSecs(rem)})`;
+    logger.warn('GMGN', '404 — endpoint/resource unavailable', {
+      path: pathKey.slice(0, 120),
+      remainingMs: rem,
+      quarantined: true,
+    });
+    return { ok: false, status: 404, data: null, error: lastError };
+  }
 
   logger.info('GMGN', 'fetch start', {
     path: path.slice(0, 160),
@@ -721,7 +815,15 @@ async function gmgnFetch(
     maxBases,
   });
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  // Hard provider cooldown: do not burn attempts against known blocks
+  if (isGmgnInCooldown() && Date.now() + 500 < rateLimitedUntil) {
+    const rem = getGmgnCooldownRemainingMs();
+    lastError = `Provider cooldown ${formatCooldownSecs(rem)}`;
+    touchDiscovery({ lastError, consecutiveFailures: consecutiveErrors });
+    return { ok: false, status: lastStatus || 429, data: null, error: lastError };
+  }
+
+  outer: for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (Date.now() >= deadlineAt) {
       lastError = 'Deadline exceeded';
       logger.warn('GMGN', 'deadline exceeded', { path: path.slice(0, 120), attempt });
@@ -735,6 +837,10 @@ async function gmgnFetch(
       if (wait > 0) {
         logger.warn('GMGN', `rate-limited — waiting ${wait}ms`, { attempt });
         await sleep(wait);
+      }
+      if (isGmgnInCooldown()) {
+        lastError = `Provider cooldown ${formatCooldownSecs(getGmgnCooldownRemainingMs())}`;
+        break;
       }
     } else {
       const gap = minRequestGapMs();
@@ -775,26 +881,44 @@ async function gmgnFetch(
         });
 
         if (res.status === 429) {
-          consecutiveErrors += 1;
-          const backoff = Math.min(
-            15_000,
-            2_000 * consecutiveErrors + Math.floor(Math.random() * 500)
-          );
-          rateLimitedUntil = Date.now() + backoff;
           lastStatus = 429;
-          lastError = `Rate limited (cooldown ${backoff}ms)`;
-          logger.warn('GMGN', 'HTTP 429 rate limited', {
-            base: base || url,
-            backoffMs: backoff,
-            consecutiveErrors,
-            attempt: attempt + 1,
-          });
-          touchDiscovery({
-            lastError,
-            consecutiveFailures: consecutiveErrors,
-          });
-          await sleep(Math.min(backoff, Math.max(0, deadlineAt - Date.now()), 3_000));
-          break; // next attempt
+          const backoff = enterGmgnProviderCooldown('429', 429);
+          lastError = `Rate limited (cooldown ${formatCooldownSecs(backoff)})`;
+          await sleep(
+            Math.min(backoff, Math.max(0, deadlineAt - Date.now()), 3_000)
+          );
+          break; // next attempt or exit if still cooled
+        }
+
+        if (res.status === 403 || res.status === 401) {
+          lastStatus = res.status;
+          // Drain body quietly (avoid Cloudflare HTML in logs)
+          if (GMGN_DEBUG) {
+            const text = await res.text().catch(() => '');
+            lastError = `HTTP ${res.status}: ${text.slice(0, 120)}`;
+          } else {
+            await res.text().catch(() => '');
+            lastError = `HTTP ${res.status} forbidden/unauthorized`;
+          }
+          enterGmgnProviderCooldown(
+            res.status === 401 ? '401' : '403',
+            res.status
+          );
+          break outer; // stop all bases/attempts
+        }
+
+        if (res.status === 404) {
+          lastStatus = 404;
+          await res.text().catch(() => '');
+          pathQuarantine.quarantine(pathKey, GMGN_PATH_QUARANTINE_MS);
+          lastError = 'HTTP 404 endpoint/resource unavailable';
+          if (gmgn404Log.allow()) {
+            logger.warn('GMGN', '404 — endpoint/resource unavailable', {
+              path: pathKey.slice(0, 120),
+              base: base || 'absolute',
+            });
+          }
+          break outer; // fail soft — do not fan out other bases
         }
 
         if (res.status >= 500) {
@@ -811,14 +935,23 @@ async function gmgnFetch(
 
         if (!res.ok) {
           consecutiveErrors += 1;
-          const text = await res.text().catch(() => '');
           lastStatus = res.status;
-          lastError = `HTTP ${res.status}: ${text.slice(0, 120)}`;
-          logger.warn('GMGN', `HTTP ${res.status}`, {
-            url: url.slice(0, 160),
-            body: text.slice(0, 300),
-            attempt: attempt + 1,
-          });
+          if (GMGN_DEBUG) {
+            const text = await res.text().catch(() => '');
+            lastError = `HTTP ${res.status}: ${text.slice(0, 120)}`;
+            logger.warn('GMGN', `HTTP ${res.status}`, {
+              url: url.slice(0, 160),
+              body: text.slice(0, 300),
+              attempt: attempt + 1,
+            });
+          } else {
+            await res.text().catch(() => '');
+            lastError = `HTTP ${res.status}`;
+            logger.warn('GMGN', `HTTP ${res.status}`, {
+              url: url.slice(0, 160),
+              attempt: attempt + 1,
+            });
+          }
           continue;
         }
 
@@ -872,7 +1005,7 @@ async function gmgnFetch(
           continue;
         }
 
-        consecutiveErrors = 0;
+        clearGmgnCooldownOnSuccess();
         touchDiscovery({
           lastSuccessAt: Date.now(),
           lastError: null,
@@ -1981,8 +2114,10 @@ export function clearGmgnCache(): void {
   topWalletsCache.clear();
   sniperCache.clear();
   sniperInflight.clear();
+  pathQuarantine.clear();
   rateLimitedUntil = 0;
   consecutiveErrors = 0;
+  providerCooldownStreak = 0;
   console.log('[gmgn] Cache cleared');
 }
 

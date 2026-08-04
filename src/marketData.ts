@@ -7,6 +7,11 @@
 import { gmgnRequest } from './gmgn';
 import { logger, errorToMeta, loggedFetch } from './logger';
 import { isDeniedCopyMint } from './deniedMints';
+import {
+  applyCooldown,
+  formatCooldownSecs,
+  QuietLogGate,
+} from './httpProviderGate';
 
 export interface MarketCandle {
   /** Unix ms */
@@ -2051,6 +2056,83 @@ const ohlcvCache = new Map<
   }
 >();
 
+export interface FetchTokenOhlcvResult {
+  candles: MarketCandle[];
+  source: 'birdeye' | 'geckoterminal' | 'none';
+  solUsd?: number;
+}
+
+const geckoOhlcvInflight = new Map<
+  string,
+  Promise<FetchTokenOhlcvResult>
+>();
+
+const GECKO_COOLDOWN_BASE_MS = 15_000;
+const GECKO_COOLDOWN_CAP_MS = 4 * 60_000;
+let geckoRateLimitedUntil = 0;
+let geckoCooldownStreak = 0;
+const geckoCooldownLog = new QuietLogGate(60_000);
+
+export function isGeckoTerminalInCooldown(): boolean {
+  return Date.now() < geckoRateLimitedUntil;
+}
+
+export function getGeckoTerminalCooldownRemainingMs(): number {
+  return Math.max(0, geckoRateLimitedUntil - Date.now());
+}
+
+export function getGeckoTerminalStatus(): {
+  inCooldown: boolean;
+  remainingMs: number;
+  streak: number;
+} {
+  return {
+    inCooldown: isGeckoTerminalInCooldown(),
+    remainingMs: getGeckoTerminalCooldownRemainingMs(),
+    streak: geckoCooldownStreak,
+  };
+}
+
+function enterGeckoCooldown(reason = '429'): void {
+  geckoCooldownStreak += 1;
+  const { until, durationMs } = applyCooldown({
+    streak: geckoCooldownStreak,
+    baseMs: GECKO_COOLDOWN_BASE_MS,
+    capMs: GECKO_COOLDOWN_CAP_MS,
+    currentUntil: geckoRateLimitedUntil,
+  });
+  geckoRateLimitedUntil = until;
+  if (geckoCooldownLog.allow()) {
+    const label = reason === '429' || reason.startsWith('http_')
+      ? reason === '429'
+        ? '429'
+        : reason.replace('http_', '')
+      : reason;
+    logger.warn(
+      'GeckoTerminal',
+      `${label === '429' ? '429' : label} — cooldown ${formatCooldownSecs(durationMs)}`,
+      { reason, streak: geckoCooldownStreak }
+    );
+  }
+}
+
+function clearGeckoCooldownOnSuccess(): void {
+  if (geckoCooldownStreak > 0 || geckoRateLimitedUntil > 0) {
+    geckoCooldownStreak = 0;
+    geckoRateLimitedUntil = 0;
+  }
+}
+
+function staleOhlcv(mint: string): FetchTokenOhlcvResult | null {
+  const cached = ohlcvCache.get(mint);
+  if (!cached || !cached.candles.length) return null;
+  return {
+    candles: cached.candles,
+    source: cached.source,
+    solUsd: cached.solUsd,
+  };
+}
+
 function usdClosesToSolCandles(
   rows: Array<{
     time: number;
@@ -2147,6 +2229,9 @@ async function fetchGeckoOhlcv(
   mint: string,
   solUsd: number
 ): Promise<MarketCandle[]> {
+  if (isGeckoTerminalInCooldown()) {
+    return [];
+  }
   try {
     const url =
       `https://api.geckoterminal.com/api/v2/networks/solana/tokens/` +
@@ -2155,12 +2240,23 @@ async function fetchGeckoOhlcv(
       context: 'GeckoTerminal',
       label: 'ohlcv',
       timeoutMs: 12_000,
+      logBodyOnError: false,
       headers: {
         Accept: 'application/json',
         'User-Agent': 'solana-smart-copy-bot/1.0',
       },
     });
-    if (!res.ok) return [];
+    if (res.status === 429) {
+      enterGeckoCooldown('429');
+      return [];
+    }
+    if (!res.ok) {
+      if (res.status >= 500) {
+        // Soft pressure — brief cooldown without storming
+        enterGeckoCooldown(`http_${res.status}`);
+      }
+      return [];
+    }
     const json = (await res.json()) as {
       data?: { attributes?: { ohlcv_list?: unknown[] } };
     };
@@ -2177,6 +2273,7 @@ async function fetchGeckoOhlcv(
         volume: Number(a[5] ?? 0) || undefined,
       };
     });
+    clearGeckoCooldownOnSuccess();
     return usdClosesToSolCandles(rows, solUsd);
   } catch (err) {
     logger.warn('MarketData', 'GeckoTerminal OHLCV failed', errorToMeta(err));
@@ -2184,15 +2281,9 @@ async function fetchGeckoOhlcv(
   }
 }
 
-export interface FetchTokenOhlcvResult {
-  candles: MarketCandle[];
-  source: 'birdeye' | 'geckoterminal' | 'none';
-  solUsd?: number;
-}
-
 /**
  * Real OHLCV for scanner ranking. Prefer Birdeye when keyed; else GeckoTerminal.
- * Cached ~90–120s per mint.
+ * Cached ~90–120s per mint. Serves stale cache during Gecko cooldown.
  */
 export async function fetchTokenOhlcvCandles(
   mint: string,
@@ -2201,6 +2292,7 @@ export async function fetchTokenOhlcvCandles(
   if (!isCopyTargetMint(mint)) {
     return { candles: [], source: 'none' };
   }
+
   const cached = ohlcvCache.get(mint);
   if (
     !opts?.force &&
@@ -2214,18 +2306,49 @@ export async function fetchTokenOhlcvCandles(
     };
   }
 
-  const solUsd = opts?.solUsd ?? (await fetchSolUsdPrice());
-  let candles = await fetchBirdeyeOhlcv(mint, solUsd);
-  let source: FetchTokenOhlcvResult['source'] =
-    candles.length >= 8 ? 'birdeye' : 'none';
-  if (candles.length < 8) {
-    candles = await fetchGeckoOhlcv(mint, solUsd);
-    source = candles.length >= 8 ? 'geckoterminal' : 'none';
+  if (!opts?.force) {
+    const pending = geckoOhlcvInflight.get(mint);
+    if (pending) return pending;
   }
-  if (source === 'none') candles = [];
 
-  ohlcvCache.set(mint, { candles, source, solUsd, at: Date.now() });
-  return { candles, source, solUsd };
+  const job = (async (): Promise<FetchTokenOhlcvResult> => {
+    try {
+      const solUsd = opts?.solUsd ?? (await fetchSolUsdPrice());
+      let candles = await fetchBirdeyeOhlcv(mint, solUsd);
+      let source: FetchTokenOhlcvResult['source'] =
+        candles.length >= 8 ? 'birdeye' : 'none';
+
+      if (candles.length < 8) {
+        if (isGeckoTerminalInCooldown()) {
+          const stale = staleOhlcv(mint);
+          if (stale && stale.candles.length > 0) return stale;
+          candles = [];
+          source = 'none';
+        } else {
+          candles = await fetchGeckoOhlcv(mint, solUsd);
+          if (candles.length >= 8) {
+            source = 'geckoterminal';
+          } else if (isGeckoTerminalInCooldown()) {
+            const stale = staleOhlcv(mint);
+            if (stale && stale.candles.length > 0) return stale;
+            source = 'none';
+            candles = [];
+          } else {
+            source = 'none';
+            candles = [];
+          }
+        }
+      }
+
+      ohlcvCache.set(mint, { candles, source, solUsd, at: Date.now() });
+      return { candles, source, solUsd };
+    } finally {
+      geckoOhlcvInflight.delete(mint);
+    }
+  })();
+
+  geckoOhlcvInflight.set(mint, job);
+  return job;
 }
 
 /** Best-effort DexScreener volume / change enrich onto a launch event. */

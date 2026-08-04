@@ -204,18 +204,40 @@ function checkTrading(): HealthIssue[] {
     }
 
     try {
-      const { isDexScreenerInCooldown, getDexScreenerCooldownRemainingMs } =
-        require('./marketData') as typeof import('./marketData');
+      const {
+        isDexScreenerInCooldown,
+        getDexScreenerCooldownRemainingMs,
+        isGeckoTerminalInCooldown,
+        getGeckoTerminalCooldownRemainingMs,
+      } = require('./marketData') as typeof import('./marketData');
+      const { isGmgnInCooldown, getGmgnCooldownRemainingMs } =
+        require('./gmgn') as typeof import('./gmgn');
+
+      const parts: string[] = [];
       if (isDexScreenerInCooldown()) {
-        const rem = getDexScreenerCooldownRemainingMs();
+        parts.push(
+          `Dex ${Math.round(getDexScreenerCooldownRemainingMs() / 1000)}s`
+        );
+      }
+      if (isGmgnInCooldown()) {
+        parts.push(
+          `GMGN ${Math.round(getGmgnCooldownRemainingMs() / 1000)}s`
+        );
+      }
+      if (isGeckoTerminalInCooldown()) {
+        parts.push(
+          `Gecko ${Math.round(getGeckoTerminalCooldownRemainingMs() / 1000)}s`
+        );
+      }
+      if (parts.length > 0) {
         out.push({
           key: 'market_data_degraded',
           area: 'trading',
           severity: 'watch',
-          title: 'Market data degraded (DexScreener cooldown)',
-          detail: `Dex cooldown ${Math.round(rem / 1000)}s — marks use Jupiter / last good`,
+          title: 'External market data degraded',
+          detail: `Provider cooldown(s): ${parts.join(', ')} — enrichment soft-fails; trading/RPC lanes unaffected`,
           recommendation:
-            'Temporary rate-limit. Open-trade monitoring continues via Jupiter fallback; no action if marks keep updating.',
+            'Temporary external API rate-limit or block. Open-trade monitoring continues; this is not an RPC failure.',
         });
       }
     } catch {

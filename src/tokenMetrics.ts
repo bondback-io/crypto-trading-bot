@@ -726,37 +726,32 @@ async function fetchDevActivity(
 async function fetchGmgnTokenHints(
   mint: string
 ): Promise<{ holderCount?: number; liquidityUsd?: number } | null> {
-  const base = (config.gmgn?.baseUrl || 'https://gmgn.ai').replace(/\/$/, '');
-  const key = config.gmgn?.apiKey || process.env.GMGN_API_KEY || '';
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  };
-  if (key) headers['Authorization'] = `Bearer ${key}`;
-
   try {
-    const res = await loggedFetch(`${base}/defi/quotation/v1/tokens/sol/${mint}`, {
-      context: 'GMGN',
-      label: 'token hints',
-      timeoutMs: 6_000,
-      headers,
-    });
-    if (!res.ok) {
-      logger.warn('GMGN', 'token hints HTTP', {
-        mint: mint.slice(0, 12),
-        status: res.status,
-      });
+    const { isGmgnInCooldown, gmgnRequest } =
+      require('./gmgn') as typeof import('./gmgn');
+    if (isGmgnInCooldown()) return null;
+
+    const res = await gmgnRequest(
+      `/defi/quotation/v1/tokens/sol/${encodeURIComponent(mint)}`,
+      6_000
+    );
+    if (!res.ok || !res.data) {
+      if (res.status !== 404 && res.status !== 403 && res.status !== 401) {
+        logger.warn('GMGN', 'token hints HTTP', {
+          mint: mint.slice(0, 12),
+          status: res.status,
+        });
+      }
       return null;
     }
-    const json = (await res.json()) as {
-      data?: Record<string, unknown>;
-    };
-    const row = json.data ?? {};
+    const json = res.data as { data?: Record<string, unknown> };
+    const row = json.data ?? (json as Record<string, unknown>);
     return {
       holderCount: Number(row.holder_count ?? row.holders ?? 0) || undefined,
       liquidityUsd: Number(row.liquidity ?? row.liquidity_usd ?? 0) || undefined,
     };
   } catch (err) {
-    logger.error('GMGN', 'token hints failed', {
+    logger.warn('GMGN', 'token hints failed', {
       mint: mint.slice(0, 12),
       ...errorToMeta(err),
     });
