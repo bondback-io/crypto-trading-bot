@@ -72,6 +72,8 @@ export const PERSIST_FILES = {
   tradeProfilesUser: 'trade-profiles-user.json',
   /** Per-profile TA playbooks (Off/Soft/Hard + tools) — survives bake */
   profileTaPlaybooks: 'profile-ta-playbooks.json',
+  /** On-chain live wallet closed-trade import (Live mode only) */
+  liveWalletHistory: 'live-wallet-history.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',

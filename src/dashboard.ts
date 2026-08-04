@@ -6283,8 +6283,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="7d" onclick="setOverviewStatsWindow('7d')">7d</button>
         <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="30d" onclick="setOverviewStatsWindow('30d')">30d</button>
         <button type="button" class="closed-filter-btn ov-window-btn is-active" data-ov-window="all" onclick="setOverviewStatsWindow('all')" aria-pressed="true">All</button>
+        <button type="button" class="btn btn-secondary text-xs ml-1" id="btn-ov-import-trades" onclick="importOverviewWindowTrades()" title="Import open + closed trades for the selected window into this session (All capped at 1000). Stats refresh to match. Use Overview Reset to clear.">Import trades</button>
+        <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-import-live-wallet" onclick="importLiveWalletHistory()" title="Live mode only: scan the active env trading wallet for on-chain swap history and import into this session. Never includes Paper / Live Sim test data.">Import live wallet</button>
         <span class="mint text-xs ml-auto" id="ov-window-label" title="Win Rate, Max DD, Trades, and Status PF/avg win-loss use this window. Wallets, Signals, Trade Rate, and Entries stay live.">Stats: All</span>
       </div>
+      <p class="mint text-xs mt-1 mb-0 hidden" id="ov-import-meta"></p>
       <div class="ov-meta-strip mt-2.5 sm:mt-3">
         <div class="card">
           <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Closed trades that finished green in the selected window. Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
@@ -13198,6 +13201,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       refreshOverviewWindowStats({ force: true });
     };
     window.refreshOverviewWindowStats = refreshOverviewWindowStats;
+    window.paintOverviewWindowStats = paintOverviewWindowStats;
 
     function setOverviewStatsWindow(win) {
       const next =
@@ -13222,6 +13226,100 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       refreshOverviewWindowStats({ force: true });
     }
     window.setOverviewStatsWindow = setOverviewStatsWindow;
+
+    async function importOverviewWindowTrades() {
+      const win = window._ovStatsWindow || 'all';
+      const label =
+        win === 'all' ? 'All (max 1000)' : String(win);
+      if (
+        !confirm(
+          'Import trades for window ' +
+            label +
+            '?\\n\\nLoads closed (+ open-in-window hints) into this session and refreshes Overview stats.\\nUse Overview Reset to clear.\\n\\nContinue?'
+        )
+      ) {
+        return;
+      }
+      try {
+        const data = await fetchJSON('/api/overview/import-trades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ window: win }),
+        });
+        if (data.overview && typeof paintOverviewWindowStats === 'function') {
+          window._lastOverviewWindowStats = data.overview;
+          paintOverviewWindowStats(data.overview, window._lastOverviewStatusCtx || {});
+        }
+        const meta = document.getElementById('ov-import-meta');
+        if (meta) {
+          meta.classList.remove('hidden');
+          meta.textContent =
+            'Imported ' +
+            (data.imported ?? data.importedClosed ?? 0) +
+            ' closed' +
+            (data.openInWindow ? ' · ' + data.openInWindow + ' open in window' : '') +
+            (data.capped ? ' · capped at 1000' : '') +
+            ' · Reset clears';
+        }
+        await refresh();
+        alert(
+          'Imported ' +
+            (data.imported ?? 0) +
+            ' closed trade(s) for ' +
+            label +
+            (data.capped ? ' (capped at 1000)' : '')
+        );
+      } catch (err) {
+        alert('Import trades failed: ' + ((err && err.message) || err));
+      }
+    }
+    async function importLiveWalletHistory() {
+      if (
+        !confirm(
+          'Import Live wallet history?\\n\\nScans the active env trading wallet for on-chain swaps and loads closed round-trips into this session.\\nPaper / Live Sim test data is never included.\\n\\nContinue?'
+        )
+      ) {
+        return;
+      }
+      try {
+        const data = await fetchJSON('/api/live/import-wallet-history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const meta = document.getElementById('ov-import-meta');
+        if (meta) {
+          meta.classList.remove('hidden');
+          meta.textContent =
+            'Live wallet imported ' +
+            (data.imported || 0) +
+            ' closed · scanned ' +
+            (data.scannedSigs || 0) +
+            ' sigs · Reset clears';
+        }
+        if (typeof loadOverviewWindowStats === 'function') loadOverviewWindowStats();
+        await refresh();
+        alert(
+          'Imported ' +
+            (data.imported || 0) +
+            ' closed trade(s) from live wallet' +
+            (data.walletPubkey
+              ? ' (' + String(data.walletPubkey).slice(0, 8) + '…)'
+              : '')
+        );
+      } catch (err) {
+        alert('Import live wallet failed: ' + ((err && err.message) || err));
+      }
+    }
+    window.importOverviewWindowTrades = importOverviewWindowTrades;
+    window.importLiveWalletHistory = importLiveWalletHistory;
+
+    function syncOverviewImportLiveWalletBtn(mode) {
+      const btn = document.getElementById('btn-ov-import-live-wallet');
+      if (!btn) return;
+      const live = mode === 'live';
+      btn.classList.toggle('hidden', !live);
+    }
 
     function scoreboardRowFor(id, intelligence) {
       const rows =
@@ -19255,6 +19353,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         modeIcon,
         status.mode === 'live' ? 'live' : status.mode === 'liveSimulation' ? 'liveSim' : 'paper'
       );
+      if (typeof syncOverviewImportLiveWalletBtn === 'function') {
+        syncOverviewImportLiveWalletBtn(status.mode);
+      }
+      const liveReady = status.liveTradingReady;
+      const liveGateEl = document.getElementById('ov-import-meta');
+      if (status.mode === 'live' && liveReady && !liveReady.ok && liveGateEl && !status.sessionImport?.count) {
+        liveGateEl.classList.remove('hidden');
+        liveGateEl.textContent = liveReady.reason;
+        liveGateEl.style.color = '#fbbf24';
+      } else if (status.sessionImport && status.sessionImport.count > 0 && liveGateEl) {
+        liveGateEl.classList.remove('hidden');
+        liveGateEl.style.color = '';
+        liveGateEl.textContent =
+          'Session import: ' +
+          status.sessionImport.count +
+          ' closed (' +
+          (status.sessionImport.source || 'window') +
+          (status.sessionImport.window ? ' · ' + status.sessionImport.window : '') +
+          ') · Reset clears';
+      }
       ['paper', 'liveSimulation', 'live'].forEach((mode) => {
         const btn = document.getElementById('mode-' + mode);
         if (!btn) return;

@@ -6153,6 +6153,24 @@ export function getEntryPathLightStatus(): {
       blockers,
     };
   }
+  if (config.mode === 'live') {
+    try {
+      const { getCachedLiveTradingReady } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      const ready = getCachedLiveTradingReady();
+      if (ready && !ready.ok) {
+        blockers.push(ready.reason);
+        return {
+          state: 'off',
+          label: 'Entries: no live wallet',
+          detail: ready.reason,
+          blockers,
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   if (!rate.ok) {
     blockers.push(rate.reason || 'trade-rate / cooldown');
     return {

@@ -276,6 +276,16 @@ export function createServer(): express.Application {
       config.mode === 'live' ? await getLiveBalanceSol() : null;
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
+    let liveTradingReady = null;
+    if (config.mode === 'live') {
+      try {
+        const { assertLiveTradingReady } =
+          require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+        liveTradingReady = await assertLiveTradingReady('live');
+      } catch {
+        liveTradingReady = null;
+      }
+    }
     const paperStats = paperTrader.getStats();
     const liveSimScore = usesPaperAccounting()
       ? performanceScoreFromStats(paperStats)
@@ -339,6 +349,9 @@ export function createServer(): express.Application {
             publicKey: pubkey?.toBase58() ?? null,
           }
         : null,
+      liveBalance,
+      liveTradingReady,
+      sessionImport: paperTrader.getSessionImportMeta(),
       lastDashboardResetAt: getLastDashboardResetAt(),
     });
   });
@@ -1038,6 +1051,138 @@ export function createServer(): express.Application {
         },
       });
       res.json({ ok: true, overview });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /**
+   * Import closed (+ open hints) for the selected Overview stats window into
+   * the session Closed Trades list. Cap 1000. Cleared by Overview Reset.
+   */
+  app.post('/api/overview/import-trades', (req: Request, res: Response) => {
+    try {
+      const { collectOverviewWindowTrades } =
+        require('./overviewTradeImport') as typeof import('./overviewTradeImport');
+      const { parseOverviewStatsWindow } =
+        require('./microBotPerformance') as typeof import('./microBotPerformance');
+      const { getTradeProfilesStatus } =
+        require('./tradeProfiles') as typeof import('./tradeProfiles');
+      const { loadLiveWalletHistory } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      const window = parseOverviewStatsWindow(
+        req.body?.window ?? req.query.window,
+        'all'
+      );
+      let catalogIds: string[] = [];
+      try {
+        const tp = getTradeProfilesStatus();
+        catalogIds = (tp.profiles || [])
+          .map((p: { id?: string }) => String(p.id || ''))
+          .filter(Boolean);
+      } catch {
+        catalogIds = [];
+      }
+      let solUsd: number | null = null;
+      try {
+        const { getCachedSolUsdPrice } =
+          require('./marketData') as typeof import('./marketData');
+        const px = getCachedSolUsdPrice();
+        solUsd = Number.isFinite(px) && px > 0 ? px : null;
+      } catch {
+        solUsd = null;
+      }
+      let extraClosed: ReturnType<typeof paperTrader.getClosedPositions> = [];
+      if (config.mode === 'live') {
+        extraClosed = loadLiveWalletHistory().closed || [];
+      }
+      // Use raw rings before session overlay for re-import source
+      const closedSrc = [
+        ...paperTrader.getClosedPositions(),
+        ...extraClosed,
+      ];
+      const collected = collectOverviewWindowTrades({
+        closed: closedSrc,
+        open: paperTrader.getOpenPositions(),
+        window,
+        catalogIds,
+        solUsd,
+        extraClosed,
+      });
+      const applied = paperTrader.importSessionClosedTrades(collected.closed, {
+        source: 'window',
+        window: collected.window,
+      });
+      const overview = (() => {
+        const {
+          buildOverviewWindowStats,
+        } = require('./microBotPerformance') as typeof import('./microBotPerformance');
+        const stats = paperTrader.getStats();
+        return buildOverviewWindowStats({
+          closed: paperTrader.getClosedPositions(),
+          openCount: paperTrader.getOpenPositions().length,
+          window: collected.window,
+          solUsd,
+          catalogIds,
+          lifetime: {
+            closed: Number(stats.lifetimeClosed) || 0,
+            wins: Number(stats.lifetimeWins) || 0,
+            losses: Number(stats.lifetimeLosses) || 0,
+          },
+        });
+      })();
+      res.json({
+        ok: true,
+        window: collected.window,
+        importedClosed: collected.importedClosed,
+        openInWindow: collected.openInWindow,
+        capped: collected.capped,
+        openHints: collected.openHints,
+        imported: applied.imported,
+        overview,
+        sessionImport: paperTrader.getSessionImportMeta(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Import on-chain history for the active Live trading wallet (Live mode only). */
+  app.post('/api/live/import-wallet-history', async (_req: Request, res: Response) => {
+    try {
+      if (config.mode !== 'live') {
+        res.status(400).json({
+          ok: false,
+          error: 'Import Live Wallet is only available in Live mode',
+        });
+        return;
+      }
+      const { importLiveWalletTradeHistory, assertLiveTradingReady } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      await assertLiveTradingReady('live');
+      const result = await importLiveWalletTradeHistory();
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      paperTrader.importSessionClosedTrades(result.closed, {
+        source: 'live_wallet',
+        window: 'all',
+      });
+      res.json({
+        ok: true,
+        imported: result.imported,
+        scannedSigs: result.scannedSigs,
+        walletPubkey: result.walletPubkey,
+        sessionImport: paperTrader.getSessionImportMeta(),
+        overviewHint: 'Imported live wallet history into session Closed Trades',
+      });
     } catch (err) {
       res.status(500).json({
         ok: false,

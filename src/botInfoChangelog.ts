@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.147',
+    title: 'Overview Trade Import + Live Wallet Gate',
+    sections: ['overview', 'execution', 'modes'],
+    items: [
+      'Overview timeframe row: Import trades loads open/closed for 1h/24h/7d/30d (All capped at 1000) into the session — stats refresh; Overview Reset clears.',
+      'Live mode only: Import live wallet scans the env trading wallet for on-chain swap history. Paper / Live Sim rows never appear in Live.',
+      'Live trading hard-gated: bots cannot fire until a real wallet key is loaded and the wallet holds the min SOL balance.',
+    ],
+  },
+  {
     version: '1.2.146',
     title: 'Overview Stats Flicker Fix',
     sections: ['overview'],

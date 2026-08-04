@@ -457,6 +457,26 @@ export async function executeBuy(
     };
   }
 
+  // Live mode hard gate: real wallet loaded + min SOL before any bot/trade fires
+  if (config.mode === 'live') {
+    try {
+      const { assertLiveTradingReady } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      const ready = await assertLiveTradingReady('live');
+      if (!ready.ok) {
+        console.log(`[trade] LIVE_GATE_SKIP ${ready.reason}`);
+        return { success: false, mode: 'live', error: ready.reason };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        mode: 'live',
+        error: `Live trading blocked — ${msg}`,
+      };
+    }
+  }
+
   // Hard floor: only Pump.fun mints ending in `pump` when toggle is ON.
   // Covers paper + live + migration + re-buy (all executeBuy callers).
   const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint);

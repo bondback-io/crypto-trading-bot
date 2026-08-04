@@ -823,6 +823,17 @@ export class PaperTrader {
   private mode: 'paper' | 'backtest';
   private positions: Map<string, Position> = new Map();
   private closedPositions: Position[] = [];
+  /**
+   * Session overlay from Overview "Import trades" / Live wallet import.
+   * When set, Closed Trades + overview stats prefer this list (up to 1000).
+   * Cleared by Overview Reset.
+   */
+  private sessionImportedClosed: Position[] | null = null;
+  private sessionImportMeta: {
+    source: 'window' | 'live_wallet' | null;
+    window?: string;
+    at: number;
+  } = { source: null, at: 0 };
   /** Monotonic Overview counters — not shrunk by the 200-row closed list. */
   private lifetimeClosed = 0;
   private lifetimeWins = 0;
@@ -1164,9 +1175,14 @@ export class PaperTrader {
   }
 
   getOpenPositions(): Position[] {
-    return Array.from(this.positions.values()).map((p) =>
-      this.withTrailSnapshot(p)
-    );
+    const { usesRealFunds } = require('./config') as typeof import('./config');
+    const live = usesRealFunds();
+    return Array.from(this.positions.values())
+      .filter((p) => {
+        if (live) return p.tradeMode === 'live';
+        return p.tradeMode !== 'live';
+      })
+      .map((p) => this.withTrailSnapshot(p));
   }
 
   /** Enrich position with current trailing stop price for UI / API */
@@ -1473,7 +1489,20 @@ export class PaperTrader {
 
   getClosedPositions(): Position[] {
     const solUsd = getCachedSolUsdPrice();
-    return this.closedPositions.map((p) => {
+    const { usesRealFunds } = require('./config') as typeof import('./config');
+    const live = usesRealFunds();
+    const source =
+      this.sessionImportedClosed != null
+        ? this.sessionImportedClosed
+        : this.closedPositions;
+    const filtered = source.filter((p) => {
+      if (live) {
+        // Never show paper / Live Sim test rows in Live mode
+        return p.tradeMode === 'live' || p.reason === 'live_wallet_import';
+      }
+      return p.tradeMode !== 'live';
+    });
+    return filtered.map((p) => {
       const costBasis =
         p.costSol > 0
           ? p.costSol
@@ -1491,6 +1520,51 @@ export class PaperTrader {
         solUsd,
       } as Position & { costUsd?: number; solUsd?: number };
     });
+  }
+
+  /**
+   * Replace session closed list with imported rows (Overview Import / Live wallet).
+   * Does not persist into paperBalance.json lifetime ring — Reset clears it.
+   */
+  importSessionClosedTrades(
+    rows: Position[],
+    meta: { source: 'window' | 'live_wallet'; window?: string }
+  ): { imported: number } {
+    const capped = rows.slice(0, 1000).map((p) => ({ ...p, status: 'closed' as const }));
+    this.sessionImportedClosed = capped;
+    this.sessionImportMeta = {
+      source: meta.source,
+      window: meta.window,
+      at: Date.now(),
+    };
+    // Align lifetime counters to imported sample for Overview strip consistency
+    const reps = representativeClosedTrades(capped);
+    this.lifetimeClosed = reps.length;
+    this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
+    this.lifetimeLosses = Math.max(0, this.lifetimeClosed - this.lifetimeWins);
+    this.log(
+      'info',
+      `Imported ${capped.length} closed trade(s) ` +
+        `(${meta.source}${meta.window ? ` · ${meta.window}` : ''}) — use Overview Reset to clear`
+    );
+    return { imported: capped.length };
+  }
+
+  clearSessionImportedTrades(): void {
+    this.sessionImportedClosed = null;
+    this.sessionImportMeta = { source: null, at: 0 };
+  }
+
+  getSessionImportMeta(): {
+    source: 'window' | 'live_wallet' | null;
+    window?: string;
+    at: number;
+    count: number;
+  } {
+    return {
+      ...this.sessionImportMeta,
+      count: this.sessionImportedClosed?.length ?? 0,
+    };
   }
 
   getLogs(limit = 100): TradeLog[] {
@@ -2283,6 +2357,7 @@ export class PaperTrader {
       this.lifetimeClosed = 0;
       this.lifetimeWins = 0;
       this.lifetimeLosses = 0;
+      this.clearSessionImportedTrades();
     }
 
     resetPeakEquity(this.balanceSol);
