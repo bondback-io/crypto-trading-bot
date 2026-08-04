@@ -232,6 +232,7 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'risk', label: 'Risk & Modules' },
   { id: 'microbots', label: 'Micro Bots' },
   { id: 'learning', label: 'Learning & ML' },
+  { id: 'coaches', label: 'Coaches & Stack' },
   { id: 'scanners', label: 'Scanners' },
   { id: 'execution', label: 'Execution' },
   { id: 'zion', label: 'Zion' },

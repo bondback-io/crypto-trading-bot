@@ -51,7 +51,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
           <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
-          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip).</li>
+          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip). Coach stack (MARL, Profile RL, TA, accelerators) is documented under <em>Coaches &amp; Stack</em>.</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and this manual.</li>
         </ul>
         <div class="botinfo-actions">
@@ -107,6 +107,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
           <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>
           <li>Lane decisions appear on Overview / Micro Bots so you can see why a profile won or skipped.</li>
+          <li><strong>Coaches</strong> — each bot has personal self-learn / ML / TA / Profile RL; MARL is the shared team coach. See <em>Coaches &amp; Stack</em> for how they cooperate and which toggles must be ON.</li>
         </ul>
         <div class="botinfo-actions">${btn('microbots', 'Open Micro Bots')}</div>
       </article>
@@ -140,6 +141,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Profile TA Playbooks</strong> — per-lane Off/Soft/Hard identity (HA, Fib/S-R, RSI/EMA/VWAP, patterns, optional whale). Soft = confirmation/conviction only; Hard = confluence gate. Global Require TA remains scanner master. Learning nudges tool weights / minConf only — never TP/SL or Peak Protect cores.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
           <li><strong>Learning Mode (global)</strong> softens conviction / wallet-quality / cluster / some MC floors and raises throughput — it does <em>not</em> bypass Require TA setup, anti-rug floors, daily-loss halts, or disabled profiles. Scalper scanner entries are exempt from Require TA when that lane wins. Trend Rider / Steady Compounder <em>specialty</em> Jupiter/KOL handoffs also bypass Require TA and Pump.fun-only (lane floors still apply).</li>
+          <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, and Peak Protect fit together (priority, defaults, activation checklist) lives in the next chapter: <em>Coaches &amp; Stack</em>.</li>
         </ul>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open learning controls')}
@@ -147,8 +149,78 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         </div>
       </article>
 
+      <article class="botinfo-card" id="botinfo-sec-coaches" data-botinfo-section="coaches">
+        <h3><span class="botinfo-sec-num">06</span> Coaches &amp; learning stack</h3>
+        <p>Every micro-bot can grow from closed trades with a layered coach stack. Layers are <strong>additive</strong>: safety wins first, stamped TP/SL stay hard, then soft coaches nudge ranking, size, TA, and learning signals. They are designed to support each other — not rewrite each other’s cores.</p>
+        <div class="botinfo-callout"><strong>Isolation:</strong> each profile keeps its own episodes, self-learn overrides, ML model, TA playbook weights, and Profile RL agent. <strong>MARL</strong> is the shared team coach (per-profile preference weights in one team state) — not a clone of any bot’s private memory.</div>
+
+        <p class="mint" style="margin:0 0 0.45rem"><strong>Who does what</strong></p>
+        <ul>
+          <li><strong>Episodes</strong> — durable “game film” on final closes (PnL, peak/giveback, TA stamps, timing quality). Source of truth for all learners.</li>
+          <li><strong>Self-learning (delta)</strong> — mutates TP/SL/trail/hold/entry floors inside clamps (Level + micro); rollback on degradation. Primary hard mutator when Mode = <code>auto</code>.</li>
+          <li><strong>ML advisor</strong> — ranks / blends patch ideas; shadow → hybrid → lead as sample grows. Never invents new strategies.</li>
+          <li><strong>Profile TA + weight learning</strong> — per-lane Off/Soft/Hard confluence; learns tool weights / sensitivities only — never TP/SL or Peak Protect cores.</li>
+          <li><strong>Profile RL</strong> — personal soft coach (setup-worth, size confidence, TA sensitivity, exit-hint aggressiveness). Shadow / Hybrid / Lead via readiness score (not trade count alone). Default global OFF.</li>
+          <li><strong>MARL</strong> — team coach: lane ranking, size confidence, low-MC pile-in, lagging support. Soft only; never writes TP/SL. Default OFF.</li>
+          <li><strong>Learning Accelerators</strong> — experience replay, counterfactual exit what-ifs, teacher→student soft TA tips. Offline/soft hints only. Master default OFF.</li>
+          <li><strong>Peak Profit Protection</strong> — soft exit on peak giveback; arm/giveback can learn via self-learn exitPolicy. Never replaces hard TP.</li>
+          <li><strong>Learning Mode</strong> — softens entry gates + fairness for low-sample bots. Does not bypass anti-rug or Require TA (except documented specialty exemptions).</li>
+          <li><strong>Anti-rug / risk / Require TA</strong> — hard safety. Always win conflicts.</li>
+          <li><strong>Zion</strong> — explains and supervises; does not mutate learning knobs or TP/SL.</li>
+        </ul>
+
+        <p class="mint" style="margin:0 0 0.45rem"><strong>Priority when layers overlap</strong></p>
+        <ul>
+          <li>1 · Safety / anti-rug</li>
+          <li>2 · Micro-bot hard rules &amp; stamped TP/SL</li>
+          <li>3 · MARL team assignment / low-MC coordination</li>
+          <li>4 · Profile RL soft confidence / TA / exit hints</li>
+          <li>5 · TA playbooks, accelerators, Learning Mode</li>
+          <li>6 · Self-learn + ML (actual knob mutations)</li>
+        </ul>
+        <p>MARL and Profile RL both add soft score/size deltas (MARL first, then RL). Bounded stack — not a race to overwrite strategy. <strong>Global Micro-Bot TP</strong>, if set, pauses exit self-learning so one global TP does not fight per-bot exit evolution.</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.45rem"><strong>Close path (final exit → learn)</strong></p>
+        <div class="botinfo-flow" aria-label="Learning close path">
+          <div class="botinfo-flow-step"><span class="k">1. Episode</span><span class="v">Stamp film</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">2. Accelerators</span><span class="v">CF · replay · transfer</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">3. Profile RL</span><span class="v">Policy update</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">4. TA nudge</span><span class="v">Tool weights</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">5. Self-learn</span><span class="v">Heuristics + ML</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">6. MARL</span><span class="v">Team reward</span></div>
+        </div>
+
+        <p class="mint" style="margin:0 0 0.45rem"><strong>Entry path (who gets the mint)</strong></p>
+        <ul>
+          <li>Lane floors / match → Learning Mode fairness → <strong>MARL rank</strong> → <strong>Profile RL rank</strong> → filters / anti-rug → MARL/RL size → TA playbook gate → buy → Peak Protect while open.</li>
+          <li><strong>Smart Bot Profiles</strong> must be ON for full lane + MARL/RL ranking. Size multipliers still apply at buy when coaches are enabled.</li>
+        </ul>
+
+        <p class="mint" style="margin:0.55rem 0 0.45rem"><strong>Why learning can look idle (gates, not fights)</strong></p>
+        <ul>
+          <li>Self-learn needs ~<strong>8+</strong> closed episodes; ML stays shadow longer (~50+ before hybrid).</li>
+          <li>MARL, Profile RL, and Accelerators often default <strong>OFF</strong> until you enable them on Micro Bots.</li>
+          <li>Counterfactuals may stamp without steering unless apply-hints is ON.</li>
+          <li>Self-learn Mode <code>shadow</code> = proposals only; use <code>auto</code> to apply.</li>
+          <li>Partials do not create episodes — only final closes.</li>
+          <li>Require TA / risk halt / max positions can limit how fast episode rings fill.</li>
+        </ul>
+
+        <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
+        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics. Controls: Micro Bots → Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
+        <div class="botinfo-actions">
+          ${btn('microbots', 'Open Micro Bots coaches')}
+          ${btn('backup', 'Open learning journal')}
+        </div>
+      </article>
+
       <article class="botinfo-card" id="botinfo-sec-scanners" data-botinfo-section="scanners">
-        <h3><span class="botinfo-sec-num">06</span> Market scanners &amp; Pump.fun</h3>
+        <h3><span class="botinfo-sec-num">07</span> Market scanners &amp; Pump.fun</h3>
         <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
@@ -161,7 +233,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-execution" data-botinfo-section="execution">
-        <h3><span class="botinfo-sec-num">07</span> Jupiter, RPC &amp; MEV</h3>
+        <h3><span class="botinfo-sec-num">08</span> Jupiter, RPC &amp; MEV</h3>
         <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
         <ul>
           <li><strong>MEV / Jito</strong> — tip bundles and sandwich abort (live only; module <code>mev_protection</code>).</li>
@@ -172,7 +244,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
-        <h3><span class="botinfo-sec-num">08</span> Zion (KOL Token Scanner)</h3>
+        <h3><span class="botinfo-sec-num">09</span> Zion (KOL Token Scanner)</h3>
         <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional <strong>Auto-send Platinum to HWR</strong> can auto-execute Platinum-tier offers into High Win-Rate.</p>
         <ul>
           <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR.</li>
@@ -184,7 +256,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-copy" data-botinfo-section="copy">
-        <h3><span class="botinfo-sec-num">09</span> Copy trading &amp; smart wallets</h3>
+        <h3><span class="botinfo-sec-num">10</span> Copy trading &amp; smart wallets</h3>
         <p>The monitor loop polls tracked wallets, scores quality, detects convergence / smart-money flow, then runs the same filter → profile → size path as scanner entries.</p>
         <ul>
           <li><strong>Smart Wallets</strong> — discover via Kolscan, GMGN, Birdeye, Dex, Axiom, Photon, BullX, Nansen, or paste manually.</li>
@@ -195,7 +267,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backtester" data-botinfo-section="backtester">
-        <h3><span class="botinfo-sec-num">10</span> Backtester</h3>
+        <h3><span class="botinfo-sec-num">11</span> Backtester</h3>
         <p>Replay historical launches with Live-Sim-style decisions and exits. Paper-only — no live capital. Compare KPIs to recent Live Sim runs; breakdowns by Risk On/Off and profile.</p>
         <ul>
           <li><strong>Smart Advisor</strong> — shadow proposals from BT results; does not auto-apply to live.</li>
@@ -206,7 +278,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-alerts" data-botinfo-section="alerts">
-        <h3><span class="botinfo-sec-num">11</span> Email &amp; notifications</h3>
+        <h3><span class="botinfo-sec-num">12</span> Email &amp; notifications</h3>
         <p>In-app bell feed plus optional email (Resend or SMTP via env). Events can still log when mail is not configured.</p>
         <ul>
           <li>Low equity, insufficient funds, profitable close, Zion offer / placed.</li>
@@ -220,7 +292,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backup" data-botinfo-section="backup">
-        <h3><span class="botinfo-sec-num">12</span> Backup &amp; persistence</h3>
+        <h3><span class="botinfo-sec-num">13</span> Backup &amp; persistence</h3>
         <p>Settings, wallets, paper balance, profile knobs, learning episodes, and notifications save as JSON under <code>DATA_DIR</code>. Auto-saves on config changes, imports, top-ups, and backtests.</p>
         ${slots.durabilityCards}
         <ul>
@@ -234,7 +306,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-knobs" data-botinfo-section="knobs">
-        <h3><span class="botinfo-sec-num">13</span> High-impact knobs</h3>
+        <h3><span class="botinfo-sec-num">14</span> High-impact knobs</h3>
         <p>Start here before fine-tuning individual micro-bots. Most controls have <code>?</code> tips on the live screens.</p>
         <ul>
           <li><strong>Mode + Risk On/Off</strong> — posture for the whole bot.</li>

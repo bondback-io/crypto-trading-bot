@@ -12,6 +12,7 @@ export const BOT_INFO_SECTION_IDS = [
   'risk',
   'microbots',
   'learning',
+  'coaches',
   'scanners',
   'execution',
   'zion',
@@ -39,6 +40,16 @@ export interface BotInfoChangelogEntry {
  * Newest first. Keep ~10–14 recent patches; older history can be trimmed.
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
+  {
+    version: '1.2.153',
+    title: 'Bot Info — Coaches & Learning Stack',
+    sections: ['coaches', 'learning', 'microbots', 'overview'],
+    items: [
+      'New Bot Info chapter Coaches & Stack: episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, Peak Protect, Learning Mode — additive priority and isolation.',
+      'Documents close/entry learning paths, why learning can look idle (defaults OFF, episode floors), and an activation checklist.',
+      'Learning & ML and Micro Bots chapters point to the new stack guide.',
+    ],
+  },
   {
     version: '1.2.152',
     title: 'Profile RL Readiness Auto-Mode',
