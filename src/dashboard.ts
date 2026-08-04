@@ -13297,7 +13297,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return (
             '<div class="tp-decision-row' +
             (obs ? ' is-obs' : '') +
-            '" onclick="this.classList.toggle(\'is-open\')" data-adl-idx="' +
+            '" onclick="this.classList.toggle(\\'is-open\\')" data-adl-idx="' +
             idx +
             '">' +
             '<div class="tp-decision-meta">' +

@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.158',
+    title: 'Dashboard Script Fix (Agent Decision Log)',
+    sections: ['overview', 'coaches', 'microbots'],
+    items: [
+      'Fix dashboard stall: Agent Decision Log row onclick used a single-escaped quote inside the HTML template literal, breaking the browser script after that line.',
+      'Hard-refresh the dashboard after deploy so the repaired script loads.',
+    ],
+  },
+  {
     version: '1.2.157',
     title: 'Agent Decision Log',
     sections: ['coaches', 'learning', 'zion', 'overview', 'microbots'],
