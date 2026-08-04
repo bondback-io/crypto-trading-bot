@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.144',
+    title: 'Copy vs Scan Module Badges',
+    sections: ['knobs', 'overview'],
+    items: [
+      'Settings → Modules now show Copy / Scan badges so you can tell which strategies gate tracked-wallet copy vs Market Scanner / TA signals.',
+      'Shared entry filters show both badges; exits and sizing stay unmarked (apply to any open trade).',
+    ],
+  },
+  {
     version: '1.2.143',
     title: 'Overview Stats Time Window',
     sections: ['overview'],
