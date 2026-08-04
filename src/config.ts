@@ -2013,6 +2013,15 @@ export interface BotConfig {
     insufficientFundsCooldownMs: number;
     /** Alert when a full close finishes in profit */
     profitableCloseEnabled: boolean;
+    /**
+     * Profit email delivery: instant per close, clustered summary, or both.
+     * Default `instant` preserves prior one-email-per-close behaviour.
+     */
+    profitEmailMode: 'instant' | 'cluster' | 'both';
+    /** Cluster summary window when mode is cluster or both */
+    profitEmailClusterInterval: '1h' | '2h' | '4h' | '12h' | '24h';
+    /** Optional override recipient for profit emails (falls back to notifications.email) */
+    profitEmailTo?: string;
     /** In-app notification bell feed (default ON) */
     dashboardEnabled: boolean;
     /** Soft chime when a new Zion trade request arrives (default ON) */
@@ -2543,6 +2552,9 @@ export const config: BotConfig = {
     insufficientFundsCooldownMs:
       Number(process.env.NOTIFY_INSUFFICIENT_FUNDS_COOLDOWN_MS) || 30 * 60_000,
     profitableCloseEnabled: process.env.NOTIFY_PROFITABLE_CLOSE !== '0',
+    profitEmailMode: 'instant',
+    profitEmailClusterInterval: '1h',
+    profitEmailTo: 'bondback2026@gmail.com',
     dashboardEnabled: true,
     tradeRequestSound: true,
     profitCloseSound: true,

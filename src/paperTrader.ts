@@ -2381,6 +2381,8 @@ export class PaperTrader {
           reason,
           holdSeconds,
           mode: config.mode,
+          profileName: position.tradeProfileName,
+          closedAt: position.closedAt || Date.now(),
           breakdown:
             breakdownParts.length > 0 ? breakdownParts.join('\n') : undefined,
           dailyWinRatePct: day.winRatePct,

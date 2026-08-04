@@ -4531,6 +4531,30 @@ export function createServer(): express.Application {
     if (typeof body.profitableCloseEnabled === 'boolean') {
       n.profitableCloseEnabled = body.profitableCloseEnabled;
     }
+    if (typeof body.profitEmailMode === 'string') {
+      const mode = String(body.profitEmailMode).toLowerCase();
+      if (mode === 'instant' || mode === 'cluster' || mode === 'both') {
+        n.profitEmailMode = mode;
+      }
+    }
+    if (typeof body.profitEmailClusterInterval === 'string') {
+      const iv = String(body.profitEmailClusterInterval).toLowerCase();
+      if (
+        iv === '1h' ||
+        iv === '2h' ||
+        iv === '4h' ||
+        iv === '12h' ||
+        iv === '24h'
+      ) {
+        n.profitEmailClusterInterval = iv;
+      }
+    }
+    if (typeof body.profitEmailTo === 'string') {
+      const to = body.profitEmailTo.trim().slice(0, 200);
+      if (!to || to.includes('@')) {
+        n.profitEmailTo = to || 'bondback2026@gmail.com';
+      }
+    }
     if (typeof body.dashboardEnabled === 'boolean') {
       n.dashboardEnabled = body.dashboardEnabled;
     }
@@ -6800,6 +6824,16 @@ export function startServer(port?: number, host?: string): void {
   } catch (err) {
     console.warn(
       '[server] Bot performance email scheduler failed to start:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const { startProfitEmailScheduler } =
+      require('./profitEmail') as typeof import('./profitEmail');
+    startProfitEmailScheduler();
+  } catch (err) {
+    console.warn(
+      '[server] Profit email scheduler failed to start:',
       err instanceof Error ? err.message : err
     );
   }

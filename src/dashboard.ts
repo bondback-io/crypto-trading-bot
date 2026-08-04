@@ -8521,6 +8521,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <div class="toggle-row"><span>Low equity alert</span><label class="switch"><input type="checkbox" id="notify-low-equity" checked /><span class="slider"></span></label></div>
               <div class="toggle-row"><span>Insufficient funds alert</span><label class="switch"><input type="checkbox" id="notify-insufficient" checked /><span class="slider"></span></label></div>
               <div class="toggle-row"><span>Profitable close alert</span><label class="switch"><input type="checkbox" id="notify-profit-close" checked /><span class="slider"></span></label></div>
+              <label class="ctl mt-2" title="Instant = one email per profitable close. Cluster = summary on an interval. Both = instant plus clustered digests.">
+                <span>Profit email mode</span>
+                <select id="notify-profit-email-mode">
+                  <option value="instant" selected>Instant only</option>
+                  <option value="cluster">Cluster only</option>
+                  <option value="both">Instant + Cluster</option>
+                </select>
+              </label>
+              <label class="ctl" title="How often to send clustered profit summaries when mode is Cluster or Instant + Cluster.">
+                <span>Cluster interval</span>
+                <select id="notify-profit-email-interval">
+                  <option value="1h" selected>1 hour</option>
+                  <option value="2h">2 hours</option>
+                  <option value="4h">4 hours</option>
+                  <option value="12h">12 hours</option>
+                  <option value="24h">24 hours</option>
+                </select>
+              </label>
+              <label class="ctl" title="Recipient for profit emails. Defaults to bondback2026@gmail.com.">
+                <span>Profit email recipient</span>
+                <input type="email" id="notify-profit-email-to" value="bondback2026@gmail.com" placeholder="bondback2026@gmail.com" />
+              </label>
             </div>
           </div>
           <div class="config-notify-col">
@@ -20526,6 +20548,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           setChk('notify-low-equity', n.lowEquityEnabled !== false);
           setChk('notify-insufficient', n.insufficientFundsEnabled !== false);
           setChk('notify-profit-close', n.profitableCloseEnabled !== false);
+          setVal('notify-profit-email-mode', n.profitEmailMode || 'instant');
+          setVal('notify-profit-email-interval', n.profitEmailClusterInterval || '1h');
+          setVal('notify-profit-email-to', n.profitEmailTo || 'bondback2026@gmail.com');
           setChk('notify-dashboard', n.dashboardEnabled !== false);
           setChk('notify-offer-sound', n.tradeRequestSound !== false);
           setChk('notify-trade-open-sound', n.tradeOpenSound !== false);
@@ -27006,6 +27031,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             lowEquityEnabled: !!(document.getElementById('notify-low-equity') || {}).checked,
             insufficientFundsEnabled: !!(document.getElementById('notify-insufficient') || {}).checked,
             profitableCloseEnabled: !!(document.getElementById('notify-profit-close') || {}).checked,
+            profitEmailMode: ((document.getElementById('notify-profit-email-mode') || {}).value || 'instant'),
+            profitEmailClusterInterval: ((document.getElementById('notify-profit-email-interval') || {}).value || '1h'),
+            profitEmailTo: ((document.getElementById('notify-profit-email-to') || {}).value || '').trim() || 'bondback2026@gmail.com',
             dashboardEnabled: !!(document.getElementById('notify-dashboard') || {}).checked,
             tradeRequestSound: !!(document.getElementById('notify-offer-sound') || {}).checked,
             tradeOpenSound: !!(document.getElementById('notify-trade-open-sound') || {}).checked,

@@ -178,21 +178,24 @@ async function sendViaResend(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY!.trim();
   const from = resolveFromAddress();
+  const payload: Record<string, unknown> = {
+    from,
+    to: [opts.to],
+    subject: opts.subject,
+    text: opts.text,
+  };
+  if (opts.html) payload.html = opts.html;
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from,
-      to: [opts.to],
-      subject: opts.subject,
-      text: opts.text,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -204,6 +207,7 @@ async function sendViaSmtp(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }): Promise<void> {
   const transport = getTransporter();
   if (!transport) throw new Error('SMTP transport unavailable');
@@ -212,6 +216,7 @@ async function sendViaSmtp(opts: {
     to: opts.to,
     subject: opts.subject,
     text: opts.text,
+    html: opts.html,
   });
 }
 
@@ -219,6 +224,7 @@ async function deliverEmail(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }): Promise<'resend' | 'smtp'> {
   if (resendConfigured()) {
     await sendViaResend(opts);
@@ -402,6 +408,8 @@ export async function notifyProfitableClose(input: {
   mode: string;
   /** Optional slice breakdown text */
   breakdown?: string;
+  profileName?: string;
+  closedAt?: number;
   dailyWinRatePct: number;
   dailyPnlSol: number;
   dailyWins: number;
@@ -429,32 +437,27 @@ export async function notifyProfitableClose(input: {
     /* optional */
   }
 
-  const subject = `[Bot] Profit closed — ${label} ${formatSol(input.pnlSol)} (${input.pnlPct.toFixed(1)}%)`;
-  const text = [
-    `Closed trade in profit.`,
-    '',
-    `Mode: ${input.mode}`,
-    `Token: ${label}`,
-    `Mint: ${input.mint}`,
-    `PnL: ${formatSol(input.pnlSol)} (${input.pnlPct.toFixed(1)}%)`,
-    `Cost basis: ${input.costSol.toFixed(4)} SOL`,
-    `Exit reason: ${input.reason}`,
-    input.holdSeconds != null
-      ? `Hold time: ${Math.round(input.holdSeconds)}s`
-      : null,
-    input.breakdown ? `Breakdown:\n${input.breakdown}` : null,
-    '',
-    '— Day stats —',
-    `Daily PnL: ${formatSol(input.dailyPnlSol)}`,
-    `Daily win rate: ${input.dailyWinRatePct.toFixed(0)}% (${input.dailyWins}W / ${input.dailyLosses}L)`,
-    `All-time win rate: ${input.allTimeWinRatePct.toFixed(0)}%`,
-    '',
-    `Time: ${new Date().toISOString()}`,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  await sendMail({ subject, text, kind: 'profitableClose' });
+  // Instant / cluster / both — handled by profitEmail module (respects toggles)
+  try {
+    const { handleProfitEmailClose } =
+      require('./profitEmail') as typeof import('./profitEmail');
+    await handleProfitEmailClose({
+      symbol: input.symbol,
+      name: input.name,
+      mint: input.mint,
+      pnlSol: input.pnlSol,
+      pnlPct: input.pnlPct,
+      profileName: input.profileName,
+      mode: input.mode,
+      reason: input.reason,
+      closedAt: input.closedAt,
+    });
+  } catch (err) {
+    logger.warn(
+      'Notify',
+      `Profit email handler failed: ${err instanceof Error ? err.message : err}`
+    );
+  }
 }
 
 /** Zion pending trade offer — deep link opens dashboard approval modal. */
@@ -633,6 +636,7 @@ export async function sendCustomEmail(opts: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
 }): Promise<{ ok: boolean; error?: string; provider?: string }> {
   const to = String(opts.to || '').trim();
   if (!to || !to.includes('@')) {
@@ -646,6 +650,7 @@ export async function sendCustomEmail(opts: {
       to,
       subject: opts.subject,
       text: opts.text,
+      html: opts.html,
     });
     logger.info('Notify', `Custom email sent via ${provider}: ${opts.subject}`, {
       to,

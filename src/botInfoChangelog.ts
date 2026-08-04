@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.160',
+    title: 'Configurable Profit Emails',
+    sections: ['alerts', 'overview', 'knobs'],
+    items: [
+      'Profitable-close emails support Instant, Cluster, or Instant + Cluster modes with 1h–24h cluster intervals.',
+      'Config → Notifications: set profit email mode, cluster interval, and recipient (default bondback2026@gmail.com).',
+      'Paper / Live Sim / Live are labelled clearly in instant and clustered profit emails.',
+    ],
+  },
+  {
     version: '1.2.159',
     title: 'DexScreener + Jupiter Mark Resilience',
     sections: ['execution', 'alerts', 'overview', 'zion'],

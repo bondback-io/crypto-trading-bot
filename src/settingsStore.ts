@@ -105,6 +105,9 @@ export interface PersistedBotSettings {
     insufficientFundsEnabled?: boolean;
     insufficientFundsCooldownMs?: number;
     profitableCloseEnabled?: boolean;
+    profitEmailMode?: 'instant' | 'cluster' | 'both';
+    profitEmailClusterInterval?: '1h' | '2h' | '4h' | '12h' | '24h';
+    profitEmailTo?: string;
     dashboardEnabled?: boolean;
     tradeRequestSound?: boolean;
     profitCloseSound?: boolean;
