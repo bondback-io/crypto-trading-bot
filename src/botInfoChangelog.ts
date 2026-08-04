@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.145',
+    title: 'Profile TA Playbooks',
+    sections: ['microbots', 'learning', 'scanners', 'knobs'],
+    items: [
+      'Each micro-bot now has an Off / Soft / Hard TA playbook (Heikin Ashi, Fib/S-R, RSI/EMA/VWAP, patterns, optional whale) with min confluence and unique defaults.',
+      'Soft never hard-blocks; Hard can block below score. Learning may nudge playbook weights only — never TP/SL. Global Require TA stays the scanner master.',
+      'Tune under Micro Bots → Profile TA Playbooks. Decisions show in plain language on the lane fight log.',
+    ],
+  },
+  {
     version: '1.2.144',
     title: 'Copy vs Scan Module Badges',
     sections: ['knobs', 'overview'],

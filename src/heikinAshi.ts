@@ -110,6 +110,105 @@ export function haFlipToBearish(series: HaCandle[]): boolean {
   return isHaBullish(prev) && isHaBearish(cur);
 }
 
+/** Prior candle red → current green. */
+export function haFlipToBullish(series: HaCandle[]): boolean {
+  if (series.length < 2) return false;
+  const prev = series[series.length - 2]!;
+  const cur = series[series.length - 1]!;
+  return isHaBearish(prev) && isHaBullish(cur);
+}
+
+export type HaBias = 'bullish' | 'bearish' | 'neutral';
+export type HaMomentum = 'strengthening' | 'weakening' | 'steady';
+export type HaFlip = 'none' | 'to_bull' | 'to_bear';
+
+export interface HaState {
+  available: boolean;
+  bias: HaBias;
+  momentum: HaMomentum;
+  flip: HaFlip;
+  consecutiveBull: number;
+  consecutiveBear: number;
+  /** Body size vs prior body — crude strength proxy */
+  bodyStrengthPct: number | null;
+}
+
+function countConsecutive(
+  series: HaCandle[],
+  pred: (c: HaCandle) => boolean
+): number {
+  let n = 0;
+  for (let i = series.length - 1; i >= 0; i--) {
+    if (!pred(series[i]!)) break;
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Rich HA state for Profile TA Playbooks.
+ * Fail-open: available=false when history is thin.
+ */
+export function evaluateHaState(
+  candles: HaCandleInput[] | null | undefined,
+  minCandles = MIN_CANDLES
+): HaState {
+  const empty: HaState = {
+    available: false,
+    bias: 'neutral',
+    momentum: 'steady',
+    flip: 'none',
+    consecutiveBull: 0,
+    consecutiveBear: 0,
+    bodyStrengthPct: null,
+  };
+  if (!candles || candles.length < minCandles) return empty;
+  const series = toHeikinAshi(candles);
+  if (series.length < minCandles) return empty;
+
+  const last = series[series.length - 1]!;
+  const consecutiveBull = countConsecutive(series, isHaBullish);
+  const consecutiveBear = countConsecutive(series, isHaBearish);
+
+  let bias: HaBias = 'neutral';
+  if (isHaBullish(last) && consecutiveBull >= 1) bias = 'bullish';
+  else if (isHaBearish(last) && consecutiveBear >= 1) bias = 'bearish';
+
+  let flip: HaFlip = 'none';
+  if (haFlipToBearish(series)) flip = 'to_bear';
+  else if (haFlipToBullish(series)) flip = 'to_bull';
+
+  let momentum: HaMomentum = 'steady';
+  let bodyStrengthPct: number | null = null;
+  if (series.length >= 2) {
+    const prev = series[series.length - 2]!;
+    const body = Math.abs(last.close - last.open);
+    const prevBody = Math.abs(prev.close - prev.open);
+    const mid = (last.open + last.close) / 2 || last.close;
+    if (mid > 0) bodyStrengthPct = (body / mid) * 100;
+    if (prevBody > 1e-12) {
+      const ratio = body / prevBody;
+      if (bias === 'bullish') {
+        momentum = ratio >= 1.05 ? 'strengthening' : ratio <= 0.85 ? 'weakening' : 'steady';
+      } else if (bias === 'bearish') {
+        momentum = ratio >= 1.05 ? 'strengthening' : ratio <= 0.85 ? 'weakening' : 'steady';
+      } else {
+        momentum = 'steady';
+      }
+    }
+  }
+
+  return {
+    available: true,
+    bias,
+    momentum,
+    flip,
+    consecutiveBull,
+    consecutiveBear,
+    bodyStrengthPct,
+  };
+}
+
 export interface HaEntryBoostResult {
   ok: boolean;
   flags: string[];

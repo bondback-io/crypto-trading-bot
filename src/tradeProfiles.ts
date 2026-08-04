@@ -5129,6 +5129,13 @@ export function resetProfileSelfLearning(
 export function onProfileTradeClosedForSelfLearn(profileId: string): void {
   const id = profileId as TradeProfileId;
   if (!ALL_IDS.includes(id) || id === 'default') return;
+  try {
+    const { maybeNudgeProfileTaFromEpisodes } =
+      require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+    maybeNudgeProfileTaFromEpisodes(id);
+  } catch {
+    /* optional additive */
+  }
   const {
     normalizeSelfLearning,
     runSelfLearnTick,

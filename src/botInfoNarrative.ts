@@ -137,6 +137,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li>Level = applied upgrades only — not episode count.</li>
           <li>Heikin-Ashi Trend module (opt-in) + learning can enable/disable <code>heikinAshiExitEnabled</code> on Trend Rider / Steady Compounder / High Win-Rate.</li>
+          <li><strong>Profile TA Playbooks</strong> — per-lane Off/Soft/Hard identity (HA, Fib/S-R, RSI/EMA/VWAP, patterns, optional whale). Soft = confirmation/conviction only; Hard = confluence gate. Global Require TA remains scanner master. Learning nudges tool weights / minConf only — never TP/SL or Peak Protect cores.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
           <li><strong>Learning Mode (global)</strong> softens conviction / wallet-quality / cluster / some MC floors and raises throughput — it does <em>not</em> bypass Require TA setup, anti-rug floors, daily-loss halts, or disabled profiles. Scalper scanner entries are exempt from Require TA when that lane wins. Trend Rider / Steady Compounder <em>specialty</em> Jupiter/KOL handoffs also bypass Require TA and Pump.fun-only (lane floors still apply).</li>
         </ul>

@@ -70,6 +70,8 @@ export const PERSIST_FILES = {
    * Survives baked-defaults re-import on deploy; always reloaded on boot.
    */
   tradeProfilesUser: 'trade-profiles-user.json',
+  /** Per-profile TA playbooks (Off/Soft/Hard + tools) — survives bake */
+  profileTaPlaybooks: 'profile-ta-playbooks.json',
   /** Legacy names — migrated once on load */
   legacyConfig: 'bot-settings.json',
   legacyBacktest: 'backtest-history.json',
@@ -248,6 +250,7 @@ export function resetAllPersistedData(): {
     PERSIST_FILES.tradingWallets,
     PERSIST_FILES.dashboardState,
     PERSIST_FILES.tradeProfilesUser,
+    PERSIST_FILES.profileTaPlaybooks,
     'profile-learning-saves.json',
     PERSIST_MARKER,
   ];

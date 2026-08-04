@@ -679,6 +679,7 @@ export interface TradeSignal {
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
   nearKeyFib?: boolean;
   nearSupport?: boolean;
+  nearResistance?: boolean;
   chartPatternIds?: string[];
   chartPatternSummary?: string | null;
   chartPatternHits?: Array<{
@@ -696,6 +697,84 @@ export interface TradeSignal {
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
+}
+
+/**
+ * Additive Profile TA Playbook gate — Soft nudges size; Hard may skip.
+ * Fail-open on throw. Stamps BuyOptions for episode learning.
+ */
+function applyProfileTaPlaybookGate(
+  profileId: string | null | undefined,
+  signal: TradeSignal,
+  buyOpts: NonNullable<Parameters<typeof executeBuy>[2]>
+): { skip: boolean; reason: string } {
+  try {
+    const { getProfileTaPlaybook } =
+      require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+    const { runProfileTaEntryGate } =
+      require('./profileTaPlaybook') as typeof import('./profileTaPlaybook');
+    const ind = evaluateIndicators({
+      mint: signal.mint,
+      candles: signal.candles,
+      priceSol: signal.priceSol,
+    });
+    const sm =
+      signal.birdeye?.smartMoneyScore != null
+        ? Number(signal.birdeye.smartMoneyScore)
+        : null;
+    const volH1 = Number(signal.metrics?.volumeH1Usd ?? 0);
+    const volM5 = Number(signal.metrics?.volumeM5Usd ?? 0);
+    const gate = runProfileTaEntryGate(
+      profileId,
+      {
+        candles: signal.candles,
+        nearSupport: signal.nearSupport === true,
+        nearResistance: signal.nearResistance === true,
+        nearKeyFib: signal.nearKeyFib === true,
+        chartPatternIds: signal.chartPatternIds ?? null,
+        indicators: ind,
+        smartMoneyScore: sm,
+        whaleAvailable: sm != null && Number.isFinite(sm),
+        whaleBullish: sm != null && sm >= 60,
+        whaleBearish: sm != null && sm <= 35,
+        volumeExpanding:
+          (Number.isFinite(volM5) && volM5 > 0 && volH1 > volM5 * 3) ||
+          (signal.holderGrowthPct != null && signal.holderGrowthPct > 5),
+        holdersExpanding:
+          signal.holderGrowthPct != null && signal.holderGrowthPct > 5,
+      },
+      getProfileTaPlaybook
+    );
+    Object.assign(buyOpts, gate.stamp);
+    if (gate.result && gate.result.mode !== 'off') {
+      console.log(
+        `[monitor] ${gate.skip ? 'STRATEGY_SKIP' : 'STRATEGY_TAKE'} profile_ta_playbook — ` +
+          `${signal.symbol} · ${gate.plainLanguage} · ${gate.reason}`
+      );
+      try {
+        appendMarlThoughtToLaneFight(signal.mint, gate.plainLanguage);
+      } catch {
+        /* optional */
+      }
+    }
+    if (gate.skip) {
+      return { skip: true, reason: gate.reason };
+    }
+    if (
+      gate.convictionMult !== 1 &&
+      buyOpts.solAmount != null &&
+      Number.isFinite(buyOpts.solAmount)
+    ) {
+      buyOpts.solAmount = Number(buyOpts.solAmount) * gate.convictionMult;
+      buyOpts.sizeReason =
+        (buyOpts.sizeReason || '') +
+        ` · TA ×${gate.convictionMult.toFixed(2)}`;
+    }
+    return { skip: false, reason: gate.reason };
+  } catch (err) {
+    console.warn('[profile-ta] gate fail-open', err);
+    return { skip: false, reason: 'TA playbook fail-open' };
+  }
 }
 
 type SignalHandler = (signal: TradeSignal) => void;
@@ -3137,6 +3216,28 @@ async function executeSignalBuy(
     }
   }
 
+  {
+    const taGate = applyProfileTaPlaybookGate(
+      String(profileAssignment.profileId || 'default'),
+      signal,
+      buyOpts
+    );
+    if (taGate.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, taGate.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: taGate.reason,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: taGate.reason,
+      });
+      markScannerCooldown(signal.mint, false);
+      return;
+    }
+  }
+
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
   if (result.success) {
@@ -3367,6 +3468,24 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     console.log(
       `[monitor] Migration priority — no profile stamp (${profileAssignment.skipReason || profileAssignment.reason})`
     );
+  }
+
+  {
+    const taGate = applyProfileTaPlaybookGate(
+      buyOpts.tradeProfileId ||
+        String(profileAssignment.profileId || 'migration_sniper'),
+      signal,
+      buyOpts
+    );
+    if (taGate.skip) {
+      finishBuy(event.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, taGate.reason);
+      annotateActivityFeedByMint(event.mint, {
+        tradeStatus: 'skipped',
+        skipReason: taGate.reason,
+      });
+      return;
+    }
   }
 
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
@@ -4220,6 +4339,23 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     );
   }
 
+  {
+    const taGate = applyProfileTaPlaybookGate(
+      String(profileAssignment.profileId || 'default'),
+      signal,
+      buyOpts
+    );
+    if (taGate.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, taGate.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: taGate.reason,
+      });
+      return;
+    }
+  }
+
   const result = await executeBuy(signal.mint, signal.symbol, buyOpts);
   finishBuy(buy.mint, result.success);
 
@@ -4458,6 +4594,21 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
         buyOpts.sizeReason =
           (buyOpts.sizeReason || sizing.reason) +
           ` · profile ${profileAssignment.name} ${sized.sizeNote}`;
+      }
+    }
+
+    {
+      const taGate = applyProfileTaPlaybookGate(
+        buyOpts.tradeProfileId ||
+          String(profileAssignment.profileId || 'default'),
+        signal,
+        buyOpts
+      );
+      if (taGate.skip) {
+        finishBuy(mint, false);
+        markReEntryAttempt(mint, taGate.reason);
+        console.log(`[monitor] Re-entry skipped — ${taGate.reason}`);
+        return false;
       }
     }
 

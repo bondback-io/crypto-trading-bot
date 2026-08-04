@@ -286,9 +286,20 @@ export interface Position {
   learningFairnessApplied?: boolean;
   /** Whether HA trend exit was enabled on the frozen exit policy at open */
   haExitEnabledAtOpen?: boolean;
+  /** Profile TA playbook snapshot at open */
+  taModeAtOpen?: 'off' | 'soft' | 'hard';
+  taToolsAtOpen?: string[];
+  taConfluenceAtEntry?: number;
+  haBiasAtEntry?: string | null;
+  haConsecutiveAtEntry?: number;
+  nearSupportAtEntry?: boolean;
+  nearResistanceAtEntry?: boolean;
+  whaleStateAtEntry?: string;
+  profileTaPlainLanguage?: string;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
   nearKeyFib?: boolean;
   nearSupport?: boolean;
+  nearResistance?: boolean;
   chartPatternIds?: string[];
   /** How the entry was discovered */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
@@ -603,6 +614,29 @@ function maybeRecordLearningEpisode(
         position.haExitEnabledAtOpen === true ||
         (position.profileExitPolicy as { heikinAshiExitEnabled?: boolean } | undefined)
           ?.heikinAshiExitEnabled === true,
+      taModeAtOpen: position.taModeAtOpen,
+      taToolsAtOpen: position.taToolsAtOpen,
+      taConfluenceAtEntry: position.taConfluenceAtEntry,
+      haBiasAtEntry: position.haBiasAtEntry,
+      haConsecutiveAtEntry: position.haConsecutiveAtEntry,
+      nearSupportAtEntry: position.nearSupportAtEntry,
+      nearResistanceAtEntry: position.nearResistanceAtEntry,
+      whaleStateAtEntry: position.whaleStateAtEntry,
+      taConditionsHeldIntoProfit:
+        metrics.maxRunupPct >= 8 &&
+        (position.taConfluenceAtEntry == null ||
+          position.taConfluenceAtEntry >= 40)
+          ? true
+          : metrics.maxRunupPct < 3 &&
+              position.taConfluenceAtEntry != null &&
+              position.taConfluenceAtEntry >= 55
+            ? false
+            : undefined,
+      taExitBeatHold: /profile.?ta|heikin-ashi|resistance/i.test(
+        String(position.reason || '')
+      )
+        ? metrics.givebackFromPeakPct < 12 && pnlPct > 0
+        : undefined,
       learningMode: position.learningMode === true ? true : undefined,
       learningStrictness: position.learningStrictness,
       learningFairnessApplied:
@@ -1252,6 +1286,15 @@ export class PaperTrader {
     candleSource?: 'real' | 'synthetic';
     top10HoldPct?: number | null;
     tokenAgeHours?: number | null;
+    taModeAtOpen?: Position['taModeAtOpen'];
+    taToolsAtOpen?: string[];
+    taConfluenceAtEntry?: number;
+    haBiasAtEntry?: string | null;
+    haConsecutiveAtEntry?: number;
+    nearSupportAtEntry?: boolean;
+    nearResistanceAtEntry?: boolean;
+    whaleStateAtEntry?: string;
+    profileTaPlainLanguage?: string;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -1330,6 +1373,15 @@ export class PaperTrader {
       scannerPlaybook: input.scannerPlaybook,
       scannerConfluence: input.scannerConfluence,
       candleSource: input.candleSource,
+      taModeAtOpen: input.taModeAtOpen,
+      taToolsAtOpen: input.taToolsAtOpen,
+      taConfluenceAtEntry: input.taConfluenceAtEntry,
+      haBiasAtEntry: input.haBiasAtEntry,
+      haConsecutiveAtEntry: input.haConsecutiveAtEntry,
+      nearSupportAtEntry: input.nearSupportAtEntry,
+      nearResistanceAtEntry: input.nearResistanceAtEntry,
+      whaleStateAtEntry: input.whaleStateAtEntry,
+      profileTaPlainLanguage: input.profileTaPlainLanguage,
       top10HoldPct:
         input.top10HoldPct != null && Number.isFinite(input.top10HoldPct)
           ? input.top10HoldPct
@@ -1528,6 +1580,15 @@ export class PaperTrader {
       candleSource?: 'real' | 'synthetic';
       top10HoldPct?: number | null;
       tokenAgeHours?: number | null;
+      taModeAtOpen?: Position['taModeAtOpen'];
+      taToolsAtOpen?: string[];
+      taConfluenceAtEntry?: number;
+      haBiasAtEntry?: string | null;
+      haConsecutiveAtEntry?: number;
+      nearSupportAtEntry?: boolean;
+      nearResistanceAtEntry?: boolean;
+      whaleStateAtEntry?: string;
+      profileTaPlainLanguage?: string;
     }
   ): Position | null {
     const spendSol = clampToMaxAllowedTradeSol(
@@ -1692,6 +1753,15 @@ export class PaperTrader {
       scannerPlaybook: meta?.scannerPlaybook,
       scannerConfluence: meta?.scannerConfluence,
       candleSource: meta?.candleSource,
+      taModeAtOpen: meta?.taModeAtOpen,
+      taToolsAtOpen: meta?.taToolsAtOpen,
+      taConfluenceAtEntry: meta?.taConfluenceAtEntry,
+      haBiasAtEntry: meta?.haBiasAtEntry,
+      haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
+      nearSupportAtEntry: meta?.nearSupportAtEntry,
+      nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+      whaleStateAtEntry: meta?.whaleStateAtEntry,
+      profileTaPlainLanguage: meta?.profileTaPlainLanguage,
       top10HoldPct:
         meta?.top10HoldPct != null && Number.isFinite(meta.top10HoldPct)
           ? meta.top10HoldPct
@@ -3171,6 +3241,61 @@ export class PaperTrader {
             this.log('sell', `${label}: [HEIKIN_ASHI] ${haReason}`);
             await this.closePositionByRules(position, currentPrice, haReason);
             continue;
+          }
+        } catch {
+          /* fail-open */
+        }
+      }
+
+      // Additive Profile TA exit hints (HA weaken / resistance / whale) — never replaces PPP/TP/SL
+      if (
+        position.tradeProfileId &&
+        position.taModeAtOpen &&
+        position.taModeAtOpen !== 'off'
+      ) {
+        try {
+          const { fetchTokenOhlcvCandles } =
+            require('./marketData') as typeof import('./marketData');
+          const { evaluateHaState } =
+            require('./heikinAshi') as typeof import('./heikinAshi');
+          const { getProfileTaPlaybook } =
+            require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+          const { evaluateProfileTaExitHints } =
+            require('./profileTaPlaybook') as typeof import('./profileTaPlaybook');
+          const ohlcv = await fetchTokenOhlcvCandles(position.mint);
+          const pb = getProfileTaPlaybook(position.tradeProfileId);
+          const hint = evaluateProfileTaExitHints(pb, {
+            candles: ohlcv.candles,
+            haState: evaluateHaState(ohlcv.candles),
+            nearSupport: position.nearSupport === true,
+            nearResistance: position.nearResistance === true,
+            nearKeyFib: position.nearKeyFib === true,
+            chartPatternIds: position.chartPatternIds,
+            unrealizedPct: markPnlPctAsync,
+          });
+          if (hint.suggestExit && hint.reason) {
+            console.log(`[profile-ta-exit] 🔴 ${label} — ${hint.reason}`);
+            this.log('sell', `${label}: [PROFILE_TA] ${hint.reason}`);
+            await this.closePositionByRules(position, currentPrice, hint.reason);
+            continue;
+          }
+          if (
+            hint.tightenTrail &&
+            !position.profileTrailTightened &&
+            position.trailingStopPct > 0
+          ) {
+            position.trailingStopPct = Math.max(
+              4,
+              position.trailingStopPct * 0.85
+            );
+            position.profileTrailTightened = true;
+            console.log(
+              `[profile-ta-exit] ${label} — tighten trail · ${hint.plainLanguage}`
+            );
+            this.log(
+              'info',
+              `${label}: [PROFILE_TA] trail tighten · ${hint.plainLanguage}`
+            );
           }
         } catch {
           /* fail-open */

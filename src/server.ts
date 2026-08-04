@@ -2971,6 +2971,80 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/profile-ta-playbooks', (_req: Request, res: Response) => {
+    try {
+      const { getProfileTaPlaybooksPublic } =
+        require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+      const { PROFILE_TA_TOOL_LABELS, PROFILE_TA_TOOL_IDS } =
+        require('./profileTaPlaybook') as typeof import('./profileTaPlaybook');
+      res.json({
+        ok: true,
+        ...getProfileTaPlaybooksPublic(),
+        toolIds: PROFILE_TA_TOOL_IDS,
+        toolLabels: PROFILE_TA_TOOL_LABELS,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/profile-ta-playbooks', (req: Request, res: Response) => {
+    try {
+      const {
+        updateProfileTaPlaybook,
+        resetProfileTaPlaybook,
+        resetAllProfileTaPlaybooks,
+        getProfileTaPlaybooksPublic,
+      } = require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (body.resetAll === true) {
+        resetAllProfileTaPlaybooks();
+        res.json({ ok: true, ...getProfileTaPlaybooksPublic() });
+        return;
+      }
+      const profileId = String(body.profileId || '').trim();
+      if (!profileId) {
+        res.status(400).json({ ok: false, error: 'profileId required' });
+        return;
+      }
+      if (body.reset === true) {
+        const playbook = resetProfileTaPlaybook(profileId);
+        res.json({ ok: true, playbook, ...getProfileTaPlaybooksPublic() });
+        return;
+      }
+      const patch = (body.playbook || body.patch || body) as Record<string, unknown>;
+      const playbook = updateProfileTaPlaybook(profileId, {
+        taMode: patch.taMode as 'off' | 'soft' | 'hard' | undefined,
+        whaleMode: patch.whaleMode as 'off' | 'soft' | 'hard' | undefined,
+        minConfluenceScore:
+          patch.minConfluenceScore != null
+            ? Number(patch.minConfluenceScore)
+            : undefined,
+        learningEnabled:
+          typeof patch.learningEnabled === 'boolean'
+            ? patch.learningEnabled
+            : undefined,
+        timeframes: Array.isArray(patch.timeframes)
+          ? (patch.timeframes as ('5m' | '15m' | '1h' | '4h')[])
+          : undefined,
+        entryTools: patch.entryTools as never,
+        exitTools: patch.exitTools as never,
+        heikinAshi: patch.heikinAshi as never,
+        supportResistance: patch.supportResistance as never,
+        learned: patch.learned as never,
+      });
+      res.json({ ok: true, playbook, ...getProfileTaPlaybooksPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/zion/agent', (_req: Request, res: Response) => {
     try {
       const {

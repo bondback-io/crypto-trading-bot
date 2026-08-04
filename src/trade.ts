@@ -244,6 +244,16 @@ export interface BuyOptions {
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
+  /** Profile TA playbook stamp at open */
+  taModeAtOpen?: 'off' | 'soft' | 'hard';
+  taToolsAtOpen?: string[];
+  taConfluenceAtEntry?: number;
+  haBiasAtEntry?: string | null;
+  haConsecutiveAtEntry?: number;
+  nearSupportAtEntry?: boolean;
+  nearResistanceAtEntry?: boolean;
+  whaleStateAtEntry?: string;
+  profileTaPlainLanguage?: string;
 }
 
 /**
@@ -811,6 +821,15 @@ export async function executeBuy(
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
+        taModeAtOpen: meta?.taModeAtOpen,
+        taToolsAtOpen: meta?.taToolsAtOpen,
+        taConfluenceAtEntry: meta?.taConfluenceAtEntry,
+        haBiasAtEntry: meta?.haBiasAtEntry,
+        haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
+        nearSupportAtEntry: meta?.nearSupportAtEntry,
+        nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+        whaleStateAtEntry: meta?.whaleStateAtEntry,
+        profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         top10HoldPct,
         tokenAgeHours: meta?.tokenAgeHours,
       }
@@ -935,6 +954,15 @@ export async function executeBuy(
         candleSource: meta?.candleSource,
         top10HoldPct,
         tokenAgeHours: meta?.tokenAgeHours,
+        taModeAtOpen: meta?.taModeAtOpen,
+        taToolsAtOpen: meta?.taToolsAtOpen,
+        taConfluenceAtEntry: meta?.taConfluenceAtEntry,
+        haBiasAtEntry: meta?.haBiasAtEntry,
+        haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
+        nearSupportAtEntry: meta?.nearSupportAtEntry,
+        nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+        whaleStateAtEntry: meta?.whaleStateAtEntry,
+        profileTaPlainLanguage: meta?.profileTaPlainLanguage,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

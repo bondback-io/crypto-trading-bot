@@ -7857,6 +7857,79 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="profile-ta-card">
+        <details class="strat-adv-pack" id="profile-ta-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Profile TA Playbooks <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Per-lane Off / Soft / Hard TA identity using Heikin Ashi, Fib/S-R, RSI/EMA/VWAP, patterns, and optional whale confirmation. Soft never hard-blocks; Hard can. Global Require TA stays the scanner master preference. Learning may nudge tool weights only — never TP/SL."></span></span>
+              <span id="profile-ta-status-badge" class="badge status-badge" style="font-size:11px">TA Playbooks</span>
+            </span>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="text-xs text-slate-400 mb-2">Each micro-bot gets its own TA mode, entry/exit tools, min confluence, HA consecutive preference, S/R bias, and whale mode. Missing HA/whale data fails open on Soft/speed lanes.</p>
+            <div class="flex flex-wrap gap-2 mb-2 items-end">
+              <label class="ctl ctl-sm" style="min-width:10rem">
+                <span>Profile</span>
+                <select id="pta-profile" onchange="onProfileTaProfileChange()"></select>
+              </label>
+              <label class="ctl ctl-sm">
+                <span>TA mode</span>
+                <select id="pta-mode" onchange="saveProfileTaPlaybook()">
+                  <option value="off">Off</option>
+                  <option value="soft">Soft</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label class="ctl ctl-sm">
+                <span>Whale</span>
+                <select id="pta-whale" onchange="saveProfileTaPlaybook()">
+                  <option value="off">Off</option>
+                  <option value="soft">Soft</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label class="ctl ctl-sm">
+                <span>Min confluence</span>
+                <input type="number" id="pta-minconf" min="0" max="100" step="1" onchange="saveProfileTaPlaybook()" />
+              </label>
+              <label class="ctl ctl-sm">
+                <span>HA min consecutive</span>
+                <input type="number" id="pta-ha-consec" min="1" max="6" step="1" onchange="saveProfileTaPlaybook()" />
+              </label>
+              <label class="ctl-check" title="Prefer strengthening HA">
+                <input type="checkbox" id="pta-ha-strengthen" onchange="saveProfileTaPlaybook()" />
+                <span>HA strengthen</span>
+              </label>
+              <label class="ctl-check">
+                <input type="checkbox" id="pta-learning" onchange="saveProfileTaPlaybook()" />
+                <span>Learning</span>
+              </label>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl-check"><input type="checkbox" id="pta-sr-support" onchange="saveProfileTaPlaybook()" /><span>Prefer near support</span></label>
+              <label class="ctl-check"><input type="checkbox" id="pta-sr-resist" onchange="saveProfileTaPlaybook()" /><span>Avoid near resistance</span></label>
+              <label class="ctl-check"><input type="checkbox" id="pta-sr-fib" onchange="saveProfileTaPlaybook()" /><span>Prefer Fib confluence</span></label>
+            </div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Timeframes</div>
+            <div class="flex flex-wrap gap-2 mb-2" id="pta-timeframes">
+              <label class="ctl-check"><input type="checkbox" data-pta-tf="5m" onchange="saveProfileTaPlaybook()" /><span>5m</span></label>
+              <label class="ctl-check"><input type="checkbox" data-pta-tf="15m" onchange="saveProfileTaPlaybook()" /><span>15m</span></label>
+              <label class="ctl-check"><input type="checkbox" data-pta-tf="1h" onchange="saveProfileTaPlaybook()" /><span>1h</span></label>
+              <label class="ctl-check"><input type="checkbox" data-pta-tf="4h" onchange="saveProfileTaPlaybook()" /><span>4h</span></label>
+            </div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Entry tools</div>
+            <div class="flex flex-wrap gap-2 mb-2" id="pta-entry-tools"></div>
+            <div class="text-xs font-semibold text-slate-300 mb-1">Exit tools</div>
+            <div class="flex flex-wrap gap-2 mb-2" id="pta-exit-tools"></div>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button type="button" class="btn btn-secondary text-xs" onclick="saveProfileTaPlaybook()">Save playbook</button>
+              <button type="button" class="btn btn-secondary text-xs" onclick="resetProfileTaPlaybook()">Reset this profile</button>
+            </div>
+            <p class="text-xs mint mt-2 mb-0" id="pta-learned-hint">Learned weights: —</p>
+          </div>
+        </details>
+      </div>
+
       <div class="card mt-4" id="microbot-performance-teaser">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div style="min-width:0;flex:1">
@@ -12980,6 +13053,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
       return 'all';
     })();
+    window._ovStatsFetchSeq = 0;
+    window._ovStatsInFlight = false;
+    window._ovStatsLastFetchAt = 0;
 
     function syncOverviewStatsWindowButtons() {
       const cur = window._ovStatsWindow || 'all';
@@ -13074,25 +13150,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
-    async function loadOverviewWindowStats() {
+    /** Keep windowed cards stable across status polls — never flash lifetime totals. */
+    function refreshOverviewWindowStats(opts) {
+      const force = !!(opts && opts.force);
       const win = window._ovStatsWindow || 'all';
       syncOverviewStatsWindowButtons();
-      try {
-        const data = await fetchJSON(
-          '/api/overview-stats?window=' + encodeURIComponent(win)
-        );
-        if (data && data.ok && data.overview) {
-          window._lastOverviewWindowStats = data.overview;
-          paintOverviewWindowStats(
-            data.overview,
-            window._lastOverviewStatusCtx || {}
-          );
-        }
-      } catch (err) {
-        console.warn('overview-stats', err);
+      const cached = window._lastOverviewWindowStats;
+      const ctx = window._lastOverviewStatusCtx || {};
+      // Re-paint cached window stats with fresh Status ctx (migrations / selective)
+      // without clearing numbers first — stops flicker on every /api/status tick.
+      if (cached && cached.window === win) {
+        paintOverviewWindowStats(cached, ctx);
       }
+      const now = Date.now();
+      const minGapMs = 12_000;
+      if (
+        !force &&
+        (window._ovStatsInFlight ||
+          (window._ovStatsLastFetchAt && now - window._ovStatsLastFetchAt < minGapMs))
+      ) {
+        return;
+      }
+      window._ovStatsInFlight = true;
+      const seq = ++window._ovStatsFetchSeq;
+      fetchJSON('/api/overview-stats?window=' + encodeURIComponent(win))
+        .then(function (data) {
+          if (seq !== window._ovStatsFetchSeq) return;
+          if (data && data.ok && data.overview) {
+            window._lastOverviewWindowStats = data.overview;
+            window._ovStatsLastFetchAt = Date.now();
+            paintOverviewWindowStats(
+              data.overview,
+              window._lastOverviewStatusCtx || {}
+            );
+          }
+        })
+        .catch(function (err) {
+          console.warn('overview-stats', err);
+        })
+        .finally(function () {
+          if (seq === window._ovStatsFetchSeq) {
+            window._ovStatsInFlight = false;
+          }
+        });
     }
-    window.loadOverviewWindowStats = loadOverviewWindowStats;
+    window.loadOverviewWindowStats = function () {
+      refreshOverviewWindowStats({ force: true });
+    };
 
     function setOverviewStatsWindow(win) {
       const next =
@@ -13103,12 +13207,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         win === 'all'
           ? win
           : 'all';
+      const prev = window._ovStatsWindow;
       window._ovStatsWindow = next;
       try {
         localStorage.setItem('ovStatsWindow', next);
       } catch (_) {}
       syncOverviewStatsWindowButtons();
-      loadOverviewWindowStats();
+      // Drop cache when window changes so we don't briefly show the wrong range
+      if (prev !== next) {
+        window._lastOverviewWindowStats = null;
+        window._ovStatsLastFetchAt = 0;
+      }
+      refreshOverviewWindowStats({ force: true });
     }
     window.setOverviewStatsWindow = setOverviewStatsWindow;
 
@@ -14471,6 +14581,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
       if (name === 'microbots' && typeof loadPeakProfitProtection === 'function') loadPeakProfitProtection();
+      if (name === 'microbots' && typeof loadProfileTaPlaybooks === 'function') loadProfileTaPlaybooks();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') {
         try { syncBotInfoVersionLabels(); } catch (_) {}
@@ -19647,18 +19758,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       })();
       const s = status.stats || {};
-      // Provisional lifetime paint — overwritten by /api/overview-stats for the selected window
-      document.getElementById('win-rate').textContent = status.winRate != null ? status.winRate.toFixed(0) + '%' : '—';
-      document.getElementById('stat-trades').textContent = s.totalTrades ?? 0;
-      const openN = s.openTrades ?? status.monitor?.openPositions ?? 0;
-      const closedN = s.closedTrades;
-      if (closedN != null || openN) {
-        const tip = document.querySelector('#stat-trades')?.parentElement?.querySelector('.tip');
-        if (tip) tip.setAttribute('data-tip',
-          (openN || 0) + ' open · ' + (closedN ?? Math.max(0, (s.totalTrades || 0) - (openN || 0))) + ' closed');
-      }
-      document.getElementById('stat-wl').textContent =
-        (s.wins ?? 0) + 'W / ' + (s.losses ?? 0) + 'L';
+      // Do NOT paint win-rate, trades, W/L, maxDD, avg hold from status.stats —
+      // those cards are owned by refreshOverviewWindowStats() for the selected window.
       const ur = sumOpenUnrealized(positions.open);
       const pfUr = status.portfolio && status.portfolio.unrealizedPnlSol != null
         ? Number(status.portfolio.unrealizedPnlSol)
@@ -24776,6 +24877,187 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadPeakProfitProtection = loadPeakProfitProtection;
     window.savePeakProfitProtection = savePeakProfitProtection;
+
+    let _ptaCache = null;
+    let _ptaSelected = 'scalper';
+    const PTA_FRIENDLY = {
+      scalper: 'Scalper',
+      migration_sniper: 'Migration Sniper',
+      momentum_burst: 'Momentum Burst',
+      reversal_scalper: 'Reversal Scalper',
+      dip_buyer: 'Dip Buyer',
+      trend_rider: 'Trend Rider',
+      steady_compounder: 'Steady Compounder',
+      high_win_rate: 'High Win-Rate',
+      smart_money_mirror: 'Smart Money Mirror',
+      zion: 'Zion',
+    };
+    function renderProfileTaToolChecks(containerId, tools, flags) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      const labels = (_ptaCache && _ptaCache.toolLabels) || {};
+      const ids = (_ptaCache && _ptaCache.toolIds) || Object.keys(flags || {});
+      el.innerHTML = ids
+        .map(function (id) {
+          const on = flags && flags[id] === true;
+          return (
+            '<label class="ctl-check"><input type="checkbox" data-pta-tool="' +
+            id +
+            '" ' +
+            (on ? 'checked' : '') +
+            ' onchange="saveProfileTaPlaybook()" /><span>' +
+            (labels[id] || id) +
+            '</span></label>'
+          );
+        })
+        .join('');
+    }
+    function paintProfileTaForm(pb) {
+      if (!pb) return;
+      const mode = document.getElementById('pta-mode');
+      if (mode) mode.value = pb.taMode || 'off';
+      const whale = document.getElementById('pta-whale');
+      if (whale) whale.value = pb.whaleMode || 'off';
+      const mc = document.getElementById('pta-minconf');
+      if (mc) mc.value = pb.minConfluenceScore != null ? pb.minConfluenceScore : 40;
+      const haC = document.getElementById('pta-ha-consec');
+      if (haC) haC.value = (pb.heikinAshi && pb.heikinAshi.minConsecutive) || 1;
+      const haS = document.getElementById('pta-ha-strengthen');
+      if (haS) haS.checked = !!(pb.heikinAshi && pb.heikinAshi.preferStrengthening);
+      const learn = document.getElementById('pta-learning');
+      if (learn) learn.checked = pb.learningEnabled !== false;
+      const srS = document.getElementById('pta-sr-support');
+      if (srS) srS.checked = !!(pb.supportResistance && pb.supportResistance.preferNearSupport);
+      const srR = document.getElementById('pta-sr-resist');
+      if (srR) srR.checked = !!(pb.supportResistance && pb.supportResistance.avoidNearResistance);
+      const srF = document.getElementById('pta-sr-fib');
+      if (srF) srF.checked = !!(pb.supportResistance && pb.supportResistance.preferFibConfluence);
+      document.querySelectorAll('[data-pta-tf]').forEach(function (inp) {
+        const tf = inp.getAttribute('data-pta-tf');
+        inp.checked = Array.isArray(pb.timeframes) && pb.timeframes.indexOf(tf) >= 0;
+      });
+      renderProfileTaToolChecks('pta-entry-tools', null, pb.entryTools || {});
+      renderProfileTaToolChecks('pta-exit-tools', null, pb.exitTools || {});
+      const hint = document.getElementById('pta-learned-hint');
+      if (hint) {
+        const L = pb.learned || {};
+        hint.textContent =
+          'Learned: minConfΔ ' +
+          (L.minConfDelta || 0) +
+          ' · HA consecΔ ' +
+          (L.haConsecutiveDelta || 0) +
+          ' · whale×' +
+          Number(L.whaleWeight != null ? L.whaleWeight : 1).toFixed(2) +
+          ' · resist×' +
+          Number(L.resistanceExitSensitivity != null ? L.resistanceExitSensitivity : 1).toFixed(2);
+      }
+      const badge = document.getElementById('profile-ta-status-badge');
+      if (badge) {
+        badge.textContent =
+          (PTA_FRIENDLY[pb.profileId] || pb.profileId) +
+          ': ' +
+          String(pb.taMode || 'off').toUpperCase();
+      }
+    }
+    function collectProfileTaTools(containerId) {
+      const out = {};
+      const root = document.getElementById(containerId);
+      if (!root) return out;
+      root.querySelectorAll('[data-pta-tool]').forEach(function (inp) {
+        out[inp.getAttribute('data-pta-tool')] = !!inp.checked;
+      });
+      return out;
+    }
+    async function loadProfileTaPlaybooks() {
+      try {
+        const data = await fetchJSON('/api/profile-ta-playbooks');
+        _ptaCache = data;
+        const sel = document.getElementById('pta-profile');
+        if (sel) {
+          const ids = Object.keys(data.playbooks || {}).filter(function (id) {
+            return id !== 'default';
+          });
+          sel.innerHTML = ids
+            .map(function (id) {
+              return (
+                '<option value="' +
+                id +
+                '"' +
+                (id === _ptaSelected ? ' selected' : '') +
+                '>' +
+                (PTA_FRIENDLY[id] || id) +
+                '</option>'
+              );
+            })
+            .join('');
+          if (!_ptaSelected || ids.indexOf(_ptaSelected) < 0) {
+            _ptaSelected = ids[0] || 'scalper';
+          }
+          sel.value = _ptaSelected;
+        }
+        const pb = (data.playbooks && data.playbooks[_ptaSelected]) || null;
+        paintProfileTaForm(pb);
+      } catch (err) {
+        console.warn('loadProfileTaPlaybooks', err);
+      }
+    }
+    function onProfileTaProfileChange() {
+      const sel = document.getElementById('pta-profile');
+      _ptaSelected = sel ? sel.value : 'scalper';
+      if (_ptaCache && _ptaCache.playbooks) {
+        paintProfileTaForm(_ptaCache.playbooks[_ptaSelected]);
+      } else {
+        loadProfileTaPlaybooks();
+      }
+    }
+    async function saveProfileTaPlaybook() {
+      const tfs = [];
+      document.querySelectorAll('[data-pta-tf]').forEach(function (inp) {
+        if (inp.checked) tfs.push(inp.getAttribute('data-pta-tf'));
+      });
+      const body = {
+        profileId: _ptaSelected,
+        playbook: {
+          taMode: document.getElementById('pta-mode')?.value || 'off',
+          whaleMode: document.getElementById('pta-whale')?.value || 'off',
+          minConfluenceScore: Number(document.getElementById('pta-minconf')?.value || 40),
+          learningEnabled: !!(document.getElementById('pta-learning') || {}).checked,
+          timeframes: tfs,
+          heikinAshi: {
+            minConsecutive: Number(document.getElementById('pta-ha-consec')?.value || 1),
+            preferStrengthening: !!(document.getElementById('pta-ha-strengthen') || {}).checked,
+          },
+          supportResistance: {
+            preferNearSupport: !!(document.getElementById('pta-sr-support') || {}).checked,
+            avoidNearResistance: !!(document.getElementById('pta-sr-resist') || {}).checked,
+            preferFibConfluence: !!(document.getElementById('pta-sr-fib') || {}).checked,
+          },
+          entryTools: collectProfileTaTools('pta-entry-tools'),
+          exitTools: collectProfileTaTools('pta-exit-tools'),
+        },
+      };
+      const data = await fetchJSON('/api/profile-ta-playbooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      _ptaCache = data;
+      paintProfileTaForm(data.playbook || (data.playbooks && data.playbooks[_ptaSelected]));
+    }
+    async function resetProfileTaPlaybook() {
+      if (!confirm('Reset TA playbook for ' + (_ptaSelected || 'profile') + ' to catalog defaults?')) return;
+      const data = await fetchJSON('/api/profile-ta-playbooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId: _ptaSelected, reset: true }),
+      });
+      _ptaCache = data;
+      paintProfileTaForm(data.playbook || (data.playbooks && data.playbooks[_ptaSelected]));
+    }
+    window.loadProfileTaPlaybooks = loadProfileTaPlaybooks;
+    window.onProfileTaProfileChange = onProfileTaProfileChange;
+    window.saveProfileTaPlaybook = saveProfileTaPlaybook;
+    window.resetProfileTaPlaybook = resetProfileTaPlaybook;
 
     const zionAgentWidgetState = { initialized: false, assistantCount: 0, pendingCount: 0, unread: 0, open: false };
     let _zionImprovementCache = [];

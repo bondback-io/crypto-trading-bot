@@ -58,6 +58,19 @@ export interface ProfileLearningEpisode {
   tokenAgeHoursAtEntry?: number;
   /** Whether Heikin-Ashi exit was enabled on frozen policy at open */
   haExitEnabledAtOpen?: boolean;
+  /** Profile TA playbook snapshot at entry */
+  taModeAtOpen?: 'off' | 'soft' | 'hard';
+  taToolsAtOpen?: string[];
+  taConfluenceAtEntry?: number;
+  haBiasAtEntry?: string | null;
+  haConsecutiveAtEntry?: number;
+  nearSupportAtEntry?: boolean;
+  nearResistanceAtEntry?: boolean;
+  whaleStateAtEntry?: string;
+  /** Whether TA/whale conditions still looked favorable while trade was green */
+  taConditionsHeldIntoProfit?: boolean;
+  /** Soft heuristic: TA exit banked vs holding longer */
+  taExitBeatHold?: boolean;
   /** Learning Mode attribution at open */
   learningMode?: boolean;
   learningStrictness?: 'stricter' | 'middle' | 'looser';
