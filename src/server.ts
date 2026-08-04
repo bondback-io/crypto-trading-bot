@@ -3106,7 +3106,22 @@ export function createServer(): express.Application {
         typeof body.profileId === 'string' &&
         (body.mode === 'shadow' || body.mode === 'hybrid' || body.mode === 'lead')
       ) {
-        setProfileRlAgentMode(body.profileId, body.mode);
+        setProfileRlAgentMode(body.profileId, body.mode, {
+          modeLocked:
+            typeof body.modeLocked === 'boolean' ? body.modeLocked : undefined,
+        });
+      } else if (
+        typeof body.profileId === 'string' &&
+        typeof body.modeLocked === 'boolean'
+      ) {
+        const { loadProfileRlState, saveProfileRlState, getOrCreateProfileRlAgent } =
+          require('./profileRlStore') as typeof import('./profileRlStore');
+        const st = loadProfileRlState();
+        const agent = getOrCreateProfileRlAgent(body.profileId);
+        agent.modeLocked = body.modeLocked;
+        agent.updatedAt = Date.now();
+        st.agents[body.profileId] = agent;
+        saveProfileRlState(st);
       }
       res.json({ ok: true, profileRl: getProfileRlStatus() });
     } catch (err) {

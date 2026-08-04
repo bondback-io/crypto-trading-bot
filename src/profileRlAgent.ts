@@ -23,6 +23,48 @@ import {
 
 export type { ProfileRlMode, ProfileRlStrength };
 
+export interface ProfileRlReadinessBreakdown {
+  sample: number;
+  rewardTrend: number;
+  stability: number;
+  baseline: number;
+  diversity: number;
+}
+
+export interface ProfileRlReadinessResult {
+  score: number;
+  breakdown: ProfileRlReadinessBreakdown;
+  plainFactors: string[];
+}
+
+export interface ProfileRlDifficulty {
+  thresholdAdd: number;
+  hybridFloor: number;
+  leadFloor: number;
+}
+
+export const PROFILE_RL_DIFFICULTY: Record<string, ProfileRlDifficulty> = {
+  scalper: { thresholdAdd: 8, hybridFloor: 40, leadFloor: 100 },
+  momentum_burst: { thresholdAdd: 5, hybridFloor: 32, leadFloor: 85 },
+  migration_sniper: { thresholdAdd: 3, hybridFloor: 28, leadFloor: 75 },
+  dip_buyer: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 65 },
+  trend_rider: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 65 },
+  high_win_rate: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 70 },
+  steady_compounder: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 70 },
+};
+
+export const DEFAULT_PROFILE_RL_DIFFICULTY: ProfileRlDifficulty = {
+  thresholdAdd: 2,
+  hybridFloor: 30,
+  leadFloor: 80,
+};
+
+const SHADOW_TO_HYBRID_READINESS = 65;
+const HYBRID_TO_LEAD_READINESS = 80;
+const LEAD_DEMOTE_READINESS = 70;
+const HYBRID_DEMOTE_READINESS = 55;
+const MIN_STABILITY_FOR_PROMOTE = 50;
+
 export interface ProfileRlConfig {
   enabled: boolean;
   strength: ProfileRlStrength;
@@ -104,10 +146,143 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
+export function getProfileRlDifficulty(profileId: string): ProfileRlDifficulty {
+  return PROFILE_RL_DIFFICULTY[profileId] ?? DEFAULT_PROFILE_RL_DIFFICULTY;
+}
+
+function computeSampleScore(trades: number, diff: ProfileRlDifficulty): number {
+  if (trades <= 0) return 0;
+  const { hybridFloor, leadFloor } = diff;
+  if (trades <= hybridFloor) {
+    return clamp((trades / hybridFloor) * 70, 0, 70);
+  }
+  if (trades <= leadFloor) {
+    return clamp(70 + ((trades - hybridFloor) / (leadFloor - hybridFloor)) * 30, 70, 100);
+  }
+  return 100;
+}
+
+function computeRewardTrendScore(agent: ProfileRlAgentState): number {
+  const ema = agent.rewardEma;
+  const last = agent.lastReward;
+  const prev = agent.prevRewardEma ?? ema;
+  const slope = ema - prev;
+  const levelScore = clamp(((ema + 0.5) / 1.5) * 60, 0, 60);
+  const slopeScore = clamp(((slope + 0.2) / 0.4) * 25, 0, 25);
+  const alignScore = last >= ema * 0.8 ? 15 : last >= 0 ? 8 : 0;
+  return clamp(Math.round(levelScore + slopeScore + alignScore), 0, 100);
+}
+
+function countRecentRollbacks(profileId: string): number {
+  return getProfileRlDecisions(30).filter(
+    (d) =>
+      d.profileId === profileId &&
+      (d.kind === 'auto_rollback' || d.kind === 'rollback')
+  ).length;
+}
+
+function computeStabilityScore(agent: ProfileRlAgentState): number {
+  let score = 72;
+  const emaDelta = Math.abs(agent.rewardEma - agent.preUpdateRewardEma);
+  if (emaDelta > 0.3) score -= 35;
+  else if (emaDelta > 0.15) score -= 18;
+  else if (emaDelta <= 0.05 && agent.tradesSinceUpdate >= 4) score += 8;
+
+  const recentRollbacks = countRecentRollbacks(agent.profileId);
+  score -= recentRollbacks * 14;
+  score -= Math.min(30, (agent.unstableCount || 0) * 8);
+
+  if (agent.tradesSinceUpdate <= 2 && agent.trades > 8) score -= 6;
+  return clamp(Math.round(score), 0, 100);
+}
+
+function computeBaselineOutperformanceScore(agent: ProfileRlAgentState): number {
+  const baseline = agent.baselineRewardEma ?? 0;
+  const diff = agent.rewardEma - baseline;
+  if (diff >= 0.3) return 100;
+  if (diff >= 0.15) return 82;
+  if (diff >= 0.05) return 65;
+  if (diff >= 0) return 50;
+  if (diff >= -0.15) return 28;
+  return 10;
+}
+
+function computeDiversityScore(profileId: string, agent: ProfileRlAgentState): number {
+  try {
+    const { getProfileLearningEpisodes } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    const eps = getProfileLearningEpisodes(profileId, 40);
+    if (eps.length >= 3) {
+      const exitKeys = new Set(eps.map((e) => e.exitKey));
+      const hours = new Set(
+        eps.map((e) => e.hourUtc).filter((h): h is number => h != null)
+      );
+      const tools = new Set<string>();
+      for (const e of eps) {
+        for (const t of e.taToolsPassedAtEntry || e.taToolsAtOpen || []) {
+          tools.add(t);
+        }
+      }
+      const mix = exitKeys.size * 2 + hours.size + Math.min(tools.size, 6);
+      return clamp(Math.round(mix * 7), 15, 100);
+    }
+  } catch {
+    /* optional */
+  }
+  if (agent.trades <= 0) return 15;
+  const winMix = agent.wins / agent.trades;
+  return clamp(Math.round(35 + winMix * 35 + Math.min(agent.trades, 15)), 15, 72);
+}
+
+export function computeProfileRlReadiness(
+  agent: ProfileRlAgentState
+): ProfileRlReadinessResult {
+  const diff = getProfileRlDifficulty(agent.profileId);
+  const sample = computeSampleScore(agent.trades, diff);
+  const rewardTrend = computeRewardTrendScore(agent);
+  const stability = computeStabilityScore(agent);
+  const baseline = computeBaselineOutperformanceScore(agent);
+  const diversity = computeDiversityScore(agent.profileId, agent);
+
+  const score = Math.round(
+    0.25 * sample +
+      0.25 * rewardTrend +
+      0.2 * stability +
+      0.2 * baseline +
+      0.1 * diversity
+  );
+
+  const plainFactors: string[] = [];
+  if (sample < 55) plainFactors.push('needs more sample trades');
+  if (rewardTrend < 45) plainFactors.push('reward trend weak');
+  if (stability < MIN_STABILITY_FOR_PROMOTE) plainFactors.push('policy still noisy');
+  if (baseline < 40) plainFactors.push('below baseline performance');
+  if (diversity < 35) plainFactors.push('limited trade diversity');
+  if (rewardTrend >= 70 && stability >= 60) plainFactors.push('stable improvement');
+  if (agent.rewardEma < -0.15) plainFactors.push('negative reward EMA');
+
+  return {
+    score: clamp(score, 0, 100),
+    breakdown: { sample, rewardTrend, stability, baseline, diversity },
+    plainFactors,
+  };
+}
+
+function profileDisplayName(profileId: string): string {
+  return profileId
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function agentInfluenceMinTrades(profileId: string): number {
+  return Math.min(getProfileRlDifficulty(profileId).hybridFloor, MIN_TRADES_INFLUENCE);
+}
+
 function agentInfluenceActive(agent: ProfileRlAgentState, cfg: ProfileRlConfig): boolean {
   if (!cfg.enabled || !agent.enabled) return false;
   if (agent.mode === 'shadow') return false;
-  if (agent.trades < MIN_TRADES_INFLUENCE) return false;
+  if (agent.trades < agentInfluenceMinTrades(agent.profileId)) return false;
   return true;
 }
 
@@ -210,21 +385,97 @@ function activePolicyDims(episode: ProfileLearningEpisode): Array<keyof ProfileR
   return dims;
 }
 
-function maybeAutoPromoteMode(agent: ProfileRlAgentState): void {
-  if (agent.trades >= 40 && agent.rewardEma >= 0.15 && agent.mode === 'hybrid') {
-    agent.mode = 'lead';
+function hasRecentPerformanceDrop(agent: ProfileRlAgentState): boolean {
+  if (agent.rewardEma < -0.2 && agent.mode !== 'shadow') return true;
+  const drop = agent.preUpdateRewardEma - agent.rewardEma;
+  if (drop > ROLLBACK_EMA_DROP && agent.tradesSinceUpdate >= 3) return true;
+  return countRecentRollbacks(agent.profileId) >= 2;
+}
+
+function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
+  if (agent.modeLocked) return;
+
+  const diff = getProfileRlDifficulty(agent.profileId);
+  const readiness = computeProfileRlReadiness(agent);
+  agent.readinessScore = readiness.score;
+  agent.readinessUpdatedAt = Date.now();
+
+  const promoteHybridThreshold = SHADOW_TO_HYBRID_READINESS + diff.thresholdAdd;
+  const promoteLeadThreshold = HYBRID_TO_LEAD_READINESS + diff.thresholdAdd;
+  const stableEnough = readiness.breakdown.stability >= MIN_STABILITY_FOR_PROMOTE;
+  const perfDrop = hasRecentPerformanceDrop(agent);
+  const unstable = readiness.breakdown.stability < MIN_STABILITY_FOR_PROMOTE;
+
+  const fmtDetail = (
+    from: ProfileRlMode,
+    to: ProfileRlMode,
+    kind: 'auto_promote' | 'auto_demote',
+    reason: string
+  ): void => {
+    const b = readiness.breakdown;
     pushProfileRlDecision({
-      kind: 'auto_promote',
+      kind,
       profileId: agent.profileId,
-      detail: `Auto-promoted shadow→lead path: hybrid→lead (EMA ${agent.rewardEma.toFixed(2)}, n=${agent.trades})`,
+      detail: `${from}→${to} · readiness ${readiness.score} · sample ${b.sample} · trend ${b.rewardTrend} · stability ${b.stability} · ${reason}`,
     });
-  } else if (agent.trades >= 20 && agent.rewardEma >= 0.05 && agent.mode === 'shadow') {
-    agent.mode = 'hybrid';
-    pushProfileRlDecision({
-      kind: 'auto_promote',
-      profileId: agent.profileId,
-      detail: `Auto-promoted shadow→hybrid (EMA ${agent.rewardEma.toFixed(2)}, n=${agent.trades})`,
-    });
+  };
+
+  if (agent.mode === 'shadow') {
+    if (
+      readiness.score >= promoteHybridThreshold &&
+      agent.trades >= diff.hybridFloor &&
+      stableEnough &&
+      !perfDrop &&
+      agent.rewardEma >= -0.1
+    ) {
+      agent.mode = 'hybrid';
+      fmtDetail('shadow', 'hybrid', 'auto_promote', `n=${agent.trades} EMA ${agent.rewardEma.toFixed(2)}`);
+    }
+    return;
+  }
+
+  if (agent.mode === 'hybrid') {
+    if (
+      readiness.score >= promoteLeadThreshold &&
+      agent.trades >= diff.leadFloor &&
+      stableEnough &&
+      !perfDrop &&
+      agent.rewardEma >= 0.05
+    ) {
+      agent.mode = 'lead';
+      fmtDetail('hybrid', 'lead', 'auto_promote', `n=${agent.trades} EMA ${agent.rewardEma.toFixed(2)}`);
+      return;
+    }
+    if (
+      readiness.score < HYBRID_DEMOTE_READINESS ||
+      unstable ||
+      (perfDrop && agent.rewardEma < 0)
+    ) {
+      agent.mode = 'shadow';
+      fmtDetail(
+        'hybrid',
+        'shadow',
+        'auto_demote',
+        perfDrop ? 'performance drop' : unstable ? 'instability' : 'readiness low'
+      );
+    }
+    return;
+  }
+
+  if (agent.mode === 'lead') {
+    if (
+      readiness.score < LEAD_DEMOTE_READINESS ||
+      perfDrop ||
+      agent.rewardEma < -0.05
+    ) {
+      agent.mode = 'hybrid';
+      fmtDetail(
+        'lead',
+        'hybrid',
+        'auto_demote',
+        perfDrop ? 'EMA drop / rollback' : 'readiness below lead floor'
+      );
+    }
   }
 }
 
@@ -235,6 +486,7 @@ function maybeAutoRollback(agent: ProfileRlAgentState): void {
   if (drop > ROLLBACK_EMA_DROP) {
     const res = rollbackProfileRlPolicyTo(agent.profileId, 0);
     if (res.ok) {
+      agent.unstableCount = (agent.unstableCount || 0) + 1;
       pushProfileRlDecision({
         kind: 'auto_rollback',
         profileId: agent.profileId,
@@ -300,10 +552,14 @@ export function notifyProfileRlTradeClosed(input: {
   if (reward > 0) agent.wins += 1;
   agent.sumReward += reward;
   agent.lastReward = reward;
+  agent.prevRewardEma = agent.rewardEma;
   agent.rewardEma =
     agent.trades <= 1
       ? reward
       : agent.rewardEma * (1 - REWARD_EMA_ALPHA) + reward * REWARD_EMA_ALPHA;
+  if (agent.trades === 10 && agent.baselineRewardEma == null) {
+    agent.baselineRewardEma = agent.rewardEma;
+  }
   agent.tradesSinceUpdate += 1;
   agent.updatedAt = Date.now();
 
@@ -320,7 +576,10 @@ export function notifyProfileRlTradeClosed(input: {
 
   saveProfileRlState();
   maybeAutoRollback(agent);
-  maybeAutoPromoteMode(agent);
+  maybeAutoAdjustMode(agent);
+  if ((agent.unstableCount || 0) > 0 && agent.trades % 5 === 0) {
+    agent.unstableCount = Math.max(0, (agent.unstableCount || 0) - 1);
+  }
   saveProfileRlState();
 
   const partStr = [
@@ -432,6 +691,20 @@ export function formatProfileRlPlainLanguage(profileId: string): string {
   const cfg = getProfileRlConfig();
   const agent = getOrCreateProfileRlAgent(profileId);
   if (!cfg.enabled) return '';
+  const name = profileDisplayName(profileId);
+  const readiness = computeProfileRlReadiness(agent);
+  const locked = agent.modeLocked ? ' (locked)' : '';
+
+  if (agent.mode === 'shadow') {
+    if (readiness.breakdown.stability < MIN_STABILITY_FOR_PROMOTE) {
+      return `${name} remains in Shadow because noise is still high (readiness ${readiness.score}/100${locked}).`;
+    }
+    if (readiness.score >= SHADOW_TO_HYBRID_READINESS + getProfileRlDifficulty(profileId).thresholdAdd) {
+      return `${name} in Shadow — readiness ${readiness.score}/100, nearing Hybrid promotion${locked}.`;
+    }
+    return `${name} observing in Shadow (${agent.trades} trades, readiness ${readiness.score}/100${locked}).`;
+  }
+
   const p = agent.policy;
   const bits: string[] = [];
   if (Math.abs(p.setupWorthBias) >= 0.08) {
@@ -462,12 +735,19 @@ export function formatProfileRlPlainLanguage(profileId: string): string {
         : 'allowing more patience on exit hints'
     );
   }
+
+  const modeNote =
+    agent.mode === 'lead'
+      ? `${name} leading with soft RL influence`
+      : `${name} in Hybrid after stable improvement`;
+
   if (!bits.length) {
-    return agent.trades < MIN_TRADES_INFLUENCE
-      ? `${profileId} RL agent observing (${agent.trades}/${MIN_TRADES_INFLUENCE} trades)`
-      : `${profileId} RL agent neutral (${agent.mode})`;
+    const minTr = agentInfluenceMinTrades(profileId);
+    return agent.trades < minTr
+      ? `${name} RL agent observing (${agent.trades}/${minTr} trades, readiness ${readiness.score}/100)`
+      : `${modeNote} — neutral policy (readiness ${readiness.score}/100, EMA ${agent.rewardEma.toFixed(2)}${locked}).`;
   }
-  return `${profileId} RL agent is ${bits.join('; ')} (${agent.mode}, EMA ${agent.rewardEma.toFixed(2)}).`;
+  return `${modeNote}: ${bits.join('; ')} (readiness ${readiness.score}/100, EMA ${agent.rewardEma.toFixed(2)}${locked}).`;
 }
 
 export function getProfileRlStatus(): {
@@ -478,6 +758,7 @@ export function getProfileRlStatus(): {
     ProfileRlAgentState & {
       winRatePct: number;
       avgReward: number;
+      readinessBreakdown: ProfileRlReadinessBreakdown;
       plainLanguage: string;
     }
   >;
@@ -486,28 +767,43 @@ export function getProfileRlStatus(): {
   const cfg = getProfileRlConfig();
   const st = loadProfileRlState();
   const agents = Object.values(st.agents)
-    .map((a) => ({
-      ...a,
-      winRatePct:
-        a.trades > 0 ? Math.round((a.wins / a.trades) * 1000) / 10 : 0,
-      avgReward:
-        a.trades > 0
-          ? Math.round((a.sumReward / a.trades) * 1000) / 1000
-          : 0,
-      plainLanguage: formatProfileRlPlainLanguage(a.profileId),
-    }))
+    .map((a) => {
+      const readiness = computeProfileRlReadiness(a);
+      a.readinessScore = readiness.score;
+      a.readinessUpdatedAt = Date.now();
+      return {
+        ...a,
+        modeLocked: a.modeLocked === true,
+        readinessScore: readiness.score,
+        winRatePct:
+          a.trades > 0 ? Math.round((a.wins / a.trades) * 1000) / 10 : 0,
+        avgReward:
+          a.trades > 0
+            ? Math.round((a.sumReward / a.trades) * 1000) / 1000
+            : 0,
+        readinessBreakdown: readiness.breakdown,
+        plainLanguage: formatProfileRlPlainLanguage(a.profileId),
+      };
+    })
     .sort((a, b) => b.rewardEma - a.rewardEma || b.trades - a.trades);
 
   for (const id of KEY_PROFILE_RL_IDS) {
     if (!st.agents[id]) {
+      const agent = getOrCreateProfileRlAgent(id);
+      const readiness = computeProfileRlReadiness(agent);
       agents.push({
-        ...getOrCreateProfileRlAgent(id),
+        ...agent,
+        modeLocked: false,
+        readinessScore: readiness.score,
         winRatePct: 0,
         avgReward: 0,
+        readinessBreakdown: readiness.breakdown,
         plainLanguage: formatProfileRlPlainLanguage(id),
       });
     }
   }
+
+  saveProfileRlState();
 
   return {
     ...cfg,

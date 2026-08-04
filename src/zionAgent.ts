@@ -206,8 +206,10 @@ function buildContextPack(): string {
     for (const a of prl.agents.slice(0, 6)) {
       const plain =
         a.plainLanguage || formatProfileRlPlainLanguage(a.profileId);
+      const ready = a.readinessScore != null ? `${a.readinessScore}/100` : '—';
+      const lock = a.modeLocked ? ' locked' : '';
       lines.push(
-        `  prl ${a.profileId}: ${a.mode || 'shadow'} · ${String(plain).slice(0, 120)}`
+        `  prl ${a.profileId}: ${a.mode || 'shadow'} · ready ${ready}${lock} · ${String(plain).slice(0, 100)}`
       );
     }
     for (const d of prl.decisions.slice(0, 4)) {

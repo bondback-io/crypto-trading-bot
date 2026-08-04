@@ -25055,6 +25055,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 .map((a) => {
                   const pid = String(a.profileId || '');
                   const mode = a.mode === 'hybrid' || a.mode === 'lead' ? a.mode : 'shadow';
+                  const readiness = a.readinessScore != null ? Number(a.readinessScore) : 0;
+                  const locked = !!a.modeLocked;
                   return (
                     '<div class="mb-1" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">' +
                     '<span style="color:#94a3b8;min-width:6rem">' +
@@ -25076,10 +25078,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                       )
                       .join('') +
                     '</select>' +
-                    '<span class="mint" style="flex:1;min-width:8rem">EMA ' +
-                    (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
-                    ' · n=' +
+                    '<label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:#64748b" title="Lock mode — skip auto promote/demote">' +
+                    '<input type="checkbox" class="profile-rl-lock" data-profile-id="' +
+                    escHtml(pid) +
+                    '"' +
+                    (locked ? ' checked' : '') +
+                    ' onchange="saveProfileRlLock(this)" onclick="event.stopPropagation()" /> lock</label>' +
+                    '<span class="mint" style="flex:1;min-width:8rem">ready ' +
+                    readiness +
+                    '/100 · n=' +
                     (a.trades || 0) +
+                    ' · EMA ' +
+                    (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
                     '</span>' +
                     '</div>'
                   );
@@ -25093,7 +25103,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           agentsEl.innerHTML = agents.length
             ? agents.slice(0, 8).map((a) =>
                 '<div class="mb-1"><span style="color:#94a3b8">' + escHtml(a.profileId) + '</span> · ' +
-                escHtml(a.mode || 'shadow') + ' · EMA ' + (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
+                escHtml(a.mode || 'shadow') +
+                (a.modeLocked ? ' 🔒' : '') +
+                ' · ready ' + (a.readinessScore != null ? Number(a.readinessScore) : '—') + '/100' +
+                ' · EMA ' + (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
                 ' · n=' + (a.trades || 0) +
                 (a.plainLanguage ? '<div class="mint" style="margin-top:2px">' + escHtml(a.plainLanguage) + '</div>' : '') +
                 '</div>'
@@ -25124,10 +25137,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const profileId = sel.getAttribute('data-profile-id');
       const mode = sel.value;
       if (!profileId || !mode) return;
+      const lockEl = document.querySelector('.profile-rl-lock[data-profile-id="' + profileId + '"]');
       await fetchJSON('/api/config/profile-rl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId, mode }),
+        body: JSON.stringify({
+          profileId,
+          mode,
+          modeLocked: lockEl ? lockEl.checked : undefined,
+        }),
+      });
+      await loadProfileRlStatus();
+    }
+    async function saveProfileRlLock(cb) {
+      const profileId = cb.getAttribute('data-profile-id');
+      if (!profileId) return;
+      const sel = document.querySelector('.profile-rl-mode-select[data-profile-id="' + profileId + '"]');
+      await fetchJSON('/api/config/profile-rl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileId,
+          mode: sel ? sel.value : undefined,
+          modeLocked: cb.checked,
+        }),
       });
       await loadProfileRlStatus();
     }
@@ -25144,6 +25177,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.saveProfileRlConfig = saveProfileRlConfig;
     window.setProfileRlStrength = setProfileRlStrength;
     window.saveProfileRlMode = saveProfileRlMode;
+    window.saveProfileRlLock = saveProfileRlLock;
 
     let _learningAccelStrength = 'low';
     async function loadLearningAccelerators() {

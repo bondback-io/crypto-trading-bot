@@ -359,8 +359,10 @@ export function buildZionAnalystBrief(opts?: {
     for (const a of prl.agents.slice(0, 5)) {
       const plain =
         a.plainLanguage || formatProfileRlPlainLanguage(a.profileId);
+      const ready = a.readinessScore != null ? `${a.readinessScore}/100` : '—';
+      const lock = a.modeLocked ? ' locked' : '';
       contextLines.push(
-        `  prl ${a.profileId}: ${a.mode} · ${String(plain).slice(0, 100)}`
+        `  prl ${a.profileId}: ${a.mode} · ready ${ready}${lock} · ${String(plain).slice(0, 90)}`
       );
     }
     if (!prl.enabled) {

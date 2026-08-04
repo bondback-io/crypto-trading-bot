@@ -40,6 +40,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.152',
+    title: 'Profile RL Readiness Auto-Mode',
+    sections: ['microbots', 'learning', 'zion'],
+    items: [
+      'Per-profile readiness score (0–100) from sample, reward trend, stability, baseline outperformance, and diversity — replaces trade-count-only auto-promote.',
+      'Agents auto-promote Shadow→Hybrid→Lead only when readiness thresholds and profile difficulty floors are met; demote on instability or performance drop. Lock checkbox skips auto-adjust.',
+      'Dashboard Profile RL shows readiness/100, sample n, and lock per lane; Zion and diagnostics include readiness + mode in plain language.',
+    ],
+  },
+  {
     version: '1.2.151',
     title: 'Zion Personality + Supervision',
     sections: ['zion', 'alerts', 'microbots'],

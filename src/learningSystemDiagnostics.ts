@@ -213,7 +213,7 @@ export function getLearningSystemDiagnostics(opts?: {
       require('./profileRlAgent') as typeof import('./profileRlAgent');
     const prl = getProfileRlStatus();
     profileRlLabel = prl.enabled
-      ? `Profile RL ON (${prl.strength}) — soft lane/confidence/TA/exit hints only`
+      ? `Profile RL ON (${prl.strength}) — readiness-scored auto shadow/hybrid/lead`
       : 'Profile RL OFF';
   } catch {
     /* optional */

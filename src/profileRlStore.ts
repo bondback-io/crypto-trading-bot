@@ -28,6 +28,8 @@ export interface ProfileRlPolicyHistoryEntry {
 export interface ProfileRlAgentState {
   profileId: string;
   mode: ProfileRlMode;
+  /** Manual override — skips automatic mode promote/demote */
+  modeLocked?: boolean;
   enabled: boolean;
   policy: ProfileRlPolicy;
   trades: number;
@@ -35,6 +37,15 @@ export interface ProfileRlAgentState {
   sumReward: number;
   lastReward: number;
   rewardEma: number;
+  /** Prior EMA snapshot for trend slope */
+  prevRewardEma?: number;
+  /** Set once after first 10 trades — baseline for outperformance */
+  baselineRewardEma?: number;
+  /** Cached readiness 0–100 */
+  readinessScore?: number;
+  readinessUpdatedAt?: number;
+  /** Rolling instability tally (auto-rollbacks, wild swings) */
+  unstableCount?: number;
   /** Trades since last policy update (for rollback window) */
   tradesSinceUpdate: number;
   /** EMA before last update baseline */
@@ -96,10 +107,14 @@ export function loadProfileRlState(): ProfileRlPersistedState {
     const raw = fs.readFileSync(path(), 'utf8');
     const parsed = JSON.parse(raw) as ProfileRlPersistedState;
     if (parsed && parsed.version === 1 && parsed.agents) {
+      const agents: Record<string, ProfileRlAgentState> = {};
+      for (const [id, a] of Object.entries(parsed.agents || {})) {
+        agents[id] = normalizeAgent(a as ProfileRlAgentState);
+      }
       cache = {
         version: 1,
         updatedAt: Number(parsed.updatedAt) || Date.now(),
-        agents: parsed.agents || {},
+        agents,
         decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
       };
       return cache;
@@ -141,6 +156,21 @@ function clampBias(n: number): number {
   return Math.max(-1, Math.min(1, n));
 }
 
+function normalizeAgent(raw: ProfileRlAgentState): ProfileRlAgentState {
+  return {
+    ...raw,
+    modeLocked: raw.modeLocked === true,
+    prevRewardEma: Number(raw.prevRewardEma) || raw.rewardEma || 0,
+    baselineRewardEma:
+      raw.baselineRewardEma != null ? Number(raw.baselineRewardEma) : undefined,
+    readinessScore:
+      raw.readinessScore != null ? Number(raw.readinessScore) : undefined,
+    readinessUpdatedAt:
+      raw.readinessUpdatedAt != null ? Number(raw.readinessUpdatedAt) : undefined,
+    unstableCount: Math.max(0, Number(raw.unstableCount) || 0),
+  };
+}
+
 export function getOrCreateProfileRlAgent(
   profileId: string,
   opts?: { defaultMode?: ProfileRlMode }
@@ -150,6 +180,7 @@ export function getOrCreateProfileRlAgent(
     st.agents[profileId] = {
       profileId,
       mode: opts?.defaultMode ?? 'shadow',
+      modeLocked: false,
       enabled: true,
       policy: emptyProfileRlPolicy(),
       trades: 0,
@@ -157,6 +188,7 @@ export function getOrCreateProfileRlAgent(
       sumReward: 0,
       lastReward: 0,
       rewardEma: 0,
+      prevRewardEma: 0,
       tradesSinceUpdate: 0,
       preUpdateRewardEma: 0,
       policyHistory: [],
@@ -212,11 +244,15 @@ export function pushProfileRlPolicyHistory(
 
 export function setProfileRlAgentMode(
   profileId: string,
-  mode: ProfileRlMode
+  mode: ProfileRlMode,
+  opts?: { modeLocked?: boolean }
 ): ProfileRlAgentState {
   const st = loadProfileRlState();
   const agent = getOrCreateProfileRlAgent(profileId);
   agent.mode = mode;
+  if (typeof opts?.modeLocked === 'boolean') {
+    agent.modeLocked = opts.modeLocked;
+  }
   agent.updatedAt = Date.now();
   st.agents[profileId] = agent;
   saveProfileRlState(st);
