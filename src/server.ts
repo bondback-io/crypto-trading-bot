@@ -3215,6 +3215,69 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Learning enhancements — additive scheduler / quality / explore / watchdog */
+  app.get('/api/config/learning-enhancements', (_req: Request, res: Response) => {
+    try {
+      const { getLearningEnhancementsConfig } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      res.json({ ok: true, learningEnhancements: getLearningEnhancementsConfig() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/learning-enhancements', (req: Request, res: Response) => {
+    try {
+      const { setLearningEnhancementsConfig, getLearningEnhancementsStatus } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      setLearningEnhancementsConfig({
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        schedulerEnabled:
+          typeof body.schedulerEnabled === 'boolean' ? body.schedulerEnabled : undefined,
+        qualityWeightingEnabled:
+          typeof body.qualityWeightingEnabled === 'boolean'
+            ? body.qualityWeightingEnabled
+            : undefined,
+        dualRewardEnabled:
+          typeof body.dualRewardEnabled === 'boolean' ? body.dualRewardEnabled : undefined,
+        explorationEnabled:
+          typeof body.explorationEnabled === 'boolean' ? body.explorationEnabled : undefined,
+        explorationRate:
+          body.explorationRate != null ? Number(body.explorationRate) : undefined,
+        watchdogEnabled:
+          typeof body.watchdogEnabled === 'boolean' ? body.watchdogEnabled : undefined,
+        schedulerIntervalMs:
+          body.schedulerIntervalMs != null ? Number(body.schedulerIntervalMs) : undefined,
+      });
+      res.json({
+        ok: true,
+        learningEnhancements: getLearningEnhancementsStatus(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/learning-enhancements/status', (_req: Request, res: Response) => {
+    try {
+      const { getLearningEnhancementsStatus } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      res.json({ ok: true, ...getLearningEnhancementsStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/peak-profit-protection', (_req: Request, res: Response) => {
     try {
       const { getPeakProfitProtectionConfig } =
@@ -6721,6 +6784,17 @@ export function startServer(port?: number, host?: string): void {
     } catch (err) {
       console.warn(
         '[zion-supervision] scheduler start failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+
+    try {
+      const { startLearningEnhancementsScheduler } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      startLearningEnhancementsScheduler();
+    } catch (err) {
+      console.warn(
+        '[learning-enhancements] scheduler start failed:',
         err instanceof Error ? err.message : err
       );
     }

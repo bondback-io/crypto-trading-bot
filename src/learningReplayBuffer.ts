@@ -267,6 +267,19 @@ export function recordReplayTransition(episode: ProfileLearningEpisode): void {
     rewardWeight: surpriseWeight(episode),
   };
 
+  // Episode quality weighting for replay prioritisation (Learning Enhancements)
+  try {
+    const { getLearningEnhancementsConfig } =
+      require('./learningEnhancements') as typeof import('./learningEnhancements');
+    const { replayQualityMultiplier } =
+      require('./episodeQuality') as typeof import('./episodeQuality');
+    if (getLearningEnhancementsConfig().enabled && getLearningEnhancementsConfig().qualityWeightingEnabled) {
+      row.rewardWeight = Math.min(1.5, row.rewardWeight * replayQualityMultiplier(episode));
+    }
+  } catch {
+    /* optional */
+  }
+
   for (const pid of [profileId, SHARED_ID]) {
     const f = loadReplayFile(pid);
     if (f.ring.some((r) => r.episodeId === episode.id)) continue;

@@ -228,6 +228,23 @@ function buildContextPack(opts?: { slim?: boolean }): string {
   }
   if (!slim) {
     try {
+      const { getLearningEnhancementsStatus, formatLearningEnhancementsPlainLanguage } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      const le = getLearningEnhancementsStatus();
+      lines.push(`Enhancements: ${le.label}`);
+      lines.push(`  ${formatLearningEnhancementsPlainLanguage()}`);
+      for (const a of le.activity.slice(-3)) {
+        lines.push(`  enh ${a.profileId}: ${a.action} — ${String(a.detail).slice(0, 72)}`);
+      }
+      for (const w of le.watchdogWarnings.slice(0, 2)) {
+        lines.push(`  enh-warn: ${w}`);
+      }
+    } catch {
+      /* optional */
+    }
+  }
+  if (!slim) {
+    try {
       const { getLearningAcceleratorsStatus, formatReplayPlainLanguage } =
         require('./learningReplayBuffer') as typeof import('./learningReplayBuffer');
       const { formatCounterfactualPlainLanguage } =
@@ -1333,6 +1350,7 @@ const ALLOWED_PATHS = new Set([
   'profileRl.strength',
   'learningAccelerators.enabled',
   'learningAccelerators.strength',
+  'learningEnhancements.enabled',
 ]);
 
 export function applyZionChangePayload(
@@ -1394,6 +1412,14 @@ export function applyZionChangePayload(
         }
       } else {
         return { ok: false, detail: `Unsupported learningAccelerators value for ${path}` };
+      }
+    } else if (path.startsWith('learningEnhancements.')) {
+      const { setLearningEnhancementsConfig } =
+        require('./learningEnhancements') as typeof import('./learningEnhancements');
+      if (path === 'learningEnhancements.enabled') {
+        setLearningEnhancementsConfig({ enabled: value === true });
+      } else {
+        return { ok: false, detail: `Unsupported learningEnhancements value for ${path}` };
       }
     } else {
       return { ok: false, detail: `Unhandled path ${path}` };

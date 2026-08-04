@@ -7911,6 +7911,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="learning-enhancements-card">
+        <details class="strat-adv-pack" id="learning-enhancements-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Learning Enhancements <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Additive soft layer: continuous scheduler (~2 min), episode quality weights, dual-objective Profile RL reward, controlled exploration (8%), learning health watchdog. Never replaces self-learn, MARL, Profile RL, TA, or accelerators — feeds existing channels only. Default OFF."></span></span>
+              <span id="learning-enhancements-status-badge" class="badge status-badge" style="font-size:11px">Enhancements OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Learning Enhancements" onclick="event.stopPropagation()">
+              <input type="checkbox" id="learning-enhancements-enabled" onchange="saveLearningEnhancements()" onclick="event.stopPropagation()" />
+              <span>Master</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="text-xs text-slate-400 mb-2">Soft scheduler, quality weights, dual reward shaping, exploration budget, watchdog — additive only; hard self-learn stays on trade-close path.</p>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-enh-scheduler" onchange="saveLearningEnhancements()" /><span>Continuous scheduler</span></label>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-enh-quality" onchange="saveLearningEnhancements()" /><span>Episode quality weighting</span></label>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-enh-dual" onchange="saveLearningEnhancements()" /><span>Dual-objective reward</span></label>
+            <label class="ctl-check mb-1"><input type="checkbox" id="learning-enh-explore" onchange="saveLearningEnhancements()" /><span>Controlled exploration</span></label>
+            <label class="ctl-check mb-2"><input type="checkbox" id="learning-enh-watchdog" onchange="saveLearningEnhancements()" /><span>Learning health watchdog</span></label>
+            <div id="learning-enhancements-status-line" class="text-xs text-slate-400 mb-2">—</div>
+            <div id="learning-enhancements-activity" class="text-xs mint max-h-32 overflow-y-auto">—</div>
+          </div>
+        </details>
+      </div>
+
       <div class="card" id="ppp-card">
         <details class="strat-adv-pack" id="ppp-details" style="margin-top:0;border:none;background:transparent">
           <summary>
@@ -14762,6 +14787,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
       if (name === 'microbots' && typeof loadProfileRlStatus === 'function') loadProfileRlStatus();
       if (name === 'microbots' && typeof loadLearningAccelerators === 'function') loadLearningAccelerators();
+      if (name === 'microbots' && typeof loadLearningEnhancements === 'function') loadLearningEnhancements();
       if (name === 'microbots' && typeof loadPeakProfitProtection === 'function') loadPeakProfitProtection();
       if (name === 'microbots' && typeof loadProfileTaPlaybooks === 'function') loadProfileTaPlaybooks();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
@@ -25250,6 +25276,68 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadLearningAccelerators = loadLearningAccelerators;
     window.saveLearningAccelerators = saveLearningAccelerators;
     window.setLearningAccelStrength = setLearningAccelStrength;
+
+    async function loadLearningEnhancements() {
+      try {
+        const data = await fetchJSON('/api/learning-enhancements/status');
+        const c = data.config || {};
+        const en = document.getElementById('learning-enhancements-enabled');
+        if (en) en.checked = !!c.enabled;
+        const sch = document.getElementById('learning-enh-scheduler');
+        if (sch) sch.checked = c.schedulerEnabled !== false;
+        const qual = document.getElementById('learning-enh-quality');
+        if (qual) qual.checked = c.qualityWeightingEnabled !== false;
+        const dual = document.getElementById('learning-enh-dual');
+        if (dual) dual.checked = c.dualRewardEnabled !== false;
+        const exp = document.getElementById('learning-enh-explore');
+        if (exp) exp.checked = c.explorationEnabled !== false;
+        const wd = document.getElementById('learning-enh-watchdog');
+        if (wd) wd.checked = c.watchdogEnabled !== false;
+        const badge = document.getElementById('learning-enhancements-status-badge');
+        if (badge) badge.textContent = data.label || (c.enabled ? 'Enhancements ON' : 'Enhancements OFF');
+        const line = document.getElementById('learning-enhancements-status-line');
+        if (line) {
+          const tickAgo = data.lastSchedulerTickAt
+            ? Math.round((Date.now() - data.lastSchedulerTickAt) / 1000) + 's ago'
+            : 'never';
+          const warns = (data.watchdogWarnings || []).length;
+          line.textContent =
+            'Last tick ' + tickAgo +
+            ' · quality avg ' + (data.lastQualityAvg != null ? Number(data.lastQualityAvg).toFixed(2) : '—') +
+            ' · explore used ' + (data.explorationUsedCount || 0) +
+            (warns ? ' · ' + warns + ' watchdog warn' : '');
+        }
+        const act = document.getElementById('learning-enhancements-activity');
+        if (act) {
+          const events = data.activity || [];
+          act.innerHTML = events.length
+            ? events.slice(0, 10).map((d) =>
+                '<div>' + escHtml((d.profileId || '') + ' · ' + (d.action || '') + ': ' + (d.detail || '')) + '</div>'
+              ).join('')
+            : '<span class="mint">No scheduler activity yet</span>';
+        }
+      } catch (err) {
+        console.warn('loadLearningEnhancements', err);
+      }
+    }
+    async function saveLearningEnhancements() {
+      const body = {
+        enabled: document.getElementById('learning-enhancements-enabled')?.checked === true,
+        schedulerEnabled: document.getElementById('learning-enh-scheduler')?.checked !== false,
+        qualityWeightingEnabled: document.getElementById('learning-enh-quality')?.checked !== false,
+        dualRewardEnabled: document.getElementById('learning-enh-dual')?.checked !== false,
+        explorationEnabled: document.getElementById('learning-enh-explore')?.checked !== false,
+        watchdogEnabled: document.getElementById('learning-enh-watchdog')?.checked !== false,
+      };
+      await fetchJSON('/api/config/learning-enhancements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadLearningEnhancements();
+    }
+    window.loadLearningEnhancements = loadLearningEnhancements;
+    window.saveLearningEnhancements = saveLearningEnhancements;
     window.setMarlStrength = setMarlStrength;
 
     async function loadPeakProfitProtection() {

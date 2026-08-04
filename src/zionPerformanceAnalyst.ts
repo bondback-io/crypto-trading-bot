@@ -400,6 +400,28 @@ export function buildZionAnalystBrief(opts?: {
     /* optional */
   }
 
+  // --- Learning Enhancements ---
+  try {
+    const { getLearningEnhancementsStatus, formatLearningEnhancementsPlainLanguage } =
+      require('./learningEnhancements') as typeof import('./learningEnhancements');
+    const le = getLearningEnhancementsStatus();
+    contextLines.push(`Analyst Enhancements: ${le.label}`);
+    contextLines.push(`  ${formatLearningEnhancementsPlainLanguage()}`);
+    if (le.config.enabled && !le.config.schedulerEnabled) {
+      actions.push({
+        kind: 'profile',
+        title: 'Enable enhancement scheduler',
+        detail: 'Continuous soft learning ticks when new episodes arrive — no hard mutations.',
+        advisoryOnly: true,
+      });
+    }
+    for (const w of le.watchdogWarnings.slice(0, 3)) {
+      observe.push(`Enhancement watchdog: ${w}`);
+    }
+  } catch {
+    /* optional */
+  }
+
   // --- Skips ---
   try {
     const { getSkipReasonCounts } =

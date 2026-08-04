@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.155',
+    title: 'Learning Enhancements — Additive Soft Layer',
+    sections: ['microbots', 'learning', 'coaches'],
+    items: [
+      'Learning Enhancements (Micro Bots master toggle, default OFF): continuous scheduler (~2 min), episode quality weighting, dual-objective Profile RL reward shaping, controlled exploration (8%), and learning health watchdog.',
+      'Scheduler runs soft paths only — replay/CF hints, TA nudges, Profile RL readiness refresh — never Level upgrades or hard self-learn mutations (those stay on trade-close).',
+      'APIs: GET/POST /api/config/learning-enhancements, GET /api/learning-enhancements/status; diagnostics and Zion plain-language integration.',
+    ],
+  },
+  {
     version: '1.2.154',
     title: 'Zion Chat Faster + Natural Dad Tone',
     sections: ['zion', 'alerts'],

@@ -300,6 +300,9 @@ export function computeProfileRlReward(
     ta: number;
     replayBonus?: number;
     cfBonus?: number;
+    dualBonus?: number;
+    dualPenalty?: number;
+    qualityWeight?: number;
   };
 } {
   const risk = Math.max(0.01, Number(costSol) || Math.abs(Number(episode.pnlSol)) || 0.1);
@@ -353,7 +356,7 @@ export function computeProfileRlReward(
     3
   );
 
-  return {
+  const base = {
     reward,
     parts: {
       pnl: Number((pnlPart * 0.5).toFixed(3)),
@@ -365,6 +368,24 @@ export function computeProfileRlReward(
       cfBonus: cfBonus ? Number(cfBonus.toFixed(3)) : undefined,
     },
   };
+
+  // Dual-objective + quality weighting when Learning Enhancements ON (additive, fail-open)
+  try {
+    const { applyDualObjectiveRewardShaping, getLearningEnhancementsConfig } =
+      require('./learningEnhancements') as typeof import('./learningEnhancements');
+    if (getLearningEnhancementsConfig().enabled) {
+      return applyDualObjectiveRewardShaping({
+        baseReward: base.reward,
+        parts: base.parts,
+        episode,
+        profileId: episode.profileId,
+      });
+    }
+  } catch {
+    /* optional */
+  }
+
+  return base;
 }
 
 function activePolicyDims(episode: ProfileLearningEpisode): Array<keyof ProfileRlPolicy> {
@@ -588,7 +609,14 @@ export function notifyProfileRlTradeClosed(input: {
     `exit=${parts.exit >= 0 ? '+' : ''}${parts.exit.toFixed(2)}`,
     `dd=${parts.dd.toFixed(2)}`,
     `ta=${parts.ta >= 0 ? '+' : ''}${parts.ta.toFixed(2)}`,
-  ].join(' · ');
+    parts.dualBonus != null ? `dual+${parts.dualBonus.toFixed(2)}` : '',
+    parts.dualPenalty != null ? `dual-${parts.dualPenalty.toFixed(2)}` : '',
+    parts.qualityWeight != null && parts.qualityWeight !== 1
+      ? `qw×${parts.qualityWeight.toFixed(2)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   pushProfileRlDecision({
     kind: 'trade_result',

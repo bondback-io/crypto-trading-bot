@@ -208,6 +208,8 @@ export function getLearningSystemDiagnostics(opts?: {
     require('./marlCoordinator') as typeof import('./marlCoordinator');
   let profileRlLabel = 'Profile RL OFF';
   let accelLabel = 'Accelerators OFF';
+  let enhancementsLabel = 'Learning Enhancements OFF';
+  let enhancementsWatchdog: string[] = [];
   try {
     const { getProfileRlStatus } =
       require('./profileRlAgent') as typeof import('./profileRlAgent');
@@ -225,6 +227,15 @@ export function getLearningSystemDiagnostics(opts?: {
     accelLabel = acc.config.enabled
       ? `Accelerators ON — replay ${acc.config.replayEnabled ? 'ON' : 'OFF'} · CF ${acc.config.counterfactualEnabled ? 'ON' : 'OFF'} · teacher ${acc.config.teacherStudentEnabled ? 'ON' : 'OFF'}`
       : 'Learning Accelerators OFF';
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getLearningEnhancementsStatus, formatLearningEnhancementsPlainLanguage } =
+      require('./learningEnhancements') as typeof import('./learningEnhancements');
+    const le = getLearningEnhancementsStatus();
+    enhancementsLabel = le.label;
+    enhancementsWatchdog = le.watchdogWarnings;
   } catch {
     /* optional */
   }
@@ -332,6 +343,7 @@ export function getLearningSystemDiagnostics(opts?: {
   );
   setupLines.push(profileRlLabel);
   setupLines.push(accelLabel);
+  setupLines.push(enhancementsLabel);
   setupLines.push(
     mlHybridOrLead.length
       ? `ML delta learning is active on ${mlHybridOrLead.length} bot(s) (hybrid ${mlHybridOrLead.filter((p) => p.mlMode === 'hybrid').length}, lead ${mlLead.length}).`
@@ -345,7 +357,7 @@ export function getLearningSystemDiagnostics(opts?: {
     );
   }
   setupLines.push(
-    'Together: Self-Learn mutates exit/entry knobs from closed trades; ML ranks those ideas; MARL coordinates lanes; Profile RL nudges per-bot quality; Accelerators add offline replay/CF/teacher hints; Learning Mode only softens entries.'
+    'Together: Self-Learn mutates exit/entry knobs from closed trades; ML ranks those ideas; MARL coordinates lanes; Profile RL nudges per-bot quality; Accelerators add offline replay/CF/teacher hints; Enhancements add scheduler/quality/dual-reward/explore/watchdog (soft only); Learning Mode only softens entries.'
   );
   if (globalTp != null) {
     setupLines.push(
@@ -376,6 +388,9 @@ export function getLearningSystemDiagnostics(opts?: {
   }
   if (globalTp != null) {
     warnings.push('Global take-profit is pausing Self-Learn exit deltas.');
+  }
+  for (const w of enhancementsWatchdog) {
+    if (!warnings.includes(w)) warnings.push(w);
   }
 
   // Health score (plan formula)

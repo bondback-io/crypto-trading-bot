@@ -708,6 +708,13 @@ function maybeRecordLearningEpisode(
         /* optional */
       }
       try {
+        const { tagEpisodeForExploration } =
+          require('./learningEnhancements') as typeof import('./learningEnhancements');
+        tagEpisodeForExploration(episodeRow.id, profileId);
+      } catch {
+        /* optional */
+      }
+      try {
         const {
           noteTeacherStudentClose,
           maybeTeacherStudentTransfer,

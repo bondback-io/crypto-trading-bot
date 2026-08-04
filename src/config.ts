@@ -2052,6 +2052,8 @@ export interface BotConfig {
   profileRl: import('./profileRlAgent').ProfileRlConfig;
   /** Learning accelerators: replay, counterfactuals, teacher-student. */
   learningAccelerators: import('./learningReplayBuffer').LearningAcceleratorsConfig;
+  /** Additive learning enhancements: scheduler, quality weights, dual reward, explore, watchdog. */
+  learningEnhancements: import('./learningEnhancements').LearningEnhancementsConfig;
   /** Zion chat agent (personality + supervision toggles; secrets via env). */
   zionAgent: {
     semiAutonomous: boolean;
@@ -2269,6 +2271,17 @@ export const config: BotConfig = {
     strength: 'low',
     replayBatchSize: 12,
     replayMaxPerHour: 6,
+  },
+
+  learningEnhancements: {
+    enabled: false,
+    schedulerEnabled: true,
+    qualityWeightingEnabled: true,
+    dualRewardEnabled: true,
+    explorationEnabled: true,
+    explorationRate: 0.08,
+    watchdogEnabled: true,
+    schedulerIntervalMs: 120_000,
   },
 
   zionAgent: {
@@ -2801,6 +2814,16 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       replayBatchSize: 12,
       replayMaxPerHour: 6,
     }) as PersistedBotSettings['learningAccelerators'],
+    learningEnhancements: cloneJson(config.learningEnhancements || {
+      enabled: false,
+      schedulerEnabled: true,
+      qualityWeightingEnabled: true,
+      dualRewardEnabled: true,
+      explorationEnabled: true,
+      explorationRate: 0.08,
+      watchdogEnabled: true,
+      schedulerIntervalMs: 120_000,
+    }) as PersistedBotSettings['learningEnhancements'],
     zionAgent: {
       semiAutonomous: config.zionAgent?.semiAutonomous === true,
       personalityEnabled: config.zionAgent?.personalityEnabled !== false,
@@ -3574,6 +3597,22 @@ function applySettingsSnapshot(
           : 'low',
       replayBatchSize: Math.max(4, Math.min(24, Math.round(Number(s.replayBatchSize) || 12))),
       replayMaxPerHour: Math.max(1, Math.min(12, Math.round(Number(s.replayMaxPerHour) || 6))),
+    };
+  }
+  if (saved.learningEnhancements && typeof saved.learningEnhancements === 'object') {
+    const s = saved.learningEnhancements;
+    config.learningEnhancements = {
+      enabled: s.enabled === true,
+      schedulerEnabled: s.schedulerEnabled !== false,
+      qualityWeightingEnabled: s.qualityWeightingEnabled !== false,
+      dualRewardEnabled: s.dualRewardEnabled !== false,
+      explorationEnabled: s.explorationEnabled !== false,
+      explorationRate: Math.max(0.01, Math.min(0.25, Number(s.explorationRate) || 0.08)),
+      watchdogEnabled: s.watchdogEnabled !== false,
+      schedulerIntervalMs: Math.max(
+        60_000,
+        Math.min(600_000, Math.round(Number(s.schedulerIntervalMs) || 120_000))
+      ),
     };
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {

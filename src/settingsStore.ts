@@ -162,6 +162,17 @@ export interface PersistedBotSettings {
     replayBatchSize?: number;
     replayMaxPerHour?: number;
   };
+  /** Additive learning enhancements */
+  learningEnhancements?: {
+    enabled?: boolean;
+    schedulerEnabled?: boolean;
+    qualityWeightingEnabled?: boolean;
+    dualRewardEnabled?: boolean;
+    explorationEnabled?: boolean;
+    explorationRate?: number;
+    watchdogEnabled?: boolean;
+    schedulerIntervalMs?: number;
+  };
   zionAgent?: {
     semiAutonomous?: boolean;
     personalityEnabled?: boolean;
