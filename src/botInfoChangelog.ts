@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.143',
+    title: 'Overview Stats Time Window',
+    sections: ['overview'],
+    items: [
+      'Overview Win Rate / Max DD / Trades / Status PF now filter by 1h, 24h, 7d, 30d, or All — same pill UI as Micro Bot Performance.',
+      'Wallets, Signals, Trade Rate, and Entries stay live (not windowed).',
+    ],
+  },
+  {
     version: '1.2.142',
     title: 'Restore Opens — Daily Loss Stay Off',
     sections: ['risk', 'microbots', 'overview'],
