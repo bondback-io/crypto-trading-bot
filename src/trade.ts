@@ -1251,30 +1251,7 @@ async function executeLiveSwap(
 }
 
 export async function refreshPositionPrices(mints: string[]): Promise<void> {
-  const {
-    isDexScreenerInCooldown,
-    resolveOpenTradeMark,
-  } = require('./marketData') as typeof import('./marketData');
-  // When Dex is healthy, activity refresh will mark via Dex — avoid Jupiter stampede.
-  // During Dex cooldown, resolveOpenTradeMark prefers Jupiter Tokens then quiet quote.
-  if (!isDexScreenerInCooldown()) return;
-
-  for (const mint of mints) {
-    try {
-      const lastGood = paperTrader.getTokenPrice(mint);
-      const mark = await Promise.race([
-        resolveOpenTradeMark(mint, { lastGoodPriceSol: lastGood }),
-        new Promise<null>((r) => setTimeout(() => r(null), 8_000)),
-      ]);
-      if (mark && mark.priceSol != null && mark.priceSol > 0) {
-        paperTrader.setTokenPrice(mint, mark.priceSol, {
-          marketCapUsd: mark.marketCapUsd,
-          markSource: mark.source,
-          stale: mark.stale,
-        });
-      }
-    } catch {
-      /* fail-open per mint */
-    }
-  }
+  // Marks are refreshed by refreshOpenMarketActivity via resolveOpenTradeMark
+  // (Jupiter → Dex → on-chain → last good). Skip duplicate Jupiter stampede here.
+  void mints;
 }

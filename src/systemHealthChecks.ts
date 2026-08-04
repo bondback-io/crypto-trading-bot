@@ -209,6 +209,7 @@ function checkTrading(): HealthIssue[] {
         getDexScreenerCooldownRemainingMs,
         isGeckoTerminalInCooldown,
         getGeckoTerminalCooldownRemainingMs,
+        getLastOpenMarkSource,
       } = require('./marketData') as typeof import('./marketData');
       const { isGmgnInCooldown, getGmgnCooldownRemainingMs } =
         require('./gmgn') as typeof import('./gmgn');
@@ -230,14 +231,27 @@ function checkTrading(): HealthIssue[] {
         );
       }
       if (parts.length > 0) {
+        let markNote = '';
+        try {
+          const last = getLastOpenMarkSource();
+          if (
+            last.source &&
+            last.source !== 'none' &&
+            Date.now() - last.at < 10 * 60_000
+          ) {
+            markNote = ` · open-trade marks via ${last.source}`;
+          }
+        } catch {
+          /* optional */
+        }
         out.push({
           key: 'market_data_degraded',
           area: 'trading',
           severity: 'watch',
           title: 'External market data degraded',
-          detail: `Provider cooldown(s): ${parts.join(', ')} — enrichment soft-fails; trading/RPC lanes unaffected`,
+          detail: `Provider cooldown(s): ${parts.join(', ')}${markNote} — enrichment soft-fails; trading/RPC lanes unaffected`,
           recommendation:
-            'Temporary external API rate-limit or block. Open-trade monitoring continues; this is not an RPC failure.',
+            'Temporary external API rate-limit or block. Open-trade monitoring continues via Jupiter/on-chain/last-good failover; this is not an RPC failure or poll stall.',
         });
       }
     } catch {

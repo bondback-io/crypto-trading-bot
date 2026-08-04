@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.162',
+    title: 'Multi-Provider Market-Data Failover',
+    sections: ['scanners', 'execution', 'alerts', 'overview', 'zion'],
+    items: [
+      'Open-trade marks resolve Jupiter → DexScreener → on-chain bonding curve → last good, with failover logs and no Jupiter stampede.',
+      'OHLCV uses GeckoTerminal then Dex sparse snapshot candles (no Birdeye); discovery prefers GMGN then Dex when healthy.',
+      'Scalper / Migration soft-fail thin candles; Health Watch shows provider cooldowns plus active mark failover source (not RPC/stall).',
+    ],
+  },
+  {
     version: '1.2.161',
     title: 'External Market-Data API Resilience',
     sections: ['scanners', 'alerts', 'overview', 'zion'],

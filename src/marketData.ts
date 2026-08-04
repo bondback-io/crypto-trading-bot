@@ -899,8 +899,56 @@ const DEX_DEBUG =
 let dexRateLimitedUntil = 0;
 let dexCooldownStreak = 0;
 let lastDexCooldownLogAt = 0;
-let lastJupiterFallbackLogAt = 0;
-let lastJupiterFailLogAt = 0;
+let lastMarkFailoverLogAt = 0;
+let lastMarkFallbackLogAt = 0;
+/** Last successful open-trade mark source (for health detail). */
+let lastOpenMarkSource: OpenTradeMarkSource = 'none';
+let lastOpenMarkSourceAt = 0;
+
+const JUPITER_MARK_CACHE_TTL_MS = 25_000;
+const jupiterMarkCache = new Map<
+  string,
+  {
+    priceSol: number;
+    marketCapUsd: number | null;
+    source: 'jupiter_tokens' | 'jupiter_quote';
+    at: number;
+  }
+>();
+const jupiterMarkInflight = new Map<
+  string,
+  Promise<{
+    priceSol: number;
+    marketCapUsd: number | null;
+    source: 'jupiter_tokens' | 'jupiter_quote';
+  } | null>
+>();
+
+export function getLastOpenMarkSource(): {
+  source: OpenTradeMarkSource;
+  at: number;
+} {
+  return { source: lastOpenMarkSource, at: lastOpenMarkSourceAt };
+}
+
+function noteOpenMarkSource(source: OpenTradeMarkSource): void {
+  lastOpenMarkSource = source;
+  lastOpenMarkSourceAt = Date.now();
+}
+
+function logMarkFailover(from: string, to: string): void {
+  const now = Date.now();
+  if (now - lastMarkFailoverLogAt < 60_000) return;
+  lastMarkFailoverLogAt = now;
+  console.warn(`[mark] Failover: ${from} → ${to}`);
+}
+
+function logMarkFallbackInUse(source: string): void {
+  const now = Date.now();
+  if (now - lastMarkFallbackLogAt < 60_000) return;
+  lastMarkFallbackLogAt = now;
+  console.warn(`[mark] Open-trade mark fallback in use (${source})`);
+}
 
 const dexSnapshotCache = new Map<
   string,
@@ -1467,7 +1515,9 @@ export interface FetchLaunchesOptions {
   maxResults?: number;
 }
 
-/** Fetch recent launches/migrations for the given window */
+/** Fetch recent launches/migrations for the given window.
+ * Prefer GMGN when healthy, then Dex; scanner merges AlphaScan/Jupiter separately.
+ */
 export async function fetchRecentLaunches(
   options: FetchLaunchesOptions = {}
 ): Promise<{ events: LaunchEvent[]; source: string }> {
@@ -1483,114 +1533,39 @@ export async function fetchRecentLaunches(
   let events: LaunchEvent[] = [];
   const sources: string[] = [];
 
-  try {
-    const dex = await fetchFromDexScreener(fromMs, toMs);
-    if (dex.length > 0) {
-      events = dex;
-      sources.push('dexscreener');
+  const mergeUnique = (incoming: LaunchEvent[], label: string) => {
+    if (incoming.length === 0) return;
+    const seen = new Set(events.map((e) => e.mint));
+    let added = 0;
+    for (const e of incoming) {
+      if (seen.has(e.mint)) continue;
+      events.push(e);
+      seen.add(e.mint);
+      added += 1;
     }
-  } catch (err) {
-    console.warn('[marketData] DexScreener failed:', err);
-  }
+    if (added > 0) sources.push(label);
+  };
 
-  // Always try GMGN to widen coverage (not only when Dex is nearly empty)
+  // 1) GMGN when healthy (skip during provider cooldown)
   try {
-    const gmgn = await fetchFromGmgn(fromMs, toMs);
-    if (gmgn.length > 0) {
-      const seen = new Set(events.map((e) => e.mint));
-      let added = 0;
-      for (const e of gmgn) {
-        if (!seen.has(e.mint)) {
-          events.push(e);
-          seen.add(e.mint);
-          added += 1;
-        }
-      }
-      if (added > 0) sources.push('gmgn');
+    const { isGmgnInCooldown } =
+      require('./gmgn') as typeof import('./gmgn');
+    if (!isGmgnInCooldown()) {
+      const gmgn = await fetchFromGmgn(fromMs, toMs);
+      mergeUnique(gmgn, 'gmgn');
     }
   } catch (err) {
     console.warn('[marketData] GMGN failed:', err);
   }
 
-  // Optional Birdeye trending enrichment
+  // 2) DexScreener trending/new enrichment when healthy
   try {
-    const { hasBirdeyeKey, getTrendingTokens } = await import('./birdeye');
-    if (hasBirdeyeKey()) {
-      const trend = await getTrendingTokens(30, { interval: '1h' });
-      if (trend.tokens.length > 0) {
-        const seen = new Set(events.map((e) => e.mint));
-        let added = 0;
-        for (const t of trend.tokens) {
-          const mint = String(t.mint || '');
-          if (!isCopyTargetMint(mint) || seen.has(mint)) continue;
-          const launchedAt =
-            Number(t.liquidityUsd || 0) > 0 ? toMs - 60 * 60_000 : 0;
-          // Only keep if we can get a Dex pair in window
-          const snap = await fetchJson(
-            `https://api.dexscreener.com/latest/dex/tokens/${mint}`
-          );
-          const pairs =
-            (snap as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
-          const sol = pairs.find((p) => String(p.chainId) === 'solana');
-          if (!sol) continue;
-          const createdAt = Number(sol.pairCreatedAt ?? 0);
-          if (!createdAt || createdAt < fromMs || createdAt > toMs) continue;
-          const priceNative = Number(
-            (sol as { priceNative?: string }).priceNative ?? 0
-          );
-          if (!(priceNative > 0)) continue;
-          const picked = pickPriceChangeForPath(sol);
-          const entry = reconstructEntryPriceSol(priceNative, picked.pct);
-          const pathWin = resolveLaunchPathWindow({
-            launchedAt: createdAt,
-            nowMs: Math.min(toMs, Date.now()),
-            changeWindowMs: picked.windowMs,
-          });
-          const liqUsd =
-            Number(
-              (sol.liquidity as { usd?: number } | undefined)?.usd ?? 0
-            ) || undefined;
-          const volUsd =
-            Number((sol.volume as { h24?: number } | undefined)?.h24 ?? 0) ||
-            undefined;
-          seen.add(mint);
-          events.push({
-            mint,
-            symbol: String(t.symbol || mint.slice(0, 6)),
-            name: String(t.name || t.symbol || mint.slice(0, 6)),
-            launchedAt: createdAt || launchedAt,
-            migrated: String(sol.dexId ?? '')
-              .toLowerCase()
-              .includes('raydium'),
-            entryPriceSol: entry > 0 ? entry : priceNative * 0.7,
-            lastPriceSol: priceNative,
-            priceChangePct: effectivePriceChangePct(entry, priceNative),
-            liquidityUsd: liqUsd,
-            volumeUsd: volUsd,
-            marketCapUsd: readMarketCapUsd(sol),
-            riskScoreHint: estimateRiskScoreHint(liqUsd, volUsd),
-            isPumpFun: String(sol.dexId ?? '')
-              .toLowerCase()
-              .includes('pump'),
-            candles: buildPricePath(
-              entry > 0 ? entry : priceNative * 0.7,
-              priceNative,
-              pathWin.startMs,
-              pathWin.endMs,
-              pathStepsForDuration(pathWin.durationMs, 48)
-            ),
-            source: 'birdeye',
-            url: String(sol.url ?? ''),
-            solUsd: solUsdFromPair(sol) ?? 150,
-          });
-          added += 1;
-          if (added >= 20) break;
-        }
-        if (added > 0) sources.push('birdeye');
-      }
+    if (!isDexScreenerInCooldown()) {
+      const dex = await fetchFromDexScreener(fromMs, toMs);
+      mergeUnique(dex, 'dexscreener');
     }
   } catch (err) {
-    console.warn('[marketData] Birdeye trending enrich failed:', err);
+    console.warn('[marketData] DexScreener failed:', err);
   }
 
   // Pad with synthetic when live pool is thin (not only when empty)
@@ -1638,6 +1613,7 @@ export type OpenTradeMarkSource =
   | 'dex_cache'
   | 'jupiter_tokens'
   | 'jupiter_quote'
+  | 'onchain'
   | 'last_good'
   | 'none';
 
@@ -1811,8 +1787,75 @@ async function fetchJupiterQuoteMark(
   }
 }
 
+/** Jupiter Tokens then quiet quote — cached + inflight-deduped. */
+async function resolveJupiterMark(mint: string): Promise<{
+  priceSol: number;
+  marketCapUsd: number | null;
+  source: 'jupiter_tokens' | 'jupiter_quote';
+} | null> {
+  const cached = jupiterMarkCache.get(mint);
+  if (cached && Date.now() - cached.at < JUPITER_MARK_CACHE_TTL_MS) {
+    return {
+      priceSol: cached.priceSol,
+      marketCapUsd: cached.marketCapUsd,
+      source: cached.source,
+    };
+  }
+  const pending = jupiterMarkInflight.get(mint);
+  if (pending) return pending;
+
+  const job = (async () => {
+    try {
+      const jTok = await fetchJupiterTokenMark(mint);
+      if (jTok) {
+        const hit = {
+          priceSol: jTok.priceSol,
+          marketCapUsd: jTok.marketCapUsd,
+          source: 'jupiter_tokens' as const,
+        };
+        jupiterMarkCache.set(mint, { ...hit, at: Date.now() });
+        return hit;
+      }
+      const jQuote = await fetchJupiterQuoteMark(mint);
+      if (jQuote != null) {
+        const hit = {
+          priceSol: jQuote,
+          marketCapUsd: null as number | null,
+          source: 'jupiter_quote' as const,
+        };
+        jupiterMarkCache.set(mint, { ...hit, at: Date.now() });
+        return hit;
+      }
+      return null;
+    } finally {
+      jupiterMarkInflight.delete(mint);
+    }
+  })();
+  jupiterMarkInflight.set(mint, job);
+  return job;
+}
+
+async function resolveOnchainBondingMark(
+  mint: string
+): Promise<{ priceSol: number; marketCapUsd: number | null } | null> {
+  try {
+    const { fetchBondingCurve, estimateBondingCurvePriceSol } =
+      require('./bondingCurve') as typeof import('./bondingCurve');
+    const state = await Promise.race([
+      fetchBondingCurve(mint),
+      sleep(4_000).then(() => null),
+    ]);
+    if (!state || state.source === 'none') return null;
+    const priceSol = estimateBondingCurvePriceSol(state);
+    if (priceSol == null || !(priceSol > 0)) return null;
+    return { priceSol, marketCapUsd: null };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Open-trade mark resolver: Dex (healthy) → Jupiter Tokens → Jupiter quote → last good.
+ * Open-trade mark resolver: Jupiter → Dex → on-chain bonding curve → last good.
  */
 export async function resolveOpenTradeMark(
   mint: string,
@@ -1833,14 +1876,36 @@ export async function resolveOpenTradeMark(
   if (!isCopyTargetMint(mint)) return empty();
 
   const cached = dexSnapshotCache.get(mint);
-  const dexOk = !isDexScreenerInCooldown();
+  const volBase = cached?.snap;
 
+  // 1) Jupiter first (Tokens → quiet quote)
+  const jup = await resolveJupiterMark(mint);
+  if (jup) {
+    noteOpenMarkSource(jup.source);
+    return {
+      priceSol: jup.priceSol,
+      marketCapUsd: jup.marketCapUsd ?? volBase?.marketCapUsd ?? null,
+      volumeH1Usd: volBase?.volumeH1Usd ?? null,
+      volumeH24Usd: volBase?.volumeH24Usd ?? null,
+      txnsH1: volBase?.txnsH1 ?? null,
+      source: jup.source,
+      stale: false,
+      at: now,
+    };
+  }
+
+  // 2) DexScreener (live if healthy, else short-lived cache)
+  logMarkFailover('Jupiter', 'DexScreener');
+  const dexOk = !isDexScreenerInCooldown();
   if (dexOk) {
     const snap = await fetchLiveTokenSnapshot(mint);
     if (snap?.priceSol != null && snap.priceSol > 0) {
+      const src: OpenTradeMarkSource =
+        cached && now - cached.at < 5_000 ? 'dex_cache' : 'dex';
+      noteOpenMarkSource(src);
       return {
         ...snap,
-        source: cached && now - cached.at < 5_000 ? 'dex_cache' : 'dex',
+        source: src,
         stale: false,
         at: now,
       };
@@ -1848,6 +1913,7 @@ export async function resolveOpenTradeMark(
   } else if (cached?.snap?.priceSol != null && cached.snap.priceSol > 0) {
     const age = now - cached.at;
     if (age < DEX_SNAPSHOT_CACHE_TTL_MS * 2) {
+      noteOpenMarkSource('dex_cache');
       return {
         ...cached.snap,
         source: 'dex_cache',
@@ -1857,43 +1923,25 @@ export async function resolveOpenTradeMark(
     }
   }
 
-  if (now - lastJupiterFallbackLogAt >= 60_000) {
-    lastJupiterFallbackLogAt = now;
-    console.warn(
-      '[mark] DexScreener unavailable — using Jupiter fallback'
-    );
-  }
-
-  const jTok = await fetchJupiterTokenMark(mint);
-  if (jTok) {
-    const base = cached?.snap;
+  // 3) On-chain bonding-curve spot (Helius/Alchemy RPC lanes)
+  logMarkFailover('DexScreener', 'on-chain');
+  const onchain = await resolveOnchainBondingMark(mint);
+  if (onchain) {
+    logMarkFallbackInUse('onchain');
+    noteOpenMarkSource('onchain');
     return {
-      priceSol: jTok.priceSol,
-      marketCapUsd: jTok.marketCapUsd ?? base?.marketCapUsd ?? null,
-      volumeH1Usd: base?.volumeH1Usd ?? null,
-      volumeH24Usd: base?.volumeH24Usd ?? null,
-      txnsH1: base?.txnsH1 ?? null,
-      source: 'jupiter_tokens',
+      priceSol: onchain.priceSol,
+      marketCapUsd: onchain.marketCapUsd ?? volBase?.marketCapUsd ?? null,
+      volumeH1Usd: volBase?.volumeH1Usd ?? null,
+      volumeH24Usd: volBase?.volumeH24Usd ?? null,
+      txnsH1: volBase?.txnsH1 ?? null,
+      source: 'onchain',
       stale: false,
       at: now,
     };
   }
 
-  const jQuote = await fetchJupiterQuoteMark(mint);
-  if (jQuote != null) {
-    const base = cached?.snap;
-    return {
-      priceSol: jQuote,
-      marketCapUsd: base?.marketCapUsd ?? null,
-      volumeH1Usd: base?.volumeH1Usd ?? null,
-      volumeH24Usd: base?.volumeH24Usd ?? null,
-      txnsH1: base?.txnsH1 ?? null,
-      source: 'jupiter_quote',
-      stale: false,
-      at: now,
-    };
-  }
-
+  // 4) Last known good
   const last =
     opts?.lastGoodPriceSol != null && opts.lastGoodPriceSol > 0
       ? opts.lastGoodPriceSol
@@ -1902,31 +1950,21 @@ export async function resolveOpenTradeMark(
         : null;
 
   if (last != null) {
-    if (now - lastJupiterFailLogAt >= 60_000) {
-      lastJupiterFailLogAt = now;
-      console.warn(
-        '[mark] Jupiter fallback failed — using last good mark'
-      );
-    }
-    const base = cached?.snap;
+    logMarkFallbackInUse('last_good');
+    noteOpenMarkSource('last_good');
     return {
       priceSol: last,
-      marketCapUsd: base?.marketCapUsd ?? null,
-      volumeH1Usd: base?.volumeH1Usd ?? null,
-      volumeH24Usd: base?.volumeH24Usd ?? null,
-      txnsH1: base?.txnsH1 ?? null,
+      marketCapUsd: volBase?.marketCapUsd ?? null,
+      volumeH1Usd: volBase?.volumeH1Usd ?? null,
+      volumeH24Usd: volBase?.volumeH24Usd ?? null,
+      txnsH1: volBase?.txnsH1 ?? null,
       source: 'last_good',
       stale: true,
       at: cached?.at ?? now,
     };
   }
 
-  if (now - lastJupiterFailLogAt >= 60_000) {
-    lastJupiterFailLogAt = now;
-    console.warn(
-      '[mark] Jupiter fallback failed — using last good mark'
-    );
-  }
+  noteOpenMarkSource('none');
   return empty();
 }
 
@@ -1958,7 +1996,7 @@ const OPEN_MARK_BUDGET_MS = 6_000;
 
 /**
  * Refresh open-position marks + activity.
- * Dex when healthy; Jupiter fallback during cooldown; per-mint fail-open.
+ * Jupiter → Dex → on-chain → last good via resolveOpenTradeMark; per-mint fail-open.
  */
 export async function refreshOpenMarketActivity(
   trader: {
@@ -2050,7 +2088,7 @@ const ohlcvCache = new Map<
   string,
   {
     candles: MarketCandle[];
-    source: 'birdeye' | 'geckoterminal' | 'none';
+    source: 'geckoterminal' | 'dex_sparse' | 'none';
     solUsd?: number;
     at: number;
   }
@@ -2058,7 +2096,7 @@ const ohlcvCache = new Map<
 
 export interface FetchTokenOhlcvResult {
   candles: MarketCandle[];
-  source: 'birdeye' | 'geckoterminal' | 'none';
+  source: 'geckoterminal' | 'dex_sparse' | 'none';
   solUsd?: number;
 }
 
@@ -2158,71 +2196,108 @@ function usdClosesToSolCandles(
   return out;
 }
 
-async function fetchBirdeyeOhlcv(
+/**
+ * Best-effort sparse candles from Dex pair snapshot (no official OHLCV API).
+ * Anchors current priceNative and walks priceChange windows into ≥8 bars.
+ */
+async function fetchDexSparseOhlcv(
   mint: string,
-  solUsd: number
+  _solUsd: number
 ): Promise<MarketCandle[]> {
-  try {
-    const { hasBirdeyeKey, birdeyeRequest } = await import('./birdeye');
-    if (!hasBirdeyeKey()) return [];
-    const nowSec = Math.floor(Date.now() / 1000);
-    const fromSec = nowSec - 8 * 3600;
-    const path =
-      `/defi/v3/ohlcv?address=${encodeURIComponent(mint)}` +
-      `&type=5m&currency=usd&time_from=${fromSec}&time_to=${nowSec}` +
-      `&mode=count&count_limit=100`;
-    const res = await birdeyeRequest(path, 'ohlcv');
-    if (!res.ok || !res.data) {
-      // Legacy fallback
-      const legacy = await birdeyeRequest(
-        `/defi/ohlcv?address=${encodeURIComponent(mint)}&type=5m` +
-          `&time_from=${fromSec}&time_to=${nowSec}`,
-        'ohlcv-legacy'
-      );
-      if (!legacy.ok || !legacy.data) return [];
-      const items =
-        (legacy.data as { data?: { items?: unknown[] } })?.data?.items ??
-        (legacy.data as { data?: unknown[] })?.data ??
-        [];
-      if (!Array.isArray(items)) return [];
-      const rows = items.map((it) => {
-        const r = it as Record<string, unknown>;
-        const t = Number(r.unixTime ?? r.unix_time ?? r.t ?? 0);
-        return {
-          time: t > 1e12 ? t : t * 1000,
-          close: Number(r.c ?? r.close ?? 0),
-          high: Number(r.h ?? r.high ?? 0) || undefined,
-          low: Number(r.l ?? r.low ?? 0) || undefined,
-          volume: Number(r.v ?? r.v_usd ?? r.volume ?? 0) || undefined,
-        };
-      });
-      return usdClosesToSolCandles(rows, solUsd);
+  if (isDexScreenerInCooldown()) {
+    const cached = dexSnapshotCache.get(mint);
+    if (cached?.snap?.priceSol != null && cached.snap.priceSol > 0) {
+      return sparseCandlesFromPriceSol(cached.snap.priceSol, null);
     }
-    const payload = res.data as {
-      data?: { items?: unknown[]; list?: unknown[] } | unknown[];
-      success?: boolean;
-    };
-    const raw =
-      (payload.data as { items?: unknown[] } | undefined)?.items ??
-      (payload.data as { list?: unknown[] } | undefined)?.list ??
-      (Array.isArray(payload.data) ? payload.data : []);
-    if (!Array.isArray(raw)) return [];
-    const rows = raw.map((it) => {
-      const r = it as Record<string, unknown>;
-      const t = Number(r.unix_time ?? r.unixTime ?? r.t ?? 0);
-      return {
-        time: t > 1e12 ? t : t * 1000,
-        close: Number(r.c ?? r.close ?? 0),
-        high: Number(r.h ?? r.high ?? 0) || undefined,
-        low: Number(r.l ?? r.low ?? 0) || undefined,
-        volume: Number(r.v_usd ?? r.v ?? r.volume ?? 0) || undefined,
-      };
-    });
-    return usdClosesToSolCandles(rows, solUsd);
-  } catch (err) {
-    logger.warn('MarketData', 'Birdeye OHLCV failed', errorToMeta(err));
     return [];
   }
+  try {
+    const data = await fetchJson(
+      `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(mint)}`
+    );
+    if (!data) return [];
+    const pairs =
+      (data as { pairs?: Record<string, unknown>[] } | null)?.pairs ?? [];
+    const solPairs = pairs.filter((p) => String(p.chainId) === 'solana');
+    if (solPairs.length === 0) return [];
+    let best = solPairs[0]!;
+    let bestLiq = Number(
+      (best.liquidity as { usd?: number } | undefined)?.usd ?? 0
+    );
+    for (const p of solPairs) {
+      const liq = Number(
+        (p.liquidity as { usd?: number } | undefined)?.usd ?? 0
+      );
+      if (liq > bestLiq) {
+        best = p;
+        bestLiq = liq;
+      }
+    }
+    const priceNative = Number(
+      (best as { priceNative?: string }).priceNative ?? 0
+    );
+    if (!(priceNative > 0)) return [];
+    const change = best.priceChange as
+      | { m5?: number; h1?: number; h6?: number; h24?: number }
+      | undefined;
+    return sparseCandlesFromPriceSol(priceNative, change ?? null);
+  } catch (err) {
+    logger.warn('MarketData', 'Dex sparse OHLCV failed', errorToMeta(err));
+    return [];
+  }
+}
+
+function sparseCandlesFromPriceSol(
+  lastPriceSol: number,
+  change: { m5?: number; h1?: number; h6?: number; h24?: number } | null
+): MarketCandle[] {
+  if (!(lastPriceSol > 0)) return [];
+  const now = Date.now();
+  const windows: Array<{ ms: number; pct: number }> = [
+    { ms: 24 * 60 * 60_000, pct: Number(change?.h24 ?? 0) },
+    { ms: 6 * 60 * 60_000, pct: Number(change?.h6 ?? 0) },
+    { ms: 60 * 60_000, pct: Number(change?.h1 ?? 0) },
+    { ms: 5 * 60_000, pct: Number(change?.m5 ?? 0) },
+    { ms: 0, pct: 0 },
+  ];
+  const anchors: Array<{ time: number; priceSol: number }> = [];
+  for (const w of windows) {
+    const pct = Number.isFinite(w.pct) ? w.pct : 0;
+    const start =
+      w.ms <= 0 ? lastPriceSol : lastPriceSol / (1 + pct / 100);
+    if (!(start > 0) || !Number.isFinite(start)) continue;
+    anchors.push({ time: now - w.ms, priceSol: start });
+  }
+  anchors.push({ time: now, priceSol: lastPriceSol });
+  anchors.sort((a, b) => a.time - b.time);
+
+  // Interpolate to ≥8 bars for soft TA consumers
+  const out: MarketCandle[] = [];
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const a = anchors[i]!;
+    const b = anchors[i + 1]!;
+    const steps = i === anchors.length - 2 ? 3 : 2;
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      out.push({
+        time: Math.round(a.time + (b.time - a.time) * t),
+        priceSol: a.priceSol + (b.priceSol - a.priceSol) * t,
+      });
+    }
+  }
+  out.push({ time: now, priceSol: lastPriceSol });
+  // Dedupe by time ascending
+  out.sort((a, b) => a.time - b.time);
+  const deduped: MarketCandle[] = [];
+  for (const c of out) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && Math.abs(prev.time - c.time) < 1_000) {
+      prev.priceSol = c.priceSol;
+      continue;
+    }
+    deduped.push(c);
+  }
+  return deduped.length >= 8 ? deduped : [];
 }
 
 async function fetchGeckoOhlcv(
@@ -2282,8 +2357,9 @@ async function fetchGeckoOhlcv(
 }
 
 /**
- * Real OHLCV for scanner ranking. Prefer Birdeye when keyed; else GeckoTerminal.
- * Cached ~90–120s per mint. Serves stale cache during Gecko cooldown.
+ * Real OHLCV for scanner ranking / TA.
+ * GeckoTerminal → Dex sparse snapshot reconstruction → soft-fail.
+ * No Birdeye dependency. Cached ~90–120s; serves stale during cooldown.
  */
 export async function fetchTokenOhlcvCandles(
   mint: string,
@@ -2314,29 +2390,26 @@ export async function fetchTokenOhlcvCandles(
   const job = (async (): Promise<FetchTokenOhlcvResult> => {
     try {
       const solUsd = opts?.solUsd ?? (await fetchSolUsdPrice());
-      let candles = await fetchBirdeyeOhlcv(mint, solUsd);
-      let source: FetchTokenOhlcvResult['source'] =
-        candles.length >= 8 ? 'birdeye' : 'none';
+      let candles: MarketCandle[] = [];
+      let source: FetchTokenOhlcvResult['source'] = 'none';
+
+      if (!isGeckoTerminalInCooldown()) {
+        candles = await fetchGeckoOhlcv(mint, solUsd);
+        if (candles.length >= 8) source = 'geckoterminal';
+      } else {
+        const stale = staleOhlcv(mint);
+        if (stale && stale.candles.length >= 8) return stale;
+      }
 
       if (candles.length < 8) {
-        if (isGeckoTerminalInCooldown()) {
+        candles = await fetchDexSparseOhlcv(mint, solUsd);
+        if (candles.length >= 8) {
+          source = 'dex_sparse';
+        } else {
           const stale = staleOhlcv(mint);
           if (stale && stale.candles.length > 0) return stale;
           candles = [];
           source = 'none';
-        } else {
-          candles = await fetchGeckoOhlcv(mint, solUsd);
-          if (candles.length >= 8) {
-            source = 'geckoterminal';
-          } else if (isGeckoTerminalInCooldown()) {
-            const stale = staleOhlcv(mint);
-            if (stale && stale.candles.length > 0) return stale;
-            source = 'none';
-            candles = [];
-          } else {
-            source = 'none';
-            candles = [];
-          }
         }
       }
 

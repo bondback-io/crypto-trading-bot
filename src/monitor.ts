@@ -709,6 +709,14 @@ function applyProfileTaPlaybookGate(
   buyOpts: NonNullable<Parameters<typeof executeBuy>[2]>
 ): { skip: boolean; reason: string } {
   try {
+    const pid = String(profileId || '');
+    const speedPath =
+      pid === 'scalper' ||
+      pid === 'migration_sniper' ||
+      pid === 'migration_event';
+    const thinCandles =
+      !Array.isArray(signal.candles) || signal.candles.length < 8;
+
     const { getProfileTaPlaybook } =
       require('./profileTaPlaybookStore') as typeof import('./profileTaPlaybookStore');
     const { runProfileTaEntryGate } =
@@ -756,6 +764,13 @@ function applyProfileTaPlaybookGate(
       } catch {
         /* optional */
       }
+    }
+    // Scalper / Migration must not stall on candle-provider outages
+    if (gate.skip && speedPath && thinCandles) {
+      return {
+        skip: false,
+        reason: `${gate.reason} · speed-path soft-fail (thin candles)`,
+      };
     }
     if (gate.skip) {
       return { skip: true, reason: gate.reason };
@@ -1536,15 +1551,24 @@ export async function refreshWalletActivity(
   let source: 'gmgn' | 'onchain' | 'mixed' = 'onchain';
   let fetchFailed = false;
 
-  // Prefer GMGN when configured — skip when no key / circuit open (avoids 403 storms)
+  // Prefer GMGN when configured — skip when cooled / circuit open (avoids 403 storms)
   let gmgnWinRate: number | undefined;
   let tradesLast7d: number | undefined;
   const gmgnStatus = getGmgnStatus();
+  let gmgnCooled = false;
+  try {
+    const { isGmgnInCooldown } =
+      require('./gmgn') as typeof import('./gmgn');
+    gmgnCooled = isGmgnInCooldown();
+  } catch {
+    gmgnCooled =
+      gmgnStatus.rateLimitedUntil != null &&
+      gmgnStatus.rateLimitedUntil > Date.now();
+  }
   const gmgnUsable =
     config.gmgn.preferGmgnActivity &&
     gmgnStatus.hasApiKey &&
-    (gmgnStatus.rateLimitedUntil == null ||
-      gmgnStatus.rateLimitedUntil <= Date.now()) &&
+    !gmgnCooled &&
     (gmgnStatus.discovery?.consecutiveFailures ?? 0) < 8;
 
   if (gmgnUsable) {
