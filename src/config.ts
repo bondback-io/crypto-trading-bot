@@ -4608,6 +4608,40 @@ export function initWallets(): void {
       err instanceof Error ? err.message : err
     );
   }
+  // Re-floor Migration Sniper max MC if override regressed below $175k (v1 already ran).
+  try {
+    const { migrateMigSniperWidenMaxMcV2 } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    migrateMigSniperWidenMaxMcV2();
+  } catch (err) {
+    console.warn(
+      '[config] migSniperWidenMaxMc_v2 failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  // Auto-pause OFF ⇒ Daily Loss Off — survive backup restores / bake that
+  // reintroduced filters.dailyLossLimitSol=0.5 and silently blocked all buys.
+  try {
+    if (
+      config.risk?.autoPauseOnLimit === false &&
+      Number(config.filters?.dailyLossLimitSol) > 0
+    ) {
+      config.filters.dailyLossLimitSol = 0;
+      try {
+        persistUserSettings();
+      } catch {
+        /* ignore */
+      }
+      console.log(
+        '[config] Auto-pause OFF heal — Daily Loss SOL forced to 0 (Off)'
+      );
+    }
+  } catch (err) {
+    console.warn(
+      '[config] autoPause daily-loss heal failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
 }
 
 /** Load live trading wallet slots (metadata only) */

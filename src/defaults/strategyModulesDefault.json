@@ -1136,7 +1136,7 @@
       "maxSniperScore": 0,
       "convergenceRequired": 2,
       "maxConcurrentPositions": 12,
-      "dailyLossLimitSol": 0.5,
+      "dailyLossLimitSol": 0,
       "minActivityDays": 14,
       "minTradesLast30d": 10,
       "enableActivityFilter": true,

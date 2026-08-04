@@ -40,6 +40,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.142',
+    title: 'Restore Opens — Daily Loss Stay Off',
+    sections: ['risk', 'microbots', 'overview'],
+    items: [
+      'Auto-pause OFF now forces Daily Loss SOL to 0 on boot and Filters save — stops backup/bake from re-arming 0.5 and silently blocking all buys while day PnL is negative.',
+      'Migration Sniper max MC re-floored to $175k (v2) when overrides regress; live daily loss cleared so entries can open again.',
+    ],
+  },
+  {
     version: '1.2.141',
     title: 'Zion KOL Scanner RPC Cooldown Fix',
     sections: ['zion', 'scanners'],

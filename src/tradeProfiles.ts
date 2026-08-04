@@ -5875,6 +5875,57 @@ export function migrateMigSniperWidenMaxMcV1(): boolean {
   return true;
 }
 
+/**
+ * Re-apply $175k Migration Sniper max MC floor when override regresses
+ * (backup restore / learning match patch) after v1 already completed.
+ */
+export function migrateMigSniperWidenMaxMcV2(): boolean {
+  const {
+    hasSettingsMigration,
+    completeSettingsMigration,
+    persistUserSettings,
+  } = require('./config') as typeof import('./config');
+  const MIGRATION_ID = 'migSniperWidenMaxMc_v2';
+  if (hasSettingsMigration(MIGRATION_ID)) return false;
+
+  const TARGET_MAX_MC = 175_000;
+  const state = ensureState();
+  if (!state.overrides) state.overrides = {};
+
+  const prev = state.overrides.migration_sniper || {};
+  const curMax = Number(prev.match?.maxMarketCapUsd);
+  const needsBump =
+    !Number.isFinite(curMax) || curMax <= 0 || curMax < TARGET_MAX_MC;
+
+  if (needsBump) {
+    state.overrides.migration_sniper = {
+      ...prev,
+      match: {
+        ...(prev.match || {}),
+        maxMarketCapUsd: TARGET_MAX_MC,
+        minMarketCapUsd:
+          Number(prev.match?.minMarketCapUsd) > 0
+            ? Number(prev.match?.minMarketCapUsd)
+            : 17_500,
+      },
+    };
+    writeTradeProfilesState(state);
+  }
+
+  completeSettingsMigration(MIGRATION_ID);
+  try {
+    persistUserSettings();
+  } catch {
+    /* ignore */
+  }
+  console.log(
+    needsBump
+      ? `[trade-profiles] Applied ${MIGRATION_ID} — Migration Sniper max MC → $${TARGET_MAX_MC}`
+      : `[trade-profiles] Applied ${MIGRATION_ID} — max MC already ≥ $${TARGET_MAX_MC}`
+  );
+  return true;
+}
+
 export function ensureTradeProfilesInitialized(): void {
   ensureState();
 }

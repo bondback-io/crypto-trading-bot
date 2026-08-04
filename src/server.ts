@@ -4726,6 +4726,13 @@ export function createServer(): express.Application {
         req.body.maxCurveProgressForEntry
       );
     }
+    // Auto-pause OFF ⇒ Daily Loss Off (same rule as /api/risk + boot heal)
+    if (
+      config.risk?.autoPauseOnLimit === false &&
+      Number(config.filters.dailyLossLimitSol) > 0
+    ) {
+      config.filters.dailyLossLimitSol = 0;
+    }
     persistUserSettings();
     res.json({
       ...config.filters,
