@@ -3599,6 +3599,70 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/zion/transfers/status', (_req: Request, res: Response) => {
+    try {
+      const { getZionTransferStatusPublic, ensureSeededWallets } =
+        require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+      ensureSeededWallets();
+      res.json({ ok: true, ...getZionTransferStatusPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/zion-transfers', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const { ensureSeededWallets } =
+        require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+      ensureSeededWallets();
+      const zt = config.zionTransfers;
+      if (typeof body.enabled === 'boolean') zt.enabled = body.enabled;
+      if (body.confirmThresholdSol != null && Number.isFinite(Number(body.confirmThresholdSol))) {
+        zt.confirmThresholdSol = Math.max(0.01, Math.min(100, Number(body.confirmThresholdSol)));
+      }
+      if (body.maxSingleTransferSol != null && Number.isFinite(Number(body.maxSingleTransferSol))) {
+        zt.maxSingleTransferSol = Math.max(0.01, Math.min(100, Number(body.maxSingleTransferSol)));
+      }
+      if (body.dailyTransferCapSol != null && Number.isFinite(Number(body.dailyTransferCapSol))) {
+        zt.dailyTransferCapSol = Math.max(0.01, Math.min(500, Number(body.dailyTransferCapSol)));
+      }
+      if (body.cooldownMs != null && Number.isFinite(Number(body.cooldownMs))) {
+        zt.cooldownMs = Math.max(5_000, Math.min(3_600_000, Number(body.cooldownMs)));
+      }
+      if (typeof body.defaultSavingsWalletId === 'string' && body.defaultSavingsWalletId.trim()) {
+        zt.defaultSavingsWalletId = body.defaultSavingsWalletId.trim();
+      }
+      if (Array.isArray(body.savedWallets)) {
+        const next = (body.savedWallets as Array<Record<string, unknown>>)
+          .map((w) => ({
+            id: String(w.id || '').trim() || 'wallet',
+            name: String(w.name || '').trim() || 'Wallet',
+            address: String(w.address || '').trim(),
+            aliases: Array.isArray(w.aliases)
+              ? w.aliases.map((a) => String(a)).filter(Boolean)
+              : [],
+            allowSendTo: w.allowSendTo === true,
+          }))
+          .filter((w) => w.address.length >= 32);
+        if (next.length > 0) zt.savedWallets = next;
+      }
+      ensureSeededWallets();
+      const ok = persistUserSettings();
+      const { getZionTransferStatusPublic } =
+        require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+      res.json({ ok, ...getZionTransferStatusPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post(
     '/api/zion/agent/change-requests/:id/decide',
     (req: Request, res: Response) => {

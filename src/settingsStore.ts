@@ -196,6 +196,22 @@ export interface PersistedBotSettings {
     stalePeakTightenSec?: number;
     staleGivebackTightenMult?: number;
   };
+  /** Zion whitelist transfers (no password secrets) */
+  zionTransfers?: {
+    enabled?: boolean;
+    savedWallets?: Array<{
+      id?: string;
+      name?: string;
+      address?: string;
+      aliases?: string[];
+      allowSendTo?: boolean;
+    }>;
+    defaultSavingsWalletId?: string;
+    confirmThresholdSol?: number;
+    maxSingleTransferSol?: number;
+    dailyTransferCapSol?: number;
+    cooldownMs?: number;
+  };
   /** One-shot migrations already applied (e.g. paperSignalRelax_v2) */
   migrations?: Record<string, boolean>;
 }

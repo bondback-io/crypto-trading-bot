@@ -2077,6 +2077,26 @@ export interface BotConfig {
   };
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
+
+  /**
+   * Zion whitelist SOL transfers (chat-driven). Separate from trading execution.
+   * Password via ZION_TRANSFER_PASSWORD env (never persisted).
+   */
+  zionTransfers: {
+    enabled: boolean;
+    savedWallets: Array<{
+      id: string;
+      name: string;
+      address: string;
+      aliases: string[];
+      allowSendTo: boolean;
+    }>;
+    defaultSavingsWalletId: string;
+    confirmThresholdSol: number;
+    maxSingleTransferSol: number;
+    dailyTransferCapSol: number;
+    cooldownMs: number;
+  };
 }
 
 export const config: BotConfig = {
@@ -2316,6 +2336,38 @@ export const config: BotConfig = {
     scalperGivebackOfPeakPct: 30,
     stalePeakTightenSec: 45,
     staleGivebackTightenMult: 0.75,
+  },
+
+  zionTransfers: {
+    enabled: false,
+    savedWallets: [
+      {
+        id: 'main',
+        name: 'Main',
+        address: '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX',
+        aliases: ['main', 'primary', 'trading bot', 'tradingbot', 'dad main'],
+        allowSendTo: false,
+      },
+      {
+        id: 'savings',
+        name: 'Savings',
+        address: 'GPHmLGBVyRunGw6buStKV5ydBCqmMrneT4XAU5WS5fRo',
+        aliases: ['profit', 'burner', 'savings', 'trading profit', 'tradingprofit'],
+        allowSendTo: true,
+      },
+      {
+        id: 'coinspot',
+        name: 'Coinspot',
+        address: '8YRT22hKQUUgetJ3RGmW6TaiDAzhf8jtq1KJ797VhxWe',
+        aliases: ['coinspot', 'external'],
+        allowSendTo: true,
+      },
+    ],
+    defaultSavingsWalletId: 'savings',
+    confirmThresholdSol: 2,
+    maxSingleTransferSol: 5,
+    dailyTransferCapSol: 10,
+    cooldownMs: 60_000,
   },
 
   profitStrategy: {
@@ -2867,6 +2919,17 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         staleGivebackTightenMult: 0.75,
       }
     ) as PersistedBotSettings['peakProfitProtection'],
+    zionTransfers: cloneJson(
+      config.zionTransfers || {
+        enabled: false,
+        savedWallets: [],
+        defaultSavingsWalletId: 'savings',
+        confirmThresholdSol: 2,
+        maxSingleTransferSol: 5,
+        dailyTransferCapSol: 10,
+        cooldownMs: 60_000,
+      }
+    ) as PersistedBotSettings['zionTransfers'],
     migrations: { ...settingsMigrations },
   };
 }
@@ -3690,6 +3753,41 @@ function applySettingsSnapshot(
         1
       ),
     };
+  }
+  if (saved.zionTransfers && typeof saved.zionTransfers === 'object') {
+    const s = saved.zionTransfers;
+    const clamp = (n: number, lo: number, hi: number) =>
+      Math.min(hi, Math.max(lo, n));
+    const wallets = Array.isArray(s.savedWallets)
+      ? s.savedWallets
+          .map((w) => ({
+            id: String(w?.id || '').trim() || 'wallet',
+            name: String(w?.name || '').trim() || 'Wallet',
+            address: String(w?.address || '').trim(),
+            aliases: Array.isArray(w?.aliases)
+              ? w!.aliases!.map((a) => String(a)).filter(Boolean)
+              : [],
+            allowSendTo: w?.allowSendTo === true,
+          }))
+          .filter((w) => w.address.length >= 32)
+      : config.zionTransfers.savedWallets;
+    config.zionTransfers = {
+      enabled: s.enabled === true,
+      savedWallets: wallets.length ? wallets : config.zionTransfers.savedWallets,
+      defaultSavingsWalletId:
+        String(s.defaultSavingsWalletId || 'savings').trim() || 'savings',
+      confirmThresholdSol: clamp(Number(s.confirmThresholdSol) || 2, 0.01, 100),
+      maxSingleTransferSol: clamp(Number(s.maxSingleTransferSol) || 5, 0.01, 100),
+      dailyTransferCapSol: clamp(Number(s.dailyTransferCapSol) || 10, 0.01, 500),
+      cooldownMs: clamp(Number(s.cooldownMs) || 60_000, 5_000, 3_600_000),
+    };
+    try {
+      const { ensureSeededWallets } =
+        require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+      ensureSeededWallets();
+    } catch {
+      /* */
+    }
   }
   // Momentum Burst: prefer timeLimitSeconds (migrate legacy minutes)
   {
@@ -5660,6 +5758,22 @@ export function getConfigSnapshot() {
       : undefined,
     paper: { ...config.paper },
     notifications: { ...config.notifications },
+    zionTransfers: {
+      enabled: config.zionTransfers?.enabled === true,
+      defaultSavingsWalletId:
+        config.zionTransfers?.defaultSavingsWalletId || 'savings',
+      confirmThresholdSol: Number(config.zionTransfers?.confirmThresholdSol) || 2,
+      maxSingleTransferSol: Number(config.zionTransfers?.maxSingleTransferSol) || 5,
+      dailyTransferCapSol: Number(config.zionTransfers?.dailyTransferCapSol) || 10,
+      cooldownMs: Number(config.zionTransfers?.cooldownMs) || 60_000,
+      savedWallets: (config.zionTransfers?.savedWallets || []).map((w) => ({
+        id: w.id,
+        name: w.name,
+        address: w.address,
+        aliases: [...(w.aliases || [])],
+        allowSendTo: w.allowSendTo === true,
+      })),
+    },
     marketScanner: { ...config.marketScanner },
     alphaScan: { ...config.alphaScan },
     zion: cloneJson(config.zion as unknown as Record<string, unknown>),

@@ -1468,10 +1468,46 @@ export async function zionAgentChat(userText: string): Promise<{
   const prior = loadZionAgentState();
   const isFirst = prior.messages.length === 0;
   const vibe = pickZionVibe();
-  appendZionChat('user', text);
+  let storeUserText = text;
+  try {
+    const { shouldRedactWalletChatUserText } =
+      require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+    if (shouldRedactWalletChatUserText(text)) {
+      storeUserText = '[transfer password entered]';
+    }
+  } catch {
+    /* optional */
+  }
+  appendZionChat('user', storeUserText);
   const st = loadZionAgentState();
   const wantsRaw = wantsRawSnapshot(text);
   const ctx = getCachedContextPack(!wantsRaw);
+
+  // Whitelist transfers + wallet balances (before LLM; never via Improvement Requests)
+  try {
+    const { processZionWalletChat } =
+      require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+    const walletOut = await processZionWalletChat(text);
+    if (walletOut.handled && walletOut.reply) {
+      let reply = softenDadAddressing(walletOut.reply);
+      if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
+        reply = `${reply.trim()}\n\n${providerAttribution('local', 'local')}`;
+      }
+      appendZionChat('assistant', reply);
+      return {
+        reply,
+        changeRequest: null,
+        mode: getZionAgentStatus().label,
+        provider: 'local',
+        model: 'zion-wallet',
+      };
+    }
+  } catch (err) {
+    console.warn(
+      '[zion-agent] wallet transfer handler failed',
+      err instanceof Error ? err.message : err
+    );
+  }
 
   // Social smalltalk stays local + short (no LLM essay risk).
   if (isSocialSmalltalk(text)) {

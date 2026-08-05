@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.163',
+    title: 'Zion Whitelist Wallet Transfers',
+    sections: ['zion', 'alerts', 'knobs', 'overview'],
+    items: [
+      'Zion chat can report live balances (SOL + USD), last 5/10/20 txs, SOL price, and transfer totals for Main / Savings / Coinspot aliases.',
+      'Whitelist-only SOL sends from the live trading keypair: Yes/No confirm, then password (3 tries); Paper/Live Sim dry-run only.',
+      'Config → Zion Transfers: enable toggle, caps, cooldown, and seeded wallets (Coinspot is the only external destination).',
+    ],
+  },
+  {
     version: '1.2.162',
     title: 'Multi-Provider Market-Data Failover',
     sections: ['scanners', 'execution', 'alerts', 'overview', 'zion'],

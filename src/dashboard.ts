@@ -8566,6 +8566,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="config-section-label">Zion Transfers <span>Whitelist SOL sends</span></div>
+      <div class="card" id="zion-transfers-card">
+        <div class="section-title">Zion Wallet Transfers <span class="tip" tabindex="0" data-tip="Chat-driven SOL sends from the live trading keypair to whitelisted destinations only (Savings / Coinspot). Paper and Live Sim never send real funds. Password via ZION_TRANSFER_PASSWORD env (default set for this deployment — never shown in UI)."></span></div>
+        <p class="mint text-xs mb-2">Balances and history work in Paper / Live Sim / Live. Real transfers require <strong>Live</strong> mode, transfers enabled, Yes confirmation, then password (3 tries).</p>
+        <div class="space-y-2 mb-3">
+          <div class="toggle-row"><span>Enable Zion transfers</span><label class="switch"><input type="checkbox" id="zion-xfer-enabled" /><span class="slider"></span></label></div>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="ctl"><span>Confirm threshold (SOL)</span><input type="number" id="zion-xfer-threshold" min="0.01" step="0.1" value="2" /></label>
+            <label class="ctl"><span>Max single transfer (SOL)</span><input type="number" id="zion-xfer-max-single" min="0.01" step="0.1" value="5" /></label>
+            <label class="ctl"><span>Daily cap (SOL)</span><input type="number" id="zion-xfer-daily-cap" min="0.01" step="0.1" value="10" /></label>
+            <label class="ctl"><span>Cooldown (seconds)</span><input type="number" id="zion-xfer-cooldown-sec" min="5" step="1" value="60" /></label>
+          </div>
+        </div>
+        <div class="mint text-xs mb-1">Saved wallets (seeded — Coinspot is the only external send destination)</div>
+        <div id="zion-xfer-wallets" class="text-xs overflow-x-auto mb-2" style="line-height:1.45;color:#94a3b8">—</div>
+        <div class="mint text-xs mb-2" id="zion-xfer-status-line">Daily used: — · Lifetime: —</div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <button type="button" class="btn btn-primary" onclick="saveZionTransfersConfig()">Save Zion Transfers</button>
+          <button type="button" class="btn btn-secondary" onclick="loadZionTransfersConfig()">Refresh</button>
+          <span class="mint text-xs" id="zion-xfer-save-status"></span>
+        </div>
+      </div>
+
       <div class="config-section-label" id="config-zion-improvements-section">Zion improvements <span>Approved &amp; denied history</span></div>
       <div class="card" id="zion-improvement-history-card">
         <div class="section-title">Zion Improvement History <span class="tip" tabindex="0" data-tip="Durable log of Improvement Requests you Approved (what changed) or Denied (nothing applied). Pending items stay on the Zion tab."></span></div>
@@ -20569,6 +20592,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           };
           try { updateNotifyAudioUnlockChip(); } catch (_) {}
         }
+        try { loadZionTransfersConfigFromCfg(cfg); } catch (_) {}
         const deliveryHint = document.getElementById('notify-delivery-hint');
         if (deliveryHint && cfg.emailDelivery) {
           const d = cfg.emailDelivery;
@@ -27063,6 +27087,82 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         alert('Save failed: ' + (err.message || String(err)));
       }
     }
+
+    function loadZionTransfersConfigFromCfg(cfg) {
+      const zt = (cfg && cfg.zionTransfers) || {};
+      const setChk = (id, v) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = !!v;
+      };
+      const setVal = (id, v) => {
+        const el = document.getElementById(id);
+        if (el && v != null) el.value = v;
+      };
+      setChk('zion-xfer-enabled', zt.enabled === true);
+      setVal('zion-xfer-threshold', zt.confirmThresholdSol != null ? zt.confirmThresholdSol : 2);
+      setVal('zion-xfer-max-single', zt.maxSingleTransferSol != null ? zt.maxSingleTransferSol : 5);
+      setVal('zion-xfer-daily-cap', zt.dailyTransferCapSol != null ? zt.dailyTransferCapSol : 10);
+      setVal('zion-xfer-cooldown-sec', zt.cooldownMs != null ? Math.round(Number(zt.cooldownMs) / 1000) : 60);
+      const box = document.getElementById('zion-xfer-wallets');
+      if (box) {
+        const rows = Array.isArray(zt.savedWallets) ? zt.savedWallets : [];
+        box.innerHTML = rows.length
+          ? '<table style="width:100%;border-collapse:collapse"><tr><th align="left">Name</th><th align="left">Aliases</th><th align="left">Send to?</th><th align="left">Address</th></tr>' +
+            rows.map((w) =>
+              '<tr><td>' + String(w.name || '') + '</td><td>' +
+              (Array.isArray(w.aliases) ? w.aliases.join(', ') : '') +
+              '</td><td>' + (w.allowSendTo ? 'yes' : 'source only') +
+              '</td><td style="word-break:break-all;font-family:monospace;font-size:10px">' +
+              String(w.address || '') + '</td></tr>'
+            ).join('') + '</table>'
+          : 'No saved wallets';
+      }
+    }
+
+    async function loadZionTransfersConfig() {
+      try {
+        const st = await fetchJSON('/api/zion/transfers/status');
+        loadZionTransfersConfigFromCfg({ zionTransfers: st });
+        const line = document.getElementById('zion-xfer-status-line');
+        if (line) {
+          line.textContent =
+            'Daily used: ' + (Number(st.dailyUsedSol) || 0).toFixed(4) +
+            ' SOL · Lifetime: ' + (Number(st.totalTransferredSol) || 0).toFixed(4) +
+            ' SOL' + (st.pending ? ' · Pending: ' + st.pending.step + ' → ' + st.pending.toName : '');
+        }
+      } catch (err) {
+        const s = document.getElementById('zion-xfer-save-status');
+        if (s) s.textContent = err.message || String(err);
+      }
+    }
+    window.loadZionTransfersConfig = loadZionTransfersConfig;
+
+    async function saveZionTransfersConfig() {
+      const status = document.getElementById('zion-xfer-save-status');
+      try {
+        if (status) status.textContent = 'Saving…';
+        const cooldownSec = Number((document.getElementById('zion-xfer-cooldown-sec') || {}).value) || 60;
+        await fetchJSON('/api/config/zion-transfers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: !!(document.getElementById('zion-xfer-enabled') || {}).checked,
+            confirmThresholdSol: Number((document.getElementById('zion-xfer-threshold') || {}).value) || 2,
+            maxSingleTransferSol: Number((document.getElementById('zion-xfer-max-single') || {}).value) || 5,
+            dailyTransferCapSol: Number((document.getElementById('zion-xfer-daily-cap') || {}).value) || 10,
+            cooldownMs: Math.max(5000, cooldownSec * 1000),
+          }),
+        });
+        if (status) status.textContent = 'Saved';
+        window._cfgLoaded = false;
+        await loadZionTransfersConfig();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+        alert('Save failed: ' + (err.message || String(err)));
+      }
+    }
+    window.saveZionTransfersConfig = saveZionTransfersConfig;
     window.saveNotificationsConfig = saveNotificationsConfig;
 
     window.__learningSavesOffset = 0;
