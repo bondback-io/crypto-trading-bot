@@ -627,6 +627,13 @@ export function evaluateProfileTaEntry(
   } catch {
     /* optional */
   }
+  try {
+    const { effectiveTaModeForDipBuyerRecovery } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    mode = effectiveTaModeForDipBuyerRecovery(playbook.profileId, mode);
+  } catch {
+    /* optional */
+  }
   const learned = playbook.learned || defaultLearned();
   let rlTaScale = 1;
   try {
@@ -636,8 +643,20 @@ export function evaluateProfileTaEntry(
   } catch {
     /* optional */
   }
+  let dbrConfBump = 0;
+  try {
+    const {
+      dipBuyerRecoveryConfluenceBump,
+      dipBuyerRecoverySupportFibMode,
+    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    dbrConfBump = dipBuyerRecoveryConfluenceBump(playbook.profileId);
+    void dipBuyerRecoverySupportFibMode;
+  } catch {
+    /* optional */
+  }
   const minScore = clamp(
-    (playbook.minConfluenceScore + (learned.minConfDelta || 0)) / rlTaScale,
+    (playbook.minConfluenceScore + (learned.minConfDelta || 0) + dbrConfBump) /
+      rlTaScale,
     0,
     100
   );
@@ -1006,6 +1025,32 @@ export function evaluateProfileTaEntry(
 
   score = clamp(Math.round(score), 0, 100);
 
+  // Dip Buyer Recovery: support + Fib confluence overlay
+  try {
+    const { dipBuyerRecoverySupportFibMode } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const sfMode = dipBuyerRecoverySupportFibMode(playbook.profileId);
+    if (sfMode === 'required' || sfMode === 'preferred') {
+      const both = nearSupport && nearFib;
+      const pts = both ? (sfMode === 'required' ? 12 : 8) : 0;
+      if (both) score = clamp(score + pts, 0, 100);
+      conditions.push({
+        id: 'dbr_support_fib',
+        passed: both,
+        score: pts,
+        detail: both
+          ? 'DBR support+Fib ok'
+          : `DBR ${sfMode}: need support + Fib`,
+        required: sfMode === 'required' && mode === 'hard',
+      });
+      if (sfMode === 'preferred' && !both && mode === 'soft') {
+        // Soft preferred: mild conviction haircut, never hard-block
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
   const passed = conditions.filter((c) => c.passed).map((c) => c.id);
   const failed = conditions.filter((c) => !c.passed).map((c) => c.id);
   const requiredFailed = conditions.filter((c) => c.required && !c.passed);
@@ -1017,11 +1062,34 @@ export function evaluateProfileTaEntry(
   if (mode === 'soft') {
     allowed = true;
     const effScore = score * rlTaScale;
+    // DBR preferred support+fib: soft haircut when missing
+    let dbrSoftPen = 1;
+    try {
+      const { dipBuyerRecoverySupportFibMode } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      const sfMode = dipBuyerRecoverySupportFibMode(playbook.profileId);
+      if (
+        (sfMode === 'preferred' || sfMode === 'required') &&
+        !(nearSupport && nearFib)
+      ) {
+        dbrSoftPen = sfMode === 'required' ? 0.82 : 0.9;
+      }
+    } catch {
+      /* optional */
+    }
     if (effScore < minScore) {
-      convictionMult = clamp(0.75 + (effScore / Math.max(1, minScore)) * 0.2, 0.7, 1);
+      convictionMult = clamp(
+        (0.75 + (effScore / Math.max(1, minScore)) * 0.2) * dbrSoftPen,
+        0.65,
+        1
+      );
       reason = `TA Soft below min (${Math.round(effScore)}/${Math.round(minScore)}) — conviction ×${convictionMult.toFixed(2)}`;
     } else {
-      convictionMult = clamp(1 + (effScore - minScore) / 200, 1, 1.12);
+      convictionMult = clamp(
+        (1 + (effScore - minScore) / 200) * dbrSoftPen,
+        0.7,
+        1.12
+      );
       reason = `TA Soft pass (${Math.round(effScore)}/${Math.round(minScore)})`;
     }
   } else {

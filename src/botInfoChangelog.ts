@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.180',
+    title: 'Dip Buyer Recovery Stages',
+    sections: ['microbots', 'learning', 'execution', 'overview'],
+    items: [
+      'New Dip Buyer–only Recovery Stages 0–4 (parallel to Fast Profiles Recovery): frequency → size → concurrency → Peak Protect arm/giveback, with minute gaps and 5m/1h volume floors — no scalper TP clamps.',
+      'Readiness includes bounce follow-through from episode MFE / entry·exit quality / giveback; auto-taper promotes/demotes ±1 stage. Defaults: enabled, Stage 0, auto-taper on.',
+      'Wired into entry gates/size, Peak Protect, RL Lead block / Hybrid cap, Learning Mode fairness block, TA support+Fib quality, collapsed-volume soft-skip; Bot Performance card + optional R0–R3 badge chip.',
+    ],
+  },
+  {
     version: '1.2.179',
     title: 'Overview Now + Live wallet indicator',
     sections: ['overview', 'modes'],

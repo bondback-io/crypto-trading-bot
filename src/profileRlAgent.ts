@@ -437,6 +437,24 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
     /* optional */
   }
 
+  try {
+    const { shouldBlockDipBuyerLead, isDipBuyerRecovering } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    if (isDipBuyerRecovering(agent.profileId)) {
+      if (agent.mode === 'lead') {
+        agent.mode = 'hybrid';
+        pushProfileRlDecision({
+          kind: 'auto_demote',
+          profileId: agent.profileId,
+          detail: 'lead→hybrid · Dip Buyer Recovery blocks Lead',
+        });
+      }
+      void shouldBlockDipBuyerLead(agent.profileId);
+    }
+  } catch {
+    /* optional */
+  }
+
   const diff = getProfileRlDifficulty(agent.profileId);
   const readiness = computeProfileRlReadiness(agent);
   agent.readinessScore = readiness.score;
@@ -484,6 +502,15 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
       blockLead = shouldBlockProfileLead(agent.profileId);
     } catch {
       blockLead = false;
+    }
+    if (!blockLead) {
+      try {
+        const { shouldBlockDipBuyerLead } =
+          require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+        blockLead = shouldBlockDipBuyerLead(agent.profileId);
+      } catch {
+        /* optional */
+      }
     }
     if (
       !blockLead &&

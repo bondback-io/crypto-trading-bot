@@ -267,6 +267,28 @@ export interface PersistedBotSettings {
       sampleSufficiency?: number;
     };
   };
+  /** Dip Buyer Recovery Stages 0–4 (no secrets) */
+  dipBuyerRecovery?: {
+    enabled?: boolean;
+    autoTaper?: boolean;
+    stage?: number;
+    stageLocked?: boolean;
+    forcedStage?: number | null;
+    learningModeOverride?: boolean;
+    learningAdjustEnabled?: boolean;
+    minTradesBeforePromote?: number;
+    minTradesBeforePromoteTo4?: number;
+    promoteReadinessByStage?: Record<string, number>;
+    demoteReadinessMax?: number;
+    readinessWeights?: {
+      expectancyTrend?: number;
+      winRateTrend?: number;
+      givebackImprovement?: number;
+      bounceFollowThrough?: number;
+      lossStreakControl?: number;
+      sampleSufficiency?: number;
+    };
+  };
   /** Zion whitelist transfers (no password secrets) */
   zionTransfers?: {
     enabled?: boolean;

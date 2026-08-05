@@ -159,7 +159,15 @@ export function scaleRewardByEpisodeQuality(
   episode: ProfileLearningEpisode
 ): { reward: number; qualityWeight: number } {
   const cfg = getLearningEnhancementsConfig();
-  if (!cfg.enabled || !cfg.qualityWeightingEnabled) {
+  let forceQw = false;
+  try {
+    const { shouldQualityWeightDipBuyerEpisodes } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    forceQw = shouldQualityWeightDipBuyerEpisodes(episode.profileId);
+  } catch {
+    /* optional */
+  }
+  if ((!cfg.enabled || !cfg.qualityWeightingEnabled) && !forceQw) {
     return { reward: baseReward, qualityWeight: 1 };
   }
   const qw = computeEpisodeQualityWeight(episode);

@@ -2092,6 +2092,9 @@ export interface BotConfig {
   /** Fast Profiles Recovery Stages 0–4 for short-term profiles. */
   fastProfileRecovery: import('./fastProfileRecovery').FastProfileRecoveryConfig;
 
+  /** Dip Buyer Recovery Stages 0–4 (dip_buyer only; parallel to FPR). */
+  dipBuyerRecovery: import('./dipBuyerRecovery').DipBuyerRecoveryConfig;
+
   /**
    * Zion whitelist SOL transfers (chat-driven). Separate from trading execution.
    * Password via ZION_TRANSFER_PASSWORD env (never persisted).
@@ -2422,6 +2425,28 @@ export const config: BotConfig = {
       givebackImprovement: 0.2,
       lossStreakControl: 0.15,
       stability: 0.1,
+      sampleSufficiency: 0.1,
+    },
+  },
+
+  dipBuyerRecovery: {
+    enabled: true,
+    autoTaper: true,
+    stage: 0,
+    stageLocked: false,
+    forcedStage: null,
+    learningModeOverride: false,
+    learningAdjustEnabled: false,
+    minTradesBeforePromote: 12,
+    minTradesBeforePromoteTo4: 20,
+    promoteReadinessByStage: { '0': 65, '1': 70, '2': 72, '3': 78 },
+    demoteReadinessMax: 40,
+    readinessWeights: {
+      expectancyTrend: 0.25,
+      winRateTrend: 0.15,
+      givebackImprovement: 0.2,
+      bounceFollowThrough: 0.2,
+      lossStreakControl: 0.1,
       sampleSufficiency: 0.1,
     },
   },
@@ -3063,6 +3088,29 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         },
       }
     ) as PersistedBotSettings['fastProfileRecovery'],
+    dipBuyerRecovery: cloneJson(
+      config.dipBuyerRecovery || {
+        enabled: true,
+        autoTaper: true,
+        stage: 0,
+        stageLocked: false,
+        forcedStage: null,
+        learningModeOverride: false,
+        learningAdjustEnabled: false,
+        minTradesBeforePromote: 12,
+        minTradesBeforePromoteTo4: 20,
+        promoteReadinessByStage: { '0': 65, '1': 70, '2': 72, '3': 78 },
+        demoteReadinessMax: 40,
+        readinessWeights: {
+          expectancyTrend: 0.25,
+          winRateTrend: 0.15,
+          givebackImprovement: 0.2,
+          bounceFollowThrough: 0.2,
+          lossStreakControl: 0.1,
+          sampleSufficiency: 0.1,
+        },
+      }
+    ) as PersistedBotSettings['dipBuyerRecovery'],
     zionTransfers: cloneJson(
       config.zionTransfers || {
         enabled: false,
@@ -4000,6 +4048,55 @@ function applySettingsSnapshot(
           DEFAULT_FAST_PROFILE_RECOVERY.demoteReadinessMax,
         readinessWeights: {
           ...DEFAULT_FAST_PROFILE_RECOVERY.readinessWeights,
+          ...(s.readinessWeights || {}),
+        },
+      };
+    } catch {
+      /* module may not be ready */
+    }
+  }
+  if (saved.dipBuyerRecovery && typeof saved.dipBuyerRecovery === 'object') {
+    try {
+      const { DEFAULT_DIP_BUYER_RECOVERY } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      const s = saved.dipBuyerRecovery;
+      const stageN = Math.round(Number(s.forcedStage ?? s.stage ?? 0));
+      const stage = (stageN <= 0 ? 0 : stageN >= 4 ? 4 : stageN) as
+        | 0
+        | 1
+        | 2
+        | 3
+        | 4;
+      config.dipBuyerRecovery = {
+        enabled: s.enabled !== false,
+        autoTaper: s.autoTaper !== false,
+        stage,
+        stageLocked: s.stageLocked === true,
+        forcedStage:
+          s.forcedStage != null && Number.isFinite(Number(s.forcedStage))
+            ? ((Math.round(Number(s.forcedStage)) <= 0
+                ? 0
+                : Math.round(Number(s.forcedStage)) >= 4
+                  ? 4
+                  : Math.round(Number(s.forcedStage))) as 0 | 1 | 2 | 3 | 4)
+            : null,
+        learningModeOverride: s.learningModeOverride === true,
+        learningAdjustEnabled: s.learningAdjustEnabled === true,
+        minTradesBeforePromote:
+          Number(s.minTradesBeforePromote) ||
+          DEFAULT_DIP_BUYER_RECOVERY.minTradesBeforePromote,
+        minTradesBeforePromoteTo4:
+          Number(s.minTradesBeforePromoteTo4) ||
+          DEFAULT_DIP_BUYER_RECOVERY.minTradesBeforePromoteTo4,
+        promoteReadinessByStage: {
+          ...DEFAULT_DIP_BUYER_RECOVERY.promoteReadinessByStage,
+          ...(s.promoteReadinessByStage || {}),
+        },
+        demoteReadinessMax:
+          Number(s.demoteReadinessMax) ||
+          DEFAULT_DIP_BUYER_RECOVERY.demoteReadinessMax,
+        readinessWeights: {
+          ...DEFAULT_DIP_BUYER_RECOVERY.readinessWeights,
           ...(s.readinessWeights || {}),
         },
       };

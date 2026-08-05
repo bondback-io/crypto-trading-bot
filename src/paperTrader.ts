@@ -808,6 +808,11 @@ function maybeRecordLearningEpisode(
       peakProtectBeatFullTp,
       recoveryStageAtClose: (() => {
         try {
+          if (profileId === 'dip_buyer') {
+            const { getDipBuyerRecoveryStage } =
+              require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+            return getDipBuyerRecoveryStage(profileId);
+          }
           const { getProfileRecoveryStage } =
             require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
           return getProfileRecoveryStage(profileId);
@@ -821,6 +826,13 @@ function maybeRecordLearningEpisode(
         const { onFastRecoveryEpisodeClosed } =
           require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
         onFastRecoveryEpisodeClosed(profileId, episodeRow);
+      } catch {
+        /* optional */
+      }
+      try {
+        const { evaluateDipBuyerRecoveryTransition } =
+          require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+        evaluateDipBuyerRecoveryTransition(profileId, episodeRow);
       } catch {
         /* optional */
       }

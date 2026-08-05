@@ -321,6 +321,11 @@ export function getLearningSystemDiagnostics(opts?: {
       }),
       recoveryLine: (() => {
         try {
+          if (p.id === 'dip_buyer') {
+            const { formatDipBuyerRecoveryPlainLanguage } =
+              require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+            return formatDipBuyerRecoveryPlainLanguage();
+          }
           const { getProfileRecoveryStatus } =
             require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
           const st = getProfileRecoveryStatus(p.id);

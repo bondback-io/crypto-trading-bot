@@ -129,6 +129,17 @@ export function buildZionAnalystBrief(opts?: {
       /* optional */
     }
     try {
+      const { formatDipBuyerRecoveryPlainLanguage } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      const dbrLine = formatDipBuyerRecoveryPlainLanguage();
+      if (dbrLine) {
+        explain.push(dbrLine);
+        contextLines.push(`  dip-buyer-recovery: ${dbrLine}`);
+      }
+    } catch {
+      /* optional */
+    }
+    try {
       const { formatScalperWinRateTrendPlainLanguage } =
         require('./profilePerformanceTrend') as typeof import('./profilePerformanceTrend');
       const scalperLine = formatScalperWinRateTrendPlainLanguage();

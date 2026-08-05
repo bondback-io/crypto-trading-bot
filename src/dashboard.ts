@@ -3525,6 +3525,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       height: 100%;
       background: #3b82f6;
     }
+    .dbr-hint {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.05rem 0.35rem;
+      border-radius: 0.25rem;
+      margin-left: 0.25rem;
+      vertical-align: middle;
+      line-height: 1.2;
+    }
+    .dbr-hint-s0 {
+      background: rgba(239,68,68,0.22);
+      color: #fca5a5;
+      border: 1px solid rgba(239,68,68,0.45);
+    }
+    .dbr-hint-s1,
+    .dbr-hint-s2 {
+      background: rgba(245,158,11,0.2);
+      color: #fcd34d;
+      border: 1px solid rgba(245,158,11,0.4);
+    }
+    .dbr-hint-s3 {
+      background: rgba(59,130,246,0.2);
+      color: #93c5fd;
+      border: 1px solid rgba(59,130,246,0.4);
+    }
+    .trade-profile-badge .dbr-hint,
+    .tp-chip .dbr-hint,
+    .tp-name .dbr-hint {
+      margin-left: 0.2rem;
+    }
+    #dbr-controls-row {
+      flex-wrap: wrap;
+      gap: 0.5rem 0.75rem;
+    }
+    #dbr-card-body .fpr-progress {
+      margin-top: 0.35rem;
+    }
     .lsd-card {
       border: 1px solid #1e293b;
       border-radius: 0.5rem;
@@ -12313,6 +12354,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '" aria-label="' + escHtml(name) + (on ? '' : ' (off)') + '">' +
                 escHtml(p.icon || '') + ' ' + escHtml(name) + (on ? '' : ' (off)') +
                 fmtFastRecoveryHint(p.id) +
+                fmtDipBuyerRecoveryHint(p.id) +
                 '</span>'
               );
             }).join('')
@@ -13345,6 +13387,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     escHtml(p.name || '') + ' modules">' +
                     escHtml(p.icon || '') + ' ' + escHtml(p.name) +
                     fmtFastRecoveryHint(p.id) +
+                    fmtDipBuyerRecoveryHint(p.id) +
                     pausedBadge +
                     (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
                     (sl.enabled && slBadge
@@ -13383,6 +13426,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadLearningDiagnostics(); } catch (_) {}
           try { loadAgentDecisionLog(); } catch (_) {}
           try { loadFastProfileRecovery(); } catch (_) {}
+          try { loadDipBuyerRecovery(); } catch (_) {}
           try { loadScalperPerformanceTrend(); } catch (_) {}
         }
       } catch (_) {}
@@ -13628,6 +13672,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ' ' +
               escHtml(r.name) +
               fmtFastRecoveryHint(r.profileId) +
+              fmtDipBuyerRecoveryHint(r.profileId) +
               '</td>' +
               '<td style="color:' +
               wrColor +
@@ -13940,6 +13985,205 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
     window.fmtFastRecoveryHint = fmtFastRecoveryHint;
+
+    function applyDipBuyerRecoveryHints(payload) {
+      if (!payload || typeof payload !== 'object') return;
+      window.__dipBuyerRecoveryHints = {
+        enabled: payload.enabled === true,
+        stage: Number(payload.stage) || 0,
+        stageName: payload.stageName || '',
+        inRecovery: payload.inRecovery === true,
+      };
+    }
+
+    function fmtDipBuyerRecoveryHint(profileId) {
+      if (profileId !== 'dip_buyer') return '';
+      const hints = window.__dipBuyerRecoveryHints;
+      if (!hints || !hints.enabled || !hints.inRecovery) return '';
+      const stage = Math.max(0, Math.min(3, Number(hints.stage) || 0));
+      const name = hints.stageName || ('Stage ' + stage);
+      const cls =
+        stage <= 0 ? 'dbr-hint-s0' : stage <= 2 ? 'dbr-hint-s1' : 'dbr-hint-s3';
+      return (
+        '<span class="dbr-hint ' +
+        cls +
+        '" title="Dip Buyer Recovery · Stage ' +
+        stage +
+        ' · ' +
+        escHtml(String(name)) +
+        '" aria-label="Dip Buyer recovery stage ' +
+        stage +
+        '">R' +
+        stage +
+        '</span>'
+      );
+    }
+    window.fmtDipBuyerRecoveryHint = fmtDipBuyerRecoveryHint;
+
+    async function loadDipBuyerRecovery() {
+      try {
+        const data = await fetchJSON('/api/dip-buyer-recovery');
+        const cfg = data.config || {};
+        const p = data.status || {};
+        try {
+          applyDipBuyerRecoveryHints({
+            enabled: cfg.enabled !== false,
+            stage: p.stage,
+            stageName: p.stageName || '',
+            inRecovery:
+              cfg.enabled !== false &&
+              Number(p.stage) >= 0 &&
+              Number(p.stage) <= 3,
+          });
+        } catch (_) {}
+        const en = document.getElementById('dbr-enabled');
+        const at = document.getElementById('dbr-autotaper');
+        const lk = document.getElementById('dbr-locked');
+        const lm = document.getElementById('dbr-lm-override');
+        if (en) en.checked = cfg.enabled !== false;
+        if (at) at.checked = cfg.autoTaper !== false;
+        if (lk) lk.checked = cfg.stageLocked === true || p.stageLocked === true;
+        if (lm) lm.checked = cfg.learningModeOverride === true;
+        const body = document.getElementById('dbr-card-body');
+        if (!body) return;
+        const sc = fprStageClass(p.stage);
+        const wr = p.windowMetrics
+          ? Math.round((p.windowMetrics.winRate || 0) * 100) + '%'
+          : '—';
+        const exp =
+          p.windowMetrics && p.windowMetrics.avgPnlPct != null
+            ? p.windowMetrics.avgPnlPct.toFixed(1) + '%'
+            : '—';
+        const gates = (p.gates || [])
+          .map(function (g) {
+            return (
+              '<span class="' +
+              (g.pass ? 'fpr-gate-pass' : 'fpr-gate-fail') +
+              '">' +
+              (g.pass ? '✓' : '✗') +
+              ' ' +
+              g.label +
+              '</span>'
+            );
+          })
+          .join(' · ');
+        const pct = Math.min(100, Math.round(Number(p.readinessScore) || 0));
+        const c = p.constraints || {};
+        body.innerHTML =
+          '<div class="fpr-card" style="max-width:100%">' +
+          '<div class="fpr-card-head">' +
+          '<strong>Dip Buyer</strong>' +
+          '<span class="fpr-badge ' +
+          sc +
+          '" title="Stage ' +
+          p.stage +
+          (p.stageName ? ' · ' + String(p.stageName) : '') +
+          '">S' +
+          p.stage +
+          (p.stageName ? ' · ' + String(p.stageName) : '') +
+          '</span>' +
+          (p.stageLocked
+            ? '<span class="fpr-locked mint text-xs">locked</span>'
+            : '') +
+          '</div>' +
+          '<p class="text-xs text-slate-400 mb-1">' +
+          (p.plainLanguage || '') +
+          '</p>' +
+          '<div class="text-xs mint mb-1">Readiness ' +
+          (p.readinessScore != null ? p.readinessScore : '—') +
+          ' · trades in stage ' +
+          (p.tradesInStage || 0) +
+          ' · WR ' +
+          wr +
+          ' · exp ' +
+          exp +
+          ' · trend ' +
+          (p.trendLabel || '—') +
+          '</div>' +
+          '<div class="text-xs mint mb-1">Gates: size×' +
+          (c.sizeMultiplier != null ? c.sizeMultiplier : '—') +
+          ' · max open ' +
+          (c.maxConcurrent != null ? c.maxConcurrent : '—') +
+          ' · gap ' +
+          (c.minMsBetweenEntries
+            ? Math.round(c.minMsBetweenEntries / 60000) + 'm'
+            : 'off') +
+          ' · max/hr ' +
+          (c.maxEntriesPerHour || 'off') +
+          ' · PPP arm ' +
+          (c.peakProtectArmOfTpPct || '—') +
+          '% / giveback ' +
+          (c.peakProtectGivebackOfPeakPct || '—') +
+          '%</div>' +
+          '<div class="text-xs mb-1" style="line-height:1.45">' +
+          gates +
+          '</div>' +
+          '<div class="fpr-progress"><span style="width:' +
+          pct +
+          '%"></span></div>' +
+          '<div class="flex flex-wrap gap-1 mt-2" style="margin-top:auto;padding-top:0.5rem">' +
+          '<button type="button" class="btn btn-sm" onclick="forceDipBuyerRecoveryStage(' +
+          Math.max(0, (p.stage || 0) - 1) +
+          ')">Demote</button>' +
+          '<button type="button" class="btn btn-sm" onclick="forceDipBuyerRecoveryStage(' +
+          Math.min(4, (p.stage || 0) + 1) +
+          ')">Promote</button>' +
+          '<button type="button" class="btn btn-sm" onclick="forceDipBuyerRecoveryStage(0,true)">Lock 0</button>' +
+          '</div></div>';
+      } catch (err) {
+        const body = document.getElementById('dbr-card-body');
+        if (body) {
+          body.innerHTML =
+            '<p class="mint text-xs">Dip Buyer Recovery unavailable: ' +
+            (err.message || String(err)) +
+            '</p>';
+        }
+      }
+    }
+    window.loadDipBuyerRecovery = loadDipBuyerRecovery;
+
+    async function saveDipBuyerRecovery() {
+      const body = {
+        enabled: !!(document.getElementById('dbr-enabled') || {}).checked,
+        autoTaper: !!(document.getElementById('dbr-autotaper') || {}).checked,
+        stageLocked: !!(document.getElementById('dbr-locked') || {}).checked,
+        learningModeOverride: !!(
+          document.getElementById('dbr-lm-override') || {}
+        ).checked,
+      };
+      if (body.stageLocked === false) {
+        body.forcedStage = null;
+      }
+      await fetchJSON('/api/dip-buyer-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadDipBuyerRecovery();
+    }
+    window.saveDipBuyerRecovery = saveDipBuyerRecovery;
+
+    async function forceDipBuyerRecoveryStage(stage, lock) {
+      await fetchJSON('/api/dip-buyer-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          forceStage: stage,
+          lock: lock === true,
+        }),
+      });
+      await loadDipBuyerRecovery();
+    }
+    window.forceDipBuyerRecoveryStage = forceDipBuyerRecoveryStage;
+
+    async function forceDipBuyerRecoveryFromSelect() {
+      const el = document.getElementById('dbr-force-stage');
+      if (!el || el.value === '') return;
+      const stage = Math.round(Number(el.value));
+      el.value = '';
+      await forceDipBuyerRecoveryStage(stage, true);
+    }
+    window.forceDipBuyerRecoveryFromSelect = forceDipBuyerRecoveryFromSelect;
 
     async function loadFastProfileRecovery() {
       try {
@@ -14998,6 +15242,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<td><span class="tp-overview-name" style="color:' + color + '">' +
               escHtml(opts.icon || '') + ' ' + escHtml(opts.name) +
               fmtFastRecoveryHint(opts.id) +
+              fmtDipBuyerRecoveryHint(opts.id) +
               (on ? '<span class="tp-overview-active-tag">on</span>' : '') +
             '</span></td>' +
             '<td class="tp-overview-desc">' + escHtml(opts.description || '') + '</td>' +
@@ -16325,6 +16570,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { loadLearningDiagnostics(); } catch (_) {}
         try { loadAgentDecisionLog(); } catch (_) {}
         try { loadFastProfileRecovery(); } catch (_) {}
+        try { loadDipBuyerRecovery(); } catch (_) {}
         try { loadScalperPerformanceTrend(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
@@ -17253,6 +17499,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         '<span class="tpb-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
         fmtFastRecoveryHint(v.id) +
+        fmtDipBuyerRecoveryHint(v.id) +
         '</span>'
       );
     }
@@ -20975,6 +21222,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
         if (status && status.fastProfileRecovery) {
           applyFastRecoveryHints(status.fastProfileRecovery);
+        }
+        if (status && status.dipBuyerRecovery) {
+          applyDipBuyerRecoveryHints(status.dipBuyerRecovery);
         }
       } catch (_) {}
       _lastConfig = cfg;

@@ -2689,13 +2689,23 @@ export function evaluateTradeProfileLanes(
       const { isLearningModeActive, learningModeFairnessBump } =
         require('./learningMode') as typeof import('./learningMode');
       if (isLearningModeActive() && isProfileLearningModeOptedIn(def.id)) {
-        const { getProfileLearningEpisodes } =
-          require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
-        const eps = getProfileLearningEpisodes(def.id, 500);
-        const bump = learningModeFairnessBump(eps.length);
-        if (bump > 0) {
-          laneScore = Math.round((laneScore + bump) * 10) / 10;
-          laneReason = `${laneReason} · LM fairness +${bump}`;
+        let blockLm = false;
+        try {
+          const { shouldBlockLearningModeForDipBuyer } =
+            require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+          blockLm = shouldBlockLearningModeForDipBuyer(def.id);
+        } catch {
+          /* optional */
+        }
+        if (!blockLm) {
+          const { getProfileLearningEpisodes } =
+            require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+          const eps = getProfileLearningEpisodes(def.id, 500);
+          const bump = learningModeFairnessBump(eps.length);
+          if (bump > 0) {
+            laneScore = Math.round((laneScore + bump) * 10) / 10;
+            laneReason = `${laneReason} · LM fairness +${bump}`;
+          }
         }
       }
     } catch {
@@ -4119,14 +4129,24 @@ export function assignTradeProfile(
         isProfileLearningModeOptedIn(def.id) &&
         score > 0
       ) {
-        const { getProfileLearningEpisodes } =
-          require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
-        const bump = learningModeFairnessBump(
-          getProfileLearningEpisodes(def.id, 500).length
-        );
-        if (bump > 0) {
-          score = Math.round((score + bump) * 10) / 10;
-          reason = `${reason} · LM fairness +${bump}`;
+        let blockLm = false;
+        try {
+          const { shouldBlockLearningModeForDipBuyer } =
+            require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+          blockLm = shouldBlockLearningModeForDipBuyer(def.id);
+        } catch {
+          /* optional */
+        }
+        if (!blockLm) {
+          const { getProfileLearningEpisodes } =
+            require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+          const bump = learningModeFairnessBump(
+            getProfileLearningEpisodes(def.id, 500).length
+          );
+          if (bump > 0) {
+            score = Math.round((score + bump) * 10) / 10;
+            reason = `${reason} · LM fairness +${bump}`;
+          }
         }
       }
     } catch {

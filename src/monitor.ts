@@ -836,6 +836,60 @@ function evaluateVolumeIntelFastSoftSkip(
   return { skip: false, reason: '' };
 }
 
+/**
+ * Dip Buyer Recovery soft-skip for collapsed / ultra-thin volume (stages 0–2).
+ */
+function evaluateDipBuyerRecoveryVolumeSkip(
+  profileId: string | null | undefined,
+  signal: TradeSignal
+): { skip: boolean; reason: string } {
+  try {
+    const {
+      getDipBuyerRecoveryConstraints,
+      isDipBuyerRecovering,
+    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    if (!isDipBuyerRecovering(profileId)) {
+      return { skip: false, reason: '' };
+    }
+    const c = getDipBuyerRecoveryConstraints(profileId);
+    if (!c.active || !c.skipCollapsedVolume) {
+      return { skip: false, reason: '' };
+    }
+    const {
+      evaluateVolumeIntelligence,
+      getVolumeIntelligenceConfig,
+    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+    if (!getVolumeIntelligenceConfig().enabled) {
+      return { skip: false, reason: '' };
+    }
+    const snap = evaluateVolumeIntelligence({
+      volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+      volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+      priceChangePct:
+        signal.metrics?.priceChangeH1Pct ??
+        signal.metrics?.priceChange24hPct ??
+        null,
+      profileId,
+      candles: Array.isArray(signal.candles) ? signal.candles : null,
+    });
+    if (
+      snap.decayState === 'collapsed' ||
+      snap.hardFloorFailFast ||
+      (snap.volM5 != null &&
+        snap.volM5 > 0 &&
+        snap.volM5 < c.minVolumeM5Usd * 0.25)
+    ) {
+      return {
+        skip: true,
+        reason: `Dip Buyer Recovery Stage ${c.stage}: skip collapsed/ultra-thin volume`,
+      };
+    }
+  } catch {
+    /* fail soft */
+  }
+  return { skip: false, reason: '' };
+}
+
 type SignalHandler = (signal: TradeSignal) => void;
 
 const recentBuys = new Map<string, WalletBuyEvent[]>();
@@ -3210,6 +3264,27 @@ function applyMarlRlSoftSizing(
     } catch {
       /* optional */
     }
+    try {
+      const {
+        applyDipBuyerRecoverySizeMultiplier,
+        isDipBuyerRecovering,
+      } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      if (isDipBuyerRecovering(input.profileId)) {
+        const before = solAmt;
+        solAmt = applyDipBuyerRecoverySizeMultiplier(input.profileId, solAmt);
+        if (solAmt !== before) {
+          sizeExtra += ` · DBR size×${(solAmt / Math.max(before, 1e-9)).toFixed(2)}`;
+          if (input.logThoughts) {
+            appendMarlThoughtToLaneFight(
+              input.mint,
+              `Dip Buyer Recovery size adjust`
+            );
+          }
+        }
+      }
+    } catch {
+      /* optional */
+    }
     return {
       ok: true,
       solAmount: clampToMaxAllowedTradeSol(solAmt, input.clampTag),
@@ -3450,6 +3525,68 @@ async function executeSignalBuy(
       });
       markScannerCooldown(signal.mint, false);
       console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
+  }
+
+  try {
+    const {
+      checkDipBuyerRecoveryEntryGates,
+      noteDipBuyerRecoveryEntry,
+    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const dbrGate = checkDipBuyerRecoveryEntryGates({
+      profileId: String(profileAssignment.profileId || ''),
+      openPositions: paperTrader.getOpenPositions().map((p) => ({
+        tradeProfileId: p.tradeProfileId,
+      })),
+      volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+      volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+      recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+    });
+    if (!dbrGate.ok) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(
+        signal.mint,
+        false,
+        dbrGate.reason || 'dip buyer recovery'
+      );
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dbrGate.reason || 'Dip Buyer Recovery gate',
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: dbrGate.reason || 'Dip Buyer Recovery gate',
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] ${dbrGate.reason}`);
+      return;
+    }
+    if (String(profileAssignment.profileId || '') === 'dip_buyer') {
+      noteDipBuyerRecoveryEntry('dip_buyer');
+    }
+  } catch {
+    /* optional */
+  }
+
+  {
+    const dbrVolSkip = evaluateDipBuyerRecoveryVolumeSkip(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (dbrVolSkip.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, dbrVolSkip.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dbrVolSkip.reason,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: dbrVolSkip.reason,
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] ${dbrVolSkip.reason}`);
       return;
     }
   }
@@ -4717,6 +4854,41 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     /* optional */
   }
 
+  try {
+    const {
+      checkDipBuyerRecoveryEntryGates,
+      noteDipBuyerRecoveryEntry,
+    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const dbrGate = checkDipBuyerRecoveryEntryGates({
+      profileId: String(profileAssignment.profileId || ''),
+      openPositions: paperTrader.getOpenPositions().map((p) => ({
+        tradeProfileId: p.tradeProfileId,
+      })),
+      volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+      volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+      recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+    });
+    if (!dbrGate.ok) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(
+        signal.mint,
+        false,
+        dbrGate.reason || 'dip buyer recovery gate'
+      );
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dbrGate.reason || 'Dip Buyer Recovery gate',
+      });
+      console.log(`[monitor] ${dbrGate.reason}`);
+      return;
+    }
+    if (String(profileAssignment.profileId || '') === 'dip_buyer') {
+      noteDipBuyerRecoveryEntry('dip_buyer');
+    }
+  } catch {
+    /* optional */
+  }
+
   recordSignalSizing(signal, sizing, true);
   console.log(`[monitor] ${sizing.reason}`);
   console.log(
@@ -4749,6 +4921,23 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
         skipReason: volSkip.reason,
       });
       console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
+  }
+
+  {
+    const dbrVolSkip = evaluateDipBuyerRecoveryVolumeSkip(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (dbrVolSkip.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, dbrVolSkip.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: dbrVolSkip.reason,
+      });
+      console.log(`[monitor] ${dbrVolSkip.reason}`);
       return;
     }
   }

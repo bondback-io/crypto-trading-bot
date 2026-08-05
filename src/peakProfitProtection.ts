@@ -169,6 +169,17 @@ export function resolvePeakProtectParams(input: {
   } catch {
     /* optional */
   }
+  try {
+    const { getDipBuyerRecoveryConstraints } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const dc = getDipBuyerRecoveryConstraints(input.profileId);
+    if (dc.active) {
+      policyArm = dc.peakProtectArmOfTpPct;
+      policyGiveback = dc.peakProtectGivebackOfPeakPct;
+    }
+  } catch {
+    /* optional */
+  }
   const armOfTp =
     policyArm != null &&
     Number.isFinite(Number(policyArm)) &&
