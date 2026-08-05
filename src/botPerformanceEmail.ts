@@ -418,7 +418,8 @@ export function buildBotPerformanceReport(opts?: {
     periodEndMs - intervalMs;
   const prevMap = new Map<string, BotPerfSnapshotRow>();
   for (const row of opts?.previousSnapshot ?? settings.previousSnapshot ?? []) {
-    if (row?.profileId) prevMap.set(row.profileId, row);
+    if (!row?.profileId || row.profileId === 'default') continue;
+    prevMap.set(row.profileId, row);
   }
 
   const { getTradeProfilesStatus } =
@@ -427,6 +428,8 @@ export function buildBotPerformanceReport(opts?: {
 
   const bots: BotPerfReportRow[] = [];
   for (const p of status.profiles) {
+    // Legacy Default stack is unused in digests — hide from email + snapshot data
+    if (!p?.id || p.id === 'default') continue;
     const allEps = getProfileLearningEpisodes(p.id, 400);
     const periodEps = allEps.filter(
       (e) => e.closedAt >= periodStartMs && e.closedAt <= periodEndMs

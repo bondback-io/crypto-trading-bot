@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.171',
+    title: 'Bot performance email skips Default',
+    sections: ['alerts', 'microbots'],
+    items: [
+      'Bot performance digest email and snapshot data exclude the unused Default profile so rankings and totals only cover real micro-bots.',
+    ],
+  },
+  {
     version: '1.2.170',
     title: 'Micro Bots Profile routing tabs',
     sections: ['microbots'],
