@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.177',
+    title: 'Closed Trades token mini PnL',
+    sections: ['overview', 'execution'],
+    items: [
+      'Closed Trades show compact green/red PnL under the token name on every row (including grouped parents): SOL on line 1, USD with % on line 2 — easier on mobile when the PnL column is off-screen.',
+      'Open Positions 5m/1h vol stacking and column widths from 1.2.176 confirmed so decay chips stay out of PnL.',
+    ],
+  },
+  {
     version: '1.2.176',
     title: 'VI false-decay hotfix + Positions UI',
     sections: ['overview', 'execution', 'microbots'],

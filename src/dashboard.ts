@@ -1597,22 +1597,37 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-size: 0.82rem;
     }
     .closed-token-mini-pnl {
+      display: block;
       margin-top: 0.22rem;
       line-height: 1.2;
       font-variant-numeric: tabular-nums;
       font-weight: 700;
+      max-width: 100%;
+      overflow: hidden;
     }
     .closed-token-mini-sol {
+      display: block;
       font-size: 0.68rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .closed-token-mini-usd {
+      display: block;
       margin-top: 0.05rem;
       font-size: 0.6rem;
       font-weight: 600;
       opacity: 0.95;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .card-closed-trades .closed-token-mini-pnl {
       max-width: 100%;
+    }
+    @media (max-width: 639px) {
+      .closed-token-mini-sol { font-size: 0.72rem; }
+      .closed-token-mini-usd { font-size: 0.64rem; }
     }
     .card-open-positions .mint-ca,
     .card-closed-trades .mint-ca {
@@ -17117,29 +17132,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : '') +
             '</div>'
           );
-      /* Compact duplicate under token for mobile glanceability (PnL col often off-screen). */
-      const miniPnlHtml = summary
-        ? ''
-        : (function () {
-            const color = pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
-            const solLine =
-              (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL';
-            const pctBit =
-              '(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)';
-            const usdLine =
-              pnlUsd != null && Number.isFinite(pnlUsd)
-                ? (pnlUsd < 0 ? '-$' : '$') +
-                  Math.abs(pnlUsd).toFixed(2) +
-                  ' ' +
-                  pctBit
-                : pctBit;
-            return (
-              '<div class="closed-token-mini-pnl" style="color:' + color + '">' +
-                '<div class="closed-token-mini-sol">' + solLine + '</div>' +
-                '<div class="closed-token-mini-usd">' + usdLine + '</div>' +
-              '</div>'
-            );
-          })();
+      /* Compact duplicate under token for mobile glanceability (PnL col often off-screen).
+         SOL alone on line 1; USD + % on line 2 (never % next to SOL). */
+      const miniPnlHtml = (function () {
+        const color = pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
+        const solLine =
+          (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL';
+        const pctBit =
+          '(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)';
+        const usdLine =
+          pnlUsd != null && Number.isFinite(pnlUsd)
+            ? (pnlUsd < 0 ? '-$' : '$') +
+              Math.abs(pnlUsd).toFixed(2) +
+              ' ' +
+              pctBit
+            : pctBit;
+        return (
+          '<div class="closed-token-mini-pnl" style="color:' + color + '" title="Realized PnL">' +
+            '<div class="closed-token-mini-sol">' + solLine + '</div>' +
+            '<div class="closed-token-mini-usd">' + usdLine + '</div>' +
+          '</div>'
+        );
+      })();
       const closedCell = opts.closedHtml != null
         ? opts.closedHtml
         : (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—');
