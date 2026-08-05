@@ -311,11 +311,11 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
     const body = [
       'Hey — Zion here with a system heads-up.',
       '',
-      `**Problem:** ${primary.summary}`,
+      `Problem: ${primary.summary}`,
       '',
-      `**Why it matters:** ${primary.why}`,
+      `Why it matters: ${primary.why}`,
       '',
-      `**Recommended fix:** ${primary.recommendation}`,
+      `Recommended fix: ${primary.recommendation}`,
       '',
       st.issues.length > 1
         ? `Also watching: ${st.issues
@@ -329,10 +329,44 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
       .filter(Boolean)
       .join('\n');
 
+    const {
+      renderDarkEmail,
+      emailCard,
+      emailParagraphsFromText,
+      emailListItems,
+    } = require('./emailTheme') as typeof import('./emailTheme');
+    const html = renderDarkEmail({
+      eyebrow: 'Zion Supervision',
+      title: 'Action needed',
+      subtitle: primary.summary.slice(0, 100),
+      bodyHtml:
+        emailCard({
+          title: 'Problem',
+          bodyHtml: emailParagraphsFromText(primary.summary),
+        }) +
+        emailCard({
+          title: 'Why it matters',
+          bodyHtml: emailParagraphsFromText(primary.why),
+        }) +
+        emailCard({
+          title: 'Recommended fix',
+          bodyHtml: emailParagraphsFromText(primary.recommendation),
+        }) +
+        (st.issues.length > 1
+          ? emailCard({
+              title: 'Also watching',
+              bodyHtml: emailListItems(
+                st.issues.slice(1, 4).map((i) => i.summary)
+              ),
+            })
+          : ''),
+    });
+
     const result = await sendCustomEmail({
       to,
       subject: `[Zion] Action needed — ${primary.summary.slice(0, 60)}`,
       text: body,
+      html,
     });
 
     if (result.ok) {

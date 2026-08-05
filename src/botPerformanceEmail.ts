@@ -116,6 +116,7 @@ export interface BotPerfReport {
     overallPnlSol: number;
   };
   text: string;
+  html?: string;
 }
 
 let settingsCache: BotPerfEmailSettings | null = null;
@@ -570,6 +571,58 @@ export function buildBotPerformanceReport(opts?: {
   );
   lines.push(`Generated ${new Date(periodEndMs).toISOString()}`);
 
+  const text = lines.join('\n');
+
+  let html = '';
+  try {
+    const {
+      renderDarkEmail,
+      emailCard,
+      emailStatTile,
+      EMAIL_THEME,
+      escHtml,
+    } = require('./emailTheme') as typeof import('./emailTheme');
+    const t = EMAIL_THEME;
+    const botCards = bots
+      .map((b) => {
+        const pnlAccent =
+          b.period.pnlSol > 0 ? 'green' : b.period.pnlSol < 0 ? 'red' : 'default';
+        return `<div style="background:${t.bgInset};border:1px solid ${t.border};border-left:3px solid ${t.peach};border-radius:12px;padding:14px;margin-bottom:10px;">
+  <div style="font-size:15px;font-weight:750;color:${t.white};">#${b.rankOverall} · ${escHtml(b.name)}${b.enabled ? '' : ' (disabled)'}</div>
+  <div style="font-size:12px;color:${t.peach};margin-top:4px;">Level ${b.level} · Learning ${b.learningEnabled ? 'ON' : 'OFF'} (${escHtml(String(b.mode))} / ML ${escHtml(String(b.mlMode))})</div>
+  <div style="font-size:13px;color:${t.textMuted};margin-top:8px;">Period: ${b.period.episodes} trades · ${b.period.wins}W / ${b.period.losses}L · <span style="color:${pnlAccent === 'green' ? t.green : pnlAccent === 'red' ? t.red : t.text};font-weight:700;">${escHtml(fmtSol(b.period.pnlSol))}</span> · WR ${b.period.winRatePct.toFixed(0)}%</div>
+  <div style="font-size:12px;color:${t.textMuted};margin-top:4px;">Overall: ${b.overall.episodes} · ${escHtml(fmtSol(b.overall.pnlSol))} · expectancy ${escHtml(fmtPct(b.overallExpectancyPct))}</div>
+  <div style="font-size:12px;color:${t.textMuted};margin-top:4px;">Improved: ${escHtml(String(b.improved))} · Needs work: ${escHtml(String(b.needsWork))}</div>
+</div>`;
+      })
+      .join('');
+    html = renderDarkEmail({
+      eyebrow: 'Bot Performance Digest',
+      title: `${bots.length} micro-bots`,
+      subtitle: periodLabel,
+      bodyHtml:
+        emailCard({
+          title: 'Overview',
+          bodyHtml: `<div style="overflow:hidden;margin-bottom:10px;">
+  <div style="float:left;width:48%;box-sizing:border-box;padding-right:4px;">${emailStatTile({ label: 'Period PnL', value: fmtSol(totals.periodPnlSol), accent: totals.periodPnlSol >= 0 ? 'green' : 'red' })}</div>
+  <div style="float:right;width:48%;box-sizing:border-box;padding-left:4px;">${emailStatTile({ label: 'Period trades', value: String(totals.periodEpisodes), accent: 'peach' })}</div>
+</div>
+<div style="clear:both;">${emailStatTile({ label: 'All-time bot PnL (sum)', value: fmtSol(totals.overallPnlSol), accent: 'default' })}</div>
+<div style="font-size:12px;color:${t.textMuted};margin-top:10px;">${totals.periodWins}W / ${totals.periodLosses}L this period · App ${escHtml(ver.label || ver.version)}</div>`,
+        }) +
+        emailCard({
+          title: 'By micro-bot',
+          bodyHtml: botCards,
+        }),
+      footerHtml: `<div style="text-align:center;font-size:12px;color:${t.textDim};line-height:1.55;padding:12px 6px 4px;">
+  Manage this digest in Dashboard → Back Ups → Bot performance email<br/>
+  Generated ${escHtml(new Date(periodEndMs).toISOString())}
+</div>`,
+    });
+  } catch {
+    html = '';
+  }
+
   return {
     generatedAt: periodEndMs,
     periodStartMs,
@@ -578,7 +631,8 @@ export function buildBotPerformanceReport(opts?: {
     timezone: TIMEZONE,
     bots,
     totals,
-    text: lines.join('\n'),
+    text,
+    html,
   };
 }
 
@@ -673,6 +727,7 @@ export async function sendBotPerformanceEmail(opts?: {
     to,
     subject,
     text: report.text,
+    html: report.html,
   });
 
   const now = Date.now();

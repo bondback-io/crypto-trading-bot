@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.166',
+    title: 'Dark Email Theme with Peach Accents',
+    sections: ['alerts', 'zion', 'overview', 'backup'],
+    items: [
+      'Profit instant/cluster emails restyled to a shared dark theme with Zion peach accents.',
+      'Bot performance, Zion trade offers / improvements / supervision, system alerts, and learning watchdog emails use the same dark template for consistency.',
+    ],
+  },
+  {
     version: '1.2.165',
     title: 'Zion Main Wallet Address Update',
     sections: ['zion', 'knobs', 'overview'],

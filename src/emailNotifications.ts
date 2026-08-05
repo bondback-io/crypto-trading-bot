@@ -242,6 +242,7 @@ async function deliverEmail(opts: {
 async function sendMail(opts: {
   subject: string;
   text: string;
+  html?: string;
   kind: NotificationKind;
 }): Promise<boolean> {
   if (!kindEnabled(opts.kind)) return false;
@@ -274,6 +275,7 @@ async function sendMail(opts: {
       to,
       subject: opts.subject,
       text: opts.text,
+      html: opts.html,
     });
     lastSentAt[opts.kind] = Date.now();
     logger.info('Notify', `Email sent via ${provider}: ${opts.subject}`, {
@@ -356,7 +358,29 @@ export async function notifyLowEquity(input: {
     }
   );
 
-  await sendMail({ subject, text, kind: 'lowEquity' });
+  const {
+    renderDarkEmail,
+    emailKvTable,
+    emailParagraphsFromText,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const html = renderDarkEmail({
+    eyebrow: 'System Alert',
+    title: 'Total equity low',
+    subtitle: `Below ${threshold} SOL threshold`,
+    bodyHtml:
+      emailKvTable([
+        ['Mode', input.mode],
+        ['Total equity', `${input.totalEquitySol.toFixed(4)} SOL`],
+        ['Available', `${input.availableSol.toFixed(4)} SOL`],
+        ['In open trades', `${input.positionsSol.toFixed(4)} SOL`],
+        ['Open positions', String(input.openCount)],
+      ]) +
+      emailParagraphsFromText(
+        'Top up paper/live-sim balance or close open trades to free capital.'
+      ),
+  });
+
+  await sendMail({ subject, text, html, kind: 'lowEquity' });
 }
 
 /** Fire when a buy is blocked because available SOL is too low. */
@@ -392,7 +416,39 @@ export async function notifyInsufficientFunds(input: {
     .filter(Boolean)
     .join('\n');
 
-  await sendMail({ subject, text, kind: 'insufficientFunds' });
+  const {
+    renderDarkEmail,
+    emailKvTable,
+    emailParagraphsFromText,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const html = renderDarkEmail({
+    eyebrow: 'System Alert',
+    title: 'Insufficient available funds',
+    subtitle: `Need ${input.neededSol.toFixed(4)} SOL`,
+    bodyHtml:
+      emailKvTable(
+        [
+          ['Mode', input.mode],
+          input.symbol || input.mint
+            ? ([
+                'Token',
+                `${input.symbol || ''} ${input.mint ? `(${input.mint.slice(0, 8)}…)` : ''}`.trim(),
+              ] as [string, string])
+            : null,
+          ['Needed', `${input.neededSol.toFixed(4)} SOL`],
+          ['Available', `${input.availableSol.toFixed(4)} SOL`],
+          ['Total equity', `${input.totalEquitySol.toFixed(4)} SOL`],
+          ['Open trades cost', `${input.positionsCostSol.toFixed(4)} SOL`],
+          ['Open trades value', `${input.positionsValueSol.toFixed(4)} SOL`],
+          ['Open positions', String(input.openCount)],
+        ].filter(Boolean) as Array<[string, string]>
+      ) +
+      emailParagraphsFromText(
+        'Top up available balance or close open trades to free capital for new opportunities.'
+      ),
+  });
+
+  await sendMail({ subject, text, html, kind: 'insufficientFunds' });
 }
 
 /** Fire when a full close finishes in profit. */
@@ -497,7 +553,51 @@ export async function notifyZionTradeOffer(offer: {
     .filter(Boolean)
     .join('\n');
 
-  await sendMail({ subject, text, kind: 'zionTradeOffer' });
+  const {
+    renderDarkEmail,
+    emailKvTable,
+    emailCta,
+    emailListItems,
+    emailCard,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const html = renderDarkEmail({
+    eyebrow: 'Zion Trade Offer',
+    title: label,
+    subtitle: `Score ${offer.score} · ${offer.kolCount} KOL wallets`,
+    bodyHtml:
+      emailKvTable(
+        [
+          ['Mint', offer.mint],
+          offer.mcUsd != null
+            ? (['Market cap', `$${Math.round(offer.mcUsd).toLocaleString()}`] as [
+                string,
+                string,
+              ])
+            : null,
+          ['Score', String(offer.score)],
+          ['KOL count', String(offer.kolCount)],
+        ].filter(Boolean) as Array<[string, string]>
+      ) +
+      (offer.reasons?.length
+        ? emailCard({
+            title: 'Reasons',
+            bodyHtml: emailListItems(offer.reasons.slice(0, 8)),
+          })
+        : '') +
+      (kols
+        ? emailCard({
+            title: 'KOLs',
+            bodyHtml: emailListItems(
+              (offer.kolWallets || [])
+                .slice(0, 8)
+                .map((w) => `${w.name} (${w.address.slice(0, 8)}…)`)
+            ),
+          })
+        : '') +
+      emailCta({ href: link, label: 'Open trade request' }),
+  });
+
+  await sendMail({ subject, text, html, kind: 'zionTradeOffer' });
 }
 
 /**
@@ -546,7 +646,50 @@ export async function notifyZionImprovementRequest(cr: {
     .filter(Boolean)
     .join('\n');
 
-  const result = await sendCustomEmail({ to, subject, text });
+  const {
+    renderDarkEmail,
+    emailKvTable,
+    emailCard,
+    emailParagraphsFromText,
+    emailCta,
+    EMAIL_THEME,
+    escHtml,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const html = renderDarkEmail({
+    eyebrow: 'Zion Improvement Request',
+    title: String(cr.title || 'Untitled').slice(0, 80),
+    subtitle: cr.target ? `Target: ${cr.target}` : 'Review in dashboard',
+    bodyHtml:
+      emailKvTable([
+        ['Id', cr.id],
+        ...(cr.target ? [['Target', cr.target] as [string, string]] : []),
+      ]) +
+      emailCard({
+        title: 'What',
+        bodyHtml: emailParagraphsFromText(cr.what || ''),
+      }) +
+      (cr.why
+        ? emailCard({
+            title: 'Why',
+            bodyHtml: emailParagraphsFromText(cr.why),
+          })
+        : '') +
+      (cr.expectedBenefit
+        ? emailCard({
+            title: 'Expected benefit',
+            bodyHtml: emailParagraphsFromText(cr.expectedBenefit),
+          })
+        : '') +
+      (cr.payload && Object.keys(cr.payload).length
+        ? emailCard({
+            title: 'Payload',
+            bodyHtml: `<pre style="margin:0;white-space:pre-wrap;font-size:12px;color:${EMAIL_THEME.textMuted};">${escHtml(payloadPreview)}</pre>`,
+          })
+        : '') +
+      emailCta({ href: link, label: 'Open Improvement Request' }),
+  });
+
+  const result = await sendCustomEmail({ to, subject, text, html });
   if (result.ok) {
     try {
       const {
@@ -596,7 +739,32 @@ export async function notifyZionTradePlaced(
     .filter(Boolean)
     .join('\n');
 
-  await sendMail({ subject, text, kind: 'zionTradePlaced' });
+  const {
+    renderDarkEmail,
+    emailKvTable,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const html = renderDarkEmail({
+    eyebrow: 'Zion Trade Placed',
+    title: label,
+    subtitle: `${solAmount.toFixed(4)} SOL · ${config.mode}`,
+    bodyHtml: emailKvTable(
+      [
+        ['Mode', String(config.mode)],
+        ['Token', label],
+        ['Mint', offer.mint],
+        ['Size', `${solAmount.toFixed(4)} SOL`],
+        offer.mcUsd != null
+          ? ([
+              'MC at offer',
+              `$${Math.round(offer.mcUsd).toLocaleString()}`,
+            ] as [string, string])
+          : null,
+        ['Offer id', offer.id],
+      ].filter(Boolean) as Array<[string, string]>
+    ),
+  });
+
+  await sendMail({ subject, text, html, kind: 'zionTradePlaced' });
 }
 
 /** Test email from dashboard/API. */
@@ -614,10 +782,22 @@ export async function sendTestNotificationEmail(): Promise<{
     };
   }
   try {
+    const {
+      renderDarkEmail,
+      emailParagraphsFromText,
+    } = require('./emailTheme') as typeof import('./emailTheme');
+    const text = `Test email from crypto trading bot at ${new Date().toISOString()}\n\nIf you received this, delivery is working.`;
+    const html = renderDarkEmail({
+      eyebrow: 'BondBack',
+      title: 'Test notification',
+      subtitle: 'Email delivery check',
+      bodyHtml: emailParagraphsFromText(text),
+    });
     const provider = await deliverEmail({
       to,
       subject: '[Bot] Test notification',
-      text: `Test email from crypto trading bot at ${new Date().toISOString()}\n\nIf you received this, delivery is working.`,
+      text,
+      html,
     });
     logger.info('Notify', `Test email sent via ${provider}`, { to, provider });
     return { ok: true, provider };

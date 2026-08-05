@@ -185,14 +185,6 @@ async function resolveSolUsd(): Promise<number | null> {
   }
 }
 
-function esc(s: string): string {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function formatUsd(n: number | null): string {
   if (n == null || !Number.isFinite(n)) return 'USD unavailable';
   const sign = n > 0 ? '+' : '';
@@ -215,38 +207,45 @@ function buildInstantHtml(input: {
   closedAt: number;
   reason?: string;
 }): string {
+  const {
+    renderDarkEmail,
+    emailCard,
+    emailKvTable,
+    EMAIL_THEME,
+    escHtml,
+  } = require('./emailTheme') as typeof import('./emailTheme');
   const modeTag = modeLabel(input.mode);
   const closed = new Date(input.closedAt).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
   const usdLine =
-    input.pnlUsd != null
-      ? formatUsd(input.pnlUsd)
-      : 'USD unavailable';
+    input.pnlUsd != null ? formatUsd(input.pnlUsd) : 'USD unavailable';
   const solPx =
-    input.solUsd != null
-      ? `$${input.solUsd.toFixed(2)}`
-      : 'unavailable';
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>ZION Profit</title></head>
-<body style="margin:0;padding:0;background:#0b1220;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#e8eefc;">
-<div style="max-width:640px;margin:0 auto;padding:20px;">
-  <div style="background:linear-gradient(135deg,#1a2744,#122033);border:1px solid #2b3b5c;border-radius:16px;padding:20px 22px;margin-bottom:16px;">
-    <div style="font-size:12px;letter-spacing:1px;color:#8fb0ff;text-transform:uppercase;margin-bottom:6px;">ZION Profit Alert</div>
-    <div style="font-size:22px;font-weight:700;color:#ffffff;margin-bottom:6px;">${esc(input.label)}</div>
-    <div style="font-size:13px;color:#9db0d0;">${esc(modeTag)} · Closed ${esc(closed)}</div>
-  </div>
-  <div style="background:#121a2b;border:1px solid #2b3b5c;border-radius:16px;padding:18px 20px;margin-bottom:16px;">
-    <div style="font-size:22px;font-weight:700;color:#3dffb5;">${esc(formatSolSigned(input.pnlSol))} · ${esc(usdLine)}</div>
-    <div style="font-size:13px;color:#9db0d0;margin-top:8px;">${input.pnlPct.toFixed(1)}% · Profile: ${esc(input.profileName || '—')}</div>
-    <div style="font-size:12px;color:#9db0d0;margin-top:8px;">SOL Price Used: <strong style="color:#e8eefc;">${esc(solPx)}</strong></div>
-    ${input.reason ? `<div style="font-size:12px;color:#9db0d0;margin-top:6px;">Exit: ${esc(input.reason)}</div>` : ''}
-  </div>
-  <div style="text-align:center;font-size:12px;color:#7f91b3;line-height:1.5;padding:8px 6px 20px;">
-    ZION · Zeal, Insight, Order, Navigation<br/>Instant profit alert
-  </div>
-</div></body></html>`;
+    input.solUsd != null ? `$${input.solUsd.toFixed(2)}` : 'unavailable';
+  const t = EMAIL_THEME;
+  const body = [
+    emailCard({
+      bodyHtml: `<div style="font-size:24px;font-weight:750;color:${t.green};">${escHtml(formatSolSigned(input.pnlSol))} · ${escHtml(usdLine)}</div>
+<div style="font-size:14px;color:${t.peach};margin-top:8px;font-weight:700;">${input.pnlPct.toFixed(1)}%</div>`,
+    }),
+    emailKvTable(
+      [
+        ['Profile', input.profileName || '—'],
+        ['Mode', modeTag],
+        ['Closed', closed],
+        ['SOL price used', solPx],
+        input.reason ? (['Exit', input.reason] as [string, string]) : null,
+      ].filter(Boolean) as Array<[string, string]>
+    ),
+  ].join('');
+  return renderDarkEmail({
+    eyebrow: 'ZION Profit Alert',
+    title: input.label,
+    subtitle: `${modeTag} · Instant alert`,
+    bodyHtml: body,
+    footerHtml: `<div style="text-align:center;font-size:12px;color:${t.textDim};line-height:1.55;padding:12px 6px 4px;">ZION · Instant profit alert</div>`,
+  });
 }
 
 function buildClusterHtml(input: {
@@ -258,11 +257,17 @@ function buildClusterHtml(input: {
   windowStartMs: number;
   windowEndMs: number;
 }): { html: string; text: string; totalSol: number; totalUsd: number | null } {
+  const {
+    renderDarkEmail,
+    emailCard,
+    emailStatTile,
+    EMAIL_THEME,
+    escHtml,
+  } = require('./emailTheme') as typeof import('./emailTheme');
+  const t = EMAIL_THEME;
   const totalSol = input.events.reduce((s, e) => s + (e.pnlSol || 0), 0);
   const totalUsd =
-    input.solUsd != null && input.solUsd > 0
-      ? totalSol * input.solUsd
-      : null;
+    input.solUsd != null && input.solUsd > 0 ? totalSol * input.solUsd : null;
   const solPx =
     input.solUsd != null ? `$${input.solUsd.toFixed(2)}` : 'unavailable';
 
@@ -281,60 +286,40 @@ function buildClusterHtml(input: {
         input.solUsd != null && input.solUsd > 0
           ? formatUsd(e.pnlSol * input.solUsd)
           : 'USD unavailable';
-      return `<div style="background:#0e1626;border-radius:12px;padding:14px;margin-bottom:10px;">
-        <div style="font-size:15px;font-weight:700;color:#ffffff;">${esc(label)}</div>
-        <div style="font-size:12px;color:#9db0d0;margin-top:3px;">Profile: ${esc(e.profileName || '—')} · Closed ${esc(closed)}</div>
-        <div style="margin-top:10px;font-size:14px;color:#3dffb5;font-weight:600;">${esc(formatSolSigned(e.pnlSol))} · ${esc(usd)}</div>
+      return `<div style="background:${t.bgInset};border:1px solid ${t.border};border-left:3px solid ${t.peach};border-radius:12px;padding:14px;margin-bottom:10px;">
+        <div style="font-size:15px;font-weight:700;color:${t.white};">${escHtml(label)}</div>
+        <div style="font-size:12px;color:${t.textMuted};margin-top:3px;">Profile: ${escHtml(e.profileName || '—')} · Closed ${escHtml(closed)}</div>
+        <div style="margin-top:10px;font-size:14px;color:${t.green};font-weight:700;">${escHtml(formatSolSigned(e.pnlSol))} · ${escHtml(usd)}</div>
       </div>`;
     })
     .join('\n');
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ZION Profit Summary</title>
-</head>
-<body style="margin:0;padding:0;background:#0b1220;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#e8eefc;">
-  <div style="max-width:640px;margin:0 auto;padding:20px;">
-    <div style="background:linear-gradient(135deg,#1a2744,#122033);border:1px solid #2b3b5c;border-radius:16px;padding:20px 22px;margin-bottom:16px;">
-      <div style="font-size:12px;letter-spacing:1px;color:#8fb0ff;text-transform:uppercase;margin-bottom:6px;">ZION Profit Summary</div>
-      <div style="font-size:24px;font-weight:700;color:#ffffff;margin-bottom:6px;">${esc(input.periodLabel)} Review</div>
-      <div style="font-size:13px;color:#9db0d0;">Delivered to ${esc(input.to)} · ${esc(input.modeHint)}</div>
-    </div>
-    <div style="background:#121a2b;border:1px solid #2b3b5c;border-radius:16px;padding:18px 20px;margin-bottom:16px;">
-      <div style="font-size:13px;color:#9db0d0;margin-bottom:12px;">Totals</div>
-      <div style="overflow:hidden;margin-bottom:10px;">
-        <div style="float:left;width:48%;background:#0e1626;border-radius:12px;padding:14px;box-sizing:border-box;">
-          <div style="font-size:12px;color:#9db0d0;">Total Profit (SOL)</div>
-          <div style="font-size:22px;font-weight:700;color:#3dffb5;margin-top:4px;">${esc(formatSolSigned(totalSol))}</div>
-        </div>
-        <div style="float:right;width:48%;background:#0e1626;border-radius:12px;padding:14px;box-sizing:border-box;">
-          <div style="font-size:12px;color:#9db0d0;">Total Profit (USD)</div>
-          <div style="font-size:22px;font-weight:700;color:#3dffb5;margin-top:4px;">${esc(formatUsd(totalUsd))}</div>
-        </div>
-      </div>
-      <div style="clear:both;background:#0e1626;border-radius:12px;padding:14px;">
-        <div style="font-size:12px;color:#9db0d0;">Profitable Trades</div>
-        <div style="font-size:18px;font-weight:700;color:#ffffff;margin-top:4px;">${input.events.length}</div>
-        <div style="font-size:12px;color:#9db0d0;margin-top:8px;">
-          SOL Price Used: <strong style="color:#e8eefc;">${esc(solPx)}</strong>
-        </div>
-      </div>
-    </div>
-    <div style="background:#121a2b;border:1px solid #2b3b5c;border-radius:16px;padding:18px 20px;margin-bottom:16px;">
-      <div style="font-size:13px;color:#9db0d0;margin-bottom:14px;">Individual Profitable Trades</div>
-      ${rows}
-    </div>
-    <div style="text-align:center;font-size:12px;color:#7f91b3;line-height:1.5;padding:8px 6px 20px;">
-      ZION · Zeal, Insight, Order, Navigation<br />
-      Clustered profit report · ${esc(new Date(input.windowEndMs).toISOString())}<br />
-      Please review in dashboard for full trade details
-    </div>
-  </div>
-</body>
-</html>`;
+  const body = [
+    emailCard({
+      title: 'Totals',
+      bodyHtml: `<div style="overflow:hidden;margin-bottom:10px;">
+  <div style="float:left;width:48%;box-sizing:border-box;padding-right:4px;">${emailStatTile({ label: 'Total Profit (SOL)', value: formatSolSigned(totalSol), accent: 'green' })}</div>
+  <div style="float:right;width:48%;box-sizing:border-box;padding-left:4px;">${emailStatTile({ label: 'Total Profit (USD)', value: formatUsd(totalUsd), accent: 'peach' })}</div>
+</div>
+<div style="clear:both;">${emailStatTile({ label: 'Profitable trades', value: String(input.events.length), accent: 'default' })}</div>
+<div style="font-size:12px;color:${t.textMuted};margin-top:12px;">SOL price used: <strong style="color:${t.peach};">${escHtml(solPx)}</strong></div>`,
+    }),
+    emailCard({
+      title: 'Individual profitable trades',
+      bodyHtml: rows || `<div style="color:${t.textMuted};font-size:13px;">No trades in this window.</div>`,
+    }),
+  ].join('');
+
+  const html = renderDarkEmail({
+    eyebrow: 'ZION Profit Summary',
+    title: `${input.periodLabel} Review`,
+    subtitle: `Delivered to ${input.to} · ${input.modeHint}`,
+    bodyHtml: body,
+    footerHtml: `<div style="text-align:center;font-size:12px;color:${t.textDim};line-height:1.55;padding:12px 6px 4px;">
+  ZION · Clustered profit report · ${escHtml(new Date(input.windowEndMs).toISOString())}<br/>
+  Review the dashboard for full trade details
+</div>`,
+  });
 
   const textLines = [
     `ZION Profit Summary — ${input.periodLabel}`,

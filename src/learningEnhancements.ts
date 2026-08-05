@@ -539,6 +539,31 @@ export function runLearningHealthWatchdog(): string[] {
         to,
         subject: '[Bot] Learning Enhancements — action suggested',
         text: `Watchdog detected sustained issues:\n\n${sustained.map((s) => `• ${s}`).join('\n')}\n\nCheck Micro Bots → Learning Enhancements diagnostics.`,
+        html: (() => {
+          try {
+            const {
+              renderDarkEmail,
+              emailCard,
+              emailListItems,
+              emailParagraphsFromText,
+            } = require('./emailTheme') as typeof import('./emailTheme');
+            return renderDarkEmail({
+              eyebrow: 'Learning Enhancements',
+              title: 'Action suggested',
+              subtitle: 'Watchdog sustained warnings',
+              bodyHtml:
+                emailCard({
+                  title: 'Issues',
+                  bodyHtml: emailListItems(sustained),
+                }) +
+                emailParagraphsFromText(
+                  'Check Micro Bots → Learning Enhancements diagnostics.'
+                ),
+            });
+          } catch {
+            return undefined;
+          }
+        })(),
       });
       watchdog.lastEmailAt = now;
     } catch {
