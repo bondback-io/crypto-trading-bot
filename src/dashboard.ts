@@ -8981,19 +8981,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" id="scalper-trend-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Scalper Performance Trend <span class="tip" tabindex="0" data-tip="Rolling win rate and PnL from Scalper learning episodes. Visualisation only — does not change strategy. Declining/Critical recommends Recovery Mode."></span></div>
+            <div class="section-title" id="spt-title">Bot Performance Trend <span class="tip" tabindex="0" data-tip="Rolling win rate and PnL from that bot’s learning episodes. Visualisation only — does not change strategy. Declining/Critical recommends Recovery Mode for fast profiles."></span></div>
             <p class="text-xs text-slate-400 mb-0" id="spt-summary">Loading…</p>
           </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <select id="spt-window" onchange="loadScalperPerformanceTrend()" class="ctl">
-              <option value="10">Last 10</option>
-              <option value="20" selected>Last 20</option>
-              <option value="50">Last 50</option>
-            </select>
-            <select id="spt-view" onchange="renderScalperTrendChart()" class="ctl">
-              <option value="wr" selected>Win rate</option>
-              <option value="pnl">PnL</option>
-            </select>
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="ctl ctl-fit" title="Which micro-bot to chart">
+              <span>Bot</span>
+              <select id="spt-profile" onchange="loadScalperPerformanceTrend()" class="ctl" style="min-width:9.5rem">
+                <option value="scalper" selected>Scalper</option>
+              </select>
+            </label>
+            <label class="ctl ctl-fit">
+              <span>Window</span>
+              <select id="spt-window" onchange="loadScalperPerformanceTrend()">
+                <option value="10">Last 10</option>
+                <option value="20" selected>Last 20</option>
+                <option value="50">Last 50</option>
+              </select>
+            </label>
+            <label class="ctl ctl-fit">
+              <span>View</span>
+              <select id="spt-view" onchange="renderScalperTrendChart()">
+                <option value="wr" selected>Win rate</option>
+                <option value="pnl">PnL</option>
+              </select>
+            </label>
           </div>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs">
@@ -12056,6 +12068,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (typeof updateGlobalMicroBotTpUi === 'function') {
         updateGlobalMicroBotTpUi(tp.globalTakeProfit);
       }
+      if (typeof populateSptProfileSelect === 'function') {
+        try { populateSptProfileSelect(); } catch (_) {}
+      }
       renderSetupWatchLists(tp);
       if (master) master.checked = tp.enabled !== false;
       if (smartBot) smartBot.checked = tp.smartBotProfiles === true;
@@ -13907,11 +13922,79 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     let __scalperTrendPayload = null;
 
+    function populateSptProfileSelect() {
+      const sel = document.getElementById('spt-profile');
+      if (!sel) return;
+      const prev = sel.value || 'scalper';
+      const tp = window.__tradeProfilesStatus;
+      let list = (tp && Array.isArray(tp.profiles) ? tp.profiles : [])
+        .filter(function (p) {
+          return p && p.id && p.id !== 'default';
+        })
+        .slice()
+        .sort(function (a, b) {
+          if (a.id === 'zion') return -1;
+          if (b.id === 'zion') return 1;
+          return String(a.name || a.id).localeCompare(String(b.name || b.id));
+        });
+      if (!list.length) {
+        list = [
+          { id: 'scalper', name: 'Scalper', icon: '' },
+          { id: 'reversal_scalper', name: 'Reversal Scalper', icon: '' },
+          { id: 'momentum_burst', name: 'Momentum Burst', icon: '' },
+          { id: 'migration_sniper', name: 'Migration Sniper', icon: '' },
+          { id: 'dip_buyer', name: 'Dip Buyer', icon: '' },
+          { id: 'trend_rider', name: 'Trend Rider', icon: '' },
+          { id: 'high_win_rate', name: 'High Win Rate', icon: '' },
+          { id: 'steady_compounder', name: 'Steady Compounder', icon: '' },
+          { id: 'smart_money_mirror', name: 'Smart Money Mirror', icon: '' },
+          { id: 'zion', name: 'Zion', icon: '◈' },
+        ];
+      }
+      sel.innerHTML = list
+        .map(function (p) {
+          const label =
+            (p.icon ? String(p.icon) + ' ' : '') + (p.name || p.id);
+          return (
+            '<option value="' +
+            escHtml(p.id) +
+            '">' +
+            escHtml(label) +
+            '</option>'
+          );
+        })
+        .join('');
+      const ids = list.map(function (p) {
+        return p.id;
+      });
+      sel.value = ids.indexOf(prev) >= 0 ? prev : ids[0] || 'scalper';
+    }
+
+    function sptSelectedProfileMeta() {
+      const id =
+        ((document.getElementById('spt-profile') || {}).value) || 'scalper';
+      const tp = window.__tradeProfilesStatus;
+      const p =
+        tp &&
+        (tp.profiles || []).find(function (x) {
+          return x && x.id === id;
+        });
+      return {
+        id: id,
+        name: (p && p.name) || id.replace(/_/g, ' '),
+      };
+    }
+
     async function loadScalperPerformanceTrend() {
       try {
+        populateSptProfileSelect();
+        const meta = sptSelectedProfileMeta();
         const win = Number((document.getElementById('spt-window') || {}).value) || 20;
         const data = await fetchJSON(
-          '/api/profile-performance-trend?profileId=scalper&window=' + win
+          '/api/profile-performance-trend?profileId=' +
+            encodeURIComponent(meta.id) +
+            '&window=' +
+            win
         );
         __scalperTrendPayload = data.trend || null;
         const t = __scalperTrendPayload;
@@ -13919,7 +14002,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const badge = document.getElementById('spt-badge');
         const streak = document.getElementById('spt-streak');
         const rec = document.getElementById('spt-recovery-rec');
-        if (sum) sum.textContent = (t && t.plainLanguage) || 'No Scalper trades yet';
+        if (sum) {
+          sum.textContent =
+            (t && t.plainLanguage) ||
+            'No ' + meta.name + ' trades yet';
+        }
         if (badge && t) {
           badge.textContent = String(t.label || 'stable').toUpperCase();
           badge.className =
@@ -13954,6 +14041,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           bd.innerHTML =
             (help ? '<div>Helping: ' + help + '</div>' : '') +
             (hurt ? '<div>Hurting: ' + hurt + '</div>' : '');
+        } else if (bd) {
+          bd.innerHTML = '';
         }
         renderScalperTrendChart();
       } catch (err) {
@@ -13962,6 +14051,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadScalperPerformanceTrend = loadScalperPerformanceTrend;
+    window.populateSptProfileSelect = populateSptProfileSelect;
 
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');

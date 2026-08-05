@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.172',
+    title: 'Bot Performance Trend profile picker',
+    sections: ['microbots'],
+    items: [
+      'Bot Performance Trend chart adds a Bot dropdown (all micro-bots except Default) so you can view rolling WR/PnL for any profile, not only Scalper.',
+    ],
+  },
+  {
     version: '1.2.171',
     title: 'Bot performance email skips Default',
     sections: ['alerts', 'microbots'],
