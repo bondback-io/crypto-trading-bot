@@ -80,11 +80,13 @@ export const DEFAULT_VOLUME_INTELLIGENCE: VolumeIntelligenceConfig = {
   collapseAbsH1Usd: 1500,
   decayTightenMult: 0.85,
   collapseTightenMult: 0.7,
-  exitUrgencyOnDecay: true,
+  // Exit urgency defaults OFF — tighten/affinity still available; soft full
+  // exits were too eager with the v1.2.175 H1/12 false-decay path.
+  exitUrgencyOnDecay: false,
   divergenceEnabled: true,
   divergenceVolDropRatio: 0.85,
   divergenceMinSwingPct: 2.5,
-  exitUrgencyOnBearishDivergence: true,
+  exitUrgencyOnBearishDivergence: false,
   learningAdjustEnabled: false,
   profileSoft: {},
 };
@@ -195,7 +197,7 @@ export function getVolumeIntelligenceConfig(): VolumeIntelligenceConfig {
       0.3,
       1
     ),
-    exitUrgencyOnDecay: raw?.exitUrgencyOnDecay !== false,
+    exitUrgencyOnDecay: raw?.exitUrgencyOnDecay === true,
     divergenceEnabled: raw?.divergenceEnabled !== false,
     divergenceVolDropRatio: clamp(
       Number(raw?.divergenceVolDropRatio) || d.divergenceVolDropRatio,
@@ -207,7 +209,8 @@ export function getVolumeIntelligenceConfig(): VolumeIntelligenceConfig {
       1,
       12
     ),
-    exitUrgencyOnBearishDivergence: raw?.exitUrgencyOnBearishDivergence !== false,
+    exitUrgencyOnBearishDivergence:
+      raw?.exitUrgencyOnBearishDivergence === true,
     learningAdjustEnabled: raw?.learningAdjustEnabled === true,
     profileSoft:
       raw?.profileSoft && typeof raw.profileSoft === 'object'
@@ -329,6 +332,7 @@ function detectDecay(
   let negativeSlope = false;
   let expanding = false;
 
+  // Prefer time-bucketed M5 ring (successive prints), not a single Dex snapshot.
   if (slices.length >= 2) {
     const cur = slices[slices.length - 1]!;
     const prior = slices[slices.length - 2]!;
@@ -354,22 +358,25 @@ function detectDecay(
     if (cur > prior * 1.2) expanding = true;
   }
 
-  // Fallback: M5 vs H1-implied pace (H1/12 ≈ one 5m of steady hour)
+  // M5 vs H1 pace: expansion only from this heuristic. Do NOT mark decaying
+  // solely because quiet 5m << busy hour (normal after a pump) — that was
+  // false-triggering exit urgency on almost every open bag.
   if (volM5 != null && volH1 != null && volH1 > 0) {
     const implied5 = volH1 / 12;
-    if (volM5 < implied5 * cfg.shortTermDecayRatio) shortTermDecay = true;
     if (volM5 > implied5 * 1.4 || (expansionRatio != null && expansionRatio > 0.2)) {
       expanding = true;
     }
   }
 
+  // Passive tape: price moving hard on thin 5m relative to hour — keep as decay.
   const passiveTape =
     priceChangePct != null &&
     Math.abs(priceChangePct) >= 3 &&
     volM5 != null &&
     volH1 != null &&
     volH1 > 0 &&
-    volM5 < (volH1 / 12) * 0.5;
+    volM5 < (volH1 / 12) * 0.5 &&
+    volM5 < cfg.healthyM5Usd;
 
   if (shortTermDecay || postSpike || negativeSlope || passiveTape) {
     if (!logs.some((l) => l.includes('decaying'))) {
@@ -547,9 +554,9 @@ export function evaluateVolumeIntelligence(
   const volH1 = fin(input.volumeH1Usd);
   const slices = Array.isArray(input.recentM5Slices)
     ? input.recentM5Slices.filter((n) => Number.isFinite(n) && n >= 0)
-    : volM5 != null
-      ? [volM5]
-      : [];
+    : [];
+  // Do not synthesize a 1-sample ring from a lone Dex print — that used to
+  // pair with H1/12 pace checks and false-flag “decaying”.
 
   const soft = cfg.profileSoft?.[String(input.profileId || '')] || {};
   const decaySens = clamp(Number(soft.decaySensitivity) || 1, 0.5, 1.5);
@@ -699,9 +706,12 @@ export function volumeExitTightenMult(
   const soft = cfg.profileSoft?.[String(profileId || '')];
   const urg = clamp(Number(soft?.exitUrgencyMult) || 1, 0.5, 1.5);
   let m = 1;
-  if (cfg.exitUrgencyOnDecay) {
-    if (decayState === 'collapsed') m = Math.min(m, cfg.collapseTightenMult);
-    else if (decayState === 'decaying') m = Math.min(m, cfg.decayTightenMult);
+  // Absolute collapse always mildly tightens PPP (safe). Soft “decaying” /
+  // bearish-div tighten only when exit-urgency knobs are explicitly on.
+  if (decayState === 'collapsed') {
+    m = Math.min(m, cfg.collapseTightenMult);
+  } else if (cfg.exitUrgencyOnDecay && decayState === 'decaying') {
+    m = Math.min(m, cfg.decayTightenMult);
   }
   if (
     cfg.exitUrgencyOnBearishDivergence &&

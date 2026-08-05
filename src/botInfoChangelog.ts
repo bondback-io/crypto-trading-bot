@@ -41,6 +41,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.176',
+    title: 'VI false-decay hotfix + Positions UI',
+    sections: ['overview', 'execution', 'microbots'],
+    items: [
+      'Fixed false “decaying” from H1/12 pace + sub-minute M5 ring polls that over-triggered soft exit urgency after v1.2.175; soft exit urgency defaults OFF (sticky 175 settings migrated once); absolute collapse still mildly tightens Peak Protect.',
+      'Overview maxDD floored at 0 equity trough (caps absurd 1000%+ readings from import overlays / negative cumulative equity).',
+      'Open Positions 5m/1h vol column stacks decay/divergence chips under the numbers and widens so chips no longer spill into PnL.',
+      'Closed Trades show a compact green/red PnL under the token name (SOL, then USD with %) for mobile glanceability; existing PnL column unchanged.',
+    ],
+  },
+  {
     version: '1.2.175',
     title: 'Volume Intelligence layer',
     sections: ['microbots', 'execution', 'learning'],

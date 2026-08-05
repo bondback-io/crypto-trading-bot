@@ -669,18 +669,36 @@ export function evaluateAdaptiveProfileExit(input: {
       ((input.highWaterMarkSol - input.currentPriceSol) /
         input.highWaterMarkSol) *
       100;
-    // Soft urgency: decay / bearish divergence lowers fade threshold
+    // Soft urgency: only absolute collapse / confirmed bearish-div lower fade
+    // threshold (not generic “decaying” — too common after pumps).
     let fadeThresh = pol.momentumFadeDropPct;
     const decay = input.volumeDecayState;
     const div = input.volumeDivergenceState;
-    if (decay === 'collapsed') fadeThresh *= 0.7;
-    else if (decay === 'decaying') fadeThresh *= 0.85;
-    if (div === 'bearish_divergence') fadeThresh *= 0.88;
+    let volUrgency = false;
+    try {
+      const { getVolumeIntelligenceConfig } =
+        require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      const viCfg = getVolumeIntelligenceConfig();
+      if (viCfg.enabled && viCfg.exitUrgencyOnDecay && decay === 'collapsed') {
+        fadeThresh *= 0.7;
+        volUrgency = true;
+      }
+      if (
+        viCfg.enabled &&
+        viCfg.exitUrgencyOnBearishDivergence &&
+        div === 'bearish_divergence'
+      ) {
+        fadeThresh *= 0.88;
+        volUrgency = true;
+      }
+    } catch {
+      /* no vol urgency */
+    }
     if (dropFromPeak >= fadeThresh) {
       return {
         type: 'full',
         reason: `Profile momentum fade −${dropFromPeak.toFixed(1)}% from peak (policy ${pol.momentumFadeDropPct}%${
-          fadeThresh < pol.momentumFadeDropPct
+          volUrgency && fadeThresh < pol.momentumFadeDropPct
             ? `; vol-urgency ${fadeThresh.toFixed(1)}%`
             : ''
         })`,
@@ -688,7 +706,8 @@ export function evaluateAdaptiveProfileExit(input: {
     }
   }
 
-  // 5b) Soft volume-decay exit urgency while green (never overrides hard SL)
+  // 5b) Soft volume-decay exit urgency while green (never overrides hard SL).
+  // Collapsed only for decay path — “decaying” alone no longer force-exits.
   try {
     const {
       getVolumeIntelligenceConfig,
@@ -699,8 +718,7 @@ export function evaluateAdaptiveProfileExit(input: {
       viCfg.exitUrgencyOnDecay &&
       pnl > 3 &&
       pnl < input.takeProfitPct * 0.9 &&
-      (input.volumeDecayState === 'decaying' ||
-        input.volumeDecayState === 'collapsed') &&
+      input.volumeDecayState === 'collapsed' &&
       peakUnrealized >= Math.max(6, input.takeProfitPct * 0.35) &&
       peakUnrealized - pnl >= 4
     ) {

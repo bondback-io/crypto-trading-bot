@@ -341,25 +341,39 @@ export interface MarketActivitySample {
   volumeM5Usd?: number | null;
 }
 
-/** Per-mint ring of recent M5 volume samples (newest last). */
+/** Per-mint ring of recent M5 volume samples (newest last). Time-bucketed. */
 const M5_ACTIVITY_RING_MAX = 8;
+/** Ignore sub-minute Dex rolling-window jitter as fake “bars”. */
+const M5_ACTIVITY_MIN_INTERVAL_MS = 60_000;
 const m5ActivityRing = new Map<string, number[]>();
+const m5ActivityRingAt = new Map<string, number>();
 
 export function pushM5ActivitySample(
   mint: string,
-  volumeM5Usd: number | null | undefined
+  volumeM5Usd: number | null | undefined,
+  atMs: number = Date.now()
 ): number[] {
   if (volumeM5Usd == null || !Number.isFinite(volumeM5Usd) || volumeM5Usd < 0) {
     return m5ActivityRing.get(mint) || [];
   }
   const ring = m5ActivityRing.get(mint) || [];
   const last = ring[ring.length - 1];
+  const lastAt = m5ActivityRingAt.get(mint) ?? 0;
+  // Same rolling print, or polled again before a real 5m step — do not append.
   if (last != null && Math.abs(last - volumeM5Usd) < 1) {
+    return ring;
+  }
+  if (ring.length > 0 && atMs - lastAt < M5_ACTIVITY_MIN_INTERVAL_MS) {
+    // Replace newest in-bucket sample instead of inventing a steeper slope.
+    ring[ring.length - 1] = volumeM5Usd;
+    m5ActivityRing.set(mint, ring);
+    m5ActivityRingAt.set(mint, atMs);
     return ring;
   }
   ring.push(volumeM5Usd);
   while (ring.length > M5_ACTIVITY_RING_MAX) ring.shift();
   m5ActivityRing.set(mint, ring);
+  m5ActivityRingAt.set(mint, atMs);
   return ring;
 }
 
@@ -1347,17 +1361,27 @@ export class PaperTrader {
       volumeM5Usd?: number | null;
     }
   ): void {
+    const prev = this.marketActivityCache.get(mint);
     const volM5 =
       sample.volumeM5Usd != null && Number.isFinite(Number(sample.volumeM5Usd))
         ? Math.max(0, Number(sample.volumeM5Usd))
-        : null;
+        : prev?.volumeM5Usd ?? null;
+    const volH1 =
+      sample.volumeH1Usd != null && Number.isFinite(Number(sample.volumeH1Usd))
+        ? Math.max(0, Number(sample.volumeH1Usd))
+        : prev?.volumeH1Usd ?? 0;
+    const txns =
+      sample.txnsH1 != null && Number.isFinite(Number(sample.txnsH1))
+        ? Math.max(0, Math.floor(sample.txnsH1))
+        : prev?.txnsH1 ?? 0;
+    const updatedAt = sample.updatedAt ?? Date.now();
     this.marketActivityCache.set(mint, {
-      volumeH1Usd: Math.max(0, sample.volumeH1Usd),
-      txnsH1: Math.max(0, Math.floor(sample.txnsH1)),
-      updatedAt: sample.updatedAt ?? Date.now(),
+      volumeH1Usd: volH1,
+      txnsH1: txns,
+      updatedAt,
       volumeM5Usd: volM5,
     });
-    if (volM5 != null) pushM5ActivitySample(mint, volM5);
+    if (volM5 != null) pushM5ActivitySample(mint, volM5, updatedAt);
   }
 
   getMarketActivity(mint: string): MarketActivitySample | undefined {
@@ -4933,10 +4957,15 @@ export class PaperTrader {
       equity += d.pnlSol;
       if (equity > peakEquity) peakEquity = equity;
       if (peakEquity > 0) {
-        const dd = ((peakEquity - equity) / peakEquity) * 100;
+        // Floor trough at 0 — import overlays / mismatched start used to
+        // produce absurd maxDD (e.g. 4000%+) when cumulative equity went negative.
+        const trough = Math.max(0, equity);
+        const dd = ((peakEquity - trough) / peakEquity) * 100;
         if (dd > maxDrawdownPct) maxDrawdownPct = dd;
       }
     }
+    // Account DD cannot exceed 100% once equity is floored at 0.
+    maxDrawdownPct = Math.min(100, maxDrawdownPct);
 
     const holdTimes = closed
       .filter((p) => p.closedAt && p.openedAt)

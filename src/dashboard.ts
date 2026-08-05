@@ -1596,6 +1596,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-variant-numeric: tabular-nums;
       font-size: 0.82rem;
     }
+    .closed-token-mini-pnl {
+      margin-top: 0.22rem;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    .closed-token-mini-sol {
+      font-size: 0.68rem;
+    }
+    .closed-token-mini-usd {
+      margin-top: 0.05rem;
+      font-size: 0.6rem;
+      font-weight: 600;
+      opacity: 0.95;
+    }
+    .card-closed-trades .closed-token-mini-pnl {
+      max-width: 100%;
+    }
     .card-open-positions .mint-ca,
     .card-closed-trades .mint-ca {
       display: inline-flex;
@@ -5904,31 +5922,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         font-size: 0.68rem;
       }
       .card-open-positions #positions-table th:nth-child(1),
-      .card-open-positions #trades-positions-table th:nth-child(1) { width: 7.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(1) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(2),
-      .card-open-positions #trades-positions-table th:nth-child(2) { width: 9%; }
+      .card-open-positions #trades-positions-table th:nth-child(2) { width: 8%; }
       .card-open-positions #positions-table th:nth-child(3),
-      .card-open-positions #trades-positions-table th:nth-child(3) { width: 8%; }
+      .card-open-positions #trades-positions-table th:nth-child(3) { width: 7%; }
       .card-open-positions #positions-table th:nth-child(4),
-      .card-open-positions #trades-positions-table th:nth-child(4) { width: 10%; }
+      .card-open-positions #trades-positions-table th:nth-child(4) { width: 8.5%; }
       .card-open-positions #positions-table th:nth-child(5),
       .card-open-positions #trades-positions-table th:nth-child(5),
       .card-open-positions #positions-table th:nth-child(6),
-      .card-open-positions #trades-positions-table th:nth-child(6) { width: 6%; }
+      .card-open-positions #trades-positions-table th:nth-child(6) { width: 5.5%; }
       .card-open-positions #positions-table th:nth-child(7),
-      .card-open-positions #trades-positions-table th:nth-child(7) { width: 9.25%; }
+      .card-open-positions #trades-positions-table th:nth-child(7) { width: 8.5%; }
       .card-open-positions #positions-table th:nth-child(8),
-      .card-open-positions #trades-positions-table th:nth-child(8) { width: 6.75%; }
+      .card-open-positions #trades-positions-table th:nth-child(8) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(9),
-      .card-open-positions #trades-positions-table th:nth-child(9) { width: 5%; }
+      .card-open-positions #trades-positions-table th:nth-child(9) { width: 10%; }
       .card-open-positions #positions-table th:nth-child(10),
       .card-open-positions #trades-positions-table th:nth-child(10) { width: 8.5%; }
       .card-open-positions #positions-table th:nth-child(11),
       .card-open-positions #trades-positions-table th:nth-child(11) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(12),
-      .card-open-positions #trades-positions-table th:nth-child(12) { width: 7%; }
+      .card-open-positions #trades-positions-table th:nth-child(12) { width: 6.5%; }
       .card-open-positions #positions-table th:nth-child(13),
-      .card-open-positions #trades-positions-table th:nth-child(13) { width: 6.5%; }
+      .card-open-positions #trades-positions-table th:nth-child(13) { width: 6%; }
       .card-open-positions #positions-table th:nth-child(14),
       .card-open-positions #trades-positions-table th:nth-child(14) { width: 3.5%; }
       .card-open-positions #positions-table td:nth-child(2),
@@ -5940,6 +5958,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         display: flex;
         max-width: 100%;
         width: 100%;
+      }
+      .card-open-positions #positions-table th:nth-child(9),
+      .card-open-positions #trades-positions-table th:nth-child(9),
+      .card-open-positions #positions-table td:nth-child(9),
+      .card-open-positions #trades-positions-table td:nth-child(9) {
+        padding-right: 0.45rem;
+        overflow: hidden;
+        white-space: normal;
+        vertical-align: top;
+      }
+      .card-open-positions #positions-table th:nth-child(10),
+      .card-open-positions #trades-positions-table th:nth-child(10),
+      .card-open-positions #positions-table td:nth-child(10),
+      .card-open-positions #trades-positions-table td:nth-child(10) {
+        padding-left: 0.45rem;
+        overflow: hidden;
       }
       .card-open-positions #positions-table th:nth-child(11),
       .card-open-positions #trades-positions-table th:nth-child(11),
@@ -5982,8 +6016,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .card-open-positions #trades-positions-table td:nth-child(5),
       .card-open-positions #positions-table td:nth-child(6),
       .card-open-positions #trades-positions-table td:nth-child(6),
-      .card-open-positions #positions-table td:nth-child(9),
-      .card-open-positions #trades-positions-table td:nth-child(9),
       .card-open-positions #positions-table td:nth-child(11),
       .card-open-positions #trades-positions-table td:nth-child(11),
       .card-open-positions #positions-table td:nth-child(13),
@@ -5991,6 +6023,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         font-size: 0.62rem;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+      }
+      .card-open-positions #positions-table td:nth-child(9),
+      .card-open-positions #trades-positions-table td:nth-child(9) {
+        font-size: 0.62rem;
+        font-variant-numeric: tabular-nums;
       }
       .card-open-positions #positions-table td:last-child .danger,
       .card-open-positions #trades-positions-table td:last-child .danger {
@@ -6036,7 +6073,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       .pos-hold { cursor: help; }
     }
     .pos-cost-cell { white-space: nowrap; font-size: 0.8rem; }
-    .pos-vol-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .pos-vol-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.1rem;
+      width: 100%;
+      max-width: 100%;
+      white-space: normal;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+      overflow: hidden;
+    }
+    .pos-vol-nums {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pos-vol-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.1rem 0.28rem;
+      max-width: 100%;
+    }
+    .pos-vol-chip {
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      line-height: 1.15;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     #wallets-table, #search-wallets-table, #discover-wallets-table, #nansen-wallets-table { min-width: 48rem; }
     #discover-wallets-table th, #discover-wallets-table td,
     #nansen-wallets-table th, #nansen-wallets-table td,
@@ -17046,6 +17117,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : '') +
             '</div>'
           );
+      /* Compact duplicate under token for mobile glanceability (PnL col often off-screen). */
+      const miniPnlHtml = summary
+        ? ''
+        : (function () {
+            const color = pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
+            const solLine =
+              (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL';
+            const pctBit =
+              '(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)';
+            const usdLine =
+              pnlUsd != null && Number.isFinite(pnlUsd)
+                ? (pnlUsd < 0 ? '-$' : '$') +
+                  Math.abs(pnlUsd).toFixed(2) +
+                  ' ' +
+                  pctBit
+                : pctBit;
+            return (
+              '<div class="closed-token-mini-pnl" style="color:' + color + '">' +
+                '<div class="closed-token-mini-sol">' + solLine + '</div>' +
+                '<div class="closed-token-mini-usd">' + usdLine + '</div>' +
+              '</div>'
+            );
+          })();
       const closedCell = opts.closedHtml != null
         ? opts.closedHtml
         : (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—');
@@ -17054,7 +17148,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (opts.groupAttr || '') +
           (opts.hidden ? ' hidden' : '') +
         '>' +
-          '<td>' + tokenCell + '</td>' +
+          '<td>' + tokenCell + miniPnlHtml + '</td>' +
           '<td>' + fmtTradeProfileBadge(opts.profileSource || p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td>' + fmtMintCa(p.mint) + '</td>' +
@@ -17895,15 +17989,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const tip =
         'Volume Intelligence · ' + parts.join(' · ') +
         (p.txnsH1 != null ? ' · ' + Number(p.txnsH1) + ' txns/hr' : '');
-      let chips = '';
+      const chipParts = [];
       const decay = p.volumeDecayState;
       if (decay === 'expanding' || decay === 'decaying' || decay === 'collapsed') {
         const dc =
           decay === 'expanding' ? '#34d399' :
           decay === 'collapsed' ? 'var(--red)' : '#fbbf24';
-        chips +=
-          ' <span class="pos-vol-chip" style="color:' + dc + '" title="Volume ' + decay + '">' +
-          decay + '</span>';
+        chipParts.push(
+          '<span class="pos-vol-chip" style="color:' + dc + '" title="Volume ' + decay + '">' +
+          decay + '</span>'
+        );
       }
       const div = p.volumeDivergenceState;
       if (div === 'bullish_divergence' || div === 'bearish_divergence' || div === 'confirming') {
@@ -17913,14 +18008,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const dc =
           div === 'bullish_divergence' ? '#34d399' :
           div === 'bearish_divergence' ? 'var(--red)' : '#94a3b8';
-        chips +=
-          ' <span class="pos-vol-chip" style="color:' + dc + '" title="' + div + '">' +
-          label + '</span>';
+        chipParts.push(
+          '<span class="pos-vol-chip" style="color:' + dc + '" title="' + div + '">' +
+          label + '</span>'
+        );
       }
       return (
         '<span class="pos-vol-cell" title="' + tip + '">' +
-        parts.join(' · ') +
-        chips +
+          '<span class="pos-vol-nums">' + parts.join(' · ') + '</span>' +
+          (chipParts.length
+            ? '<span class="pos-vol-chips">' + chipParts.join('') + '</span>'
+            : '') +
         '</span>'
       );
     }

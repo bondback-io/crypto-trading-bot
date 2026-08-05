@@ -2371,11 +2371,11 @@ export const config: BotConfig = {
     collapseAbsH1Usd: 1500,
     decayTightenMult: 0.85,
     collapseTightenMult: 0.7,
-    exitUrgencyOnDecay: true,
+    exitUrgencyOnDecay: false,
     divergenceEnabled: true,
     divergenceVolDropRatio: 0.85,
     divergenceMinSwingPct: 2.5,
-    exitUrgencyOnBearishDivergence: true,
+    exitUrgencyOnBearishDivergence: false,
     learningAdjustEnabled: false,
     profileSoft: {},
   },
@@ -3027,11 +3027,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         collapseAbsH1Usd: 1500,
         decayTightenMult: 0.85,
         collapseTightenMult: 0.7,
-        exitUrgencyOnDecay: true,
+        exitUrgencyOnDecay: false,
         divergenceEnabled: true,
         divergenceVolDropRatio: 0.85,
         divergenceMinSwingPct: 2.5,
-        exitUrgencyOnBearishDivergence: true,
+        exitUrgencyOnBearishDivergence: false,
         learningAdjustEnabled: false,
         profileSoft: {},
       }
@@ -3910,19 +3910,36 @@ function applySettingsSnapshot(
         DEFAULT_VOLUME_INTELLIGENCE,
         getVolumeIntelligenceConfig,
       } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      const rawVi = saved.volumeIntelligence as Partial<
+        import('./volumeIntelligence').VolumeIntelligenceConfig
+      > & { softExitMigrated176?: boolean };
+      // 1.2.176: clear sticky exit-urgency=true from 1.2.175 first persist.
+      const needsSoftExitMigration = rawVi.softExitMigrated176 !== true;
       config.volumeIntelligence = {
         ...DEFAULT_VOLUME_INTELLIGENCE,
-        ...(saved.volumeIntelligence as Partial<
-          import('./volumeIntelligence').VolumeIntelligenceConfig
-        >),
+        ...rawVi,
+        ...(needsSoftExitMigration
+          ? {
+              exitUrgencyOnDecay: false,
+              exitUrgencyOnBearishDivergence: false,
+            }
+          : {}),
         profileSoft:
-          saved.volumeIntelligence.profileSoft &&
-          typeof saved.volumeIntelligence.profileSoft === 'object'
-            ? saved.volumeIntelligence.profileSoft
+          rawVi.profileSoft && typeof rawVi.profileSoft === 'object'
+            ? rawVi.profileSoft
             : {},
       };
       // Normalize via getters (clamps)
       config.volumeIntelligence = getVolumeIntelligenceConfig();
+      if (needsSoftExitMigration) {
+        (config.volumeIntelligence as { softExitMigrated176?: boolean }).softExitMigrated176 =
+          true;
+        try {
+          persistUserSettings();
+        } catch {
+          /* optional */
+        }
+      }
     } catch {
       /* optional */
     }
