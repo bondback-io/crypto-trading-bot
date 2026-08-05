@@ -272,20 +272,41 @@ export function createServer(): express.Application {
 
   app.get('/api/status', async (_req: Request, res: Response) => {
     const monitor = getMonitorStatus();
-    const liveBalance =
-      config.mode === 'live' ? await getLiveBalanceSol() : null;
     const active = getActiveTradingWallet();
     const pubkey = getWalletPublicKey();
     let liveTradingReady = null;
+    let liveWalletConnected = true;
+    let liveWalletMeta: {
+      connected: boolean;
+      publicKey: string | null;
+      walletName: string | null;
+      walletId: string | null;
+      lastBalances: {
+        availableSol: number;
+        equitySol: number;
+        positionsValueSol: number;
+        at: number;
+      } | null;
+    } | null = null;
     if (config.mode === 'live') {
       try {
-        const { assertLiveTradingReady } =
-          require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+        const {
+          assertLiveTradingReady,
+          getConnectedLiveWalletMeta,
+          isLiveWalletConnected,
+        } = require('./liveWalletHistory') as typeof import('./liveWalletHistory');
         liveTradingReady = await assertLiveTradingReady('live');
+        liveWalletConnected = isLiveWalletConnected();
+        liveWalletMeta = getConnectedLiveWalletMeta();
       } catch {
         liveTradingReady = null;
+        liveWalletConnected = false;
       }
     }
+    const liveBalance =
+      config.mode === 'live' && liveWalletConnected
+        ? await getLiveBalanceSol()
+        : null;
     const paperStats = paperTrader.getStats();
     const liveSimScore = usesPaperAccounting()
       ? performanceScoreFromStats(paperStats)
@@ -293,12 +314,30 @@ export function createServer(): express.Application {
 
     const { marketSessionPublic } = require('./marketSession') as typeof import('./marketSession');
 
-    const availableBalance = usesPaperAccounting()
-      ? paperTrader.getBalance()
-      : liveBalance;
-    const portfolio = paperTrader.getPortfolioSummary(
-      usesPaperAccounting() ? null : liveBalance
-    );
+    const zeroPortfolio = {
+      availableBalanceSol: 0,
+      positionsValueSol: 0,
+      positionsCostSol: 0,
+      unrealizedPnlSol: 0,
+      realizedPnlSol: 0,
+      totalEquitySol: 0,
+      openCount: 0,
+      markedCount: 0,
+      startingBalanceSol: 0,
+      returnPct: 0,
+    };
+
+    const liveNeedsImport = config.mode === 'live' && !liveWalletConnected;
+    const availableBalance = liveNeedsImport
+      ? 0
+      : usesPaperAccounting()
+        ? paperTrader.getBalance()
+        : liveBalance;
+    const portfolio = liveNeedsImport
+      ? zeroPortfolio
+      : paperTrader.getPortfolioSummary(
+          usesPaperAccounting() ? null : liveBalance
+        );
 
     let solUsd: number | null = null;
     try {
@@ -309,6 +348,31 @@ export function createServer(): express.Application {
     } catch {
       solUsd = null;
     }
+
+    const zeroedStats = liveNeedsImport
+      ? {
+          ...paperStats,
+          totalTrades: 0,
+          closedTrades: 0,
+          openTrades: 0,
+          openCount: 0,
+          winRatePct: 0,
+          wins: 0,
+          losses: 0,
+          netPnlSol: 0,
+          dailyPnlSol: 0,
+          lifetimeClosed: 0,
+          lifetimeWins: 0,
+          lifetimeLosses: 0,
+          sessionClosed: 0,
+          profitFactor: 0,
+          maxDrawdownPct: 0,
+          avgHoldSec: 0,
+          balanceSol: 0,
+          bestTrade: null,
+          worstTrade: null,
+        }
+      : paperStats;
 
     res.json({
       mode: config.mode,
@@ -330,8 +394,8 @@ export function createServer(): express.Application {
       portfolio,
       /** Cached SOL/USD for overview equity USD hints */
       solUsd,
-      winRate: paperTrader.getWinRatePct(),
-      stats: paperStats,
+      winRate: liveNeedsImport ? 0 : paperTrader.getWinRatePct(),
+      stats: zeroedStats,
       soak: paperTrader.getSoakMetrics(),
       performanceScore: liveSimScore,
       charts: usesPaperAccounting() ? paperTrader.getChartData() : null,
@@ -349,10 +413,20 @@ export function createServer(): express.Application {
             publicKey: pubkey?.toBase58() ?? null,
           }
         : null,
-      liveBalance,
+      liveBalance: liveNeedsImport ? null : liveBalance,
       liveTradingReady,
-      sessionImport: paperTrader.getSessionImportMeta(),
+      liveWalletConnected: config.mode === 'live' ? liveWalletConnected : true,
+      liveWallet: liveWalletMeta,
+      sessionImport: liveNeedsImport
+        ? { source: null, at: 0, count: 0, openCount: 0 }
+        : paperTrader.getSessionImportMeta(),
       lastDashboardResetAt: getLastDashboardResetAt(),
+      /** When live && !connected, clients must not paint paper/sim lists */
+      liveWalletEmpty: liveNeedsImport,
+      learning: {
+        includeLiveModeEpisodes:
+          config.learning?.includeLiveModeEpisodes === true,
+      },
     });
   });
 
@@ -1060,8 +1134,8 @@ export function createServer(): express.Application {
   });
 
   /**
-   * Import closed (+ open hints) for the selected Overview stats window into
-   * the session Closed Trades list. Cap 1000. Cleared by Overview Reset.
+   * Import closed + open trades for the selected Overview stats window into
+   * the session overlay. Cap 1000 closed. Cleared by Overview Reset.
    */
   app.post('/api/overview/import-trades', (req: Request, res: Response) => {
     try {
@@ -1095,26 +1169,32 @@ export function createServer(): express.Application {
       } catch {
         solUsd = null;
       }
-      let extraClosed: ReturnType<typeof paperTrader.getClosedPositions> = [];
+      let extraClosed: ReturnType<typeof paperTrader.getDurableClosedPositions> =
+        [];
       if (config.mode === 'live') {
-        extraClosed = loadLiveWalletHistory().closed || [];
+        const hist = loadLiveWalletHistory();
+        const pk = hist.connectedPubkey;
+        extraClosed = pk && hist.byWallet[pk]?.closed
+          ? hist.byWallet[pk]!.closed
+          : [];
       }
-      // Use raw rings before session overlay for re-import source
+      // Use durable rings before session overlay for re-import source
       const closedSrc = [
-        ...paperTrader.getClosedPositions(),
+        ...paperTrader.getDurableClosedPositions(),
         ...extraClosed,
       ];
       const collected = collectOverviewWindowTrades({
         closed: closedSrc,
-        open: paperTrader.getOpenPositions(),
+        open: paperTrader.getDurableOpenPositions(),
         window,
         catalogIds,
         solUsd,
         extraClosed,
       });
-      const applied = paperTrader.importSessionClosedTrades(collected.closed, {
-        source: 'window',
-        window: collected.window,
+      const applied = paperTrader.importSessionOverlay({
+        closed: collected.closed,
+        opens: collected.opens,
+        meta: { source: 'window', window: collected.window },
       });
       const overview = (() => {
         const {
@@ -1142,6 +1222,7 @@ export function createServer(): express.Application {
         capped: collected.capped,
         openHints: collected.openHints,
         imported: applied.imported,
+        importedOpen: applied.importedOpen,
         overview,
         sessionImport: paperTrader.getSessionImportMeta(),
       });
@@ -1153,7 +1234,7 @@ export function createServer(): express.Application {
     }
   });
 
-  /** Import on-chain history for the active Live trading wallet (Live mode only). */
+  /** Import system live trades + on-chain balances for active Live wallet. */
   app.post('/api/live/import-wallet-history', async (_req: Request, res: Response) => {
     try {
       if (config.mode !== 'live') {
@@ -1166,22 +1247,52 @@ export function createServer(): express.Application {
       const { importLiveWalletTradeHistory, assertLiveTradingReady } =
         require('./liveWalletHistory') as typeof import('./liveWalletHistory');
       await assertLiveTradingReady('live');
-      const result = await importLiveWalletTradeHistory();
+      const result = await importLiveWalletTradeHistory(paperTrader);
       if (!result.ok) {
         res.status(400).json(result);
         return;
       }
-      paperTrader.importSessionClosedTrades(result.closed, {
-        source: 'live_wallet',
-        window: 'all',
+      paperTrader.importSessionOverlay({
+        closed: result.closed,
+        opens: result.opens,
+        meta: { source: 'live_wallet', window: 'all' },
       });
       res.json({
         ok: true,
         imported: result.imported,
+        importedOpen: result.importedOpen,
         scannedSigs: result.scannedSigs,
         walletPubkey: result.walletPubkey,
+        walletName: result.walletName,
+        walletId: result.walletId,
+        balances: result.balances,
+        noSystemTrades: result.noSystemTrades,
+        message: result.message,
         sessionImport: paperTrader.getSessionImportMeta(),
-        overviewHint: 'Imported live wallet history into session Closed Trades',
+        liveWalletConnected: true,
+        overviewHint: result.noSystemTrades
+          ? result.message
+          : 'Imported live wallet system trades into session',
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  /** Disconnect live wallet from Overview (keeps per-address history on disk). */
+  app.post('/api/live/disconnect-wallet', (_req: Request, res: Response) => {
+    try {
+      const { disconnectLiveWallet } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      const result = disconnectLiveWallet();
+      paperTrader.clearSessionImportedTrades();
+      res.json({
+        ...result,
+        liveWalletConnected: false,
+        sessionImport: paperTrader.getSessionImportMeta(),
       });
     } catch (err) {
       res.status(500).json({
@@ -2154,6 +2265,27 @@ export function createServer(): express.Application {
       req.query.fast === '1' ||
       req.query.fast === 'true' ||
       req.query.lite === '1';
+    let liveEmpty = false;
+    if (config.mode === 'live') {
+      try {
+        const { isLiveWalletConnected } =
+          require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+        liveEmpty = !isLiveWalletConnected();
+      } catch {
+        liveEmpty = true;
+      }
+    }
+    if (liveEmpty) {
+      res.json({
+        open: [],
+        closed: [],
+        sellHistory: [],
+        rebuy: { status: null, candidates: [] },
+        liveWalletEmpty: true,
+        ...(fast ? { fast: true } : {}),
+      });
+      return;
+    }
     const openRaw = paperTrader.getOpenPositions();
     // Always attach technicalLevels so fast (2s) and full (5s) polls paint
     // the same TOKEN meta height — omitting it caused open-row flicker/resize.
@@ -2992,6 +3124,41 @@ export function createServer(): express.Application {
       });
     } catch (err) {
       res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/config/live-mode-learning', (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      includeLiveModeEpisodes:
+        config.learning?.includeLiveModeEpisodes === true,
+    });
+  });
+
+  app.post('/api/config/live-mode-learning', (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { includeLiveModeEpisodes?: boolean };
+      if (typeof body.includeLiveModeEpisodes !== 'boolean') {
+        res.status(400).json({
+          ok: false,
+          error: 'includeLiveModeEpisodes boolean required',
+        });
+        return;
+      }
+      config.learning = {
+        includeLiveModeEpisodes: body.includeLiveModeEpisodes === true,
+      };
+      persistUserSettings();
+      res.json({
+        ok: true,
+        includeLiveModeEpisodes: config.learning.includeLiveModeEpisodes,
+        config: getConfigSnapshot(),
+      });
+    } catch (err) {
+      res.status(500).json({
         ok: false,
         error: err instanceof Error ? err.message : String(err),
       });

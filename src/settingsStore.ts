@@ -140,6 +140,10 @@ export interface PersistedBotSettings {
     snapshot?: Record<string, unknown> | null;
     fairnessBoost?: boolean;
   };
+  /** Episode learning sources (Live Mode inclusion) */
+  learning?: {
+    includeLiveModeEpisodes?: boolean;
+  };
   /** Soft MARL coordinator */
   marl?: {
     enabled?: boolean;

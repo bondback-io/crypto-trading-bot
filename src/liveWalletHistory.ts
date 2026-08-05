@@ -1,6 +1,7 @@
 /**
- * Live wallet on-chain trade history import.
+ * Live wallet history — system-recorded live trades + on-chain balances.
  * Live mode only — never mixes paper / liveSimulation ledger rows.
+ * Persists closed history per wallet pubkey for re-import after disconnect.
  */
 
 import {
@@ -11,7 +12,6 @@ import {
   readJsonFile,
 } from './dataDir';
 import {
-  withRpc,
   getKeypair,
   getLiveBalanceSol,
   peekTradingWalletPublicKey,
@@ -21,30 +21,79 @@ import {
   usesRealFunds,
   type TradingMode,
 } from './config';
-import { logger, errorToMeta } from './logger';
 import type { Position } from './paperTrader';
-import { PublicKey, type ParsedTransactionWithMeta } from '@solana/web3.js';
 
-export const LIVE_WALLET_IMPORT_MAX_SIGS = 400;
 export const LIVE_WALLET_IMPORT_MAX_TRADES = 1000;
 /** Default min SOL on the live wallet before Live trading may fire */
 export const DEFAULT_LIVE_MIN_WALLET_SOL = 0.05;
 
-export interface LiveWalletHistoryFile {
-  version: 1;
-  updatedAt: number;
-  walletPubkey: string;
+export interface LiveWalletBalances {
+  availableSol: number;
+  equitySol: number;
+  positionsValueSol: number;
+  at: number;
+}
+
+export interface LiveWalletBucket {
   closed: Position[];
+  lastBalances?: LiveWalletBalances;
+  walletName?: string;
+  walletId?: string;
+  updatedAt: number;
+}
+
+/** v2 per-wallet store with connected flag */
+export interface LiveWalletHistoryFile {
+  version: 2;
+  updatedAt: number;
+  /** When true, Live Overview shows imported wallet data */
+  connected: boolean;
+  connectedPubkey: string;
+  byWallet: Record<string, LiveWalletBucket>;
+  /** Legacy single-wallet fields (migrated on load) */
+  walletPubkey?: string;
+  closed?: Position[];
 }
 
 const FILE = () => dataFile(PERSIST_FILES.liveWalletHistory);
 
-function emptyHistory(walletPubkey = ''): LiveWalletHistoryFile {
+function emptyHistory(): LiveWalletHistoryFile {
   return {
-    version: 1,
+    version: 2,
     updatedAt: 0,
-    walletPubkey,
-    closed: [],
+    connected: false,
+    connectedPubkey: '',
+    byWallet: {},
+  };
+}
+
+function migrateRaw(raw: LiveWalletHistoryFile | null): LiveWalletHistoryFile {
+  if (!raw || typeof raw !== 'object') return emptyHistory();
+  if (Number(raw.version) >= 2 && raw.byWallet && typeof raw.byWallet === 'object') {
+    return {
+      version: 2,
+      updatedAt: Number(raw.updatedAt) || 0,
+      connected: raw.connected === true,
+      connectedPubkey: String(raw.connectedPubkey || ''),
+      byWallet: raw.byWallet,
+    };
+  }
+  // v1 → v2: single walletPubkey + closed
+  const pubkey = String(raw.walletPubkey || '');
+  const closed = Array.isArray(raw.closed) ? raw.closed : [];
+  const byWallet: Record<string, LiveWalletBucket> = {};
+  if (pubkey) {
+    byWallet[pubkey] = {
+      closed: closed.slice(0, LIVE_WALLET_IMPORT_MAX_TRADES),
+      updatedAt: Number(raw.updatedAt) || Date.now(),
+    };
+  }
+  return {
+    version: 2,
+    updatedAt: Number(raw.updatedAt) || 0,
+    connected: false,
+    connectedPubkey: '',
+    byWallet,
   };
 }
 
@@ -52,13 +101,7 @@ export function loadLiveWalletHistory(): LiveWalletHistoryFile {
   try {
     ensureDataDir();
     const raw = readJsonFile<LiveWalletHistoryFile>(FILE());
-    if (!raw || typeof raw !== 'object') return emptyHistory();
-    return {
-      version: 1,
-      updatedAt: Number(raw.updatedAt) || 0,
-      walletPubkey: String(raw.walletPubkey || ''),
-      closed: Array.isArray(raw.closed) ? raw.closed : [],
-    };
+    return migrateRaw(raw);
   } catch {
     return emptyHistory();
   }
@@ -66,13 +109,101 @@ export function loadLiveWalletHistory(): LiveWalletHistoryFile {
 
 export function saveLiveWalletHistory(file: LiveWalletHistoryFile): void {
   ensureDataDir();
+  file.version = 2;
   file.updatedAt = Date.now();
-  file.closed = file.closed.slice(0, LIVE_WALLET_IMPORT_MAX_TRADES);
+  for (const key of Object.keys(file.byWallet || {})) {
+    const b = file.byWallet[key];
+    if (b) b.closed = (b.closed || []).slice(0, LIVE_WALLET_IMPORT_MAX_TRADES);
+  }
   atomicWriteJson(FILE(), file);
 }
 
 export function clearLiveWalletHistory(): void {
   saveLiveWalletHistory(emptyHistory());
+}
+
+export function isLiveWalletConnected(): boolean {
+  const h = loadLiveWalletHistory();
+  return h.connected === true && Boolean(h.connectedPubkey);
+}
+
+export function getConnectedLiveWalletMeta(): {
+  connected: boolean;
+  publicKey: string | null;
+  walletName: string | null;
+  walletId: string | null;
+  lastBalances: LiveWalletBalances | null;
+} {
+  const h = loadLiveWalletHistory();
+  if (!h.connected || !h.connectedPubkey) {
+    return {
+      connected: false,
+      publicKey: null,
+      walletName: null,
+      walletId: null,
+      lastBalances: null,
+    };
+  }
+  const bucket = h.byWallet[h.connectedPubkey];
+  return {
+    connected: true,
+    publicKey: h.connectedPubkey,
+    walletName: bucket?.walletName || null,
+    walletId: bucket?.walletId || null,
+    lastBalances: bucket?.lastBalances || null,
+  };
+}
+
+/** Persist closed history for a pubkey without changing connected flag. */
+export function saveWalletClosedHistory(
+  pubkey: string,
+  closed: Position[],
+  meta?: { walletName?: string; walletId?: string; balances?: LiveWalletBalances }
+): void {
+  const h = loadLiveWalletHistory();
+  const prev = h.byWallet[pubkey] || {
+    closed: [],
+    updatedAt: 0,
+  };
+  const merged = mergeClosedById(prev.closed || [], closed);
+  h.byWallet[pubkey] = {
+    closed: merged.slice(0, LIVE_WALLET_IMPORT_MAX_TRADES),
+    lastBalances: meta?.balances ?? prev.lastBalances,
+    walletName: meta?.walletName ?? prev.walletName,
+    walletId: meta?.walletId ?? prev.walletId,
+    updatedAt: Date.now(),
+  };
+  saveLiveWalletHistory(h);
+}
+
+function mergeClosedById(a: Position[], b: Position[]): Position[] {
+  const map = new Map<string, Position>();
+  for (const p of [...a, ...b]) {
+    if (!p?.id) continue;
+    const prev = map.get(p.id);
+    if (!prev || (Number(p.closedAt) || 0) >= (Number(prev.closedAt) || 0)) {
+      map.set(p.id, p);
+    }
+  }
+  return Array.from(map.values()).sort(
+    (x, y) => (Number(y.closedAt) || 0) - (Number(x.closedAt) || 0)
+  );
+}
+
+/**
+ * Disconnect: clear session overlay is caller's job; keep disk history,
+ * set connected=false so Live Overview zeros until re-import.
+ */
+export function disconnectLiveWallet(): {
+  ok: true;
+  publicKey: string | null;
+} {
+  const h = loadLiveWalletHistory();
+  const prev = h.connectedPubkey || null;
+  h.connected = false;
+  h.connectedPubkey = '';
+  saveLiveWalletHistory(h);
+  return { ok: true, publicKey: prev };
 }
 
 export interface LiveTradingReadyResult {
@@ -200,176 +331,43 @@ export async function assertLiveTradingReady(
   });
 }
 
-type MintLeg = {
-  mint: string;
-  symbol: string;
-  signedSol: number;
-  slot: number;
-  blockTime: number;
-  signature: string;
-};
-
-function extractLegs(
-  tx: ParsedTransactionWithMeta,
-  owner: string
-): MintLeg[] {
-  const meta = tx.meta;
-  if (!meta || meta.err) return [];
-  const msg = tx.transaction.message;
-  const accountKeys = msg.accountKeys.map((k) =>
-    typeof k === 'string' ? k : k.pubkey.toBase58()
-  );
-  const ownerIdx = accountKeys.indexOf(owner);
-  if (ownerIdx < 0) return [];
-
-  const preSol = (meta.preBalances?.[ownerIdx] ?? 0) / 1e9;
-  const postSol = (meta.postBalances?.[ownerIdx] ?? 0) / 1e9;
-  const solDelta = postSol - preSol;
-
-  const preTok = meta.preTokenBalances || [];
-  const postTok = meta.postTokenBalances || [];
-  const byMint = new Map<string, { pre: number; post: number; decimals: number }>();
-
-  for (const b of preTok) {
-    if (b.owner !== owner || !b.mint) continue;
-    const ui = Number(b.uiTokenAmount?.uiAmount ?? 0);
-    const cur = byMint.get(b.mint) || {
-      pre: 0,
-      post: 0,
-      decimals: b.uiTokenAmount?.decimals ?? 0,
-    };
-    cur.pre = ui;
-    byMint.set(b.mint, cur);
-  }
-  for (const b of postTok) {
-    if (b.owner !== owner || !b.mint) continue;
-    const ui = Number(b.uiTokenAmount?.uiAmount ?? 0);
-    const cur = byMint.get(b.mint) || {
-      pre: 0,
-      post: 0,
-      decimals: b.uiTokenAmount?.decimals ?? 0,
-    };
-    cur.post = ui;
-    byMint.set(b.mint, cur);
-  }
-
-  const blockTime = (tx.blockTime || 0) * 1000;
-  const signature =
-    tx.transaction.signatures?.[0] ||
-    `slot-${tx.slot}`;
-  const legs: MintLeg[] = [];
-
-  for (const [mint, bal] of byMint) {
-    const delta = bal.post - bal.pre;
-    if (Math.abs(delta) < 1e-12) continue;
-    // Attribute SOL delta to the dominant mint change in this tx
-    legs.push({
-      mint,
-      symbol: mint.slice(0, 4),
-      signedSol: delta > 0 ? -Math.abs(solDelta) : Math.abs(solDelta),
-      slot: tx.slot,
-      blockTime: blockTime || Date.now(),
-      signature,
-    });
-  }
-
-  // Prefer single-mint swaps
-  if (legs.length > 1) {
-    legs.sort(
-      (a, b) => Math.abs(b.signedSol) - Math.abs(a.signedSol)
-    );
-    return [legs[0]!];
-  }
-  return legs;
-}
-
-function pairLegsToClosed(legs: MintLeg[]): Position[] {
-  // Group by mint: buys (token in / SOL out → signedSol < 0) then sells
-  const byMint = new Map<string, MintLeg[]>();
-  for (const leg of legs) {
-    const arr = byMint.get(leg.mint) || [];
-    arr.push(leg);
-    byMint.set(leg.mint, arr);
-  }
-  const closed: Position[] = [];
-  for (const [mint, arr] of byMint) {
-    arr.sort((a, b) => a.blockTime - b.blockTime);
-    const buys = arr.filter((l) => l.signedSol < 0);
-    const sells = arr.filter((l) => l.signedSol > 0);
-    let bi = 0;
-    let si = 0;
-    while (bi < buys.length && si < sells.length) {
-      const buy = buys[bi]!;
-      const sell = sells[si]!;
-      if (sell.blockTime < buy.blockTime) {
-        si++;
-        continue;
-      }
-      const costSol = Math.abs(buy.signedSol);
-      const proceeds = Math.abs(sell.signedSol);
-      const pnlSol = proceeds - costSol;
-      const pnlPct = costSol > 0 ? (pnlSol / costSol) * 100 : 0;
-      closed.push({
-        id: `liveimp-${sell.signature.slice(0, 16)}`,
-        mint,
-        symbol: buy.symbol || mint.slice(0, 6),
-        name: '',
-        entryPriceSol: 1,
-        amountTokens: 0,
-        costSol: costSol || 0.001,
-        initialAmountTokens: 0,
-        initialCostSol: costSol || 0.001,
-        takeProfitPct: 0,
-        stopLossPct: 0,
-        highWaterMarkSol: 1,
-        trailingStopPct: 0,
-        trailingActive: false,
-        tiersHit: [],
-        initialRecovered: false,
-        partialSellDone: false,
-        bagTrimDone: false,
-        solReturned: proceeds,
-        strategyKind: 'normal',
-        tradeMode: 'live',
-        realizedPnlSol: pnlSol,
-        openedAt: buy.blockTime,
-        closedAt: sell.blockTime,
-        exitPriceSol: costSol > 0 ? proceeds / costSol : 1,
-        pnlSol,
-        pnlPct,
-        status: 'closed',
-        reason: 'live_wallet_import',
-        entrySource: 'wallet',
-        tradeProfileId: 'default',
-      });
-      bi++;
-      si++;
-    }
-  }
-  closed.sort((a, b) => (b.closedAt || 0) - (a.closedAt || 0));
-  return closed.slice(0, LIVE_WALLET_IMPORT_MAX_TRADES);
-}
-
 /**
- * Scan the active live wallet for swap-like token balance changes and
- * pair buy→sell legs into closed Position rows. Live mode only.
+ * Import Live wallet: on-chain SOL for available/equity + bot-recorded
+ * live opens/closes only (no random on-chain swaps). Merges with saved
+ * per-wallet closed history and sets connected=true.
  */
-export async function importLiveWalletTradeHistory(): Promise<{
+export async function importLiveWalletTradeHistory(paperTrader: {
+  getDurableClosedPositions: () => Position[];
+  getDurableOpenPositions: () => Position[];
+}): Promise<{
   ok: boolean;
   error?: string;
+  message?: string;
   imported: number;
+  importedOpen: number;
   scannedSigs: number;
   walletPubkey: string | null;
+  walletName: string | null;
+  walletId: string | null;
   closed: Position[];
+  opens: Position[];
+  balances: LiveWalletBalances | null;
+  noSystemTrades: boolean;
 }> {
   if (!usesRealFunds()) {
     return {
       ok: false,
       error: 'Import Live Wallet is only available in Live mode',
       imported: 0,
+      importedOpen: 0,
       scannedSigs: 0,
       walletPubkey: null,
+      walletName: null,
+      walletId: null,
       closed: [],
+      opens: [],
+      balances: null,
+      noSystemTrades: true,
     };
   }
   const slot = getActiveTradingWallet();
@@ -379,64 +377,84 @@ export async function importLiveWalletTradeHistory(): Promise<{
       ok: false,
       error: 'No live trading wallet with a loaded key',
       imported: 0,
+      importedOpen: 0,
       scannedSigs: 0,
       walletPubkey: null,
+      walletName: null,
+      walletId: null,
       closed: [],
+      opens: [],
+      balances: null,
+      noSystemTrades: true,
     };
   }
 
-  const owner = pub;
-  let sigInfos: Array<{ signature: string }> = [];
-  try {
-    sigInfos = await withRpc('getSignaturesForAddress', (conn) =>
-      conn.getSignaturesForAddress(new PublicKey(owner), {
-        limit: LIVE_WALLET_IMPORT_MAX_SIGS,
-      })
-    );
-  } catch (err) {
-    logger.warn('LiveWalletImport', 'signatures failed', errorToMeta(err));
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-      imported: 0,
-      scannedSigs: 0,
-      walletPubkey: owner,
-      closed: [],
-    };
+  const systemClosed = (paperTrader.getDurableClosedPositions() || []).filter(
+    (p) => p.tradeMode === 'live'
+  );
+  const systemOpens = (paperTrader.getDurableOpenPositions() || []).filter(
+    (p) => p.tradeMode === 'live'
+  );
+
+  const store = loadLiveWalletHistory();
+  const saved = store.byWallet[pub]?.closed || [];
+  const closed = mergeClosedById(saved, systemClosed).slice(
+    0,
+    LIVE_WALLET_IMPORT_MAX_TRADES
+  );
+  const opens = systemOpens.slice(0, 200);
+
+  let availableSol = 0;
+  const balanceRead = await getLiveBalanceSol(slot.id);
+  if (balanceRead != null && Number.isFinite(balanceRead)) {
+    availableSol = Math.max(0, balanceRead);
   }
 
-  const legs: MintLeg[] = [];
-  const batchSize = 25;
-  for (let i = 0; i < sigInfos.length; i += batchSize) {
-    const batch = sigInfos.slice(i, i + batchSize).map((s) => s.signature);
-    try {
-      const txs = await withRpc('getParsedTransactions', (conn) =>
-        conn.getParsedTransactions(batch, {
-          maxSupportedTransactionVersion: 0,
-        })
-      );
-      for (const tx of txs) {
-        if (!tx) continue;
-        legs.push(...extractLegs(tx as ParsedTransactionWithMeta, owner));
-      }
-    } catch (err) {
-      logger.warn('LiveWalletImport', 'batch parse failed', errorToMeta(err));
-    }
+  let positionsValueSol = 0;
+  for (const p of opens) {
+    const cost =
+      Number(p.costSol) > 0
+        ? Number(p.costSol)
+        : Number(p.initialCostSol) > 0
+          ? Number(p.initialCostSol)
+          : 0;
+    positionsValueSol += cost;
   }
+  const equitySol = availableSol + positionsValueSol;
+  const balances: LiveWalletBalances = {
+    availableSol,
+    equitySol,
+    positionsValueSol,
+    at: Date.now(),
+  };
 
-  const closed = pairLegsToClosed(legs);
-  saveLiveWalletHistory({
-    version: 1,
-    updatedAt: Date.now(),
-    walletPubkey: owner,
+  store.connected = true;
+  store.connectedPubkey = pub;
+  store.byWallet[pub] = {
     closed,
-  });
+    lastBalances: balances,
+    walletName: slot.name,
+    walletId: slot.id,
+    updatedAt: Date.now(),
+  };
+  saveLiveWalletHistory(store);
+
+  const noSystemTrades = closed.length === 0 && opens.length === 0;
 
   return {
     ok: true,
     imported: closed.length,
-    scannedSigs: sigInfos.length,
-    walletPubkey: owner,
+    importedOpen: opens.length,
+    scannedSigs: 0,
+    walletPubkey: pub,
+    walletName: slot.name,
+    walletId: slot.id,
     closed,
+    opens,
+    balances,
+    noSystemTrades,
+    message: noSystemTrades
+      ? 'no trades or transactions have been recorded for this wallet'
+      : undefined,
   };
 }

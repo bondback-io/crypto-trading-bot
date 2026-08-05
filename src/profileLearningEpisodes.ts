@@ -84,6 +84,12 @@ export interface ProfileLearningEpisode {
   learningStrictness?: 'stricter' | 'middle' | 'looser';
   learningFairnessApplied?: boolean;
   /**
+   * Trade mode when the episode was recorded.
+   * Live Mode episodes are filtered out of RL/playbook unless
+   * config.learning.includeLiveModeEpisodes is ON.
+   */
+  tradeMode?: 'paper' | 'live';
+  /**
    * Entry timing quality 0–100 (cheap proxy from MAE depth vs hold / MFE path).
    * Optional — older episode rings omit this.
    */
@@ -370,11 +376,26 @@ export function patchProfileLearningEpisode(
 
 export function getProfileLearningEpisodes(
   profileId: string,
-  limit = 200
+  limit = 200,
+  opts?: { includeLiveMode?: boolean }
 ): ProfileLearningEpisode[] {
   const ring = loadProfile(profileId);
   const n = Math.max(1, Math.min(MAX_PER_PROFILE, limit));
-  return ring.slice(-n);
+  let out = ring.slice(-n);
+  // Default: exclude Live Mode episodes from learning consumers unless toggled on
+  let includeLive = opts?.includeLiveMode;
+  if (includeLive == null) {
+    try {
+      const { config } = require('./config') as typeof import('./config');
+      includeLive = config.learning?.includeLiveModeEpisodes === true;
+    } catch {
+      includeLive = false;
+    }
+  }
+  if (!includeLive) {
+    out = out.filter((e) => e.tradeMode !== 'live');
+  }
+  return out;
 }
 
 export function getProfileEpisodeExpectancy(

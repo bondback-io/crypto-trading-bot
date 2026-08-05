@@ -4079,10 +4079,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .ov-equity-main {
       display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
+      flex-wrap: nowrap;
+      align-items: flex-start;
       justify-content: space-between;
-      gap: 0.25rem 1rem;
+      gap: 0.5rem 0.75rem;
+    }
+    .ov-equity-left {
+      min-width: 0;
+      flex: 1 1 auto;
     }
     .ov-equity-label {
       font-size: 11px;
@@ -4123,7 +4127,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       display: flex;
       align-items: flex-end;
       gap: 0.65rem;
-      flex-shrink: 0;
+      flex: 0 0 auto;
+      align-self: flex-start;
       margin-left: auto;
     }
     .ov-reset-meta {
@@ -4143,6 +4148,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-weight: 500;
       color: #64748b;
       white-space: nowrap;
+    }
+    @media (max-width: 640px) {
+      .ov-equity-main {
+        gap: 0.35rem 0.5rem;
+      }
+      .ov-reset-wrap {
+        gap: 0.4rem;
+      }
+      .ov-reset-elapsed {
+        font-size: 11px;
+      }
+      .ov-reset-at {
+        font-size: 9px;
+        white-space: normal;
+        max-width: 7.25rem;
+      }
     }
     .ov-equity-rows {
       display: grid;
@@ -6290,8 +6311,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
       <div class="ov-equity-panel" id="ov-equity-panel" title="Available moves into Positions when you open a trade; marks update Unrealized continuously; closes credit Available and Realized.">
-        <div class="ov-equity-main" style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem">
-          <div>
+        <div class="ov-equity-main">
+          <div class="ov-equity-left">
             <div class="ov-equity-label">Total Equity <span class="tip tip-below" tabindex="0" data-tip="Available Balance + Positions Value. Most accurate view of portfolio worth across Paper, Live Sim, and Live."></span></div>
             <div class="ov-equity-value" id="ov-equity">—<span class="ov-unit">SOL</span></div>
           </div>
@@ -6345,7 +6366,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="30d" onclick="setOverviewStatsWindow('30d')">30d</button>
         <button type="button" class="closed-filter-btn ov-window-btn is-active" data-ov-window="all" onclick="setOverviewStatsWindow('all')" aria-pressed="true">All</button>
         <button type="button" class="btn btn-secondary text-xs ml-1" id="btn-ov-import-trades" onclick="importOverviewWindowTrades()" title="Import open + closed trades for the selected window into this session (All capped at 1000). Stats refresh to match. Use Overview Reset to clear.">Import trades</button>
-        <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-import-live-wallet" onclick="importLiveWalletHistory()" title="Live mode only: scan the active env trading wallet for on-chain swap history and import into this session. Never includes Paper / Live Sim test data.">Import live wallet</button>
+        <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-import-live-wallet" onclick="importLiveWalletHistory()" title="Live mode only: import on-chain balances + bot-recorded live opens/closes for the active trading wallet. Paper / Live Sim test data is never included.">Import live wallet</button>
+        <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-disconnect-live-wallet" onclick="disconnectLiveWallet()" title="Clear Live Overview wallet details and trades. History stays on disk for re-import. Live ↔ Live Sim without disconnect keeps data.">Disconnect</button>
         <span class="mint text-xs ml-auto" id="ov-window-label" title="Win Rate, Max DD, Trades, and Status PF/avg win-loss use this window. Wallets, Signals, Trade Rate, and Entries stay live.">Stats: All</span>
       </div>
       <p class="mint text-xs mt-1 mb-0 hidden" id="ov-import-meta"></p>
@@ -7793,6 +7815,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
+      <div class="card" id="live-mode-learning-microbots-card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div style="min-width:0;flex:1">
+            <div class="text-sm font-semibold text-slate-200">Live Mode Learning <span class="tip" tabindex="0" data-tip="Default OFF: bots learn episodes from Live Sim only. When ON, Live Mode closed trades also feed learning. Trading acts the same in Live vs Live Sim either way."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Include episodes / closed trades from Live Mode?</p>
+          </div>
+          <label class="ctl-check" title="Include Live Mode closed episodes in learning">
+            <input type="checkbox" id="live-mode-learning-enabled-mb" onchange="setLiveModeLearningEnabled(this.checked)" />
+            <span>Include Live Mode</span>
+          </label>
+        </div>
+      </div>
+
       <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
           <div style="min-width:0;flex:1">
@@ -8193,6 +8228,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="learning-mode-live-warning" class="hidden text-amber-300 text-xs mt-2 font-medium rounded-md px-2.5 py-2 border border-amber-600/60 bg-amber-950/40">Live trading with Learning Mode ON — softened gate overlays + effective concurrent/rate are active. Position size (SOL) and the Max Positions slider baseline are unchanged.</div>
           <p class="text-xs text-slate-500 mt-2 mb-0">Does not change position sizing. Snapshot captured on first OFF→ON; Reset restores it.</p>
+        </div>
+
+        <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="live-mode-learning-card">
+          <div class="section-title !text-sm mb-1">Live Mode Learning <span class="tip" tabindex="0" data-tip="By default bots learn from Live Sim closed trades only. Turn ON to also include Live Mode closed episodes in the same learning stack. Trading behaviour is otherwise identical in Live vs Live Sim."></span></div>
+          <p class="text-xs text-slate-400 mb-2">Include episodes / closed trades from Live Mode in learning? Default OFF — Live Sim keeps actively learning.</p>
+          <label class="ctl-check" title="When ON, Live Mode closed trades feed the same learning as Live Sim">
+            <input type="checkbox" id="live-mode-learning-enabled" onchange="setLiveModeLearningEnabled(this.checked)" />
+            <span>Live Mode Learning</span>
+          </label>
+          <span class="mint text-xs ml-2" id="live-mode-learning-label">OFF</span>
         </div>
 
         <div class="mt-4 pt-3" style="border-top:1px solid #1e293b" id="trade-caps-card">
@@ -9735,7 +9780,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const id = opens[i] && opens[i].id;
           if (id) curOpen.add(String(id));
         }
-        if (!st.hydrated) {
+        const muted =
+          window.__importMuteSoundsUntil &&
+          Date.now() < Number(window.__importMuteSoundsUntil);
+        if (!st.hydrated || muted) {
           st.openIds = curOpen;
           for (let i = 0; i < closeds.length; i++) {
             const c = closeds[i];
@@ -9797,6 +9845,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
     }
     window.maybePlayTradeLifecycleSounds = maybePlayTradeLifecycleSounds;
+
+    function seedTradeSoundIdsFromImport(closedList, openList) {
+      try {
+        if (!window.__tradeSoundState) {
+          window.__tradeSoundState = {
+            openIds: new Set(),
+            closedIds: new Set(),
+            hydrated: false,
+          };
+        }
+        const st = window.__tradeSoundState;
+        const closeds = Array.isArray(closedList) ? closedList : [];
+        const opens = Array.isArray(openList) ? openList : [];
+        for (let i = 0; i < closeds.length; i++) {
+          const c = closeds[i];
+          if (c && c.id && !/^partial:/i.test(String(c.reason || ''))) {
+            st.closedIds.add(String(c.id));
+          }
+        }
+        const curOpen = new Set();
+        for (let i = 0; i < opens.length; i++) {
+          if (opens[i] && opens[i].id) curOpen.add(String(opens[i].id));
+        }
+        if (curOpen.size) st.openIds = curOpen;
+        st.hydrated = true;
+        window.__importMuteSoundsUntil = Date.now() + 15000;
+      } catch (_) {}
+    }
+    window.seedTradeSoundIdsFromImport = seedTradeSoundIdsFromImport;
+
+    function showImportMetaStatus(text, opts) {
+      const meta = document.getElementById('ov-import-meta');
+      if (!meta) return;
+      const hideAt = Date.now() + 10000;
+      window.__importStatusHideAt = hideAt;
+      meta.classList.remove('hidden');
+      meta.style.color = (opts && opts.warn) ? '#fbbf24' : '';
+      meta.textContent = text || '';
+      setTimeout(function () {
+        if (Number(window.__importStatusHideAt) !== hideAt) return;
+        meta.classList.add('hidden');
+        meta.textContent = '';
+      }, 10000);
+    }
+    window.showImportMetaStatus = showImportMetaStatus;
 
     installNotifyAudioUnlock();
 
@@ -14015,37 +14108,45 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         !confirm(
           'Import trades for window ' +
             label +
-            '?\\n\\nLoads closed (+ open-in-window hints) into this session and refreshes Overview stats.\\nUse Overview Reset to clear.\\n\\nContinue?'
+            '?\\n\\nLoads closed + open trades into this session and refreshes Overview stats.\\nUse Overview Reset to clear.\\n\\nContinue?'
         )
       ) {
         return;
       }
       try {
+        window.__importMuteSoundsUntil = Date.now() + 15000;
         const data = await fetchJSON('/api/overview/import-trades', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ window: win }),
         });
+        seedTradeSoundIdsFromImport(
+          data.overview && data.overview.closed
+            ? data.overview.closed
+            : null,
+          data.openHints || null
+        );
         if (data.overview && typeof paintOverviewWindowStats === 'function') {
           window._lastOverviewWindowStats = data.overview;
           paintOverviewWindowStats(data.overview, window._lastOverviewStatusCtx || {});
         }
-        const meta = document.getElementById('ov-import-meta');
-        if (meta) {
-          meta.classList.remove('hidden');
-          meta.textContent =
-            'Imported ' +
+        showImportMetaStatus(
+          'Imported ' +
             (data.imported ?? data.importedClosed ?? 0) +
             ' closed' +
-            (data.openInWindow ? ' · ' + data.openInWindow + ' open in window' : '') +
+            (data.importedOpen || data.openInWindow
+              ? ' · ' + (data.importedOpen ?? data.openInWindow) + ' open'
+              : '') +
             (data.capped ? ' · capped at 1000' : '') +
-            ' · Reset clears';
-        }
+            ' · Reset clears'
+        );
         await refresh();
         alert(
           'Imported ' +
             (data.imported ?? 0) +
-            ' closed trade(s) for ' +
+            ' closed' +
+            (data.importedOpen ? ' + ' + data.importedOpen + ' open' : '') +
+            ' trade(s) for ' +
             label +
             (data.capped ? ' (capped at 1000)' : '')
         );
@@ -14056,49 +14157,100 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     async function importLiveWalletHistory() {
       if (
         !confirm(
-          'Import Live wallet history?\\n\\nScans the active env trading wallet for on-chain swaps and loads closed round-trips into this session.\\nPaper / Live Sim test data is never included.\\n\\nContinue?'
+          'Import Live wallet?\\n\\nLoads on-chain SOL balances and bot-recorded live opens/closes for the active trading wallet.\\nRandom on-chain swaps outside the bot are ignored.\\nPaper / Live Sim test data is never included.\\n\\nContinue?'
         )
       ) {
         return;
       }
       try {
+        window.__importMuteSoundsUntil = Date.now() + 15000;
         const data = await fetchJSON('/api/live/import-wallet-history', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         });
-        const meta = document.getElementById('ov-import-meta');
-        if (meta) {
-          meta.classList.remove('hidden');
-          meta.textContent =
-            'Live wallet imported ' +
-            (data.imported || 0) +
-            ' closed · scanned ' +
-            (data.scannedSigs || 0) +
-            ' sigs · Reset clears';
-        }
+        seedTradeSoundIdsFromImport(null, null);
+        const msg = data.noSystemTrades
+          ? (data.message ||
+              'no trades or transactions have been recorded for this wallet')
+          : ('Live wallet imported ' +
+              (data.imported || 0) +
+              ' closed · ' +
+              (data.importedOpen || 0) +
+              ' open');
+        const walletBit =
+          (data.walletName ? data.walletName + ' · ' : '') +
+          (data.walletPubkey
+            ? String(data.walletPubkey).slice(0, 8) + '…'
+            : '');
+        showImportMetaStatus(
+          msg +
+            (walletBit ? ' · ' + walletBit : '') +
+            (data.balances
+              ? ' · avail ' +
+                Number(data.balances.availableSol || 0).toFixed(4) +
+                ' · equity ' +
+                Number(data.balances.equitySol || 0).toFixed(4)
+              : '')
+        );
         if (typeof loadOverviewWindowStats === 'function') loadOverviewWindowStats();
         await refresh();
         alert(
-          'Imported ' +
-            (data.imported || 0) +
-            ' closed trade(s) from live wallet' +
-            (data.walletPubkey
-              ? ' (' + String(data.walletPubkey).slice(0, 8) + '…)'
+          (data.noSystemTrades
+            ? 'no trades or transactions have been recorded for this wallet'
+            : 'Imported ' +
+                (data.imported || 0) +
+                ' closed + ' +
+                (data.importedOpen || 0) +
+                ' open') +
+            (walletBit ? '\\n' + walletBit : '') +
+            (data.balances
+              ? '\\nAvailable ' +
+                Number(data.balances.availableSol || 0).toFixed(4) +
+                ' SOL · Equity ' +
+                Number(data.balances.equitySol || 0).toFixed(4) +
+                ' SOL'
               : '')
         );
       } catch (err) {
         alert('Import live wallet failed: ' + ((err && err.message) || err));
       }
     }
+    async function disconnectLiveWallet() {
+      if (
+        !confirm(
+          'Disconnect live wallet from Overview?\\n\\nClears wallet details and trades from the Live screen. History stays saved for re-import.\\n\\nContinue?'
+        )
+      ) {
+        return;
+      }
+      try {
+        await fetchJSON('/api/live/disconnect-wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        showImportMetaStatus('Live wallet disconnected — import again to load data');
+        window._lastOpenPositions = [];
+        window._lastClosedPositions = [];
+        if (typeof loadOverviewWindowStats === 'function') loadOverviewWindowStats();
+        await refresh();
+      } catch (err) {
+        alert('Disconnect failed: ' + ((err && err.message) || err));
+      }
+    }
     window.importOverviewWindowTrades = importOverviewWindowTrades;
     window.importLiveWalletHistory = importLiveWalletHistory;
+    window.disconnectLiveWallet = disconnectLiveWallet;
 
     function syncOverviewImportLiveWalletBtn(mode) {
-      const btn = document.getElementById('btn-ov-import-live-wallet');
-      if (!btn) return;
       const live = mode === 'live';
-      btn.classList.toggle('hidden', !live);
+      const importBtn = document.getElementById('btn-ov-import-trades');
+      const liveBtn = document.getElementById('btn-ov-import-live-wallet');
+      const discBtn = document.getElementById('btn-ov-disconnect-live-wallet');
+      if (importBtn) importBtn.classList.toggle('hidden', live);
+      if (liveBtn) liveBtn.classList.toggle('hidden', !live);
+      if (discBtn) discBtn.classList.toggle('hidden', !live);
     }
 
     function scoreboardRowFor(id, intelligence) {
@@ -14817,6 +14969,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.resetLearningMode = resetLearningMode;
+
+    function updateLiveModeLearningUi(learning) {
+      const on =
+        learning && learning.includeLiveModeEpisodes === true;
+      const a = document.getElementById('live-mode-learning-enabled');
+      const b = document.getElementById('live-mode-learning-enabled-mb');
+      const lab = document.getElementById('live-mode-learning-label');
+      if (a) a.checked = on;
+      if (b) b.checked = on;
+      if (lab) lab.textContent = on ? 'ON' : 'OFF';
+    }
+    window.updateLiveModeLearningUi = updateLiveModeLearningUi;
+
+    async function setLiveModeLearningEnabled(on) {
+      try {
+        const data = await fetchJSON('/api/config/live-mode-learning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ includeLiveModeEpisodes: !!on }),
+        });
+        updateLiveModeLearningUi({
+          includeLiveModeEpisodes: data.includeLiveModeEpisodes === true,
+        });
+      } catch (err) {
+        alert('Failed to save Live Mode Learning: ' + ((err && err.message) || err));
+        updateLiveModeLearningUi({ includeLiveModeEpisodes: !on });
+      }
+    }
+    window.setLiveModeLearningEnabled = setLiveModeLearningEnabled;
 
     async function toggleTradeProfile(id, enabled, skipConfirm) {
       if (!enabled && !skipConfirm) {
@@ -20016,6 +20197,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof updateLearningModeUi === 'function') {
           updateLearningModeUi(cfg.learningMode || null);
         }
+        if (typeof updateLiveModeLearningUi === 'function') {
+          updateLiveModeLearningUi(cfg.learning || null);
+        }
       } catch (_) {}
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
 
@@ -20144,20 +20328,42 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const liveReady = status.liveTradingReady;
       const liveGateEl = document.getElementById('ov-import-meta');
-      if (status.mode === 'live' && liveReady && !liveReady.ok && liveGateEl && !status.sessionImport?.count) {
+      const importStatusActive =
+        window.__importStatusHideAt &&
+        Date.now() < Number(window.__importStatusHideAt);
+      if (
+        status.mode === 'live' &&
+        liveReady &&
+        !liveReady.ok &&
+        liveGateEl &&
+        !status.sessionImport?.count &&
+        !importStatusActive
+      ) {
         liveGateEl.classList.remove('hidden');
         liveGateEl.textContent = liveReady.reason;
         liveGateEl.style.color = '#fbbf24';
-      } else if (status.sessionImport && status.sessionImport.count > 0 && liveGateEl) {
+      } else if (
+        status.mode === 'live' &&
+        status.liveWalletEmpty &&
+        liveGateEl &&
+        !importStatusActive
+      ) {
         liveGateEl.classList.remove('hidden');
-        liveGateEl.style.color = '';
+        liveGateEl.style.color = '#94a3b8';
         liveGateEl.textContent =
-          'Session import: ' +
-          status.sessionImport.count +
-          ' closed (' +
-          (status.sessionImport.source || 'window') +
-          (status.sessionImport.window ? ' · ' + status.sessionImport.window : '') +
-          ') · Reset clears';
+          'Live mode — import live wallet to load balances and system trades';
+      } else if (
+        !importStatusActive &&
+        liveGateEl &&
+        status.sessionImport &&
+        (status.sessionImport.count > 0 || status.sessionImport.openCount > 0)
+      ) {
+        // Don't permanently re-show after auto-hide; only when a fresh import set hideAt
+      }
+      if (typeof updateLiveModeLearningUi === 'function') {
+        updateLiveModeLearningUi(status.config && status.config.learning
+          ? status.config.learning
+          : status.learning);
       }
       ['paper', 'liveSimulation', 'live'].forEach((mode) => {
         const btn = document.getElementById('mode-' + mode);

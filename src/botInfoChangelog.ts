@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.167',
+    title: 'Import Overlay, Live Wallet & Live Mode Learning',
+    sections: ['overview', 'microbots', 'learning', 'execution'],
+    items: [
+      'Import trades now writes open + closed into a session overlay so Overview Available / Positions / Open / Realized / Daily match the imported window; sounds muted during import; import status auto-hides after 10s.',
+      'Live mode: hide Import trades; Import live wallet loads on-chain equity/available + bot-recorded live opens/closes (persisted per wallet); Disconnect clears Live UI while keeping history; first Live visit stays zeroed until import.',
+      'Live Mode Learning toggle (default OFF) — Live Sim keeps learning; Live closes skip episodes unless toggled on. Mobile Total Equity keeps timer/date/Reset top-right.',
+    ],
+  },
+  {
     version: '1.2.166',
     title: 'Dark Email Theme with Peach Accents',
     sections: ['alerts', 'zion', 'overview', 'backup'],

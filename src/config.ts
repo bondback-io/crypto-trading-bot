@@ -2055,6 +2055,14 @@ export interface BotConfig {
    * Default OFF. Does not change position sizing.
    */
   learningMode: import('./learningMode').LearningModeConfig;
+  /**
+   * Episode learning sources. Live Sim always learns; Live Mode closed
+   * episodes are excluded unless includeLiveModeEpisodes is ON.
+   */
+  learning: {
+    /** When true, Live Mode closed trades feed the same learning as Live Sim. Default OFF. */
+    includeLiveModeEpisodes: boolean;
+  };
   /** Soft MARL coordinator (lane ranking / size confidence / low-MC). */
   marl: import('./marlCoordinator').MarlConfig;
   /** Per-profile RL soft agents (setup-worth / confidence / TA / exit hints). */
@@ -2282,6 +2290,10 @@ export const config: BotConfig = {
     strictness: 'middle',
     snapshot: null,
     fairnessBoost: true,
+  },
+
+  learning: {
+    includeLiveModeEpisodes: false,
   },
 
   marl: {
@@ -2912,6 +2924,10 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
           snapshot: null,
           fairnessBoost: true,
         },
+    learning: {
+      includeLiveModeEpisodes:
+        config.learning?.includeLiveModeEpisodes === true,
+    },
     marl: cloneJson(config.marl || {
       enabled: false,
       strength: 'medium',
@@ -3719,6 +3735,12 @@ function applySettingsSnapshot(
         fairnessBoost: saved.learningMode.fairnessBoost !== false,
       };
     }
+  }
+  if (saved.learning && typeof saved.learning === 'object') {
+    config.learning = {
+      includeLiveModeEpisodes:
+        saved.learning.includeLiveModeEpisodes === true,
+    };
   }
   if (saved.marl && typeof saved.marl === 'object') {
     const s = saved.marl;
@@ -6019,5 +6041,9 @@ export function getConfigSnapshot() {
         };
       }
     })(),
+    learning: {
+      includeLiveModeEpisodes:
+        config.learning?.includeLiveModeEpisodes === true,
+    },
   };
 }

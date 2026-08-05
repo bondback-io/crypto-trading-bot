@@ -1,6 +1,6 @@
 /**
- * Overview window trade import — hydrate session closed list from durable
- * closed positions + learning episodes for the selected stats window.
+ * Overview window trade import — hydrate session closed + open lists from
+ * durable closed positions + learning episodes for the selected stats window.
  * Cap 1000 for All (and as a hard ceiling for any window).
  */
 
@@ -32,6 +32,8 @@ export interface OverviewImportResult {
   openInWindow: number;
   capped: boolean;
   closed: Position[];
+  /** Full open positions for session overlay (not display-only). */
+  opens: Position[];
   openHints: OverviewImportOpenHint[];
 }
 
@@ -146,13 +148,67 @@ function tradeLikeToPosition(
   };
 }
 
+function openRowToPosition(p: Partial<Position> & {
+  id?: string;
+  mint?: string;
+  symbol?: string;
+  name?: string;
+  openedAt?: number;
+  tradeMode?: string;
+  status?: string;
+}): Position {
+  const mint = String(p.mint || '');
+  const cost =
+    Number(p.costSol) > 0
+      ? Number(p.costSol)
+      : Number(p.initialCostSol) > 0
+        ? Number(p.initialCostSol)
+        : 0.05;
+  const entry = Number(p.entryPriceSol) > 0 ? Number(p.entryPriceSol) : 1;
+  return {
+    id: String(p.id || `open-${mint.slice(0, 8)}-${Number(p.openedAt) || 0}`),
+    mint,
+    symbol: String(p.symbol || mint.slice(0, 6) || '—'),
+    name: String(p.name || p.symbol || ''),
+    entryPriceSol: entry,
+    amountTokens: Number(p.amountTokens) || 0,
+    costSol: cost,
+    initialAmountTokens: Number(p.initialAmountTokens) || Number(p.amountTokens) || 0,
+    initialCostSol: Number(p.initialCostSol) || cost,
+    takeProfitPct: Number(p.takeProfitPct) || 0,
+    stopLossPct: Number(p.stopLossPct) || 0,
+    highWaterMarkSol: Number(p.highWaterMarkSol) || entry,
+    trailingStopPct: Number(p.trailingStopPct) || 0,
+    trailingActive: p.trailingActive === true,
+    tiersHit: Array.isArray(p.tiersHit) ? p.tiersHit : [],
+    initialRecovered: p.initialRecovered === true,
+    partialSellDone: p.partialSellDone === true,
+    bagTrimDone: p.bagTrimDone === true,
+    solReturned: Number(p.solReturned) || 0,
+    strategyKind: p.strategyKind === 'migration' ? 'migration' : 'normal',
+    tradeMode: p.tradeMode === 'live' ? 'live' : 'paper',
+    realizedPnlSol: Number(p.realizedPnlSol) || 0,
+    openedAt: Number(p.openedAt) || Date.now(),
+    status: p.status === 'partial' ? 'partial' : 'open',
+    tradeProfileId: p.tradeProfileId,
+    tradeProfileName: p.tradeProfileName,
+    tradeProfileIcon: p.tradeProfileIcon,
+    tradeProfileColor: p.tradeProfileColor,
+    entryMarketCapUsd: p.entryMarketCapUsd,
+    convictionScore: p.convictionScore,
+    entrySource: p.entrySource,
+    liveTokenAmount: p.liveTokenAmount,
+  };
+}
+
 /**
  * Build closed Position rows for the selected overview window from
  * in-memory closed + durable learning episodes. Hard-capped at 1000.
+ * Also returns open positions that fall in the window for session overlay.
  */
 export function collectOverviewWindowTrades(input: {
   closed: PerformanceTradeLike[];
-  open: Array<{
+  open: Array<Partial<Position> & {
     id?: string;
     mint?: string;
     symbol?: string;
@@ -248,28 +304,30 @@ export function collectOverviewWindowTrades(input: {
             ? nowMs - 7 * 86400_000
             : nowMs - 30 * 86400_000;
 
-  const openHints: OverviewImportOpenHint[] = (input.open || [])
-    .filter((p) => {
-      const opened = Number(p.openedAt) || 0;
-      if (window !== 'all' && opened < start) return false;
-      if (usesRealFunds()) return p.tradeMode === 'live' || !p.tradeMode;
-      return p.tradeMode !== 'live';
-    })
-    .map((p) => ({
-      id: String(p.id || p.mint || ''),
-      mint: String(p.mint || ''),
-      symbol: String(p.symbol || ''),
-      openedAt: Number(p.openedAt) || 0,
-      tradeMode: p.tradeMode,
-    }));
+  const openFiltered = (input.open || []).filter((p) => {
+    const opened = Number(p.openedAt) || 0;
+    if (window !== 'all' && opened < start) return false;
+    if (usesRealFunds()) return p.tradeMode === 'live' || !p.tradeMode;
+    return p.tradeMode !== 'live';
+  });
+
+  const opens = openFiltered.map((p) => openRowToPosition(p));
+  const openHints: OverviewImportOpenHint[] = opens.map((p) => ({
+    id: p.id,
+    mint: p.mint,
+    symbol: p.symbol,
+    openedAt: p.openedAt,
+    tradeMode: p.tradeMode,
+  }));
 
   return {
     ok: true,
     window,
     importedClosed: closed.length,
-    openInWindow: openHints.length,
+    openInWindow: opens.length,
     capped,
     closed,
+    opens,
     openHints,
   };
 }

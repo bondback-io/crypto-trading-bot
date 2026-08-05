@@ -472,6 +472,19 @@ function maybeRecordLearningEpisode(
   if (/^partial:/i.test(String(position.reason || ''))) return;
   const profileId = position.tradeProfileId;
   if (!profileId || profileId === 'default') return;
+  // Live Mode closed trades skip learning unless "Live Mode Learning" is ON.
+  // Live Sim / paper keep learning by default.
+  if (position.tradeMode === 'live') {
+    try {
+      const { config: cfg } = require('./config') as typeof import('./config');
+      const include =
+        (cfg as { learning?: { includeLiveModeEpisodes?: boolean } }).learning
+          ?.includeLiveModeEpisodes === true;
+      if (!include) return;
+    } catch {
+      return;
+    }
+  }
   try {
     const {
       appendProfileLearningEpisode,
@@ -590,6 +603,7 @@ function maybeRecordLearningEpisode(
       scannerPlaybook: position.scannerPlaybook,
       qualityTier: position.qualityTier,
       failureCategory: computeFailureCategory(position),
+      tradeMode: position.tradeMode === 'live' ? 'live' : 'paper',
       trailStopPctAtOpen:
         position.trailingStopPct != null && Number.isFinite(position.trailingStopPct)
           ? Number(position.trailingStopPct)
@@ -918,9 +932,11 @@ export class PaperTrader {
   /**
    * Session overlay from Overview "Import trades" / Live wallet import.
    * When set, Closed Trades + overview stats prefer this list (up to 1000).
-   * Cleared by Overview Reset.
+   * Cleared by Overview Reset / Disconnect wallet.
    */
   private sessionImportedClosed: Position[] | null = null;
+  /** Session overlay for open/active trades (Import trades / Live wallet). */
+  private sessionImportedOpen: Position[] | null = null;
   private sessionImportMeta: {
     source: 'window' | 'live_wallet' | null;
     window?: string;
@@ -1247,6 +1263,33 @@ export class PaperTrader {
    * Live: pass `availableOverrideSol` = on-chain wallet SOL so Available
    * reflects funds not locked in tracked open positions' market value.
    */
+  /** Closed rows used for session stats (overlay when present). */
+  private closedForSessionStats(): Position[] {
+    return this.sessionImportedClosed != null
+      ? this.sessionImportedClosed
+      : this.closedPositions;
+  }
+
+  /** Open rows used for session portfolio (overlay when present, merged with durable). */
+  private opensForSessionStats(): Position[] {
+    if (this.sessionImportedOpen != null) {
+      const { usesRealFunds } = require('./config') as typeof import('./config');
+      const live = usesRealFunds();
+      const modeFilter = (p: Position) =>
+        live ? p.tradeMode === 'live' : p.tradeMode !== 'live';
+      const byId = new Map<string, Position>();
+      for (const p of this.sessionImportedOpen) {
+        if (p?.id) byId.set(p.id, p);
+      }
+      for (const p of this.positions.values()) {
+        if (!modeFilter(p)) continue;
+        byId.set(p.id, p);
+      }
+      return Array.from(byId.values()).filter(modeFilter);
+    }
+    return Array.from(this.positions.values());
+  }
+
   getPortfolioSummary(availableOverrideSol?: number | null): {
     availableBalanceSol: number;
     positionsValueSol: number;
@@ -1262,8 +1305,9 @@ export class PaperTrader {
     let positionsCostSol = 0;
     let positionsValueSol = 0;
     let markedCount = 0;
-    for (const p of this.positions.values()) {
-      const cost = Number(p.costSol) || 0;
+    const opens = this.opensForSessionStats();
+    for (const p of opens) {
+      const cost = Number(p.costSol) || Number(p.initialCostSol) || 0;
       positionsCostSol += cost;
       const px = this.priceCache.get(p.mint);
       if (
@@ -1285,7 +1329,9 @@ export class PaperTrader {
         : this.balanceSol;
     const unrealizedPnlSol = positionsValueSol - positionsCostSol;
     const totalEquitySol = availableBalanceSol + positionsValueSol;
-    const realizedPnlSol = realizedPnlFromClosedHistory(this.closedPositions);
+    const realizedPnlSol = realizedPnlFromClosedHistory(
+      this.closedForSessionStats()
+    );
     const start = this.startingBalanceSol;
     return {
       availableBalanceSol,
@@ -1294,7 +1340,7 @@ export class PaperTrader {
       unrealizedPnlSol,
       realizedPnlSol,
       totalEquitySol,
-      openCount: this.positions.size,
+      openCount: opens.length,
       markedCount,
       startingBalanceSol: start,
       returnPct:
@@ -1313,12 +1359,56 @@ export class PaperTrader {
   getOpenPositions(): Position[] {
     const { usesRealFunds } = require('./config') as typeof import('./config');
     const live = usesRealFunds();
+    const modeFilter = (p: Position) => {
+      if (live) return p.tradeMode === 'live';
+      return p.tradeMode !== 'live';
+    };
+    if (this.sessionImportedOpen != null) {
+      // Overlay snapshot + any newer durable opens (durable wins on id clash)
+      const byId = new Map<string, Position>();
+      for (const p of this.sessionImportedOpen) {
+        if (p?.id) byId.set(p.id, p);
+      }
+      for (const p of this.positions.values()) {
+        if (!modeFilter(p)) continue;
+        byId.set(p.id, p);
+      }
+      return Array.from(byId.values())
+        .filter(modeFilter)
+        .map((p) => this.withTrailSnapshot(p));
+    }
+    return Array.from(this.positions.values())
+      .filter(modeFilter)
+      .map((p) => this.withTrailSnapshot(p));
+  }
+
+  /**
+   * Durable open positions (ignores session import overlay).
+   * Used as re-import source so overlays do not feed themselves.
+   */
+  getDurableOpenPositions(): Position[] {
+    const { usesRealFunds } = require('./config') as typeof import('./config');
+    const live = usesRealFunds();
     return Array.from(this.positions.values())
       .filter((p) => {
         if (live) return p.tradeMode === 'live';
         return p.tradeMode !== 'live';
       })
       .map((p) => this.withTrailSnapshot(p));
+  }
+
+  /**
+   * Durable closed positions (ignores session import overlay).
+   */
+  getDurableClosedPositions(): Position[] {
+    const { usesRealFunds } = require('./config') as typeof import('./config');
+    const live = usesRealFunds();
+    return this.closedPositions.filter((p) => {
+      if (live) {
+        return p.tradeMode === 'live' || p.reason === 'live_wallet_import';
+      }
+      return p.tradeMode !== 'live';
+    });
   }
 
   /** Enrich position with current trailing stop price for UI / API */
@@ -1673,15 +1763,25 @@ export class PaperTrader {
   }
 
   /**
-   * Replace session closed list with imported rows (Overview Import / Live wallet).
-   * Does not persist into paperBalance.json lifetime ring — Reset clears it.
+   * Replace session closed (+ optional opens) with imported rows
+   * (Overview Import / Live wallet). Does not persist into paperBalance.json
+   * lifetime ring — Reset / Disconnect clears it.
    */
   importSessionClosedTrades(
     rows: Position[],
-    meta: { source: 'window' | 'live_wallet'; window?: string }
-  ): { imported: number } {
+    meta: { source: 'window' | 'live_wallet'; window?: string },
+    opens?: Position[] | null
+  ): { imported: number; importedOpen: number } {
     const capped = rows.slice(0, 1000).map((p) => ({ ...p, status: 'closed' as const }));
     this.sessionImportedClosed = capped;
+    if (opens !== undefined) {
+      this.sessionImportedOpen = (opens || [])
+        .slice(0, 200)
+        .map((p) => ({
+          ...p,
+          status: (p.status === 'partial' ? 'partial' : 'open') as PositionStatus,
+        }));
+    }
     this.sessionImportMeta = {
       source: meta.source,
       window: meta.window,
@@ -1692,16 +1792,32 @@ export class PaperTrader {
     this.lifetimeClosed = reps.length;
     this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
     this.lifetimeLosses = Math.max(0, this.lifetimeClosed - this.lifetimeWins);
+    const openN = this.sessionImportedOpen?.length ?? 0;
     this.log(
       'info',
-      `Imported ${capped.length} closed trade(s) ` +
-        `(${meta.source}${meta.window ? ` · ${meta.window}` : ''}) — use Overview Reset to clear`
+      `Imported ${capped.length} closed` +
+        (opens !== undefined ? ` + ${openN} open` : '') +
+        ` trade(s) (${meta.source}${meta.window ? ` · ${meta.window}` : ''}) — use Overview Reset to clear`
     );
-    return { imported: capped.length };
+    return { imported: capped.length, importedOpen: openN };
+  }
+
+  /** Alias — apply closed + opens overlay in one call. */
+  importSessionOverlay(input: {
+    closed: Position[];
+    opens?: Position[] | null;
+    meta: { source: 'window' | 'live_wallet'; window?: string };
+  }): { imported: number; importedOpen: number } {
+    return this.importSessionClosedTrades(
+      input.closed,
+      input.meta,
+      input.opens ?? null
+    );
   }
 
   clearSessionImportedTrades(): void {
     this.sessionImportedClosed = null;
+    this.sessionImportedOpen = null;
     this.sessionImportMeta = { source: null, at: 0 };
   }
 
@@ -1710,10 +1826,12 @@ export class PaperTrader {
     window?: string;
     at: number;
     count: number;
+    openCount: number;
   } {
     return {
       ...this.sessionImportMeta,
       count: this.sessionImportedClosed?.length ?? 0,
+      openCount: this.sessionImportedOpen?.length ?? 0,
     };
   }
 
@@ -2456,7 +2574,7 @@ export class PaperTrader {
     start.setUTCDate(start.getUTCDate() - diff);
     start.setUTCHours(0, 0, 0, 0);
     const cut = start.getTime();
-    return this.closedPositions
+    return this.closedForSessionStats()
       .filter((p) => p.closedAt && p.closedAt >= cut)
       .reduce((sum, p) => sum + (p.pnlSol ?? 0), 0);
   }
@@ -4336,7 +4454,7 @@ export class PaperTrader {
     startOfDay.setUTCHours(0, 0, 0, 0);
     const startMs = startOfDay.getTime();
 
-    return chronologicalRealizedDeltas(this.closedPositions)
+    return chronologicalRealizedDeltas(this.closedForSessionStats())
       .filter((d) => d.time >= startMs)
       .reduce((sum, d) => sum + d.pnlSol, 0);
   }
@@ -4351,7 +4469,7 @@ export class PaperTrader {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
     const startMs = startOfDay.getTime();
-    const reps = representativeClosedTrades(this.closedPositions).filter(
+    const reps = representativeClosedTrades(this.closedForSessionStats()).filter(
       (p) => (p.closedAt ?? 0) >= startMs
     );
     const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
