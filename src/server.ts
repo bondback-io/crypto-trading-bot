@@ -438,6 +438,15 @@ export function createServer(): express.Application {
         includeLiveModeEpisodes:
           config.learning?.includeLiveModeEpisodes === true,
       },
+      fastProfileRecovery: (() => {
+        try {
+          const { getFastRecoveryUiHints } =
+            require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+          return getFastRecoveryUiHints();
+        } catch {
+          return { groupEnabled: false, byProfile: {} };
+        }
+      })(),
     });
   });
 

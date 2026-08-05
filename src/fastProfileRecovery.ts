@@ -1211,6 +1211,36 @@ export function getFastProfileRecoveryPublic(): {
   };
 }
 
+/** Compact per-profile recovery hints for dashboard badges/chips (stages 0–3 only). */
+export function getFastRecoveryUiHints(): {
+  groupEnabled: boolean;
+  byProfile: Record<
+    string,
+    { stage: RecoveryStage; stageName: string; enabled: boolean; inRecovery: boolean }
+  >;
+} {
+  const config_ = getFastProfileRecoveryConfig();
+  const byProfile: Record<
+    string,
+    { stage: RecoveryStage; stageName: string; enabled: boolean; inRecovery: boolean }
+  > = {};
+  for (const id of FAST_RECOVERY_PROFILE_IDS) {
+    const st = getProfileRecoveryStatus(id);
+    if (!st) continue;
+    const stage = st.stage;
+    const enabled = st.enabled !== false;
+    const inRecovery =
+      config_.enabled === true && enabled && stage >= 0 && stage <= 3;
+    byProfile[id] = {
+      stage,
+      stageName: st.stageName || RECOVERY_STAGE_NAMES[stage],
+      enabled,
+      inRecovery,
+    };
+  }
+  return { groupEnabled: config_.enabled === true, byProfile };
+}
+
 export function formatFastRecoveryPlainLanguage(): string[] {
   try {
     const { profiles } = getFastProfileRecoveryPublic();

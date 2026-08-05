@@ -681,6 +681,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       flex-direction: column;
       gap: 0.2rem;
       min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+      box-sizing: border-box;
+      position: relative;
+      z-index: 0;
     }
     .ctl > span {
       font-size: 11px;
@@ -688,11 +693,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-weight: 500;
       letter-spacing: .02em;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      display: block;
+      line-height: 1.25;
     }
     .ctl input:not([type="checkbox"]):not([type="radio"]),
     .ctl select {
       width: 100%;
-      min-width: 4.5rem;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .ctl input[type="checkbox"],
     .ctl input[type="radio"] {
@@ -705,6 +717,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .ctl-md { width: 5.75rem; }
     .ctl-lg { width: 7.5rem; }
     .ctl-date { width: 10.5rem; }
+    /* Prefer content-sized fields when labels are longer than ctl-sm */
+    .ctl.ctl-fit {
+      width: auto;
+      min-width: 4.75rem;
+      overflow: visible;
+    }
+    .ctl.ctl-fit > span {
+      overflow: visible;
+      text-overflow: clip;
+    }
     .ctl-check {
       display: inline-flex;
       flex-direction: row;
@@ -3271,6 +3293,58 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .fpr-s4 { background: rgba(34,197,94,0.18); color: #86efac; border: 1px solid rgba(34,197,94,0.35); }
     .fpr-gate-pass { color: #86efac; }
     .fpr-gate-fail { color: #fca5a5; }
+    /* Minimal recovery-stage chips on badges / profile chips elsewhere */
+    .fpr-hint {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      padding: 0.06rem 0.28rem;
+      border-radius: 0.25rem;
+      margin-left: 0.28rem;
+      line-height: 1.15;
+      vertical-align: middle;
+      flex-shrink: 0;
+      white-space: nowrap;
+      border: 1px solid transparent;
+    }
+    .fpr-hint-s0 {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.45);
+    }
+    .fpr-hint-s1,
+    .fpr-hint-s2 {
+      color: #f2ae66;
+      background: rgba(242, 174, 102, 0.16);
+      border-color: rgba(242, 174, 102, 0.45);
+    }
+    .fpr-hint-s3 {
+      color: #fdba74;
+      background: rgba(251, 146, 60, 0.14);
+      border-color: rgba(251, 146, 60, 0.4);
+    }
+    .trade-profile-badge .fpr-hint,
+    .tp-chip .fpr-hint,
+    .tp-name .fpr-hint {
+      margin-left: 0.22rem;
+    }
+    #fpr-controls-row {
+      align-items: flex-end;
+    }
+    #fpr-controls-row > .ctl-check {
+      padding-top: 0;
+      align-self: center;
+      flex: 0 0 auto;
+    }
+    #fpr-controls-row > .ctl.ctl-fit {
+      flex: 0 1 auto;
+    }
+    #fpr-controls-row #fpr-cooldown {
+      min-width: 5.5rem;
+    }
     .fpr-progress {
       height: 4px;
       background: #1e293b;
@@ -5969,6 +6043,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         flex: 1 1 calc(50% - 0.35rem);
         width: auto !important;
         min-width: calc(50% - 0.35rem);
+      }
+      .filters-row > .ctl.ctl-fit,
+      .filters-row > label.ctl.ctl-fit {
+        flex: 1 1 calc(50% - 0.35rem);
+        min-width: calc(50% - 0.35rem);
+        max-width: 100%;
+        overflow: hidden;
+      }
+      #fpr-controls-row > .ctl.ctl-fit,
+      #fpr-controls-row > label.ctl.ctl-fit {
+        flex: 1 1 calc(50% - 0.35rem);
+      }
+      #fpr-controls-row > .ctl-check,
+      #fpr-controls-row > label.ctl-check {
+        flex: 1 1 100%;
+        padding-top: 0.15rem;
       }
       .filters-row > .ctl-lg,
       .filters-row > label.ctl-lg {
@@ -8774,31 +8864,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="section-title">Fast Profiles Recovery Stages <span class="tip" tabindex="0" data-tip="Stages 0–4 for Scalper, Reversal Scalper, Momentum Burst, Migration Sniper. Auto taper: frequency → size → concurrency → exit strictness. Hard safety filters always win. Slower profiles untouched."></span></div>
             <p class="text-xs text-slate-400 mb-0">Self-adjusting recovery for short-term profiles. Stage 0 = full recovery (red); Stage 4 = normal (green).</p>
           </div>
-          <label class="ctl ctl-sm flex items-center gap-2">
+          <label class="ctl-check" title="Enable Fast Profiles Recovery group">
             <input type="checkbox" id="fpr-enabled" onchange="saveFastProfileRecovery()" />
             <span>Group ON</span>
           </label>
         </div>
-        <div class="filters-row mb-2 flex flex-wrap gap-2 items-end">
-          <label class="ctl ctl-sm flex items-center gap-2">
+        <div class="filters-row mb-2" id="fpr-controls-row">
+          <label class="ctl-check" title="Auto taper frequency → size → concurrency → exits">
             <input type="checkbox" id="fpr-autotaper" checked onchange="saveFastProfileRecovery()" />
             <span>Auto taper</span>
           </label>
-          <label class="ctl ctl-sm">
+          <label class="ctl ctl-fit">
             <span>Size ×</span>
-            <input type="number" id="fpr-size" min="0.3" max="1" step="0.05" value="0.65" style="width:4.5rem" onchange="saveFastProfileRecovery()" />
+            <input type="number" id="fpr-size" min="0.3" max="1" step="0.05" value="0.65" onchange="saveFastProfileRecovery()" />
           </label>
-          <label class="ctl ctl-sm">
-            <span>Cooldownoldown ms</span>
-            <input type="number" id="fpr-cooldown" min="15000" step="5000" value="120000" style="width:6rem" onchange="saveFastProfileRecovery()" />
+          <label class="ctl ctl-fit">
+            <span>Cooldown ms</span>
+            <input type="number" id="fpr-cooldown" min="15000" step="5000" value="120000" onchange="saveFastProfileRecovery()" />
           </label>
-          <label class="ctl ctl-sm">
+          <label class="ctl ctl-fit">
             <span>PPP arm %</span>
-            <input type="number" id="fpr-arm" min="25" max="70" step="1" value="45" style="width:4rem" onchange="saveFastProfileRecovery()" />
+            <input type="number" id="fpr-arm" min="25" max="70" step="1" value="45" onchange="saveFastProfileRecovery()" />
           </label>
-          <label class="ctl ctl-sm">
+          <label class="ctl ctl-fit">
             <span>Giveback %</span>
-            <input type="number" id="fpr-giveback" min="15" max="50" step="1" value="30" style="width:4rem" onchange="saveFastProfileRecovery()" />
+            <input type="number" id="fpr-giveback" min="15" max="50" step="1" value="30" onchange="saveFastProfileRecovery()" />
           </label>
           <button type="button" class="btn btn-sm" onclick="loadFastProfileRecovery()">Refresh</button>
         </div>
@@ -11915,6 +12005,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 ';border-color:' + color + '99;background:' + color + '22" title="' + tip +
                 '" aria-label="' + escHtml(name) + (on ? '' : ' (off)') + '">' +
                 escHtml(p.icon || '') + ' ' + escHtml(name) + (on ? '' : ' (off)') +
+                fmtFastRecoveryHint(p.id) +
                 '</span>'
               );
             }).join('')
@@ -12946,6 +13037,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   '<span class="tp-name tp-mod-tip" tabindex="0" style="color:' + color + '" aria-label="' +
                     escHtml(p.name || '') + ' modules">' +
                     escHtml(p.icon || '') + ' ' + escHtml(p.name) +
+                    fmtFastRecoveryHint(p.id) +
                     pausedBadge +
                     (p.hasOverrides ? '<span class="tp-override-badge">edited</span>' : '') +
                     (sl.enabled && slBadge
@@ -13228,6 +13320,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               escHtml(r.icon || '') +
               ' ' +
               escHtml(r.name) +
+              fmtFastRecoveryHint(r.profileId) +
               '</td>' +
               '<td style="color:' +
               wrColor +
@@ -13503,10 +13596,70 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return 'fpr-s4';
     }
 
+    /** Cache compact recovery hints from /api/status or FPR panel load. */
+    function applyFastRecoveryHints(payload) {
+      if (!payload || typeof payload !== 'object') return;
+      window.__fastRecoveryHints = {
+        groupEnabled: payload.groupEnabled === true,
+        byProfile: payload.byProfile && typeof payload.byProfile === 'object'
+          ? payload.byProfile
+          : {},
+      };
+    }
+
+    /** Minimal R0–R3 mark for profile chips/badges when in recovery. */
+    function fmtFastRecoveryHint(profileId) {
+      if (!profileId) return '';
+      const hints = window.__fastRecoveryHints;
+      if (!hints || !hints.groupEnabled) return '';
+      const row = hints.byProfile && hints.byProfile[profileId];
+      if (!row || !row.inRecovery) return '';
+      const stage = Math.max(0, Math.min(3, Number(row.stage) || 0));
+      const name = row.stageName || ('Stage ' + stage);
+      const cls =
+        stage <= 0 ? 'fpr-hint-s0' : stage <= 2 ? 'fpr-hint-s1' : 'fpr-hint-s3';
+      return (
+        '<span class="fpr-hint ' +
+        cls +
+        '" title="Recovery Mode · Stage ' +
+        stage +
+        ' · ' +
+        escHtml(String(name)) +
+        '" aria-label="Recovery stage ' +
+        stage +
+        '">R' +
+        stage +
+        '</span>'
+      );
+    }
+    window.fmtFastRecoveryHint = fmtFastRecoveryHint;
+
     async function loadFastProfileRecovery() {
       try {
         const data = await fetchJSON('/api/fast-profile-recovery');
         const cfg = data.config || {};
+        try {
+          const byProfile = {};
+          (Array.isArray(data.profiles) ? data.profiles : []).forEach(function (p) {
+            if (!p || !p.profileId) return;
+            const stage = Number(p.stage);
+            const enabled = p.enabled !== false;
+            byProfile[p.profileId] = {
+              stage: stage,
+              stageName: p.stageName || '',
+              enabled: enabled,
+              inRecovery:
+                cfg.enabled === true &&
+                enabled &&
+                stage >= 0 &&
+                stage <= 3,
+            };
+          });
+          applyFastRecoveryHints({
+            groupEnabled: cfg.enabled === true,
+            byProfile: byProfile,
+          });
+        } catch (_) {}
         const en = document.getElementById('fpr-enabled');
         const at = document.getElementById('fpr-autotaper');
         if (en) en.checked = cfg.enabled === true;
@@ -13601,11 +13754,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\\'' +
               p.profileId +
               '\\',0,true)">Lock 0</button>' +
-              '<label class="ctl ctl-sm flex items-center gap-1 text-xs"><input type="checkbox" ' +
+              '<label class="ctl-check text-xs"><input type="checkbox" ' +
               (p.enabled ? 'checked' : '') +
               ' onchange="toggleFastRecoveryProfile(\\'' +
               p.profileId +
-              '\\',this.checked)" /> On</label>' +
+              '\\',this.checked)" /><span>On</span></label>' +
               '</div></div>'
             );
           })
@@ -14341,6 +14494,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<td class="tp-overview-rank' + rankClass + '">' + escHtml(ordinalRank(opts.rank)) + '</td>' +
             '<td><span class="tp-overview-name" style="color:' + color + '">' +
               escHtml(opts.icon || '') + ' ' + escHtml(opts.name) +
+              fmtFastRecoveryHint(opts.id) +
               (on ? '<span class="tp-overview-active-tag">on</span>' : '') +
             '</span></td>' +
             '<td class="tp-overview-desc">' + escHtml(opts.description || '') + '</td>' +
@@ -16540,6 +16694,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         ' style="' + badgeStyle + '">' +
         '<span class="tpb-icon" aria-hidden="true">' + escHtml(v.icon) + '</span>' +
         (compact ? '' : '<span class="tpb-name">' + escHtml(v.name) + '</span>') +
+        fmtFastRecoveryHint(v.id) +
         '</span>'
       );
     }
@@ -20191,6 +20346,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       ]);
       try { if (zionData) handleZionRefresh(zionData); } catch (_) {}
       try { refreshDashboardNotifications(); } catch (_) {}
+      try {
+        if (status && status.fastProfileRecovery) {
+          applyFastRecoveryHints(status.fastProfileRecovery);
+        }
+      } catch (_) {}
       _lastConfig = cfg;
       applyStrategyConfigValues(cfg);
       try {

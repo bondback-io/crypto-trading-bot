@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.169',
+    title: 'Recovery badges + control field overlap fix',
+    sections: ['microbots', 'overview', 'knobs'],
+    items: [
+      'Fixed overlapping labels on Fast Profiles Recovery controls (Cooldown typo, ctl-sm overflow) and contained long field labels dashboard-wide.',
+      'Minimal R0–R3 recovery-stage hints (red/peach) on profile chips, trade badges, Micro Bot cards, overview table, and Bot Performance.',
+    ],
+  },
+  {
     version: '1.2.168',
     title: 'Dashboard Fix + Live Overlay Sync',
     sections: ['overview', 'microbots', 'execution'],
