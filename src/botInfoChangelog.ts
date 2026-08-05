@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.178',
+    title: 'Closed Trades unified summary rows',
+    sections: ['overview', 'execution'],
+    items: [
+      'Closed Trades: removed the compact mini PnL under the token name (v1.2.177) — that was a mistake.',
+      'Every closed trade now uses the same rich summary as partial-exit parents: token, Entry SOL, Total ±SOL (±%) · $USD, Exit reason, Held time — green + / red − styling matched.',
+      'DETAILS button, “N partial exit(s)”, and “tap Details…” appear only when a trade has real partial exits; full TP/SL single exits stay clean.',
+    ],
+  },
+  {
     version: '1.2.177',
     title: 'Closed Trades token mini PnL',
     sections: ['overview', 'execution'],

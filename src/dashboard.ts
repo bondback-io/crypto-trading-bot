@@ -1596,39 +1596,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-variant-numeric: tabular-nums;
       font-size: 0.82rem;
     }
-    .closed-token-mini-pnl {
-      display: block;
-      margin-top: 0.22rem;
-      line-height: 1.2;
-      font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      max-width: 100%;
-      overflow: hidden;
-    }
-    .closed-token-mini-sol {
-      display: block;
-      font-size: 0.68rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .closed-token-mini-usd {
-      display: block;
-      margin-top: 0.05rem;
-      font-size: 0.6rem;
-      font-weight: 600;
-      opacity: 0.95;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .card-closed-trades .closed-token-mini-pnl {
-      max-width: 100%;
-    }
-    @media (max-width: 639px) {
-      .closed-token-mini-sol { font-size: 0.72rem; }
-      .closed-token-mini-usd { font-size: 0.64rem; }
-    }
     .card-open-positions .mint-ca,
     .card-closed-trades .mint-ca {
       display: inline-flex;
@@ -16843,8 +16810,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     /**
-     * Bold parent summary for a grouped closed trade:
-     * "Cooper • 3 partial exits • Entry 0.25 SOL • Total +0.084 SOL (+31%) • Exit: Trailing Stop"
+     * Bold parent summary for every closed trade (same layout as partial-exit parents):
+     * "Monkeys • Entry 0.10 SOL • Total +0.019 SOL (+18%) · $0.23 • Exit: Timer"
+     * Partial-exit note + “tap Details…” only when the trade has expandable exits.
      * Hold time sits on a quieter line underneath to keep the main summary scannable.
      */
     function fmtClosedGroupSummary(g) {
@@ -16852,7 +16820,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const final = g.final || p;
       const symbol = String(p.symbol || (p.mint ? String(p.mint).slice(0, 6) : 'Trade'));
       const n = (g.partials && g.partials.length) || 0;
-      const partialBit = n + ' partial exit' + (n === 1 ? '' : 's');
+      const hasPartials = n > 0;
+      const partialBit = hasPartials
+        ? n + ' partial exit' + (n === 1 ? '' : 's')
+        : null;
       const size = Number(g.initialCost || p.initialCostSol || p.costSol || 0);
       const entryBit = size > 0 ? ('Entry ' + fmtSolShort(size) + ' SOL') : null;
       const pnl = Number(p.pnlSol || 0);
@@ -16897,8 +16868,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           badgeLabel +
         '</span>' +
         '<span class="trade-group-summary-token">' + escHtml(symbol) + '</span>',
-        '<span class="trade-group-summary-exits">' + partialBit + '</span>',
       ];
+      if (partialBit) {
+        parts.push('<span class="trade-group-summary-exits">' + partialBit + '</span>');
+      }
       if (entryBit) {
         parts.push('<span class="trade-group-summary-entry">' + entryBit + '</span>');
       }
@@ -16913,15 +16886,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         '">' + exitBit + '</span>'
       );
       const sep = '<span class="trade-group-summary-sep" aria-hidden="true">•</span>';
+      const title = hasPartials
+        ? 'Grouped trade summary — expand for each partial exit'
+        : 'Closed trade summary';
+      let subHtml = '';
+      if (holdBit && hasPartials) {
+        subHtml =
+          '<div class="trade-group-summary-sub">' + holdBit +
+          ' · tap Details to see each exit</div>';
+      } else if (holdBit) {
+        subHtml = '<div class="trade-group-summary-sub">' + holdBit + '</div>';
+      } else if (hasPartials) {
+        subHtml = '<div class="trade-group-summary-sub">Tap Details to see each exit</div>';
+      }
       return (
         '<div class="trade-group-summary-wrap">' +
-          '<div class="trade-group-summary" title="Grouped trade summary — expand for each partial exit">' +
+          '<div class="trade-group-summary" title="' + title + '">' +
             parts.join(sep) +
           '</div>' +
-          (holdBit
-            ? '<div class="trade-group-summary-sub">' + holdBit +
-              ' · tap Details to see each exit</div>'
-            : '<div class="trade-group-summary-sub">Tap Details to see each exit</div>') +
+          subHtml +
         '</div>'
       );
     }
@@ -17132,28 +17115,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : '') +
             '</div>'
           );
-      /* Compact duplicate under token for mobile glanceability (PnL col often off-screen).
-         SOL alone on line 1; USD + % on line 2 (never % next to SOL). */
-      const miniPnlHtml = (function () {
-        const color = pnlSol >= 0 ? 'var(--green)' : 'var(--red)';
-        const solLine =
-          (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(4) + ' SOL';
-        const pctBit =
-          '(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)';
-        const usdLine =
-          pnlUsd != null && Number.isFinite(pnlUsd)
-            ? (pnlUsd < 0 ? '-$' : '$') +
-              Math.abs(pnlUsd).toFixed(2) +
-              ' ' +
-              pctBit
-            : pctBit;
-        return (
-          '<div class="closed-token-mini-pnl" style="color:' + color + '" title="Realized PnL">' +
-            '<div class="closed-token-mini-sol">' + solLine + '</div>' +
-            '<div class="closed-token-mini-usd">' + usdLine + '</div>' +
-          '</div>'
-        );
-      })();
       const closedCell = opts.closedHtml != null
         ? opts.closedHtml
         : (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—');
@@ -17162,7 +17123,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (opts.groupAttr || '') +
           (opts.hidden ? ' hidden' : '') +
         '>' +
-          '<td>' + tokenCell + miniPnlHtml + '</td>' +
+          '<td>' + tokenCell + '</td>' +
           '<td>' + fmtTradeProfileBadge(opts.profileSource || p) + '</td>' +
           '<td>' + exitLabel + fmtTokenName(p.symbol, p.name, p.mint) + '</td>' +
           '<td>' + fmtMintCa(p.mint) + '</td>' +
@@ -17548,17 +17509,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const pnlSol = Number(p.pnlSol || 0);
         const pnlPct = Number(p.pnlPct || 0);
 
+        const finalReason = (g.final && g.final.reason) || p.reason;
+        const summaryHtml = fmtClosedGroupSummary(g);
+        const parentPnlHtml =
+          '<strong style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
+          (pnlSol >= 0 ? '+' : '') + fmtSolShort(pnlSol) + ' SOL</strong>' +
+          '<div class="mint">(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)</div>';
+        const parentClosedHtml =
+          (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
+          (holdMs != null
+            ? '<div class="mint" title="' +
+              (hasKids
+                ? 'Total hold from entry to final exit'
+                : 'Hold from entry to exit') +
+              '">held ' +
+              fmtHold(holdMs) +
+              '</div>'
+            : '');
+
         if (!hasKids) {
           return renderClosedTradeRow(p, {
+            rowClass: 'trade-group-parent',
+            summaryHtml,
             reasonOverride: fmtClosedReasonCell(p, {
               entryPos: p,
               exitPos: p,
             }),
-            closedHtml:
-              (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
-              (holdMs != null
-                ? '<div class="mint" title="Hold from entry to exit">held ' + fmtHold(holdMs) + '</div>'
-                : ''),
+            exitMarketCapUsd: closedGroupDisplayExitMc(g),
+            exitMcRolled: true,
+            pnlHtml: parentPnlHtml,
+            closedHtml: parentClosedHtml,
           });
         }
 
@@ -17573,7 +17553,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<span class="trade-group-chevron" aria-hidden="true">▶</span>' +
           '<span class="trade-group-expand-hint">' + (isExpanded ? 'Hide' : 'Details') + '</span>' +
           '</button>';
-        const finalReason = (g.final && g.final.reason) || p.reason;
         const reasonOverride = fmtClosedReasonCell(p, {
           entryPos: p,
           exitPos: g.final || p,
@@ -17588,7 +17567,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const parentRow = renderClosedTradeRow(p, {
           rowClass: 'trade-group-parent' + (isExpanded ? ' is-expanded' : ''),
           toggleHtml,
-          summaryHtml: fmtClosedGroupSummary(g),
+          summaryHtml,
           reasonOverride,
           exitLabel:
             '<span class="trade-exit-label is-final">' +
@@ -17596,15 +17575,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Full trade</span><br/>',
           exitMarketCapUsd: closedGroupDisplayExitMc(g),
           exitMcRolled: true,
-          pnlHtml:
-            '<strong style="color:' + (pnlSol >= 0 ? 'var(--green)' : 'var(--red)') + '">' +
-            (pnlSol >= 0 ? '+' : '') + fmtSolShort(pnlSol) + ' SOL</strong>' +
-            '<div class="mint">(' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(0) + '%)</div>',
-          closedHtml:
-            (p.closedAt ? fmtTimeAgoCell(p.closedAt) : '—') +
-            (holdMs != null
-              ? '<div class="mint" title="Total hold from entry to final exit">held ' + fmtHold(holdMs) + '</div>'
-              : ''),
+          pnlHtml: parentPnlHtml,
+          closedHtml: parentClosedHtml,
         });
         const childList = g.children.slice();
         if (g.final) childList.push(g.final);
