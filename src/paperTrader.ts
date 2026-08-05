@@ -303,6 +303,16 @@ export interface Position {
   macdHistSlopeAtEntry?: string;
   rsiDivergenceAtEntry?: string;
   volumeDivergenceAtEntry?: string;
+  /** Volume Intelligence stamps at entry */
+  volumeStateAtEntry?: string;
+  volumeScoreAtEntry?: number;
+  volumeM5UsdAtEntry?: number | null;
+  volumeH1UsdAtEntry?: number | null;
+  volumeDivergenceStateAtEntry?: string;
+  /** Live volume intel refreshed while open (for exits / UI) */
+  volumeDecayState?: string;
+  volumeDivergenceState?: string;
+  volumeM5Usd?: number | null;
   /** TA hints for swing hold/cut (optional; refreshed on mark when known) */
   nearKeyFib?: boolean;
   nearSupport?: boolean;
@@ -327,6 +337,79 @@ export interface MarketActivitySample {
   volumeH1Usd: number;
   txnsH1: number;
   updatedAt: number;
+  /** Rolling 5m USD volume when available */
+  volumeM5Usd?: number | null;
+}
+
+/** Per-mint ring of recent M5 volume samples (newest last). */
+const M5_ACTIVITY_RING_MAX = 8;
+const m5ActivityRing = new Map<string, number[]>();
+
+export function pushM5ActivitySample(
+  mint: string,
+  volumeM5Usd: number | null | undefined
+): number[] {
+  if (volumeM5Usd == null || !Number.isFinite(volumeM5Usd) || volumeM5Usd < 0) {
+    return m5ActivityRing.get(mint) || [];
+  }
+  const ring = m5ActivityRing.get(mint) || [];
+  const last = ring[ring.length - 1];
+  if (last != null && Math.abs(last - volumeM5Usd) < 1) {
+    return ring;
+  }
+  ring.push(volumeM5Usd);
+  while (ring.length > M5_ACTIVITY_RING_MAX) ring.shift();
+  m5ActivityRing.set(mint, ring);
+  return ring;
+}
+
+export function getM5ActivityRing(mint: string): number[] {
+  return m5ActivityRing.get(mint) || [];
+}
+
+/** Best-effort Volume Intelligence stamp at position open. */
+function stampVolumeIntelAtOpen(
+  position: Position,
+  opts?: {
+    volumeM5Usd?: number | null;
+    volumeH1Usd?: number | null;
+    volumeDivergenceAtEntry?: string;
+  }
+): void {
+  try {
+    const {
+      evaluateVolumeIntelligence,
+      logVolumeIntelligence,
+    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+    const snap = evaluateVolumeIntelligence({
+      volumeM5Usd: opts?.volumeM5Usd ?? null,
+      volumeH1Usd: opts?.volumeH1Usd ?? null,
+      recentM5Slices: getM5ActivityRing(position.mint),
+      profileId: position.tradeProfileId,
+    });
+    position.volumeStateAtEntry = snap.decayState;
+    position.volumeScoreAtEntry = snap.score01;
+    position.volumeM5UsdAtEntry = snap.volM5;
+    position.volumeH1UsdAtEntry = snap.volH1;
+    position.volumeDivergenceStateAtEntry = snap.divergence.state;
+    position.volumeDecayState = snap.decayState;
+    position.volumeDivergenceState = snap.divergence.state;
+    position.volumeM5Usd = snap.volM5;
+    if (!position.volumeDivergenceAtEntry && snap.divergence.bias !== 'none') {
+      position.volumeDivergenceAtEntry =
+        opts?.volumeDivergenceAtEntry || snap.divergence.bias;
+    } else if (opts?.volumeDivergenceAtEntry) {
+      position.volumeDivergenceAtEntry = opts.volumeDivergenceAtEntry;
+    }
+    logVolumeIntelligence(
+      snap,
+      `open ${position.symbol || position.mint.slice(0, 8)}`
+    );
+  } catch {
+    if (opts?.volumeDivergenceAtEntry) {
+      position.volumeDivergenceAtEntry = opts.volumeDivergenceAtEntry;
+    }
+  }
 }
 
 export interface TradeLog {
@@ -663,6 +746,26 @@ function maybeRecordLearningEpisode(
       macdHistSlopeAtEntry: position.macdHistSlopeAtEntry,
       rsiDivergenceAtEntry: position.rsiDivergenceAtEntry,
       volumeDivergenceAtEntry: position.volumeDivergenceAtEntry,
+      volumeStateAtEntry: position.volumeStateAtEntry,
+      volumeStateAtExit: position.volumeDecayState,
+      volumeDecayedAfterEntry:
+        position.volumeStateAtEntry != null &&
+        position.volumeDecayState != null &&
+        (position.volumeDecayState === 'decaying' ||
+          position.volumeDecayState === 'collapsed') &&
+        position.volumeStateAtEntry !== 'decaying' &&
+        position.volumeStateAtEntry !== 'collapsed'
+          ? true
+          : position.volumeStateAtEntry === 'expanding' &&
+              (position.volumeDecayState === 'decaying' ||
+                position.volumeDecayState === 'collapsed')
+            ? true
+            : undefined,
+      volumeM5UsdAtEntry: position.volumeM5UsdAtEntry,
+      volumeH1UsdAtEntry: position.volumeH1UsdAtEntry,
+      volumeScoreAtEntry: position.volumeScoreAtEntry,
+      volumeDivergenceStateAtEntry: position.volumeDivergenceStateAtEntry,
+      volumeDivergenceStateAtExit: position.volumeDivergenceState,
       taConditionsHeldIntoProfit:
         metrics.maxRunupPct >= 8 &&
         (position.taConfluenceAtEntry == null ||
@@ -1234,16 +1337,27 @@ export class PaperTrader {
     return this.priceCache.get(mint);
   }
 
-  /** Cache DexScreener 1h volume / txn activity for dead-market exits */
+  /** Cache DexScreener 1h / 5m volume / txn activity for dead-market exits */
   setMarketActivity(
     mint: string,
-    sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
+    sample: {
+      volumeH1Usd: number;
+      txnsH1: number;
+      updatedAt?: number;
+      volumeM5Usd?: number | null;
+    }
   ): void {
+    const volM5 =
+      sample.volumeM5Usd != null && Number.isFinite(Number(sample.volumeM5Usd))
+        ? Math.max(0, Number(sample.volumeM5Usd))
+        : null;
     this.marketActivityCache.set(mint, {
       volumeH1Usd: Math.max(0, sample.volumeH1Usd),
       txnsH1: Math.max(0, Math.floor(sample.txnsH1)),
       updatedAt: sample.updatedAt ?? Date.now(),
+      volumeM5Usd: volM5,
     });
+    if (volM5 != null) pushM5ActivitySample(mint, volM5);
   }
 
   getMarketActivity(mint: string): MarketActivitySample | undefined {
@@ -1446,7 +1560,10 @@ export class PaperTrader {
   /** Enrich position with current trailing stop price for UI / API */
   withTrailSnapshot(position: Position): Position & {
     volumeH1Usd?: number | null;
+    volumeM5Usd?: number | null;
     txnsH1?: number | null;
+    volumeDecayState?: string;
+    volumeDivergenceState?: string;
     costUsd?: number;
     initialCostUsd?: number;
     solUsd?: number;
@@ -1506,7 +1623,10 @@ export class PaperTrader {
       trailingStopPriceSol: stopPrice,
       pnlPct: unrealizedPct ?? position.pnlPct,
       volumeH1Usd: activity ? activity.volumeH1Usd : null,
+      volumeM5Usd: activity?.volumeM5Usd ?? position.volumeM5Usd ?? null,
       txnsH1: activity ? activity.txnsH1 : null,
+      volumeDecayState: position.volumeDecayState ?? undefined,
+      volumeDivergenceState: position.volumeDivergenceState ?? undefined,
       costUsd,
       initialCostUsd,
       solUsd,
@@ -1679,6 +1799,12 @@ export class PaperTrader {
           ? Math.max(0, Number(input.tokenAgeHours))
           : undefined,
     };
+
+    stampVolumeIntelAtOpen(position, {
+      volumeDivergenceAtEntry: input.volumeDivergenceAtEntry,
+      volumeM5Usd: this.marketActivityCache.get(position.mint)?.volumeM5Usd,
+      volumeH1Usd: this.marketActivityCache.get(position.mint)?.volumeH1Usd,
+    });
 
     if (input.scalpMode) {
       const id = input.shortTermStrategyId || 'quick_scalper';
@@ -2249,6 +2375,12 @@ export class PaperTrader {
           ? Math.max(0, Number(meta.tokenAgeHours))
           : undefined,
     };
+
+    stampVolumeIntelAtOpen(position, {
+      volumeDivergenceAtEntry: meta?.volumeDivergenceAtEntry,
+      volumeM5Usd: this.marketActivityCache.get(position.mint)?.volumeM5Usd,
+      volumeH1Usd: this.marketActivityCache.get(position.mint)?.volumeH1Usd,
+    });
 
     if (meta?.scalpMode) {
       const id = meta.shortTermStrategyId || 'quick_scalper';
@@ -3846,6 +3978,54 @@ export class PaperTrader {
             tradeProfileId: position.tradeProfileId,
             peakProtectArmedAt: position.peakProtectArmedAt,
             peakProtectLastPeakAt: position.peakProtectLastPeakAt,
+            volumeDecayState: (position.volumeDecayState as
+              | 'expanding'
+              | 'stable'
+              | 'decaying'
+              | 'collapsed'
+              | null
+              | undefined) ?? null,
+            volumeDivergenceState: (position.volumeDivergenceState as
+              | 'bullish_divergence'
+              | 'bearish_divergence'
+              | 'confirming'
+              | 'none'
+              | 'insufficient'
+              | null
+              | undefined) ?? null,
+            volumeExitTightenMult: (() => {
+              try {
+                const {
+                  evaluateVolumeIntelligence,
+                  volumeExitTightenMult,
+                } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+                const act = this.marketActivityCache.get(position.mint);
+                const snap = evaluateVolumeIntelligence({
+                  volumeM5Usd: act?.volumeM5Usd ?? position.volumeM5Usd ?? null,
+                  volumeH1Usd: act?.volumeH1Usd ?? null,
+                  recentM5Slices: getM5ActivityRing(position.mint),
+                  profileId: position.tradeProfileId,
+                });
+                position.volumeDecayState = snap.decayState;
+                position.volumeDivergenceState = snap.divergence.state;
+                position.volumeM5Usd = snap.volM5;
+                if (
+                  snap.decayState === 'decaying' ||
+                  snap.decayState === 'collapsed'
+                ) {
+                  console.log(
+                    `[VolIntel] ${label}: Open trade volume decay — tighten exit bias`
+                  );
+                }
+                return volumeExitTightenMult(
+                  snap.decayState,
+                  snap.divergence.state,
+                  position.tradeProfileId
+                );
+              } catch {
+                return null;
+              }
+            })(),
           });
           if (adapt.type === 'tighten_trail' && adapt.newTrailingStopPct != null) {
             if (!position.profileTrailTightened) {

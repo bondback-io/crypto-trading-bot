@@ -73,8 +73,17 @@ export interface ProfileLearningEpisode {
   zigzagStructureAtEntry?: string;
   macdCrossAtEntry?: string;
   macdHistSlopeAtEntry?: string;
-  rsiDivergenceAtEntry?: string;
+      rsiDivergenceAtEntry?: string;
   volumeDivergenceAtEntry?: string;
+  /** Volume Intelligence at entry / exit */
+  volumeStateAtEntry?: string;
+  volumeStateAtExit?: string;
+  volumeDecayedAfterEntry?: boolean;
+  volumeM5UsdAtEntry?: number | null;
+  volumeH1UsdAtEntry?: number | null;
+  volumeScoreAtEntry?: number;
+  volumeDivergenceStateAtEntry?: string;
+  volumeDivergenceStateAtExit?: string;
   /** Whether TA/whale conditions still looked favorable while trade was green */
   taConditionsHeldIntoProfit?: boolean;
   /** Soft heuristic: TA exit banked vs holding longer */

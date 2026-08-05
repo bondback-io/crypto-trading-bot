@@ -224,6 +224,29 @@ export function computeFactorAffinities(
     volume = highIsBetter(volH1 ?? volM5, 500, 5_000);
   }
 
+  // Additive Volume Intelligence — decay + divergence factors (never hard-block alone)
+  try {
+    const {
+      evaluateVolumeIntelligence,
+      decayAffinityFactor,
+      divergenceAffinityDelta,
+      getVolumeIntelligenceConfig,
+    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+    if (getVolumeIntelligenceConfig().enabled) {
+      const snap = evaluateVolumeIntelligence({
+        volumeM5Usd: volM5,
+        volumeH1Usd: volH1,
+        priceChangePct: chgH1 ?? chg24,
+        profileId: def.id,
+      });
+      const decayF = decayAffinityFactor(snap.decayState, def.id);
+      const divDelta = divergenceAffinityDelta(snap.divergence.state, def.id);
+      volume = clamp01(volume * decayF + divDelta);
+    }
+  } catch {
+    /* fail soft — keep base volume affinity */
+  }
+
   // Volatility / speed
   let volatility = 0.5;
   const speed = Math.max(

@@ -6652,7 +6652,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>5m / 1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -6781,7 +6781,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="positions-scroll">
           <table id="trades-positions-table">
-            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
+            <thead><tr><th>Token</th><th>Profile</th><th>Name</th><th>Mint</th><th>Buy MC</th><th>Live MC</th><th>Cost</th><th>Wallets</th><th>5m / 1h vol</th><th>PnL</th><th>TP / SL</th><th>Reason</th><th>Opened</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -17872,6 +17872,59 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         label + '</span>';
     }
 
+    function fmtUsdVolShort(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return '?';
+      if (n >= 1000) return '$' + (n / 1000).toFixed(1) + 'k';
+      return '$' + (n < 10 ? n.toFixed(1) : Math.round(n));
+    }
+
+    /** Open Positions: 5m $… · 1h $… with optional decay / divergence chips */
+    function fmtVolM5H1(p) {
+      const m5 = p && p.volumeM5Usd != null ? Number(p.volumeM5Usd) : null;
+      const h1 = p && p.volumeH1Usd != null ? Number(p.volumeH1Usd) : null;
+      if (
+        (m5 == null || !Number.isFinite(m5)) &&
+        (h1 == null || !Number.isFinite(h1))
+      ) {
+        return '<span class="mint">—</span>';
+      }
+      const parts = [];
+      if (m5 != null && Number.isFinite(m5)) parts.push('5m ' + fmtUsdVolShort(m5));
+      if (h1 != null && Number.isFinite(h1)) parts.push('1h ' + fmtUsdVolShort(h1));
+      const tip =
+        'Volume Intelligence · ' + parts.join(' · ') +
+        (p.txnsH1 != null ? ' · ' + Number(p.txnsH1) + ' txns/hr' : '');
+      let chips = '';
+      const decay = p.volumeDecayState;
+      if (decay === 'expanding' || decay === 'decaying' || decay === 'collapsed') {
+        const dc =
+          decay === 'expanding' ? '#34d399' :
+          decay === 'collapsed' ? 'var(--red)' : '#fbbf24';
+        chips +=
+          ' <span class="pos-vol-chip" style="color:' + dc + '" title="Volume ' + decay + '">' +
+          decay + '</span>';
+      }
+      const div = p.volumeDivergenceState;
+      if (div === 'bullish_divergence' || div === 'bearish_divergence' || div === 'confirming') {
+        const label =
+          div === 'bullish_divergence' ? 'bull div' :
+          div === 'bearish_divergence' ? 'bear div' : 'confirm';
+        const dc =
+          div === 'bullish_divergence' ? '#34d399' :
+          div === 'bearish_divergence' ? 'var(--red)' : '#94a3b8';
+        chips +=
+          ' <span class="pos-vol-chip" style="color:' + dc + '" title="' + div + '">' +
+          label + '</span>';
+      }
+      return (
+        '<span class="pos-vol-cell" title="' + tip + '">' +
+        parts.join(' · ') +
+        chips +
+        '</span>'
+      );
+    }
+
     /** 0–100 quality score for an open position (profile score preferred). */
     function computeOpenQualityScore(p) {
       if (!p) return null;
@@ -21853,7 +21906,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const sellLabel = (p.symbol || p.mint.slice(0, 6)).replace(/'/g, "\\\\'");
           const costCell = fmtOpenSizeCell(p);
           const walletsCell = fmtWalletConvergence(p);
-          const volCell = fmtVolH1(p.volumeH1Usd, p.txnsH1);
+          const volCell = fmtVolM5H1(p);
           const openedCell = fmtOpenedHoldCell(p.openedAt);
           const tokenCell = fmtOpenTokenCell(p);
           const reasonCell = fmtOpenReasonCell(p);

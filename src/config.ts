@@ -2086,6 +2086,9 @@ export interface BotConfig {
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
+  /** Additive Volume Intelligence — strength, decay, price-volume divergence. */
+  volumeIntelligence: import('./volumeIntelligence').VolumeIntelligenceConfig;
+
   /** Fast Profiles Recovery Stages 0–4 for short-term profiles. */
   fastProfileRecovery: import('./fastProfileRecovery').FastProfileRecoveryConfig;
 
@@ -2351,6 +2354,30 @@ export const config: BotConfig = {
     scalperGivebackOfPeakPct: 30,
     stalePeakTightenSec: 45,
     staleGivebackTightenMult: 0.75,
+  },
+
+  volumeIntelligence: {
+    enabled: true,
+    blockCollapsedOnFastProfiles: true,
+    fastMinVolumeM5Usd: 800,
+    fastMinVolumeH1Usd: 2000,
+    healthyM5Usd: 2500,
+    healthyH1Usd: 15000,
+    strongM5Usd: 5000,
+    strongH1Usd: 50000,
+    shortTermDecayRatio: 0.55,
+    postSpikeDropRatio: 0.4,
+    collapseAbsM5Usd: 400,
+    collapseAbsH1Usd: 1500,
+    decayTightenMult: 0.85,
+    collapseTightenMult: 0.7,
+    exitUrgencyOnDecay: true,
+    divergenceEnabled: true,
+    divergenceVolDropRatio: 0.85,
+    divergenceMinSwingPct: 2.5,
+    exitUrgencyOnBearishDivergence: true,
+    learningAdjustEnabled: false,
+    profileSoft: {},
   },
 
   fastProfileRecovery: {
@@ -2984,6 +3011,31 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         staleGivebackTightenMult: 0.75,
       }
     ) as PersistedBotSettings['peakProfitProtection'],
+    volumeIntelligence: cloneJson(
+      config.volumeIntelligence || {
+        enabled: true,
+        blockCollapsedOnFastProfiles: true,
+        fastMinVolumeM5Usd: 800,
+        fastMinVolumeH1Usd: 2000,
+        healthyM5Usd: 2500,
+        healthyH1Usd: 15000,
+        strongM5Usd: 5000,
+        strongH1Usd: 50000,
+        shortTermDecayRatio: 0.55,
+        postSpikeDropRatio: 0.4,
+        collapseAbsM5Usd: 400,
+        collapseAbsH1Usd: 1500,
+        decayTightenMult: 0.85,
+        collapseTightenMult: 0.7,
+        exitUrgencyOnDecay: true,
+        divergenceEnabled: true,
+        divergenceVolDropRatio: 0.85,
+        divergenceMinSwingPct: 2.5,
+        exitUrgencyOnBearishDivergence: true,
+        learningAdjustEnabled: false,
+        profileSoft: {},
+      }
+    ) as PersistedBotSettings['volumeIntelligence'],
     fastProfileRecovery: cloneJson(
       config.fastProfileRecovery || {
         enabled: false,
@@ -3851,6 +3903,29 @@ function applySettingsSnapshot(
         1
       ),
     };
+  }
+  if (saved.volumeIntelligence && typeof saved.volumeIntelligence === 'object') {
+    try {
+      const {
+        DEFAULT_VOLUME_INTELLIGENCE,
+        getVolumeIntelligenceConfig,
+      } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      config.volumeIntelligence = {
+        ...DEFAULT_VOLUME_INTELLIGENCE,
+        ...(saved.volumeIntelligence as Partial<
+          import('./volumeIntelligence').VolumeIntelligenceConfig
+        >),
+        profileSoft:
+          saved.volumeIntelligence.profileSoft &&
+          typeof saved.volumeIntelligence.profileSoft === 'object'
+            ? saved.volumeIntelligence.profileSoft
+            : {},
+      };
+      // Normalize via getters (clamps)
+      config.volumeIntelligence = getVolumeIntelligenceConfig();
+    } catch {
+      /* optional */
+    }
   }
   if (saved.fastProfileRecovery && typeof saved.fastProfileRecovery === 'object') {
     try {

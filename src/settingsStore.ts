@@ -200,6 +200,38 @@ export interface PersistedBotSettings {
     stalePeakTightenSec?: number;
     staleGivebackTightenMult?: number;
   };
+  /** Additive Volume Intelligence (strength / decay / divergence) */
+  volumeIntelligence?: {
+    enabled?: boolean;
+    blockCollapsedOnFastProfiles?: boolean;
+    fastMinVolumeM5Usd?: number;
+    fastMinVolumeH1Usd?: number;
+    healthyM5Usd?: number;
+    healthyH1Usd?: number;
+    strongM5Usd?: number;
+    strongH1Usd?: number;
+    shortTermDecayRatio?: number;
+    postSpikeDropRatio?: number;
+    collapseAbsM5Usd?: number;
+    collapseAbsH1Usd?: number;
+    decayTightenMult?: number;
+    collapseTightenMult?: number;
+    exitUrgencyOnDecay?: boolean;
+    divergenceEnabled?: boolean;
+    divergenceVolDropRatio?: number;
+    divergenceMinSwingPct?: number;
+    exitUrgencyOnBearishDivergence?: boolean;
+    learningAdjustEnabled?: boolean;
+    profileSoft?: Record<
+      string,
+      {
+        decaySensitivity?: number;
+        entryDecayWeight?: number;
+        exitUrgencyMult?: number;
+        divergenceWeight?: number;
+      }
+    >;
+  };
   /** Fast Profiles Recovery Stages 0–4 (no secrets) */
   fastProfileRecovery?: {
     enabled?: boolean;

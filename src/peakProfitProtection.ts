@@ -209,6 +209,8 @@ export interface PeakProtectEvalInput {
   /** Last time a new peak was made (ms) */
   peakProtectLastPeakAt?: number | null;
   nowMs?: number;
+  /** Optional Volume Intelligence giveback multiplier (1 = no change). */
+  volumeExitTightenMult?: number | null;
 }
 
 export interface PeakProtectEvalResult {
@@ -266,6 +268,12 @@ export function evaluatePeakProfitProtection(
       8,
       80
     );
+  }
+
+  // Additive Volume Intelligence — decay / bearish-div tighten (never loosens)
+  const volTighten = Number(input.volumeExitTightenMult);
+  if (Number.isFinite(volTighten) && volTighten > 0 && volTighten < 1) {
+    effGive = clamp(effGive * volTighten, 8, 80);
   }
 
   if (peak <= 0) {

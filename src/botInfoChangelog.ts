@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.175',
+    title: 'Volume Intelligence layer',
+    sections: ['microbots', 'execution', 'learning'],
+    items: [
+      'Additive Volume Intelligence: strength score, decay (expanding/stable/decaying/collapsed), and price-volume divergence (ZigZag reuse) folded into auto-score, fast soft skips, Peak Protect tighten, and soft exit urgency.',
+      'Open Positions show 5m · 1h volume with optional decay / divergence chips; learning episodes stamp volume state at entry/exit.',
+      'GET/POST /api/config/volume-intelligence — fail-soft, no forced trades, Paper / Live Sim / Live shared paths.',
+    ],
+  },
+  {
     version: '1.2.174',
     title: 'Fast Recovery card header alignment',
     sections: ['microbots'],

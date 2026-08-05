@@ -511,6 +511,21 @@ export function evaluateAdaptiveProfileExit(input: {
   tradeProfileId?: string | null;
   peakProtectArmedAt?: number | null;
   peakProtectLastPeakAt?: number | null;
+  /** Volume Intelligence decay / divergence for soft exit urgency */
+  volumeDecayState?:
+    | 'expanding'
+    | 'stable'
+    | 'decaying'
+    | 'collapsed'
+    | null;
+  volumeDivergenceState?:
+    | 'bullish_divergence'
+    | 'bearish_divergence'
+    | 'confirming'
+    | 'none'
+    | 'insufficient'
+    | null;
+  volumeExitTightenMult?: number | null;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const tier = input.qualityTier || 'medium';
@@ -544,6 +559,7 @@ export function evaluateAdaptiveProfileExit(input: {
         peakProtectArmedAt: input.peakProtectArmedAt,
         peakProtectLastPeakAt: input.peakProtectLastPeakAt,
         nowMs: now,
+        volumeExitTightenMult: input.volumeExitTightenMult,
       });
       if (ppp.shouldExit && ppp.reason) {
         return { type: 'full', reason: ppp.reason };
@@ -653,12 +669,62 @@ export function evaluateAdaptiveProfileExit(input: {
       ((input.highWaterMarkSol - input.currentPriceSol) /
         input.highWaterMarkSol) *
       100;
-    if (dropFromPeak >= pol.momentumFadeDropPct) {
+    // Soft urgency: decay / bearish divergence lowers fade threshold
+    let fadeThresh = pol.momentumFadeDropPct;
+    const decay = input.volumeDecayState;
+    const div = input.volumeDivergenceState;
+    if (decay === 'collapsed') fadeThresh *= 0.7;
+    else if (decay === 'decaying') fadeThresh *= 0.85;
+    if (div === 'bearish_divergence') fadeThresh *= 0.88;
+    if (dropFromPeak >= fadeThresh) {
       return {
         type: 'full',
-        reason: `Profile momentum fade −${dropFromPeak.toFixed(1)}% from peak (policy ${pol.momentumFadeDropPct}%)`,
+        reason: `Profile momentum fade −${dropFromPeak.toFixed(1)}% from peak (policy ${pol.momentumFadeDropPct}%${
+          fadeThresh < pol.momentumFadeDropPct
+            ? `; vol-urgency ${fadeThresh.toFixed(1)}%`
+            : ''
+        })`,
       };
     }
+  }
+
+  // 5b) Soft volume-decay exit urgency while green (never overrides hard SL)
+  try {
+    const {
+      getVolumeIntelligenceConfig,
+    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+    const viCfg = getVolumeIntelligenceConfig();
+    if (
+      viCfg.enabled &&
+      viCfg.exitUrgencyOnDecay &&
+      pnl > 3 &&
+      pnl < input.takeProfitPct * 0.9 &&
+      (input.volumeDecayState === 'decaying' ||
+        input.volumeDecayState === 'collapsed') &&
+      peakUnrealized >= Math.max(6, input.takeProfitPct * 0.35) &&
+      peakUnrealized - pnl >= 4
+    ) {
+      return {
+        type: 'full',
+        reason: `Open trade volume decay — tighten exit bias (peak +${peakUnrealized.toFixed(1)}% → +${pnl.toFixed(1)}%)`,
+      };
+    }
+    if (
+      viCfg.enabled &&
+      viCfg.exitUrgencyOnBearishDivergence &&
+      input.volumeDivergenceState === 'bearish_divergence' &&
+      pnl > 4 &&
+      pnl < input.takeProfitPct * 0.85 &&
+      peakUnrealized >= Math.max(8, input.takeProfitPct * 0.4) &&
+      peakUnrealized - pnl >= 5
+    ) {
+      return {
+        type: 'full',
+        reason: `Bearish volume divergence detected — soft exit while +${pnl.toFixed(1)}% (peak +${peakUnrealized.toFixed(1)}%)`,
+      };
+    }
+  } catch {
+    /* fail soft */
   }
 
   // 6) Quality breakdown: green but conviction collapsed + held a bit

@@ -101,6 +101,7 @@ let cachedSolUsd: { value: number; at: number } | null = null;
 type LiveTokenSnapshotEarly = {
   priceSol: number | null;
   marketCapUsd: number | null;
+  volumeM5Usd: number | null;
   volumeH1Usd: number | null;
   volumeH24Usd: number | null;
   txnsH1: number | null;
@@ -1600,6 +1601,8 @@ export async function fetchLivePriceSol(mint: string): Promise<number | null> {
 export interface LiveTokenSnapshot {
   priceSol: number | null;
   marketCapUsd: number | null;
+  /** Rolling 5m USD volume from DexScreener best pool */
+  volumeM5Usd: number | null;
   /** Rolling 1h USD volume from DexScreener best pool */
   volumeH1Usd: number | null;
   /** Rolling 24h USD volume */
@@ -1620,6 +1623,7 @@ export type OpenTradeMarkSource =
 export interface OpenTradeMarkResult {
   priceSol: number | null;
   marketCapUsd: number | null;
+  volumeM5Usd: number | null;
   volumeH1Usd: number | null;
   volumeH24Usd: number | null;
   txnsH1: number | null;
@@ -1678,13 +1682,14 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
 
   const marketCapUsd = readMarketCapUsd(best) ?? null;
   const volume = best.volume as
-    | { h1?: number; h24?: number }
+    | { m5?: number; h1?: number; h24?: number }
     | undefined;
   const txnsH1 = best.txns as
     | { h1?: { buys?: number; sells?: number } }
     | undefined;
   const buys = Number(txnsH1?.h1?.buys ?? 0);
   const sells = Number(txnsH1?.h1?.sells ?? 0);
+  const volumeM5Usd = Number(volume?.m5 ?? NaN);
   const volumeH1Usd = Number(volume?.h1 ?? NaN);
   const volumeH24Usd = Number(volume?.h24 ?? NaN);
   const txnsTotal = buys + sells;
@@ -1692,6 +1697,7 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
   return {
     priceSol,
     marketCapUsd: marketCapUsd != null && marketCapUsd > 0 ? marketCapUsd : null,
+    volumeM5Usd: Number.isFinite(volumeM5Usd) ? volumeM5Usd : null,
     volumeH1Usd: Number.isFinite(volumeH1Usd) ? volumeH1Usd : null,
     volumeH24Usd: Number.isFinite(volumeH24Usd) ? volumeH24Usd : null,
     txnsH1: Number.isFinite(txnsTotal) ? txnsTotal : null,
@@ -1865,6 +1871,7 @@ export async function resolveOpenTradeMark(
   const empty = (): OpenTradeMarkResult => ({
     priceSol: null,
     marketCapUsd: null,
+    volumeM5Usd: null,
     volumeH1Usd: null,
     volumeH24Usd: null,
     txnsH1: null,
@@ -1885,6 +1892,7 @@ export async function resolveOpenTradeMark(
     return {
       priceSol: jup.priceSol,
       marketCapUsd: jup.marketCapUsd ?? volBase?.marketCapUsd ?? null,
+      volumeM5Usd: volBase?.volumeM5Usd ?? null,
       volumeH1Usd: volBase?.volumeH1Usd ?? null,
       volumeH24Usd: volBase?.volumeH24Usd ?? null,
       txnsH1: volBase?.txnsH1 ?? null,
@@ -1932,6 +1940,7 @@ export async function resolveOpenTradeMark(
     return {
       priceSol: onchain.priceSol,
       marketCapUsd: onchain.marketCapUsd ?? volBase?.marketCapUsd ?? null,
+      volumeM5Usd: volBase?.volumeM5Usd ?? null,
       volumeH1Usd: volBase?.volumeH1Usd ?? null,
       volumeH24Usd: volBase?.volumeH24Usd ?? null,
       txnsH1: volBase?.txnsH1 ?? null,
@@ -1955,6 +1964,7 @@ export async function resolveOpenTradeMark(
     return {
       priceSol: last,
       marketCapUsd: volBase?.marketCapUsd ?? null,
+      volumeM5Usd: volBase?.volumeM5Usd ?? null,
       volumeH1Usd: volBase?.volumeH1Usd ?? null,
       volumeH24Usd: volBase?.volumeH24Usd ?? null,
       txnsH1: volBase?.txnsH1 ?? null,
@@ -2004,7 +2014,12 @@ export async function refreshOpenMarketActivity(
     getTokenPrice?: (mint: string) => number | undefined;
     setMarketActivity: (
       mint: string,
-      sample: { volumeH1Usd: number; txnsH1: number; updatedAt?: number }
+      sample: {
+        volumeH1Usd: number;
+        txnsH1: number;
+        updatedAt?: number;
+        volumeM5Usd?: number | null;
+      }
     ) => void;
     setTokenPrice?: (
       mint: string,
@@ -2054,10 +2069,11 @@ export async function refreshOpenMarketActivity(
       });
       if (!mark || mark.source === 'none') continue;
 
-      if (mark.volumeH1Usd != null || mark.txnsH1 != null) {
+      if (mark.volumeH1Usd != null || mark.txnsH1 != null || mark.volumeM5Usd != null) {
         trader.setMarketActivity(mint, {
           volumeH1Usd: mark.volumeH1Usd ?? 0,
           txnsH1: mark.txnsH1 ?? 0,
+          volumeM5Usd: mark.volumeM5Usd ?? null,
           updatedAt: mark.at,
         });
       }

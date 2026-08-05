@@ -3576,6 +3576,78 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/config/volume-intelligence', (_req: Request, res: Response) => {
+    try {
+      const { getVolumeIntelligenceConfig } =
+        require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      res.json({ ok: true, volumeIntelligence: getVolumeIntelligenceConfig() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/volume-intelligence', (req: Request, res: Response) => {
+    try {
+      const { setVolumeIntelligenceConfig, getVolumeIntelligenceConfig } =
+        require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const boolOrUndef = (v: unknown): boolean | undefined =>
+        typeof v === 'boolean' ? v : undefined;
+      const numOrUndef = (v: unknown): number | undefined =>
+        v != null && Number.isFinite(Number(v)) ? Number(v) : undefined;
+      setVolumeIntelligenceConfig({
+        enabled: boolOrUndef(body.enabled),
+        blockCollapsedOnFastProfiles: boolOrUndef(
+          body.blockCollapsedOnFastProfiles
+        ),
+        fastMinVolumeM5Usd: numOrUndef(body.fastMinVolumeM5Usd),
+        fastMinVolumeH1Usd: numOrUndef(body.fastMinVolumeH1Usd),
+        healthyM5Usd: numOrUndef(body.healthyM5Usd),
+        healthyH1Usd: numOrUndef(body.healthyH1Usd),
+        strongM5Usd: numOrUndef(body.strongM5Usd),
+        strongH1Usd: numOrUndef(body.strongH1Usd),
+        shortTermDecayRatio: numOrUndef(body.shortTermDecayRatio),
+        postSpikeDropRatio: numOrUndef(body.postSpikeDropRatio),
+        collapseAbsM5Usd: numOrUndef(body.collapseAbsM5Usd),
+        collapseAbsH1Usd: numOrUndef(body.collapseAbsH1Usd),
+        decayTightenMult: numOrUndef(body.decayTightenMult),
+        collapseTightenMult: numOrUndef(body.collapseTightenMult),
+        exitUrgencyOnDecay: boolOrUndef(body.exitUrgencyOnDecay),
+        divergenceEnabled: boolOrUndef(body.divergenceEnabled),
+        divergenceVolDropRatio: numOrUndef(body.divergenceVolDropRatio),
+        divergenceMinSwingPct: numOrUndef(body.divergenceMinSwingPct),
+        exitUrgencyOnBearishDivergence: boolOrUndef(
+          body.exitUrgencyOnBearishDivergence
+        ),
+        learningAdjustEnabled: boolOrUndef(body.learningAdjustEnabled),
+        profileSoft:
+          body.profileSoft != null && typeof body.profileSoft === 'object'
+            ? (body.profileSoft as Record<
+                string,
+                {
+                  decaySensitivity?: number;
+                  entryDecayWeight?: number;
+                  exitUrgencyMult?: number;
+                  divergenceWeight?: number;
+                }
+              >)
+            : undefined,
+      });
+      res.json({
+        ok: true,
+        volumeIntelligence: getVolumeIntelligenceConfig(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/profile-ta-playbooks', (_req: Request, res: Response) => {
     try {
       const { getProfileTaPlaybooksPublic } =

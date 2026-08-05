@@ -792,6 +792,50 @@ function applyProfileTaPlaybookGate(
   }
 }
 
+/**
+ * Fast-profile soft skip when volume is collapsed / ultra-thin.
+ * Divergence never hard-blocks alone — only hardFloorFailFast (collapsed).
+ */
+function evaluateVolumeIntelFastSoftSkip(
+  profileId: string | null | undefined,
+  signal: TradeSignal
+): { skip: boolean; reason: string } {
+  try {
+    const {
+      evaluateVolumeIntelligence,
+      logVolumeIntelligence,
+      isVolumeIntelFastProfile,
+      getVolumeIntelligenceConfig,
+    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+    if (!getVolumeIntelligenceConfig().enabled) {
+      return { skip: false, reason: '' };
+    }
+    if (!isVolumeIntelFastProfile(profileId)) {
+      return { skip: false, reason: '' };
+    }
+    const snap = evaluateVolumeIntelligence({
+      volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+      volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
+      priceChangePct:
+        signal.metrics?.priceChangeH1Pct ??
+        signal.metrics?.priceChange24hPct ??
+        null,
+      profileId,
+      candles: Array.isArray(signal.candles) ? signal.candles : null,
+    });
+    logVolumeIntelligence(snap, signal.symbol || signal.mint.slice(0, 8));
+    if (snap.hardFloorFailFast) {
+      return {
+        skip: true,
+        reason: 'Volume collapsed — entry penalised',
+      };
+    }
+  } catch {
+    /* fail soft */
+  }
+  return { skip: false, reason: '' };
+}
+
 type SignalHandler = (signal: TradeSignal) => void;
 
 const recentBuys = new Map<string, WalletBuyEvent[]>();
@@ -3389,6 +3433,28 @@ async function executeSignalBuy(
   }
 
   {
+    const volSkip = evaluateVolumeIntelFastSoftSkip(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (volSkip.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, volSkip.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: volSkip.reason,
+      });
+      annotateScannerCandidate(signal.mint, {
+        status: 'skipped',
+        skipReason: volSkip.reason,
+      });
+      markScannerCooldown(signal.mint, false);
+      console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
+  }
+
+  {
     const taGate = applyProfileTaPlaybookGate(
       String(profileAssignment.profileId || 'default'),
       signal,
@@ -3709,6 +3775,24 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     console.log(
       `[monitor] Migration priority — no profile stamp (${profileAssignment.skipReason || profileAssignment.reason})`
     );
+  }
+
+  {
+    const volSkip = evaluateVolumeIntelFastSoftSkip(
+      buyOpts.tradeProfileId ||
+        String(profileAssignment.profileId || 'migration_sniper'),
+      signal
+    );
+    if (volSkip.skip) {
+      finishBuy(event.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, volSkip.reason);
+      annotateActivityFeedByMint(event.mint, {
+        tradeStatus: 'skipped',
+        skipReason: volSkip.reason,
+      });
+      console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
   }
 
   {
@@ -4650,6 +4734,23 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
           .map((t) => `${t.name}=${t.score.toFixed(1)}`)
           .join(' · ')
     );
+  }
+
+  {
+    const volSkip = evaluateVolumeIntelFastSoftSkip(
+      String(profileAssignment.profileId || 'default'),
+      signal
+    );
+    if (volSkip.skip) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, volSkip.reason);
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: volSkip.reason,
+      });
+      console.log(`[monitor] ${volSkip.reason}`);
+      return;
+    }
   }
 
   {
