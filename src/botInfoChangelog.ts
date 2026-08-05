@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.174',
+    title: 'Fast Recovery card header alignment',
+    sections: ['microbots'],
+    items: [
+      'Fast Profiles Recovery cards keep the stage badge on one line with the bot name (fixes Momentum Burst wrapping on desktop).',
+    ],
+  },
+  {
     version: '1.2.173',
     title: 'Profile routing tab cleanup',
     sections: ['microbots'],

@@ -3269,7 +3269,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .fpr-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
       gap: 0.65rem;
     }
     .fpr-card {
@@ -3278,14 +3278,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       background: #020617;
       padding: 0.55rem 0.65rem;
       min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .fpr-card-head {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 0.4rem;
+      margin-bottom: 0.25rem;
+      min-width: 0;
+    }
+    .fpr-card-head > strong {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 0.8125rem;
+      color: #e2e8f0;
+    }
+    .fpr-card-head .fpr-badge,
+    .fpr-card-head .fpr-locked {
+      flex-shrink: 0;
+      white-space: nowrap;
     }
     .fpr-badge {
       display: inline-block;
-      font-size: 0.65rem;
+      font-size: 0.62rem;
       font-weight: 700;
-      padding: 0.15rem 0.45rem;
+      padding: 0.12rem 0.4rem;
       border-radius: 0.35rem;
       letter-spacing: 0.02em;
+      line-height: 1.2;
+      max-width: 100%;
     }
     .fpr-s0 { background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); }
     .fpr-s1, .fpr-s2 { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.35); }
@@ -13839,18 +13865,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             const pct = Math.min(100, Math.round(Number(p.readinessScore) || 0));
             return (
               '<div class="fpr-card">' +
-              '<div class="flex flex-wrap items-center gap-2 mb-1">' +
-              '<strong class="text-sm text-slate-200">' +
+              '<div class="fpr-card-head">' +
+              '<strong title="' +
+              escHtml((p.profileId || '').replace(/_/g, ' ')) +
+              '">' +
               (p.profileId || '').replace(/_/g, ' ') +
               '</strong>' +
               '<span class="fpr-badge ' +
               sc +
-              '">Stage ' +
+              '" title="Stage ' +
               p.stage +
-              ' · ' +
-              (p.stageName || '') +
+              (p.stageName ? ' · ' + String(p.stageName) : '') +
+              '">S' +
+              p.stage +
+              (p.stageName ? ' · ' + String(p.stageName) : '') +
               '</span>' +
-              (p.stageLocked ? '<span class="mint text-xs">locked</span>' : '') +
+              (p.stageLocked
+                ? '<span class="fpr-locked mint text-xs">locked</span>'
+                : '') +
               '</div>' +
               '<p class="text-xs text-slate-400 mb-1">' +
               (p.plainLanguage || '') +
@@ -13872,7 +13904,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '<div class="fpr-progress"><span style="width:' +
               pct +
               '%"></span></div>' +
-              '<div class="flex flex-wrap gap-1 mt-2">' +
+              '<div class="flex flex-wrap gap-1 mt-2" style="margin-top:auto;padding-top:0.5rem">' +
               '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\\'' +
               p.profileId +
               '\\',' +
