@@ -13993,6 +13993,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         stage: Number(payload.stage) || 0,
         stageName: payload.stageName || '',
         inRecovery: payload.inRecovery === true,
+        lastSkipReason: payload.lastSkipReason || null,
+        lastSkipAt: payload.lastSkipAt != null ? Number(payload.lastSkipAt) : null,
       };
     }
 
@@ -14034,6 +14036,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               cfg.enabled !== false &&
               Number(p.stage) >= 0 &&
               Number(p.stage) <= 3,
+            lastSkipReason: p.lastSkipReason || null,
+            lastSkipAt: p.lastSkipAt != null ? p.lastSkipAt : null,
           });
         } catch (_) {}
         const en = document.getElementById('dbr-enabled');
@@ -14118,6 +14122,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '<div class="text-xs mb-1" style="line-height:1.45">' +
           gates +
           '</div>' +
+          (p.lastSkipReason
+            ? '<p class="text-xs mb-1" style="color:#fbbf24" title="' +
+              (p.lastSkipAt
+                ? 'at ' + new Date(p.lastSkipAt).toLocaleString()
+                : '') +
+              '">Last skip: ' +
+              escHtml(String(p.lastSkipReason)) +
+              '</p>'
+            : '') +
           '<div class="fpr-progress"><span style="width:' +
           pct +
           '%"></span></div>' +

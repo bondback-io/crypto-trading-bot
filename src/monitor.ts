@@ -3530,10 +3530,8 @@ async function executeSignalBuy(
   }
 
   try {
-    const {
-      checkDipBuyerRecoveryEntryGates,
-      noteDipBuyerRecoveryEntry,
-    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const { checkDipBuyerRecoveryEntryGates } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
     const dbrGate = checkDipBuyerRecoveryEntryGates({
       profileId: String(profileAssignment.profileId || ''),
       openPositions: paperTrader.getOpenPositions().map((p) => ({
@@ -3542,6 +3540,10 @@ async function executeSignalBuy(
       volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
       volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
       recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+      nearSupport: signal.nearSupport === true,
+      nearFib:
+        signal.nearKeyFib === true ||
+        (signal as { nearFib?: boolean }).nearFib === true,
     });
     if (!dbrGate.ok) {
       finishBuy(buy.mint, false);
@@ -3561,9 +3563,6 @@ async function executeSignalBuy(
       markScannerCooldown(signal.mint, false);
       console.log(`[monitor] ${dbrGate.reason}`);
       return;
-    }
-    if (String(profileAssignment.profileId || '') === 'dip_buyer') {
-      noteDipBuyerRecoveryEntry('dip_buyer');
     }
   } catch {
     /* optional */
@@ -3618,6 +3617,15 @@ async function executeSignalBuy(
   if (result.success) {
     markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
+    try {
+      const { noteDipBuyerRecoveryEntry } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      if (String(profileAssignment.profileId || '') === 'dip_buyer') {
+        noteDipBuyerRecoveryEntry('dip_buyer');
+      }
+    } catch {
+      /* optional */
+    }
     try {
       const { notifyMarlEntryOpened } =
         require('./marlCoordinator') as typeof import('./marlCoordinator');
@@ -3861,7 +3869,6 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     try {
       const {
         checkFastRecoveryEntryGates,
-        noteFastProfileEntry,
         getRecoveryConstraints,
       } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
       const pid = String(profileAssignment.profileId || 'migration_sniper');
@@ -3900,7 +3907,6 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
         buyOpts.profileStopLossPct =
           sl < 0 ? Math.max(sl, tight) : Math.min(sl, Math.abs(tight));
       }
-      noteFastProfileEntry(pid);
     } catch {
       /* optional */
     }
@@ -3955,6 +3961,15 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
   if (result.success) {
     markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
+    try {
+      const { noteFastProfileEntry } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      noteFastProfileEntry(
+        String(profileAssignment.profileId || 'migration_sniper')
+      );
+    } catch {
+      /* optional */
+    }
     annotateActivityFeedByMint(event.mint, {
       tradeStatus: 'taken',
       skipReason: undefined,
@@ -4808,7 +4823,6 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   try {
     const {
       checkFastRecoveryEntryGates,
-      noteFastProfileEntry,
       getRecoveryConstraints,
     } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
     const gate = checkFastRecoveryEntryGates({
@@ -4849,16 +4863,13 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       buyOpts.profileStopLossPct =
         sl < 0 ? Math.max(sl, tight) : Math.min(sl, Math.abs(tight));
     }
-    noteFastProfileEntry(String(profileAssignment.profileId || ''));
   } catch {
     /* optional */
   }
 
   try {
-    const {
-      checkDipBuyerRecoveryEntryGates,
-      noteDipBuyerRecoveryEntry,
-    } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const { checkDipBuyerRecoveryEntryGates } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
     const dbrGate = checkDipBuyerRecoveryEntryGates({
       profileId: String(profileAssignment.profileId || ''),
       openPositions: paperTrader.getOpenPositions().map((p) => ({
@@ -4867,6 +4878,10 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
       volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
       recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+      nearSupport: signal.nearSupport === true,
+      nearFib:
+        signal.nearKeyFib === true ||
+        (signal as { nearFib?: boolean }).nearFib === true,
     });
     if (!dbrGate.ok) {
       finishBuy(buy.mint, false);
@@ -4881,9 +4896,6 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
       });
       console.log(`[monitor] ${dbrGate.reason}`);
       return;
-    }
-    if (String(profileAssignment.profileId || '') === 'dip_buyer') {
-      noteDipBuyerRecoveryEntry('dip_buyer');
     }
   } catch {
     /* optional */
@@ -4965,6 +4977,22 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   if (result.success) {
     markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
+    try {
+      const { noteFastProfileEntry } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      noteFastProfileEntry(String(profileAssignment.profileId || ''));
+    } catch {
+      /* optional */
+    }
+    try {
+      const { noteDipBuyerRecoveryEntry } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      if (String(profileAssignment.profileId || '') === 'dip_buyer') {
+        noteDipBuyerRecoveryEntry('dip_buyer');
+      }
+    } catch {
+      /* optional */
+    }
     annotateActivityFeed(buy.mint, buy.signature, {
       tradeStatus: 'taken',
       skipReason: undefined,
@@ -6717,13 +6745,32 @@ export function getEntryPathLightStatus(): {
     Number(config.risk?.minTradeSol) || 0.01
   );
   const funds = evaluateAffordability(minTrade);
-  const skipHint = lastFilterSkipReason
+  let skipHint = lastFilterSkipReason
     ? /no TA setup/i.test(lastFilterSkipReason)
       ? `Last skip: ${lastFilterSkipReason} · Learning Mode does not bypass Require TA (Scalper + Trend/Compounder specialty exempt)`
       : /not a pump\.fun mint/i.test(lastFilterSkipReason)
         ? `Last skip: ${lastFilterSkipReason} · Trend/Compounder Jupiter|KOL specialty can bypass Pump.fun-only`
         : `Last skip: ${lastFilterSkipReason}`
     : undefined;
+  try {
+    const { getLastDipBuyerRecoverySkip } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const dbrSkip = getLastDipBuyerRecoverySkip();
+    if (dbrSkip.reason) {
+      const ageMs = dbrSkip.at != null ? Date.now() - dbrSkip.at : null;
+      const fresh = ageMs == null || ageMs < 30 * 60_000;
+      if (fresh) {
+        const dbrBit = `Last DBR skip: ${dbrSkip.reason}`;
+        if (!skipHint) {
+          skipHint = dbrBit;
+        } else if (!/Dip Buyer Recovery/i.test(skipHint)) {
+          skipHint = `${skipHint} · ${dbrBit}`;
+        }
+      }
+    }
+  } catch {
+    /* optional */
+  }
 
   if (!running) {
     blockers.push('monitor not running');

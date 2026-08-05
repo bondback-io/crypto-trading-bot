@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.181',
+    title: 'Dip Buyer Recovery open-starvation relief',
+    sections: ['microbots', 'execution', 'overview'],
+    items: [
+      'Dip Buyer Recovery Stage 0 volume floors softened to $2.5k (5m) / $12k (1h); frequency, concurrency, collapsed-volume, and support+Fib gates unchanged. Stages 1–3 unchanged.',
+      'DBR and Fast Profiles Recovery entry counters now tick only after a successful fill (not on gate pass), so failed buys no longer start cooldowns.',
+      'Monitor passes nearSupport / nearKeyFib into DBR entry gates; last DBR skip reason shown on the Bot Performance card and Entries path hint.',
+    ],
+  },
+  {
     version: '1.2.180',
     title: 'Dip Buyer Recovery Stages',
     sections: ['microbots', 'learning', 'execution', 'overview'],

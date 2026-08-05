@@ -98,8 +98,8 @@ const STAGE_TABLE: Record<0 | 1 | 2 | 3, StageRow> = {
     maxConcurrent: 1,
     minMsBetweenEntries: 15 * 60_000,
     maxEntriesPerHour: 2,
-    minVolumeM5Usd: 5_000,
-    minVolumeH1Usd: 30_000,
+    minVolumeM5Usd: 2_500,
+    minVolumeH1Usd: 12_000,
     peakProtectArmOfTpPct: 55,
     peakProtectGivebackOfPeakPct: 35,
     skipCollapsedVolume: true,
@@ -219,6 +219,8 @@ export interface DipBuyerRecoveryStatus {
   constraints: DipBuyerRecoveryConstraints;
   lastTransitionReason: string;
   learningModeOverride: boolean;
+  lastSkipReason: string | null;
+  lastSkipAt: number | null;
 }
 
 const FILE = () => dataFile('dip-buyer-recovery-state.json');
@@ -248,6 +250,9 @@ export const DEFAULT_DIP_BUYER_RECOVERY: DipBuyerRecoveryConfig = {
 let stateCache: DipBuyerRecoveryStateFile | null = null;
 let lastEntryAt = 0;
 let recentEntryAts: number[] = [];
+/** Last hard gate skip (session) — for DBR card / Entries hint. */
+let lastSkipReason: string | null = null;
+let lastSkipAt: number | null = null;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -557,6 +562,19 @@ function countEntriesLastHour(): number {
   return recentEntryAts.length;
 }
 
+function noteDipBuyerRecoverySkip(reason: string): { ok: false; reason: string } {
+  lastSkipReason = reason;
+  lastSkipAt = Date.now();
+  return { ok: false, reason };
+}
+
+export function getLastDipBuyerRecoverySkip(): {
+  reason: string | null;
+  at: number | null;
+} {
+  return { reason: lastSkipReason, at: lastSkipAt };
+}
+
 export function checkDipBuyerRecoveryEntryGates(input: {
   profileId?: string | null;
   openPositions: Array<{ tradeProfileId?: string | null }>;
@@ -580,10 +598,9 @@ export function checkDipBuyerRecoveryEntryGates(input: {
     (p) => p.tradeProfileId === DIP_BUYER_RECOVERY_ID
   ).length;
   if (openCount >= c.maxConcurrent) {
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: max ${c.maxConcurrent} open`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: max ${c.maxConcurrent} open`
+    );
   }
 
   const last = getLastDipBuyerRecoveryEntryAt();
@@ -591,44 +608,39 @@ export function checkDipBuyerRecoveryEntryGates(input: {
     const waitSec = Math.ceil(
       (c.minMsBetweenEntries - (Date.now() - last)) / 1000
     );
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: cooldown ${waitSec}s remaining`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: cooldown ${waitSec}s remaining`
+    );
   }
 
   if (c.maxEntriesPerHour > 0) {
     const n = countEntriesLastHour();
     if (n >= c.maxEntriesPerHour) {
-      return {
-        ok: false,
-        reason: `Dip Buyer Recovery Stage ${c.stage}: max ${c.maxEntriesPerHour}/hr (${n} in last hour)`,
-      };
+      return noteDipBuyerRecoverySkip(
+        `Dip Buyer Recovery Stage ${c.stage}: max ${c.maxEntriesPerHour}/hr (${n} in last hour)`
+      );
     }
   }
 
   const volM5 = Number(input.volumeM5Usd ?? input.recentVolumeUsd ?? 0);
   if (c.minVolumeM5Usd > 0 && volM5 > 0 && volM5 < c.minVolumeM5Usd) {
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: 5m volume $${Math.round(volM5)} < $${c.minVolumeM5Usd}`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: 5m volume $${Math.round(volM5)} < $${c.minVolumeM5Usd}`
+    );
   }
   const volH1 = Number(input.volumeH1Usd ?? 0);
   if (c.minVolumeH1Usd > 0 && volH1 > 0 && volH1 < c.minVolumeH1Usd) {
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: 1h volume $${Math.round(volH1)} < $${c.minVolumeH1Usd}`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: 1h volume $${Math.round(volH1)} < $${c.minVolumeH1Usd}`
+    );
   }
   if (
     (input.recentVolumeUsd != null && Number(input.recentVolumeUsd) <= 0) ||
     (input.volumeM5Usd != null && Number(input.volumeM5Usd) <= 0)
   ) {
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: near-zero volume skip`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: near-zero volume skip`
+    );
   }
 
   if (
@@ -636,10 +648,9 @@ export function checkDipBuyerRecoveryEntryGates(input: {
     (input.volumeDecayState === 'collapsed' ||
       input.volumeDecayState === 'ultra_thin')
   ) {
-    return {
-      ok: false,
-      reason: `Dip Buyer Recovery Stage ${c.stage}: skip collapsed/ultra-thin volume`,
-    };
+    return noteDipBuyerRecoverySkip(
+      `Dip Buyer Recovery Stage ${c.stage}: skip collapsed/ultra-thin volume`
+    );
   }
 
   if (c.requireSupportFibConfluence === 'required') {
@@ -647,10 +658,9 @@ export function checkDipBuyerRecoveryEntryGates(input: {
     const fibOk = input.nearFib === true;
     if (input.nearSupport != null || input.nearFib != null) {
       if (!supportOk || !fibOk) {
-        return {
-          ok: false,
-          reason: `Dip Buyer Recovery Stage ${c.stage}: need support + Fib confluence`,
-        };
+        return noteDipBuyerRecoverySkip(
+          `Dip Buyer Recovery Stage ${c.stage}: need support + Fib confluence`
+        );
       }
     }
   }
@@ -1036,6 +1046,8 @@ export function getDipBuyerRecoveryStatus(): DipBuyerRecoveryStatus {
     constraints,
     lastTransitionReason: runtime.lastTransitionReason || '',
     learningModeOverride: cfg.learningModeOverride === true,
+    lastSkipReason,
+    lastSkipAt,
   };
 }
 
@@ -1241,6 +1253,8 @@ export function getDipBuyerRecoveryUiHints(): {
   stage: DipRecoveryStage;
   stageName: string;
   inRecovery: boolean;
+  lastSkipReason: string | null;
+  lastSkipAt: number | null;
 } {
   const cfg = getDipBuyerRecoveryConfig();
   const st = getDipBuyerRecoveryStatus();
@@ -1251,6 +1265,8 @@ export function getDipBuyerRecoveryUiHints(): {
     stage,
     stageName: st.stageName || DIP_RECOVERY_STAGE_NAMES[stage],
     inRecovery,
+    lastSkipReason: st.lastSkipReason,
+    lastSkipAt: st.lastSkipAt,
   };
 }
 
