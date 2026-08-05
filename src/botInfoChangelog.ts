@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.170',
+    title: 'Micro Bots Profile routing tabs',
+    sections: ['microbots'],
+    items: [
+      'Micro Bots header revamped into one Profile routing card with Scoring / Profiles / Learning tabs — Automatic Scoring first; Smart Bot + Trade Profiles and Live Mode Learning below; mobile-friendly; all setting IDs preserved.',
+    ],
+  },
+  {
     version: '1.2.169',
     title: 'Recovery badges + control field overlap fix',
     sections: ['microbots', 'overview', 'knobs'],

@@ -3331,6 +3331,72 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .tp-name .fpr-hint {
       margin-left: 0.22rem;
     }
+    /* Micro Bots — Profile routing sub-tabs */
+    #mb-profile-routing-card {
+      background: #0b1220;
+      border: 1px solid #1e293b;
+      padding: 0.75rem;
+    }
+    .mb-routing-tabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.35rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.15rem;
+    }
+    .mb-routing-tabs .closed-filter-btn {
+      flex: 0 0 auto;
+      min-height: 2.25rem;
+      padding: 0.4rem 0.75rem;
+      white-space: nowrap;
+    }
+    .mb-routing-panel {
+      display: none;
+      min-width: 0;
+    }
+    .mb-routing-panel.is-active {
+      display: block;
+    }
+    .mb-routing-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem 0.75rem;
+    }
+    .mb-routing-row + .mb-routing-row {
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #1e293b;
+    }
+    .mb-routing-row > div:first-child {
+      min-width: 0;
+      flex: 1 1 12rem;
+    }
+    .mb-routing-row > .ctl-check {
+      flex: 0 0 auto;
+      align-self: center;
+      padding-top: 0;
+    }
+    @media (max-width: 479px) {
+      .mb-routing-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .mb-routing-row > .ctl-check {
+        align-self: flex-start;
+        min-height: 2.25rem;
+      }
+      .mb-routing-tabs .closed-filter-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        font-size: 12px;
+        padding: 0.4rem 0.55rem;
+      }
+    }
     #fpr-controls-row {
       align-items: flex-end;
     }
@@ -7905,50 +7971,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
-      <div class="card" id="live-mode-learning-microbots-card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
-        <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="card" id="mb-profile-routing-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="text-sm font-semibold text-slate-200">Live Mode Learning <span class="tip" tabindex="0" data-tip="Default OFF: bots learn episodes from Live Sim only. When ON, Live Mode closed trades also feed learning. Trading acts the same in Live vs Live Sim either way."></span></div>
-            <p class="text-xs text-slate-400 mb-0">Include episodes / closed trades from Live Mode?</p>
+            <div class="section-title !text-sm mb-0">Profile routing <span class="tip" tabindex="0" data-tip="Scoring picks the lane; Profiles turns lanes on/off; Learning controls whether Live Mode closes feed episodes. Element IDs and save handlers are unchanged."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Automatic scoring first — profiles and Live Mode Learning live in the tabs below.</p>
           </div>
-          <label class="ctl-check" title="Include Live Mode closed episodes in learning">
-            <input type="checkbox" id="live-mode-learning-enabled-mb" onchange="setLiveModeLearningEnabled(this.checked)" />
-            <span>Include Live Mode</span>
-          </label>
         </div>
-      </div>
+        <div class="mb-routing-tabs closed-filter" role="tablist" aria-label="Profile routing sections">
+          <button type="button" role="tab" class="closed-filter-btn is-active" id="mb-routing-tab-scoring" data-mb-routing-tab="scoring" aria-selected="true" aria-controls="auto-scoring-panel" onclick="setMbRoutingTab('scoring')">Scoring</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="mb-routing-tab-profiles" data-mb-routing-tab="profiles" aria-selected="false" aria-controls="mb-routing-panel-profiles" onclick="setMbRoutingTab('profiles')">Profiles</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="mb-routing-tab-learning" data-mb-routing-tab="learning" aria-selected="false" aria-controls="live-mode-learning-microbots-card" onclick="setMbRoutingTab('learning')">Learning</button>
+        </div>
 
-      <div class="card" style="background:#0b1220;border:1px solid #1e293b;padding:0.75rem">
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3" style="border-bottom:1px solid #1e293b">
-          <div style="min-width:0;flex:1">
-            <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
-            <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Settings tab = global capability / kill switches. OFF = shared master modules for all profiles.</p>
-          </div>
-          <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
-            <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
-            <span>Smart Bot Profiles</span>
-          </label>
-        </div>
-        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div style="min-width:0;flex:1">
-            <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
-            <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
-          </div>
-          <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
-            <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
-            <span>Multi-profile ON</span>
-          </label>
-        </div>
-        <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
-          <div class="profile-colour-legend-head">
-            <span class="profile-colour-legend-title">Profile colours</span>
-            <span class="profile-colour-legend-hint">Matches trade badges</span>
-          </div>
-          <div class="profile-colour-legend-items" data-profile-legend-items></div>
-        </div>
-        <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
-        <div class="mt-3 pt-3 border-t border-slate-700/80" id="auto-scoring-panel">
-          <details class="strat-adv-pack" id="auto-scoring-details" style="margin-top:0">
+        <div class="mb-routing-panel is-active" id="auto-scoring-panel" data-mb-routing-panel="scoring" role="tabpanel" aria-labelledby="mb-routing-tab-scoring">
+          <details class="strat-adv-pack" id="auto-scoring-details" open style="margin-top:0">
             <summary>
               <span class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</span>
               <label class="ctl-check" title="Enable weighted auto-scoring" onclick="event.stopPropagation()">
@@ -7994,6 +8031,50 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               </details>
             </div>
           </details>
+        </div>
+
+        <div class="mb-routing-panel" id="mb-routing-panel-profiles" data-mb-routing-panel="profiles" role="tabpanel" aria-labelledby="mb-routing-tab-profiles">
+          <div class="mb-routing-row">
+            <div>
+              <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
+              <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Settings tab = global capability / kill switches. OFF = shared master modules for all profiles.</p>
+            </div>
+            <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
+              <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
+              <span>Smart Bot Profiles</span>
+            </label>
+          </div>
+          <div class="mb-routing-row">
+            <div>
+              <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
+              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
+            </div>
+            <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
+              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
+              <span>Multi-profile ON</span>
+            </label>
+          </div>
+          <div class="profile-colour-legend mb-2 mt-3" data-profile-legend role="region" aria-label="Profile colour legend">
+            <div class="profile-colour-legend-head">
+              <span class="profile-colour-legend-title">Profile colours</span>
+              <span class="profile-colour-legend-hint">Matches trade badges</span>
+            </div>
+            <div class="profile-colour-legend-items" data-profile-legend-items></div>
+          </div>
+          <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
+        </div>
+
+        <div class="mb-routing-panel" id="live-mode-learning-microbots-card" data-mb-routing-panel="learning" role="tabpanel" aria-labelledby="mb-routing-tab-learning">
+          <div class="mb-routing-row">
+            <div>
+              <div class="text-sm font-semibold text-slate-200">Live Mode Learning <span class="tip" tabindex="0" data-tip="Default OFF: bots learn episodes from Live Sim only. When ON, Live Mode closed trades also feed learning. Trading acts the same in Live vs Live Sim either way."></span></div>
+              <p class="text-xs text-slate-400 mb-0">Include episodes / closed trades from Live Mode?</p>
+            </div>
+            <label class="ctl-check" title="Include Live Mode closed episodes in learning">
+              <input type="checkbox" id="live-mode-learning-enabled-mb" onchange="setLiveModeLearningEnabled(this.checked)" />
+              <span>Include Live Mode</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -14728,6 +14809,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
+    function setMbRoutingTab(tab) {
+      const next =
+        tab === 'profiles' || tab === 'learning' || tab === 'scoring'
+          ? tab
+          : 'scoring';
+      try {
+        localStorage.setItem('mbRoutingTab', next);
+      } catch (_) {}
+      document.querySelectorAll('[data-mb-routing-tab]').forEach(function (btn) {
+        const on = btn.getAttribute('data-mb-routing-tab') === next;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-mb-routing-panel]').forEach(function (panel) {
+        const on = panel.getAttribute('data-mb-routing-panel') === next;
+        panel.classList.toggle('is-active', on);
+      });
+    }
+    window.setMbRoutingTab = setMbRoutingTab;
+
+    (function initMbRoutingTab() {
+      try {
+        const stored = localStorage.getItem('mbRoutingTab');
+        if (stored === 'profiles' || stored === 'learning' || stored === 'scoring') {
+          setMbRoutingTab(stored);
+        }
+      } catch (_) {}
+    })();
+
     function renderAutoScoringUi(tp) {
       const auto = tp && tp.autoScoring ? tp.autoScoring : null;
       const en = document.getElementById('auto-scoring-enabled');
@@ -14855,11 +14965,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof showTab === 'function') showTab('zion');
         return;
       }
+      if (typeof showTab === 'function') showTab('microbots');
+      if (typeof setMbRoutingTab === 'function') setMbRoutingTab('profiles');
       const card = document.getElementById('tp-card-' + id);
       if (!card) return;
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.classList.add('tp-card-flash');
-      setTimeout(function () { card.classList.remove('tp-card-flash'); }, 1200);
+      setTimeout(function () {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('tp-card-flash');
+        setTimeout(function () { card.classList.remove('tp-card-flash'); }, 1200);
+      }, 80);
     }
     window.focusTradeProfileCard = focusTradeProfileCard;
 
