@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.173',
+    title: 'Profile routing tab cleanup',
+    sections: ['microbots'],
+    items: [
+      'Profiles is the default Profile routing tab; Smart Bot / Multi-profile toggles sit under the bot cards. Scoring shows only auto-score; Learning shows Live Mode Learning plus MARL / Profile RL / accelerators / enhancements.',
+    ],
+  },
+  {
     version: '1.2.172',
     title: 'Bot Performance Trend profile picker',
     sections: ['microbots'],

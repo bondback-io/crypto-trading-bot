@@ -3368,8 +3368,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       gap: 0.5rem 0.75rem;
     }
     .mb-routing-row + .mb-routing-row {
-      margin-top: 0.75rem;
-      padding-top: 0.75rem;
+      margin-top: 0.65rem;
+      padding-top: 0.65rem;
       border-top: 1px solid #1e293b;
     }
     .mb-routing-row > div:first-child {
@@ -3380,6 +3380,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       flex: 0 0 auto;
       align-self: center;
       padding-top: 0;
+    }
+    .mb-routing-module {
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      background: #020617;
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.65rem;
+    }
+    .mb-routing-module:last-child {
+      margin-bottom: 0;
+    }
+    .mb-routing-module .strat-adv-pack {
+      margin-top: 0;
+      border: none;
+      background: transparent;
+    }
+    .mb-routing-foot {
+      margin-top: 0.85rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #1e293b;
+    }
+    .mb-routing-foot .mb-routing-row:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    /* Hide learning-scoped cards unless Learning tab is active */
+    [data-tab-panel="microbots"]:not([data-mb-active="learning"]) [data-mb-tab-scope="learning"] {
+      display: none !important;
     }
     @media (max-width: 479px) {
       .mb-routing-row {
@@ -7967,94 +7996,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </aside>
 
     <!-- ========== TAB: Micro Bots ========== -->
-    <section data-tab-panel="microbots" class="strategies-panel hidden space-y-4">
+    <section data-tab-panel="microbots" data-mb-active="profiles" class="strategies-panel hidden space-y-4">
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
       <div class="card" id="mb-profile-routing-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-0">Profile routing <span class="tip" tabindex="0" data-tip="Scoring picks the lane; Profiles turns lanes on/off; Learning controls whether Live Mode closes feed episodes. Element IDs and save handlers are unchanged."></span></div>
-            <p class="text-xs text-slate-400 mb-0">Automatic scoring first — profiles and Live Mode Learning live in the tabs below.</p>
+            <div class="section-title !text-sm mb-0">Profile routing <span class="tip" tabindex="0" data-tip="Profiles turns lanes on/off; Scoring picks the lane; Learning covers Live Mode episodes plus MARL / Profile RL / accelerators. Element IDs and save handlers are unchanged."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Profiles first — Scoring and Learning stay in their own tabs.</p>
           </div>
         </div>
         <div class="mb-routing-tabs closed-filter" role="tablist" aria-label="Profile routing sections">
-          <button type="button" role="tab" class="closed-filter-btn is-active" id="mb-routing-tab-scoring" data-mb-routing-tab="scoring" aria-selected="true" aria-controls="auto-scoring-panel" onclick="setMbRoutingTab('scoring')">Scoring</button>
-          <button type="button" role="tab" class="closed-filter-btn" id="mb-routing-tab-profiles" data-mb-routing-tab="profiles" aria-selected="false" aria-controls="mb-routing-panel-profiles" onclick="setMbRoutingTab('profiles')">Profiles</button>
+          <button type="button" role="tab" class="closed-filter-btn is-active" id="mb-routing-tab-profiles" data-mb-routing-tab="profiles" aria-selected="true" aria-controls="mb-routing-panel-profiles" onclick="setMbRoutingTab('profiles')">Profiles</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="mb-routing-tab-scoring" data-mb-routing-tab="scoring" aria-selected="false" aria-controls="auto-scoring-panel" onclick="setMbRoutingTab('scoring')">Scoring</button>
           <button type="button" role="tab" class="closed-filter-btn" id="mb-routing-tab-learning" data-mb-routing-tab="learning" aria-selected="false" aria-controls="live-mode-learning-microbots-card" onclick="setMbRoutingTab('learning')">Learning</button>
         </div>
 
-        <div class="mb-routing-panel is-active" id="auto-scoring-panel" data-mb-routing-panel="scoring" role="tabpanel" aria-labelledby="mb-routing-tab-scoring">
-          <details class="strat-adv-pack" id="auto-scoring-details" open style="margin-top:0">
-            <summary>
-              <span class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</span>
-              <label class="ctl-check" title="Enable weighted auto-scoring" onclick="event.stopPropagation()">
-                <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" onclick="event.stopPropagation()" />
-                <span>Auto-score ON</span>
-              </label>
-            </summary>
-            <div class="strat-adv-body">
-              <p class="text-xs text-slate-400 mb-2">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
-              <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
-                <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
-                <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
-                  <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
-                  <span>Skip below min</span>
-                </label>
-                <label class="ctl ctl-lg" style="flex:1 1 12rem;min-width:10rem"><span>Force profile</span>
-                  <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
-                    <option value="">— none (auto pick) —</option>
-                  </select>
-                </label>
-              </div>
-              <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
-                <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
-                <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
-                  <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
-                    <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
-                    <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
-                  </div>
-                  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
-                    <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                    <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
-                  </div>
-                  <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
-                  <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
-                </div>
-              </details>
-            </div>
-          </details>
-        </div>
-
-        <div class="mb-routing-panel" id="mb-routing-panel-profiles" data-mb-routing-panel="profiles" role="tabpanel" aria-labelledby="mb-routing-tab-profiles">
-          <div class="mb-routing-row">
-            <div>
-              <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
-              <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Settings tab = global capability / kill switches. OFF = shared master modules for all profiles.</p>
-            </div>
-            <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
-              <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
-              <span>Smart Bot Profiles</span>
-            </label>
-          </div>
-          <div class="mb-routing-row">
-            <div>
-              <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
-              <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
-            </div>
-            <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
-              <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
-              <span>Multi-profile ON</span>
-            </label>
-          </div>
-          <div class="profile-colour-legend mb-2 mt-3" data-profile-legend role="region" aria-label="Profile colour legend">
+        <div class="mb-routing-panel is-active" id="mb-routing-panel-profiles" data-mb-routing-panel="profiles" role="tabpanel" aria-labelledby="mb-routing-tab-profiles">
+          <div class="profile-colour-legend mb-2" data-profile-legend role="region" aria-label="Profile colour legend">
             <div class="profile-colour-legend-head">
               <span class="profile-colour-legend-title">Profile colours</span>
               <span class="profile-colour-legend-hint">Matches trade badges</span>
@@ -8062,23 +8022,99 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="profile-colour-legend-items" data-profile-legend-items></div>
           </div>
           <div class="tp-toggle-row" id="trade-profiles-toggles">Loading…</div>
+          <div class="mb-routing-foot">
+            <div class="mb-routing-row">
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Smart Bot Profiles</div>
+                <p class="text-xs text-slate-400 mb-0">ON = each profile is a micro-bot lane (own modules + Min/Max MC floors); lanes compete, one winner stamps the trade. Settings tab = global capability / kill switches. OFF = shared master modules for all profiles.</p>
+              </div>
+              <label class="ctl-check" title="Default ON — parallel micro-bot lanes with per-profile modules and MC floors">
+                <input type="checkbox" id="smart-bot-profiles" onchange="toggleSmartBotProfiles(this.checked)" />
+                <span>Smart Bot Profiles</span>
+              </label>
+            </div>
+            <div class="mb-routing-row">
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Trade Profiles <span class="mint font-normal text-xs">(primary)</span></div>
+                <p class="text-xs text-slate-400 mb-0">Each new trade is assigned to the best matching ON profile. You do <strong>not</strong> pick a scalp preset per trade — profiles + enabled modules decide.</p>
+              </div>
+              <label class="ctl-check" title="When off, all trades use Default (legacy single-stack behaviour)">
+                <input type="checkbox" id="trade-profiles-master" onchange="toggleMultiProfiles(this.checked)" />
+                <span>Multi-profile ON</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-routing-panel" id="auto-scoring-panel" data-mb-routing-panel="scoring" role="tabpanel" aria-labelledby="mb-routing-tab-scoring">
+          <div class="mb-routing-module">
+            <details class="strat-adv-pack" id="auto-scoring-details" open style="margin-top:0">
+              <summary>
+                <span class="text-sm font-semibold text-slate-200">Automatic Profile Scoring</span>
+                <label class="ctl-check" title="Enable weighted auto-scoring" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="auto-scoring-enabled" onchange="saveAutoScoringFromUi()" onclick="event.stopPropagation()" />
+                  <span>Auto-score ON</span>
+                </label>
+              </summary>
+              <div class="strat-adv-body">
+                <p class="text-xs text-slate-400 mb-2">Scores ON profiles, picks the best, can skip below min. OFF = simpler match rules only.</p>
+                <div class="filters-row text-xs mb-2" id="auto-scoring-controls">
+                  <label class="ctl ctl-md"><span>Min score (0–100)</span><input type="number" id="auto-scoring-min" min="0" max="100" step="1" value="45" onchange="saveAutoScoringFromUi()" /></label>
+                  <label class="ctl-check" title="Skip the trade when the best ON profile scores below Min score">
+                    <input type="checkbox" id="auto-scoring-skip" checked onchange="saveAutoScoringFromUi()" />
+                    <span>Skip below min</span>
+                  </label>
+                  <label class="ctl ctl-fit" style="flex:1 1 10rem;min-width:8rem"><span>Force profile</span>
+                    <select id="auto-scoring-force" onchange="saveAutoScoringFromUi()">
+                      <option value="">— none (auto pick) —</option>
+                    </select>
+                  </label>
+                </div>
+                <details class="strat-adv-pack" style="border:none;background:transparent;margin:0">
+                  <summary style="padding:0.35rem 0">Scoring weights &amp; recent decisions</summary>
+                  <div class="strat-adv-body" style="border:none;padding:0.35rem 0 0">
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <div class="text-xs font-semibold text-slate-300">Weights <span class="mint font-normal" id="auto-scoring-weight-total">(100%)</span></div>
+                      <button type="button" class="btn btn-secondary text-xs" style="padding:0.15rem 0.45rem" onclick="resetAutoScoringWeights()">Reset defaults</button>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs" id="auto-scoring-weights">
+                      <label class="ctl"><span>Volume Behaviour</span><div class="flex items-center gap-1"><input type="number" data-w="volume" min="0" max="100" step="1" value="20" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Smart Wallet Activity</span><div class="flex items-center gap-1"><input type="number" data-w="smartMoney" min="0" max="100" step="1" value="16" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Token Age / Stage</span><div class="flex items-center gap-1"><input type="number" data-w="tokenAge" min="0" max="100" step="1" value="12" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Volatility / Speed</span><div class="flex items-center gap-1"><input type="number" data-w="volatility" min="0" max="100" step="1" value="11" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Support / Fib</span><div class="flex items-center gap-1"><input type="number" data-w="supportFib" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Chart Pattern Fit</span><div class="flex items-center gap-1"><input type="number" data-w="chartPatterns" min="0" max="100" step="1" value="10" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Migration Status</span><div class="flex items-center gap-1"><input type="number" data-w="migration" min="0" max="100" step="1" value="9" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Liquidity + Holders</span><div class="flex items-center gap-1"><input type="number" data-w="liquidityHolders" min="0" max="100" step="1" value="7" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                      <label class="ctl"><span>Market Session</span><div class="flex items-center gap-1"><input type="number" data-w="session" min="0" max="100" step="1" value="5" oninput="updateAutoWeightTotal()" onchange="saveAutoScoringFromUi()" /><span class="mint">%</span></div></label>
+                    </div>
+                    <div class="text-xs font-semibold text-slate-300 mb-1 mt-2">Recent profile decisions</div>
+                    <div class="tp-decisions" id="auto-scoring-decisions"><span class="mint">No decisions yet</span></div>
+                  </div>
+                </details>
+              </div>
+            </details>
+          </div>
         </div>
 
         <div class="mb-routing-panel" id="live-mode-learning-microbots-card" data-mb-routing-panel="learning" role="tabpanel" aria-labelledby="mb-routing-tab-learning">
-          <div class="mb-routing-row">
-            <div>
-              <div class="text-sm font-semibold text-slate-200">Live Mode Learning <span class="tip" tabindex="0" data-tip="Default OFF: bots learn episodes from Live Sim only. When ON, Live Mode closed trades also feed learning. Trading acts the same in Live vs Live Sim either way."></span></div>
-              <p class="text-xs text-slate-400 mb-0">Include episodes / closed trades from Live Mode?</p>
+          <div class="mb-routing-module">
+            <div class="mb-routing-row">
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Live Mode Learning <span class="tip" tabindex="0" data-tip="Default OFF: bots learn episodes from Live Sim only. When ON, Live Mode closed trades also feed learning. Trading acts the same in Live vs Live Sim either way."></span></div>
+                <p class="text-xs text-slate-400 mb-0">Include episodes / closed trades from Live Mode?</p>
+              </div>
+              <label class="ctl-check" title="Include Live Mode closed episodes in learning">
+                <input type="checkbox" id="live-mode-learning-enabled-mb" onchange="setLiveModeLearningEnabled(this.checked)" />
+                <span>Include Live Mode</span>
+              </label>
             </div>
-            <label class="ctl-check" title="Include Live Mode closed episodes in learning">
-              <input type="checkbox" id="live-mode-learning-enabled-mb" onchange="setLiveModeLearningEnabled(this.checked)" />
-              <span>Include Live Mode</span>
-            </label>
           </div>
+          <p class="text-xs text-slate-500 mb-0">MARL, Profile RL, and Learning Accelerators appear below when this tab is open.</p>
         </div>
       </div>
 
-      <div class="card" id="marl-card">
+      <div class="card" id="marl-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
@@ -8116,7 +8152,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
-      <div class="card" id="profile-rl-card">
+      <div class="card" id="profile-rl-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="profile-rl-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
@@ -8148,7 +8184,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
-      <div class="card" id="learning-accel-card">
+      <div class="card" id="learning-accel-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="learning-accel-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
@@ -8179,7 +8215,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
-      <div class="card" id="learning-enhancements-card">
+      <div class="card" id="learning-enhancements-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="learning-enhancements-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
@@ -14903,7 +14939,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const next =
         tab === 'profiles' || tab === 'learning' || tab === 'scoring'
           ? tab
-          : 'scoring';
+          : 'profiles';
       try {
         localStorage.setItem('mbRoutingTab', next);
       } catch (_) {}
@@ -14916,6 +14952,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const on = panel.getAttribute('data-mb-routing-panel') === next;
         panel.classList.toggle('is-active', on);
       });
+      const micro = document.querySelector('[data-tab-panel="microbots"]');
+      if (micro) micro.setAttribute('data-mb-active', next);
     }
     window.setMbRoutingTab = setMbRoutingTab;
 
@@ -14924,8 +14962,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const stored = localStorage.getItem('mbRoutingTab');
         if (stored === 'profiles' || stored === 'learning' || stored === 'scoring') {
           setMbRoutingTab(stored);
+        } else {
+          setMbRoutingTab('profiles');
         }
-      } catch (_) {}
+      } catch (_) {
+        setMbRoutingTab('profiles');
+      }
     })();
 
     function renderAutoScoringUi(tp) {
