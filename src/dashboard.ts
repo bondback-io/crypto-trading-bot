@@ -3131,6 +3131,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       gap: 0.35rem;
       margin-bottom: 0.65rem;
     }
+    .ov-wallet-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.22rem 0.55rem;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      border: 1px solid transparent;
+      max-width: 14rem;
+    }
+    .ov-wallet-indicator .ov-wallet-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .ov-wallet-indicator .ov-wallet-addr {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 500;
+    }
+    .ov-wallet-indicator.is-connected {
+      color: #6ee7b7;
+      background: rgba(16, 185, 129, 0.14);
+      border-color: rgba(52, 211, 153, 0.42);
+    }
+    .ov-wallet-indicator.is-connected .ov-wallet-dot {
+      background: #34d399;
+      box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.25);
+    }
+    .ov-wallet-indicator.is-disconnected {
+      color: #fca5a5;
+      background: rgba(248, 113, 113, 0.12);
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+    .ov-wallet-indicator.is-disconnected .ov-wallet-dot {
+      background: #f87171;
+      box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.22);
+    }
+    #btn-ov-import-trades:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     .mbp-table-wrap { overflow-x: auto; }
     .mbp-table td, .mbp-table th { white-space: nowrap; }
     .mbp-table tr.mbp-top { background: rgba(16, 185, 129, 0.08); }
@@ -6624,20 +6671,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
 
       <div class="mbp-window-row mt-2.5 sm:mt-3 mb-0" role="group" aria-label="Overview stats time window" id="overview-stats-window-row">
-        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="1h" onclick="setOverviewStatsWindow('1h')">1h</button>
-        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="24h" onclick="setOverviewStatsWindow('24h')">24h</button>
-        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="7d" onclick="setOverviewStatsWindow('7d')">7d</button>
-        <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="30d" onclick="setOverviewStatsWindow('30d')">30d</button>
-        <button type="button" class="closed-filter-btn ov-window-btn is-active" data-ov-window="all" onclick="setOverviewStatsWindow('all')" aria-pressed="true">All</button>
-        <button type="button" class="btn btn-secondary text-xs ml-1" id="btn-ov-import-trades" onclick="importOverviewWindowTrades()" title="Import open + closed trades for the selected window into this session (All capped at 1000). Stats refresh to match. Use Overview Reset to clear.">Import trades</button>
+        <span id="ov-timeframe-pills" class="ov-timeframe-pills" style="display:inline-flex;flex-wrap:wrap;align-items:center;gap:0.35rem">
+          <button type="button" class="closed-filter-btn ov-window-btn is-active" data-ov-window="now" onclick="setOverviewStatsWindow('now')" aria-pressed="true" title="Live session view — current open + closed on screen. No historical import.">Now</button>
+          <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="1h" onclick="setOverviewStatsWindow('1h')">1h</button>
+          <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="24h" onclick="setOverviewStatsWindow('24h')">24h</button>
+          <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="7d" onclick="setOverviewStatsWindow('7d')">7d</button>
+          <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="30d" onclick="setOverviewStatsWindow('30d')">30d</button>
+          <button type="button" class="closed-filter-btn ov-window-btn" data-ov-window="all" onclick="setOverviewStatsWindow('all')">All</button>
+        </span>
+        <button type="button" class="btn btn-secondary text-xs ml-1" id="btn-ov-import-trades" onclick="importOverviewWindowTrades()" title="Import open + closed trades for the selected window into this session (All capped at 1000). Not available in Now. Stats refresh to match. Use Overview Reset to clear.">Import trades</button>
         <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-import-live-wallet" onclick="importLiveWalletHistory()" title="Live mode only: import on-chain balances + bot-recorded live opens/closes for the active trading wallet. Paper / Live Sim test data is never included.">Import live wallet</button>
         <button type="button" class="btn btn-secondary text-xs hidden" id="btn-ov-disconnect-live-wallet" onclick="disconnectLiveWallet()" title="Clear Live Overview wallet details and trades. History stays on disk for re-import. Live ↔ Live Sim without disconnect keeps data.">Disconnect</button>
-        <span class="mint text-xs ml-auto" id="ov-window-label" title="Win Rate, Max DD, Trades, and Status PF/avg win-loss use this window. Wallets, Signals, Trade Rate, and Entries stay live.">Stats: All</span>
+        <span id="ov-live-wallet-indicator" class="ov-wallet-indicator is-disconnected hidden" title="Live wallet connection status" aria-live="polite">
+          <span class="ov-wallet-dot" aria-hidden="true"></span>
+          <span class="ov-wallet-addr" id="ov-live-wallet-addr">Disconnected</span>
+        </span>
+        <span class="mint text-xs ml-auto" id="ov-window-label" title="Win Rate, Max DD, Trades, and Status PF/avg win-loss use this window. Now = current session on screen (no import). Wallets, Signals, Trade Rate, and Entries stay live.">Stats: Now</span>
       </div>
       <p class="mint text-xs mt-1 mb-0 hidden" id="ov-import-meta"></p>
       <div class="ov-meta-strip mt-2.5 sm:mt-3">
         <div class="card">
-          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Closed trades that finished green in the selected window. Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
+          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Closed trades that finished green in the selected window. Now = current session on screen (no historical import). Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
           <div class="stat" id="win-rate">—</div>
           <div class="mint mt-1 text-xs" id="stat-wl">—</div>
         </div>
@@ -6661,7 +6715,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Closed trades in the selected window (All also adds open). Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Closed trades in the selected window (Now and All also add open). Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap (always live — not windowed)."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Large number = currently open trades. Below: Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
           <div class="text-lg font-semibold" id="entries-open-count">—</div>
@@ -9089,6 +9143,48 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button type="button" class="btn btn-sm" onclick="loadFastProfileRecovery()">Refresh</button>
         </div>
         <div id="fpr-profile-grid" class="fpr-grid">
+          <p class="mint text-xs">Loading…</p>
+        </div>
+      </div>
+
+      <div class="card" id="dip-buyer-recovery-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Dip Buyer Recovery Stages <span class="tip" tabindex="0" data-tip="Stages 0–4 for Dip Buyer only. Auto taper: frequency → size → concurrency → Peak Protect. Bounce follow-through in readiness. Hard safety filters always win. Not part of Fast Profiles Recovery."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Dip-swing recovery with minute gaps and volume floors. Stage 0 = full recovery; Stage 4 = normal.</p>
+          </div>
+          <label class="ctl-check" title="Enable Dip Buyer Recovery">
+            <input type="checkbox" id="dbr-enabled" checked onchange="saveDipBuyerRecovery()" />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="filters-row mb-2" id="dbr-controls-row">
+          <label class="ctl-check" title="Auto promote/demote one stage at a time">
+            <input type="checkbox" id="dbr-autotaper" checked onchange="saveDipBuyerRecovery()" />
+            <span>Auto taper</span>
+          </label>
+          <label class="ctl-check" title="Lock stage — ignore auto taper">
+            <input type="checkbox" id="dbr-locked" onchange="saveDipBuyerRecovery()" />
+            <span>Lock stage</span>
+          </label>
+          <label class="ctl-check" title="Allow Learning Mode fairness while recovering">
+            <input type="checkbox" id="dbr-lm-override" onchange="saveDipBuyerRecovery()" />
+            <span>LM override</span>
+          </label>
+          <label class="ctl ctl-fit">
+            <span>Force stage</span>
+            <select id="dbr-force-stage" onchange="forceDipBuyerRecoveryFromSelect()">
+              <option value="">—</option>
+              <option value="0">0 Full</option>
+              <option value="1">1 Freq</option>
+              <option value="2">2 Size</option>
+              <option value="3">3 Ctrl</option>
+              <option value="4">4 Normal</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-sm" onclick="loadDipBuyerRecovery()">Refresh</button>
+        </div>
+        <div id="dbr-card-body" class="fpr-grid">
           <p class="mint text-xs">Loading…</p>
         </div>
       </div>
@@ -14370,26 +14466,78 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window._ovStatsWindow = window._ovStatsWindow || (function () {
       try {
         const s = localStorage.getItem('ovStatsWindow');
-        if (s === '1h' || s === '24h' || s === '7d' || s === '30d' || s === 'all') return s;
+        if (
+          s === 'now' ||
+          s === '1h' ||
+          s === '24h' ||
+          s === '7d' ||
+          s === '30d' ||
+          s === 'all'
+        ) {
+          return s;
+        }
       } catch (_) {}
-      return 'all';
+      return 'now';
     })();
     window._ovStatsFetchSeq = 0;
     window._ovStatsInFlight = false;
     window._ovStatsLastFetchAt = 0;
+    window._dashboardMode = window._dashboardMode || 'paper';
+
+    function emptyOverviewWindowStats(win) {
+      return {
+        window: win || 'now',
+        winRatePct: 0,
+        wins: 0,
+        losses: 0,
+        closedTrades: 0,
+        totalTrades: 0,
+        openTrades: 0,
+        maxDrawdownPct: 0,
+        avgHoldSec: 0,
+        profitFactor: 0,
+        avgWinPct: 0,
+        avgLossPct: 0,
+        netPnlSol: 0,
+        sampleSize: 0,
+        rankedAt: Date.now(),
+      };
+    }
 
     function syncOverviewStatsWindowButtons() {
-      const cur = window._ovStatsWindow || 'all';
+      const live = window._dashboardMode === 'live';
+      const cur = live ? 'now' : (window._ovStatsWindow || 'now');
       document.querySelectorAll('.ov-window-btn').forEach(function (btn) {
         const w = btn.getAttribute('data-ov-window');
-        const on = w === cur;
+        const on = !live && w === cur;
         btn.classList.toggle('is-active', on);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
       const lab = document.getElementById('ov-window-label');
       if (lab) {
-        const labels = { '1h': '1h', '24h': '24h', '7d': '7d', '30d': '30d', all: 'All' };
-        lab.textContent = 'Stats: ' + (labels[cur] || cur);
+        if (live) {
+          lab.textContent = 'Stats: Live';
+        } else {
+          const labels = {
+            now: 'Now',
+            '1h': '1h',
+            '24h': '24h',
+            '7d': '7d',
+            '30d': '30d',
+            all: 'All',
+          };
+          lab.textContent = 'Stats: ' + (labels[cur] || cur);
+        }
+      }
+      const importBtn = document.getElementById('btn-ov-import-trades');
+      if (importBtn) {
+        const disableImport = live || cur === 'now';
+        importBtn.disabled = disableImport;
+        importBtn.title = disableImport
+          ? (live
+              ? 'Import trades is for Paper / Live Sim windows only. Use Import live wallet in Live.'
+              : 'Import trades is disabled in Now — switch to 1h/24h/7d/30d/All to import history.')
+          : 'Import open + closed trades for the selected window into this session (All capped at 1000). Stats refresh to match. Use Overview Reset to clear.';
       }
     }
 
@@ -14435,8 +14583,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const tradesEl = document.getElementById('stat-trades');
       if (tradesEl) {
+        const includeOpen = ov.window === 'all' || ov.window === 'now';
         tradesEl.textContent = String(
-          ov.window === 'all' ? ov.totalTrades ?? ov.closedTrades : ov.closedTrades ?? 0
+          includeOpen ? ov.totalTrades ?? ov.closedTrades : ov.closedTrades ?? 0
         );
         const tip = tradesEl.parentElement && tradesEl.parentElement.querySelector('.tip');
         if (tip) {
@@ -14446,7 +14595,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ' open · ' +
               (ov.closedTrades || 0) +
               ' closed (' +
-              (ov.window || 'all') +
+              (ov.window || 'now') +
               ')'
           );
         }
@@ -14474,8 +14623,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /** Keep windowed cards stable across status polls — never flash lifetime totals. */
     function refreshOverviewWindowStats(opts) {
       const force = !!(opts && opts.force);
-      const win = window._ovStatsWindow || 'all';
+      const live = window._dashboardMode === 'live';
+      const win = live ? 'now' : (window._ovStatsWindow || 'now');
       syncOverviewStatsWindowButtons();
+      if (live && window._liveWalletEmpty) {
+        const empty = emptyOverviewWindowStats('now');
+        window._lastOverviewWindowStats = empty;
+        paintOverviewWindowStats(empty, window._lastOverviewStatusCtx || {});
+        return;
+      }
       const cached = window._lastOverviewWindowStats;
       const ctx = window._lastOverviewStatusCtx || {};
       // Re-paint cached window stats with fresh Status ctx (migrations / selective)
@@ -14522,14 +14678,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.paintOverviewWindowStats = paintOverviewWindowStats;
 
     function setOverviewStatsWindow(win) {
+      if (window._dashboardMode === 'live') return;
       const next =
+        win === 'now' ||
         win === '1h' ||
         win === '24h' ||
         win === '7d' ||
         win === '30d' ||
         win === 'all'
           ? win
-          : 'all';
+          : 'now';
       const prev = window._ovStatsWindow;
       window._ovStatsWindow = next;
       try {
@@ -14546,7 +14704,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.setOverviewStatsWindow = setOverviewStatsWindow;
 
     async function importOverviewWindowTrades() {
-      const win = window._ovStatsWindow || 'all';
+      const win = window._ovStatsWindow || 'now';
+      if (win === 'now' || window._dashboardMode === 'live') {
+        alert(
+          win === 'now'
+            ? 'Import trades is disabled in Now. Switch to 1h, 24h, 7d, 30d, or All.'
+            : 'Use Import live wallet in Live mode.'
+        );
+        return;
+      }
       const label =
         win === 'all' ? 'All (max 1000)' : String(win);
       if (
@@ -14688,14 +14854,59 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.importLiveWalletHistory = importLiveWalletHistory;
     window.disconnectLiveWallet = disconnectLiveWallet;
 
-    function syncOverviewImportLiveWalletBtn(mode) {
+    function truncateWalletAddr(pk) {
+      const s = String(pk || '');
+      if (s.length < 10) return s || '';
+      return s.slice(0, 4) + '…' + s.slice(-4);
+    }
+
+    function syncLiveWalletIndicator(status) {
+      const ind = document.getElementById('ov-live-wallet-indicator');
+      const addrEl = document.getElementById('ov-live-wallet-addr');
+      if (!ind) return;
+      const live = status && status.mode === 'live';
+      ind.classList.toggle('hidden', !live);
+      if (!live) return;
+      const meta = status.liveWallet || {};
+      const connected =
+        status.liveWalletConnected === true ||
+        meta.connected === true ||
+        (status.liveWalletEmpty !== true && !!meta.publicKey);
+      const pk =
+        meta.publicKey ||
+        (status.tradingWallet && status.tradingWallet.publicKey) ||
+        '';
+      ind.classList.toggle('is-connected', connected);
+      ind.classList.toggle('is-disconnected', !connected);
+      if (addrEl) {
+        if (connected && pk) {
+          addrEl.textContent = truncateWalletAddr(pk);
+          ind.title = 'Live wallet connected · ' + pk;
+        } else {
+          addrEl.textContent = 'Disconnected';
+          ind.title = 'Live wallet disconnected — import live wallet to load balances and trades';
+        }
+      }
+    }
+
+    function syncOverviewImportLiveWalletBtn(mode, status) {
       const live = mode === 'live';
       const importBtn = document.getElementById('btn-ov-import-trades');
       const liveBtn = document.getElementById('btn-ov-import-live-wallet');
       const discBtn = document.getElementById('btn-ov-disconnect-live-wallet');
+      const pills = document.getElementById('ov-timeframe-pills');
+      const lab = document.getElementById('ov-window-label');
+      if (pills) pills.classList.toggle('hidden', live);
+      if (lab) lab.classList.toggle('hidden', live);
       if (importBtn) importBtn.classList.toggle('hidden', live);
       if (liveBtn) liveBtn.classList.toggle('hidden', !live);
       if (discBtn) discBtn.classList.toggle('hidden', !live);
+      if (status) syncLiveWalletIndicator(status);
+      else if (!live) {
+        const ind = document.getElementById('ov-live-wallet-indicator');
+        if (ind) ind.classList.add('hidden');
+      }
+      syncOverviewStatsWindowButtons();
     }
 
     function scoreboardRowFor(id, intelligence) {
@@ -20898,8 +21109,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         modeIcon,
         status.mode === 'live' ? 'live' : status.mode === 'liveSimulation' ? 'liveSim' : 'paper'
       );
+      window._dashboardMode = status.mode || 'paper';
+      window._liveWalletEmpty = !!(status.mode === 'live' && status.liveWalletEmpty);
       if (typeof syncOverviewImportLiveWalletBtn === 'function') {
-        syncOverviewImportLiveWalletBtn(status.mode);
+        syncOverviewImportLiveWalletBtn(status.mode, status);
       }
       const liveReady = status.liveTradingReady;
       const liveGateEl = document.getElementById('ov-import-meta');
@@ -21481,10 +21694,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const trEl = document.getElementById('stat-trade-rate');
       const tr = status.monitor?.tradeRate;
-      if (trEl && tr) {
-        trEl.textContent = tr.maxTradesPerHour > 0
-          ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
-          : tr.tradesLastHour + '/hr';
+      if (trEl) {
+        if (status.mode === 'live' && status.liveWalletEmpty) {
+          trEl.textContent = '—';
+        } else if (tr) {
+          trEl.textContent = tr.maxTradesPerHour > 0
+            ? tr.tradesLastHour + '/' + tr.maxTradesPerHour + '/hr'
+            : tr.tradesLastHour + '/hr';
+        }
       }
       const capsLive = document.getElementById('settings-trade-caps-live');
       if (capsLive && tr) {

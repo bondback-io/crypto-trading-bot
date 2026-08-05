@@ -18,9 +18,16 @@ export const PERFORMANCE_WINDOWS: readonly PerformanceWindow[] = [
 ] as const;
 
 /** Overview strip windows (same pill pattern as Micro Bot Performance). */
-export type OverviewStatsWindow = '1h' | '24h' | '7d' | '30d' | 'all';
+export type OverviewStatsWindow =
+  | 'now'
+  | '1h'
+  | '24h'
+  | '7d'
+  | '30d'
+  | 'all';
 
 export const OVERVIEW_STATS_WINDOWS: readonly OverviewStatsWindow[] = [
+  'now',
   '1h',
   '24h',
   '7d',
@@ -154,7 +161,11 @@ export function parseOverviewStatsWindow(
   raw: unknown,
   fallback: OverviewStatsWindow = 'all'
 ): OverviewStatsWindow {
-  const w = parsePerformanceWindow(raw, fallback);
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  if (s === 'now' || s === 'session' || s === 'live') return 'now';
+  const w = parsePerformanceWindow(raw, fallback === 'now' ? 'all' : fallback);
   if (w === '1h' || w === '24h' || w === '7d' || w === '30d' || w === 'all') {
     return w;
   }
@@ -195,11 +206,14 @@ function tradeKey(t: {
 
 function toInternalFromClosed(
   t: PerformanceTradeLike,
-  solUsdFallback: number | null
+  solUsdFallback: number | null,
+  opts?: { allowMissingProfile?: boolean }
 ): InternalTrade | null {
   if (isPartialReason(t.reason)) return null;
   const profileId = String(t.tradeProfileId || '').trim();
-  if (!profileId || profileId === 'default') return null;
+  if (!opts?.allowMissingProfile && (!profileId || profileId === 'default')) {
+    return null;
+  }
   const closedAt = Number(t.closedAt);
   if (!Number.isFinite(closedAt) || closedAt <= 0) return null;
   const pnlSol = Number(t.pnlSol);
@@ -216,7 +230,7 @@ function toInternalFromClosed(
     if (rate != null && rate > 0) pnlUsd = pnlSol * rate;
   }
   return {
-    profileId,
+    profileId: profileId || '_session',
     mint: String(t.mint || ''),
     symbol: String(t.symbol || t.mint || '—').slice(0, 24),
     pnlSol: Number.isFinite(pnlSol) ? pnlSol : 0,
@@ -227,6 +241,24 @@ function toInternalFromClosed(
     learningMode: t.learningMode === true,
     key: tradeKey(t),
   };
+}
+
+/** Session-only closed rows for Overview "Now" (no learning-episode merge). */
+function sessionClosedTrades(
+  closed: PerformanceTradeLike[],
+  solUsd: number | null
+): InternalTrade[] {
+  const byStable = new Map<string, InternalTrade>();
+  for (const t of closed || []) {
+    const row = toInternalFromClosed(t, solUsd, { allowMissingProfile: true });
+    if (!row) continue;
+    const sk = `${row.mint}|${row.closedAt}|${row.pnlSol.toFixed(6)}|${row.key}`;
+    const prev = byStable.get(sk);
+    if (!prev || (prev.pnlUsd == null && row.pnlUsd != null)) {
+      byStable.set(sk, row);
+    }
+  }
+  return [...byStable.values()].sort((a, b) => a.closedAt - b.closedAt);
 }
 
 function toInternalFromEpisode(
@@ -660,40 +692,50 @@ export function buildOverviewWindowStats(opts: {
       : null;
   const openTrades = Math.max(0, Math.round(Number(opts.openCount) || 0));
 
-  const catalogIds =
-    opts.catalogIds && opts.catalogIds.length
-      ? opts.catalogIds
-      : Array.from(
-          new Set(
-            (opts.closed || [])
-              .map((t) => String(t.tradeProfileId || '').trim())
-              .filter(Boolean)
-          )
-        );
+  let filtered: InternalTrade[];
 
-  const episodesByProfile =
-    opts.episodesByProfile ??
-    (() => {
-      const m = new Map<string, ProfileLearningEpisode[]>();
-      for (const id of catalogIds) {
-        if (!id || id === 'default') continue;
-        try {
-          m.set(id, getProfileLearningEpisodes(id, 400));
-        } catch {
-          m.set(id, []);
+  if (window === 'now') {
+    // Live session view: current on-screen closed only — no episode overlay,
+    // no historical time window, no lifetime counter substitution.
+    filtered = sessionClosedTrades(opts.closed || [], solUsd);
+  } else {
+    const catalogIds =
+      opts.catalogIds && opts.catalogIds.length
+        ? opts.catalogIds
+        : Array.from(
+            new Set(
+              (opts.closed || [])
+                .map((t) => String(t.tradeProfileId || '').trim())
+                .filter(Boolean)
+            )
+          );
+
+    const episodesByProfile =
+      opts.episodesByProfile ??
+      (() => {
+        const m = new Map<string, ProfileLearningEpisode[]>();
+        for (const id of catalogIds) {
+          if (!id || id === 'default') continue;
+          try {
+            m.set(id, getProfileLearningEpisodes(id, 400));
+          } catch {
+            m.set(id, []);
+          }
         }
-      }
-      return m;
-    })();
+        return m;
+      })();
 
-  const merged = mergePerformanceTrades(
-    opts.closed || [],
-    episodesByProfile,
-    solUsd
-  );
-  const filtered = filterTradesByWindow(merged, window, nowMs).sort(
-    (a, b) => a.closedAt - b.closedAt
-  );
+    const merged = mergePerformanceTrades(
+      opts.closed || [],
+      episodesByProfile,
+      solUsd
+    );
+    filtered = filterTradesByWindow(
+      merged,
+      window as '1h' | '24h' | '7d' | '30d' | 'all',
+      nowMs
+    ).sort((a, b) => a.closedAt - b.closedAt);
+  }
 
   const wins = filtered.filter((t) => t.pnlSol > 0);
   const losses = filtered.filter((t) => t.pnlSol <= 0);
@@ -734,6 +776,7 @@ export function buildOverviewWindowStats(opts: {
       ? holdTimes.reduce((a, b) => a + b, 0) / holdTimes.length
       : 0;
   const { maxDrawdownPct } = computeMaxDrawdown(filtered);
+  const includeOpen = window === 'all' || window === 'now';
 
   return {
     window,
@@ -741,7 +784,7 @@ export function buildOverviewWindowStats(opts: {
     wins: winCount,
     losses: lossCount,
     closedTrades,
-    totalTrades: closedTrades + (window === 'all' ? openTrades : 0),
+    totalTrades: closedTrades + (includeOpen ? openTrades : 0),
     openTrades,
     maxDrawdownPct,
     avgHoldSec,

@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.179',
+    title: 'Overview Now + Live wallet indicator',
+    sections: ['overview', 'modes'],
+    items: [
+      'Overview timeframe row: Now (first) → 1h → 24h → 7d → 30d → All. Now shows the live session on screen (open + closed) without historical import; Import trades is disabled in Now. Default for new sessions is Now (saved prefs kept).',
+      'Real Live hides the timeframe pills; Import live wallet + Disconnect remain. Until a wallet is connected, session stats stay zeroed — no Paper/Sim bleed. Connected shows a green pill + truncated address; disconnected shows red.',
+      'Paper and Live Sim keep full timeframe controls including Now.',
+    ],
+  },
+  {
     version: '1.2.178',
     title: 'Closed Trades unified summary rows',
     sections: ['overview', 'execution'],

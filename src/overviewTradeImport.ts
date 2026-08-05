@@ -224,6 +224,11 @@ export function collectOverviewWindowTrades(input: {
   extraClosed?: PerformanceTradeLike[];
 }): OverviewImportResult {
   const window = parseOverviewStatsWindow(input.window, 'all');
+  if (window === 'now') {
+    throw new Error(
+      'Import trades is not available for Now — switch to 1h/24h/7d/30d/All'
+    );
+  }
   const nowMs = input.nowMs ?? Date.now();
   const catalogIds =
     input.catalogIds && input.catalogIds.length
@@ -270,9 +275,11 @@ export function collectOverviewWindowTrades(input: {
     episodesByProfile,
     input.solUsd ?? null
   );
-  let filtered = filterTradesByWindow(merged, window, nowMs).sort(
-    (a, b) => b.closedAt - a.closedAt
-  );
+  let filtered = filterTradesByWindow(
+    merged,
+    window as '1h' | '24h' | '7d' | '30d' | 'all',
+    nowMs
+  ).sort((a, b) => b.closedAt - a.closedAt);
 
   const capped = filtered.length > OVERVIEW_IMPORT_MAX_TRADES;
   if (capped) {

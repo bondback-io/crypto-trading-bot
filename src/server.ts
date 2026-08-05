@@ -447,6 +447,20 @@ export function createServer(): express.Application {
           return { groupEnabled: false, byProfile: {} };
         }
       })(),
+      dipBuyerRecovery: (() => {
+        try {
+          const { getDipBuyerRecoveryUiHints } =
+            require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+          return getDipBuyerRecoveryUiHints();
+        } catch {
+          return {
+            enabled: false,
+            stage: 4,
+            stageName: 'Normal Operation',
+            inRecovery: false,
+          };
+        }
+      })(),
     });
   });
 
@@ -1101,7 +1115,7 @@ export function createServer(): express.Application {
     });
   });
 
-  /** Overview strip stats for a time window (1h / 24h / 7d / 30d / all). */
+  /** Overview strip stats for a time window (Now / 1h / 24h / 7d / 30d / all). */
   app.get('/api/overview-stats', (req: Request, res: Response) => {
     try {
       const {
@@ -1111,6 +1125,28 @@ export function createServer(): express.Application {
       const { getTradeProfilesStatus } =
         require('./tradeProfiles') as typeof import('./tradeProfiles');
       const window = parseOverviewStatsWindow(req.query.window, 'all');
+
+      // Live mode without connected wallet: never paint Paper/Sim session stats
+      if (config.mode === 'live') {
+        try {
+          const { isLiveWalletConnected } =
+            require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+          if (!isLiveWalletConnected()) {
+            const empty = buildOverviewWindowStats({
+              closed: [],
+              openCount: 0,
+              window: window === 'now' ? 'now' : window,
+              catalogIds: [],
+              episodesByProfile: new Map(),
+              lifetime: null,
+            });
+            return res.json({ ok: true, overview: empty, liveWalletEmpty: true });
+          }
+        } catch {
+          /* fall through to normal stats */
+        }
+      }
+
       const stats = paperTrader.getStats();
       const closed = paperTrader.getClosedPositions();
       const open = paperTrader.getOpenPositions();
@@ -1138,11 +1174,14 @@ export function createServer(): express.Application {
         window,
         solUsd,
         catalogIds,
-        lifetime: {
-          closed: Number(stats.lifetimeClosed) || Number(stats.closedTrades) || 0,
-          wins: Number(stats.lifetimeWins) || Number(stats.wins) || 0,
-          losses: Number(stats.lifetimeLosses) || Number(stats.losses) || 0,
-        },
+        lifetime:
+          window === 'now'
+            ? null
+            : {
+                closed: Number(stats.lifetimeClosed) || Number(stats.closedTrades) || 0,
+                wins: Number(stats.lifetimeWins) || Number(stats.wins) || 0,
+                losses: Number(stats.lifetimeLosses) || Number(stats.losses) || 0,
+              },
       });
       res.json({ ok: true, overview });
     } catch (err) {
@@ -1171,6 +1210,13 @@ export function createServer(): express.Application {
         req.body?.window ?? req.query.window,
         'all'
       );
+      if (window === 'now') {
+        return res.status(400).json({
+          ok: false,
+          error:
+            'Import trades is not available for Now — switch to 1h/24h/7d/30d/All',
+        });
+      }
       let catalogIds: string[] = [];
       try {
         const tp = getTradeProfilesStatus();
@@ -3509,6 +3555,50 @@ export function createServer(): express.Application {
         setFastProfileRecoveryConfig(body as never);
       }
       res.json({ ok: true, ...getFastProfileRecoveryPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/dip-buyer-recovery', (_req: Request, res: Response) => {
+    try {
+      const { getDipBuyerRecoveryPublic } =
+        require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      res.json({ ok: true, ...getDipBuyerRecoveryPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/dip-buyer-recovery', (req: Request, res: Response) => {
+    try {
+      const {
+        setDipBuyerRecoveryConfig,
+        getDipBuyerRecoveryPublic,
+        forceDipBuyerRecoveryStage,
+        promoteDipBuyerRecoveryStage,
+        demoteDipBuyerRecoveryStage,
+      } = require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (body.forceStage != null) {
+        forceDipBuyerRecoveryStage(
+          Math.round(Number(body.forceStage)) as 0 | 1 | 2 | 3 | 4,
+          { lock: body.lock === true }
+        );
+      } else if (body.promote === true) {
+        promoteDipBuyerRecoveryStage();
+      } else if (body.demote === true) {
+        demoteDipBuyerRecoveryStage();
+      } else {
+        setDipBuyerRecoveryConfig(body as never);
+      }
+      res.json({ ok: true, ...getDipBuyerRecoveryPublic() });
     } catch (err) {
       res.status(500).json({
         ok: false,
