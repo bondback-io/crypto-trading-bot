@@ -3291,6 +3291,61 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/fast-profile-recovery', (_req: Request, res: Response) => {
+    try {
+      const { getFastProfileRecoveryPublic } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      res.json({ ok: true, ...getFastProfileRecoveryPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/fast-profile-recovery', (req: Request, res: Response) => {
+    try {
+      const {
+        setFastProfileRecoveryConfig,
+        getFastProfileRecoveryPublic,
+        forceProfileRecoveryStage,
+      } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      if (body.forceProfileId != null && body.forceStage != null) {
+        forceProfileRecoveryStage(
+          String(body.forceProfileId),
+          Math.round(Number(body.forceStage)) as 0 | 1 | 2 | 3 | 4,
+          { lock: body.lock === true }
+        );
+      } else {
+        setFastProfileRecoveryConfig(body as never);
+      }
+      res.json({ ok: true, ...getFastProfileRecoveryPublic() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/profile-performance-trend', (req: Request, res: Response) => {
+    try {
+      const { buildProfilePerformanceTrend } =
+        require('./profilePerformanceTrend') as typeof import('./profilePerformanceTrend');
+      const profileId = String(req.query.profileId || 'scalper');
+      const window = Math.max(10, Math.min(50, Number(req.query.window) || 20));
+      const trend = buildProfilePerformanceTrend(profileId, window);
+      res.json({ ok: true, trend });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
     try {
       const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =

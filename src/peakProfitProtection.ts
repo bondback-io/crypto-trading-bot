@@ -156,19 +156,32 @@ export function resolvePeakProtectParams(input: {
 }): ResolvedPeakProtect {
   const cfg = getPeakProfitProtectionConfig();
   const fast = isPeakProtectFastProfile(input.profileId);
+  let policyArm = input.policyArmOfTpPct;
+  let policyGiveback = input.policyGivebackOfPeakPct;
+  try {
+    const { getRecoveryConstraints } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    const rc = getRecoveryConstraints(input.profileId);
+    if (rc.active) {
+      policyArm = rc.peakProtectArmOfTpPct;
+      policyGiveback = rc.peakProtectGivebackOfPeakPct;
+    }
+  } catch {
+    /* optional */
+  }
   const armOfTp =
-    input.policyArmOfTpPct != null &&
-    Number.isFinite(Number(input.policyArmOfTpPct)) &&
-    Number(input.policyArmOfTpPct) > 0
-      ? clamp(Number(input.policyArmOfTpPct), 10, 95)
+    policyArm != null &&
+    Number.isFinite(Number(policyArm)) &&
+    Number(policyArm) > 0
+      ? clamp(Number(policyArm), 10, 95)
       : fast
         ? cfg.scalperArmOfTpPct
         : cfg.armOfTpPct;
   const giveback =
-    input.policyGivebackOfPeakPct != null &&
-    Number.isFinite(Number(input.policyGivebackOfPeakPct)) &&
-    Number(input.policyGivebackOfPeakPct) > 0
-      ? clamp(Number(input.policyGivebackOfPeakPct), 10, 80)
+    policyGiveback != null &&
+    Number.isFinite(Number(policyGiveback)) &&
+    Number(policyGiveback) > 0
+      ? clamp(Number(policyGiveback), 10, 80)
       : fast
         ? cfg.scalperGivebackOfPeakPct
         : cfg.givebackOfPeakPct;

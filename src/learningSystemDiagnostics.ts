@@ -37,6 +37,8 @@ export interface ProfileLearningDiag {
   improvementPct: number;
   spark: number[];
   learnedSummary: string;
+  recoveryLine?: string;
+  scalperTrendLine?: string;
 }
 
 export interface LearningSystemDiagnostics {
@@ -317,6 +319,26 @@ export function getLearningSystemDiagnostics(opts?: {
         lastChanges,
         mlMode,
       }),
+      recoveryLine: (() => {
+        try {
+          const { getProfileRecoveryStatus } =
+            require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+          const st = getProfileRecoveryStatus(p.id);
+          return st?.enabled ? st.plainLanguage : '';
+        } catch {
+          return '';
+        }
+      })(),
+      scalperTrendLine: (() => {
+        if (p.id !== 'scalper') return '';
+        try {
+          const { formatScalperWinRateTrendPlainLanguage } =
+            require('./profilePerformanceTrend') as typeof import('./profilePerformanceTrend');
+          return formatScalperWinRateTrendPlainLanguage();
+        } catch {
+          return '';
+        }
+      })(),
     });
   }
 

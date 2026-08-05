@@ -619,7 +619,14 @@ export function evaluateProfileTaEntry(
   playbook: ProfileTaPlaybook,
   ctx: ProfileTaEntryContext
 ): ProfileTaEntryResult {
-  const mode = playbook.taMode || 'off';
+  let mode = playbook.taMode || 'off';
+  try {
+    const { effectiveTaModeForRecovery } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    mode = effectiveTaModeForRecovery(playbook.profileId, mode);
+  } catch {
+    /* optional */
+  }
   const learned = playbook.learned || defaultLearned();
   let rlTaScale = 1;
   try {

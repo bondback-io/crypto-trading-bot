@@ -675,8 +675,24 @@ function maybeRecordLearningEpisode(
       peakProtectGivebackOfPeakPct,
       peakProtectArmed: position.peakProtectArmed === true ? true : undefined,
       peakProtectBeatFullTp,
+      recoveryStageAtClose: (() => {
+        try {
+          const { getProfileRecoveryStage } =
+            require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+          return getProfileRecoveryStage(profileId);
+        } catch {
+          return undefined;
+        }
+      })(),
     });
     if (episodeRow) {
+      try {
+        const { onFastRecoveryEpisodeClosed } =
+          require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+        onFastRecoveryEpisodeClosed(profileId, episodeRow);
+      } catch {
+        /* optional */
+      }
       try {
         const { computeAndStampCounterfactuals } =
           require('./learningCounterfactual') as typeof import('./learningCounterfactual');

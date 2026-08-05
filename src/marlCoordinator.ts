@@ -168,9 +168,21 @@ export function marlLaneScoreDelta(profileId: string): {
   const agent = getOrCreateAgent(profileId);
   const scale = strengthScale(cfg.strength);
   const raw = agent.weight * 10 * scale;
-  const delta = Math.max(-SCORE_CAP, Math.min(SCORE_CAP, raw));
+  let delta = Math.max(-SCORE_CAP, Math.min(SCORE_CAP, raw));
+  let noteExtra = '';
+  try {
+    const { getRecoveryConstraints } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    const rc = getRecoveryConstraints(profileId);
+    if (rc.active && rc.marlDownrank) {
+      delta = Math.max(-SCORE_CAP, Math.min(SCORE_CAP, delta + rc.marlDownrank));
+      noteExtra = ` · recovery ${rc.marlDownrank}`;
+    }
+  } catch {
+    /* optional */
+  }
   if (Math.abs(delta) < 0.05) return { delta: 0, note: '' };
-  const note = `MARL ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`;
+  const note = `MARL ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}${noteExtra}`;
   return { delta: Math.round(delta * 10) / 10, note };
 }
 

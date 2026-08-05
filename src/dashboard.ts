@@ -3245,6 +3245,44 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
       gap: 0.65rem;
     }
+    .fpr-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      gap: 0.65rem;
+    }
+    .fpr-card {
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      background: #020617;
+      padding: 0.55rem 0.65rem;
+      min-width: 0;
+    }
+    .fpr-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      border-radius: 0.35rem;
+      letter-spacing: 0.02em;
+    }
+    .fpr-s0 { background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); }
+    .fpr-s1, .fpr-s2 { background: rgba(245,158,11,0.18); color: #fcd34d; border: 1px solid rgba(245,158,11,0.35); }
+    .fpr-s3 { background: rgba(59,130,246,0.18); color: #93c5fd; border: 1px solid rgba(59,130,246,0.35); }
+    .fpr-s4 { background: rgba(34,197,94,0.18); color: #86efac; border: 1px solid rgba(34,197,94,0.35); }
+    .fpr-gate-pass { color: #86efac; }
+    .fpr-gate-fail { color: #fca5a5; }
+    .fpr-progress {
+      height: 4px;
+      background: #1e293b;
+      border-radius: 2px;
+      margin-top: 0.35rem;
+      overflow: hidden;
+    }
+    .fpr-progress > span {
+      display: block;
+      height: 100%;
+      background: #3b82f6;
+    }
     .lsd-card {
       border: 1px solid #1e293b;
       border-radius: 0.5rem;
@@ -8685,6 +8723,72 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card" id="fast-profile-recovery-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Fast Profiles Recovery Stages <span class="tip" tabindex="0" data-tip="Stages 0–4 for Scalper, Reversal Scalper, Momentum Burst, Migration Sniper. Auto taper: frequency → size → concurrency → exit strictness. Hard safety filters always win. Slower profiles untouched."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Self-adjusting recovery for short-term profiles. Stage 0 = full recovery (red); Stage 4 = normal (green).</p>
+          </div>
+          <label class="ctl ctl-sm flex items-center gap-2">
+            <input type="checkbox" id="fpr-enabled" onchange="saveFastProfileRecovery()" />
+            <span>Group ON</span>
+          </label>
+        </div>
+        <div class="filters-row mb-2 flex flex-wrap gap-2 items-end">
+          <label class="ctl ctl-sm flex items-center gap-2">
+            <input type="checkbox" id="fpr-autotaper" checked onchange="saveFastProfileRecovery()" />
+            <span>Auto taper</span>
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Size ×</span>
+            <input type="number" id="fpr-size" min="0.3" max="1" step="0.05" value="0.65" style="width:4.5rem" onchange="saveFastProfileRecovery()" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Cooldownoldown ms</span>
+            <input type="number" id="fpr-cooldown" min="15000" step="5000" value="120000" style="width:6rem" onchange="saveFastProfileRecovery()" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>PPP arm %</span>
+            <input type="number" id="fpr-arm" min="25" max="70" step="1" value="45" style="width:4rem" onchange="saveFastProfileRecovery()" />
+          </label>
+          <label class="ctl ctl-sm">
+            <span>Giveback %</span>
+            <input type="number" id="fpr-giveback" min="15" max="50" step="1" value="30" style="width:4rem" onchange="saveFastProfileRecovery()" />
+          </label>
+          <button type="button" class="btn btn-sm" onclick="loadFastProfileRecovery()">Refresh</button>
+        </div>
+        <div id="fpr-profile-grid" class="fpr-grid">
+          <p class="mint text-xs">Loading…</p>
+        </div>
+      </div>
+
+      <div class="card" id="scalper-trend-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Scalper Performance Trend <span class="tip" tabindex="0" data-tip="Rolling win rate and PnL from Scalper learning episodes. Visualisation only — does not change strategy. Declining/Critical recommends Recovery Mode."></span></div>
+            <p class="text-xs text-slate-400 mb-0" id="spt-summary">Loading…</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <select id="spt-window" onchange="loadScalperPerformanceTrend()" class="ctl">
+              <option value="10">Last 10</option>
+              <option value="20" selected>Last 20</option>
+              <option value="50">Last 50</option>
+            </select>
+            <select id="spt-view" onchange="renderScalperTrendChart()" class="ctl">
+              <option value="wr" selected>Win rate</option>
+              <option value="pnl">PnL</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-2 text-xs">
+          <span id="spt-badge" class="fpr-badge fpr-s2">—</span>
+          <span id="spt-streak" class="mint">Streak —</span>
+          <span id="spt-recovery-rec" class="hidden text-amber-300">Recommend Recovery</span>
+        </div>
+        <div class="chart-wrap" style="height:180px"><canvas id="chart-scalper-trend"></canvas></div>
+        <div id="spt-breakdown" class="text-xs text-slate-400 mt-2"></div>
+      </div>
+
       <div class="card" id="learning-system-diagnostics-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
@@ -12786,6 +12890,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           loadMicroBotPerformance();
           try { loadLearningDiagnostics(); } catch (_) {}
           try { loadAgentDecisionLog(); } catch (_) {}
+          try { loadFastProfileRecovery(); } catch (_) {}
+          try { loadScalperPerformanceTrend(); } catch (_) {}
         }
       } catch (_) {}
       renderAutoScoringUi(tp);
@@ -13293,6 +13399,302 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.loadLearningDiagnostics = loadLearningDiagnostics;
+
+    let chartScalperTrend = null;
+
+    function fprStageClass(stage) {
+      const s = Number(stage);
+      if (s <= 0) return 'fpr-s0';
+      if (s <= 2) return 'fpr-s1';
+      if (s === 3) return 'fpr-s3';
+      return 'fpr-s4';
+    }
+
+    async function loadFastProfileRecovery() {
+      try {
+        const data = await fetchJSON('/api/fast-profile-recovery');
+        const cfg = data.config || {};
+        const en = document.getElementById('fpr-enabled');
+        const at = document.getElementById('fpr-autotaper');
+        if (en) en.checked = cfg.enabled === true;
+        if (at) at.checked = cfg.autoTaper !== false;
+        const s0 = cfg.stage0 || {};
+        const sizeEl = document.getElementById('fpr-size');
+        const cdEl = document.getElementById('fpr-cooldown');
+        const armEl = document.getElementById('fpr-arm');
+        const gbEl = document.getElementById('fpr-giveback');
+        if (sizeEl) sizeEl.value = s0.sizeMultiplier != null ? s0.sizeMultiplier : 0.65;
+        if (cdEl) cdEl.value = s0.minMsBetweenEntries != null ? s0.minMsBetweenEntries : 120000;
+        if (armEl) armEl.value = s0.peakProtectArmOfTpPct != null ? s0.peakProtectArmOfTpPct : 45;
+        if (gbEl) gbEl.value = s0.peakProtectGivebackOfPeakPct != null ? s0.peakProtectGivebackOfPeakPct : 30;
+        const grid = document.getElementById('fpr-profile-grid');
+        if (!grid) return;
+        const rows = Array.isArray(data.profiles) ? data.profiles : [];
+        if (!rows.length) {
+          grid.innerHTML = '<p class="mint text-xs">No fast profiles.</p>';
+          return;
+        }
+        grid.innerHTML = rows
+          .map(function (p) {
+            const sc = fprStageClass(p.stage);
+            const wr = p.windowMetrics
+              ? Math.round((p.windowMetrics.winRate || 0) * 100) + '%'
+              : '—';
+            const exp =
+              p.windowMetrics && p.windowMetrics.avgPnlPct != null
+                ? p.windowMetrics.avgPnlPct.toFixed(1) + '%'
+                : '—';
+            const gates = (p.gates || [])
+              .map(function (g) {
+                return (
+                  '<span class="' +
+                  (g.pass ? 'fpr-gate-pass' : 'fpr-gate-fail') +
+                  '">' +
+                  (g.pass ? '✓' : '✗') +
+                  ' ' +
+                  g.label +
+                  '</span>'
+                );
+              })
+              .join(' · ');
+            const thresh = 70;
+            const pct = Math.min(100, Math.round(Number(p.readinessScore) || 0));
+            return (
+              '<div class="fpr-card">' +
+              '<div class="flex flex-wrap items-center gap-2 mb-1">' +
+              '<strong class="text-sm text-slate-200">' +
+              (p.profileId || '').replace(/_/g, ' ') +
+              '</strong>' +
+              '<span class="fpr-badge ' +
+              sc +
+              '">Stage ' +
+              p.stage +
+              ' · ' +
+              (p.stageName || '') +
+              '</span>' +
+              (p.stageLocked ? '<span class="mint text-xs">locked</span>' : '') +
+              '</div>' +
+              '<p class="text-xs text-slate-400 mb-1">' +
+              (p.plainLanguage || '') +
+              '</p>' +
+              '<div class="text-xs mint mb-1">Readiness ' +
+              (p.readinessScore != null ? p.readinessScore : '—') +
+              ' · trades in stage ' +
+              (p.tradesInStage || 0) +
+              ' · WR ' +
+              wr +
+              ' · exp ' +
+              exp +
+              ' · trend ' +
+              (p.trendLabel || '—') +
+              '</div>' +
+              '<div class="text-xs mb-1" style="line-height:1.45">' +
+              gates +
+              '</div>' +
+              '<div class="fpr-progress"><span style="width:' +
+              pct +
+              '%"></span></div>' +
+              '<div class="flex flex-wrap gap-1 mt-2">' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              p.profileId +
+              '\',' +
+              Math.max(0, (p.stage || 0) - 1) +
+              ')">Demote</button>' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              p.profileId +
+              '\',' +
+              Math.min(4, (p.stage || 0) + 1) +
+              ')">Promote</button>' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              p.profileId +
+              '\',0,true)">Lock 0</button>' +
+              '<label class="ctl ctl-sm flex items-center gap-1 text-xs"><input type="checkbox" ' +
+              (p.enabled ? 'checked' : '') +
+              ' onchange="toggleFastRecoveryProfile(\'' +
+              p.profileId +
+              '\',this.checked)" /> On</label>' +
+              '</div></div>'
+            );
+          })
+          .join('');
+      } catch (err) {
+        const grid = document.getElementById('fpr-profile-grid');
+        if (grid) {
+          grid.innerHTML =
+            '<p class="mint text-xs">Recovery unavailable: ' +
+            (err.message || String(err)) +
+            '</p>';
+        }
+      }
+    }
+    window.loadFastProfileRecovery = loadFastProfileRecovery;
+
+    async function saveFastProfileRecovery() {
+      const body = {
+        enabled: !!(document.getElementById('fpr-enabled') || {}).checked,
+        autoTaper: !!(document.getElementById('fpr-autotaper') || {}).checked,
+        stage0: {
+          sizeMultiplier: Number((document.getElementById('fpr-size') || {}).value) || 0.65,
+          minMsBetweenEntries:
+            Number((document.getElementById('fpr-cooldown') || {}).value) || 120000,
+          peakProtectArmOfTpPct:
+            Number((document.getElementById('fpr-arm') || {}).value) || 45,
+          peakProtectGivebackOfPeakPct:
+            Number((document.getElementById('fpr-giveback') || {}).value) || 30,
+        },
+      };
+      await fetchJSON('/api/fast-profile-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadFastProfileRecovery();
+    }
+    window.saveFastProfileRecovery = saveFastProfileRecovery;
+
+    async function forceFastRecoveryStage(profileId, stage, lock) {
+      await fetchJSON('/api/fast-profile-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          forceProfileId: profileId,
+          forceStage: stage,
+          lock: lock === true,
+        }),
+      });
+      await loadFastProfileRecovery();
+    }
+    window.forceFastRecoveryStage = forceFastRecoveryStage;
+
+    async function toggleFastRecoveryProfile(profileId, enabled) {
+      const patch = { profiles: {} };
+      patch.profiles[profileId] = { enabled: !!enabled };
+      await fetchJSON('/api/fast-profile-recovery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      await loadFastProfileRecovery();
+    }
+    window.toggleFastRecoveryProfile = toggleFastRecoveryProfile;
+
+    let __scalperTrendPayload = null;
+
+    async function loadScalperPerformanceTrend() {
+      try {
+        const win = Number((document.getElementById('spt-window') || {}).value) || 20;
+        const data = await fetchJSON(
+          '/api/profile-performance-trend?profileId=scalper&window=' + win
+        );
+        __scalperTrendPayload = data.trend || null;
+        const t = __scalperTrendPayload;
+        const sum = document.getElementById('spt-summary');
+        const badge = document.getElementById('spt-badge');
+        const streak = document.getElementById('spt-streak');
+        const rec = document.getElementById('spt-recovery-rec');
+        if (sum) sum.textContent = (t && t.plainLanguage) || 'No Scalper trades yet';
+        if (badge && t) {
+          badge.textContent = String(t.label || 'stable').toUpperCase();
+          badge.className =
+            'fpr-badge ' +
+            (t.label === 'improving'
+              ? 'fpr-s4'
+              : t.label === 'critical' || t.label === 'declining'
+                ? 'fpr-s0'
+                : 'fpr-s2');
+        }
+        if (streak && t) {
+          streak.textContent =
+            'Streak ' +
+            (t.streakKind === 'none' ? '—' : t.streakKind + ' ×' + t.streakLen);
+        }
+        if (rec) {
+          if (t && t.recoveryRecommend) rec.classList.remove('hidden');
+          else rec.classList.add('hidden');
+        }
+        const bd = document.getElementById('spt-breakdown');
+        if (bd && t) {
+          const help = (t.helpful || [])
+            .map(function (b) {
+              return b.label + ' (+' + b.avgPnlPct.toFixed(1) + '%)';
+            })
+            .join(', ');
+          const hurt = (t.harmful || [])
+            .map(function (b) {
+              return b.label + ' (' + b.avgPnlPct.toFixed(1) + '%)';
+            })
+            .join(', ');
+          bd.innerHTML =
+            (help ? '<div>Helping: ' + help + '</div>' : '') +
+            (hurt ? '<div>Hurting: ' + hurt + '</div>' : '');
+        }
+        renderScalperTrendChart();
+      } catch (err) {
+        const sum = document.getElementById('spt-summary');
+        if (sum) sum.textContent = 'Trend unavailable: ' + (err.message || String(err));
+      }
+    }
+    window.loadScalperPerformanceTrend = loadScalperPerformanceTrend;
+
+    function renderScalperTrendChart() {
+      const canvas = document.getElementById('chart-scalper-trend');
+      if (!canvas || typeof Chart === 'undefined') return;
+      const t = __scalperTrendPayload;
+      const series = t && t.chart;
+      if (!series || !series.tradeIndex || !series.tradeIndex.length) {
+        if (chartScalperTrend) {
+          chartScalperTrend.destroy();
+          chartScalperTrend = null;
+        }
+        return;
+      }
+      const view = ((document.getElementById('spt-view') || {}).value) || 'wr';
+      const label =
+        view === 'pnl' ? 'Cumulative PnL %' : 'Rolling win rate %';
+      const data =
+        view === 'pnl' ? series.cumulativePnlPct : series.rollingWinRatePct;
+      const color =
+        t.label === 'improving'
+          ? '#34d399'
+          : t.label === 'declining' || t.label === 'critical'
+            ? '#f87171'
+            : '#94a3b8';
+      if (chartScalperTrend) {
+        chartScalperTrend.data.labels = series.tradeIndex;
+        chartScalperTrend.data.datasets[0].data = data;
+        chartScalperTrend.data.datasets[0].label = label;
+        chartScalperTrend.data.datasets[0].borderColor = color;
+        chartScalperTrend.update('none');
+        return;
+      }
+      chartScalperTrend = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: series.tradeIndex,
+          datasets: [
+            {
+              label: label,
+              data: data,
+              borderColor: color,
+              backgroundColor: color + '33',
+              tension: 0.25,
+              pointRadius: 2,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 8 } },
+            y: { beginAtZero: view === 'wr' },
+          },
+        },
+      });
+    }
+    window.renderScalperTrendChart = renderScalperTrendChart;
 
     function adlAppliedLabel(a) {
       if (a === 'applied') return 'Applied: soft influence';
@@ -15045,6 +15447,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { loadMicroBotPerformance(); } catch (_) {}
         try { loadLearningDiagnostics(); } catch (_) {}
         try { loadAgentDecisionLog(); } catch (_) {}
+        try { loadFastProfileRecovery(); } catch (_) {}
+        try { loadScalperPerformanceTrend(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {

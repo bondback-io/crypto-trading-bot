@@ -3147,6 +3147,25 @@ function applyMarlRlSoftSizing(
         appendMarlThoughtToLaneFight(input.mint, low.reason);
       }
     }
+    try {
+      const { applyRecoverySizeMultiplier, isFastProfileRecovering } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      if (isFastProfileRecovering(input.profileId)) {
+        const before = solAmt;
+        solAmt = applyRecoverySizeMultiplier(input.profileId, solAmt);
+        if (solAmt !== before) {
+          sizeExtra += ` · recovery size×${(solAmt / Math.max(before, 1e-9)).toFixed(2)}`;
+          if (input.logThoughts) {
+            appendMarlThoughtToLaneFight(
+              input.mint,
+              `Fast Recovery size adjust for ${input.profileName || input.profileId}`
+            );
+          }
+        }
+      }
+    } catch {
+      /* optional */
+    }
     return {
       ok: true,
       solAmount: clampToMaxAllowedTradeSol(solAmt, input.clampTag),
@@ -3636,6 +3655,52 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     }
     buyOpts.solAmount = migMarlRl.solAmount;
     buyOpts.sizeReason = migMarlRl.sizeReason;
+    try {
+      const {
+        checkFastRecoveryEntryGates,
+        noteFastProfileEntry,
+        getRecoveryConstraints,
+      } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      const pid = String(profileAssignment.profileId || 'migration_sniper');
+      const gate = checkFastRecoveryEntryGates({
+        profileId: pid,
+        openPositions: paperTrader.getOpenPositions().map((p) => ({
+          tradeProfileId: p.tradeProfileId,
+        })),
+        volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+        recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+        tokenAgeMin:
+          signal.tokenAgeHours != null
+            ? Number(signal.tokenAgeHours) * 60
+            : null,
+      });
+      if (!gate.ok) {
+        finishBuy(event.mint, false);
+        markLaneFightCascadeResult(signal.mint, false, gate.reason || 'recovery');
+        annotateActivityFeedByMint(event.mint, {
+          tradeStatus: 'skipped',
+          skipReason: gate.reason || 'Fast Recovery gate',
+        });
+        console.log(`[monitor] ${gate.reason}`);
+        return;
+      }
+      const rc = getRecoveryConstraints(pid);
+      if (rc.active && rc.tpPctMaxSoft != null && buyOpts.profileTakeProfitPct != null) {
+        buyOpts.profileTakeProfitPct = Math.min(
+          Number(buyOpts.profileTakeProfitPct),
+          rc.tpPctMaxSoft
+        );
+      }
+      if (rc.active && rc.stopLossPctTight != null && buyOpts.profileStopLossPct != null) {
+        const sl = Number(buyOpts.profileStopLossPct);
+        const tight = rc.stopLossPctTight;
+        buyOpts.profileStopLossPct =
+          sl < 0 ? Math.max(sl, tight) : Math.min(sl, Math.abs(tight));
+      }
+      noteFastProfileEntry(pid);
+    } catch {
+      /* optional */
+    }
     console.log(
       `[monitor] Profile ${profileAssignment.icon} ${profileAssignment.name} → ${signal.symbol}` +
         ` · score ${profileAssignment.score.toFixed(1)} (migration priority)`
@@ -4518,6 +4583,55 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   }
   buyOpts.solAmount = walletMarlRl.solAmount;
   buyOpts.sizeReason = walletMarlRl.sizeReason;
+
+  try {
+    const {
+      checkFastRecoveryEntryGates,
+      noteFastProfileEntry,
+      getRecoveryConstraints,
+    } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    const gate = checkFastRecoveryEntryGates({
+      profileId: String(profileAssignment.profileId || ''),
+      openPositions: paperTrader.getOpenPositions().map((p) => ({
+        tradeProfileId: p.tradeProfileId,
+      })),
+      volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
+      recentVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
+      extensionPct:
+        signal.metrics &&
+        (signal.metrics as { priceChangeM5Pct?: number }).priceChangeM5Pct != null
+          ? Number((signal.metrics as { priceChangeM5Pct?: number }).priceChangeM5Pct)
+          : null,
+      tokenAgeMin:
+        signal.tokenAgeHours != null ? Number(signal.tokenAgeHours) * 60 : null,
+    });
+    if (!gate.ok) {
+      finishBuy(buy.mint, false);
+      markLaneFightCascadeResult(signal.mint, false, gate.reason || 'recovery gate');
+      annotateActivityFeed(buy.mint, buy.signature, {
+        tradeStatus: 'skipped',
+        skipReason: gate.reason || 'Fast Recovery gate',
+      });
+      console.log(`[monitor] ${gate.reason}`);
+      return;
+    }
+    const rc = getRecoveryConstraints(String(profileAssignment.profileId || ''));
+    if (rc.active && rc.tpPctMaxSoft != null && buyOpts.profileTakeProfitPct != null) {
+      buyOpts.profileTakeProfitPct = Math.min(
+        Number(buyOpts.profileTakeProfitPct),
+        rc.tpPctMaxSoft
+      );
+    }
+    if (rc.active && rc.stopLossPctTight != null && buyOpts.profileStopLossPct != null) {
+      const sl = Number(buyOpts.profileStopLossPct);
+      const tight = rc.stopLossPctTight;
+      buyOpts.profileStopLossPct =
+        sl < 0 ? Math.max(sl, tight) : Math.min(sl, Math.abs(tight));
+    }
+    noteFastProfileEntry(String(profileAssignment.profileId || ''));
+  } catch {
+    /* optional */
+  }
 
   recordSignalSizing(signal, sizing, true);
   console.log(`[monitor] ${sizing.reason}`);

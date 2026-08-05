@@ -109,6 +109,8 @@ export interface ProfileLearningEpisode {
    * or left TP on table after peaking at/above TP (false).
    */
   peakProtectBeatFullTp?: boolean;
+  /** Fast Profiles Recovery stage active when the trade closed (0–4). */
+  recoveryStageAtClose?: number;
   /** Counterfactual exit evaluation (additive — learning accelerators) */
   cfPeakExitPnlPct?: number;
   cfActualVsPeakGapPct?: number;

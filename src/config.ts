@@ -2078,6 +2078,9 @@ export interface BotConfig {
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
+  /** Fast Profiles Recovery Stages 0–4 for short-term profiles. */
+  fastProfileRecovery: import('./fastProfileRecovery').FastProfileRecoveryConfig;
+
   /**
    * Zion whitelist SOL transfers (chat-driven). Separate from trading execution.
    * Password via ZION_TRANSFER_PASSWORD env (never persisted).
@@ -2336,6 +2339,52 @@ export const config: BotConfig = {
     scalperGivebackOfPeakPct: 30,
     stalePeakTightenSec: 45,
     staleGivebackTightenMult: 0.75,
+  },
+
+  fastProfileRecovery: {
+    enabled: false,
+    autoTaper: true,
+    profiles: {
+      scalper: { enabled: true, stage: 0, stageLocked: false, forcedStage: null },
+      reversal_scalper: {
+        enabled: true,
+        stage: 0,
+        stageLocked: false,
+        forcedStage: null,
+      },
+      momentum_burst: {
+        enabled: true,
+        stage: 0,
+        stageLocked: false,
+        forcedStage: null,
+      },
+      migration_sniper: {
+        enabled: true,
+        stage: 0,
+        stageLocked: false,
+        forcedStage: null,
+      },
+    },
+    stage0: {
+      maxConcurrent: 1,
+      sizeMultiplier: 0.65,
+      minMsBetweenEntries: 120_000,
+      peakProtectArmOfTpPct: 45,
+      peakProtectGivebackOfPeakPct: 30,
+      minVolumeM5Usd: 1200,
+    },
+    minTradesBeforePromote: 12,
+    minTradesBeforePromoteTo4: 20,
+    promoteReadinessByStage: { '0': 65, '1': 70, '2': 72, '3': 78 },
+    demoteReadinessMax: 40,
+    readinessWeights: {
+      expectancyTrend: 0.25,
+      winRateTrend: 0.2,
+      givebackImprovement: 0.2,
+      lossStreakControl: 0.15,
+      stability: 0.1,
+      sampleSufficiency: 0.1,
+    },
   },
 
   zionTransfers: {
@@ -2919,6 +2968,33 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         staleGivebackTightenMult: 0.75,
       }
     ) as PersistedBotSettings['peakProfitProtection'],
+    fastProfileRecovery: cloneJson(
+      config.fastProfileRecovery || {
+        enabled: false,
+        autoTaper: true,
+        profiles: {},
+        stage0: {
+          maxConcurrent: 1,
+          sizeMultiplier: 0.65,
+          minMsBetweenEntries: 120_000,
+          peakProtectArmOfTpPct: 45,
+          peakProtectGivebackOfPeakPct: 30,
+          minVolumeM5Usd: 1200,
+        },
+        minTradesBeforePromote: 12,
+        minTradesBeforePromoteTo4: 20,
+        promoteReadinessByStage: { '0': 65, '1': 70, '2': 72, '3': 78 },
+        demoteReadinessMax: 40,
+        readinessWeights: {
+          expectancyTrend: 0.25,
+          winRateTrend: 0.2,
+          givebackImprovement: 0.2,
+          lossStreakControl: 0.15,
+          stability: 0.1,
+          sampleSufficiency: 0.1,
+        },
+      }
+    ) as PersistedBotSettings['fastProfileRecovery'],
     zionTransfers: cloneJson(
       config.zionTransfers || {
         enabled: false,
@@ -3753,6 +3829,69 @@ function applySettingsSnapshot(
         1
       ),
     };
+  }
+  if (saved.fastProfileRecovery && typeof saved.fastProfileRecovery === 'object') {
+    try {
+      const {
+        DEFAULT_FAST_PROFILE_RECOVERY,
+        FAST_RECOVERY_PROFILE_IDS,
+      } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      const s = saved.fastProfileRecovery;
+      const profiles: Record<string, {
+        enabled: boolean;
+        stage: 0 | 1 | 2 | 3 | 4;
+        stageLocked: boolean;
+        forcedStage: 0 | 1 | 2 | 3 | 4 | null;
+        learningModeOverride?: boolean;
+      }> = {};
+      for (const id of FAST_RECOVERY_PROFILE_IDS) {
+        const p = s.profiles?.[id];
+        const stageN = Math.round(Number(p?.forcedStage ?? p?.stage ?? 0));
+        const stage = (stageN <= 0 ? 0 : stageN >= 4 ? 4 : stageN) as 0 | 1 | 2 | 3 | 4;
+        profiles[id] = {
+          enabled: p?.enabled !== false,
+          stage,
+          stageLocked: p?.stageLocked === true,
+          forcedStage:
+            p?.forcedStage != null && Number.isFinite(Number(p.forcedStage))
+              ? ((Math.round(Number(p.forcedStage)) <= 0
+                  ? 0
+                  : Math.round(Number(p.forcedStage)) >= 4
+                    ? 4
+                    : Math.round(Number(p.forcedStage))) as 0 | 1 | 2 | 3 | 4)
+              : null,
+          learningModeOverride: p?.learningModeOverride === true,
+        };
+      }
+      config.fastProfileRecovery = {
+        enabled: s.enabled === true,
+        autoTaper: s.autoTaper !== false,
+        profiles,
+        stage0: {
+          ...DEFAULT_FAST_PROFILE_RECOVERY.stage0,
+          ...(s.stage0 || {}),
+        },
+        minTradesBeforePromote:
+          Number(s.minTradesBeforePromote) ||
+          DEFAULT_FAST_PROFILE_RECOVERY.minTradesBeforePromote,
+        minTradesBeforePromoteTo4:
+          Number(s.minTradesBeforePromoteTo4) ||
+          DEFAULT_FAST_PROFILE_RECOVERY.minTradesBeforePromoteTo4,
+        promoteReadinessByStage: {
+          ...DEFAULT_FAST_PROFILE_RECOVERY.promoteReadinessByStage,
+          ...(s.promoteReadinessByStage || {}),
+        },
+        demoteReadinessMax:
+          Number(s.demoteReadinessMax) ||
+          DEFAULT_FAST_PROFILE_RECOVERY.demoteReadinessMax,
+        readinessWeights: {
+          ...DEFAULT_FAST_PROFILE_RECOVERY.readinessWeights,
+          ...(s.readinessWeights || {}),
+        },
+      };
+    } catch {
+      /* module may not be ready */
+    }
   }
   if (saved.zionTransfers && typeof saved.zionTransfers === 'object') {
     const s = saved.zionTransfers;

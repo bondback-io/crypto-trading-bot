@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.164',
+    title: 'Fast Profiles Recovery Stages + Scalper Trend',
+    sections: ['microbots', 'learning', 'coaches', 'overview'],
+    items: [
+      'Fast Profiles Recovery Stages 0–4 for Scalper, Reversal Scalper, Momentum Burst, and Migration Sniper — auto taper frequency→size→concurrency→exits with readiness gates.',
+      'Scalper win-rate trend analysis + Chart.js card (10/20/50 windows); Declining/Critical recommends Recovery. Visualisation only.',
+      'Dashboard Recovery Stages panel with readiness breakdown, promote/demote gates, and manual stage lock/override.',
+    ],
+  },
+  {
     version: '1.2.163',
     title: 'Zion Whitelist Wallet Transfers',
     sections: ['zion', 'alerts', 'knobs', 'overview'],

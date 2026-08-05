@@ -118,6 +118,27 @@ export function buildZionAnalystBrief(opts?: {
       weaknesses.push(w);
       contextLines.push(`  analyst-warn: ${w}`);
     }
+    try {
+      const { formatFastRecoveryPlainLanguage } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      for (const line of formatFastRecoveryPlainLanguage().slice(0, 3)) {
+        explain.push(line);
+        contextLines.push(`  recovery: ${line}`);
+      }
+    } catch {
+      /* optional */
+    }
+    try {
+      const { formatScalperWinRateTrendPlainLanguage } =
+        require('./profilePerformanceTrend') as typeof import('./profilePerformanceTrend');
+      const scalperLine = formatScalperWinRateTrendPlainLanguage();
+      if (scalperLine) {
+        explain.push(scalperLine);
+        contextLines.push(`  scalper-trend: ${scalperLine}`);
+      }
+    } catch {
+      /* optional */
+    }
   } catch {
     observe.push('Learning diagnostics unavailable.');
   }

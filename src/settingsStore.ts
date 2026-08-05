@@ -196,6 +196,41 @@ export interface PersistedBotSettings {
     stalePeakTightenSec?: number;
     staleGivebackTightenMult?: number;
   };
+  /** Fast Profiles Recovery Stages 0–4 (no secrets) */
+  fastProfileRecovery?: {
+    enabled?: boolean;
+    autoTaper?: boolean;
+    profiles?: Record<
+      string,
+      {
+        enabled?: boolean;
+        stage?: number;
+        stageLocked?: boolean;
+        forcedStage?: number | null;
+        learningModeOverride?: boolean;
+      }
+    >;
+    stage0?: {
+      maxConcurrent?: number;
+      sizeMultiplier?: number;
+      minMsBetweenEntries?: number;
+      peakProtectArmOfTpPct?: number;
+      peakProtectGivebackOfPeakPct?: number;
+      minVolumeM5Usd?: number;
+    };
+    minTradesBeforePromote?: number;
+    minTradesBeforePromoteTo4?: number;
+    promoteReadinessByStage?: Record<string, number>;
+    demoteReadinessMax?: number;
+    readinessWeights?: {
+      expectancyTrend?: number;
+      winRateTrend?: number;
+      givebackImprovement?: number;
+      lossStreakControl?: number;
+      stability?: number;
+      sampleSufficiency?: number;
+    };
+  };
   /** Zion whitelist transfers (no password secrets) */
   zionTransfers?: {
     enabled?: boolean;

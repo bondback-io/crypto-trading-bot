@@ -416,6 +416,27 @@ function hasRecentPerformanceDrop(agent: ProfileRlAgentState): boolean {
 function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
   if (agent.modeLocked) return;
 
+  try {
+    const { shouldBlockProfileLead, isFastProfileRecovering } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    if (isFastProfileRecovering(agent.profileId)) {
+      if (agent.mode === 'lead') {
+        agent.mode = 'hybrid';
+        pushProfileRlDecision({
+          kind: 'auto_demote',
+          profileId: agent.profileId,
+          detail: 'lead→hybrid · Fast Recovery blocks Lead',
+        });
+      }
+      // Allow shadow↔hybrid but never promote to lead while recovering
+      if (shouldBlockProfileLead(agent.profileId) && agent.mode === 'hybrid') {
+        // fall through for demote checks only; skip lead promote below
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
   const diff = getProfileRlDifficulty(agent.profileId);
   const readiness = computeProfileRlReadiness(agent);
   agent.readinessScore = readiness.score;
@@ -456,7 +477,16 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
   }
 
   if (agent.mode === 'hybrid') {
+    let blockLead = false;
+    try {
+      const { shouldBlockProfileLead } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      blockLead = shouldBlockProfileLead(agent.profileId);
+    } catch {
+      blockLead = false;
+    }
     if (
+      !blockLead &&
       readiness.score >= promoteLeadThreshold &&
       agent.trades >= diff.leadFloor &&
       stableEnough &&
