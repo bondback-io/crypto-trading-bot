@@ -328,6 +328,17 @@ export function createServer(): express.Application {
     };
 
     const liveNeedsImport = config.mode === 'live' && !liveWalletConnected;
+    if (
+      config.mode === 'live' &&
+      liveWalletConnected &&
+      !liveNeedsImport
+    ) {
+      try {
+        paperTrader.syncLiveWalletSessionOverlay();
+      } catch {
+        /* overlay sync best-effort */
+      }
+    }
     const availableBalance = liveNeedsImport
       ? 0
       : usesPaperAccounting()

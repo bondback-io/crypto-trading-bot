@@ -13588,24 +13588,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               pct +
               '%"></span></div>' +
               '<div class="flex flex-wrap gap-1 mt-2">' +
-              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\\'' +
               p.profileId +
-              '\',' +
+              '\\',' +
               Math.max(0, (p.stage || 0) - 1) +
               ')">Demote</button>' +
-              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\\'' +
               p.profileId +
-              '\',' +
+              '\\',' +
               Math.min(4, (p.stage || 0) + 1) +
               ')">Promote</button>' +
-              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\'' +
+              '<button type="button" class="btn btn-sm" onclick="forceFastRecoveryStage(\\'' +
               p.profileId +
-              '\',0,true)">Lock 0</button>' +
+              '\\',0,true)">Lock 0</button>' +
               '<label class="ctl ctl-sm flex items-center gap-1 text-xs"><input type="checkbox" ' +
               (p.enabled ? 'checked' : '') +
-              ' onchange="toggleFastRecoveryProfile(\'' +
+              ' onchange="toggleFastRecoveryProfile(\\'' +
               p.profileId +
-              '\',this.checked)" /> On</label>' +
+              '\\',this.checked)" /> On</label>' +
               '</div></div>'
             );
           })

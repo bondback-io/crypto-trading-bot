@@ -1263,11 +1263,23 @@ export class PaperTrader {
    * Live: pass `availableOverrideSol` = on-chain wallet SOL so Available
    * reflects funds not locked in tracked open positions' market value.
    */
-  /** Closed rows used for session stats (overlay when present). */
+  /** Closed rows used for session stats (overlay when present, merged with durable). */
   private closedForSessionStats(): Position[] {
-    return this.sessionImportedClosed != null
-      ? this.sessionImportedClosed
-      : this.closedPositions;
+    if (this.sessionImportedClosed == null) return this.closedPositions;
+    const byId = new Map<string, Position>();
+    for (const p of this.sessionImportedClosed) {
+      if (p?.id) byId.set(p.id, p);
+    }
+    for (const p of this.closedPositions) {
+      if (!p?.id) continue;
+      const prev = byId.get(p.id);
+      if (!prev || (Number(p.closedAt) || 0) >= (Number(prev.closedAt) || 0)) {
+        byId.set(p.id, p);
+      }
+    }
+    return Array.from(byId.values()).sort(
+      (a, b) => (Number(b.closedAt) || 0) - (Number(a.closedAt) || 0)
+    );
   }
 
   /** Open rows used for session portfolio (overlay when present, merged with durable). */
@@ -1277,9 +1289,19 @@ export class PaperTrader {
       const live = usesRealFunds();
       const modeFilter = (p: Position) =>
         live ? p.tradeMode === 'live' : p.tradeMode !== 'live';
+      const closedIds = new Set<string>();
+      for (const p of this.closedPositions) {
+        if (p?.id) closedIds.add(p.id);
+      }
+      if (this.sessionImportedClosed) {
+        for (const p of this.sessionImportedClosed) {
+          if (p?.id) closedIds.add(p.id);
+        }
+      }
       const byId = new Map<string, Position>();
       for (const p of this.sessionImportedOpen) {
-        if (p?.id) byId.set(p.id, p);
+        if (!p?.id || closedIds.has(p.id)) continue;
+        byId.set(p.id, p);
       }
       for (const p of this.positions.values()) {
         if (!modeFilter(p)) continue;
@@ -1364,10 +1386,20 @@ export class PaperTrader {
       return p.tradeMode !== 'live';
     };
     if (this.sessionImportedOpen != null) {
-      // Overlay snapshot + any newer durable opens (durable wins on id clash)
+      // Overlay + durable opens (durable wins). Drop overlay rows that already closed.
+      const closedIds = new Set<string>();
+      for (const p of this.closedPositions) {
+        if (p?.id) closedIds.add(p.id);
+      }
+      if (this.sessionImportedClosed) {
+        for (const p of this.sessionImportedClosed) {
+          if (p?.id) closedIds.add(p.id);
+        }
+      }
       const byId = new Map<string, Position>();
       for (const p of this.sessionImportedOpen) {
-        if (p?.id) byId.set(p.id, p);
+        if (!p?.id || closedIds.has(p.id)) continue;
+        byId.set(p.id, p);
       }
       for (const p of this.positions.values()) {
         if (!modeFilter(p)) continue;
@@ -1724,6 +1756,8 @@ export class PaperTrader {
       `Live position tracked ${formatTokenLabel(position.symbol, position.name, position.mint)} ` +
         `@ ${input.entryPriceSol.toExponential(4)} — trail arms at +${trailArm}%${profileBit}`
     );
+    this.persistState();
+    this.afterLiveBookChange();
     return position;
   }
 
@@ -1731,10 +1765,7 @@ export class PaperTrader {
     const solUsd = getCachedSolUsdPrice();
     const { usesRealFunds } = require('./config') as typeof import('./config');
     const live = usesRealFunds();
-    const source =
-      this.sessionImportedClosed != null
-        ? this.sessionImportedClosed
-        : this.closedPositions;
+    const source = this.closedForSessionStats();
     const filtered = source.filter((p) => {
       if (live) {
         // Never show paper / Live Sim test rows in Live mode
@@ -1833,6 +1864,97 @@ export class PaperTrader {
       count: this.sessionImportedClosed?.length ?? 0,
       openCount: this.sessionImportedOpen?.length ?? 0,
     };
+  }
+
+  /**
+   * When Live wallet is connected and the session overlay came from
+   * Import live wallet, refresh opens from the durable live book and merge
+   * new durable closes into the overlay so Overview stays fresh without
+   * requiring another Import click.
+   */
+  syncLiveWalletSessionOverlay(): void {
+    if (
+      this.sessionImportedOpen == null &&
+      this.sessionImportedClosed == null
+    ) {
+      return;
+    }
+    if (this.sessionImportMeta.source !== 'live_wallet') return;
+    try {
+      const { usesRealFunds } = require('./config') as typeof import('./config');
+      if (!usesRealFunds()) return;
+      const { isLiveWalletConnected } =
+        require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      if (!isLiveWalletConnected()) return;
+    } catch {
+      return;
+    }
+
+    const durableOpens = this.getDurableOpenPositions();
+    const durableClosed = this.getDurableClosedPositions().filter(
+      (p) => p.tradeMode === 'live'
+    );
+
+    if (this.sessionImportedOpen != null) {
+      this.sessionImportedOpen = durableOpens.slice(0, 200).map((p) => ({
+        ...p,
+        status: (p.status === 'partial' ? 'partial' : 'open') as PositionStatus,
+      }));
+    }
+
+    if (this.sessionImportedClosed != null) {
+      const byId = new Map<string, Position>();
+      for (const p of this.sessionImportedClosed) {
+        if (p?.id) byId.set(p.id, { ...p, status: 'closed' as const });
+      }
+      for (const p of durableClosed) {
+        if (!p?.id) continue;
+        const prev = byId.get(p.id);
+        if (!prev || (Number(p.closedAt) || 0) >= (Number(prev.closedAt) || 0)) {
+          byId.set(p.id, { ...p, status: 'closed' as const });
+        }
+      }
+      this.sessionImportedClosed = Array.from(byId.values())
+        .sort((a, b) => (Number(b.closedAt) || 0) - (Number(a.closedAt) || 0))
+        .slice(0, 1000);
+      const reps = representativeClosedTrades(this.sessionImportedClosed);
+      this.lifetimeClosed = reps.length;
+      this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
+      this.lifetimeLosses = Math.max(
+        0,
+        this.lifetimeClosed - this.lifetimeWins
+      );
+    }
+  }
+
+  /** Append closed live rows to on-disk per-wallet history (Import remains full reconcile). */
+  private persistLiveClosedToWalletHistory(closed: Position): void {
+    if (closed.tradeMode !== 'live') return;
+    try {
+      const { usesRealFunds } = require('./config') as typeof import('./config');
+      if (!usesRealFunds()) return;
+      const {
+        isLiveWalletConnected,
+        getConnectedLiveWalletMeta,
+        saveWalletClosedHistory,
+      } = require('./liveWalletHistory') as typeof import('./liveWalletHistory');
+      if (!isLiveWalletConnected()) return;
+      const meta = getConnectedLiveWalletMeta();
+      if (!meta.publicKey) return;
+      saveWalletClosedHistory(meta.publicKey, [closed], {
+        walletName: meta.walletName || undefined,
+        walletId: meta.walletId || undefined,
+        balances: meta.lastBalances || undefined,
+      });
+    } catch {
+      /* optional disk sync */
+    }
+  }
+
+  /** After a live open/close: persist closed history + refresh live_wallet overlay. */
+  private afterLiveBookChange(closedRow?: Position): void {
+    if (closedRow) this.persistLiveClosedToWalletHistory(closedRow);
+    this.syncLiveWalletSessionOverlay();
   }
 
   getLogs(limit = 100): TradeLog[] {
@@ -2372,6 +2494,9 @@ export class PaperTrader {
         this.closedPositions = this.closedPositions.slice(-200);
       }
       this.persistState();
+      if (position.tradeMode === 'live') {
+        this.afterLiveBookChange(slice);
+      }
       return slice;
     }
 
@@ -2546,6 +2671,10 @@ export class PaperTrader {
     });
 
     this.persistState();
+    if (position.tradeMode === 'live') {
+      const closedRow = this.closedPositions[this.closedPositions.length - 1];
+      this.afterLiveBookChange(closedRow);
+    }
     return position;
   }
 
@@ -4354,6 +4483,8 @@ export class PaperTrader {
             sourceWallets: position.sourceWallets,
             sourceNames: position.sourceNames,
           });
+          this.persistState();
+          this.afterLiveBookChange(position);
         } else {
           console.error(`[trail] Live sell failed: ${result.error}`);
         }

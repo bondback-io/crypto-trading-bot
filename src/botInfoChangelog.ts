@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.168',
+    title: 'Dashboard Fix + Live Overlay Sync',
+    sections: ['overview', 'microbots', 'execution'],
+    items: [
+      'Fixed dashboard stall: Fast Profiles Recovery button onclick strings were under-escaped inside the HTML template, so the entire client script failed to parse.',
+      'Live wallet session overlay auto-refreshes on open/close and status when connected — Overview drops stale imported opens and merges new closes without re-clicking Import.',
+      'System live closes append to on-disk per-wallet history immediately; Import live wallet remains the full balance + opens + closed reconcile path.',
+    ],
+  },
+  {
     version: '1.2.167',
     title: 'Import Overlay, Live Wallet & Live Mode Learning',
     sections: ['overview', 'microbots', 'learning', 'execution'],
