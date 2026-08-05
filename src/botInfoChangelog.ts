@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.165',
+    title: 'Zion Main Wallet Address Update',
+    sections: ['zion', 'knobs', 'overview'],
+    items: [
+      'Zion Main / primary trading wallet seed updated to the new live address for balances, history, and whitelist transfers.',
+      'Persisted settings and Zion chat/archives auto-migrate off the retired Main pubkey so Zion no longer references it.',
+    ],
+  },
+  {
     version: '1.2.164',
     title: 'Fast Profiles Recovery Stages + Scalper Trend',
     sections: ['microbots', 'learning', 'coaches', 'overview'],

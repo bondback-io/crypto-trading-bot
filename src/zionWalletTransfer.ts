@@ -39,11 +39,15 @@ export interface ZionTransfersConfig {
   cooldownMs: number;
 }
 
+/** Retired Main pubkey — scrubbed from config/chat so Zion never references it. */
+export const RETIRED_MAIN_WALLET_ADDRESS =
+  '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX';
+
 export const SEED_ZION_WALLETS: ZionSavedWallet[] = [
   {
     id: 'main',
     name: 'Main',
-    address: '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX',
+    address: '4bMvt1kbybbUTZk4MjHNHPvRYBqtYnL9timFYVwhZ3Mm',
     aliases: ['main', 'primary', 'trading bot', 'tradingbot', 'dad main'],
     allowSendTo: false,
   },
@@ -136,29 +140,70 @@ export function getZionTransfersConfig(): ZionTransfersConfig {
   };
 }
 
-/** Merge seed wallets if missing from config (by id or address). */
+/** Merge seed wallets if missing; migrate Main id/address off the retired pubkey. */
 export function ensureSeededWallets(): void {
   if (!config.zionTransfers) {
     config.zionTransfers = cloneTransfers(DEFAULT_ZION_TRANSFERS);
     return;
   }
   const list = Array.isArray(config.zionTransfers.savedWallets)
-    ? config.zionTransfers.savedWallets
+    ? [...config.zionTransfers.savedWallets]
     : [];
-  const byId = new Set(list.map((w) => w.id));
-  const byAddr = new Set(list.map((w) => w.address));
   let changed = false;
+  const mainSeed = SEED_ZION_WALLETS.find((w) => w.id === 'main');
+  for (let i = 0; i < list.length; i++) {
+    const w = list[i]!;
+    if (
+      w.id === 'main' ||
+      w.address === RETIRED_MAIN_WALLET_ADDRESS ||
+      (mainSeed && w.address === mainSeed.address && w.id !== 'main')
+    ) {
+      if (
+        mainSeed &&
+        (w.address === RETIRED_MAIN_WALLET_ADDRESS ||
+          (w.id === 'main' && w.address !== mainSeed.address))
+      ) {
+        list[i] = {
+          ...w,
+          id: 'main',
+          name: w.name || mainSeed.name,
+          address: mainSeed.address,
+          aliases: Array.from(
+            new Set([...(w.aliases || []), ...mainSeed.aliases])
+          ),
+          allowSendTo: false,
+        };
+        changed = true;
+      }
+    }
+  }
+  // Drop any leftover row that still holds only the retired address
+  const filtered = list.filter((w) => w.address !== RETIRED_MAIN_WALLET_ADDRESS);
+  if (filtered.length !== list.length) {
+    changed = true;
+  }
+  const byId = new Set(filtered.map((w) => w.id));
+  const byAddr = new Set(filtered.map((w) => w.address));
   for (const seed of SEED_ZION_WALLETS) {
     if (byId.has(seed.id) || byAddr.has(seed.address)) continue;
-    list.push({ ...seed, aliases: [...seed.aliases] });
+    filtered.push({ ...seed, aliases: [...seed.aliases] });
     changed = true;
   }
   if (changed || !Array.isArray(config.zionTransfers.savedWallets)) {
-    config.zionTransfers.savedWallets = list;
+    config.zionTransfers.savedWallets = filtered;
   }
   if (config.zionTransfers.defaultSavingsWalletId == null) {
     config.zionTransfers.defaultSavingsWalletId = 'savings';
   }
+}
+
+/** Replace retired Main pubkey in free text (chat history / backups). */
+export function scrubRetiredMainWalletText(text: string): string {
+  if (!text || !text.includes(RETIRED_MAIN_WALLET_ADDRESS)) return text;
+  const main =
+    SEED_ZION_WALLETS.find((w) => w.id === 'main')?.address ||
+    '4bMvt1kbybbUTZk4MjHNHPvRYBqtYnL9timFYVwhZ3Mm';
+  return text.split(RETIRED_MAIN_WALLET_ADDRESS).join(main);
 }
 
 function cloneTransfers(c: ZionTransfersConfig): ZionTransfersConfig {

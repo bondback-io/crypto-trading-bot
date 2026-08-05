@@ -2393,7 +2393,7 @@ export const config: BotConfig = {
       {
         id: 'main',
         name: 'Main',
-        address: '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX',
+        address: '4bMvt1kbybbUTZk4MjHNHPvRYBqtYnL9timFYVwhZ3Mm',
         aliases: ['main', 'primary', 'trading bot', 'tradingbot', 'dad main'],
         allowSendTo: false,
       },
@@ -3899,16 +3899,31 @@ function applySettingsSnapshot(
       Math.min(hi, Math.max(lo, n));
     const wallets = Array.isArray(s.savedWallets)
       ? s.savedWallets
-          .map((w) => ({
-            id: String(w?.id || '').trim() || 'wallet',
-            name: String(w?.name || '').trim() || 'Wallet',
-            address: String(w?.address || '').trim(),
-            aliases: Array.isArray(w?.aliases)
-              ? w!.aliases!.map((a) => String(a)).filter(Boolean)
-              : [],
-            allowSendTo: w?.allowSendTo === true,
-          }))
-          .filter((w) => w.address.length >= 32)
+          .map((w) => {
+            let address = String(w?.address || '').trim();
+            let id = String(w?.id || '').trim() || 'wallet';
+            if (
+              address === '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX' ||
+              id === 'main'
+            ) {
+              address = '4bMvt1kbybbUTZk4MjHNHPvRYBqtYnL9timFYVwhZ3Mm';
+              id = 'main';
+            }
+            return {
+              id,
+              name: String(w?.name || '').trim() || 'Wallet',
+              address,
+              aliases: Array.isArray(w?.aliases)
+                ? w!.aliases!.map((a) => String(a)).filter(Boolean)
+                : [],
+              allowSendTo: id === 'main' ? false : w?.allowSendTo === true,
+            };
+          })
+          .filter(
+            (w) =>
+              w.address.length >= 32 &&
+              w.address !== '294hBvq3qpoqPLRugMj26egk6r5Tgj7LV6x3aaGZAmtX'
+          )
       : config.zionTransfers.savedWallets;
     config.zionTransfers = {
       enabled: s.enabled === true,

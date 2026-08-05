@@ -112,13 +112,44 @@ export function loadZionAgentState(): ZionAgentPersisted {
             .map(normalizeChangeRequest)
             .filter((c): c is ZionChangeRequest => !!c)
         : [];
+      let messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+      let scrubbed = false;
+      try {
+        const { scrubRetiredMainWalletText } =
+          require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
+        messages = messages.map((m) => {
+          const next = scrubRetiredMainWalletText(String(m.text || ''));
+          if (next !== m.text) scrubbed = true;
+          return { ...m, text: next };
+        });
+        for (const c of crs) {
+          const what = scrubRetiredMainWalletText(c.what);
+          const why = scrubRetiredMainWalletText(c.why);
+          const title = scrubRetiredMainWalletText(c.title);
+          if (what !== c.what || why !== c.why || title !== c.title) {
+            c.what = what;
+            c.why = why;
+            c.title = title;
+            scrubbed = true;
+          }
+        }
+      } catch {
+        /* optional */
+      }
       cache = {
         version: 1,
         updatedAt: Number(parsed.updatedAt) || Date.now(),
         semiAutonomous: parsed.semiAutonomous === true,
-        messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+        messages,
         changeRequests: crs,
       };
+      if (scrubbed) {
+        try {
+          saveZionAgentState(cache);
+        } catch {
+          /* */
+        }
+      }
       return cache;
     }
   } catch {
@@ -192,13 +223,33 @@ function loadChatArchives(): ZionChatArchivesFile {
     const raw = fs.readFileSync(archivePath(), 'utf8');
     const parsed = JSON.parse(raw) as ZionChatArchivesFile;
     if (parsed?.version === 1 && Array.isArray(parsed.archives)) {
-      return {
+      let scrubbed = false;
+      let scrubFn: ((t: string) => string) | null = null;
+      try {
+        scrubFn = (
+          require('./zionWalletTransfer') as typeof import('./zionWalletTransfer')
+        ).scrubRetiredMainWalletText;
+      } catch {
+        scrubFn = null;
+      }
+      const archives = parsed.archives
+        .filter((a) => a && Array.isArray(a.messages) && a.id)
+        .map((a) => {
+          if (!scrubFn) return a;
+          const messages = a.messages.map((m) => {
+            const next = scrubFn!(String(m.text || ''));
+            if (next !== m.text) scrubbed = true;
+            return { ...m, text: next };
+          });
+          return { ...a, messages };
+        });
+      const file: ZionChatArchivesFile = {
         version: 1,
         updatedAt: Number(parsed.updatedAt) || Date.now(),
-        archives: parsed.archives.filter(
-          (a) => a && Array.isArray(a.messages) && a.id
-        ),
+        archives,
       };
+      if (scrubbed) saveChatArchives(file);
+      return file;
     }
   } catch {
     /* */
