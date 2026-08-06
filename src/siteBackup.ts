@@ -408,6 +408,16 @@ export function createAndSaveSiteBackup(): {
   meta: SiteBackupMeta;
   persistence: ReturnType<typeof getPersistenceStatus>;
 } {
+  // Prevent Upload-to-GitHub from re-poisoning remote with code defaults when
+  // DATA_DIR still has un-saved / reset HMC·FPR·DBR·Zion·Trade Caps.
+  try {
+    reconcileCriticalSettingsFromBundledBackup({ reason: 'pre-backup-export' });
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] pre-backup reconcile failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
   const backup = buildSiteBackup();
   const saved = saveSiteBackup(backup);
   return {
@@ -511,4 +521,336 @@ export function maybeSeedDataDirFromBundledSiteBackup(): {
       path: bundledPath,
     };
   }
+}
+
+function parseBackupConfigJson(backup: SiteBackup): Record<string, unknown> | null {
+  const raw = backup.files?.['config.json'];
+  if (raw == null) return null;
+  try {
+    if (typeof raw === 'string') {
+      return JSON.parse(raw) as Record<string, unknown>;
+    }
+    if (typeof raw === 'object') {
+      return raw as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** True when live critical prefs still match shipped code defaults (poisoned disk). */
+export function criticalSettingsLookLikeCodeDefaults(): boolean {
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    const hmc = config.hierarchicalCoordination as
+      | {
+          gatekeeperStrictness?: string;
+          classifierEnabled?: boolean;
+          minVolumeM5Usd?: number;
+        }
+      | undefined;
+    const fpr = config.fastProfileRecovery as { enabled?: boolean } | undefined;
+    const dbr = config.dipBuyerRecovery as { stage?: number } | undefined;
+    const zt = config.zionTransfers as { enabled?: boolean } | undefined;
+    const sel = config.selective as
+      | { maxTradesPerHour?: number; minMsBetweenTrades?: number }
+      | undefined;
+
+    const hmcDefault =
+      !hmc ||
+      ((hmc.gatekeeperStrictness === 'medium' || !hmc.gatekeeperStrictness) &&
+        hmc.classifierEnabled !== true &&
+        (hmc.minVolumeM5Usd == null || Number(hmc.minVolumeM5Usd) === 800));
+    const fprDefault = !fpr || fpr.enabled !== true;
+    const dbrDefault = !dbr || Number(dbr.stage) === 0;
+    const ztDefault = !zt || zt.enabled !== true;
+    const capsDefault =
+      !sel ||
+      (Number(sel.maxTradesPerHour) === 16 &&
+        Number(sel.minMsBetweenTrades) === 25_000);
+
+    return hmcDefault || fprDefault || dbrDefault || ztDefault || capsDefault;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * When DATA_DIR config still has code-default critical knobs, overlay the
+ * preferred values from the repo-bundled site-backup-latest.json and persist.
+ * Runs on boot (config present) and before GitHub upload so Upload cannot
+ * re-poison the remote with defaults.
+ */
+export function reconcileCriticalSettingsFromBundledBackup(opts?: {
+  reason?: string;
+}): {
+  changed: boolean;
+  applied: string[];
+  reason: string;
+} {
+  const reason = String(opts?.reason || 'boot').slice(0, 80);
+  const backup = loadBundledRepoSiteBackup();
+  if (!backup) {
+    return { changed: false, applied: [], reason: 'no bundled backup' };
+  }
+  const bundledCfg = parseBackupConfigJson(backup);
+  if (!bundledCfg) {
+    return { changed: false, applied: [], reason: 'bundled config.json missing' };
+  }
+
+  const { config, persistUserSettings } =
+    require('./config') as typeof import('./config');
+  const applied: string[] = [];
+
+  // —— HMC Gatekeeper / Classifier ——
+  try {
+    const {
+      getHierarchicalCoordinationConfig,
+      setHierarchicalCoordinationConfig,
+      DEFAULT_HIERARCHICAL_COORDINATION,
+    } =
+      require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+    const live = getHierarchicalCoordinationConfig();
+    const src = bundledCfg.hierarchicalCoordination as
+      | Record<string, unknown>
+      | undefined;
+    const looksDefault =
+      live.gatekeeperStrictness === 'medium' &&
+      live.classifierEnabled !== true &&
+      Number(live.minVolumeM5Usd) ===
+        Number(DEFAULT_HIERARCHICAL_COORDINATION.minVolumeM5Usd);
+    if (
+      looksDefault &&
+      src &&
+      typeof src === 'object' &&
+      (src.gatekeeperStrictness === 'low' ||
+        src.gatekeeperStrictness === 'high' ||
+        src.classifierEnabled === true)
+    ) {
+      setHierarchicalCoordinationConfig({
+        enabled: src.enabled !== false,
+        gatekeeperEnabled: src.gatekeeperEnabled !== false,
+        gatekeeperStrictness:
+          src.gatekeeperStrictness === 'low' ||
+          src.gatekeeperStrictness === 'high' ||
+          src.gatekeeperStrictness === 'medium'
+            ? (src.gatekeeperStrictness as 'low' | 'medium' | 'high')
+            : 'low',
+        softBlocksEnforced: src.softBlocksEnforced !== false,
+        minVolumeM5Usd:
+          Number(src.minVolumeM5Usd) ||
+          (src.gatekeeperStrictness === 'low' ? 400 : live.minVolumeM5Usd),
+        minVolumeH1Usd:
+          Number(src.minVolumeH1Usd) ||
+          (src.gatekeeperStrictness === 'low' ? 1200 : live.minVolumeH1Usd),
+        minLiquidityUsd:
+          Number(src.minLiquidityUsd) ||
+          (src.gatekeeperStrictness === 'low' ? 5000 : live.minLiquidityUsd),
+        debugLogging:
+          src.debugLogging === 'off' ||
+          src.debugLogging === 'verbose' ||
+          src.debugLogging === 'normal'
+            ? src.debugLogging
+            : live.debugLogging,
+        classifierEnabled: src.classifierEnabled === true,
+        unknownSetupsCanTrade: src.unknownSetupsCanTrade !== false,
+      });
+      applied.push('hierarchicalCoordination');
+    }
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] HMC overlay failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // —— Fast Profiles Recovery (Group ON + stages) ——
+  try {
+    const {
+      getFastProfileRecoveryConfig,
+      setFastProfileRecoveryConfig,
+      FAST_RECOVERY_PROFILE_IDS,
+    } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    const live = getFastProfileRecoveryConfig();
+    const src = bundledCfg.fastProfileRecovery as
+      | {
+          enabled?: boolean;
+          autoTaper?: boolean;
+          profiles?: Record<string, unknown>;
+          stage0?: Record<string, unknown>;
+        }
+      | undefined;
+    if (live.enabled !== true && src && src.enabled === true) {
+      const profiles: Record<string, unknown> = { ...(live.profiles || {}) };
+      for (const id of FAST_RECOVERY_PROFILE_IDS) {
+        const p = (src.profiles?.[id] || {}) as {
+          enabled?: boolean;
+          stage?: number;
+          stageLocked?: boolean;
+          forcedStage?: number | null;
+          learningModeOverride?: boolean;
+        };
+        const stageN = Math.round(Number(p.stage ?? 0));
+        profiles[id] = {
+          enabled: p.enabled !== false,
+          stage: (stageN <= 0 ? 0 : stageN >= 4 ? 4 : stageN) as 0 | 1 | 2 | 3 | 4,
+          stageLocked: p.stageLocked === true,
+          forcedStage:
+            p.forcedStage != null && Number.isFinite(Number(p.forcedStage))
+              ? Math.round(Number(p.forcedStage))
+              : null,
+          learningModeOverride: p.learningModeOverride === true,
+        };
+      }
+      setFastProfileRecoveryConfig({
+        enabled: true,
+        autoTaper: src.autoTaper !== false,
+        profiles: profiles as never,
+        ...(src.stage0 ? { stage0: src.stage0 as never } : {}),
+      });
+      applied.push('fastProfileRecovery');
+    }
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] FPR overlay failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // —— Dip Buyer Recovery stage ——
+  try {
+    const { getDipBuyerRecoveryConfig, setDipBuyerRecoveryConfig } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    const live = getDipBuyerRecoveryConfig();
+    const src = bundledCfg.dipBuyerRecovery as
+      | {
+          enabled?: boolean;
+          autoTaper?: boolean;
+          stage?: number;
+          stageLocked?: boolean;
+          forcedStage?: number | null;
+          learningModeOverride?: boolean;
+        }
+      | undefined;
+    const bundledStage = Math.round(Number(src?.stage ?? 0));
+    if (
+      Number(live.stage) === 0 &&
+      src &&
+      bundledStage >= 1 &&
+      bundledStage <= 4
+    ) {
+      setDipBuyerRecoveryConfig({
+        enabled: src.enabled !== false,
+        autoTaper: src.autoTaper !== false,
+        stage: bundledStage as 0 | 1 | 2 | 3 | 4,
+        stageLocked: src.stageLocked === true,
+        forcedStage:
+          src.forcedStage != null && Number.isFinite(Number(src.forcedStage))
+            ? (Math.round(Number(src.forcedStage)) as 0 | 1 | 2 | 3 | 4)
+            : null,
+        learningModeOverride: src.learningModeOverride === true,
+      });
+      applied.push('dipBuyerRecovery');
+    }
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] DBR overlay failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // —— Zion wallet transfers ——
+  try {
+    const src = bundledCfg.zionTransfers as
+      | { enabled?: boolean; savedWallets?: unknown[] }
+      | undefined;
+    const live = config.zionTransfers;
+    if (
+      live?.enabled !== true &&
+      src &&
+      src.enabled === true
+    ) {
+      config.zionTransfers = {
+        ...live,
+        enabled: true,
+        savedWallets:
+          Array.isArray(src.savedWallets) && src.savedWallets.length
+            ? (src.savedWallets as typeof live.savedWallets)
+            : live.savedWallets,
+      };
+      applied.push('zionTransfers');
+    }
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] Zion transfers overlay failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // —— Trade Caps (selective rate limits) ——
+  try {
+    const src = bundledCfg.selective as
+      | { maxTradesPerHour?: number; minMsBetweenTrades?: number }
+      | undefined;
+    const live = config.selective;
+    if (
+      live &&
+      Number(live.maxTradesPerHour) === 16 &&
+      Number(live.minMsBetweenTrades) === 25_000 &&
+      src &&
+      (Number(src.maxTradesPerHour) !== 16 ||
+        Number(src.minMsBetweenTrades) !== 25_000)
+    ) {
+      if (src.maxTradesPerHour != null && Number.isFinite(Number(src.maxTradesPerHour))) {
+        live.maxTradesPerHour = Math.round(Number(src.maxTradesPerHour));
+      }
+      if (
+        src.minMsBetweenTrades != null &&
+        Number.isFinite(Number(src.minMsBetweenTrades))
+      ) {
+        live.minMsBetweenTrades = Math.round(Number(src.minMsBetweenTrades));
+      }
+      applied.push('selective.tradeCaps');
+    }
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] Trade Caps overlay failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  if (!applied.length) {
+    console.log(`[boot-reconcile] skipped (${reason}): nothing default-like to overlay`);
+    return { changed: false, applied: [], reason: 'no-op' };
+  }
+
+  try {
+    persistUserSettings();
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] persist failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  try {
+    const { invalidateFastProfileRecoveryCache } =
+      require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    invalidateFastProfileRecoveryCache();
+  } catch {
+    /* optional */
+  }
+  try {
+    const { invalidateDipBuyerRecoveryCache } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    invalidateDipBuyerRecoveryCache();
+  } catch {
+    /* optional */
+  }
+
+  console.log(
+    `[boot-reconcile] applied from bundled backup (${reason}): ${applied.join(', ')}`
+  );
+  return { changed: true, applied, reason: 'applied' };
 }

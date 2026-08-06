@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.191',
+    title: 'Critical settings no longer poison GitHub backup',
+    sections: ['backup', 'knobs', 'microbots', 'zion'],
+    items: [
+      'When config.json already exists but HMC / FPR Group / Dip Recovery / Zion transfers / Trade Caps still match code defaults, boot overlays preferred values from bundled site-backup-latest.json and persists them (seed alone only ran when config was missing).',
+      'Upload to GitHub runs the same reconcile first so a defaults-stamped DATA_DIR cannot overwrite a good remote backup. Post-import reconcile re-applies if remote was already poisoned.',
+    ],
+  },
+  {
     version: '1.2.190',
     title: 'HMC Low no longer starves quiet feeds',
     sections: ['microbots', 'knobs', 'execution'],

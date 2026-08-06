@@ -87,6 +87,31 @@ async function main(): Promise<void> {
   logPersistenceStatus();
 
   initWallets();
+
+  // Config present but still on code defaults for HMC/FPR/DBR/Zion/caps →
+  // overlay preferred values from bundled backup (Upload was poisoning remote).
+  try {
+    const {
+      reconcileCriticalSettingsFromBundledBackup,
+      criticalSettingsLookLikeCodeDefaults,
+    } = require('./siteBackup') as typeof import('./siteBackup');
+    if (criticalSettingsLookLikeCodeDefaults()) {
+      try {
+        const { markForceGithubAutoImportOnce } =
+          require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+        markForceGithubAutoImportOnce('critical-settings-look-default');
+      } catch {
+        /* optional */
+      }
+    }
+    reconcileCriticalSettingsFromBundledBackup({ reason: 'post-initWallets' });
+  } catch (err) {
+    console.warn(
+      '[boot-reconcile] hook failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+
   paperTrader.loadPersistedState();
   resolveBootTradingMode();
 

@@ -7469,6 +7469,18 @@ export function startServer(port?: number, host?: string): void {
           const { maybeAutoImportGithubBackupOnBoot } =
             require('./githubSiteBackup') as typeof import('./githubSiteBackup');
           await maybeAutoImportGithubBackupOnBoot();
+          try {
+            const { reconcileCriticalSettingsFromBundledBackup } =
+              require('./siteBackup') as typeof import('./siteBackup');
+            reconcileCriticalSettingsFromBundledBackup({
+              reason: 'post-github-auto-import',
+            });
+          } catch (err) {
+            console.warn(
+              '[boot-reconcile] post-import hook failed:',
+              err instanceof Error ? err.message : err
+            );
+          }
         } catch (err) {
           console.warn(
             '[github-backup] auto-import boot hook failed:',
