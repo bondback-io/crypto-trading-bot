@@ -2089,6 +2089,12 @@ export interface BotConfig {
   /** Additive Volume Intelligence — strength, decay, price-volume divergence. */
   volumeIntelligence: import('./volumeIntelligence').VolumeIntelligenceConfig;
 
+  /**
+   * Hierarchical Multi-Agent Coordination — Phase 1 Gatekeeper
+   * (allow/block before lane fight; classifier reserved).
+   */
+  hierarchicalCoordination: import('./hierarchicalCoordination').HierarchicalCoordinationConfig;
+
   /** Fast Profiles Recovery Stages 0–4 for short-term profiles. */
   fastProfileRecovery: import('./fastProfileRecovery').FastProfileRecoveryConfig;
 
@@ -2381,6 +2387,19 @@ export const config: BotConfig = {
     exitUrgencyOnBearishDivergence: false,
     learningAdjustEnabled: false,
     profileSoft: {},
+  },
+
+  hierarchicalCoordination: {
+    enabled: true,
+    gatekeeperEnabled: true,
+    gatekeeperStrictness: 'medium',
+    softBlocksEnforced: true,
+    minVolumeM5Usd: 800,
+    minVolumeH1Usd: 2500,
+    minLiquidityUsd: 8000,
+    debugLogging: 'normal',
+    classifierEnabled: false,
+    unknownSetupsCanTrade: true,
   },
 
   fastProfileRecovery: {
@@ -3061,6 +3080,20 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         profileSoft: {},
       }
     ) as PersistedBotSettings['volumeIntelligence'],
+    hierarchicalCoordination: cloneJson(
+      config.hierarchicalCoordination || {
+        enabled: true,
+        gatekeeperEnabled: true,
+        gatekeeperStrictness: 'medium',
+        softBlocksEnforced: true,
+        minVolumeM5Usd: 800,
+        minVolumeH1Usd: 2500,
+        minLiquidityUsd: 8000,
+        debugLogging: 'normal',
+        classifierEnabled: false,
+        unknownSetupsCanTrade: true,
+      }
+    ) as PersistedBotSettings['hierarchicalCoordination'],
     fastProfileRecovery: cloneJson(
       config.fastProfileRecovery || {
         enabled: false,
@@ -3988,6 +4021,45 @@ function applySettingsSnapshot(
           /* optional */
         }
       }
+    } catch {
+      /* optional */
+    }
+  }
+  if (
+    saved.hierarchicalCoordination &&
+    typeof saved.hierarchicalCoordination === 'object'
+  ) {
+    try {
+      const {
+        DEFAULT_HIERARCHICAL_COORDINATION,
+        getHierarchicalCoordinationConfig,
+      } =
+        require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+      const s = saved.hierarchicalCoordination as Partial<
+        import('./hierarchicalCoordination').HierarchicalCoordinationConfig
+      >;
+      config.hierarchicalCoordination = {
+        ...DEFAULT_HIERARCHICAL_COORDINATION,
+        ...s,
+        enabled: s.enabled !== false,
+        gatekeeperEnabled: s.gatekeeperEnabled !== false,
+        gatekeeperStrictness:
+          s.gatekeeperStrictness === 'low' ||
+          s.gatekeeperStrictness === 'high' ||
+          s.gatekeeperStrictness === 'medium'
+            ? s.gatekeeperStrictness
+            : 'medium',
+        softBlocksEnforced: s.softBlocksEnforced !== false,
+        debugLogging:
+          s.debugLogging === 'off' ||
+          s.debugLogging === 'verbose' ||
+          s.debugLogging === 'normal'
+            ? s.debugLogging
+            : 'normal',
+        classifierEnabled: s.classifierEnabled === true,
+        unknownSetupsCanTrade: s.unknownSetupsCanTrade !== false,
+      };
+      config.hierarchicalCoordination = getHierarchicalCoordinationConfig();
     } catch {
       /* optional */
     }

@@ -8288,6 +8288,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
+      <div class="card" id="hmc-gatekeeper-card" data-mb-tab-scope="learning">
+        <details class="strat-adv-pack" id="hmc-gatekeeper-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">HMC Gatekeeper <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Phase 1 hierarchical coordination: allow/block candidates before lane fight. Hard safety never fails open. Soft blocks can be advisory. No TP/SL changes."></span></span>
+              <span id="hmc-gk-status-badge" class="badge status-badge" style="font-size:11px">Gatekeeper ON</span>
+            </span>
+            <label class="ctl-check" title="Enable HMC Gatekeeper" onclick="event.stopPropagation()">
+              <input type="checkbox" id="hmc-gk-enabled" onchange="saveHmcGatekeeperConfig()" onclick="event.stopPropagation()" />
+              <span>Enable Gatekeeper</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Strictness <span id="hmc-gk-strictness-label" class="text-slate-200">Medium</span></div>
+              <div class="closed-filter" role="group" aria-label="Gatekeeper strictness">
+                <button type="button" class="closed-filter-btn" data-hmc-gk-strictness="low" onclick="setHmcGatekeeperStrictness('low')">Low</button>
+                <button type="button" class="closed-filter-btn is-active" data-hmc-gk-strictness="medium" onclick="setHmcGatekeeperStrictness('medium')">Medium</button>
+                <button type="button" class="closed-filter-btn" data-hmc-gk-strictness="high" onclick="setHmcGatekeeperStrictness('high')">High</button>
+              </div>
+            </div>
+            <label class="ctl-check mb-2" title="When off, soft blocks are advisory only; hard safety still blocks">
+              <input type="checkbox" id="hmc-gk-soft-enforced" onchange="saveHmcGatekeeperConfig()" />
+              <span>Enforce soft blocks <span class="tip" tabindex="0" data-tip="OFF = soft findings log as advisory ALLOW. Hard safety (honeypot / anti-rug) always blocks."></span></span>
+            </label>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Min vol 5m ($)</span><input type="number" id="hmc-gk-vol-m5" value="800" min="0" step="100" onchange="saveHmcGatekeeperConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Min vol 1h ($)</span><input type="number" id="hmc-gk-vol-h1" value="2500" min="0" step="100" onchange="saveHmcGatekeeperConfig()" /></label>
+              <label class="ctl ctl-sm"><span>Min liquidity ($)</span><input type="number" id="hmc-gk-liq" value="8000" min="0" step="500" onchange="saveHmcGatekeeperConfig()" /></label>
+            </div>
+            <div class="mb-2">
+              <div class="text-xs text-slate-400 mb-1">Debug logging <span id="hmc-gk-debug-label" class="text-slate-200">Normal</span></div>
+              <div class="closed-filter" role="group" aria-label="Gatekeeper debug logging">
+                <button type="button" class="closed-filter-btn" data-hmc-gk-debug="off" onclick="setHmcGatekeeperDebug('off')">Off</button>
+                <button type="button" class="closed-filter-btn is-active" data-hmc-gk-debug="normal" onclick="setHmcGatekeeperDebug('normal')">Normal</button>
+                <button type="button" class="closed-filter-btn" data-hmc-gk-debug="verbose" onclick="setHmcGatekeeperDebug('verbose')">Verbose</button>
+              </div>
+            </div>
+            <p class="text-xs text-slate-500 mb-0">Runs after enrich, before lane fight. Decisions appear in Agent Decision Log (source HMC Gatekeeper) and lane fight rows.</p>
+          </div>
+        </details>
+      </div>
+
       <div class="card" id="marl-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
           <summary>
@@ -9315,6 +9358,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <option value="accel_cf">Counterfactual</option>
               <option value="accel_teacher">Teacher–Student</option>
               <option value="peak_protect">Peak Protect</option>
+              <option value="hmc_gatekeeper">HMC Gatekeeper</option>
               <option value="zion">Zion</option>
             </select>
           </label>
@@ -15362,6 +15406,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   marlThoughts.slice(0, 5).map(function (t) { return escHtml(String(t).slice(0, 120)); }).join(' · ') +
                 '</div>'
               : '';
+            const gate = d.hmcGate || null;
+            const gateLine = gate && gate.plainLanguage
+              ? '<div class="tp-decision-why" style="color:' +
+                (gate.decision === 'block' ? '#f87171' : '#a3e635') +
+                '" title="' + escHtml((gate.reasonCodes || []).join(', ')) + '">' +
+                  '<span style="font-weight:700">HMC</span> · ' +
+                  escHtml(String(gate.plainLanguage).slice(0, 160)) +
+                '</div>'
+              : '';
             const tokenMeta =
               escHtml(d.symbol || '') +
               fmtLaneTokenActions(d.mint) +
@@ -15372,6 +15425,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<span class="tp-decision-meta">' + tokenMeta + '</span>' +
                 '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
                 '<div class="tp-decision-why">' + lanes + '</div>' +
+                gateLine +
                 marlLine +
                 skipLine +
               '</div>'
@@ -16605,6 +16659,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { syncZionChatSurfaces(); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
+      if (name === 'microbots' && typeof loadHmcGatekeeperConfig === 'function') loadHmcGatekeeperConfig();
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
       if (name === 'microbots' && typeof loadProfileRlStatus === 'function') loadProfileRlStatus();
       if (name === 'microbots' && typeof loadLearningAccelerators === 'function') loadLearningAccelerators();
@@ -27008,6 +27063,108 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadMarlStatus = loadMarlStatus;
     window.saveMarlConfig = saveMarlConfig;
+
+    let _hmcGkStrictness = 'medium';
+    let _hmcGkDebug = 'normal';
+    async function loadHmcGatekeeperConfig() {
+      try {
+        const data = await fetchJSON('/api/config/hierarchical-coordination');
+        const c = data.hierarchicalCoordination || {};
+        const en = document.getElementById('hmc-gk-enabled');
+        if (en) en.checked = c.gatekeeperEnabled !== false && c.enabled !== false;
+        _hmcGkStrictness =
+          c.gatekeeperStrictness === 'low' || c.gatekeeperStrictness === 'high'
+            ? c.gatekeeperStrictness
+            : 'medium';
+        document.querySelectorAll('[data-hmc-gk-strictness]').forEach((btn) => {
+          btn.classList.toggle(
+            'is-active',
+            btn.getAttribute('data-hmc-gk-strictness') === _hmcGkStrictness
+          );
+        });
+        const lab = document.getElementById('hmc-gk-strictness-label');
+        if (lab)
+          lab.textContent =
+            _hmcGkStrictness.charAt(0).toUpperCase() + _hmcGkStrictness.slice(1);
+        const soft = document.getElementById('hmc-gk-soft-enforced');
+        if (soft) soft.checked = c.softBlocksEnforced !== false;
+        const m5 = document.getElementById('hmc-gk-vol-m5');
+        if (m5) m5.value = c.minVolumeM5Usd != null ? c.minVolumeM5Usd : 800;
+        const h1 = document.getElementById('hmc-gk-vol-h1');
+        if (h1) h1.value = c.minVolumeH1Usd != null ? c.minVolumeH1Usd : 2500;
+        const liq = document.getElementById('hmc-gk-liq');
+        if (liq) liq.value = c.minLiquidityUsd != null ? c.minLiquidityUsd : 8000;
+        _hmcGkDebug =
+          c.debugLogging === 'off' || c.debugLogging === 'verbose'
+            ? c.debugLogging
+            : 'normal';
+        document.querySelectorAll('[data-hmc-gk-debug]').forEach((btn) => {
+          btn.classList.toggle(
+            'is-active',
+            btn.getAttribute('data-hmc-gk-debug') === _hmcGkDebug
+          );
+        });
+        const dlab = document.getElementById('hmc-gk-debug-label');
+        if (dlab)
+          dlab.textContent =
+            _hmcGkDebug.charAt(0).toUpperCase() + _hmcGkDebug.slice(1);
+        const badge = document.getElementById('hmc-gk-status-badge');
+        if (badge) {
+          const on = c.enabled !== false && c.gatekeeperEnabled !== false;
+          badge.textContent = on
+            ? 'Gatekeeper ' + _hmcGkStrictness.toUpperCase()
+            : 'Gatekeeper OFF';
+        }
+      } catch (err) {
+        console.warn('loadHmcGatekeeperConfig', err);
+      }
+    }
+    async function saveHmcGatekeeperConfig() {
+      const body = {
+        enabled: true,
+        gatekeeperEnabled: document.getElementById('hmc-gk-enabled')
+          ? document.getElementById('hmc-gk-enabled').checked
+          : true,
+        gatekeeperStrictness: _hmcGkStrictness,
+        softBlocksEnforced: document.getElementById('hmc-gk-soft-enforced')
+          ? document.getElementById('hmc-gk-soft-enforced').checked
+          : true,
+        minVolumeM5Usd: Number(document.getElementById('hmc-gk-vol-m5')?.value || 800),
+        minVolumeH1Usd: Number(document.getElementById('hmc-gk-vol-h1')?.value || 2500),
+        minLiquidityUsd: Number(document.getElementById('hmc-gk-liq')?.value || 8000),
+        debugLogging: _hmcGkDebug,
+      };
+      await fetchJSON('/api/config/hierarchical-coordination', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadHmcGatekeeperConfig();
+    }
+    function setHmcGatekeeperStrictness(s) {
+      _hmcGkStrictness = s === 'low' || s === 'high' ? s : 'medium';
+      const floors = {
+        low: { m5: 400, h1: 1200, liq: 5000 },
+        medium: { m5: 800, h1: 2500, liq: 8000 },
+        high: { m5: 1500, h1: 5000, liq: 12000 },
+      };
+      const f = floors[_hmcGkStrictness] || floors.medium;
+      const m5 = document.getElementById('hmc-gk-vol-m5');
+      if (m5) m5.value = f.m5;
+      const h1 = document.getElementById('hmc-gk-vol-h1');
+      if (h1) h1.value = f.h1;
+      const liq = document.getElementById('hmc-gk-liq');
+      if (liq) liq.value = f.liq;
+      saveHmcGatekeeperConfig();
+    }
+    function setHmcGatekeeperDebug(d) {
+      _hmcGkDebug = d === 'off' || d === 'verbose' ? d : 'normal';
+      saveHmcGatekeeperConfig();
+    }
+    window.loadHmcGatekeeperConfig = loadHmcGatekeeperConfig;
+    window.saveHmcGatekeeperConfig = saveHmcGatekeeperConfig;
+    window.setHmcGatekeeperStrictness = setHmcGatekeeperStrictness;
+    window.setHmcGatekeeperDebug = setHmcGatekeeperDebug;
 
     let _profileRlStrength = 'medium';
     async function loadProfileRlStatus() {

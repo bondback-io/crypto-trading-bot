@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.183',
+    title: 'HMC Gatekeeper (Phase 1)',
+    sections: ['coaches', 'learning', 'execution', 'overview', 'microbots'],
+    items: [
+      'Hierarchical Coordination Gatekeeper: allow/block before lane fight (volume, liquidity, safety, collapsed volume, low-MC congestion, freshness). Hard safety never fails open; soft blocks enforceable. Default ON · medium.',
+      'Agent Decision Log source hmc_gatekeeper; lane fight rows show HMC gate summary; Zion comments when gate present. Micro Bots controls for enable, strictness, soft-block enforce, volume floors, debug.',
+      'Shared Paper / Live Sim / Live path; brief mint cache; classifier stubs reserved for later phases. No TP/SL mutation.',
+    ],
+  },
+  {
     version: '1.2.182',
     title: 'Stop settings auto-reset',
     sections: ['risk', 'knobs', 'microbots', 'overview'],

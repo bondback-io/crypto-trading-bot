@@ -3738,6 +3738,76 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get(
+    '/api/config/hierarchical-coordination',
+    (_req: Request, res: Response) => {
+      try {
+        const { getHierarchicalCoordinationConfig } =
+          require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+        res.json({
+          ok: true,
+          hierarchicalCoordination: getHierarchicalCoordinationConfig(),
+        });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
+
+  app.post(
+    '/api/config/hierarchical-coordination',
+    (req: Request, res: Response) => {
+      try {
+        const {
+          setHierarchicalCoordinationConfig,
+          getHierarchicalCoordinationConfig,
+        } =
+          require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const boolOrUndef = (v: unknown): boolean | undefined =>
+          typeof v === 'boolean' ? v : undefined;
+        const numOrUndef = (v: unknown): number | undefined =>
+          v != null && Number.isFinite(Number(v)) ? Number(v) : undefined;
+        const strictness =
+          body.gatekeeperStrictness === 'low' ||
+          body.gatekeeperStrictness === 'medium' ||
+          body.gatekeeperStrictness === 'high'
+            ? body.gatekeeperStrictness
+            : undefined;
+        const debugLogging =
+          body.debugLogging === 'off' ||
+          body.debugLogging === 'normal' ||
+          body.debugLogging === 'verbose'
+            ? body.debugLogging
+            : undefined;
+        setHierarchicalCoordinationConfig({
+          enabled: boolOrUndef(body.enabled),
+          gatekeeperEnabled: boolOrUndef(body.gatekeeperEnabled),
+          gatekeeperStrictness: strictness,
+          softBlocksEnforced: boolOrUndef(body.softBlocksEnforced),
+          minVolumeM5Usd: numOrUndef(body.minVolumeM5Usd),
+          minVolumeH1Usd: numOrUndef(body.minVolumeH1Usd),
+          minLiquidityUsd: numOrUndef(body.minLiquidityUsd),
+          debugLogging,
+          classifierEnabled: boolOrUndef(body.classifierEnabled),
+          unknownSetupsCanTrade: boolOrUndef(body.unknownSetupsCanTrade),
+        });
+        res.json({
+          ok: true,
+          hierarchicalCoordination: getHierarchicalCoordinationConfig(),
+        });
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
+
   app.get('/api/profile-ta-playbooks', (_req: Request, res: Response) => {
     try {
       const { getProfileTaPlaybooksPublic } =

@@ -161,6 +161,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>ML advisor</strong> — ranks / blends patch ideas; shadow → hybrid → lead as sample grows. Never invents new strategies.</li>
           <li><strong>Profile TA + weight learning</strong> — per-lane Off/Soft/Hard confluence; learns tool weights / sensitivities only — never TP/SL or Peak Protect cores.</li>
           <li><strong>Profile RL</strong> — personal soft coach (setup-worth, size confidence, TA sensitivity, exit-hint aggressiveness). Shadow / Hybrid / Lead via readiness score (not trade count alone). Default global OFF.</li>
+          <li><strong>HMC Gatekeeper</strong> — Phase 1 hierarchical coordination: allow/block before lane fight (volume, liquidity, safety, low-MC congestion). Hard safety never fails open. Soft blocks optional. Default ON · medium.</li>
           <li><strong>MARL</strong> — team coach: lane ranking, size confidence, low-MC pile-in, lagging support. Soft only; never writes TP/SL. Default OFF.</li>
           <li><strong>Learning Accelerators</strong> — experience replay, counterfactual exit what-ifs, teacher→student soft TA tips. Offline/soft hints only. Master default OFF.</li>
           <li><strong>Peak Profit Protection</strong> — soft exit on peak giveback; arm/giveback can learn via self-learn exitPolicy. Never replaces hard TP.</li>
@@ -171,6 +172,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
         <p class="mint" style="margin:0 0 0.45rem"><strong>Priority when layers overlap</strong></p>
         <ul>
+          <li>0 · <strong>HMC Gatekeeper</strong> allow/block (before lanes)</li>
           <li>1 · Safety / anti-rug</li>
           <li>2 · Micro-bot hard rules &amp; stamped TP/SL</li>
           <li>3 · MARL team assignment / low-MC coordination</li>
@@ -197,7 +199,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
         <p class="mint" style="margin:0 0 0.45rem"><strong>Entry path (who gets the mint)</strong></p>
         <ul>
-          <li>Lane floors / match → Learning Mode fairness → <strong>MARL rank</strong> → <strong>Profile RL rank</strong> → filters / anti-rug → MARL/RL size → TA playbook gate → buy → Peak Protect while open.</li>
+          <li>Lane floors / match → Learning Mode fairness → <strong>MARL rank</strong> → <strong>Profile RL rank</strong> → filters / anti-rug → MARL/RL size → TA playbook gate → buy → Peak Protect while open. <strong>HMC Gatekeeper</strong> runs after enrich, before lanes.</li>
           <li><strong>Smart Bot Profiles</strong> must be ON for full lane + MARL/RL ranking. Size multipliers still apply at buy when coaches are enabled.</li>
         </ul>
 
@@ -212,8 +214,8 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         </ul>
 
         <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
-        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed. Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (MARL, Profile RL, accelerators, TA, ML, sparse Zion) — logging only.</p>
-        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed (includes HMC Gate when present). Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (HMC Gatekeeper, MARL, Profile RL, accelerators, TA, ML, sparse Zion) — logging only.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → HMC Gatekeeper / Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open Micro Bots coaches')}
           ${btn('botperf', 'Open Bot Performance')}

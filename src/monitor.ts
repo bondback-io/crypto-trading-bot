@@ -5529,6 +5529,14 @@ const laneDecisionLog: Array<{
   opened?: boolean;
   cascadeSkipReason?: string;
   marl?: LaneFightMarlSnap;
+  /** HMC Gatekeeper snapshot (Phase 1). */
+  hmcGate?: {
+    decision: 'allow' | 'block';
+    severity: 'soft' | 'hard';
+    reasonCodes: string[];
+    plainLanguage: string;
+    advisory?: boolean;
+  };
   lanes: Array<{
     id: string;
     name: string;
@@ -5540,7 +5548,14 @@ const laneDecisionLog: Array<{
 
 function logLaneFightDecisions(
   signal: TradeSignal,
-  lanes: TradeProfileLaneResult[]
+  lanes: TradeProfileLaneResult[],
+  hmcGate?: {
+    decision: 'allow' | 'block';
+    severity: 'soft' | 'hard';
+    reasonCodes: string[];
+    plainLanguage: string;
+    advisory?: boolean;
+  }
 ): void {
   const winner = pickWinningTradeProfileLane(lanes);
   let marl: LaneFightMarlSnap | undefined;
@@ -5571,6 +5586,7 @@ function logLaneFightDecisions(
     symbol: signal.symbol,
     winnerId: winner?.profileId ?? null,
     marl,
+    hmcGate,
     lanes: lanes.map((l) => ({
       id: l.profileId,
       name: l.name,
@@ -5591,6 +5607,7 @@ function logLaneFightDecisions(
       winnerId: entry.winnerId,
       lanes: entry.lanes,
       marl: entry.marl,
+      hmcGate: entry.hmcGate,
     });
   } catch {
     /* non-fatal */
@@ -5598,10 +5615,62 @@ function logLaneFightDecisions(
   try {
     const { maybeZionFightLogComment } =
       require('./zionFightLog') as typeof import('./zionFightLog');
-    maybeZionFightLogComment({ mint: entry.mint, event: 'open', winnerId: entry.winnerId });
+    maybeZionFightLogComment({
+      mint: entry.mint,
+      event: 'open',
+      winnerId: entry.winnerId,
+      hmcGateSummary: entry.hmcGate?.plainLanguage,
+    });
   } catch {
     /* optional */
   }
+}
+
+/** Record a Gatekeeper-only skip row (pre-lane-fight block). */
+function logGatekeeperBlock(
+  signal: TradeSignal,
+  hmcGate: {
+    decision: 'allow' | 'block';
+    severity: 'soft' | 'hard';
+    reasonCodes: string[];
+    plainLanguage: string;
+    advisory?: boolean;
+  }
+): void {
+  const entry = {
+    at: Date.now(),
+    mint: signal.mint,
+    symbol: signal.symbol,
+    winnerId: null as string | null,
+    opened: false,
+    cascadeSkipReason: hmcGate.plainLanguage.slice(0, 280),
+    hmcGate,
+    lanes: [] as Array<{
+      id: string;
+      name: string;
+      passed: boolean;
+      score: number;
+      reason: string;
+    }>,
+  };
+  laneDecisionLog.unshift(entry);
+  if (laneDecisionLog.length > LANE_DECISION_LOG_MAX) {
+    laneDecisionLog.length = LANE_DECISION_LOG_MAX;
+  }
+  try {
+    const { recordLaneFightOpen } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    recordLaneFightOpen({
+      mint: entry.mint,
+      symbol: entry.symbol,
+      winnerId: null,
+      lanes: [],
+      hmcGate: entry.hmcGate,
+    });
+  } catch {
+    /* non-fatal */
+  }
+  markLaneFightCascadeResult(signal.mint, false, hmcGate.plainLanguage);
 }
 
 /** Append a MARL thought to the latest fight row for this mint (size / low-MC). */
@@ -5687,6 +5756,7 @@ function markLaneFightCascadeResult(
     maybeZionFightLogComment({
       mint,
       event: opened ? 'cascade_open' : 'cascade_skip',
+      hmcGateSummary: hit?.hmcGate?.plainLanguage || cascadeSkipReason,
     });
   } catch {
     /* optional */
@@ -5780,15 +5850,106 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     );
   }
 
-  // Smart Bot Profiles ON: enrich → lane fight (floors + match) → cascade
+  // Smart Bot Profiles ON: enrich → gatekeeper → lane fight (floors + match) → cascade
   // passers under each profile gate (CORE ∩ assigned modules). Smart Bot OFF:
-  // legacy global modules only.
+  // legacy global modules only (gatekeeper still runs when HMC enabled).
   let lanePassers: TradeProfileLaneResult[] | null = null;
+  let lastHmcGate:
+    | {
+        decision: 'allow' | 'block';
+        severity: 'soft' | 'hard';
+        reasonCodes: string[];
+        plainLanguage: string;
+        advisory?: boolean;
+      }
+    | undefined;
+  {
+    let gatekeeperActive = false;
+    try {
+      const { isGatekeeperActive } =
+        require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+      gatekeeperActive = isGatekeeperActive();
+    } catch {
+      gatekeeperActive = false;
+    }
+
+    if (isSmartBotProfilesEnabled() || gatekeeperActive) {
+      await enrichSignalForLaneFight(signal);
+    }
+
+    if (gatekeeperActive) {
+      try {
+        const {
+          evaluateGatekeeper,
+          recordGatekeeperDecision,
+        } =
+          require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+        const profileHint = signal.candidateTradeProfileId || null;
+        let hasOpen = false;
+        try {
+          hasOpen = paperTrader.hasOpenMint(signal.mint);
+        } catch {
+          hasOpen = false;
+        }
+        const gk = evaluateGatekeeper({
+          mint: signal.mint,
+          symbol: signal.symbol,
+          profileHint,
+          metrics: signal.metrics
+            ? {
+                liquidityUsd: signal.metrics.liquidityUsd,
+                volumeM5Usd: signal.metrics.volumeM5Usd,
+                volumeH1Usd: signal.metrics.volumeH1Usd,
+                marketCapUsd: signal.metrics.marketCapUsd,
+                priceChangeH1Pct: signal.metrics.priceChangeH1Pct,
+                priceChange24hPct: signal.metrics.priceChange24hPct,
+              }
+            : null,
+          antiRug: signal.antiRug
+            ? {
+                ok: signal.antiRug.ok,
+                riskLevel: signal.antiRug.riskLevel,
+                riskScore: signal.antiRug.riskScore,
+                honeypot: signal.antiRug.honeypot,
+                skipReasons: signal.antiRug.skipReasons,
+                flags: signal.antiRug.flags,
+              }
+            : null,
+          alreadyTraded: tradedMints.has(signal.mint),
+          hasOpenPosition: hasOpen,
+          exhausted: false,
+          candles: signal.candles || null,
+        });
+        lastHmcGate = gk;
+        recordGatekeeperDecision({
+          result: gk,
+          mint: signal.mint,
+          symbol: signal.symbol,
+          profileHint,
+        });
+        if (gk.decision === 'block') {
+          const reason = gk.plainLanguage;
+          logGatekeeperBlock(signal, gk);
+          recordRejectedSignal(signal, reason);
+          console.log(
+            `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+              `reason=${reason}`
+          );
+          return false;
+        }
+      } catch (err) {
+        console.warn(
+          `[monitor] HMC Gatekeeper error (fail-open soft):`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  }
+
   if (isSmartBotProfilesEnabled()) {
-    await enrichSignalForLaneFight(signal);
     const ctx = buildTradeProfileMatchContext(signal);
     const lanes = evaluateTradeProfileLanes(ctx, { silent: false });
-    logLaneFightDecisions(signal, lanes);
+    logLaneFightDecisions(signal, lanes, lastHmcGate);
     lanePassers = lanes.filter((l) => l.passed && l.assignment);
     if (!lanePassers.length) {
       const failBits = lanes

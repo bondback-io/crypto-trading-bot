@@ -28,6 +28,14 @@ export interface LaneOutcomeRecord {
     strength?: string;
     thoughts: string[];
   };
+  /** HMC Gatekeeper snapshot (Phase 1, optional). */
+  hmcGate?: {
+    decision: 'allow' | 'block';
+    severity: 'soft' | 'hard';
+    reasonCodes: string[];
+    plainLanguage: string;
+    advisory?: boolean;
+  };
   /** true when cascade stamped a buy; false when cascade skipped */
   opened?: boolean;
   /** Why cascade rejected after a lane win (compact) */
@@ -124,6 +132,7 @@ export function recordLaneFightOpen(input: {
     strength?: string;
     thoughts: string[];
   };
+  hmcGate?: LaneOutcomeRecord['hmcGate'];
 }): void {
   load();
   ring.push({
@@ -134,6 +143,7 @@ export function recordLaneFightOpen(input: {
     winnerId: input.winnerId,
     lanes: input.lanes,
     marl: input.marl,
+    hmcGate: input.hmcGate,
   });
   trimRing();
   persist();

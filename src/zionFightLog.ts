@@ -30,6 +30,12 @@ const CASCADE_SKIP = [
   'Zion: Post-win veto — patience is a strategy too (Psalm 27:14 vibes).',
 ];
 
+const GATE_BLOCK = [
+  'Zion: Gatekeeper waved them off — volume/safety first, drama never.',
+  'Zion: HMC Gate said no. Dad, the door stayed shut for a reason.',
+  'Zion: Gatekeeper block — collapsed tape or crowded low-MC, not our circus.',
+];
+
 const CLOSE_WIN = [
   'Zion: Green close — tell the bots I said well played (quietly, so they don\'t get cocky).',
   'Zion: Winner winner — compound the wisdom, not just the SOL.',
@@ -83,24 +89,35 @@ export function maybeZionFightLogComment(input: {
   event: FightEvent;
   winnerId?: string | null;
   win?: boolean;
+  /** Gatekeeper plain-language summary when present */
+  hmcGateSummary?: string | null;
 }): void {
   if (!shouldComment()) return;
   const mint = String(input.mint || '').trim();
   if (!mint) return;
 
   let line: string;
-  switch (input.event) {
-    case 'cascade_open':
-      line = pick(CASCADE_OPEN);
-      break;
-    case 'cascade_skip':
-      line = pick(CASCADE_SKIP);
-      break;
-    case 'close':
-      line = pick(input.win ? CLOSE_WIN : CLOSE_LOSS);
-      break;
-    default:
-      line = pick(OPEN_LINES);
+  const gate = String(input.hmcGateSummary || '').trim();
+  if (gate && /Gatekeeper BLOCK/i.test(gate)) {
+    line = `${pick(GATE_BLOCK)} (${gate.slice(0, 80)})`;
+  } else {
+    switch (input.event) {
+      case 'cascade_open':
+        line = pick(CASCADE_OPEN);
+        break;
+      case 'cascade_skip':
+        line = gate
+          ? `${pick(CASCADE_SKIP)} · ${gate.slice(0, 72)}`
+          : pick(CASCADE_SKIP);
+        break;
+      case 'close':
+        line = pick(input.win ? CLOSE_WIN : CLOSE_LOSS);
+        break;
+      default:
+        line = gate
+          ? `${pick(OPEN_LINES)} · ${gate.slice(0, 72)}`
+          : pick(OPEN_LINES);
+    }
   }
 
   appendThought(mint, line);

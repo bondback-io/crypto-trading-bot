@@ -232,6 +232,19 @@ export interface PersistedBotSettings {
       }
     >;
   };
+  /** HMC Phase 1 Gatekeeper (allow/block before lane fight) */
+  hierarchicalCoordination?: {
+    enabled?: boolean;
+    gatekeeperEnabled?: boolean;
+    gatekeeperStrictness?: 'low' | 'medium' | 'high';
+    softBlocksEnforced?: boolean;
+    minVolumeM5Usd?: number;
+    minVolumeH1Usd?: number;
+    minLiquidityUsd?: number;
+    debugLogging?: 'off' | 'normal' | 'verbose';
+    classifierEnabled?: boolean;
+    unknownSetupsCanTrade?: boolean;
+  };
   /** Fast Profiles Recovery Stages 0–4 (no secrets) */
   fastProfileRecovery?: {
     enabled?: boolean;
