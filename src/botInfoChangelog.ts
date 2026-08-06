@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.195',
+    title: 'Zion lifestyle — weather, food, fitness, nutrition',
+    sections: ['zion', 'overview'],
+    items: [
+      'Locate me on Zion chat (main + widget): browser geolocation cached ~25 min in sessionStorage; chat sends lat/lon + timeZone (Sunshine Coast fallback if denied).',
+      'Free-first lifestyle: Open-Meteo weather, OpenStreetMap Overpass places (restaurants/cafes/pizza/takeaway/cinema/gym/futsal), built-in training sessions + Mifflin–St Jeor macros/meal templates — no paid APIs required.',
+      'Cinema: nearby theatres listed; live showtimes only acknowledged when ZION_CINEMA_SHOWTIMES_API_KEY is set (never invents times or IG/TikTok virality).',
+    ],
+  },
+  {
     version: '1.2.194',
     title: 'Zion chat emoji feedback + voice input',
     sections: ['zion', 'overview'],

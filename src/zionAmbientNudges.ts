@@ -329,6 +329,34 @@ async function runWeatherNudge(): Promise<void> {
   if (!ambientCfg().weatherNudgesEnabled) return;
   if (Date.now() - runtime.lastWeatherAt < WEATHER_MS - 60_000) return;
   try {
+    // Soft enhancement: prefer ephemeral device location when Dad has shared it
+    let deviceLine: string | null = null;
+    try {
+      const {
+        getLastZionLocation,
+        getLastZionTimeZone,
+        getWeather,
+      } = require('./zionLifestyle') as typeof import('./zionLifestyle');
+      const last = getLastZionLocation();
+      if (
+        last &&
+        last.source === 'device' &&
+        Number.isFinite(last.lat) &&
+        Date.now() - (last.at || 0) < 3 * 60 * 60 * 1000
+      ) {
+        const w = await getWeather(
+          last.lat,
+          last.lon,
+          getLastZionTimeZone()
+        );
+        if (w.ok) {
+          deviceLine = `Your area (device): ${localTimeIn(getLastZionTimeZone() || 'Australia/Brisbane')} · ${w.line}`;
+        }
+      }
+    } catch {
+      /* optional */
+    }
+
     const idx = runtime.weatherLocaleIdx % WEATHER_LOCALES.length;
     runtime.weatherLocaleIdx = idx + 1;
     // Rotate 2 locales per nudge for compact family coverage
@@ -341,6 +369,7 @@ async function runWeatherNudge(): Promise<void> {
     const text = [
       'Family local weather / time',
       '',
+      ...(deviceLine ? [deviceLine, ''] : []),
       lineA,
       lineB,
       '',

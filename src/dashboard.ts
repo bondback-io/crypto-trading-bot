@@ -5810,6 +5810,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
+    .zion-chat-loc-row {
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+      margin-top: 0.5rem; font-size: 0.72rem; color: #94a3b8;
+    }
+    .zion-locate-btn {
+      flex: 0 0 auto; min-height: 1.7rem; padding: 0.2rem 0.55rem;
+      border: 1px solid #475569; border-radius: 0.5rem;
+      background: #111827; color: #cbd5e1; font-size: 0.72rem; font-weight: 600;
+      cursor: pointer;
+    }
+    .zion-locate-btn:hover, .zion-locate-btn:focus-visible {
+      border-color: #64748b; color: #e2e8f0; outline: none;
+    }
+    .zion-loc-status { color: #64748b; }
+    .zion-loc-status.is-ok { color: #34d399; }
+    .zion-loc-status.is-denied { color: #fbbf24; }
+    .zion-loc-status.is-fallback { color: #94a3b8; }
     /* 16px prevents iOS Safari auto-zoom on focus */
     .zion-chat-composer input {
       min-width: 0;
@@ -8115,7 +8132,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-nudge-trending" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Weather / local time <span class="tip" tabindex="0" data-tip="Every ~6h family locales: Sunshine Coast, Auckland area towns, Sölvesborg (Open-Meteo)."></span></span>
+          <span>Weather / local time <span class="tip" tabindex="0" data-tip="Every ~6h family locales: Sunshine Coast, Auckland area towns, Sölvesborg (Open-Meteo). If you used Locate me, device weather is preferred when fresh."></span></span>
           <label class="switch"><input type="checkbox" id="zion-nudge-weather" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="mint text-xs mb-2 flex flex-wrap gap-2 items-center" id="zion-learning-status-row">
@@ -8126,6 +8143,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="text-xs mb-2" id="zion-agent-supervision-detail" style="color:#94a3b8;line-height:1.45"></div>
         <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
+        <div class="zion-chat-loc-row">
+          <button type="button" class="zion-locate-btn" id="zion-agent-locate" onclick="locateZionDevice('main')" title="Share device location with Zion (session cache ~25 min)">Locate me</button>
+          <span class="zion-loc-status" id="zion-agent-loc-status">Location: not set</span>
+        </div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
           <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('main')">
@@ -8250,6 +8271,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div id="zion-agent-widget-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-widget-ir-chip" class="zion-improvement-chip" role="status"></div>
+        <div class="zion-chat-loc-row">
+          <button type="button" class="zion-locate-btn" id="zion-agent-widget-locate" onclick="locateZionDevice('widget')" title="Share device location with Zion (session cache ~25 min)">Locate me</button>
+          <span class="zion-loc-status" id="zion-agent-widget-loc-status">Location: not set</span>
+        </div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
           <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('widget')">
@@ -27995,12 +28020,117 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionImprovementCache = [];
     let _zionImprovementHistoryCache = [];
     const ZION_CHAT_CACHE_KEY = 'zionAgentChatMessages_v1';
+    const ZION_LOC_CACHE_KEY = 'zionDeviceLocation_v1';
+    const ZION_LOC_TTL_MS = 25 * 60 * 1000;
+    const ZION_FALLBACK_COORDS = { lat: -26.65, lon: 153.0667 };
     /** In-memory source of truth so tab + widget always paint the same thread */
     let _zionChatMessagesLive = [];
     let _zionChatBusy = false;
     let _zionChatNeedsRefresh = false;
     let _zionTypewriterGen = 0;
     let _zionTypewriterTimer = null;
+    function readZionLocationCache() {
+      try {
+        const raw = JSON.parse(sessionStorage.getItem(ZION_LOC_CACHE_KEY) || 'null');
+        if (!raw || typeof raw.lat !== 'number' || typeof raw.lon !== 'number') return null;
+        const at = Number(raw.at) || 0;
+        if (Date.now() - at > ZION_LOC_TTL_MS) return null;
+        return raw;
+      } catch (_) {
+        return null;
+      }
+    }
+    function writeZionLocationCache(loc) {
+      try {
+        sessionStorage.setItem(ZION_LOC_CACHE_KEY, JSON.stringify(loc));
+      } catch (_) {}
+    }
+    function paintZionLocationStatus() {
+      const loc = readZionLocationCache();
+      let label = 'Location: not set';
+      let cls = 'zion-loc-status';
+      if (loc) {
+        if (loc.source === 'device') {
+          label = 'Location: located';
+          cls += ' is-ok';
+        } else if (loc.source === 'denied') {
+          label = 'Location: denied · Sunshine Coast fallback';
+          cls += ' is-denied';
+        } else {
+          label = 'Location: Sunshine Coast fallback';
+          cls += ' is-fallback';
+        }
+      }
+      ['zion-agent-loc-status', 'zion-agent-widget-loc-status'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.className = cls;
+        el.textContent = label;
+      });
+    }
+    function getZionChatLocationPayload() {
+      const cached = readZionLocationCache();
+      if (cached) {
+        return {
+          lat: cached.lat,
+          lon: cached.lon,
+          accuracy: cached.accuracy,
+          at: cached.at,
+          source: cached.source || 'device',
+        };
+      }
+      return {
+        lat: ZION_FALLBACK_COORDS.lat,
+        lon: ZION_FALLBACK_COORDS.lon,
+        at: Date.now(),
+        source: 'fallback',
+      };
+    }
+    function locateZionDevice(_source) {
+      paintZionLocationStatus();
+      if (!navigator.geolocation) {
+        const fallback = {
+          lat: ZION_FALLBACK_COORDS.lat,
+          lon: ZION_FALLBACK_COORDS.lon,
+          at: Date.now(),
+          source: 'fallback',
+        };
+        writeZionLocationCache(fallback);
+        paintZionLocationStatus();
+        return;
+      }
+      ['zion-agent-loc-status', 'zion-agent-widget-loc-status'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) {
+          el.className = 'zion-loc-status';
+          el.textContent = 'Location: locating…';
+        }
+      });
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          const loc = {
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            at: Date.now(),
+            source: 'device',
+          };
+          writeZionLocationCache(loc);
+          paintZionLocationStatus();
+        },
+        function () {
+          const denied = {
+            lat: ZION_FALLBACK_COORDS.lat,
+            lon: ZION_FALLBACK_COORDS.lon,
+            at: Date.now(),
+            source: 'denied',
+          };
+          writeZionLocationCache(denied);
+          paintZionLocationStatus();
+        },
+        { enableHighAccuracy: false, timeout: 12000, maximumAge: ZION_LOC_TTL_MS }
+      );
+    }
     function cacheZionChatMessages(messages) {
       const list = Array.isArray(messages) ? messages.slice(-40) : [];
       _zionChatMessagesLive = list;
@@ -28238,6 +28368,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       document.querySelectorAll('.zion-mic-btn').forEach(function (btn) {
         if (btn.classList.contains('is-unsupported')) return;
+        btn.disabled = !!busy;
+      });
+      document.querySelectorAll('.zion-locate-btn').forEach(function (btn) {
         btn.disabled = !!busy;
       });
       if (busy) {
@@ -29023,7 +29156,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const out = await fetchJSON('/api/zion/agent/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg }),
+          body: JSON.stringify({
+            message: msg,
+            location: getZionChatLocationPayload(),
+            timeZone: (function () {
+              try {
+                return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+              } catch (_) {
+                return '';
+              }
+            })(),
+          }),
           timeoutMs: 90000,
         });
         const waitMore = Math.max(0, minTypingMs - (Date.now() - started));
@@ -29072,12 +29215,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadZionAgent = loadZionAgent;
     window.saveZionAgentConfig = saveZionAgentConfig;
     window.sendZionAgentChat = sendZionAgentChat;
+    window.locateZionDevice = locateZionDevice;
     window.decideZionChangeRequest = decideZionChangeRequest;
     window.toggleZionAgentWidget = toggleZionAgentWidget;
     window.openZionImprovementPopup = openZionImprovementPopup;
     window.showZionImprovementHistory = showZionImprovementHistory;
     window.dismissZionImprovementPopup = dismissZionImprovementPopup;
 
+    try {
+      paintZionLocationStatus();
+    } catch (_) {}
     try {
       ensureZionStack();
       window.addEventListener('resize', function () {

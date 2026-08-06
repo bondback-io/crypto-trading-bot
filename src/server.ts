@@ -4126,8 +4126,49 @@ export function createServer(): express.Application {
     try {
       const { zionAgentChat } =
         require('./zionAgent') as typeof import('./zionAgent');
-      const text = String((req.body ?? {}).message || '');
-      const out = await zionAgentChat(text);
+      const body = (req.body ?? {}) as {
+        message?: string;
+        timeZone?: string;
+        location?: {
+          lat?: number;
+          lon?: number;
+          accuracy?: number;
+          at?: number;
+          source?: string;
+        };
+      };
+      const text = String(body.message || '');
+      const locRaw = body.location;
+      const lat = locRaw != null ? Number(locRaw.lat) : NaN;
+      const lon = locRaw != null ? Number(locRaw.lon) : NaN;
+      let location: {
+        lat: number;
+        lon: number;
+        accuracy?: number;
+        at: number;
+        source: 'device' | 'fallback' | 'denied';
+      } | null = null;
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        const src =
+          locRaw?.source === 'fallback' || locRaw?.source === 'denied'
+            ? locRaw.source
+            : 'device';
+        location = {
+          lat,
+          lon,
+          accuracy:
+            locRaw?.accuracy != null && Number.isFinite(Number(locRaw.accuracy))
+              ? Number(locRaw.accuracy)
+              : undefined,
+          at:
+            locRaw?.at != null && Number.isFinite(Number(locRaw.at))
+              ? Number(locRaw.at)
+              : Date.now(),
+          source: src,
+        };
+      }
+      const timeZone = String(body.timeZone || '').trim().slice(0, 80) || undefined;
+      const out = await zionAgentChat(text, { location, timeZone });
       res.json({ ok: true, ...out });
     } catch (err) {
       res.status(500).json({

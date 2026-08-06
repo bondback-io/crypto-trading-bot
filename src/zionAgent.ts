@@ -1395,6 +1395,12 @@ Response shape:
 If a profile is off or data is missing, say so simply and stay constructive about next steps.
 Never paste the context pack, raw logs, or huge config blocks unless a raw/snapshot dump is asked.
 
+Lifestyle (when asked):
+- You can help with local weather, food nearby, training sessions, nutrition estimates, and cinema places.
+- Prefer tool / lifestyle fact packs when present — do not invent live showtimes, IG/TikTok virality, or precise GPS claims.
+- If location is a Sunshine Coast fallback, say so briefly when giving local recommendations.
+- Fitness/nutrition is general wellness only (not clinical); be practical for men 30+ fat loss when relevant.
+
 Boundaries (hard):
 - Never claim you changed micro-bot TP, SL, timers, ML mode, or self-learning / delta learning.
 - Never invent live coin prices — use the domain snapshot / context pack when quoting BTC/SOL/majors.
@@ -1537,7 +1543,21 @@ export function applyZionChangePayload(
   }
 }
 
-export async function zionAgentChat(userText: string): Promise<{
+export interface ZionAgentChatLocation {
+  lat: number;
+  lon: number;
+  accuracy?: number;
+  at?: number;
+  source?: 'device' | 'fallback' | 'denied';
+}
+
+export async function zionAgentChat(
+  userText: string,
+  opts?: {
+    location?: ZionAgentChatLocation | null;
+    timeZone?: string;
+  }
+): Promise<{
   reply: string;
   changeRequest: ZionChangeRequest | null;
   mode: string;
@@ -1573,7 +1593,31 @@ export async function zionAgentChat(userText: string): Promise<{
   const wantsRaw = wantsRawSnapshot(text);
   const ctx = getCachedContextPack(!wantsRaw);
 
-  // Whitelist transfers + wallet balances (before LLM; never via Improvement Requests)
+  // Ephemeral device location (not family memory) — remember before handlers
+  let lifestyleFacts = '';
+  const locIn = opts?.location;
+  try {
+    const { rememberZionLocation } =
+      require('./zionLifestyle') as typeof import('./zionLifestyle');
+    if (locIn && Number.isFinite(locIn.lat) && Number.isFinite(locIn.lon)) {
+      rememberZionLocation(
+        {
+          lat: locIn.lat,
+          lon: locIn.lon,
+          accuracy: locIn.accuracy,
+          at: locIn.at || Date.now(),
+          source: locIn.source || 'device',
+        },
+        opts?.timeZone
+      );
+    } else if (opts?.timeZone) {
+      rememberZionLocation(null, opts.timeZone);
+    }
+  } catch {
+    /* optional */
+  }
+
+  // Whitelist transfers + wallet balances (before LLM / lifestyle; never via Improvement Requests)
   try {
     const { processZionWalletChat } =
       require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
@@ -1595,6 +1639,57 @@ export async function zionAgentChat(userText: string): Promise<{
   } catch (err) {
     console.warn(
       '[zion-agent] wallet transfer handler failed',
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // Lifestyle: weather / places / cinema / fitness-nutrition (like wallet short-circuit)
+  try {
+    const { processZionLifestyleChat } =
+      require('./zionLifestyle') as typeof import('./zionLifestyle');
+    const lifeOut = await processZionLifestyleChat(text, {
+      location:
+        locIn && Number.isFinite(locIn.lat) && Number.isFinite(locIn.lon)
+          ? {
+              lat: locIn.lat,
+              lon: locIn.lon,
+              accuracy: locIn.accuracy,
+              at: locIn.at || Date.now(),
+              source: locIn.source || 'device',
+            }
+          : null,
+      timeZone: opts?.timeZone,
+    });
+    if (lifeOut.handled && lifeOut.reply) {
+      let reply = softenDadAddressing(lifeOut.reply);
+      if (!/~\s*Zion Valton\s*$/i.test(reply.trim())) {
+        reply = `${reply.trim()}\n\n${providerAttribution('local', 'local')}`;
+      }
+      appendZionChat('assistant', reply);
+      try {
+        const { touchZionWorkingMemory } =
+          require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+        touchZionWorkingMemory({
+          userText: text,
+          assistantText: reply,
+          isSocial: false,
+          decisionNote: 'lifestyle',
+        });
+      } catch {
+        /* optional */
+      }
+      return {
+        reply,
+        changeRequest: null,
+        mode: getZionAgentStatus().label,
+        provider: 'local',
+        model: 'zion-lifestyle',
+      };
+    }
+    if (lifeOut.facts) lifestyleFacts = lifeOut.facts;
+  } catch (err) {
+    console.warn(
+      '[zion-agent] lifestyle handler failed',
       err instanceof Error ? err.message : err
     );
   }
@@ -1648,6 +1743,9 @@ export async function zionAgentChat(userText: string): Promise<{
     (isFirst
       ? '\nConversation cue: first exchange — brief friendly hello; keep short and upbeat. Dad optional once max.'
       : '\nConversation cue: stay short, fun, skimmable. Use Dad sparingly and naturally — avoid ", Dad" tag endings. Use prior turns + working memory for continuity.') +
+    (lifestyleFacts
+      ? `\n\nLifestyle facts (prefer these; do not invent showtimes/virality beyond them):\n${lifestyleFacts}`
+      : '') +
     `\n\nContext pack (internal — do not paste unless raw/snapshot asked):\n${ctx}`;
 
   const history = buildZionLlmHistory(storeUserText);
