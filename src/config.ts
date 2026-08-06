@@ -1633,6 +1633,11 @@ export interface ZionConfig {
    * into High Win-Rate. Gold/Green/default stay manual. Default OFF.
    */
   autoSendPlatinumToHwr?: boolean;
+  /**
+   * When true, Gold offers (score ≥85, ≥8 KOL, 1h vol ≥$500k; not Platinum)
+   * auto-execute into Smart Money Mirror. Default OFF.
+   */
+  autoSendGoldToSmartMoney?: boolean;
   defaults: {
     sizeMode: 'sol' | 'usd';
     solAmount: number;
@@ -2787,6 +2792,7 @@ export const config: BotConfig = {
     useTrackedWalletsAsBoost: true,
     autoOfferFromScanner: true,
     autoSendPlatinumToHwr: false,
+    autoSendGoldToSmartMoney: false,
     defaults: {
       sizeMode: 'sol',
       solAmount: 0.25,

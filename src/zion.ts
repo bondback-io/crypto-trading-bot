@@ -51,6 +51,7 @@ export const ZION_GOLD_MIN_VOL_H1_USD = 500_000;
 
 /** Prevent double auto-buys while execute is in flight */
 const platinumAutoInFlight = new Set<string>();
+const goldAutoInFlight = new Set<string>();
 
 export interface ZionOffer {
   id: string;
@@ -538,6 +539,7 @@ export function refreshPendingOfferLive(
     o.updatedAt = Date.now();
     persist();
     maybeAutoSendPlatinumToHwr(o);
+    maybeAutoSendGoldToSmartMoney(o);
   }
   return o;
 }
@@ -682,6 +684,7 @@ export function maybeCreateOffer(
   }
 
   maybeAutoSendPlatinumToHwr(offer);
+  maybeAutoSendGoldToSmartMoney(offer);
   return offer;
 }
 
@@ -732,6 +735,8 @@ export interface ApproveOfferOverrides {
   trailingActivationProfit?: number;
   /** Auto Platinum path — stamp High Win-Rate (not Zion exit presets) */
   autoPlatinumHwr?: boolean;
+  /** Auto Gold path — stamp Smart Money Mirror (not Zion exit presets) */
+  autoGoldSmartMoney?: boolean;
 }
 
 /**
@@ -772,6 +777,44 @@ export function maybeAutoSendPlatinumToHwr(offer: ZionOffer): void {
     });
 }
 
+/**
+ * Fire-and-forget: if toggle ON and offer is Gold (not Platinum) + pending, execute into SMM.
+ */
+export function maybeAutoSendGoldToSmartMoney(offer: ZionOffer): void {
+  if (!config.zion?.autoSendGoldToSmartMoney) return;
+  if (!offer || offer.status !== 'pending') return;
+  if (resolveZionOfferVisualTier(offer) !== 'gold') return;
+  if (goldAutoInFlight.has(offer.id)) return;
+  goldAutoInFlight.add(offer.id);
+  logger.info('Zion', 'Auto-sending Gold offer to Smart Money Mirror', {
+    offerId: offer.id,
+    mint: offer.mint.slice(0, 12),
+    symbol: offer.symbol,
+    score: offer.score,
+    kolCount: offer.kolCount,
+  });
+  void executeApprovedOffer(offer.id, { autoGoldSmartMoney: true })
+    .then((r) => {
+      if (!r.ok) {
+        logger.warn('Zion', 'Gold → SMM auto-exec failed', {
+          offerId: offer.id,
+          error: r.error,
+        });
+      } else {
+        console.log(
+          `[zion] GOLD → SMM opened ${offer.symbol} (${offer.mint.slice(0, 8)}…) ` +
+            `score=${offer.score} kol=${offer.kolCount}`
+        );
+      }
+    })
+    .catch((err) => {
+      logger.warn('Zion', 'Gold → SMM auto-exec error', errorToMeta(err));
+    })
+    .finally(() => {
+      goldAutoInFlight.delete(offer.id);
+    });
+}
+
 export async function executeApprovedOffer(
   id: string,
   overrides: ApproveOfferOverrides = {}
@@ -794,10 +837,12 @@ export async function executeApprovedOffer(
   }
 
   const autoPlatinumHwr = overrides.autoPlatinumHwr === true;
+  const autoGoldSmartMoney = overrides.autoGoldSmartMoney === true;
+  const autoProfileStamp = autoPlatinumHwr || autoGoldSmartMoney;
   const d = config.zion.defaults;
   const useExit =
-    autoPlatinumHwr
-      ? false // HWR catalog exit rules applied below
+    autoProfileStamp
+      ? false // profile catalog exit rules applied below
       : overrides.useExitPresets != null
         ? Boolean(overrides.useExitPresets)
         : d.useExitPresets !== false;
@@ -829,7 +874,9 @@ export async function executeApprovedOffer(
     solAmount,
     name: autoPlatinumHwr
       ? `Zion Platinum · ${offer.symbol}`
-      : `Zion · ${offer.symbol}`,
+      : autoGoldSmartMoney
+        ? `Zion Gold · ${offer.symbol}`
+        : `Zion · ${offer.symbol}`,
     entrySource: 'zion',
     sourceNames: offer.kolWallets.map((w) => w.name || w.address.slice(0, 8)),
     sourceWallets: offer.kolWallets.map((w) => w.address),
@@ -924,6 +971,81 @@ export async function executeApprovedOffer(
     } catch {
       /* optional lane log */
     }
+  } else if (autoGoldSmartMoney) {
+    const {
+      resolveTradeProfileDefinition,
+      materializeExitRules,
+      applyProfileExitRulesToBuyOpts,
+      applyTradeProfileSizing,
+      recordSyntheticProfileDecision,
+      serializeTradeProfilesForPersist,
+    } = require('./tradeProfiles') as typeof import('./tradeProfiles');
+
+    const tpState = serializeTradeProfilesForPersist();
+    if (tpState.profiles?.smart_money_mirror === false) {
+      offer.status = 'pending';
+      offer.error =
+        'Smart Money Mirror profile is OFF — Gold auto-send skipped';
+      offer.updatedAt = Date.now();
+      persist();
+      console.warn(
+        `[zion] Gold auto-send blocked — Smart Money Mirror is OFF (${offer.symbol})`
+      );
+      return { ok: false, offer, error: offer.error };
+    }
+
+    const def = resolveTradeProfileDefinition('smart_money_mirror');
+    const exitRules = materializeExitRules({ ...def.exitRules });
+    const sized = applyTradeProfileSizing(solAmount, exitRules);
+    solAmount = clampToMaxAllowedTradeSol(sized.sizeSol);
+    offer.solAmount = solAmount;
+    buyOpts.solAmount = solAmount;
+    if (sized.sizeNote) buyOpts.sizeReason = sized.sizeNote;
+
+    buyOpts.tradeProfileId = def.id;
+    buyOpts.tradeProfileName = def.name;
+    buyOpts.tradeProfileIcon = def.icon;
+    buyOpts.tradeProfileColor = def.color;
+    buyOpts.tradeProfileReason =
+      `Zion gold → Smart Money Mirror · auto` +
+      (offer.reasons[0] ? ` · ${offer.reasons.slice(0, 2).join(' · ')}` : '');
+    applyProfileExitRulesToBuyOpts(buyOpts, exitRules);
+
+    recordSyntheticProfileDecision({
+      symbol: offer.symbol,
+      profileId: 'smart_money_mirror',
+      profileName: def.name,
+      icon: def.icon,
+      score:
+        offer.score != null && Number.isFinite(offer.score)
+          ? Math.round(offer.score)
+          : 85,
+      reason: 'Zion gold → Smart Money Mirror (auto)',
+    });
+
+    try {
+      const { recordLaneFightOpen } =
+        require('./laneOutcomes') as typeof import('./laneOutcomes');
+      recordLaneFightOpen({
+        mint: offer.mint,
+        symbol: offer.symbol,
+        winnerId: 'smart_money_mirror',
+        lanes: [
+          {
+            id: 'smart_money_mirror',
+            name: 'Smart Money Mirror',
+            passed: true,
+            score:
+              offer.score != null && Number.isFinite(offer.score)
+                ? Math.round(offer.score)
+                : 85,
+            reason: 'Zion gold → Smart Money Mirror (auto)',
+          },
+        ],
+      });
+    } catch {
+      /* optional lane log */
+    }
   } else if (useExit) {
     buyOpts.profileTakeProfitPct =
       overrides.takeProfitPct != null
@@ -949,7 +1071,7 @@ export async function executeApprovedOffer(
       () => executeBuy(offer.mint, offer.symbol, buyOpts),
       'zion'
     );
-    if (autoPlatinumHwr) {
+    if (autoProfileStamp) {
       try {
         const { recordLaneFightCascadeResult } =
           require('./laneOutcomes') as typeof import('./laneOutcomes');
@@ -999,7 +1121,7 @@ export async function executeApprovedOffer(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (autoPlatinumHwr) {
+    if (autoProfileStamp) {
       try {
         const { recordLaneFightCascadeResult } =
           require('./laneOutcomes') as typeof import('./laneOutcomes');

@@ -3025,6 +3025,9 @@ export function createServer(): express.Application {
       if (typeof body.autoSendPlatinumToHwr === 'boolean') {
         z.autoSendPlatinumToHwr = body.autoSendPlatinumToHwr;
       }
+      if (typeof body.autoSendGoldToSmartMoney === 'boolean') {
+        z.autoSendGoldToSmartMoney = body.autoSendGoldToSmartMoney;
+      }
       if (typeof body.notifyEmailOnOffer === 'boolean') {
         z.notifyEmailOnOffer = body.notifyEmailOnOffer;
       }

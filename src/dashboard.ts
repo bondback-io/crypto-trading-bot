@@ -8228,7 +8228,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
 
       <div class="card zion-hero-card">
-        <div class="section-title">Zion <span class="tip" tabindex="0" data-tip="Personal KOL micro-bot. Isolated from copy trading and Market/Pump scanners. Offers are manual by default; optional Auto-send Platinum to HWR can auto-execute Platinum-tier offers into High Win-Rate."></span></div>
+        <div class="section-title">Zion <span class="tip" tabindex="0" data-tip="Personal KOL micro-bot. Isolated from copy trading and Market/Pump scanners. Offers are manual by default; optional Auto-send Platinum to HWR and Auto-send Gold to Smart Money can auto-execute those tiers into their profiles."></span></div>
         <p class="text-sm text-slate-400 mb-3" style="line-height:1.45">
           Primary signal: <strong class="zion-accent">KOL Token Scanner</strong> (Kolscan + GMGN universe, not your watch list).
           Tracked smart wallets are a <strong class="zion-accent">secondary boost</strong> only. Enabling Zion does not change Copy, Market Scanner, or strategy toggles.
@@ -8246,8 +8246,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-auto-offer" checked onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Auto-send Platinum to HWR <span class="tip" tabindex="0" data-tip="Platinum = score ≥85, ≥10 KOL wallets, 1h vol ≥$750k. When ON, those offers auto-open on High Win-Rate (HWR manages exits). Gold / Green / default stay manual Place Trade."></span></span>
+          <span>Auto-send Platinum to HWR <span class="tip" tabindex="0" data-tip="Platinum = score ≥85, ≥10 KOL wallets, 1h vol ≥$750k. When ON, those offers auto-open on High Win-Rate (HWR manages exits). Gold / Green / default stay manual Place Trade unless Gold auto-send is also ON."></span></span>
           <label class="switch"><input type="checkbox" id="zion-auto-platinum-hwr" onchange="saveZionConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Auto-send Gold to Smart Money <span class="tip" tabindex="0" data-tip="Gold = score ≥85, ≥8 KOL wallets, 1h vol ≥$500k (below Platinum). When ON, those offers auto-open on Smart Money Mirror (SMM manages exits). OFF → manual Place Trade."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-auto-gold-smm" onchange="saveZionConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Tracked wallets as boost <span class="tip" tabindex="0" data-tip="Score boost only. Does NOT count toward Min KOL wallets — you still need that many real KOL wallets before an offer is created."></span></span>
@@ -26259,6 +26263,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       setChk('zion-scanner-enabled', cfg.scanner?.enabled !== false);
       setChk('zion-auto-offer', cfg.autoOfferFromScanner !== false);
       setChk('zion-auto-platinum-hwr', cfg.autoSendPlatinumToHwr === true);
+      setChk('zion-auto-gold-smm', cfg.autoSendGoldToSmartMoney === true);
       setChk('zion-tracked-boost', cfg.useTrackedWalletsAsBoost !== false);
       setChk('zion-email-offer', cfg.notifyEmailOnOffer !== false);
       setChk('zion-email-placed', cfg.notifyEmailOnPlaced !== false);
@@ -26752,6 +26757,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const scannerEl = document.getElementById('zion-scanner-enabled');
         const autoEl = document.getElementById('zion-auto-offer');
         const platinumEl = document.getElementById('zion-auto-platinum-hwr');
+        const goldEl = document.getElementById('zion-auto-gold-smm');
         const boostEl = document.getElementById('zion-tracked-boost');
         const emailOfferEl = document.getElementById('zion-email-offer');
         const emailPlacedEl = document.getElementById('zion-email-placed');
@@ -26765,6 +26771,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           },
           autoOfferFromScanner: autoEl ? !!autoEl.checked : true,
           autoSendPlatinumToHwr: platinumEl ? !!platinumEl.checked : false,
+          autoSendGoldToSmartMoney: goldEl ? !!goldEl.checked : false,
           useTrackedWalletsAsBoost: boostEl ? !!boostEl.checked : true,
           notifyEmailOnOffer: emailOfferEl ? !!emailOfferEl.checked : true,
           notifyEmailOnPlaced: emailPlacedEl ? !!emailPlacedEl.checked : true,

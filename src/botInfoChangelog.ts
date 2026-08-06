@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.206',
+    title: 'Zion Gold → Smart Money Mirror auto-send',
+    sections: ['zion', 'microbots', 'overview'],
+    items: [
+      'New Zion toggle: Auto-send Gold to Smart Money (default OFF). Gold = score ≥85, ≥8 KOL, 1h vol ≥$500k (below Platinum).',
+      'When ON, Gold offers auto-open on Smart Money Mirror with SMM sizing/exits, synthetic decision, and lane-fight open; OFF stays manual Place Trade.',
+      'Platinum → HWR remains exclusive (Platinum never routes to Gold/SMM). Both auto-send toggles work independently.',
+    ],
+  },
+  {
     version: '1.2.205',
     title: 'HMC rebalance for Trend / Dip / Steady',
     sections: ['microbots', 'knobs', 'execution'],
