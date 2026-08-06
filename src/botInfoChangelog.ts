@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.192',
+    title: 'Lane fight skip reason under MARL',
+    sections: ['microbots', 'overview'],
+    items: [
+      'Lane Fight Log shows a white “skip: …” line under MARL (or at the end of the row) for skipped / no-buy fights — best failed lane, cascade reject, or HMC/classifier block.',
+    ],
+  },
+  {
     version: '1.2.191',
     title: 'Critical settings no longer poison GitHub backup',
     sections: ['backup', 'knobs', 'microbots', 'zion'],

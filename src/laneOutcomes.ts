@@ -49,6 +49,8 @@ export interface LaneOutcomeRecord {
   opened?: boolean;
   /** Why cascade rejected after a lane win (compact) */
   cascadeSkipReason?: string;
+  /** Why the fight was a skip (no winner) — compact plain language */
+  skipReason?: string;
   /** Filled when the stamped position closes */
   closedAt?: number;
   pnlSol?: number;
@@ -130,6 +132,41 @@ function nextId(): string {
   return `lane-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Compact plain-language why a fight did not open (no winner / cascade reject). */
+export function summarizeLaneFightSkipReason(input: {
+  winnerId: string | null;
+  lanes?: LaneOutcomeLaneSnap[] | null;
+  hmcGate?: LaneOutcomeRecord['hmcGate'];
+  hmcClassifier?: LaneOutcomeRecord['hmcClassifier'];
+  cascadeSkipReason?: string | null;
+  skipReason?: string | null;
+}): string | null {
+  const cascade = String(input.cascadeSkipReason || '').trim();
+  if (cascade) return cascade.slice(0, 280);
+  const stored = String(input.skipReason || '').trim();
+  if (stored) return stored.slice(0, 280);
+  if (input.winnerId) return null;
+
+  const gate = input.hmcGate;
+  if (gate?.decision === 'block' && gate.plainLanguage) {
+    return String(gate.plainLanguage).slice(0, 280);
+  }
+  const clf = input.hmcClassifier;
+  if (clf?.blocked && clf.plainLanguage) {
+    return String(clf.plainLanguage).slice(0, 280);
+  }
+
+  const failed = (input.lanes || []).filter(
+    (l) => !l.passed && String(l.reason || '').trim()
+  );
+  if (!failed.length) return 'No profile passed lane fight';
+  failed.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  const top = failed[0]!;
+  const name = String(top.name || top.id || 'lane').trim();
+  const why = String(top.reason || '').trim();
+  return `${name}: ${why}`.slice(0, 280);
+}
+
 /** Record a Smart Bot lane fight (open / skip — winner may later get PnL). */
 export function recordLaneFightOpen(input: {
   mint: string;
@@ -143,8 +180,19 @@ export function recordLaneFightOpen(input: {
   };
   hmcGate?: LaneOutcomeRecord['hmcGate'];
   hmcClassifier?: LaneOutcomeRecord['hmcClassifier'];
+  skipReason?: string | null;
 }): void {
   load();
+  const skipReason =
+    input.winnerId == null
+      ? summarizeLaneFightSkipReason({
+          winnerId: input.winnerId,
+          lanes: input.lanes,
+          hmcGate: input.hmcGate,
+          hmcClassifier: input.hmcClassifier,
+          skipReason: input.skipReason,
+        }) || undefined
+      : undefined;
   ring.push({
     id: nextId(),
     at: Date.now(),
@@ -155,6 +203,7 @@ export function recordLaneFightOpen(input: {
     marl: input.marl,
     hmcGate: input.hmcGate,
     hmcClassifier: input.hmcClassifier,
+    ...(skipReason ? { skipReason } : {}),
   });
   trimRing();
   persist();
@@ -232,6 +281,7 @@ export function recordLaneFightCascadeResult(input: {
     row.opened = input.opened === true;
     if (!row.opened && input.cascadeSkipReason) {
       row.cascadeSkipReason = String(input.cascadeSkipReason).slice(0, 280);
+      row.skipReason = row.cascadeSkipReason;
     }
     persist();
     return;

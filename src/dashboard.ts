@@ -15469,9 +15469,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             }).join(' · ');
             let outcome = !d.winnerId ? 'skip' : (d.opened === true ? 'opened' : (d.opened === false || d.cascadeSkipReason ? 'no buy' : 'win'));
             const outcomeColor = outcome === 'opened' ? '#34d399' : (outcome === 'no buy' ? '#fbbf24' : winColor);
-            const skipLine = d.cascadeSkipReason
-              ? '<div class="tp-decision-why" style="color:#fbbf24">no buy: ' + escHtml(String(d.cascadeSkipReason).slice(0, 160)) + '</div>'
-              : '';
             const marlThoughts = (d.marl && Array.isArray(d.marl.thoughts) ? d.marl.thoughts : []).filter(Boolean);
             const marlLine = marlThoughts.length
               ? '<div class="tp-decision-why" style="color:#5eead4" title="' + escHtml(marlThoughts.join(' · ')) + '">' +
@@ -15507,6 +15504,36 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '">' +
                   '<span style="font-weight:700">Setup</span> · ' +
                   escHtml(String(clf.plainLanguage).slice(0, 180)) +
+                '</div>'
+              : '';
+            let skipText = '';
+            if (outcome === 'skip' || outcome === 'no buy') {
+              if (d.cascadeSkipReason) {
+                skipText = String(d.cascadeSkipReason);
+              } else if (d.skipReason) {
+                skipText = String(d.skipReason);
+              } else if (gate && gate.decision === 'block' && gate.plainLanguage) {
+                skipText = String(gate.plainLanguage);
+              } else if (clf && clf.blocked && clf.plainLanguage) {
+                skipText = String(clf.plainLanguage);
+              } else {
+                const failed = (d.lanes || []).filter(function (l) {
+                  return !l.passed && String(l.reason || '').trim();
+                });
+                if (failed.length) {
+                  failed.sort(function (a, b) {
+                    return Number(b.score || 0) - Number(a.score || 0);
+                  });
+                  const top = failed[0];
+                  skipText = (top.name || top.id || 'lane') + ': ' + top.reason;
+                } else if (outcome === 'skip') {
+                  skipText = 'No profile passed lane fight';
+                }
+              }
+            }
+            const skipLine = skipText
+              ? '<div class="tp-decision-why" style="color:#ffffff">skip: ' +
+                escHtml(String(skipText).slice(0, 180)) +
                 '</div>'
               : '';
             const tokenMeta =
