@@ -43,13 +43,51 @@ export interface LogQuery {
 
 const MAX_RING = 200;
 const MAX_BODY = 400;
+/** Rotate before OneDrive / disk I/O on a multi‑hundred‑MB log can stall the bot. */
+const MAX_LOG_BYTES = 32 * 1024 * 1024;
 const LOG_DIR = path.join(process.cwd(), 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'app.log');
+const LOG_FILE_PREV = path.join(LOG_DIR, 'app.log.1');
 
 const ring: LogEntry[] = [];
 let nextId = 1;
 let writeChain: Promise<void> = Promise.resolve();
 let dirReady = false;
+let rotateChecked = false;
+
+function rotateLogIfNeeded(): void {
+  if (rotateChecked) return;
+  rotateChecked = true;
+  try {
+    if (!fs.existsSync(LOG_FILE)) return;
+    const size = fs.statSync(LOG_FILE).size;
+    if (size < MAX_LOG_BYTES) return;
+    try {
+      if (fs.existsSync(LOG_FILE_PREV)) fs.unlinkSync(LOG_FILE_PREV);
+    } catch {
+      /* ignore */
+    }
+    fs.renameSync(LOG_FILE, LOG_FILE_PREV);
+    try {
+      console.warn(
+        `[logger] Rotated app.log (${Math.round(size / (1024 * 1024))}MB) → app.log.1`
+      );
+    } catch {
+      /* ignore */
+    }
+  } catch (err) {
+    try {
+      // Last resort: truncate in place if rename fails (OneDrive lock)
+      fs.writeFileSync(LOG_FILE, '');
+      console.warn(
+        '[logger] Truncated oversized app.log:',
+        err instanceof Error ? err.message : err
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 function ensureLogDir(): void {
   if (dirReady) return;
@@ -58,6 +96,7 @@ function ensureLogDir(): void {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
     dirReady = true;
+    rotateLogIfNeeded();
   } catch {
     // ignore — console still works
   }

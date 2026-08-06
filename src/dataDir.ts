@@ -96,10 +96,22 @@ export function isCloudHost(): boolean {
   return isRunningOnRender() || isRunningOnFly();
 }
 
+/**
+ * Brief thread sleep for OneDrive/AV lock retries.
+ * Prefer Atomics.wait (no CPU spin). Cap tightly — a sync busy/sleep loop here
+ * blocks the whole Node event loop (dashboard /health freezes).
+ */
 function sleepSyncMs(ms: number): void {
-  const end = Date.now() + Math.max(0, ms);
-  while (Date.now() < end) {
-    /* busy-wait — only used for short OneDrive lock retries */
+  const wait = Math.max(0, Math.min(Math.floor(ms), 25));
+  if (wait <= 0) return;
+  try {
+    const buf = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(buf, 0, 0, wait);
+  } catch {
+    const end = Date.now() + wait;
+    while (Date.now() < end) {
+      /* last-resort spin — only a few ms */
+    }
   }
 }
 
@@ -111,10 +123,15 @@ function isBusyFsError(err: unknown): boolean {
   return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
 }
 
+/** Max rename retries + total sleep budget for sync atomic writes. */
+const ATOMIC_WRITE_MAX_ATTEMPTS = 3;
+const ATOMIC_WRITE_RETRY_MS = 12;
+
 /**
  * Atomic JSON write: write temp file then rename (safe across crashes).
  * On Windows, replaces destination if rename-over-existing fails.
  * Retries unlink/rename briefly for OneDrive / AV file locks (EBUSY).
+ * Keep retries short — this runs on the trading hot path and must not stall HTTP.
  */
 export function atomicWriteJson(filePath: string, data: unknown): void {
   ensureDataDir();
@@ -128,7 +145,7 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
   try {
     fs.writeFileSync(tmp, payload, 'utf-8');
     let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 0; attempt < ATOMIC_WRITE_MAX_ATTEMPTS; attempt++) {
       try {
         try {
           fs.renameSync(tmp, filePath);
@@ -143,8 +160,10 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
         }
       } catch (err) {
         lastErr = err;
-        if (!isBusyFsError(err) || attempt === 7) break;
-        sleepSyncMs(40 * (attempt + 1));
+        if (!isBusyFsError(err) || attempt === ATOMIC_WRITE_MAX_ATTEMPTS - 1) {
+          break;
+        }
+        sleepSyncMs(ATOMIC_WRITE_RETRY_MS);
       }
     }
     // Last resort: direct overwrite (still better than losing progress)

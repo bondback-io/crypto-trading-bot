@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.199',
+    title: 'Stop dashboard freezes from OneDrive lock waits + huge logs',
+    sections: ['overview', 'alerts', 'backup'],
+    items: [
+      'Atomic data saves no longer busy-wait up to ~1.4s on OneDrive/AV file locks — short Atomics.wait retries then fall through so /health and the dashboard stay responsive.',
+      'app.log rotates automatically above ~32MB (was growing past 700MB and adding disk pressure on the bot folder).',
+      'Dashboard polls return the latest 100 closed trades instead of the full ring (~500KB+ payloads every few seconds).',
+    ],
+  },
+  {
     version: '1.2.198',
     title: 'Zion trending attention shows full Jupiter CA links',
     sections: ['zion', 'overview'],

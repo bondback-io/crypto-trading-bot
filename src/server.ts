@@ -1078,11 +1078,15 @@ export function createServer(): express.Application {
     res.json(paperTrader.getStats());
   });
 
+  /** Cap closed rows on dashboard polls — full ring stays in memory/disk for stats. */
+  const DASHBOARD_CLOSED_LIMIT = 100;
+
   /** Paper trading status + Chart.js data */
   app.get('/paper-status', (_req: Request, res: Response) => {
     const stats = paperTrader.getStats();
     const charts = paperTrader.getChartData();
     const portfolio = paperTrader.getPortfolioSummary();
+    const closedAll = paperTrader.getClosedPositions();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
@@ -1092,7 +1096,8 @@ export function createServer(): express.Application {
       charts,
       useLiveData: config.paper.useLiveData,
       open: paperTrader.getOpenPositions(),
-      closed: paperTrader.getClosedPositions(),
+      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
+      closedTotal: closedAll.length,
       logs: paperTrader.getLogs(50),
     });
   });
@@ -1101,6 +1106,7 @@ export function createServer(): express.Application {
     const stats = paperTrader.getStats();
     const charts = paperTrader.getChartData();
     const portfolio = paperTrader.getPortfolioSummary();
+    const closedAll = paperTrader.getClosedPositions();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
@@ -1110,7 +1116,8 @@ export function createServer(): express.Application {
       charts,
       useLiveData: config.paper.useLiveData,
       open: paperTrader.getOpenPositions(),
-      closed: paperTrader.getClosedPositions(),
+      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
+      closedTotal: closedAll.length,
       logs: paperTrader.getLogs(50),
     });
   });
@@ -2376,9 +2383,11 @@ export function createServer(): express.Application {
         technicalLevels: technicalLevelsPublic(snap),
       };
     });
+    const closedAll = paperTrader.getClosedPositions();
     res.json({
       open,
-      closed: paperTrader.getClosedPositions(),
+      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
+      closedTotal: closedAll.length,
       sellHistory: getSellHistory(),
       rebuy: {
         status: getReBuyStatus(),
