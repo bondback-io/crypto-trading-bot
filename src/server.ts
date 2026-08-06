@@ -1940,7 +1940,10 @@ export function createServer(): express.Application {
 
   /**
    * Full Overview session reset for module A/B tests:
-   * balance, equity, open/closed trades, logs, signals, skip tallies, trade-rate.
+   * balance, equity, open/closed trades, logs, signals, skip tallies, trade-rate,
+   * scanner mint cooldowns / feed, buy-queue backlog, poll 429 pause.
+   * Clears risk halt and resumes the monitor so Halt→Reset does not leave
+   * scanning paused (deploy starts unpaused; Reset must match).
    * Does not change risk level or strategy modules.
    */
   app.post('/api/dashboard/reset', (_req: Request, res: Response) => {
@@ -1948,6 +1951,10 @@ export function createServer(): express.Application {
     const monitor = resetMonitorSession();
     clearRiskHalt();
     clearMonitorRiskHalt();
+    // Must run after clearRiskHalt — resumeMonitor refuses while halted.
+    if (isMonitorPaused()) {
+      resumeMonitor();
+    }
     const lastDashboardResetAt = markDashboardReset();
     res.json({
       ok: true,

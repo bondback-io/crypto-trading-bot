@@ -1410,6 +1410,38 @@ export function restartMarketScanner(): void {
   }
 }
 
+/**
+ * Clear mint cooldowns / feed / in-flight lock so Overview Reset behaves like a
+ * fresh process boot for scanner signal flow (without restarting timers).
+ */
+export function resetMarketScannerSession(): {
+  clearedCooldowns: number;
+  clearedFeed: number;
+} {
+  const clearedCooldowns = cooldowns.size;
+  const clearedFeed = feed.length;
+  cooldowns.clear();
+  seenThisSession.clear();
+  feed.length = 0;
+  skippedForBuyQueue = 0;
+  lastSkipReason = null;
+  lastError = null;
+  // Allow the next tick immediately (boot has no lastPollAt gate).
+  lastPollAt = null;
+  lastPollMs = null;
+  pollInFlight = false;
+  if (running) {
+    setTimeout(() => {
+      void runScannerPollOnce();
+    }, 1_500);
+  }
+  console.log(
+    `[marketScanner] Session reset — cleared ${clearedCooldowns} cooldown(s), ` +
+      `${clearedFeed} feed row(s)`
+  );
+  return { clearedCooldowns, clearedFeed };
+}
+
 /** Backtest helper: build a scanner-ranked view of a launch event. */
 export function scoreLaunchForBacktestScanner(event: LaunchEvent): {
   ok: boolean;

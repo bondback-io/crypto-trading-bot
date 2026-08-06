@@ -72,6 +72,7 @@ import {
   isMarketScannerSignal,
   isMarketScannerAddress,
   setScannerBuyQueueDepthFn,
+  resetMarketScannerSession,
   MARKET_SCANNER_WALLET,
   MARKET_SCANNER_NAME,
   type ScannerCandidate,
@@ -1216,24 +1217,41 @@ export function clearTradedMints(): void {
 
 /**
  * Wipe in-memory signal/session tallies for a fresh module soak test.
- * Does not stop the monitor or change risk/module settings.
+ * Also clears scanner mint cooldowns, buy-queue backlog, and poll 429 pause so
+ * signal flow matches a clean process boot (without stopping the monitor).
+ * Does not change risk/module settings. Caller should clear risk halt then
+ * resumeMonitor() so a halt-induced pause does not leave scanning dead.
  */
 export function resetMonitorSession(): {
   clearedActivity: number;
   clearedSizedSignals: number;
   clearedSignalTimestamps: number;
+  clearedPendingBuys: number;
+  scanner: ReturnType<typeof resetMarketScannerSession>;
 } {
   const clearedActivity = activityFeed.length;
   const clearedSizedSignals = recentSignals.length;
   const clearedSignalTimestamps = signals24hTimestamps.length;
+  const clearedPendingBuys = pendingBuyEvents.length;
   activityFeed.length = 0;
   recentSignals.length = 0;
   signals24hTimestamps.length = 0;
   recentBuys.clear();
+  pendingBuyEvents.length = 0;
   clearTradedMints();
   resetSkipReasonCounts();
   clearRecentTradeTimes();
-  return { clearedActivity, clearedSizedSignals, clearedSignalTimestamps };
+  // Unstick wallet-poll gates that a deploy would also clear.
+  pollRateLimitedUntil = 0;
+  pollInFlight = false;
+  const scanner = resetMarketScannerSession();
+  return {
+    clearedActivity,
+    clearedSizedSignals,
+    clearedSignalTimestamps,
+    clearedPendingBuys,
+    scanner,
+  };
 }
 
 const ACTIVITY_REFRESH_MS = 30 * 60 * 1000; // re-check activity every 30 min (was 15)

@@ -21399,7 +21399,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function resetDashboardSession() {
       if (!confirm(
-        'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons.\\n\\nKeeps: Risk On/Off and strategy modules.\\n\\nContinue?'
+        'Reset dashboard session?\\n\\nClears: SOL balance → start, equity, open & closed trades, PnL, signals, soak stats, skip reasons, scanner mint cooldowns.\\n\\nResumes monitor if paused (e.g. after risk halt). Keeps: Risk On/Off and strategy modules.\\n\\nContinue?'
       )) return;
       try {
         const data = await fetchJSON('/api/dashboard/reset', {

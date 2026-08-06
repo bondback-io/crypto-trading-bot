@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.197',
+    title: 'Overview Reset restores scanner signal flow',
+    sections: ['overview', 'scanners'],
+    items: [
+      'Overview Reset now clears Market Scanner mint cooldowns / feed / in-flight lock and buy-queue backlog (same session suppressors a deploy wiped).',
+      'Reset clears wallet-poll 429 pause and resumes the monitor after risk-halt clear so Halt→Reset no longer leaves scanning paused while stats look fresh.',
+    ],
+  },
+  {
     version: '1.2.196',
     title: 'Zion voice, chat UX, and location reliability',
     sections: ['zion', 'overview'],
