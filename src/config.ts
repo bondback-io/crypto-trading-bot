@@ -2084,6 +2084,12 @@ export interface BotConfig {
     healthCheckIntervalMsHealthy: number;
     healthCheckIntervalMsWatch: number;
     healthCheckIntervalMsAction: number;
+    /** Ambient chat nudges (market / trending / weather). Defaults ON. */
+    ambientNudges: {
+      marketUpdatesEnabled: boolean;
+      trendingNudgesEnabled: boolean;
+      weatherNudgesEnabled: boolean;
+    };
   };
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
@@ -2355,6 +2361,11 @@ export const config: BotConfig = {
     healthCheckIntervalMsHealthy: 900_000,
     healthCheckIntervalMsWatch: 600_000,
     healthCheckIntervalMsAction: 300_000,
+    ambientNudges: {
+      marketUpdatesEnabled: true,
+      trendingNudgesEnabled: true,
+      weatherNudgesEnabled: true,
+    },
   },
 
   peakProfitProtection: {
@@ -3086,6 +3097,14 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         Number(config.zionAgent?.healthCheckIntervalMsWatch) || 600_000,
       healthCheckIntervalMsAction:
         Number(config.zionAgent?.healthCheckIntervalMsAction) || 300_000,
+      ambientNudges: {
+        marketUpdatesEnabled:
+          config.zionAgent?.ambientNudges?.marketUpdatesEnabled !== false,
+        trendingNudgesEnabled:
+          config.zionAgent?.ambientNudges?.trendingNudgesEnabled !== false,
+        weatherNudgesEnabled:
+          config.zionAgent?.ambientNudges?.weatherNudgesEnabled !== false,
+      },
     },
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
@@ -3979,6 +3998,8 @@ function applySettingsSnapshot(
   }
   if (saved.zionAgent && typeof saved.zionAgent === 'object') {
     const s = saved.zionAgent;
+    const ambient = (s as { ambientNudges?: Record<string, unknown> })
+      .ambientNudges;
     config.zionAgent = {
       semiAutonomous: s.semiAutonomous === true,
       personalityEnabled: s.personalityEnabled !== false,
@@ -3997,6 +4018,14 @@ function applySettingsSnapshot(
         60_000,
         Number(s.healthCheckIntervalMsAction) || 300_000
       ),
+      ambientNudges: {
+        marketUpdatesEnabled:
+          ambient?.marketUpdatesEnabled !== false,
+        trendingNudgesEnabled:
+          ambient?.trendingNudgesEnabled !== false,
+        weatherNudgesEnabled:
+          ambient?.weatherNudgesEnabled !== false,
+      },
     };
     try {
       const { setZionSemiAutonomous } =

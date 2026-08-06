@@ -5775,6 +5775,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-message.is-user .zion-chat-bubble { border-color: rgba(56, 189, 248, 0.34); border-radius: 0.75rem 0.75rem 0.22rem 0.75rem; color: #e0f2fe; background: rgba(14, 116, 144, 0.3); }
     .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
     .zion-chat-message.is-user .zion-chat-time { text-align: right; }
+    .zion-feedback-row {
+      display: flex; flex-wrap: wrap; gap: 0.28rem; margin-top: 0.2rem; padding: 0 0.05rem;
+    }
+    .zion-feedback-btn {
+      border: 1px solid #334155; border-radius: 0.4rem; padding: 0.12rem 0.4rem;
+      color: #94a3b8; background: transparent; font-size: 0.62rem; font-weight: 650; cursor: pointer;
+    }
+    .zion-feedback-btn:hover, .zion-feedback-btn:focus-visible {
+      color: #fde7cf; border-color: rgba(242, 174, 102, 0.45); outline: none;
+    }
+    .zion-feedback-btn.is-done { opacity: 0.55; pointer-events: none; }
     .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
     /* 16px prevents iOS Safari auto-zoom on focus */
     .zion-chat-composer input {
@@ -8037,6 +8048,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="toggle-row">
           <span>Supervision emails <span class="tip" tabindex="0" data-tip="Email Dad on Action needed (rate-limited ~3h/key). Requires notify email configured."></span></span>
           <label class="switch"><input type="checkbox" id="zion-agent-supervision-email" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Market briefs (BTC/SOL) <span class="tip" tabindex="0" data-tip="Every ~4h Zion posts a short BTC/SOL price brief in chat. Info only — never auto-trades."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-nudge-market" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Trending memecoin nudges <span class="tip" tabindex="0" data-tip="Every 30–45m attention ping from Jupiter/Dex/scanner. Never auto-buys; no X claims without bearer token."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-nudge-trending" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Weather / local time <span class="tip" tabindex="0" data-tip="Every ~6h family locales: Sunshine Coast, Auckland area towns, Sölvesborg (Open-Meteo)."></span></span>
+          <label class="switch"><input type="checkbox" id="zion-nudge-weather" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
+        </div>
+        <div class="mint text-xs mb-2 flex flex-wrap gap-2 items-center" id="zion-learning-status-row">
+          <span id="zion-learning-status">Personality v—</span>
+          <button type="button" class="btn btn-secondary text-xs" id="zion-personality-rollback" onclick="rollbackZionPersonality()" title="Restore previous personality weights">Rollback</button>
         </div>
         <div class="mint text-xs mb-2" id="zion-agent-supervision-status">—</div>
         <div class="text-xs mb-2" id="zion-agent-supervision-detail" style="color:#94a3b8;line-height:1.45"></div>
@@ -28046,11 +28073,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         .map((m) => {
           const isUser = m.role === 'user';
           const when = fmtZionChatWhen(m.at);
+          const mid = escAttr(String(m.id || ''));
+          const feedback = isUser
+            ? ''
+            : (
+              '<div class="zion-feedback-row" data-zion-fb="' + mid + '">' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="good" data-zion-fb-id="' + mid + '">Good</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="too_technical" data-zion-fb-id="' + mid + '">Too technical</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="forgot_context" data-zion-fb-id="' + mid + '">Forgot context</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="better" data-zion-fb-id="' + mid + '">Better</button>' +
+              '</div>'
+            );
           return (
             '<div class="zion-chat-message' + (isUser ? ' is-user' : '') + '">' +
               '<div class="zion-chat-message-avatar">' + (isUser ? 'You' : 'Z') + '</div>' +
               '<div class="zion-chat-message-body">' +
                 '<div class="zion-chat-bubble">' + formatZionBubbleHtml(m.text || '', isUser) + '</div>' +
+                feedback +
                 (when ? '<div class="zion-chat-time">' + escHtml(when) + '</div>' : '') +
               '</div>' +
             '</div>'
@@ -28058,6 +28097,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         })
         .join('');
     }
+    async function sendZionFeedback(messageId, signal, btn) {
+      if (!messageId || !signal) return;
+      try {
+        await fetchJSON('/api/zion/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageId: messageId, signal: signal }),
+        });
+        if (btn && btn.parentNode) {
+          btn.parentNode.querySelectorAll('.zion-feedback-btn').forEach(function (el) {
+            el.classList.add('is-done');
+          });
+        }
+        if (typeof loadZionAgent === 'function') loadZionAgent();
+      } catch (err) {
+        alert('Feedback failed: ' + (err.message || err));
+      }
+    }
+    document.addEventListener('click', function (ev) {
+      const t = ev.target;
+      if (!t || !t.getAttribute) return;
+      const signal = t.getAttribute('data-zion-fb-signal');
+      const mid = t.getAttribute('data-zion-fb-id');
+      if (signal && mid) {
+        ev.preventDefault();
+        sendZionFeedback(mid, signal, t);
+      }
+    });
+    async function rollbackZionPersonality() {
+      if (!confirm('Roll back Zion personality weights to the previous snapshot?')) return;
+      try {
+        const out = await fetchJSON('/api/zion/personality/rollback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (out && out.ok === false) {
+          alert(out.detail || 'Rollback failed');
+        }
+        await loadZionAgent();
+      } catch (err) {
+        alert('Rollback failed: ' + (err.message || err));
+      }
+    }
+    window.rollbackZionPersonality = rollbackZionPersonality;
     function zionTypingHtml() {
       return (
         '<div class="zion-chat-typing" id="zion-chat-typing" aria-live="polite">' +
@@ -28314,6 +28398,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (fl) fl.checked = st.fightLogCommentsEnabled !== false;
       const supEm = document.getElementById('zion-agent-supervision-email');
       if (supEm) supEm.checked = st.supervisionEmailEnabled !== false;
+      const ambient = data.ambientNudges || st.ambientNudges || {};
+      const nM = document.getElementById('zion-nudge-market');
+      if (nM) nM.checked = ambient.marketUpdatesEnabled !== false;
+      const nT = document.getElementById('zion-nudge-trending');
+      if (nT) nT.checked = ambient.trendingNudgesEnabled !== false;
+      const nW = document.getElementById('zion-nudge-weather');
+      if (nW) nW.checked = ambient.weatherNudgesEnabled !== false;
+      const learning = data.learning || st.learning || {};
+      const learnEl = document.getElementById('zion-learning-status');
+      if (learnEl) {
+        const ver = learning.personalityVersion != null ? learning.personalityVersion : '—';
+        const topics = learning.workingTopics != null ? learning.workingTopics : '—';
+        const growth = learning.growthNotes != null ? learning.growthNotes : '—';
+        learnEl.textContent =
+          'Personality v' + ver + ' · topics ' + topics + ' · growth notes ' + growth;
+      }
       const supStat = document.getElementById('zion-agent-supervision-status');
       const supDetail = document.getElementById('zion-agent-supervision-detail');
       const supervision = data.supervision || {};
@@ -28514,6 +28614,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const sup = document.getElementById('zion-agent-supervision');
       const fl = document.getElementById('zion-agent-fightlog');
       const supEm = document.getElementById('zion-agent-supervision-email');
+      const nM = document.getElementById('zion-nudge-market');
+      const nT = document.getElementById('zion-nudge-trending');
+      const nW = document.getElementById('zion-nudge-weather');
       await fetchJSON('/api/zion/agent/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -28523,6 +28626,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           supervisionEnabled: !!(sup && sup.checked),
           fightLogCommentsEnabled: !!(fl && fl.checked),
           supervisionEmailEnabled: !!(supEm && supEm.checked),
+          ambientNudges: {
+            marketUpdatesEnabled: !!(nM && nM.checked),
+            trendingNudgesEnabled: !!(nT && nT.checked),
+            weatherNudgesEnabled: !!(nW && nW.checked),
+          },
         }),
       });
       await loadZionAgent();

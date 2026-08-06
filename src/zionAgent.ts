@@ -74,6 +74,14 @@ export function getZionAgentStatus(): {
   pendingImprovementRequests: number;
   familyMemoryScore: number;
   supervisionClassification?: string;
+  ambientNudges?: {
+    marketUpdatesEnabled: boolean;
+    trendingNudgesEnabled: boolean;
+    weatherNudgesEnabled: boolean;
+  };
+  learning?: ReturnType<
+    typeof import('./zionContinuousLearning').getZionLearningStatus
+  >;
 } {
   const st = loadZionAgentState();
   const semi = st.semiAutonomous === true;
@@ -88,6 +96,19 @@ export function getZionAgentStatus(): {
   } catch {
     /* optional */
   }
+  let learning:
+    | ReturnType<
+        typeof import('./zionContinuousLearning').getZionLearningStatus
+      >
+    | undefined;
+  try {
+    const { getZionLearningStatus } =
+      require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+    learning = getZionLearningStatus();
+  } catch {
+    /* optional */
+  }
+  const ambient = config.zionAgent?.ambientNudges;
   return {
     mode: semi ? 'semi_autonomous' : 'read_only',
     label: semi ? 'Zion · Semi-Autonomous' : 'Zion · Read-Only',
@@ -106,6 +127,12 @@ export function getZionAgentStatus(): {
     pendingImprovementRequests: pending,
     familyMemoryScore: computeFamilyMemoryScore(st.messages),
     supervisionClassification,
+    ambientNudges: {
+      marketUpdatesEnabled: ambient?.marketUpdatesEnabled !== false,
+      trendingNudgesEnabled: ambient?.trendingNudgesEnabled !== false,
+      weatherNudgesEnabled: ambient?.weatherNudgesEnabled !== false,
+    },
+    learning,
   };
 }
 
@@ -1012,6 +1039,11 @@ function withTimeoutSignal(ms: number): AbortSignal {
   return ctrl.signal;
 }
 
+type ZionLlmHistoryTurn = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 type OpenAiCompatOpts = {
   provider: 'groq' | 'openai';
   baseUrl: string;
@@ -1019,14 +1051,55 @@ type OpenAiCompatOpts = {
   model: string;
   system: string;
   user: string;
+  history?: ZionLlmHistoryTurn[];
   timeoutMs?: number;
 };
+
+const ZION_HISTORY_TURNS = 12;
+const ZION_HISTORY_MSG_CHARS = 800;
+
+/** Prior chat turns for the model (excludes the just-appended current user). */
+function buildZionLlmHistory(currentUserText: string): ZionLlmHistoryTurn[] {
+  try {
+    const msgs = loadZionAgentState().messages || [];
+    const out: ZionLlmHistoryTurn[] = [];
+    for (const m of msgs) {
+      if (m.role !== 'user' && m.role !== 'assistant') continue;
+      const content = String(m.text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, ZION_HISTORY_MSG_CHARS);
+      if (!content) continue;
+      out.push({ role: m.role, content });
+    }
+    // Drop trailing user that matches the message we just appended
+    const cur = String(currentUserText || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, ZION_HISTORY_MSG_CHARS);
+    while (
+      out.length &&
+      out[out.length - 1].role === 'user' &&
+      (out[out.length - 1].content === cur ||
+        out[out.length - 1].content.startsWith(cur.slice(0, 40)))
+    ) {
+      out.pop();
+    }
+    return out.slice(-ZION_HISTORY_TURNS);
+  } catch {
+    return [];
+  }
+}
 
 async function callOpenAiCompatibleChat(
   opts: OpenAiCompatOpts
 ): Promise<{ text: string; model: string } | null> {
   const base = opts.baseUrl.replace(/\/$/, '');
   const timeoutMs = opts.timeoutMs ?? ZION_LLM_TIMEOUT_MS;
+  const historyMsgs = (opts.history || []).map((h) => ({
+    role: h.role,
+    content: h.content,
+  }));
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -1041,6 +1114,7 @@ async function callOpenAiCompatibleChat(
         max_tokens: ZION_MAX_OUTPUT_TOKENS,
         messages: [
           { role: 'system', content: opts.system },
+          ...historyMsgs,
           { role: 'user', content: opts.user },
         ],
       }),
@@ -1086,9 +1160,17 @@ async function callGeminiModel(
   model: string,
   system: string,
   user: string,
+  history: ZionLlmHistoryTurn[] = [],
   timeoutMs = ZION_LLM_TIMEOUT_MS
 ): Promise<{ text: string; model: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const contents = [
+    ...history.map((h) => ({
+      role: h.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: h.content }],
+    })),
+    { role: 'user', parts: [{ text: user }] },
+  ];
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -1099,7 +1181,7 @@ async function callGeminiModel(
       signal: withTimeoutSignal(timeoutMs),
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
+        contents,
         generationConfig: {
           temperature: 0.72,
           maxOutputTokens: ZION_MAX_OUTPUT_TOKENS,
@@ -1145,7 +1227,8 @@ async function callGeminiModel(
 
 async function callGeminiChat(
   system: string,
-  user: string
+  user: string,
+  history: ZionLlmHistoryTurn[] = []
 ): Promise<{ text: string; model: string } | null> {
   const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
@@ -1156,7 +1239,7 @@ async function callGeminiChat(
       )
     : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-3.6-flash'];
   for (const model of models) {
-    const out = await callGeminiModel(apiKey, model, system, user);
+    const out = await callGeminiModel(apiKey, model, system, user, history);
     if (out) return out;
   }
   return null;
@@ -1164,7 +1247,8 @@ async function callGeminiChat(
 
 async function callGroqChat(
   system: string,
-  user: string
+  user: string,
+  history: ZionLlmHistoryTurn[] = []
 ): Promise<{ text: string; model: string } | null> {
   const apiKey = getGroqApiKey();
   if (!apiKey) return null;
@@ -1182,6 +1266,7 @@ async function callGroqChat(
       model,
       system,
       user,
+      history,
       timeoutMs: ZION_LLM_TIMEOUT_MS,
     });
     if (out) return out;
@@ -1191,7 +1276,8 @@ async function callGroqChat(
 
 async function callOpenAiChat(
   system: string,
-  user: string
+  user: string,
+  history: ZionLlmHistoryTurn[] = []
 ): Promise<{ text: string; model: string } | null> {
   const apiKey = getOpenAiApiKey();
   if (!apiKey) return null;
@@ -1215,6 +1301,7 @@ async function callOpenAiChat(
     model,
     system,
     user,
+    history,
     timeoutMs: ZION_LLM_TIMEOUT_MS,
   });
 }
@@ -1222,19 +1309,20 @@ async function callOpenAiChat(
 /** Race Gemini + Groq (first success), then OpenAI. Never throws. */
 async function callZionLlm(
   system: string,
-  user: string
+  user: string,
+  history: ZionLlmHistoryTurn[] = []
 ): Promise<ZionLlmResult | null> {
   const racers: Array<Promise<ZionLlmResult | null>> = [];
   if (getGeminiApiKey()) {
     racers.push(
-      callGeminiChat(system, user).then((r) =>
+      callGeminiChat(system, user, history).then((r) =>
         r ? { text: r.text, provider: 'gemini' as const, model: r.model } : null
       )
     );
   }
   if (getGroqApiKey()) {
     racers.push(
-      callGroqChat(system, user).then((r) =>
+      callGroqChat(system, user, history).then((r) =>
         r ? { text: r.text, provider: 'groq' as const, model: r.model } : null
       )
     );
@@ -1253,7 +1341,7 @@ async function callZionLlm(
   }
 
   try {
-    const openai = await callOpenAiChat(system, user);
+    const openai = await callOpenAiChat(system, user, history);
     if (openai) {
       return { text: openai.text, provider: 'openai', model: openai.model };
     }
@@ -1309,6 +1397,8 @@ Never paste the context pack, raw logs, or huge config blocks unless a raw/snaps
 
 Boundaries (hard):
 - Never claim you changed micro-bot TP, SL, timers, ML mode, or self-learning / delta learning.
+- Never invent live coin prices — use the domain snapshot / context pack when quoting BTC/SOL/majors.
+- Never invent extra family facts; family memory is canonical.
 - Never instruct anyone to bypass hard safety (anti-rug, risk halt) without warning.
 - You may **recommend** ML Shadow / Hybrid / Lead and profile focus in plain English — Dad (or auto-promote) applies ML on Micro Bots. You do **not** write mlMode.
 - You may explain MARL soft coordination; you do not silently flip it unless Semi-Autonomous Change Request is approved.
@@ -1516,6 +1606,17 @@ export async function zionAgentChat(userText: string): Promise<{
       reply = `${reply.trim()}\n\n${providerAttribution('local', 'local')}`;
     }
     appendZionChat('assistant', reply);
+    try {
+      const { touchZionWorkingMemory } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      touchZionWorkingMemory({
+        userText: text,
+        assistantText: reply,
+        isSocial: true,
+      });
+    } catch {
+      /* optional */
+    }
     return {
       reply,
       changeRequest: null,
@@ -1527,22 +1628,35 @@ export async function zionAgentChat(userText: string): Promise<{
 
   const personalityOn = config.zionAgent?.personalityEnabled !== false;
   const familyBlock = personalityOn ? `\n\n${formatFamilyMemoryForPrompt()}` : '';
+  let learningBlock = '';
+  if (personalityOn) {
+    try {
+      const { formatLearningMemoryForPrompt } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      learningBlock = `\n\n${formatLearningMemoryForPrompt()}`;
+    } catch {
+      /* optional */
+    }
+  }
 
   const system =
     SYSTEM_PROMPT +
     familyBlock +
+    learningBlock +
     `\nSemi-Autonomous: ${st.semiAutonomous ? 'ON' : 'OFF'}` +
     `\nThis turn's vibe cue: ${vibe} — lean that flavor lightly; still sound like Zion Valton.` +
     (isFirst
       ? '\nConversation cue: first exchange — brief friendly hello; keep short and upbeat. Dad optional once max.'
-      : '\nConversation cue: stay short, fun, skimmable. Use Dad sparingly and naturally — avoid ", Dad" tag endings.') +
+      : '\nConversation cue: stay short, fun, skimmable. Use Dad sparingly and naturally — avoid ", Dad" tag endings. Use prior turns + working memory for continuity.') +
     `\n\nContext pack (internal — do not paste unless raw/snapshot asked):\n${ctx}`;
+
+  const history = buildZionLlmHistory(storeUserText);
 
   let provider: ZionLlmProvider = 'local';
   let model = 'local';
   let reply: string;
   try {
-    const llm = await callZionLlm(system, text);
+    const llm = await callZionLlm(system, text, history);
     if (llm?.text) {
       provider = llm.provider;
       model = llm.model;
@@ -1619,6 +1733,25 @@ export async function zionAgentChat(userText: string): Promise<{
   }
 
   appendZionChat('assistant', reply);
+  try {
+    const {
+      touchZionWorkingMemory,
+      noteZionLlmChatCompleted,
+    } = require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+    touchZionWorkingMemory({
+      userText: text,
+      assistantText: reply,
+      isSocial: false,
+      decisionNote: changeRequest
+        ? `Queued IR: ${changeRequest.title}`
+        : undefined,
+    });
+    if (provider !== 'local') {
+      noteZionLlmChatCompleted();
+    }
+  } catch {
+    /* optional */
+  }
   return {
     reply,
     changeRequest,

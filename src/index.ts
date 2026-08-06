@@ -150,6 +150,13 @@ async function main(): Promise<void> {
       require('./dashboardNotifications') as typeof import('./dashboardNotifications');
     const app = getAppVersion();
     maybeNotifyAppVersionUpdate(app.label || `v${app.version}`);
+    try {
+      const { ingestBotInfoGrowthNotes } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      ingestBotInfoGrowthNotes(false);
+    } catch {
+      /* optional */
+    }
     const persist = getPersistenceStatus();
     if (isCloudHost() && !persist.volumeMounted) {
       pushDashboardNotification({

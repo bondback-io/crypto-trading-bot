@@ -3931,6 +3931,27 @@ export function createServer(): express.Application {
       const history = listZionImprovementHistory(40);
       const status = getZionAgentStatus();
       const supervision = getZionSupervisionStatus();
+      let learning = status.learning;
+      try {
+        if (!learning) {
+          const { getZionLearningStatus } =
+            require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+          learning = getZionLearningStatus();
+        }
+      } catch {
+        /* optional */
+      }
+      let ambientNudges = status.ambientNudges;
+      try {
+        const { getZionAmbientNudgeStatus } =
+          require('./zionAmbientNudges') as typeof import('./zionAmbientNudges');
+        ambientNudges = {
+          ...getZionAmbientNudgeStatus(),
+          ...(ambientNudges || {}),
+        };
+      } catch {
+        /* optional */
+      }
       res.json({
         ok: true,
         status,
@@ -3939,6 +3960,8 @@ export function createServer(): express.Application {
           score: status.familyMemoryScore,
         },
         supervision,
+        learning,
+        ambientNudges,
         messages: st.messages.slice(-40),
         changeRequests: st.changeRequests.slice(0, 40),
         improvementRequests: pending,
@@ -4015,10 +4038,16 @@ export function createServer(): express.Application {
         supervisionEnabled?: boolean;
         fightLogCommentsEnabled?: boolean;
         supervisionEmailEnabled?: boolean;
+        ambientNudges?: {
+          marketUpdatesEnabled?: boolean;
+          trendingNudgesEnabled?: boolean;
+          weatherNudgesEnabled?: boolean;
+        };
       };
       if (typeof body.semiAutonomous === 'boolean') {
         setZionSemiAutonomous(body.semiAutonomous);
       }
+      const prevAmbient = cfg.zionAgent?.ambientNudges;
       cfg.zionAgent = {
         semiAutonomous:
           typeof body.semiAutonomous === 'boolean'
@@ -4046,6 +4075,20 @@ export function createServer(): express.Application {
           Number(cfg.zionAgent?.healthCheckIntervalMsWatch) || 600_000,
         healthCheckIntervalMsAction:
           Number(cfg.zionAgent?.healthCheckIntervalMsAction) || 300_000,
+        ambientNudges: {
+          marketUpdatesEnabled:
+            typeof body.ambientNudges?.marketUpdatesEnabled === 'boolean'
+              ? body.ambientNudges.marketUpdatesEnabled
+              : prevAmbient?.marketUpdatesEnabled !== false,
+          trendingNudgesEnabled:
+            typeof body.ambientNudges?.trendingNudgesEnabled === 'boolean'
+              ? body.ambientNudges.trendingNudgesEnabled
+              : prevAmbient?.trendingNudgesEnabled !== false,
+          weatherNudgesEnabled:
+            typeof body.ambientNudges?.weatherNudgesEnabled === 'boolean'
+              ? body.ambientNudges.weatherNudgesEnabled
+              : prevAmbient?.weatherNudgesEnabled !== false,
+        },
       };
       if (typeof body.semiAutonomous === 'boolean') {
         setZionSemiAutonomous(body.semiAutonomous);
@@ -4086,6 +4129,57 @@ export function createServer(): express.Application {
       const text = String((req.body ?? {}).message || '');
       const out = await zionAgentChat(text);
       res.json({ ok: true, ...out });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/zion/feedback', (req: Request, res: Response) => {
+    try {
+      const { recordZionFeedback } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      const body = (req.body ?? {}) as {
+        messageId?: string;
+        signal?: string;
+      };
+      const signal = String(body.signal || '');
+      if (
+        signal !== 'good' &&
+        signal !== 'too_technical' &&
+        signal !== 'forgot_context' &&
+        signal !== 'better'
+      ) {
+        res.status(400).json({ ok: false, error: 'Invalid signal' });
+        return;
+      }
+      const out = recordZionFeedback({
+        messageId: String(body.messageId || ''),
+        signal,
+      });
+      res.json(out);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/zion/personality/rollback', (req: Request, res: Response) => {
+    try {
+      const { rollbackPersonality, getZionLearningStatus } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      const toVersion = (req.body ?? {}).toVersion;
+      const out = rollbackPersonality(
+        toVersion != null ? Number(toVersion) : undefined
+      );
+      res.json({
+        ...out,
+        learning: getZionLearningStatus(),
+      });
     } catch (err) {
       res.status(500).json({
         ok: false,
@@ -7447,6 +7541,29 @@ export function startServer(port?: number, host?: string): void {
     } catch (err) {
       console.warn(
         '[zion-supervision] scheduler start failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+
+    try {
+      const { startZionLearningScheduler, ingestBotInfoGrowthNotes } =
+        require('./zionContinuousLearning') as typeof import('./zionContinuousLearning');
+      ingestBotInfoGrowthNotes(false);
+      startZionLearningScheduler();
+    } catch (err) {
+      console.warn(
+        '[zion-learning] scheduler start failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+
+    try {
+      const { startZionAmbientNudgeScheduler } =
+        require('./zionAmbientNudges') as typeof import('./zionAmbientNudges');
+      startZionAmbientNudgeScheduler();
+    } catch (err) {
+      console.warn(
+        '[zion-nudges] scheduler start failed:',
         err instanceof Error ? err.message : err
       );
     }

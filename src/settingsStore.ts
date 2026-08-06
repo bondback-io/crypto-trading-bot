@@ -190,6 +190,11 @@ export interface PersistedBotSettings {
     healthCheckIntervalMsHealthy?: number;
     healthCheckIntervalMsWatch?: number;
     healthCheckIntervalMsAction?: number;
+    ambientNudges?: {
+      marketUpdatesEnabled?: boolean;
+      trendingNudgesEnabled?: boolean;
+      weatherNudgesEnabled?: boolean;
+    };
   };
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {

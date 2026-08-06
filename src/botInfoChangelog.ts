@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.193',
+    title: 'Zion continuous learning',
+    sections: ['zion', 'learning', 'overview'],
+    items: [
+      'Zion LLM chats now include the last ~12 turns plus working memory so he stays on-topic across the thread.',
+      'Continuous learning stores (working / long-term / Bot Info growth / personality versions), feedback buttons on chat bubbles, and Personality vN rollback.',
+      'Domain crypto/Solana curriculum with live top-coin refresh; ambient BTC/SOL briefs, trending attention nudges, and family weather/time (Sunshine Coast, NZ towns, Sölvesborg).',
+    ],
+  },
+  {
     version: '1.2.192',
     title: 'Lane fight skip reason under MARL',
     sections: ['microbots', 'overview'],
