@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.200',
+    title: 'Dashboard unstick — stop poll-path OneDrive probes + fat JSON',
+    sections: ['overview', 'alerts', 'backup'],
+    items: [
+      'Persistence status no longer write-probes DATA_DIR on every /api/status (was syncing .write-probe via OneDrive every 5s). Cached ~30s; probe at most ~2 min.',
+      'Fast positions poll returns open rows only; closed trades are slimmed (~field subset) and no longer duplicated on /paper-status. Charts dropped from /api/status; chart series capped.',
+      'OneDrive lock retries no longer Atomics.wait on the hot path — busy writes defer to a short background flush. /dashboard is gzip-compressed (~1.6MB → much smaller transfer).',
+    ],
+  },
+  {
     version: '1.2.199',
     title: 'Stop dashboard freezes from OneDrive lock waits + huge logs',
     sections: ['overview', 'alerts', 'backup'],

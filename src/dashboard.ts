@@ -10477,6 +10477,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         for (const id of curOpen) {
           if (!st.openIds.has(id)) playTradeOpenChime();
         }
+        // When fast poll omits closed rows, still chime on vanished opens
+        if (!closeds.length) {
+          for (const id of st.openIds) {
+            if (!curOpen.has(id)) playTradeCloseSound();
+          }
+        }
         // Newest closed first — play at most a few per poll (burst protection)
         let closeChimes = 0;
         const sortedClosed = closeds.slice().sort(function (a, b) {
@@ -18171,7 +18177,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         applyOpenPositionsList((posData && posData.open) || [], {
           fromFill: fromFill,
-          closed: (posData && posData.closed) || [],
+          // Fast endpoint omits closed — keep prior closed for sound hydration only
+          closed: (posData && posData.closed && posData.closed.length)
+            ? posData.closed
+            : [],
         });
       } catch (_) {}
     }

@@ -96,25 +96,6 @@ export function isCloudHost(): boolean {
   return isRunningOnRender() || isRunningOnFly();
 }
 
-/**
- * Brief thread sleep for OneDrive/AV lock retries.
- * Prefer Atomics.wait (no CPU spin). Cap tightly — a sync busy/sleep loop here
- * blocks the whole Node event loop (dashboard /health freezes).
- */
-function sleepSyncMs(ms: number): void {
-  const wait = Math.max(0, Math.min(Math.floor(ms), 25));
-  if (wait <= 0) return;
-  try {
-    const buf = new Int32Array(new SharedArrayBuffer(4));
-    Atomics.wait(buf, 0, 0, wait);
-  } catch {
-    const end = Date.now() + wait;
-    while (Date.now() < end) {
-      /* last-resort spin — only a few ms */
-    }
-  }
-}
-
 function isBusyFsError(err: unknown): boolean {
   const code =
     err && typeof err === 'object' && 'code' in err
@@ -123,72 +104,107 @@ function isBusyFsError(err: unknown): boolean {
   return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
 }
 
-/** Max rename retries + total sleep budget for sync atomic writes. */
-const ATOMIC_WRITE_MAX_ATTEMPTS = 3;
-const ATOMIC_WRITE_RETRY_MS = 12;
+/** Pending OneDrive/AV lock retries — never sleep on the request/trading path. */
+const deferredAtomicWrites = new Map<string, string>();
+let deferredAtomicFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleDeferredAtomicWrite(filePath: string, payload: string): void {
+  deferredAtomicWrites.set(filePath, payload);
+  if (deferredAtomicFlushTimer) return;
+  deferredAtomicFlushTimer = setTimeout(() => {
+    deferredAtomicFlushTimer = null;
+    const batch = [...deferredAtomicWrites.entries()];
+    deferredAtomicWrites.clear();
+    for (const [fp, body] of batch) {
+      try {
+        writeAtomicJsonSync(fp, body, { allowDefer: false });
+      } catch (err) {
+        console.warn(
+          `[persist] Deferred write failed ${path.basename(fp)}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  }, 40);
+}
 
 /**
  * Atomic JSON write: write temp file then rename (safe across crashes).
  * On Windows, replaces destination if rename-over-existing fails.
- * Retries unlink/rename briefly for OneDrive / AV file locks (EBUSY).
- * Keep retries short — this runs on the trading hot path and must not stall HTTP.
+ * On OneDrive/AV EBUSY: try once, then direct overwrite; if still locked,
+ * queue a deferred retry (no Atomics.wait / sync sleep — keeps HTTP alive).
  */
-export function atomicWriteJson(filePath: string, data: unknown): void {
+function writeAtomicJsonSync(
+  filePath: string,
+  payload: string,
+  opts: { allowDefer: boolean }
+): void {
   ensureDataDir();
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const payload =
-    typeof data === 'string' ? data : JSON.stringify(data, null, 2);
   const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     fs.writeFileSync(tmp, payload, 'utf-8');
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt < ATOMIC_WRITE_MAX_ATTEMPTS; attempt++) {
-      try {
-        try {
-          fs.renameSync(tmp, filePath);
-          return;
-        } catch {
-          // Windows: rename onto existing file often fails
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-          fs.renameSync(tmp, filePath);
-          return;
-        }
-      } catch (err) {
-        lastErr = err;
-        if (!isBusyFsError(err) || attempt === ATOMIC_WRITE_MAX_ATTEMPTS - 1) {
-          break;
-        }
-        sleepSyncMs(ATOMIC_WRITE_RETRY_MS);
-      }
-    }
-    // Last resort: direct overwrite (still better than losing progress)
     try {
-      fs.writeFileSync(filePath, payload, 'utf-8');
       try {
-        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        fs.renameSync(tmp, filePath);
+        return;
       } catch {
-        /* ignore */
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        fs.renameSync(tmp, filePath);
+        return;
       }
-      return;
-    } catch {
-      /* fall through */
+    } catch (err) {
+      // Last resort on this tick: direct overwrite (still better than losing progress)
+      try {
+        fs.writeFileSync(filePath, payload, 'utf-8');
+        try {
+          if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        } catch {
+          /* ignore */
+        }
+        return;
+      } catch (err2) {
+        try {
+          if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+        } catch {
+          /* ignore */
+        }
+        if (opts.allowDefer && isBusyFsError(err2)) {
+          scheduleDeferredAtomicWrite(filePath, payload);
+          return;
+        }
+        throw err2 instanceof Error
+          ? err2
+          : err instanceof Error
+            ? err
+            : new Error('atomicWriteJson failed');
+      }
     }
-    throw lastErr instanceof Error
-      ? lastErr
-      : new Error('atomicWriteJson failed');
   } catch (err) {
     try {
       if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
     } catch {
       /* ignore cleanup */
     }
+    if (opts.allowDefer && isBusyFsError(err)) {
+      scheduleDeferredAtomicWrite(filePath, payload);
+      return;
+    }
     throw err;
   }
+}
+
+export function atomicWriteJson(filePath: string, data: unknown): void {
+  const payload =
+    typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  writeAtomicJsonSync(filePath, payload, { allowDefer: true });
+  // File set changed — drop poll cache so banner refreshes soon
+  persistStatusCache = null;
 }
 
 /** Read JSON file or return null on missing/corrupt. */
@@ -485,7 +501,29 @@ export interface PersistenceStatus {
   warning: string | null;
 }
 
-export function getPersistenceStatus(): PersistenceStatus {
+/** Avoid sync OneDrive write-probes on every /api/status poll (was freezing the UI). */
+const PERSIST_STATUS_CACHE_MS = 30_000;
+const PERSIST_WRITABLE_PROBE_MS = 120_000;
+let persistStatusCache: { at: number; status: PersistenceStatus } | null = null;
+let lastWritableProbeAt = 0;
+let cachedWritable = true;
+
+/**
+ * Snapshot of DATA_DIR health for the dashboard.
+ * Cached ~30s. Write-probe at most every ~2 min (not on each poll).
+ */
+export function getPersistenceStatus(opts?: {
+  force?: boolean;
+}): PersistenceStatus {
+  const now = Date.now();
+  if (
+    !opts?.force &&
+    persistStatusCache &&
+    now - persistStatusCache.at < PERSIST_STATUS_CACHE_MS
+  ) {
+    return persistStatusCache.status;
+  }
+
   const dataDir = getDataDir();
   const settingsPath = dataFile(PERSIST_FILES.config);
   const walletsPath = dataFile(PERSIST_FILES.wallets);
@@ -497,15 +535,19 @@ export function getPersistenceStatus(): PersistenceStatus {
   const onFly = isRunningOnFly();
   const onCloud = onRender || onFly;
 
-  let writable = false;
-  try {
-    ensureDataDir();
-    const probe = dataFile('.write-probe');
-    fs.writeFileSync(probe, String(Date.now()), 'utf-8');
-    fs.unlinkSync(probe);
-    writable = true;
-  } catch {
-    writable = false;
+  let writable = cachedWritable;
+  if (opts?.force || now - lastWritableProbeAt >= PERSIST_WRITABLE_PROBE_MS) {
+    try {
+      ensureDataDir();
+      const probe = dataFile('.write-probe');
+      fs.writeFileSync(probe, String(Date.now()), 'utf-8');
+      fs.unlinkSync(probe);
+      writable = true;
+    } catch {
+      writable = false;
+    }
+    cachedWritable = writable;
+    lastWritableProbeAt = now;
   }
 
   const settingsExists =
@@ -534,12 +576,8 @@ export function getPersistenceStatus(): PersistenceStatus {
   let lastSettingsSavedAt: number | null = null;
   if (settingsExists) {
     try {
-      const parsed = readJsonFile<{ updatedAt?: number }>(settingsPath);
-      if (parsed?.updatedAt != null && Number.isFinite(Number(parsed.updatedAt))) {
-        lastSettingsSavedAt = Number(parsed.updatedAt);
-      } else {
-        lastSettingsSavedAt = fs.statSync(settingsPath).mtimeMs;
-      }
+      // Prefer mtime only on the poll path — avoid JSON.parse of config every 5s
+      lastSettingsSavedAt = fs.statSync(settingsPath).mtimeMs;
     } catch {
       lastSettingsSavedAt = null;
     }
@@ -574,7 +612,7 @@ export function getPersistenceStatus(): PersistenceStatus {
       'Dashboard → Disks → Add disk. Env DATA_DIR alone does not create a volume.';
   }
 
-  return {
+  const status: PersistenceStatus = {
     dataDir,
     writable,
     onRender,
@@ -598,6 +636,13 @@ export function getPersistenceStatus(): PersistenceStatus {
     durableLikely,
     warning,
   };
+  persistStatusCache = { at: now, status };
+  return status;
+}
+
+/** Drop cached persistence snapshot (e.g. after settings save). */
+export function invalidatePersistenceStatusCache(): void {
+  persistStatusCache = null;
 }
 
 /** Log persistence status once at boot. */

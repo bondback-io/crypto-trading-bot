@@ -3,6 +3,7 @@
  */
 
 import path from 'node:path';
+import zlib from 'node:zlib';
 import express, { Request, Response } from 'express';
 import {
   config,
@@ -409,7 +410,8 @@ export function createServer(): express.Application {
       stats: zeroedStats,
       soak: paperTrader.getSoakMetrics(),
       performanceScore: liveSimScore,
-      charts: usesPaperAccounting() ? paperTrader.getChartData() : null,
+      // Charts live on /paper-status only — avoid duplicating ~40KB every 5s
+      charts: null,
       rpc: getRpcStats(),
       jito: getJitoStatus(),
       mev: getMevStatus(),
@@ -1078,15 +1080,69 @@ export function createServer(): express.Application {
     res.json(paperTrader.getStats());
   });
 
-  /** Cap closed rows on dashboard polls — full ring stays in memory/disk for stats. */
-  const DASHBOARD_CLOSED_LIMIT = 100;
+  /**
+   * Cap + slim closed rows on dashboard polls.
+   * Full fat objects (~3–4KB each × 100) were ~275KB every 2–5s and froze the UI.
+   */
+  const DASHBOARD_CLOSED_LIMIT = 80;
+
+  function slimClosedPositionForDashboard(p: Record<string, unknown>) {
+    return {
+      id: p.id,
+      mint: p.mint,
+      symbol: p.symbol,
+      name: p.name,
+      entryPriceSol: p.entryPriceSol,
+      amountTokens: p.amountTokens,
+      costSol: p.costSol,
+      initialCostSol: p.initialCostSol,
+      initialAmountTokens: p.initialAmountTokens,
+      openedAt: p.openedAt,
+      closedAt: p.closedAt,
+      exitPriceSol: p.exitPriceSol,
+      pnlSol: p.pnlSol,
+      pnlPct: p.pnlPct,
+      reason: p.reason,
+      status: p.status,
+      parentPositionId: p.parentPositionId,
+      entryMarketCapUsd: p.entryMarketCapUsd,
+      exitMarketCapUsd: p.exitMarketCapUsd,
+      impliedExitMarketCapUsd: p.impliedExitMarketCapUsd,
+      liveExitMarketCapUsd: p.liveExitMarketCapUsd,
+      costUsd: p.costUsd,
+      solUsd: p.solUsd,
+      sourceNames: p.sourceNames,
+      entrySource: p.entrySource,
+      strategyKind: p.strategyKind,
+      tradeProfileId: p.tradeProfileId,
+      tradeProfileName: p.tradeProfileName,
+      tradeProfileIcon: p.tradeProfileIcon,
+      tradeProfileColor: p.tradeProfileColor,
+      tradeProfileScore: p.tradeProfileScore,
+      tradeProfileReason: p.tradeProfileReason,
+      scannerPlaybook: p.scannerPlaybook,
+      realizedPnlSol: p.realizedPnlSol,
+      maxRunupPct: p.maxRunupPct,
+      maxDrawdownPct: p.maxDrawdownPct,
+    };
+  }
+
+  function dashboardClosedSlice() {
+    const closedAll = paperTrader.getClosedPositions();
+    return {
+      closed: closedAll
+        .slice(-DASHBOARD_CLOSED_LIMIT)
+        .map((p) => slimClosedPositionForDashboard(p as unknown as Record<string, unknown>)),
+      closedTotal: closedAll.length,
+    };
+  }
 
   /** Paper trading status + Chart.js data */
   app.get('/paper-status', (_req: Request, res: Response) => {
     const stats = paperTrader.getStats();
-    const charts = paperTrader.getChartData();
+    const charts = paperTrader.getChartData({ lite: true });
     const portfolio = paperTrader.getPortfolioSummary();
-    const closedAll = paperTrader.getClosedPositions();
+    const closedMeta = dashboardClosedSlice();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
@@ -1096,17 +1152,18 @@ export function createServer(): express.Application {
       charts,
       useLiveData: config.paper.useLiveData,
       open: paperTrader.getOpenPositions(),
-      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
-      closedTotal: closedAll.length,
+      // Closed list comes from /api/positions — omit duplicate ~fat array here
+      closed: [],
+      closedTotal: closedMeta.closedTotal,
       logs: paperTrader.getLogs(50),
     });
   });
 
   app.get('/api/paper-status', (_req: Request, res: Response) => {
     const stats = paperTrader.getStats();
-    const charts = paperTrader.getChartData();
+    const charts = paperTrader.getChartData({ lite: true });
     const portfolio = paperTrader.getPortfolioSummary();
-    const closedAll = paperTrader.getClosedPositions();
+    const closedMeta = dashboardClosedSlice();
     res.json({
       mode: config.mode,
       balance: paperTrader.getBalance(),
@@ -1116,8 +1173,8 @@ export function createServer(): express.Application {
       charts,
       useLiveData: config.paper.useLiveData,
       open: paperTrader.getOpenPositions(),
-      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
-      closedTotal: closedAll.length,
+      closed: [],
+      closedTotal: closedMeta.closedTotal,
       logs: paperTrader.getLogs(50),
     });
   });
@@ -2383,17 +2440,31 @@ export function createServer(): express.Application {
         technicalLevels: technicalLevelsPublic(snap),
       };
     });
-    const closedAll = paperTrader.getClosedPositions();
+    // Fast poll: open rows only — closed was ~275KB every 2s and froze the UI.
+    if (fast) {
+      res.json({
+        open,
+        closed: [],
+        closedTotal: paperTrader.getClosedPositions().length,
+        sellHistory: [],
+        rebuy: {
+          status: getReBuyStatus(),
+          candidates: getReBuyCandidates().slice(0, 20),
+        },
+        fast: true,
+      });
+      return;
+    }
+    const closedSlice = dashboardClosedSlice();
     res.json({
       open,
-      closed: closedAll.slice(-DASHBOARD_CLOSED_LIMIT),
-      closedTotal: closedAll.length,
-      sellHistory: getSellHistory(),
+      closed: closedSlice.closed,
+      closedTotal: closedSlice.closedTotal,
+      sellHistory: getSellHistory().slice(0, 50),
       rebuy: {
         status: getReBuyStatus(),
-        candidates: getReBuyCandidates(),
+        candidates: getReBuyCandidates().slice(0, 20),
       },
-      ...(fast ? { fast: true } : {}),
     });
   });
 
@@ -7502,9 +7573,27 @@ export function createServer(): express.Application {
 
   // --- Dashboard (tabbed Tailwind UI) ---
 
-  app.get('/dashboard', (_req: Request, res: Response) => {
+  let dashboardGzipCache: Buffer | null = null;
+  function getDashboardGzip(): Buffer {
+    if (!dashboardGzipCache) {
+      dashboardGzipCache = zlib.gzipSync(Buffer.from(DASHBOARD_HTML, 'utf8'), {
+        level: 6,
+      });
+    }
+    return dashboardGzipCache;
+  }
+
+  app.get('/dashboard', (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.type('html').send(DASHBOARD_HTML);
+    res.type('html');
+    const ae = String(req.headers['accept-encoding'] || '');
+    if (/\bgzip\b/i.test(ae)) {
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.send(getDashboardGzip());
+      return;
+    }
+    res.send(DASHBOARD_HTML);
   });
 
   app.get('/', (_req: Request, res: Response) => {

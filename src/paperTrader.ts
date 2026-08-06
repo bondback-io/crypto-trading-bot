@@ -5149,9 +5149,10 @@ export class PaperTrader {
    * - perWallet: PnL attributed to triggering smart wallets
    * - winLoss: win vs loss counts (and SOL totals)
    */
-  getChartData() {
+  getChartData(opts?: { lite?: boolean }) {
     const closedRaw = this.closedPositions;
     const closed = representativeClosedTrades(closedRaw);
+    const lite = opts?.lite !== false; // default lite for dashboard polls
 
     let cumulative = 0;
     const cumulativePnl = {
@@ -5167,7 +5168,16 @@ export class PaperTrader {
       }[],
     };
 
-    for (const d of chronologicalRealizedDeltas(closedRaw)) {
+    const deltas = chronologicalRealizedDeltas(closedRaw);
+    // Cap chart series so poll payloads stay small (UI only needs labels+values)
+    const CHART_POINT_CAP = 120;
+    const startIdx =
+      deltas.length > CHART_POINT_CAP ? deltas.length - CHART_POINT_CAP : 0;
+    if (startIdx > 0) {
+      for (let i = 0; i < startIdx; i++) cumulative += deltas[i]!.pnlSol;
+    }
+    for (let i = startIdx; i < deltas.length; i++) {
+      const d = deltas[i]!;
       const p = d.position;
       cumulative += d.pnlSol;
       const time = d.time;
@@ -5179,14 +5189,16 @@ export class PaperTrader {
       });
       cumulativePnl.labels.push(label);
       cumulativePnl.values.push(Number(cumulative.toFixed(6)));
-      cumulativePnl.points.push({
-        time,
-        label,
-        pnlSol: d.pnlSol,
-        cumulative,
-        symbol: p.symbol,
-        name: p.name || p.symbol,
-      });
+      if (!lite) {
+        cumulativePnl.points.push({
+          time,
+          label,
+          pnlSol: d.pnlSol,
+          cumulative,
+          symbol: p.symbol,
+          name: p.name || p.symbol,
+        });
+      }
     }
 
     // Per-wallet attribution (split PnL evenly across signal wallets)
