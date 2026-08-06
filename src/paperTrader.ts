@@ -30,7 +30,7 @@ import {
   alignClosedExitMarketCapsToFill,
 } from './marketData';
 import { recordScannerOutcome } from './scannerOutcomes';
-import { loadPaperBalance, savePaperBalance } from './paperStateStore';
+import { loadPaperBalance, savePaperBalance, CLOSED_POSITIONS_RING_MAX } from './paperStateStore';
 import {
   effectiveDeadVolumeConsecutiveHours,
   effectiveDeadVolumeMinHoldMinutes,
@@ -1071,7 +1071,7 @@ export class PaperTrader {
     window?: string;
     at: number;
   } = { source: null, at: 0 };
-  /** Monotonic Overview counters — not shrunk by the 200-row closed list. */
+  /** Monotonic Overview counters — not shrunk by the closed-list ring. */
   private lifetimeClosed = 0;
   private lifetimeWins = 0;
   private lifetimeLosses = 0;
@@ -1152,6 +1152,9 @@ export class PaperTrader {
       }
     }
     this.closedPositions = (saved.closedPositions || []).map((p) => ({ ...p }));
+    if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+      this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
+    }
     // Historical Closed Trades: Exit MC used to prefer Dex while PnL used fill.
     // Align Exit MC to fill-scaled only — never rewrite pnlSol/pnlPct (overview stats).
     const aligned = alignClosedExitMarketCapsToFill(this.closedPositions);
@@ -2658,8 +2661,8 @@ export class PaperTrader {
         reason: `partial: ${reason}`,
       };
       this.closedPositions.push(slice);
-      if (this.closedPositions.length > 200) {
-        this.closedPositions = this.closedPositions.slice(-200);
+      if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+        this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
       }
       this.persistState();
       if (position.tradeMode === 'live') {
@@ -2740,8 +2743,8 @@ export class PaperTrader {
       costSol: closedCostSol,
       amountTokens: closedTokens,
     });
-    if (this.closedPositions.length > 200) {
-      this.closedPositions = this.closedPositions.slice(-200);
+    if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+        this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
     }
     this.noteLifetimeFinalClose(totalPnl);
 
@@ -4571,8 +4574,8 @@ export class PaperTrader {
                   ? (position.realizedPnlSol / position.initialCostSol) * 100
                   : 0;
               this.closedPositions.push(position);
-              if (this.closedPositions.length > 200) {
-                this.closedPositions = this.closedPositions.slice(-200);
+              if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+        this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
               }
               this.noteLifetimeFinalClose(position.pnlSol ?? 0);
             } else {
@@ -4601,8 +4604,8 @@ export class PaperTrader {
                 pnlPct: slicePct,
                 reason: `partial: ${action.reason}`,
               });
-              if (this.closedPositions.length > 200) {
-                this.closedPositions = this.closedPositions.slice(-200);
+              if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+        this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
               }
             }
           }
@@ -4673,8 +4676,8 @@ export class PaperTrader {
             100;
           position.pnlPct = pnlPct;
           this.closedPositions.push(position);
-          if (this.closedPositions.length > 200) {
-            this.closedPositions = this.closedPositions.slice(-200);
+          if (this.closedPositions.length > CLOSED_POSITIONS_RING_MAX) {
+        this.closedPositions = this.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX);
           }
           this.noteLifetimeFinalClose(position.pnlSol ?? 0);
           this.log(
@@ -4841,7 +4844,7 @@ export class PaperTrader {
     return (wins / reps.length) * 100;
   }
 
-  /** Session closed count for a trade profile (current 200-row list). */
+  /** Session closed count for a trade profile (current closed ring). */
   getSessionClosedCountForProfile(profileId: string): number {
     if (!profileId) return 0;
     return representativeClosedTrades(this.closedPositions).filter(

@@ -21,11 +21,14 @@ export interface PersistedPaperState {
   startingBalanceSol: number;
   positions: Position[];
   closedPositions: Position[];
-  /** Lifetime representative closed trade counts (survive 200-row list rotation). */
+  /** Lifetime representative closed trade counts (survive closed-list rotation). */
   lifetimeClosed?: number;
   lifetimeWins?: number;
   lifetimeLosses?: number;
 }
+
+/** Durable closed-trade ring size (memory + paperBalance.json). */
+export const CLOSED_POSITIONS_RING_MAX = 500;
 
 export function paperBalanceFilePath(): string {
   return PAPER_FILE;
@@ -75,7 +78,7 @@ export function savePaperBalance(state: {
       startingBalanceSol: state.startingBalanceSol,
       positions: state.positions,
       // Cap closed history on disk
-      closedPositions: state.closedPositions.slice(-200),
+      closedPositions: state.closedPositions.slice(-CLOSED_POSITIONS_RING_MAX),
       lifetimeClosed: state.lifetimeClosed ?? 0,
       lifetimeWins: state.lifetimeWins ?? 0,
       lifetimeLosses: state.lifetimeLosses ?? 0,

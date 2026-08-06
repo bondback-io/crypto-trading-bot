@@ -1,6 +1,6 @@
 /**
  * Micro Bot Performance — per-profile metrics, streaks, time windows, PF-first ranking.
- * Merges closed-position finals with durable learning episodes (survives 200-row closed cap).
+ * Merges closed-position finals with durable learning episodes (survives closed-list ring cap).
  */
 
 import type { ProfileLearningEpisode } from './profileLearningEpisodes';

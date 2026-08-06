@@ -6756,7 +6756,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-2.5 sm:mt-3">
-        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Closed trades in the selected window (Now and All also add open). Closed Trades list shows the last 200 rows only."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
+        <div class="card !py-3"><div class="stat-label">Trades <span class="tip tip-below" tabindex="0" data-tip="Closed trades in the selected window (Now and All also add open). Closed Trades list keeps the last 500 rows. Profitable filter shows all wins in the selected Overview timeframe."></span></div><div class="text-lg font-semibold" id="stat-trades">—</div></div>
         <div class="card !py-3"><div class="stat-label">Trade Rate <span class="tip tip-below" tabindex="0" data-tip="Buys in the last hour vs selective cap (always live — not windowed)."></span></div><div class="text-lg font-semibold" id="stat-trade-rate">—</div></div>
         <div class="card !py-3"><div class="stat-label">Entries <span class="tip tip-below" tabindex="0" data-tip="Large number = currently open trades. Below: Green = path clear for new trades. Amber = soft limit (cooldown / poll). Red = abnormal blocker (off, pause, risk, funds, engines)."></span></div>
           <div class="text-lg font-semibold" id="entries-open-count">—</div>
@@ -6810,11 +6810,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry (last 500 rows kept). Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Profitable / Losing honor the Overview timeframe (Now / 1h / 24h / …). Filter by trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
-            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
-            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false" title="All profitable closes in the selected Overview timeframe">Profitable</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false" title="All losing closes in the selected Overview timeframe">Losing</button>
             <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear the closed-trades list only. Open positions and balance stay. Does not delete micro-bot learning episodes. Not Overview Reset.">Clear list</button>
           </div>
         </div>
@@ -6937,11 +6937,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card card-closed-trades" id="trades-closed-trades-panel">
         <div class="closed-trades-head">
-          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry. Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Buy/exit MC, buy-in, wallet, and total PnL are for the full trade. Filter by profitable, losing, or trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
+          <div class="section-title">Closed Trades <span class="tip" tabindex="0" data-tip="Finished trades grouped by entry (last 500 rows kept). Expand a row to see each partial take-profit and the final exit. Hover or tap Reason → More Info for a side-by-side Open vs Exit breakdown. Profitable / Losing honor the Overview timeframe (Now / 1h / 24h / …). Filter by trade profile. Bulb icon = opened while Learning Mode was ON (strictness in tooltip)."></span></div>
           <div class="closed-filter" role="group" aria-label="Filter closed trades by result">
             <button type="button" class="closed-filter-btn is-active" data-closed-filter="all" onclick="setClosedTradesFilter('all')" aria-pressed="true">All</button>
-            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false">Profitable</button>
-            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false">Losing</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="profit" onclick="setClosedTradesFilter('profit')" aria-pressed="false" title="All profitable closes in the selected Overview timeframe">Profitable</button>
+            <button type="button" class="closed-filter-btn" data-closed-filter="loss" onclick="setClosedTradesFilter('loss')" aria-pressed="false" title="All losing closes in the selected Overview timeframe">Losing</button>
             <button type="button" class="closed-clear-btn" onclick="clearClosedTradesSession()" title="Clear the closed-trades list only. Open positions and balance stay. Does not delete micro-bot learning episodes. Not Overview Reset.">Clear list</button>
           </div>
         </div>
@@ -12610,7 +12610,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   lpWins +
                   ' wins / ' +
                   lpLosses +
-                  ' losses · survives Clear list / Overview Reset / 200-row closed cap · Level = applied upgrades'
+                  ' losses · survives Clear list / Overview Reset / 500-row closed cap · Level = applied upgrades'
               ) +
             '">' +
               '<div class="tp-learn-progress-meta">' +
@@ -15033,6 +15033,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         window._ovStatsLastFetchAt = 0;
       }
       refreshOverviewWindowStats({ force: true });
+      // Profitable / Losing closed list uses Overview timeframe — repaint when it changes
+      if (
+        (window._closedTradesFilter === 'profit' ||
+          window._closedTradesFilter === 'loss') &&
+        typeof paintClosedTradesTables === 'function'
+      ) {
+        paintClosedTradesTables();
+      }
     }
     window.setOverviewStatsWindow = setOverviewStatsWindow;
 
@@ -18045,12 +18053,37 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
     }
 
+    function closedListWindowStartMs(win, nowMs) {
+      const now = nowMs || Date.now();
+      if (win === '1h') return now - 60 * 60 * 1000;
+      if (win === '24h') return now - 24 * 60 * 60 * 1000;
+      if (win === '7d') return now - 7 * 24 * 60 * 60 * 1000;
+      if (win === '30d') return now - 30 * 24 * 60 * 60 * 1000;
+      // now / all — no extra time cut (ring already caps history)
+      return null;
+    }
+
     function filterClosedTradeGroups(groups, filter) {
       let list = groups || [];
       if (filter === 'profit') {
         list = list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) > 0);
       } else if (filter === 'loss') {
         list = list.filter((g) => Number((g.parent && g.parent.pnlSol) || 0) < 0);
+      }
+      // Profitable (and Losing): honor Overview timeframe so wins don't hide behind newest-N
+      if (filter === 'profit' || filter === 'loss') {
+        const start = closedListWindowStartMs(window._ovStatsWindow || 'now');
+        if (start != null) {
+          list = list.filter((g) => {
+            const t = Number(
+              (g.final && g.final.closedAt) ||
+                (g.parent && g.parent.closedAt) ||
+                g.latestAt ||
+                0
+            );
+            return t >= start;
+          });
+        }
       }
       const pf = window._closedProfileFilter || 'all';
       if (pf && pf !== 'all') {
@@ -18065,16 +18098,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function renderClosedTradesHtml(groups) {
       rebuildClosedProfileFilterButtons(groups);
-      const filtered = filterClosedTradeGroups(groups, window._closedTradesFilter || 'all');
+      let filtered = filterClosedTradeGroups(groups, window._closedTradesFilter || 'all');
+      // All / Losing: show up to ring size. Profitable: show every win in timeframe (already filtered).
+      const filterMode = window._closedTradesFilter || 'all';
+      if (filterMode !== 'profit' && filtered.length > 500) {
+        filtered = filtered.slice(0, 500);
+      }
       if (!groups || groups.length === 0) {
         return '<tr><td colspan="11" style="color:var(--muted)">No closed trades yet</td></tr>';
       }
       if (filtered.length === 0) {
+        const win = window._ovStatsWindow || 'now';
+        const winBit =
+          (filterMode === 'profit' || filterMode === 'loss') && win !== 'now' && win !== 'all'
+            ? ' in ' + win
+            : '';
         const label =
-          window._closedTradesFilter === 'profit'
-            ? 'No profitable closed trades'
-            : window._closedTradesFilter === 'loss'
-              ? 'No losing closed trades'
+          filterMode === 'profit'
+            ? 'No profitable closed trades' + winBit
+            : filterMode === 'loss'
+              ? 'No losing closed trades' + winBit
               : (window._closedProfileFilter && window._closedProfileFilter !== 'all')
                 ? 'No closed trades for this profile'
                 : 'No closed trades yet';
@@ -22632,7 +22675,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       window._closedTradeGroups = buildClosedTradeGroups(
         positions.closed || [],
         window._lastOpenPositions || positions.open || []
-      ).slice(0, 40);
+      );
+      // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
       paintClosedTradesTables();
 
       const rb = positions.rebuy || {};

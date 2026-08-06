@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.186',
+    title: 'Closed Trades ring 500 + Profitable timeframe',
+    sections: ['overview', 'execution', 'alerts'],
+    items: [
+      'Closed Trades durable ring raised from 200 → 500 rows (memory + paperBalance.json). No time TTL — oldest still rotate out when over cap.',
+      'UI no longer truncates to newest 40 groups. Profitable / Losing filters show all matching closes in the selected Overview timeframe (Now / 1h / 24h / 7d / 30d / All).',
+    ],
+  },
+  {
     version: '1.2.185',
     title: 'Notify email stuck on isaac — fixed',
     sections: ['alerts', 'backup', 'overview'],
