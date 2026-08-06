@@ -590,6 +590,15 @@ export function reconcileCriticalSettingsFromBundledBackup(opts?: {
   reason: string;
 } {
   const reason = String(opts?.reason || 'boot').slice(0, 80);
+  // Re-read disk first — a later persist can stamp defaults after an earlier
+  // in-memory reconcile, leaving memory "good" while config.json is poisoned.
+  try {
+    const { applyPersistedSettings } =
+      require('./config') as typeof import('./config');
+    applyPersistedSettings({ replaceStrategyToggles: true });
+  } catch {
+    /* optional */
+  }
   const backup = loadBundledRepoSiteBackup();
   if (!backup) {
     return { changed: false, applied: [], reason: 'no bundled backup' };

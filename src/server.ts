@@ -7481,6 +7481,21 @@ export function startServer(port?: number, host?: string): void {
               err instanceof Error ? err.message : err
             );
           }
+          // Late pass: migrations / hydrate can re-stamp defaults after first reconcile.
+          setTimeout(() => {
+            try {
+              const { reconcileCriticalSettingsFromBundledBackup } =
+                require('./siteBackup') as typeof import('./siteBackup');
+              reconcileCriticalSettingsFromBundledBackup({
+                reason: 'boot-delayed',
+              });
+            } catch (err) {
+              console.warn(
+                '[boot-reconcile] delayed hook failed:',
+                err instanceof Error ? err.message : err
+              );
+            }
+          }, 8_000);
         } catch (err) {
           console.warn(
             '[github-backup] auto-import boot hook failed:',
