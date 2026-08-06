@@ -41,6 +41,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.188',
+    title: 'Zion chat poll for health nudges',
+    sections: ['zion', 'alerts'],
+    items: [
+      'Dashboard lightly polls Zion chat every ~75s (when visible) so supervision health nudges update the unread badge, shake, and reply sound without opening the popup.',
+    ],
+  },
+  {
     version: '1.2.187',
     title: 'Zion health chat nudges + reply sound',
     sections: ['zion', 'alerts', 'coaches', 'overview'],

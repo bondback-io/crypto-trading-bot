@@ -28589,6 +28589,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     setTimeout(function () {
       if (typeof loadZionAgent === 'function') loadZionAgent();
     }, 300);
+    // Light poll so supervision health chat nudges surface (unread + shake + sound)
+    // without opening the widget. Skip while typing / tab hidden.
+    setInterval(function () {
+      try {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (_zionChatBusy) return;
+        if (typeof loadZionAgent === 'function') loadZionAgent();
+      } catch (_) {}
+    }, 75_000);
 
 
     async function saveTechnicalLevelsConfig(silent) {
