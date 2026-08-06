@@ -53,6 +53,36 @@ async function main(): Promise<void> {
   }
   // Prefer /var/data: copy from legacy Render src/data if new dir is empty
   migrateLegacyRenderDataDir();
+
+  // Fresh/wiped volume: seed from bundled site-backup BEFORE migrations write defaults.
+  const dataDirEmptyAtBoot = !hasPersistedSettings();
+  let bootSeeded = false;
+  try {
+    const { maybeSeedDataDirFromBundledSiteBackup } =
+      require('./siteBackup') as typeof import('./siteBackup');
+    const seed = maybeSeedDataDirFromBundledSiteBackup();
+    bootSeeded = seed.seeded === true;
+  } catch (err) {
+    console.warn(
+      '[boot-seed] hook failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+  if (bootSeeded || dataDirEmptyAtBoot) {
+    try {
+      const { markForceGithubAutoImportOnce } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      markForceGithubAutoImportOnce(
+        bootSeeded ? 'post-bundled-seed' : 'empty-data-dir-boot'
+      );
+    } catch (err) {
+      console.warn(
+        '[boot-seed] force GitHub auto-import arm failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   touchPersistMarker();
   logPersistenceStatus();
 

@@ -337,6 +337,10 @@ export function reloadPersistedRuntimeFromDisk(): void {
     require('./laneOutcomes') as typeof import('./laneOutcomes');
   const { invalidateScannerOutcomesCache } =
     require('./scannerOutcomes') as typeof import('./scannerOutcomes');
+  const { invalidateFastProfileRecoveryCache } =
+    require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+  const { invalidateDipBuyerRecoveryCache } =
+    require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
 
   clearDashboardStateCache();
   invalidateDashboardNotificationsCache();
@@ -344,6 +348,8 @@ export function reloadPersistedRuntimeFromDisk(): void {
   invalidateLearningSaveCache();
   invalidateLaneOutcomesCache();
   invalidateScannerOutcomesCache();
+  invalidateFastProfileRecoveryCache();
+  invalidateDipBuyerRecoveryCache();
   reloadZionOffersFromDisk();
 
   applyPersistedSettings({ replaceStrategyToggles: true });
@@ -410,4 +416,99 @@ export function createAndSaveSiteBackup(): {
     meta: getLatestSiteBackupMeta(),
     persistence: getPersistenceStatus(),
   };
+}
+
+/**
+ * Bundled repo copy of site-backup-latest.json (shipped with the deploy image).
+ * Used to seed a fresh/wiped DATA_DIR before migrations write code defaults.
+ */
+export function resolveBundledRepoSiteBackupPath(): string | null {
+  const candidates = [
+    path.join(process.cwd(), 'site-backups', LATEST_NAME),
+    path.join(__dirname, '..', 'site-backups', LATEST_NAME),
+    path.join(__dirname, '..', '..', 'site-backups', LATEST_NAME),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+export function loadBundledRepoSiteBackup(): SiteBackup | null {
+  const filePath = resolveBundledRepoSiteBackupPath();
+  if (!filePath) return null;
+  try {
+    const raw = JSON.parse(
+      fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')
+    ) as unknown;
+    if (!isValidSiteBackup(raw)) return null;
+    return raw;
+  } catch (err) {
+    console.warn(
+      '[boot-seed] failed to read bundled site-backup-latest.json:',
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
+
+/**
+ * When config.json is missing (fresh / wiped volume), synchronously restore from
+ * the repo-bundled site-backup-latest.json BEFORE migrations persist defaults.
+ */
+export function maybeSeedDataDirFromBundledSiteBackup(): {
+  seeded: boolean;
+  reason: string;
+  written?: string[];
+  exportedAt?: string;
+  fileCount?: number;
+  path?: string | null;
+} {
+  const { hasPersistedSettings } =
+    require('./settingsStore') as typeof import('./settingsStore');
+  if (hasPersistedSettings()) {
+    console.log('[boot-seed] skipped: config.json already present');
+    return { seeded: false, reason: 'config present' };
+  }
+
+  const bundledPath = resolveBundledRepoSiteBackupPath();
+  const backup = loadBundledRepoSiteBackup();
+  if (!backup) {
+    console.log(
+      '[boot-seed] skipped: no valid bundled site-backups/site-backup-latest.json'
+    );
+    return { seeded: false, reason: 'no bundled backup', path: bundledPath };
+  }
+
+  console.log(
+    `[boot-seed] seeding DATA_DIR from bundled backup` +
+      (bundledPath ? ` (${bundledPath})` : '') +
+      ` · exportedAt=${backup.exportedAt} · files=${backup.fileCount || Object.keys(backup.files || {}).length}`
+  );
+  try {
+    const result = restoreSiteBackup(backup);
+    console.log(
+      `[boot-seed] seeded ok · ${result.fileCount} file(s) · ${result.exportedAt}`
+    );
+    return {
+      seeded: true,
+      reason: 'seeded from bundled backup',
+      written: result.written,
+      exportedAt: result.exportedAt,
+      fileCount: result.fileCount,
+      path: bundledPath,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[boot-seed] restore failed:', msg);
+    return {
+      seeded: false,
+      reason: `seed failed: ${msg.slice(0, 160)}`,
+      path: bundledPath,
+    };
+  }
 }

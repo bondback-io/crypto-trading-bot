@@ -254,6 +254,15 @@ let recentEntryAts: number[] = [];
 let lastSkipReason: string | null = null;
 let lastSkipAt: number | null = null;
 
+/** Drop in-memory DBR state so the next load reads DATA_DIR (e.g. after site restore). */
+export function invalidateDipBuyerRecoveryCache(): void {
+  stateCache = null;
+  lastEntryAt = 0;
+  recentEntryAts = [];
+  lastSkipReason = null;
+  lastSkipAt = null;
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }

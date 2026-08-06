@@ -2742,7 +2742,14 @@ export function captureStrategyProfileKnobs(): StrategyProfileKnobs {
 function applyStrategyProfileKnobs(knobs: StrategyProfileKnobs): void {
   config.strategyToggles = { ...knobs.strategyToggles };
   Object.assign(config.filters, knobs.filters);
+  const preserveTradeCaps = ensureStrategyRecipeMode() === 'custom';
+  const preservedMaxTradesPerHour = config.selective.maxTradesPerHour;
+  const preservedMinMsBetweenTrades = config.selective.minMsBetweenTrades;
   Object.assign(config.selective, knobs.selective);
+  if (preserveTradeCaps) {
+    config.selective.maxTradesPerHour = preservedMaxTradesPerHour;
+    config.selective.minMsBetweenTrades = preservedMinMsBetweenTrades;
+  }
   Object.assign(config.strategy, knobs.strategy);
   Object.assign(config.risk, knobs.risk);
   Object.assign(config.bondingCurve, knobs.bondingCurve);
@@ -3052,8 +3059,11 @@ function applyStrategyPresetThresholds(t: StrategyPresetThresholds): void {
   config.selective.minWalletsForTrade = t.minWalletsForTrade;
   config.selective.requireConvergenceForNormal = t.requireConvergenceForNormal;
   config.selective.allowSingleWalletMigration = t.allowSingleWalletMigration;
-  config.selective.maxTradesPerHour = t.maxTradesPerHour;
-  config.selective.minMsBetweenTrades = t.minMsBetweenTrades;
+  // Custom recipe: do not overwrite operator Trade Caps from bake/preset thresholds.
+  if (ensureStrategyRecipeMode() !== 'custom') {
+    config.selective.maxTradesPerHour = t.maxTradesPerHour;
+    config.selective.minMsBetweenTrades = t.minMsBetweenTrades;
+  }
   config.filters.convergenceRequired = t.convergenceRequired;
   config.filters.clusterMinWallets = t.clusterMinWallets;
   config.filters.allowSingleWalletTopPerformerMigration =

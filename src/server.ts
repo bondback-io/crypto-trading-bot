@@ -3554,6 +3554,13 @@ export function createServer(): express.Application {
       } else {
         setFastProfileRecoveryConfig(body as never);
       }
+      try {
+        const { queueGithubBackupUploadAfterCriticalSave } =
+          require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+        queueGithubBackupUploadAfterCriticalSave('fast-profile-recovery');
+      } catch {
+        /* optional */
+      }
       res.json({ ok: true, ...getFastProfileRecoveryPublic() });
     } catch (err) {
       res.status(500).json({
@@ -3597,6 +3604,13 @@ export function createServer(): express.Application {
         demoteDipBuyerRecoveryStage();
       } else {
         setDipBuyerRecoveryConfig(body as never);
+      }
+      try {
+        const { queueGithubBackupUploadAfterCriticalSave } =
+          require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+        queueGithubBackupUploadAfterCriticalSave('dip-buyer-recovery');
+      } catch {
+        /* optional */
       }
       res.json({ ok: true, ...getDipBuyerRecoveryPublic() });
     } catch (err) {
@@ -3795,6 +3809,13 @@ export function createServer(): express.Application {
           classifierEnabled: boolOrUndef(body.classifierEnabled),
           unknownSetupsCanTrade: boolOrUndef(body.unknownSetupsCanTrade),
         });
+        try {
+          const { queueGithubBackupUploadAfterCriticalSave } =
+            require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+          queueGithubBackupUploadAfterCriticalSave('hierarchical-coordination');
+        } catch {
+          /* optional */
+        }
         res.json({
           ok: true,
           hierarchicalCoordination: getHierarchicalCoordinationConfig(),
@@ -4126,6 +4147,15 @@ export function createServer(): express.Application {
       }
       ensureSeededWallets();
       const ok = persistUserSettings();
+      if (ok) {
+        try {
+          const { queueGithubBackupUploadAfterCriticalSave } =
+            require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+          queueGithubBackupUploadAfterCriticalSave('zion-transfers');
+        } catch {
+          /* optional */
+        }
+      }
       const { getZionTransferStatusPublic } =
         require('./zionWalletTransfer') as typeof import('./zionWalletTransfer');
       res.json({ ok, ...getZionTransferStatusPublic() });
@@ -6233,6 +6263,13 @@ export function createServer(): express.Application {
     }
 
     const selective = updateSelectiveConfig(partial);
+    try {
+      const { queueGithubBackupUploadAfterCriticalSave } =
+        require('./githubSiteBackup') as typeof import('./githubSiteBackup');
+      queueGithubBackupUploadAfterCriticalSave('selective-trade-caps');
+    } catch {
+      /* optional */
+    }
     res.json(selective);
   });
 

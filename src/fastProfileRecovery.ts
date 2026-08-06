@@ -208,6 +208,14 @@ export const DEFAULT_FAST_PROFILE_RECOVERY: FastProfileRecoveryConfig = {
 let stateCache: RecoveryStateFile | null = null;
 const lastEntryAtByProfile: Record<string, number> = {};
 
+/** Drop in-memory FPR state so the next load reads DATA_DIR (e.g. after site restore). */
+export function invalidateFastProfileRecoveryCache(): void {
+  stateCache = null;
+  for (const k of Object.keys(lastEntryAtByProfile)) {
+    delete lastEntryAtByProfile[k];
+  }
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }

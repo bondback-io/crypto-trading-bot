@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.189',
+    title: 'Settings survive fresh deploy volumes',
+    sections: ['backup', 'knobs', 'coaches', 'zion', 'microbots'],
+    items: [
+      'Fresh/wiped DATA_DIR seeds from bundled site-backup-latest.json before defaults persist; first post-empty boot forces GitHub auto-import even if restore copied lastAutoImportSha.',
+      'Custom recipe keeps Trade Caps (50/5) across Risk On/Off and bake; FPR/DBR caches invalidate on restore; critical saves queue a best-effort GitHub backup upload.',
+    ],
+  },
+  {
     version: '1.2.188',
     title: 'Zion chat poll for health nudges',
     sections: ['zion', 'alerts'],

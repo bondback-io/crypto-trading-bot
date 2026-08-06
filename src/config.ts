@@ -5991,7 +5991,16 @@ export function applyRiskLevel(
     config.risk.trailingStopPct = config.risk.trailingStopPercent;
   }
 
+  // Custom recipe: keep operator Trade Caps across Risk On/Off presets.
+  const preserveTradeCaps = config.strategyRecipeMode === 'custom';
+  const preservedMaxTradesPerHour = config.selective.maxTradesPerHour;
+  const preservedMinMsBetweenTrades = config.selective.minMsBetweenTrades;
+
   Object.assign(config.selective, preset.selective);
+  if (preserveTradeCaps) {
+    config.selective.maxTradesPerHour = preservedMaxTradesPerHour;
+    config.selective.minMsBetweenTrades = preservedMinMsBetweenTrades;
+  }
   if (canonical === 'off') {
     config.selective.minVolume24hUsd = Math.max(
       0,

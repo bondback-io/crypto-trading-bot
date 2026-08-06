@@ -94,6 +94,11 @@ export interface GithubBackupStatus {
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let uploadInFlight = false;
 let autoImportInFlight = false;
+/** One-shot: after empty DATA_DIR / bundled seed, do not skip on sha match. */
+let forceAutoImportOnce = false;
+let forceAutoImportReason: string | null = null;
+let criticalUploadTimer: ReturnType<typeof setTimeout> | null = null;
+let criticalUploadQueuedReason: string | null = null;
 
 function envToken(): string {
   return String(process.env.GITHUB_BACKUP_TOKEN || '').trim();
@@ -359,7 +364,7 @@ async function fetchRemoteSha(
  * Build local latest backup and push compact JSON to GitHub (overwrite path).
  */
 export async function uploadSiteBackupToGithub(opts?: {
-  reason?: 'manual' | 'scheduled';
+  reason?: string;
 }): Promise<{
   ok: true;
   exportedAt: string;
@@ -578,6 +583,60 @@ function recordAutoImportSkip(reason: string): void {
 }
 
 /**
+ * After empty DATA_DIR / bundled seed, force the next boot auto-import to run
+ * even if lastAutoImportSha was copied from the restore artifact.
+ */
+export function markForceGithubAutoImportOnce(reason: string): void {
+  forceAutoImportOnce = true;
+  forceAutoImportReason = String(reason || 'empty-boot').slice(0, 120);
+  console.log(
+    `[github-backup] force auto-import once armed (${forceAutoImportReason})`
+  );
+}
+
+export function consumeForceGithubAutoImportOnce(): {
+  force: boolean;
+  reason: string | null;
+} {
+  const force = forceAutoImportOnce;
+  const reason = forceAutoImportReason;
+  forceAutoImportOnce = false;
+  forceAutoImportReason = null;
+  return { force, reason };
+}
+
+/**
+ * Best-effort queue a GitHub backup upload after a critical settings save.
+ * Debounced; failures log only (never throw to callers).
+ */
+export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
+  criticalUploadQueuedReason = String(reason || 'critical-save').slice(0, 120);
+  if (criticalUploadTimer) return;
+  criticalUploadTimer = setTimeout(() => {
+    criticalUploadTimer = null;
+    const r = criticalUploadQueuedReason || 'critical-save';
+    criticalUploadQueuedReason = null;
+    void (async () => {
+      try {
+        const st = getGithubBackupStatus();
+        if (!st.configured) {
+          console.log(
+            `[github-backup] critical-save upload skipped (${r}): not configured`
+          );
+          return;
+        }
+        await uploadSiteBackupToGithub({ reason: `critical:${r}` });
+      } catch (err) {
+        console.warn(
+          `[github-backup] critical-save upload failed (${r}):`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    })();
+  }, 4_000);
+}
+
+/**
  * Boot/restart auto-import: restore from GitHub when enabled and remote SHA
  * differs from lastAutoImportSha. Never throws — logs and returns.
  * Call AFTER app.listen so the dashboard stays available.
@@ -594,8 +653,14 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
   if (autoImportInFlight) {
     return { skipped: true, reason: 'in flight' };
   }
+  const forced = consumeForceGithubAutoImportOnce();
   const s = loadGithubBackupSettings();
   if (!isAutoImportEnabled(s)) {
+    console.log(
+      `[github-backup] auto-import skipped: disabled` +
+        (forced.force ? ` (force was armed: ${forced.reason})` : '')
+    );
+    recordAutoImportSkip('disabled');
     return { skipped: true, reason: 'disabled' };
   }
   const target = resolveGithubBackupTarget(s);
@@ -615,7 +680,10 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
     : 'setting';
   try {
     console.log(
-      `[github-backup] auto-import checking remote (${source}) · ${target.owner}/${target.repo}/${target.path}`
+      `[github-backup] auto-import checking remote (${source}) · ${target.owner}/${target.repo}/${target.path}` +
+        (forced.force
+          ? ` · forceOnce=${forced.reason || 'yes'}`
+          : '')
     );
     const remoteSha = await fetchRemoteSha(
       target.owner,
@@ -633,12 +701,17 @@ export async function maybeAutoImportGithubBackupOnBoot(): Promise<{
     const lastImported =
       s.lastAutoImportSha ||
       (s.lastAutoImportAtMs != null ? s.lastRemoteSha : null);
-    if (lastImported && lastImported === remoteSha) {
+    if (lastImported && lastImported === remoteSha && !forced.force) {
       console.log(
         `[github-backup] auto-import skipped: sha unchanged (${remoteSha.slice(0, 7)})`
       );
       recordAutoImportSkip('sha unchanged');
       return { skipped: true, reason: 'sha unchanged', sha: remoteSha };
+    }
+    if (forced.force && lastImported && lastImported === remoteSha) {
+      console.log(
+        `[github-backup] auto-import forced despite sha match (${remoteSha.slice(0, 7)}) · ${forced.reason}`
+      );
     }
 
     console.log(
