@@ -21260,34 +21260,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       ensureCharts();
       if (!chartCumulative || !charts) return;
 
-      const hasTrades = (charts.tradeCount || 0) > 0;
-      document.getElementById('chart-cumulative-empty').style.display = hasTrades ? 'none' : 'block';
-      document.getElementById('chart-wallet-empty').style.display =
-        (charts.perWallet?.labels?.length || 0) > 0 ? 'none' : 'block';
-      document.getElementById('chart-winloss-empty').style.display = hasTrades ? 'none' : 'block';
-      document.getElementById('chart-cumulative').style.display = hasTrades ? 'block' : 'none';
-      document.getElementById('chart-wallet').style.display =
-        (charts.perWallet?.labels?.length || 0) > 0 ? 'block' : 'none';
-      document.getElementById('chart-winloss').style.display = hasTrades ? 'block' : 'none';
+      const cum = charts.cumulativePnl || {};
+      const cumLabels = Array.isArray(cum.labels) ? cum.labels : [];
+      const cumValues = Array.isArray(cum.values) ? cum.values : [];
+      const winLoss = charts.winLoss || {};
+      const wlCounts = Array.isArray(winLoss.counts) ? winLoss.counts : [0, 0];
+      const wlPnl = Array.isArray(winLoss.pnlSol) ? winLoss.pnlSol : [0, 0];
+      const perWallet = charts.perWallet || {};
+      const pwLabels = Array.isArray(perWallet.labels) ? perWallet.labels : [];
+      const pwPnl = Array.isArray(perWallet.pnlSol) ? perWallet.pnlSol : [];
+
+      const hasTrades = (charts.tradeCount || 0) > 0 && cumValues.length > 0;
+      const hasWallet = pwLabels.length > 0;
+      const elCumEmpty = document.getElementById('chart-cumulative-empty');
+      const elWalEmpty = document.getElementById('chart-wallet-empty');
+      const elWlEmpty = document.getElementById('chart-winloss-empty');
+      const elCum = document.getElementById('chart-cumulative');
+      const elWal = document.getElementById('chart-wallet');
+      const elWl = document.getElementById('chart-winloss');
+      if (elCumEmpty) elCumEmpty.style.display = hasTrades ? 'none' : 'block';
+      if (elWalEmpty) elWalEmpty.style.display = hasWallet ? 'none' : 'block';
+      if (elWlEmpty) elWlEmpty.style.display = hasTrades ? 'none' : 'block';
+      if (elCum) elCum.style.display = hasTrades ? 'block' : 'none';
+      if (elWal) elWal.style.display = hasWallet ? 'block' : 'none';
+      if (elWl) elWl.style.display = hasTrades ? 'block' : 'none';
 
       if (hasTrades) {
-        chartCumulative.data.labels = charts.cumulativePnl.labels;
-        chartCumulative.data.datasets[0].data = charts.cumulativePnl.values;
-        const last = charts.cumulativePnl.values[charts.cumulativePnl.values.length - 1] || 0;
+        chartCumulative.data.labels = cumLabels;
+        chartCumulative.data.datasets[0].data = cumValues;
+        const last = cumValues[cumValues.length - 1] || 0;
         chartCumulative.data.datasets[0].borderColor = last >= 0 ? '#3fb950' : '#f85149';
         chartCumulative.data.datasets[0].backgroundColor =
           last >= 0 ? 'rgba(63,185,80,0.15)' : 'rgba(248,81,73,0.15)';
         chartCumulative.update('none');
 
-        chartWinLoss.data.datasets[0].data = charts.winLoss.counts;
-        chartWinLoss.data.datasets[1].data = charts.winLoss.pnlSol;
-        chartWinLoss.update('none');
+        if (chartWinLoss) {
+          chartWinLoss.data.datasets[0].data = wlCounts;
+          chartWinLoss.data.datasets[1].data = wlPnl;
+          chartWinLoss.update('none');
+        }
       }
 
-      if (charts.perWallet?.labels?.length) {
-        chartWallet.data.labels = charts.perWallet.labels;
-        chartWallet.data.datasets[0].data = charts.perWallet.pnlSol;
-        chartWallet.data.datasets[0].backgroundColor = charts.perWallet.pnlSol.map(
+      if (hasWallet && chartWallet) {
+        chartWallet.data.labels = pwLabels;
+        chartWallet.data.datasets[0].data = pwPnl;
+        chartWallet.data.datasets[0].backgroundColor = pwPnl.map(
           (v) => (v >= 0 ? '#3fb950' : '#f85149')
         );
         chartWallet.update('none');
@@ -21621,9 +21638,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const wallets = Array.isArray(walletsRaw) ? walletsRaw : (walletsRaw && walletsRaw.wallets) || [];
 
       updateCharts(paper && paper.charts);
-      if (paper.useLiveData != null) {
-        document.getElementById('paper-live-data').checked = !!paper.useLiveData;
-        document.getElementById('bt-live').checked = !!paper.useLiveData;
+      if (paper && paper.useLiveData != null) {
+        const liveEl = document.getElementById('paper-live-data');
+        const btLiveEl = document.getElementById('bt-live');
+        if (liveEl) liveEl.checked = !!paper.useLiveData;
+        if (btLiveEl) btLiveEl.checked = !!paper.useLiveData;
       }
 
       const persistEl = document.getElementById('persist-banner');
@@ -21685,11 +21704,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       let runState = 'running';
       let runLabel = 'Running';
       let runIconKey = 'play';
-      if (!status.monitor.running) {
+      const mon = (status && status.monitor) || {};
+      if (!mon.running) {
         runState = 'stopped';
         runLabel = 'Stopped';
         runIconKey = 'stop';
-      } else if (status.monitor.paused) {
+      } else if (mon.paused) {
         runState = 'paused';
         runLabel = 'Paused';
         runIconKey = 'pause';
@@ -21716,7 +21736,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       setStatusIcon(runIcon, runIconKey);
       syncOverviewRunModeStatus(runState, runLabel, runIconKey, status);
 
-      document.getElementById('btn-pause').textContent = status.monitor.paused ? 'Resume' : 'Pause';
+      document.getElementById('btn-pause').textContent = mon.paused ? 'Resume' : 'Pause';
 
       const badge = document.getElementById('mode-badge');
       const modeLabelEl = document.getElementById('mode-badge-label');
@@ -22890,8 +22910,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (typeof renderZionOpenTrades === 'function') renderZionOpenTrades();
 
       window._closedTradeGroups = buildClosedTradeGroups(
-        positions.closed || [],
-        window._lastOpenPositions || positions.open || []
+        (positions && Array.isArray(positions.closed) ? positions.closed : []) || [],
+        window._lastOpenPositions || (positions && positions.open) || []
       );
       // Keep full ring for Profitable/Losing + timeframe filters (no newest-40 cut).
       paintClosedTradesTables();
@@ -29457,7 +29477,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         // If turning on, show compact button under ack when still off after prompt attempt
         if (/location prompt|turn(ed)? on|Allow it/i.test(String(locNl.ack || ''))) {
           optimistic[optimistic.length - 1].text =
-            String(locNl.ack || '') + '\n\n[[ZION_TURN_ON_LOCATION]]';
+            String(locNl.ack || '') + '\\n\\n[[ZION_TURN_ON_LOCATION]]';
         }
         cacheZionChatMessages(optimistic);
         paintZionChatThreads(optimistic);

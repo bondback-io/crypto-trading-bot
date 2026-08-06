@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.201',
+    title: 'Fix blank dashboard — Zion location string SyntaxError',
+    sections: ['overview', 'zion', 'alerts'],
+    items: [
+      'Dashboard inline JS no longer dies on parse: Zion location ack used an unescaped \\n inside the HTML template literal, which became a real newline and SyntaxError’d the entire script (blank/frozen UI).',
+      'Charts and closed-trade poll handlers are null-safe when cumulativePnl/winLoss/closed are missing after slim payloads; paper-status live-data toggles guard missing DOM/nodes.',
+    ],
+  },
+  {
     version: '1.2.200',
     title: 'Dashboard unstick — stop poll-path OneDrive probes + fat JSON',
     sections: ['overview', 'alerts', 'backup'],
