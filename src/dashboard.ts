@@ -9215,7 +9215,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="ctl ctl-fit">
             <span>Force stage</span>
             <select id="dbr-force-stage" onchange="forceDipBuyerRecoveryFromSelect()">
-              <option value="">—</option>
+              <option value="">None (auto)</option>
               <option value="0">0 Full</option>
               <option value="1">1 Freq</option>
               <option value="2">2 Size</option>
@@ -14198,6 +14198,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.forceDipBuyerRecoveryFromSelect = forceDipBuyerRecoveryFromSelect;
 
+    let __fprHydrated = false;
+
     async function loadFastProfileRecovery() {
       try {
         const data = await fetchJSON('/api/fast-profile-recovery');
@@ -14238,10 +14240,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (armEl) armEl.value = s0.peakProtectArmOfTpPct != null ? s0.peakProtectArmOfTpPct : 45;
         if (gbEl) gbEl.value = s0.peakProtectGivebackOfPeakPct != null ? s0.peakProtectGivebackOfPeakPct : 30;
         const grid = document.getElementById('fpr-profile-grid');
-        if (!grid) return;
+        if (!grid) {
+          __fprHydrated = true;
+          return;
+        }
         const rows = Array.isArray(data.profiles) ? data.profiles : [];
         if (!rows.length) {
           grid.innerHTML = '<p class="mint text-xs">No fast profiles.</p>';
+          __fprHydrated = true;
           return;
         }
         grid.innerHTML = rows
@@ -14333,6 +14339,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           })
           .join('');
+        __fprHydrated = true;
       } catch (err) {
         const grid = document.getElementById('fpr-profile-grid');
         if (grid) {
@@ -14346,6 +14353,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.loadFastProfileRecovery = loadFastProfileRecovery;
 
     async function saveFastProfileRecovery() {
+      if (!__fprHydrated) return;
       const body = {
         enabled: !!(document.getElementById('fpr-enabled') || {}).checked,
         autoTaper: !!(document.getElementById('fpr-autotaper') || {}).checked,
@@ -24860,13 +24868,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           data.summary && data.summary.recipeMode === 'synced'
             ? '\\nStrategy modules re-synced to this Risk Level.'
             : data.summary && data.summary.recipeMode === 'custom'
-              ? '\\nStrategy modules left custom (Reset Strategy Defaults for a full code reset).'
+              ? '\\nKnobs updated; strategy modules kept (custom). Use Reset Strategy Defaults or Reset modules to Risk recipe to wipe modules.'
               : '';
         alert(
           'Risk level set to ' + String(level).toUpperCase() +
           (data.warning ? '\\n' + data.warning : '') +
           recipeNote +
-          '\\nRecommended settings applied.'
+          (data.summary && data.summary.recipeMode === 'custom'
+            ? ''
+            : '\\nRecommended settings applied.')
         );
       } catch (err) {
         alert(err.message || String(err));

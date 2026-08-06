@@ -5890,12 +5890,17 @@ export function applyRiskLevel(
 
   syncConfigAliases();
 
-  // Always apply on/off module baseline when switching risk (lean On / ops-only Off).
+  // Synced recipe: re-apply lean On / ops-only Off modules.
+  // Custom recipe: keep user module toggles; still apply size/filter/risk knobs above.
   try {
-    const { applyRiskStrategyRecipe } =
-      require('./strategies') as typeof import('./strategies');
-    config.strategyRecipeMode = 'synced';
-    applyRiskStrategyRecipe(canonical, { persist: false });
+    const recipeMode =
+      config.strategyRecipeMode === 'custom' ? 'custom' : 'synced';
+    if (recipeMode === 'synced') {
+      const { applyRiskStrategyRecipe } =
+        require('./strategies') as typeof import('./strategies');
+      config.strategyRecipeMode = 'synced';
+      applyRiskStrategyRecipe(canonical, { persist: false });
+    }
 
     if (canonical === 'off') {
       Object.assign(config.filters, {

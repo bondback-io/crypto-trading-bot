@@ -4377,12 +4377,28 @@ export function applyBakedStrategyModulesDefaultOnBoot(): boolean {
       !!savedOverrides && Object.keys(savedOverrides).length > 0;
     const hadSelfLearning =
       !!savedSelfLearning && Object.keys(savedSelfLearning).length > 0;
+    // Custom recipe: preserve module toggles across bake (trade-profile restore still runs).
+    const preserveCustomToggles = config.strategyRecipeMode === 'custom';
+    const savedCustomToggles = preserveCustomToggles
+      ? ({ ...(config.strategyToggles || {}) } as StrategyToggleMap)
+      : null;
 
     clearPriorStrategyModulesDefaultMigrations(stamp);
     const result = importStrategyModulesBundle(baked, {
       persist: false,
       label: 'boot-default',
     });
+
+    if (preserveCustomToggles && savedCustomToggles) {
+      updateStrategyToggles(savedCustomToggles, {
+        persist: false,
+        syncUnderlying: true,
+        markCustom: true,
+      });
+      console.log(
+        '[settings] Preserved custom strategy module toggles across bake'
+      );
+    }
 
     // Restore user-owned micro-bot knobs — bake must never wipe learning / custom cards
     {

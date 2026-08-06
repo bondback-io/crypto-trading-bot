@@ -391,7 +391,8 @@ export function setDipBuyerRecoveryConfig(
   const enabled =
     typeof patch.enabled === 'boolean' ? patch.enabled : cur.enabled;
   const turningOn = enabled && wasOff;
-  if (turningOn && patch.stage == null && patch.forcedStage == null) stage = 0;
+  // Re-enable keeps persisted stage (already in `stage` from cur). Do not force 0.
+  // First-ever enable uses DEFAULT stage 0 via getDipBuyerRecoveryConfig.
 
   const next: DipBuyerRecoveryConfig = {
     enabled,
@@ -437,7 +438,7 @@ export function setDipBuyerRecoveryConfig(
   if (turningOn) {
     logger.info(
       'DipBuyerRecovery',
-      'Dip Buyer Recovery ON — default Stage 0'
+      `Dip Buyer Recovery ON — stage ${stage} (persisted)`
     );
   }
 

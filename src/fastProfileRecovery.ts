@@ -439,7 +439,23 @@ export function setFastProfileRecoveryConfig(
       ...(patch.readinessWeights || {}),
     },
   };
+  if (patch.enabled === false && cur.enabled) {
+    logger.info('FastRecovery', 'Fast Profiles Recovery Group enabled → false');
+  }
   if (patch.enabled === true && !cur.enabled) {
+    const allProfilesOff = FAST_RECOVERY_PROFILE_IDS.every(
+      (id) => next.profiles[id]?.enabled === false
+    );
+    if (allProfilesOff) {
+      for (const id of FAST_RECOVERY_PROFILE_IDS) {
+        const prev = next.profiles[id] || defaultProfileCfg();
+        next.profiles[id] = { ...prev, enabled: true };
+      }
+      logger.info(
+        'FastRecovery',
+        'Group ON with all profiles off — auto-enabled all four FPR profiles'
+      );
+    }
     for (const id of FAST_RECOVERY_PROFILE_IDS) {
       if (next.profiles[id]?.enabled !== false && next.profiles[id]?.forcedStage == null) {
         next.profiles[id]!.stage = 0;

@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.182',
+    title: 'Stop settings auto-reset',
+    sections: ['risk', 'knobs', 'microbots', 'overview'],
+    items: [
+      'Risk On/Off no longer wipes custom strategy modules — knobs still update; synced recipe mode keeps lean re-sync. Boot bake preserves custom toggles.',
+      'Fast Profiles Recovery: ignore saves until hydrated; Group ON auto-enables all four profiles if all were off; logs Group off.',
+      'Dip Buyer Recovery Force stage shows None (auto); re-enable keeps the persisted stage instead of resetting to S0.',
+    ],
+  },
+  {
     version: '1.2.181',
     title: 'Dip Buyer Recovery open-starvation relief',
     sections: ['microbots', 'execution', 'overview'],
