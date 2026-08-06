@@ -8522,7 +8522,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <input type="checkbox" id="hmc-clf-soft-elig" onchange="saveHmcClassifierConfig()" />
               <span>Soft eligibility <span class="tip" tabindex="0" data-tip="ON (default): preferred specialists score normally; other specialists still compete with ~−15% score (reason hmc_soft_deprioritized) — no hard hmc_not_eligible. OFF: hard filter to eligible lanes only."></span></span>
             </label>
-            <p class="text-xs text-slate-500 mb-1">Eligibility map: momentum → Momentum Burst / Scalper / Trend Rider / Reversal · dip → Dip Buyer / Reversal / Scalper · migration → Migration Sniper / Scalper / Momentum Burst · slow_quality → High Win-Rate / Steady / Smart Money.</p>
+            <p class="text-xs text-slate-500 mb-1">Eligibility map: momentum → MB / Scalper / Trend Rider / Reversal / Steady · dip → Dip Buyer / Reversal / Scalper / Trend Rider / Steady · migration → Sniper / Scalper / MB / Trend Rider · slow_quality → HWR / Steady / Smart Money / Trend Rider.</p>
             <p class="text-xs text-slate-500 mb-0">Runs after Gatekeeper allow, before lane fight. Agent Decision Log source HMC Classifier; lane fight rows show setup + eligible list.</p>
           </div>
         </details>

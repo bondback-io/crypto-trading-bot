@@ -6148,6 +6148,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   if (isSmartBotProfilesEnabled()) {
     const ctx = buildTradeProfileMatchContext(signal);
+    if (lastHmcClassifier?.setup) {
+      ctx.hmcSetup = lastHmcClassifier.setup;
+    }
     const softLaneMode =
       classifierSoftEligibility &&
       classifierPreferredIds != null &&

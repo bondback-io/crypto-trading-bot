@@ -41,6 +41,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.205',
+    title: 'HMC rebalance for Trend / Dip / Steady',
+    sections: ['microbots', 'knobs', 'execution'],
+    items: [
+      'Classifier maps widen: Trend Rider on dip / migration / slow_quality; Steady Compounder on momentum / dip — soft eligibility stays OFF.',
+      'High-confidence narrow bar raised 0.55 → 0.65 so borderline setups use full specialist eligibility.',
+      'Gatekeeper Medium: thin 5m volume is advisory for quality / non-fast hints when 1h volume clears the Medium floor (hard safety still blocks).',
+      'Lane priorities: Trend Rider 76, Steady Compounder 70; Dip Buyer eases MC / H1 confirm floors on classified or structural dip paths.',
+    ],
+  },
+  {
     version: '1.2.204',
     title: 'Market Scanner enable sticks',
     sections: ['overview', 'microbots', 'alerts'],

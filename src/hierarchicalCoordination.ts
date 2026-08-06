@@ -127,10 +127,27 @@ export const HMC_SPECIALIST_PROFILE_IDS: HmcProfileId[] = [
 
 /** Setup class → eligible TradeProfileId specialists. */
 export const SETUP_ELIGIBLE_PROFILES: Record<SetupClass, HmcProfileId[]> = {
-  momentum: ['momentum_burst', 'scalper', 'trend_rider', 'reversal_scalper'],
-  dip: ['dip_buyer', 'reversal_scalper', 'scalper'],
-  migration: ['migration_sniper', 'scalper', 'momentum_burst'],
-  slow_quality: ['high_win_rate', 'steady_compounder', 'smart_money_mirror'],
+  momentum: [
+    'momentum_burst',
+    'scalper',
+    'trend_rider',
+    'reversal_scalper',
+    'steady_compounder',
+  ],
+  dip: [
+    'dip_buyer',
+    'reversal_scalper',
+    'scalper',
+    'trend_rider',
+    'steady_compounder',
+  ],
+  migration: ['migration_sniper', 'scalper', 'momentum_burst', 'trend_rider'],
+  slow_quality: [
+    'high_win_rate',
+    'steady_compounder',
+    'smart_money_mirror',
+    'trend_rider',
+  ],
   unknown: [...HMC_SPECIALIST_PROFILE_IDS],
 };
 
@@ -186,7 +203,7 @@ export function classifySetupStub(
 /** Low confidence below this is treated as unknown. */
 const CLASSIFIER_CONFIDENCE_FLOOR = 0.5;
 /** Below this (or AMBIGUOUS / CLOSE_SECOND) → widen eligibility to full specialists. */
-const CLASSIFIER_HIGH_CONFIDENCE = 0.55;
+const CLASSIFIER_HIGH_CONFIDENCE = 0.65;
 
 const CLASSIFIER_CACHE_TTL_MS = 45_000;
 const classifierCache = new Map<
@@ -820,6 +837,24 @@ function profileActivityMult(profileHint?: string | null): number {
   return 1;
 }
 
+/**
+ * Medium + soft-enforced: quality / non-fast hints may treat thin M5 as
+ * advisory when H1 clears the Medium floor (hard safety still blocks).
+ */
+function qualifiesForMediumM5Advisory(profileHint?: string | null): boolean {
+  const id = String(profileHint || '');
+  if (
+    id === 'trend_rider' ||
+    id === 'steady_compounder' ||
+    id === 'high_win_rate' ||
+    id === 'smart_money_mirror'
+  ) {
+    return true;
+  }
+  // No hint, or any non-fast-lane hint (not scalper / MB / sniper / reversal).
+  return !isVolumeIntelFastProfile(id);
+}
+
 function plainFromCodes(
   decision: GatekeeperDecision,
   codes: string[],
@@ -1018,12 +1053,26 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
     // softBlocksEnforced is checked — hard safety already handled above.
     const enforceSoft =
       cfg.softBlocksEnforced && cfg.gatekeeperStrictness !== 'low';
-    if (enforceSoft) {
+
+    // Medium quality path: thin M5 alone is advisory when H1 ≥ floor.
+    let softForEnforce = softCodes;
+    if (
+      enforceSoft &&
+      cfg.gatekeeperStrictness === 'medium' &&
+      softCodes.includes('ACTIVITY_LOW_VOLUME_M5') &&
+      volH1 != null &&
+      volH1 >= minH1 &&
+      qualifiesForMediumM5Advisory(input.profileHint)
+    ) {
+      softForEnforce = softCodes.filter((c) => c !== 'ACTIVITY_LOW_VOLUME_M5');
+    }
+
+    if (enforceSoft && softForEnforce.length) {
       result = {
         decision: 'block',
         severity: 'soft',
         reasonCodes: softCodes,
-        plainLanguage: plainFromCodes('block', softCodes, false),
+        plainLanguage: plainFromCodes('block', softForEnforce, false),
       };
     } else {
       result = {

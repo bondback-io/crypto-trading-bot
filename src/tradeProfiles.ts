@@ -667,7 +667,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Lane floors: age ≥1.5h · holders ≥40 · 1h vol ≥$4k',
       'Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA (global scanner still gated)',
     ],
-    priority: 68,
+    priority: 76,
     defaultEnabled: true,
     match: {
       preferTrend: true,
@@ -960,7 +960,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
       'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
     ],
-    priority: 62,
+    priority: 70,
     defaultEnabled: true,
     match: {
       preferSteadyCompounder: true,
@@ -1295,6 +1295,11 @@ export interface TradeProfileMatchContext {
   preferProfileId?: string | null;
   /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
+  /**
+   * HMC Setup Classifier class when available (e.g. 'dip') — used to ease
+   * dip_buyer conversion floors on classified dip paths.
+   */
+  hmcSetup?: string | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -2498,12 +2503,14 @@ export function evaluateLaneEntryFloors(
       ? Number(ctx.holderCount)
       : null;
 
+  const eased = dipBuyerEasedFloors(def, ctx);
   const profileMin =
-    m.minMarketCapUsd != null &&
+    eased?.minMarketCapUsd ??
+    (m.minMarketCapUsd != null &&
     Number.isFinite(m.minMarketCapUsd) &&
     m.minMarketCapUsd > 0
       ? Number(m.minMarketCapUsd)
-      : 0;
+      : 0);
   const globalMin = effectiveMinMarketCapUsd();
   const laneMinMc = Math.max(globalMin, profileMin);
 
@@ -2623,6 +2630,47 @@ export function resolveTokenAgeHoursForGate(
     return Math.max(0, Number(ctx.tokenAgeHours));
   }
   return null;
+}
+
+/** Classified dip or clear structural dip context — ease dip_buyer floors. */
+function isDipBuyerEasePath(ctx: TradeProfileMatchContext): boolean {
+  if (String(ctx.hmcSetup || '').toLowerCase() === 'dip') return true;
+  if (ctx.shortTermStrategyId === 'post_run_dip') return true;
+  const drop =
+    ctx.dropFromPeakPct != null && Number.isFinite(ctx.dropFromPeakPct)
+      ? Number(ctx.dropFromPeakPct)
+      : ctx.localPullbackPct != null && Number.isFinite(ctx.localPullbackPct)
+        ? Number(ctx.localPullbackPct)
+        : null;
+  if (drop != null && drop >= 8) return true;
+  if (ctx.nearKeyFib === true || ctx.nearSupport === true) return true;
+  return false;
+}
+
+/** Eased MC / H1 floors for dip_buyer on classified or structural dip paths. */
+function dipBuyerEasedFloors(
+  def: TradeProfileDefinition,
+  ctx: TradeProfileMatchContext
+): { minMarketCapUsd: number; minVolumeH1Usd: number } | null {
+  if (def.id !== 'dip_buyer' || !isDipBuyerEasePath(ctx)) return null;
+  const m = def.match;
+  const baseMc =
+    m.minMarketCapUsd != null &&
+    Number.isFinite(m.minMarketCapUsd) &&
+    m.minMarketCapUsd > 0
+      ? Number(m.minMarketCapUsd)
+      : 500_000;
+  const baseH1 =
+    m.minVolumeH1Usd != null &&
+    Number.isFinite(m.minVolumeH1Usd) &&
+    m.minVolumeH1Usd > 0
+      ? Number(m.minVolumeH1Usd)
+      : 8_000;
+  // ~30% ease so mid-MC classified dips convert instead of scalper-only.
+  return {
+    minMarketCapUsd: Math.round(baseMc * 0.7),
+    minVolumeH1Usd: Math.round(baseH1 * 0.7),
+  };
 }
 
 export interface TradeProfileLaneResult {
@@ -3074,7 +3122,13 @@ function scoreProfile(
         bits.push(`patterns ${hits.join('+')}`);
       }
     }
-    if (volH1 != null && volH1 >= (m.minVolumeH1Usd ?? 2000)) {
+    if (
+      volH1 != null &&
+      volH1 >=
+        (dipBuyerEasedFloors(def, ctx)?.minVolumeH1Usd ??
+          m.minVolumeH1Usd ??
+          2000)
+    ) {
       score += 8;
       bits.push('volume confirm');
     }
