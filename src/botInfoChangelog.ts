@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.194',
+    title: 'Zion chat emoji feedback + voice input',
+    sections: ['zion', 'overview'],
+    items: [
+      'Learning feedback under Zion replies is now compact emoji reactions (🙂 😐 🙁 😢) with light hover/click animation — same Good / Too technical / Forgot context / Better signals.',
+      'Composer stays focused after Send for rapid follow-up questions. Mic toggle before Send: voice dictation (Web Speech API), 3s silence auto-send, and helpers (“send”, “clear”, “cancel”, “new question”). Mic defaults off each page load.',
+    ],
+  },
+  {
     version: '1.2.193',
     title: 'Zion continuous learning',
     sections: ['zion', 'learning', 'overview'],

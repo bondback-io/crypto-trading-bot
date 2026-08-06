@@ -5776,16 +5776,39 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
     .zion-chat-message.is-user .zion-chat-time { text-align: right; }
     .zion-feedback-row {
-      display: flex; flex-wrap: wrap; gap: 0.28rem; margin-top: 0.2rem; padding: 0 0.05rem;
+      display: flex; flex-wrap: nowrap; align-items: center; gap: 0.15rem;
+      margin-top: 0.15rem; padding: 0 0.05rem;
     }
     .zion-feedback-btn {
-      border: 1px solid #334155; border-radius: 0.4rem; padding: 0.12rem 0.4rem;
-      color: #94a3b8; background: transparent; font-size: 0.62rem; font-weight: 650; cursor: pointer;
+      border: 0; border-radius: 0.35rem; padding: 0.05rem;
+      width: 1.35rem; height: 1.35rem; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: inherit; background: transparent; font-size: 0.85rem;
+      cursor: pointer; opacity: 0.55;
+      transform: scale(1);
+      transition: transform 0.15s ease, opacity 0.15s ease;
     }
     .zion-feedback-btn:hover, .zion-feedback-btn:focus-visible {
-      color: #fde7cf; border-color: rgba(242, 174, 102, 0.45); outline: none;
+      opacity: 1; outline: none; transform: scale(1.18);
     }
-    .zion-feedback-btn.is-done { opacity: 0.55; pointer-events: none; }
+    .zion-feedback-btn:active {
+      transform: scale(0.92);
+      animation: zion-fb-bounce 0.35s ease;
+    }
+    .zion-feedback-btn.is-done { opacity: 0.35; pointer-events: none; transform: scale(1); }
+    @keyframes zion-fb-bounce {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.28); }
+      100% { transform: scale(1); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .zion-feedback-btn,
+      .zion-feedback-btn:hover,
+      .zion-feedback-btn:focus-visible,
+      .zion-feedback-btn:active {
+        transition: none; animation: none; transform: none;
+      }
+    }
     .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
     /* 16px prevents iOS Safari auto-zoom on focus */
     .zion-chat-composer input {
@@ -5800,6 +5823,40 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       line-height: 1.35;
     }
     .zion-chat-composer input::placeholder { color: #64748b; font-size: 16px; }
+    .zion-mic-btn {
+      position: relative;
+      flex: 0 0 auto;
+      width: 2.2rem; height: 2.2rem;
+      border: 1px solid #334155; border-radius: 0.55rem;
+      background: transparent; color: #64748b;
+      display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; padding: 0; font-size: 1rem; line-height: 1;
+      opacity: 0.55; transition: color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .zion-mic-btn:hover, .zion-mic-btn:focus-visible {
+      opacity: 0.9; color: #94a3b8; border-color: #64748b; outline: none;
+    }
+    .zion-mic-btn.is-on {
+      opacity: 1; color: #34d399; border-color: rgba(52, 211, 153, 0.55);
+      background: rgba(6, 78, 59, 0.35);
+    }
+    .zion-mic-btn.is-on:hover, .zion-mic-btn.is-on:focus-visible {
+      color: #6ee7b7; border-color: rgba(110, 231, 183, 0.7);
+    }
+    .zion-mic-btn.is-unsupported,
+    .zion-mic-btn:disabled {
+      opacity: 0.35; cursor: not-allowed;
+    }
+    .zion-mic-dot {
+      position: absolute; top: 0.28rem; right: 0.28rem;
+      width: 0.38rem; height: 0.38rem; border-radius: 999px;
+      background: #22c55e; box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85);
+      display: none;
+    }
+    .zion-mic-btn.is-on .zion-mic-dot { display: block; }
+    @media (prefers-reduced-motion: reduce) {
+      .zion-mic-btn { transition: none; }
+    }
     .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
     .zion-chat-clear {
@@ -8071,6 +8128,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
+          <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('main')">
+            <span aria-hidden="true">🎤</span><span class="zion-mic-dot" aria-hidden="true"></span>
+          </button>
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
           <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
           <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
@@ -8192,6 +8252,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-agent-widget-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-composer">
           <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
+          <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('widget')">
+            <span aria-hidden="true">🎤</span><span class="zion-mic-dot" aria-hidden="true"></span>
+          </button>
           <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
           <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
           <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
@@ -28078,10 +28141,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ? ''
             : (
               '<div class="zion-feedback-row" data-zion-fb="' + mid + '">' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="good" data-zion-fb-id="' + mid + '">Good</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="too_technical" data-zion-fb-id="' + mid + '">Too technical</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="forgot_context" data-zion-fb-id="' + mid + '">Forgot context</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="better" data-zion-fb-id="' + mid + '">Better</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="good" data-zion-fb-id="' + mid + '" title="Good" aria-label="Good">🙂</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="too_technical" data-zion-fb-id="' + mid + '" title="Too technical" aria-label="Too technical">😐</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="forgot_context" data-zion-fb-id="' + mid + '" title="Forgot context" aria-label="Forgot context">🙁</button>' +
+                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="better" data-zion-fb-id="' + mid + '" title="Needs better / clearer" aria-label="Needs better">😢</button>' +
               '</div>'
             );
           return (
@@ -28173,7 +28236,299 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.querySelectorAll('.zion-chat-send').forEach(function (btn) {
         btn.disabled = !!busy;
       });
+      document.querySelectorAll('.zion-mic-btn').forEach(function (btn) {
+        if (btn.classList.contains('is-unsupported')) return;
+        btn.disabled = !!busy;
+      });
+      if (busy) {
+        pauseZionVoiceForBusy();
+      } else {
+        resumeZionVoiceAfterBusy();
+      }
     }
+    function focusZionComposer(source) {
+      const id =
+        source === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input';
+      const el = document.getElementById(id);
+      if (!el || el.disabled) return;
+      try {
+        el.focus({ preventScroll: true });
+      } catch (_) {
+        try { el.focus(); } catch (__) {}
+      }
+    }
+
+    /** Voice-to-chat (Web Speech API). Default OFF each page load. */
+    let _zionVoiceOn = false;
+    let _zionVoiceSource = 'widget';
+    let _zionVoiceRec = null;
+    let _zionVoiceSilenceTimer = null;
+    let _zionVoiceBaseText = '';
+    let _zionVoicePausedBusy = false;
+    const ZION_VOICE_SILENCE_MS = 3000;
+
+    function getZionSpeechRecognitionCtor() {
+      const w = window;
+      return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+    }
+
+    function syncZionMicUi() {
+      const supported = !!getZionSpeechRecognitionCtor();
+      ['zion-agent-mic', 'zion-agent-widget-mic'].forEach(function (id) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (!supported) {
+          btn.classList.add('is-unsupported');
+          btn.classList.remove('is-on');
+          btn.setAttribute('aria-pressed', 'false');
+          btn.setAttribute('aria-label', 'Voice not supported in this browser');
+          btn.title = 'Voice not supported in this browser';
+          btn.disabled = true;
+          return;
+        }
+        btn.classList.remove('is-unsupported');
+        const on = _zionVoiceOn;
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute(
+          'aria-label',
+          on ? 'Voice input on — click to stop' : 'Voice input off — click to speak'
+        );
+        btn.title = on
+          ? 'Listening… (3s silence sends · say “send”, “clear”, or “cancel”)'
+          : 'Voice input (off)';
+        if (!_zionChatBusy) btn.disabled = false;
+      });
+    }
+
+    function clearZionVoiceSilenceTimer() {
+      if (_zionVoiceSilenceTimer) {
+        clearTimeout(_zionVoiceSilenceTimer);
+        _zionVoiceSilenceTimer = null;
+      }
+    }
+
+    function zionVoiceInputEl() {
+      return document.getElementById(
+        _zionVoiceSource === 'widget'
+          ? 'zion-agent-widget-input'
+          : 'zion-agent-input'
+      );
+    }
+
+    function stripZionVoiceCommands(raw) {
+      let text = String(raw || '').replace(/\s+/g, ' ').trim();
+      const lower = text.toLowerCase();
+      const cmds = [
+        {
+          re: /\b(send it|send message|send that|send)\s*$/i,
+          action: 'send',
+        },
+        {
+          re: /\b(clear that|scratch that|clear)\s*$/i,
+          action: 'clear',
+        },
+        {
+          re: /\b(stop listening|microphone off|mic off|cancel)\s*$/i,
+          action: 'cancel',
+        },
+        {
+          re: /\b(new question)\s*$/i,
+          action: 'new_question',
+        },
+      ];
+      for (let i = 0; i < cmds.length; i++) {
+        if (cmds[i].re.test(text)) {
+          text = text.replace(cmds[i].re, '').replace(/\s+/g, ' ').trim();
+          return { text: text, action: cmds[i].action };
+        }
+      }
+      return { text: text, action: null };
+    }
+
+    function stopZionVoiceRecognition(opts) {
+      clearZionVoiceSilenceTimer();
+      const keepOn = opts && opts.keepOnFlag === true;
+      if (_zionVoiceRec) {
+        try {
+          _zionVoiceRec.onresult = null;
+          _zionVoiceRec.onerror = null;
+          _zionVoiceRec.onend = null;
+          _zionVoiceRec.stop();
+        } catch (_) {}
+        try { _zionVoiceRec.abort(); } catch (_) {}
+        _zionVoiceRec = null;
+      }
+      if (!keepOn) {
+        _zionVoiceOn = false;
+        _zionVoicePausedBusy = false;
+        _zionVoiceBaseText = '';
+      }
+      syncZionMicUi();
+    }
+
+    function scheduleZionVoiceSilenceSend() {
+      clearZionVoiceSilenceTimer();
+      _zionVoiceSilenceTimer = setTimeout(function () {
+        _zionVoiceSilenceTimer = null;
+        if (!_zionVoiceOn || _zionChatBusy) return;
+        const inp = zionVoiceInputEl();
+        const msg = inp ? String(inp.value || '').trim() : '';
+        if (!msg) return;
+        sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
+      }, ZION_VOICE_SILENCE_MS);
+    }
+
+    function handleZionVoiceFinalTranscript(finalChunk) {
+      const parsed = stripZionVoiceCommands(finalChunk);
+      const inp = zionVoiceInputEl();
+      if (!inp) return;
+      if (parsed.action === 'cancel') {
+        stopZionVoiceRecognition();
+        return;
+      }
+      if (parsed.action === 'clear' || parsed.action === 'new_question') {
+        inp.value = '';
+        _zionVoiceBaseText = '';
+        clearZionVoiceSilenceTimer();
+        focusZionComposer(_zionVoiceSource);
+        return;
+      }
+      const next = [_zionVoiceBaseText, parsed.text]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      inp.value = next;
+      _zionVoiceBaseText = next;
+      if (parsed.action === 'send') {
+        clearZionVoiceSilenceTimer();
+        if (next) {
+          sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
+        }
+        return;
+      }
+      scheduleZionVoiceSilenceSend();
+    }
+
+    function startZionVoiceRecognition() {
+      const Ctor = getZionSpeechRecognitionCtor();
+      if (!Ctor) {
+        syncZionMicUi();
+        return;
+      }
+      stopZionVoiceRecognition({ keepOnFlag: true });
+      const inp = zionVoiceInputEl();
+      _zionVoiceBaseText = inp ? String(inp.value || '').trim() : '';
+      const rec = new Ctor();
+      _zionVoiceRec = rec;
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = (navigator.language || 'en-US');
+      rec.maxAlternatives = 1;
+      rec.onresult = function (event) {
+        if (!_zionVoiceOn || _zionChatBusy) return;
+        let interim = '';
+        let finalChunk = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          const t = String((r && r[0] && r[0].transcript) || '');
+          if (r.isFinal) finalChunk += t;
+          else interim += t;
+        }
+        const inpEl = zionVoiceInputEl();
+        if (!inpEl) return;
+        if (finalChunk) {
+          handleZionVoiceFinalTranscript(finalChunk);
+          return;
+        }
+        if (interim) {
+          const live = [_zionVoiceBaseText, interim.trim()]
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          inpEl.value = live;
+          scheduleZionVoiceSilenceSend();
+        }
+      };
+      rec.onerror = function (ev) {
+        const err = String((ev && ev.error) || '');
+        if (err === 'aborted' || err === 'no-speech') return;
+        if (err === 'not-allowed' || err === 'service-not-allowed') {
+          stopZionVoiceRecognition();
+          try {
+            const btn = document.getElementById(
+              _zionVoiceSource === 'widget'
+                ? 'zion-agent-widget-mic'
+                : 'zion-agent-mic'
+            );
+            if (btn) btn.title = 'Microphone permission denied';
+          } catch (_) {}
+          return;
+        }
+        // Network / other — soft restart if still on
+        if (_zionVoiceOn && !_zionChatBusy) {
+          try { startZionVoiceRecognition(); } catch (_) {}
+        }
+      };
+      rec.onend = function () {
+        _zionVoiceRec = null;
+        if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
+          try { startZionVoiceRecognition(); } catch (_) {}
+        }
+      };
+      try {
+        rec.start();
+      } catch (err) {
+        stopZionVoiceRecognition();
+      }
+      syncZionMicUi();
+      focusZionComposer(_zionVoiceSource);
+    }
+
+    function toggleZionVoice(source) {
+      const src = source === 'widget' ? 'widget' : 'main';
+      if (!getZionSpeechRecognitionCtor()) {
+        syncZionMicUi();
+        return;
+      }
+      if (_zionChatBusy) return;
+      if (_zionVoiceOn && _zionVoiceSource === src) {
+        stopZionVoiceRecognition();
+        focusZionComposer(src);
+        return;
+      }
+      _zionVoiceSource = src;
+      _zionVoiceOn = true;
+      _zionVoicePausedBusy = false;
+      startZionVoiceRecognition();
+    }
+
+    function pauseZionVoiceForBusy() {
+      if (!_zionVoiceOn) return;
+      _zionVoicePausedBusy = true;
+      clearZionVoiceSilenceTimer();
+      if (_zionVoiceRec) {
+        try {
+          _zionVoiceRec.onresult = null;
+          _zionVoiceRec.onerror = null;
+          _zionVoiceRec.onend = null;
+          _zionVoiceRec.stop();
+        } catch (_) {}
+        _zionVoiceRec = null;
+      }
+    }
+
+    function resumeZionVoiceAfterBusy() {
+      if (!_zionVoiceOn || !_zionVoicePausedBusy) return;
+      _zionVoicePausedBusy = false;
+      startZionVoiceRecognition();
+    }
+
+    // Init mic UI once DOM ready
+    try { syncZionMicUi(); } catch (_) {}
+    window.toggleZionVoice = toggleZionVoice;
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
       try {
@@ -28636,9 +28991,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       await loadZionAgent();
     }
     async function sendZionAgentChat(source) {
-      const inp = document.getElementById(source === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input');
+      const sendSource = source === 'widget' ? 'widget' : 'main';
+      const inp = document.getElementById(
+        sendSource === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input'
+      );
       const msg = inp ? String(inp.value || '').trim() : '';
-      if (!msg) return;
+      if (!msg) {
+        focusZionComposer(sendSource);
+        return;
+      }
+      if (_zionVoiceOn) {
+        _zionVoiceSource = sendSource;
+        _zionVoiceBaseText = '';
+        clearZionVoiceSilenceTimer();
+      }
       ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
         const el = document.getElementById(id);
         if (el) el.value = '';
@@ -28681,6 +29047,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } finally {
         _zionChatBusy = false;
         setZionChatBusy(false);
+        focusZionComposer(sendSource);
         if (_zionChatNeedsRefresh) {
           _zionChatNeedsRefresh = false;
           loadZionAgent();
