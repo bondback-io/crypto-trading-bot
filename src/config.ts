@@ -2413,6 +2413,7 @@ export const config: BotConfig = {
     debugLogging: 'normal',
     classifierEnabled: false,
     unknownSetupsCanTrade: true,
+    classifierSoftEligibility: true,
   },
 
   fastProfileRecovery: {
@@ -3154,6 +3155,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         debugLogging: 'normal',
         classifierEnabled: false,
         unknownSetupsCanTrade: true,
+        classifierSoftEligibility: true,
       }
     ) as PersistedBotSettings['hierarchicalCoordination'],
     fastProfileRecovery: cloneJson(
@@ -4130,6 +4132,7 @@ function applySettingsSnapshot(
             : 'normal',
         classifierEnabled: s.classifierEnabled === true,
         unknownSetupsCanTrade: s.unknownSetupsCanTrade !== false,
+        classifierSoftEligibility: s.classifierSoftEligibility !== false,
       };
       config.hierarchicalCoordination = getHierarchicalCoordinationConfig();
     } catch {

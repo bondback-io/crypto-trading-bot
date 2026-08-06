@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.203',
+    title: 'HMC classifier — restore trade volume',
+    sections: ['microbots', 'learning', 'overview'],
+    items: [
+      'Setup Classifier confidence floor raised (0.50); ambiguous / close-second / conf < 0.55 widens eligibility to all specialists while still logging the preferred setup.',
+      'Wider eligibility maps (momentum + Reversal; dip + Reversal/Scalper; migration + Scalper/Momentum Burst). MIG_FRESH only when migration context is already present.',
+      'Soft eligibility (default ON): preferred lanes score normally; non-preferred still compete with ~−15% (reason hmc_soft_deprioritized) — no hard hmc_not_eligible. Toggle under Classifier Show; hard filter when OFF.',
+    ],
+  },
+  {
     version: '1.2.202',
     title: 'Zion wake-word mic + places reliability',
     sections: ['zion', 'overview'],

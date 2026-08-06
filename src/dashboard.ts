@@ -8505,7 +8505,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <details class="strat-adv-pack" id="hmc-classifier-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
-              <span class="text-sm font-semibold text-slate-200">HMC Setup Classifier <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Phase 2: after Gatekeeper allow, classify setup (momentum / dip / migration / slow_quality) and restrict which specialist lanes may compete. MARL ranks only eligible lanes. Default OFF. No TP/SL changes."></span></span>
+              <span class="text-sm font-semibold text-slate-200">HMC Setup Classifier <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Phase 2: after Gatekeeper allow, classify setup (momentum / dip / migration / slow_quality) and prefer which specialist lanes compete. Soft eligibility (default ON) keeps non-preferred lanes in the fight with a score penalty; hard mode filters them out. Ambiguous/low-conf widens to all specialists. Default classifier OFF. No TP/SL changes."></span></span>
               <span id="hmc-clf-status-badge" class="badge status-badge" style="font-size:11px">Classifier OFF</span>
             </span>
             <label class="ctl-check" title="Enable HMC Setup Classifier" onclick="event.stopPropagation()">
@@ -8518,7 +8518,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <input type="checkbox" id="hmc-clf-unknown-trade" onchange="saveHmcClassifierConfig()" />
               <span>Unknown setups can trade <span class="tip" tabindex="0" data-tip="ON (default): unknown / low-confidence setups keep all specialists eligible. OFF: block entry when setup is unknown."></span></span>
             </label>
-            <p class="text-xs text-slate-500 mb-1">Eligibility map: momentum → Momentum Burst / Scalper / Trend Rider · dip → Dip Buyer · migration → Migration Sniper · slow_quality → High Win-Rate / Steady / Smart Money.</p>
+            <label class="ctl-check mb-2" title="Soft eligibility: non-preferred lanes still compete with a score penalty">
+              <input type="checkbox" id="hmc-clf-soft-elig" onchange="saveHmcClassifierConfig()" />
+              <span>Soft eligibility <span class="tip" tabindex="0" data-tip="ON (default): preferred specialists score normally; other specialists still compete with ~−15% score (reason hmc_soft_deprioritized) — no hard hmc_not_eligible. OFF: hard filter to eligible lanes only."></span></span>
+            </label>
+            <p class="text-xs text-slate-500 mb-1">Eligibility map: momentum → Momentum Burst / Scalper / Trend Rider / Reversal · dip → Dip Buyer / Reversal / Scalper · migration → Migration Sniper / Scalper / Momentum Burst · slow_quality → High Win-Rate / Steady / Smart Money.</p>
             <p class="text-xs text-slate-500 mb-0">Runs after Gatekeeper allow, before lane fight. Agent Decision Log source HMC Classifier; lane fight rows show setup + eligible list.</p>
           </div>
         </details>
@@ -15654,6 +15658,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '</div>'
               : '';
             const clf = d.hmcClassifier || null;
+            const clfSoftTag = clf && clf.softEligibility ? ' · soft' : '';
             const clfLine = clf && clf.plainLanguage
               ? '<div class="tp-decision-why" style="color:' +
                 (clf.blocked ? '#f87171' : '#c4b5fd') +
@@ -15662,6 +15667,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   (clf.setup || '') +
                     ' · conf=' +
                     (clf.confidence != null ? Number(clf.confidence).toFixed(2) : '') +
+                    (clf.softEligibility ? ' · soft eligibility' : '') +
                     ' · ' +
                     (Array.isArray(clf.eligibleProfileIds)
                       ? clf.eligibleProfileIds.join(', ')
@@ -15670,7 +15676,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (clf.reasonCodes || []).join(', ')
                 ) +
                 '">' +
-                  '<span style="font-weight:700">Setup</span> · ' +
+                  '<span style="font-weight:700">Setup</span>' +
+                  escHtml(clfSoftTag) +
+                  ' · ' +
                   escHtml(String(clf.plainLanguage).slice(0, 180)) +
                 '</div>'
               : '';
@@ -27528,6 +27536,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (en) en.checked = c.classifierEnabled === true && c.enabled !== false;
         const unk = document.getElementById('hmc-clf-unknown-trade');
         if (unk) unk.checked = c.unknownSetupsCanTrade !== false;
+        const soft = document.getElementById('hmc-clf-soft-elig');
+        if (soft) soft.checked = c.classifierSoftEligibility !== false;
         const badge = document.getElementById('hmc-clf-status-badge');
         if (badge) {
           const on = c.enabled !== false && c.classifierEnabled === true;
@@ -27544,6 +27554,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           : false,
         unknownSetupsCanTrade: document.getElementById('hmc-clf-unknown-trade')
           ? document.getElementById('hmc-clf-unknown-trade').checked
+          : true,
+        classifierSoftEligibility: document.getElementById('hmc-clf-soft-elig')
+          ? document.getElementById('hmc-clf-soft-elig').checked
           : true,
       };
       await fetchJSON('/api/config/hierarchical-coordination', {

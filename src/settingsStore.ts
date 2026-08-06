@@ -250,6 +250,7 @@ export interface PersistedBotSettings {
     debugLogging?: 'off' | 'normal' | 'verbose';
     classifierEnabled?: boolean;
     unknownSetupsCanTrade?: boolean;
+    classifierSoftEligibility?: boolean;
   };
   /** Fast Profiles Recovery Stages 0–4 (no secrets) */
   fastProfileRecovery?: {

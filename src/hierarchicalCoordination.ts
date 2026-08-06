@@ -31,6 +31,12 @@ export interface HierarchicalCoordinationConfig {
   classifierEnabled: boolean;
   /** Phase 2 — unknown / low-confidence setups still allow all specialists */
   unknownSetupsCanTrade: boolean;
+  /**
+   * Phase 2 — soft eligibility (default ON): preferred specialists score normally;
+   * non-preferred still compete with a score penalty (no hard hmc_not_eligible).
+   * OFF restores hard eligibility filter.
+   */
+  classifierSoftEligibility: boolean;
 }
 
 /** Strictness-scaled activity floors (medium = baseline). */
@@ -53,6 +59,7 @@ export const DEFAULT_HIERARCHICAL_COORDINATION: HierarchicalCoordinationConfig =
     debugLogging: 'normal',
     classifierEnabled: false,
     unknownSetupsCanTrade: true,
+    classifierSoftEligibility: true,
   };
 
 export interface GatekeeperResult {
@@ -120,9 +127,9 @@ export const HMC_SPECIALIST_PROFILE_IDS: HmcProfileId[] = [
 
 /** Setup class → eligible TradeProfileId specialists. */
 export const SETUP_ELIGIBLE_PROFILES: Record<SetupClass, HmcProfileId[]> = {
-  momentum: ['momentum_burst', 'scalper', 'trend_rider'],
-  dip: ['dip_buyer'],
-  migration: ['migration_sniper'],
+  momentum: ['momentum_burst', 'scalper', 'trend_rider', 'reversal_scalper'],
+  dip: ['dip_buyer', 'reversal_scalper', 'scalper'],
+  migration: ['migration_sniper', 'scalper', 'momentum_burst'],
   slow_quality: ['high_win_rate', 'steady_compounder', 'smart_money_mirror'],
   unknown: [...HMC_SPECIALIST_PROFILE_IDS],
 };
@@ -144,6 +151,12 @@ export interface SetupClassifierResult {
   confidence: number;
   reasonCodes: string[];
   plainLanguage: string;
+  /** Narrow map for the preferred setup (soft-mode preferred lanes). */
+  preferredProfileIds: HmcProfileId[];
+  /**
+   * Hard-filter eligibility: narrow when high-conf clear winner;
+   * full specialists (like unknown + can-trade) when ambiguous / close / low conf.
+   */
   eligibleProfileIds: HmcProfileId[];
   /** When unknown and unknownSetupsCanTrade=false (or empty eligibles) */
   blocked: boolean;
@@ -171,7 +184,9 @@ export function classifySetupStub(
 }
 
 /** Low confidence below this is treated as unknown. */
-const CLASSIFIER_CONFIDENCE_FLOOR = 0.28;
+const CLASSIFIER_CONFIDENCE_FLOOR = 0.5;
+/** Below this (or AMBIGUOUS / CLOSE_SECOND) → widen eligibility to full specialists. */
+const CLASSIFIER_HIGH_CONFIDENCE = 0.55;
 
 const CLASSIFIER_CACHE_TTL_MS = 45_000;
 const classifierCache = new Map<
@@ -289,6 +304,7 @@ export function classifySetup(
       confidence: 0,
       reasonCodes: [],
       plainLanguage: 'Classifier off',
+      preferredProfileIds: [...HMC_SPECIALIST_PROFILE_IDS],
       eligibleProfileIds: [...HMC_SPECIALIST_PROFILE_IDS],
       blocked: false,
       inactive: true,
@@ -310,6 +326,7 @@ export function classifySetup(
         blocked,
         eligible
       ),
+      preferredProfileIds: eligible,
       eligibleProfileIds: eligible,
       blocked,
     };
@@ -357,7 +374,12 @@ export function classifySetup(
     scores.migration += 0.25;
     codes.push('MIG_SCANNER');
   }
-  if (ageH != null && ageH < 2) {
+  const migContext =
+    input.isMigration === true ||
+    input.nearMigration === true ||
+    entry === 'migration' ||
+    reasons.some((r) => r.includes('grad') || r.includes('migrat'));
+  if (migContext && ageH != null && ageH < 2) {
     scores.migration += 0.15;
     codes.push('MIG_FRESH');
   }
@@ -455,9 +477,8 @@ export function classifySetup(
     setup = best[0];
     confidence = Math.min(0.95, best[1]);
     if (second && second[1] > 0 && best[1] - second[1] < 0.12) {
-      // Ambiguous — prefer unknown unless clear winner
+      // Ambiguous / close second — keep preferred setup for logging; widen eligibility later
       if (best[1] < 0.45) {
-        setup = 'unknown';
         confidence = Math.min(0.4, best[1]);
         codes.push('AMBIGUOUS');
       } else {
@@ -484,7 +505,15 @@ export function classifySetup(
     codes.push('DATA_GAP');
   }
 
-  const eligible = eligibleForSetup(setup, cfg.unknownSetupsCanTrade);
+  const preferred = eligibleForSetup(setup, cfg.unknownSetupsCanTrade);
+  const ambiguousOrClose =
+    codes.includes('AMBIGUOUS') || codes.includes('CLOSE_SECOND');
+  const widenEligibility =
+    setup !== 'unknown' &&
+    (ambiguousOrClose || confidence < CLASSIFIER_HIGH_CONFIDENCE);
+  const eligible = widenEligibility
+    ? eligibleForSetup('unknown', cfg.unknownSetupsCanTrade)
+    : preferred;
   const blocked =
     eligible.length === 0 ||
     (setup === 'unknown' && !cfg.unknownSetupsCanTrade);
@@ -500,6 +529,7 @@ export function classifySetup(
       blocked,
       eligible
     ),
+    preferredProfileIds: preferred,
     eligibleProfileIds: eligible,
     blocked,
   };
@@ -603,6 +633,7 @@ export function getHierarchicalCoordinationConfig(): HierarchicalCoordinationCon
     debugLogging: parseDebug(raw?.debugLogging ?? d.debugLogging),
     classifierEnabled: raw?.classifierEnabled === true,
     unknownSetupsCanTrade: raw?.unknownSetupsCanTrade !== false,
+    classifierSoftEligibility: raw?.classifierSoftEligibility !== false,
   };
 }
 
@@ -658,6 +689,10 @@ export function setHierarchicalCoordinationConfig(
       typeof patch.unknownSetupsCanTrade === 'boolean'
         ? patch.unknownSetupsCanTrade
         : cur.unknownSetupsCanTrade,
+    classifierSoftEligibility:
+      typeof patch.classifierSoftEligibility === 'boolean'
+        ? patch.classifierSoftEligibility
+        : cur.classifierSoftEligibility,
   };
   (
     config as {

@@ -2641,14 +2641,29 @@ export interface TradeProfileLaneResult {
  */
 export function evaluateTradeProfileLanes(
   ctx: TradeProfileMatchContext,
-  opts?: { silent?: boolean; eligibleProfileIds?: string[] | null }
+  opts?: {
+    silent?: boolean;
+    eligibleProfileIds?: string[] | null;
+    /** Soft mode: preferred specialists score normally; others compete with penalty. */
+    preferredProfileIds?: string[] | null;
+    softEligibility?: boolean;
+  }
 ): TradeProfileLaneResult[] {
   const state = ensureState();
   if (!state.enabled) {
     return [];
   }
+  const softMode =
+    opts?.softEligibility === true &&
+    opts?.preferredProfileIds != null &&
+    opts.preferredProfileIds.length > 0;
+  const preferredSet = softMode
+    ? new Set(opts!.preferredProfileIds!.map(String))
+    : null;
   const eligibleSet =
-    opts?.eligibleProfileIds != null && opts.eligibleProfileIds.length > 0
+    !softMode &&
+    opts?.eligibleProfileIds != null &&
+    opts.eligibleProfileIds.length > 0
       ? new Set(opts.eligibleProfileIds.map(String))
       : null;
   const results: TradeProfileLaneResult[] = [];
@@ -2729,6 +2744,10 @@ export function evaluateTradeProfileLanes(
       }
     } catch {
       /* ignore */
+    }
+    if (preferredSet && !preferredSet.has(def.id)) {
+      laneScore = Math.round(laneScore * 0.85 * 10) / 10;
+      laneReason = `${laneReason} · hmc_soft_deprioritized`;
     }
     const assignment = buildAssignmentFromDef(def, ctx, {
       score: laneScore,

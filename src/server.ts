@@ -3895,6 +3895,7 @@ export function createServer(): express.Application {
           debugLogging,
           classifierEnabled: boolOrUndef(body.classifierEnabled),
           unknownSetupsCanTrade: boolOrUndef(body.unknownSetupsCanTrade),
+          classifierSoftEligibility: boolOrUndef(body.classifierSoftEligibility),
         });
         try {
           const { queueGithubBackupUploadAfterCriticalSave } =

@@ -5589,7 +5589,9 @@ function logLaneFightDecisions(
     reasonCodes: string[];
     plainLanguage: string;
     eligibleProfileIds: string[];
+    preferredProfileIds?: string[];
     blocked?: boolean;
+    softEligibility?: boolean;
   }
 ): void {
   const winner = pickWinningTradeProfileLane(lanes);
@@ -5966,10 +5968,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         reasonCodes: string[];
         plainLanguage: string;
         eligibleProfileIds: string[];
+        preferredProfileIds?: string[];
         blocked?: boolean;
+        softEligibility?: boolean;
       }
     | undefined;
   let classifierEligibleIds: string[] | null = null;
+  let classifierPreferredIds: string[] | null = null;
+  let classifierSoftEligibility = false;
   {
     let gatekeeperActive = false;
     let classifierActive = false;
@@ -6060,8 +6066,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         const {
           classifySetup,
           recordClassifierDecision,
+          getHierarchicalCoordinationConfig,
         } =
           require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+        const hmcClfCfg = getHierarchicalCoordinationConfig();
+        classifierSoftEligibility = hmcClfCfg.classifierSoftEligibility !== false;
         const profileHint = signal.candidateTradeProfileId || null;
         const clf = classifySetup({
           mint: signal.mint,
@@ -6105,7 +6114,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             reasonCodes: clf.reasonCodes,
             plainLanguage: clf.plainLanguage,
             eligibleProfileIds: clf.eligibleProfileIds,
+            preferredProfileIds: clf.preferredProfileIds,
             blocked: clf.blocked,
+            softEligibility: classifierSoftEligibility,
           };
           recordClassifierDecision({
             result: clf,
@@ -6124,6 +6135,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             return false;
           }
           classifierEligibleIds = clf.eligibleProfileIds;
+          classifierPreferredIds = clf.preferredProfileIds;
         }
       } catch (err) {
         console.warn(
@@ -6136,9 +6148,15 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
 
   if (isSmartBotProfilesEnabled()) {
     const ctx = buildTradeProfileMatchContext(signal);
+    const softLaneMode =
+      classifierSoftEligibility &&
+      classifierPreferredIds != null &&
+      classifierPreferredIds.length > 0;
     const lanes = evaluateTradeProfileLanes(ctx, {
       silent: false,
-      eligibleProfileIds: classifierEligibleIds,
+      eligibleProfileIds: softLaneMode ? null : classifierEligibleIds,
+      preferredProfileIds: softLaneMode ? classifierPreferredIds : null,
+      softEligibility: softLaneMode,
     });
     logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
     lanePassers = lanes.filter((l) => l.passed && l.assignment);

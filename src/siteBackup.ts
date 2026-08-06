@@ -664,6 +664,7 @@ export function reconcileCriticalSettingsFromBundledBackup(opts?: {
             : live.debugLogging,
         classifierEnabled: src.classifierEnabled === true,
         unknownSetupsCanTrade: src.unknownSetupsCanTrade !== false,
+        classifierSoftEligibility: src.classifierSoftEligibility !== false,
       });
       applied.push('hierarchicalCoordination');
     }
