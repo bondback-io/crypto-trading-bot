@@ -25,6 +25,8 @@ export interface ZionLifestyleChatResult {
   reply?: string;
   /** Inject into LLM system prompt when not fully short-circuited */
   facts?: string;
+  /** Client should show Turn on location when device coords missing */
+  needsLocation?: boolean;
 }
 
 /** Sunshine Coast, QLD — default when geolocation denied / missing */
@@ -38,7 +40,10 @@ export const ZION_FALLBACK_LOCATION: ZionDeviceLocation = {
 const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
+const OVERPASS_TIMEOUT_MS = 45_000;
+const OVERPASS_QUERY_TIMEOUT_S = 40;
 
 /** Ephemeral last known device/fallback location (RAM only). */
 let lastLocation: ZionDeviceLocation | null = null;
@@ -363,6 +368,29 @@ function parseOverpassElements(
   });
 }
 
+function overpassBbox(lat: number, lon: number, radiusKm: number): {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+} {
+  const km = Math.max(0.5, Math.min(radiusKm, 40));
+  const dLat = km / 111;
+  const cos = Math.cos((lat * Math.PI) / 180);
+  const dLon = km / (111 * Math.max(0.2, Math.abs(cos)));
+  return {
+    south: lat - dLat,
+    west: lon - dLon,
+    north: lat + dLat,
+    east: lon + dLon,
+  };
+}
+
+function isRetryableOverpassError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return /abort|timeout|network|fetch|ECONN|ETIMEDOUT|socket/i.test(msg);
+}
+
 export async function findPlaces(opts: {
   lat: number;
   lon: number;
@@ -372,49 +400,66 @@ export async function findPlaces(opts: {
   radiusKm?: number;
 }): Promise<{ ok: boolean; places: ZionPlace[]; error?: string }> {
   const limit = Math.max(1, Math.min(opts.limit ?? 8, 15));
-  const radiusM = Math.round(
-    Math.max(0.5, Math.min(opts.radiusKm ?? 8, 40)) * 1000
-  );
+  const radiusKm = Math.max(0.5, Math.min(opts.radiusKm ?? 8, 40));
   const filters = overpassFilters(opts.category, opts.query);
-  const around = filters
-    .map((f) => `${f}(around:${radiusM},${opts.lat},${opts.lon});`)
-    .join('\n');
-  const query = `[out:json][timeout:25];\n(\n${around}\n);\nout center tags ${limit * 3};`;
+  const box = overpassBbox(opts.lat, opts.lon, radiusKm);
+  const bbox = `(${box.south},${box.west},${box.north},${box.east})`;
+  const around = filters.map((f) => `${f}${bbox};`).join('\n');
+  const query = `[out:json][timeout:${OVERPASS_QUERY_TIMEOUT_S}];\n(\n${around}\n);\nout center tags ${limit * 3};`;
 
   let lastErr = 'Overpass unavailable';
+  const attemptFetch = async (endpoint: string): Promise<ZionPlace[] | null> => {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal:
+        typeof AbortSignal !== 'undefined' &&
+        typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(OVERPASS_TIMEOUT_MS)
+          : undefined,
+    });
+    if (!res.ok) {
+      lastErr = `Overpass HTTP ${res.status}`;
+      return null;
+    }
+    const data = (await res.json()) as {
+      elements?: Array<Record<string, unknown>>;
+    };
+    return parseOverpassElements(
+      data.elements || [],
+      opts.lat,
+      opts.lon
+    )
+      .filter((p) => p.distKm <= radiusKm + 0.15)
+      .slice(0, limit);
+  };
+
   for (const endpoint of OVERPASS_URLS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'application/json',
-        },
-        body: `data=${encodeURIComponent(query)}`,
-        signal:
-          typeof AbortSignal !== 'undefined' &&
-          typeof AbortSignal.timeout === 'function'
-            ? AbortSignal.timeout(28_000)
-            : undefined,
-      });
-      if (!res.ok) {
-        lastErr = `Overpass HTTP ${res.status}`;
-        continue;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const places = await attemptFetch(endpoint);
+        if (places) return { ok: true, places };
+        break;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        if (attempt === 0 && isRetryableOverpassError(err)) {
+          continue;
+        }
+        break;
       }
-      const data = (await res.json()) as {
-        elements?: Array<Record<string, unknown>>;
-      };
-      const places = parseOverpassElements(
-        data.elements || [],
-        opts.lat,
-        opts.lon
-      ).slice(0, limit);
-      return { ok: true, places };
-    } catch (err) {
-      lastErr = err instanceof Error ? err.message : String(err);
     }
   }
-  return { ok: false, places: [], error: lastErr };
+  return {
+    ok: false,
+    places: [],
+    error: isRetryableOverpassError(lastErr)
+      ? 'Maps timed out — try again in a moment'
+      : lastErr,
+  };
 }
 
 function formatPlacesList(places: ZionPlace[], heading: string): string {
@@ -449,7 +494,7 @@ async function cinemaReply(
     radiusKm: 25,
   });
   const fallbackNote = usedFallback
-    ? '\n\n_(Using Sunshine Coast fallback coords — tap **Locate me** for your device location.)_'
+    ? '\n\n_(Using Sunshine Coast fallback coords — turn on location for your device.)_'
     : '';
   if (!found.ok) {
     return (
@@ -470,6 +515,20 @@ async function cinemaReply(
       '\n\nA showtimes API key is set, but I still won’t invent times. Use the cinema listings above and confirm sessions on their site/app (provider wiring is best-effort only).';
   }
   return list + showtimesNote + fallbackNote;
+}
+
+function locationNeededReply(): ZionLifestyleChatResult {
+  return {
+    handled: true,
+    needsLocation: true,
+    reply:
+      'I need your device location to complete that — I can’t finish without it. Please turn on location (allow when the browser asks), then ask me again.\n\n[[ZION_TURN_ON_LOCATION]]' +
+      footer(),
+  };
+}
+
+function needsDeviceLocation(usedFallback: boolean, loc: ZionDeviceLocation): boolean {
+  return usedFallback || loc.source === 'fallback' || loc.source === 'denied';
 }
 
 function looksLikeWeather(text: string): boolean {
@@ -537,6 +596,9 @@ export async function processZionLifestyleChat(
   }
 
   if (looksLikeVirality(text)) {
+    if (needsDeviceLocation(usedFallback, loc)) {
+      return locationNeededReply();
+    }
     const cat = mapPlaceCategory(text) || 'restaurant';
     const found = await findPlaces({
       lat: loc.lat,
@@ -556,38 +618,37 @@ export async function processZionLifestyleChat(
       reply:
         `I can’t verify Instagram/TikTok virality without those APIs — I won’t invent follower counts or “trending” claims.\n\n` +
         osmBits +
-        (usedFallback
-          ? '\n\n_(Location fallback: Sunshine Coast — use Locate me for device coords.)_'
-          : '') +
         footer(),
     };
   }
 
   if (looksLikeWeather(text)) {
+    if (needsDeviceLocation(usedFallback, loc)) {
+      return locationNeededReply();
+    }
     const w = await getWeather(loc.lat, loc.lon, tz);
-    const where = usedFallback
-      ? 'Sunshine Coast (fallback — geolocation not available)'
-      : 'your area';
     return {
       handled: true,
       reply:
         (w.ok
-          ? `Weather near ${where}: **${w.line}** (Open-Meteo).`
-          : `Couldn't fetch weather for ${where}: ${w.line}`) +
-        (usedFallback
-          ? '\n\nTap **Locate me** on the dashboard if you want this for your real device location.'
-          : '') +
-        footer(),
+          ? `Weather near your area: **${w.line}** (Open-Meteo).`
+          : `Couldn't fetch weather for your area: ${w.line}`) + footer(),
     };
   }
 
   const cinemaAsk = /\b(cinema|movie|movies|showtimes?|film)\b/i.test(text);
   if (cinemaAsk) {
-    const reply = await cinemaReply(loc, usedFallback);
+    if (needsDeviceLocation(usedFallback, loc)) {
+      return locationNeededReply();
+    }
+    const reply = await cinemaReply(loc, false);
     return { handled: true, reply: reply + footer() };
   }
 
   if (looksLikePlaces(text)) {
+    if (needsDeviceLocation(usedFallback, loc)) {
+      return locationNeededReply();
+    }
     const category = mapPlaceCategory(text) || 'restaurant';
     const radiusKm =
       category === 'cinema' ? 25 : category === 'gym' || category === 'futsal' ? 15 : 8;
@@ -617,13 +678,10 @@ export async function processZionLifestyleChat(
         handled: true,
         reply:
           `I couldn't reach OpenStreetMap for ${label} (${found.error || 'error'}). Soft-fail — try again in a bit.` +
-          (usedFallback
-            ? '\n\n_(Using Sunshine Coast fallback coords.)_'
-            : '') +
           footer(),
       };
     }
-    const heading = `Nearby ${label} (OpenStreetMap${usedFallback ? ', Sunshine Coast fallback' : ''}):`;
+    const heading = `Nearby ${label} (OpenStreetMap):`;
     return {
       handled: true,
       reply: formatPlacesList(found.places, heading) + footer(),
@@ -637,19 +695,18 @@ export async function processZionLifestyleChat(
     )
   ) {
     const facts: string[] = [];
-    try {
-      const w = await getWeather(loc.lat, loc.lon, tz);
-      if (w.ok) {
-        facts.push(
-          `Local weather (${usedFallback ? 'Sunshine Coast fallback' : 'device/area'}): ${w.line}`
-        );
+    if (!needsDeviceLocation(usedFallback, loc)) {
+      try {
+        const w = await getWeather(loc.lat, loc.lon, tz);
+        if (w.ok) {
+          facts.push(`Local weather (device/area): ${w.line}`);
+        }
+      } catch {
+        /* soft */
       }
-    } catch {
-      /* soft */
-    }
-    if (usedFallback) {
+    } else {
       facts.push(
-        'Location note: using Sunshine Coast fallback; mention this if giving local recommendations.'
+        'Location note: device location is off; ask Dad to turn location on before local recommendations.'
       );
     }
     if (facts.length) {

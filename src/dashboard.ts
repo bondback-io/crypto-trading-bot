@@ -5778,24 +5778,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-feedback-row {
       display: flex; flex-wrap: nowrap; align-items: center; gap: 0.15rem;
       margin-top: 0.15rem; padding: 0 0.05rem;
+      background: transparent; border: 0; box-shadow: none;
     }
     .zion-feedback-btn {
       border: 0; border-radius: 0.35rem; padding: 0.05rem;
       width: 1.35rem; height: 1.35rem; line-height: 1;
       display: inline-flex; align-items: center; justify-content: center;
       color: inherit; background: transparent; font-size: 0.85rem;
-      cursor: pointer; opacity: 0.55;
+      cursor: pointer; opacity: 0.45; filter: grayscale(0.35);
       transform: scale(1);
-      transition: transform 0.15s ease, opacity 0.15s ease;
+      transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease;
     }
     .zion-feedback-btn:hover, .zion-feedback-btn:focus-visible {
-      opacity: 1; outline: none; transform: scale(1.18);
+      opacity: 0.9; outline: none; transform: scale(1.18); filter: none;
     }
     .zion-feedback-btn:active {
       transform: scale(0.92);
       animation: zion-fb-bounce 0.35s ease;
     }
-    .zion-feedback-btn.is-done { opacity: 0.35; pointer-events: none; transform: scale(1); }
+    .zion-feedback-btn.is-selected {
+      opacity: 1; filter: none; pointer-events: none; transform: scale(1.08);
+    }
+    .zion-feedback-row.has-selection .zion-feedback-btn:not(.is-selected) {
+      opacity: 0.28; filter: grayscale(0.85); pointer-events: none;
+    }
     @keyframes zion-fb-bounce {
       0% { transform: scale(1); }
       40% { transform: scale(1.28); }
@@ -5809,24 +5815,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         transition: none; animation: none; transform: none;
       }
     }
-    .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
+    .zion-chat-composer-wrap { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .zion-chat-composer { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem; border: 1px solid #334155; border-radius: 0.8rem; background: #0b1220; }
+    .zion-chat-actions {
+      display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+      padding: 0 0.1rem;
+    }
     .zion-chat-loc-row {
       display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
-      margin-top: 0.5rem; font-size: 0.72rem; color: #94a3b8;
+      margin-top: 0.5rem; font-size: 0.72rem; color: #64748b;
     }
-    .zion-locate-btn {
-      flex: 0 0 auto; min-height: 1.7rem; padding: 0.2rem 0.55rem;
+    .zion-loc-status { color: #64748b; font-size: 0.72rem; }
+    .zion-loc-status.is-ok { color: #94a3b8; }
+    .zion-loc-status.is-asking { color: #94a3b8; }
+    .zion-loc-status.is-off { color: #64748b; }
+    .zion-turn-on-loc {
+      display: inline-flex; align-items: center; margin-top: 0.35rem;
+      min-height: 1.7rem; padding: 0.25rem 0.65rem;
       border: 1px solid #475569; border-radius: 0.5rem;
-      background: #111827; color: #cbd5e1; font-size: 0.72rem; font-weight: 600;
+      background: #111827; color: #e2e8f0; font-size: 0.72rem; font-weight: 600;
       cursor: pointer;
     }
-    .zion-locate-btn:hover, .zion-locate-btn:focus-visible {
-      border-color: #64748b; color: #e2e8f0; outline: none;
+    .zion-turn-on-loc:hover, .zion-turn-on-loc:focus-visible {
+      border-color: #64748b; outline: none;
     }
-    .zion-loc-status { color: #64748b; }
-    .zion-loc-status.is-ok { color: #34d399; }
-    .zion-loc-status.is-denied { color: #fbbf24; }
-    .zion-loc-status.is-fallback { color: #94a3b8; }
     /* 16px prevents iOS Safari auto-zoom on focus */
     .zion-chat-composer input {
       min-width: 0;
@@ -5847,18 +5859,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       border: 1px solid #334155; border-radius: 0.55rem;
       background: transparent; color: #64748b;
       display: inline-flex; align-items: center; justify-content: center;
-      cursor: pointer; padding: 0; font-size: 1rem; line-height: 1;
-      opacity: 0.55; transition: color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      cursor: pointer; padding: 0; line-height: 1;
+      opacity: 0.7; transition: color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
+    .zion-mic-btn svg { width: 1.05rem; height: 1.05rem; display: block; }
     .zion-mic-btn:hover, .zion-mic-btn:focus-visible {
-      opacity: 0.9; color: #94a3b8; border-color: #64748b; outline: none;
+      opacity: 0.95; color: #94a3b8; border-color: #64748b; outline: none;
     }
     .zion-mic-btn.is-on {
-      opacity: 1; color: #34d399; border-color: rgba(52, 211, 153, 0.55);
-      background: rgba(6, 78, 59, 0.35);
+      opacity: 1; color: var(--zion-peach, #f0a070); border-color: rgba(240, 160, 112, 0.55);
+      background: rgba(240, 160, 112, 0.12);
     }
     .zion-mic-btn.is-on:hover, .zion-mic-btn.is-on:focus-visible {
-      color: #6ee7b7; border-color: rgba(110, 231, 183, 0.7);
+      color: #f8c4a0; border-color: rgba(248, 196, 160, 0.7);
     }
     .zion-mic-btn.is-unsupported,
     .zion-mic-btn:disabled {
@@ -5876,6 +5889,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
+    .zion-chat-send:disabled { opacity: 0.55; cursor: not-allowed; }
     .zion-chat-clear {
       flex: 0 0 auto;
       min-height: 2.2rem;
@@ -8132,7 +8146,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="zion-nudge-trending" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Weather / local time <span class="tip" tabindex="0" data-tip="Every ~6h family locales: Sunshine Coast, Auckland area towns, Sölvesborg (Open-Meteo). If you used Locate me, device weather is preferred when fresh."></span></span>
+          <span>Weather / local time <span class="tip" tabindex="0" data-tip="Every ~6h family locales: Sunshine Coast, Auckland area towns, Sölvesborg (Open-Meteo). When location is on, device weather is preferred when fresh."></span></span>
           <label class="switch"><input type="checkbox" id="zion-nudge-weather" onchange="saveZionAgentConfig()" /><span class="slider"></span></label>
         </div>
         <div class="mint text-xs mb-2 flex flex-wrap gap-2 items-center" id="zion-learning-status-row">
@@ -8144,17 +8158,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-agent-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-loc-row">
-          <button type="button" class="zion-locate-btn" id="zion-agent-locate" onclick="locateZionDevice('main')" title="Share device location with Zion (session cache ~25 min)">Locate me</button>
-          <span class="zion-loc-status" id="zion-agent-loc-status">Location: not set</span>
+          <span class="zion-loc-status" id="zion-agent-loc-status">Location: off</span>
         </div>
-        <div class="zion-chat-composer">
-          <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" />
-          <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('main')">
-            <span aria-hidden="true">🎤</span><span class="zion-mic-dot" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
-          <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
-          <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+        <div class="zion-chat-composer-wrap">
+          <div class="zion-chat-composer">
+            <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" oninput="onZionComposerInput('main')" />
+          </div>
+          <div class="zion-chat-actions">
+            <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('main')">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg><span class="zion-mic-dot" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
+            <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
+            <button type="button" class="zion-chat-refresh" onclick="refreshZionAgentChat()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+          </div>
         </div>
       </div>
 
@@ -8272,17 +8289,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="zion-agent-widget-chat" class="zion-chat-thread text-sm" role="log" aria-live="polite">—</div>
         <div id="zion-agent-widget-ir-chip" class="zion-improvement-chip" role="status"></div>
         <div class="zion-chat-loc-row">
-          <button type="button" class="zion-locate-btn" id="zion-agent-widget-locate" onclick="locateZionDevice('widget')" title="Share device location with Zion (session cache ~25 min)">Locate me</button>
-          <span class="zion-loc-status" id="zion-agent-widget-loc-status">Location: not set</span>
+          <span class="zion-loc-status" id="zion-agent-widget-loc-status">Location: off</span>
         </div>
-        <div class="zion-chat-composer">
-          <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" />
-          <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('widget')">
-            <span aria-hidden="true">🎤</span><span class="zion-mic-dot" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
-          <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
-          <button type="button" class="zion-chat-refresh" onclick="loadZionAgent()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+        <div class="zion-chat-composer-wrap">
+          <div class="zion-chat-composer">
+            <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" oninput="onZionComposerInput('widget')" />
+          </div>
+          <div class="zion-chat-actions">
+            <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('widget')">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg><span class="zion-mic-dot" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
+            <button type="button" class="zion-chat-clear" onclick="clearZionAgentChat()" aria-label="Clear Zion chat" title="Clear chat (saves a copy on the server)">Clear</button>
+            <button type="button" class="zion-chat-refresh" onclick="refreshZionAgentChat()" aria-label="Refresh Zion chat" title="Refresh">↻</button>
+          </div>
         </div>
         <div id="zion-agent-widget-crs" class="zion-change-requests text-sm"></div>
       </div>
@@ -16894,6 +16914,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadZion();
         // Instant shared paint, then force-refresh server history for both surfaces
         try { syncZionChatSurfaces(); } catch (_) {}
+        try { ensureZionDeviceLocation('zion-tab'); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadHmcGatekeeperConfig === 'function') loadHmcGatekeeperConfig();
@@ -28021,14 +28042,54 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionImprovementHistoryCache = [];
     const ZION_CHAT_CACHE_KEY = 'zionAgentChatMessages_v1';
     const ZION_LOC_CACHE_KEY = 'zionDeviceLocation_v1';
+    const ZION_LOC_OPTOUT_KEY = 'zionDeviceLocationOptOut_v1';
     const ZION_LOC_TTL_MS = 25 * 60 * 1000;
     const ZION_FALLBACK_COORDS = { lat: -26.65, lon: 153.0667 };
+    let _zionLocAsking = false;
+    let _zionLocAwaitingConsent = false;
     /** In-memory source of truth so tab + widget always paint the same thread */
     let _zionChatMessagesLive = [];
     let _zionChatBusy = false;
     let _zionChatNeedsRefresh = false;
     let _zionTypewriterGen = 0;
     let _zionTypewriterTimer = null;
+    const ZION_FEEDBACK_KEY = 'zionFeedbackSignals_v1';
+    let _zionFeedbackMap = (function () {
+      try {
+        const raw = JSON.parse(sessionStorage.getItem(ZION_FEEDBACK_KEY) || '{}');
+        return raw && typeof raw === 'object' ? raw : {};
+      } catch (_) {
+        return {};
+      }
+    })();
+    function persistZionFeedbackMap() {
+      try {
+        sessionStorage.setItem(ZION_FEEDBACK_KEY, JSON.stringify(_zionFeedbackMap || {}));
+      } catch (_) {}
+    }
+    function getZionFeedbackSignal(messageId) {
+      const id = String(messageId || '');
+      return id && _zionFeedbackMap ? _zionFeedbackMap[id] || '' : '';
+    }
+    function setZionFeedbackSignal(messageId, signal) {
+      const id = String(messageId || '');
+      if (!id || !signal) return;
+      _zionFeedbackMap[id] = String(signal);
+      persistZionFeedbackMap();
+    }
+    function isZionLocationOptedOut() {
+      try {
+        return sessionStorage.getItem(ZION_LOC_OPTOUT_KEY) === '1';
+      } catch (_) {
+        return false;
+      }
+    }
+    function setZionLocationOptOut(on) {
+      try {
+        if (on) sessionStorage.setItem(ZION_LOC_OPTOUT_KEY, '1');
+        else sessionStorage.removeItem(ZION_LOC_OPTOUT_KEY);
+      } catch (_) {}
+    }
     function readZionLocationCache() {
       try {
         const raw = JSON.parse(sessionStorage.getItem(ZION_LOC_CACHE_KEY) || 'null');
@@ -28045,21 +28106,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         sessionStorage.setItem(ZION_LOC_CACHE_KEY, JSON.stringify(loc));
       } catch (_) {}
     }
+    function clearZionLocationCache() {
+      try {
+        sessionStorage.removeItem(ZION_LOC_CACHE_KEY);
+      } catch (_) {}
+    }
     function paintZionLocationStatus() {
+      const optedOut = isZionLocationOptedOut();
       const loc = readZionLocationCache();
-      let label = 'Location: not set';
-      let cls = 'zion-loc-status';
-      if (loc) {
-        if (loc.source === 'device') {
-          label = 'Location: located';
-          cls += ' is-ok';
-        } else if (loc.source === 'denied') {
-          label = 'Location: denied · Sunshine Coast fallback';
-          cls += ' is-denied';
-        } else {
-          label = 'Location: Sunshine Coast fallback';
-          cls += ' is-fallback';
-        }
+      let label = 'Location: off';
+      let cls = 'zion-loc-status is-off';
+      if (_zionLocAsking) {
+        label = 'Location: asking…';
+        cls = 'zion-loc-status is-asking';
+      } else if (!optedOut && loc && loc.source === 'device') {
+        label = 'Location: on';
+        cls = 'zion-loc-status is-ok';
+      } else {
+        label = 'Location: off';
+        cls = 'zion-loc-status is-off';
       }
       ['zion-agent-loc-status', 'zion-agent-widget-loc-status'].forEach(function (id) {
         const el = document.getElementById(id);
@@ -28070,13 +28135,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     function getZionChatLocationPayload() {
       const cached = readZionLocationCache();
-      if (cached) {
+      if (cached && cached.source === 'device' && !isZionLocationOptedOut()) {
         return {
           lat: cached.lat,
           lon: cached.lon,
           accuracy: cached.accuracy,
           at: cached.at,
-          source: cached.source || 'device',
+          source: 'device',
         };
       }
       return {
@@ -28086,50 +28151,87 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         source: 'fallback',
       };
     }
-    function locateZionDevice(_source) {
-      paintZionLocationStatus();
-      if (!navigator.geolocation) {
-        const fallback = {
-          lat: ZION_FALLBACK_COORDS.lat,
-          lon: ZION_FALLBACK_COORDS.lon,
-          at: Date.now(),
-          source: 'fallback',
-        };
-        writeZionLocationCache(fallback);
+    function locateZionDevice(opts) {
+      const force = !!(opts && opts.force);
+      const fromUser = !!(opts && opts.fromUser);
+      if (!force && isZionLocationOptedOut()) {
         paintZionLocationStatus();
         return;
       }
-      ['zion-agent-loc-status', 'zion-agent-widget-loc-status'].forEach(function (id) {
-        const el = document.getElementById(id);
-        if (el) {
-          el.className = 'zion-loc-status';
-          el.textContent = 'Location: locating…';
+      if (force || fromUser) setZionLocationOptOut(false);
+      if (!navigator.geolocation) {
+        clearZionLocationCache();
+        _zionLocAsking = false;
+        paintZionLocationStatus();
+        if (fromUser) {
+          alert('Geolocation is not available in this browser. Enable location in browser/OS settings if you can.');
         }
-      });
+        return;
+      }
+      _zionLocAsking = true;
+      paintZionLocationStatus();
       navigator.geolocation.getCurrentPosition(
         function (pos) {
-          const loc = {
+          _zionLocAsking = false;
+          _zionLocAwaitingConsent = false;
+          setZionLocationOptOut(false);
+          writeZionLocationCache({
             lat: pos.coords.latitude,
             lon: pos.coords.longitude,
             accuracy: pos.coords.accuracy,
             at: Date.now(),
             source: 'device',
-          };
-          writeZionLocationCache(loc);
+          });
           paintZionLocationStatus();
         },
-        function () {
-          const denied = {
-            lat: ZION_FALLBACK_COORDS.lat,
-            lon: ZION_FALLBACK_COORDS.lon,
-            at: Date.now(),
-            source: 'denied',
-          };
-          writeZionLocationCache(denied);
+        function (err) {
+          _zionLocAsking = false;
+          clearZionLocationCache();
           paintZionLocationStatus();
+          if (fromUser) {
+            const code = err && err.code;
+            const denied = code === 1;
+            alert(
+              denied
+                ? 'Location permission denied. Enable location for this site in your browser or OS settings, then try again.'
+                : 'Could not get location. Check browser/OS location settings and try again.'
+            );
+          }
         },
         { enableHighAccuracy: false, timeout: 12000, maximumAge: ZION_LOC_TTL_MS }
       );
+    }
+    function ensureZionDeviceLocation(reason) {
+      if (isZionLocationOptedOut()) {
+        paintZionLocationStatus();
+        return;
+      }
+      const cached = readZionLocationCache();
+      if (cached && cached.source === 'device') {
+        paintZionLocationStatus();
+        return;
+      }
+      locateZionDevice({ force: false, fromUser: false, reason: reason || '' });
+    }
+    function handleZionLocationNl(raw) {
+      const t = String(raw || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+      if (!t) return null;
+      if (/^(turn|switch|set)\\s+location\\s+off\\b/.test(t) || t === 'location off' || t === 'turn my location off') {
+        setZionLocationOptOut(true);
+        clearZionLocationCache();
+        paintZionLocationStatus();
+        return { handled: true, ack: 'Location turned off for this session. I won’t attach device coords until you turn it on again.' };
+      }
+      const turnOn =
+        /^(yes(\\s+please)?|yes[, ]+turn(\\s+my)?\\s+location\\s+on|turn(\\s+my)?\\s+location\\s+on|enable\\s+location|share\\s+(my\\s+)?location)\\b/.test(t) ||
+        t === 'yes turn my location on' ||
+        t === 'turn location on';
+      if (turnOn || (_zionLocAwaitingConsent && /^(yes|ok|okay|sure|please)\\b/.test(t))) {
+        _zionLocAwaitingConsent = false;
+        locateZionDevice({ force: true, fromUser: true });
+        return { handled: true, ack: 'Opening the browser location prompt… Allow it, then ask me again.' };
+      }
+      return null;
     }
     function cacheZionChatMessages(messages) {
       const list = Array.isArray(messages) ? messages.slice(-40) : [];
@@ -28258,6 +28360,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }, stepMs);
       });
     }
+    function zionTurnOnLocationBtnHtml() {
+      return '<button type="button" class="zion-turn-on-loc" onclick="locateZionDevice({force:true,fromUser:true})">Turn on location</button>';
+    }
+    function formatZionBubbleHtmlWithLoc(text, isUser) {
+      let raw = String(text || '');
+      let locBtn = '';
+      if (!isUser && raw.indexOf('[[ZION_TURN_ON_LOCATION]]') >= 0) {
+        raw = raw.split('[[ZION_TURN_ON_LOCATION]]').join('');
+        locBtn = zionTurnOnLocationBtnHtml();
+        _zionLocAwaitingConsent = true;
+      }
+      return formatZionBubbleHtml(raw, isUser) + locBtn;
+    }
     function renderZionAgentMessages(messages) {
       if (!messages.length) {
         return '<div class="zion-chat-empty">Ask about profiles, Learning Mode, MARL, or how the bots are doing.</div>';
@@ -28266,22 +28381,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         .map((m) => {
           const isUser = m.role === 'user';
           const when = fmtZionChatWhen(m.at);
-          const mid = escAttr(String(m.id || ''));
+          const midRaw = String(m.id || '');
+          const mid = escAttr(midRaw);
+          const selected = !isUser ? getZionFeedbackSignal(midRaw) : '';
           const feedback = isUser
             ? ''
             : (
-              '<div class="zion-feedback-row" data-zion-fb="' + mid + '">' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="good" data-zion-fb-id="' + mid + '" title="Good" aria-label="Good">🙂</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="too_technical" data-zion-fb-id="' + mid + '" title="Too technical" aria-label="Too technical">😐</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="forgot_context" data-zion-fb-id="' + mid + '" title="Forgot context" aria-label="Forgot context">🙁</button>' +
-                '<button type="button" class="zion-feedback-btn" data-zion-fb-signal="better" data-zion-fb-id="' + mid + '" title="Needs better / clearer" aria-label="Needs better">😢</button>' +
+              '<div class="zion-feedback-row' + (selected ? ' has-selection' : '') + '" data-zion-fb="' + mid + '">' +
+                '<button type="button" class="zion-feedback-btn' + (selected === 'good' ? ' is-selected' : '') + '" data-zion-fb-signal="good" data-zion-fb-id="' + mid + '" title="Good" aria-label="Good">🙂</button>' +
+                '<button type="button" class="zion-feedback-btn' + (selected === 'too_technical' ? ' is-selected' : '') + '" data-zion-fb-signal="too_technical" data-zion-fb-id="' + mid + '" title="Too technical" aria-label="Too technical">😐</button>' +
+                '<button type="button" class="zion-feedback-btn' + (selected === 'forgot_context' ? ' is-selected' : '') + '" data-zion-fb-signal="forgot_context" data-zion-fb-id="' + mid + '" title="Forgot context" aria-label="Forgot context">🙁</button>' +
+                '<button type="button" class="zion-feedback-btn' + (selected === 'better' ? ' is-selected' : '') + '" data-zion-fb-signal="better" data-zion-fb-id="' + mid + '" title="Needs better / clearer" aria-label="Needs better">😢</button>' +
               '</div>'
             );
           return (
             '<div class="zion-chat-message' + (isUser ? ' is-user' : '') + '">' +
               '<div class="zion-chat-message-avatar">' + (isUser ? 'You' : 'Z') + '</div>' +
               '<div class="zion-chat-message-body">' +
-                '<div class="zion-chat-bubble">' + formatZionBubbleHtml(m.text || '', isUser) + '</div>' +
+                '<div class="zion-chat-bubble">' + formatZionBubbleHtmlWithLoc(m.text || '', isUser) + '</div>' +
                 feedback +
                 (when ? '<div class="zion-chat-time">' + escHtml(when) + '</div>' : '') +
               '</div>' +
@@ -28290,20 +28407,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         })
         .join('');
     }
+    function paintZionFeedbackSelection(messageId, signal) {
+      const mid = String(messageId || '');
+      if (!mid) return;
+      document.querySelectorAll('.zion-feedback-row[data-zion-fb="' + mid.replace(/"/g, '') + '"]').forEach(function (row) {
+        row.classList.add('has-selection');
+        row.querySelectorAll('.zion-feedback-btn').forEach(function (el) {
+          const sig = el.getAttribute('data-zion-fb-signal');
+          el.classList.toggle('is-selected', sig === signal);
+          el.classList.remove('is-done');
+        });
+      });
+    }
     async function sendZionFeedback(messageId, signal, btn) {
       if (!messageId || !signal) return;
+      setZionFeedbackSignal(messageId, signal);
+      paintZionFeedbackSelection(messageId, signal);
       try {
         await fetchJSON('/api/zion/feedback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ messageId: messageId, signal: signal }),
         });
-        if (btn && btn.parentNode) {
-          btn.parentNode.querySelectorAll('.zion-feedback-btn').forEach(function (el) {
-            el.classList.add('is-done');
-          });
+        // Avoid racing a busy chat reload; selection already persisted in session map.
+        if (!_zionChatBusy && typeof loadZionAgent === 'function') {
+          /* soft refresh only when idle — preserve feedback map on paint */
+          _zionChatNeedsRefresh = true;
         }
-        if (typeof loadZionAgent === 'function') loadZionAgent();
       } catch (err) {
         alert('Feedback failed: ' + (err.message || err));
       }
@@ -28311,6 +28441,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     document.addEventListener('click', function (ev) {
       const t = ev.target;
       if (!t || !t.getAttribute) return;
+      if (t.closest && t.closest('.zion-chat-composer-wrap') && _zionChatBusy) {
+        // tap-to-recover if UI stuck disabled
+        try { clearZionChatBusyUi(); } catch (_) {}
+      }
       const signal = t.getAttribute('data-zion-fb-signal');
       const mid = t.getAttribute('data-zion-fb-id');
       if (signal && mid) {
@@ -28358,32 +28492,48 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function clearZionTyping() {
       document.querySelectorAll('.zion-chat-typing').forEach(function (el) { el.remove(); });
     }
-    function setZionChatBusy(busy) {
+    function clearZionChatBusyUi() {
+      _zionChatBusy = false;
+      document.querySelectorAll('.zion-chat-send').forEach(function (btn) {
+        btn.disabled = false;
+      });
       ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
         const el = document.getElementById(id);
-        if (el) el.disabled = !!busy;
+        if (el) el.disabled = false;
+      });
+      document.querySelectorAll('.zion-mic-btn').forEach(function (btn) {
+        if (btn.classList.contains('is-unsupported')) return;
+        btn.disabled = false;
+      });
+      try { syncZionMicUi(); } catch (_) {}
+    }
+    function setZionChatBusy(busy) {
+      _zionChatBusy = !!busy;
+      // Prefer never disable the text input — only Send while in flight; pause mic.
+      ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = false;
       });
       document.querySelectorAll('.zion-chat-send').forEach(function (btn) {
         btn.disabled = !!busy;
       });
       document.querySelectorAll('.zion-mic-btn').forEach(function (btn) {
         if (btn.classList.contains('is-unsupported')) return;
-        btn.disabled = !!busy;
-      });
-      document.querySelectorAll('.zion-locate-btn').forEach(function (btn) {
-        btn.disabled = !!busy;
+        // pause via recognition stop; keep clickable to show state
+        btn.disabled = false;
       });
       if (busy) {
         pauseZionVoiceForBusy();
       } else {
         resumeZionVoiceAfterBusy();
       }
+      try { syncZionMicUi(); } catch (_) {}
     }
     function focusZionComposer(source) {
       const id =
         source === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input';
       const el = document.getElementById(id);
-      if (!el || el.disabled) return;
+      if (!el) return;
       try {
         el.focus({ preventScroll: true });
       } catch (_) {
@@ -28396,13 +28546,157 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionVoiceSource = 'widget';
     let _zionVoiceRec = null;
     let _zionVoiceSilenceTimer = null;
+    let _zionVoiceInactivityTimer = null;
     let _zionVoiceBaseText = '';
     let _zionVoicePausedBusy = false;
     const ZION_VOICE_SILENCE_MS = 3000;
+    const ZION_VOICE_INACTIVITY_MS = 2 * 60 * 1000;
+
+    const ZION_VOICE_LEXICON = {
+      'take profit': ['take profits', 'take prof it', 'teak profit', 'take profit'],
+      'stop loss': ['stop loss', 'stop losses', 'stop lost', 'stoploss'],
+      'market cap': ['market cap', 'marketcap', 'mark it cap'],
+      solana: ['solana', 'sol anna', 'so lana'],
+      sol: ['sol', 'soul'],
+      jupiter: ['jupiter', 'jup iter'],
+      pump: ['pump', 'pumps'],
+      migration: ['migration', 'migrations', 'migrating'],
+      microbot: ['microbot', 'micro bot', 'microbots', 'micro bots'],
+      marl: ['marl', 'marl ', 'm a r l'],
+      zion: ['zion', 'zionne', 'zyon'],
+      learning: ['learning', 'learnin'],
+      'high win rate': ['high win rate', 'high winrate', 'hwr'],
+      wallet: ['wallet', 'wallets'],
+      trade: ['trade', 'trades', 'trayed'],
+      position: ['position', 'positions'],
+      scanner: ['scanner', 'scanners'],
+      weather: ['weather', 'whether', 'wether'],
+      cinema: ['cinema', 'cinemas', 'sinema'],
+      restaurant: ['restaurant', 'restaurants', 'restaraunt', 'resturant'],
+      nearby: ['nearby', 'near by', 'near-by'],
+      location: ['location', 'locations', 'locasion'],
+    };
 
     function getZionSpeechRecognitionCtor() {
       const w = window;
       return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+    }
+
+    function zionLevenshtein(a, b) {
+      const s = String(a || '');
+      const t = String(b || '');
+      if (s === t) return 0;
+      const n = s.length;
+      const m = t.length;
+      if (!n) return m;
+      if (!m) return n;
+      const row = new Array(m + 1);
+      for (let j = 0; j <= m; j++) row[j] = j;
+      for (let i = 1; i <= n; i++) {
+        let prev = i - 1;
+        row[0] = i;
+        for (let j = 1; j <= m; j++) {
+          const cur = row[j];
+          const cost = s.charCodeAt(i - 1) === t.charCodeAt(j - 1) ? 0 : 1;
+          row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+          prev = cur;
+        }
+      }
+      return row[m];
+    }
+
+    function correctZionVoiceText(raw) {
+      let text = String(raw || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return '';
+      // Common English repairs
+      text = text
+        .replace(/\\bi\\b/g, 'I')
+        .replace(/\\bim\\b/gi, "I'm")
+        .replace(/\\bdont\\b/gi, "don't")
+        .replace(/\\bcant\\b/gi, "can't")
+        .replace(/\\bwont\\b/gi, "won't")
+        .replace(/\\blets\\b/gi, "let's")
+        .replace(/\\bwhats\\b/gi, "what's")
+        .replace(/\\btheres\\b/gi, "there's")
+        .replace(/\\byoure\\b/gi, "you're")
+        .replace(/\\bit\\s+s\\b/gi, "it's")
+        .replace(/\\bgonna\\b/gi, 'going to')
+        .replace(/\\bwanna\\b/gi, 'want to');
+      const keys = Object.keys(ZION_VOICE_LEXICON);
+      for (let k = 0; k < keys.length; k++) {
+        const canon = keys[k];
+        const alts = ZION_VOICE_LEXICON[canon] || [];
+        for (let a = 0; a < alts.length; a++) {
+          const alt = String(alts[a] || '').trim();
+          if (!alt || alt === canon) continue;
+          const re = new RegExp('\\\\b' + alt.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&') + '\\\\b', 'gi');
+          text = text.replace(re, canon);
+        }
+      }
+      return text.replace(/\\s+/g, ' ').trim();
+    }
+
+    function fuzzyZionVoiceCommand(token) {
+      const t = String(token || '').toLowerCase().replace(/[^a-z0-9\\s]/g, '').trim();
+      if (!t) return null;
+      const targets = [
+        { action: 'send', words: ['send', 'sent', 'sand', 'sen'] },
+        { action: 'clear', words: ['clear', 'clea', 'clair'] },
+        { action: 'cancel', words: ['cancel', 'cancell', 'cancer'] },
+        { action: 'new_question', words: ['new question', 'new questions'] },
+      ];
+      for (let i = 0; i < targets.length; i++) {
+        const words = targets[i].words;
+        for (let j = 0; j < words.length; j++) {
+          const max = words[j].length <= 4 ? 1 : 2;
+          if (zionLevenshtein(t, words[j]) <= max) return targets[i].action;
+        }
+      }
+      return null;
+    }
+
+    function stripZionVoiceCommands(raw) {
+      let text = correctZionVoiceText(raw);
+      const phrases = [
+        { re: /\\b(send it|send message|send that|send)\\s*$/i, action: 'send' },
+        { re: /\\b(clear that|scratch that|clear)\\s*$/i, action: 'clear' },
+        { re: /\\b(stop listening|microphone off|mic off|cancel)\\s*$/i, action: 'cancel' },
+        { re: /\\b(new question)\\s*$/i, action: 'new_question' },
+      ];
+      for (let i = 0; i < phrases.length; i++) {
+        if (phrases[i].re.test(text)) {
+          text = text.replace(phrases[i].re, '').replace(/\\s+/g, ' ').trim();
+          return { text: correctZionVoiceText(text), action: phrases[i].action };
+        }
+      }
+      const parts = text.split(/\\s+/);
+      if (parts.length) {
+        const last = parts[parts.length - 1];
+        const lastTwo = parts.length >= 2 ? parts.slice(-2).join(' ') : last;
+        let action = fuzzyZionVoiceCommand(lastTwo) || fuzzyZionVoiceCommand(last);
+        if (action) {
+          if (action === 'new_question' || (parts.length >= 2 && fuzzyZionVoiceCommand(lastTwo))) {
+            parts.splice(-2, 2);
+          } else {
+            parts.pop();
+          }
+          text = parts.join(' ').trim();
+          return { text: correctZionVoiceText(text), action: action };
+        }
+      }
+      return { text: text, action: null };
+    }
+
+    function touchZionVoiceActivity() {
+      if (_zionVoiceInactivityTimer) {
+        clearTimeout(_zionVoiceInactivityTimer);
+        _zionVoiceInactivityTimer = null;
+      }
+      if (!_zionVoiceOn) return;
+      _zionVoiceInactivityTimer = setTimeout(function () {
+        _zionVoiceInactivityTimer = null;
+        if (_zionVoiceOn) stopZionVoiceRecognition();
+      }, ZION_VOICE_INACTIVITY_MS);
     }
 
     function syncZionMicUi() {
@@ -28430,7 +28724,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         btn.title = on
           ? 'Listening… (3s silence sends · say “send”, “clear”, or “cancel”)'
           : 'Voice input (off)';
-        if (!_zionChatBusy) btn.disabled = false;
+        btn.disabled = false;
       });
     }
 
@@ -28449,38 +28743,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
-    function stripZionVoiceCommands(raw) {
-      let text = String(raw || '').replace(/\s+/g, ' ').trim();
-      const lower = text.toLowerCase();
-      const cmds = [
-        {
-          re: /\b(send it|send message|send that|send)\s*$/i,
-          action: 'send',
-        },
-        {
-          re: /\b(clear that|scratch that|clear)\s*$/i,
-          action: 'clear',
-        },
-        {
-          re: /\b(stop listening|microphone off|mic off|cancel)\s*$/i,
-          action: 'cancel',
-        },
-        {
-          re: /\b(new question)\s*$/i,
-          action: 'new_question',
-        },
-      ];
-      for (let i = 0; i < cmds.length; i++) {
-        if (cmds[i].re.test(text)) {
-          text = text.replace(cmds[i].re, '').replace(/\s+/g, ' ').trim();
-          return { text: text, action: cmds[i].action };
-        }
-      }
-      return { text: text, action: null };
-    }
-
     function stopZionVoiceRecognition(opts) {
       clearZionVoiceSilenceTimer();
+      if (_zionVoiceInactivityTimer) {
+        clearTimeout(_zionVoiceInactivityTimer);
+        _zionVoiceInactivityTimer = null;
+      }
       const keepOn = opts && opts.keepOnFlag === true;
       if (_zionVoiceRec) {
         try {
@@ -28506,13 +28774,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceSilenceTimer = null;
         if (!_zionVoiceOn || _zionChatBusy) return;
         const inp = zionVoiceInputEl();
-        const msg = inp ? String(inp.value || '').trim() : '';
-        if (!msg) return;
+        if (!inp) return;
+        const corrected = correctZionVoiceText(inp.value || '');
+        inp.value = corrected;
+        _zionVoiceBaseText = corrected;
+        if (!corrected) return;
         sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
       }, ZION_VOICE_SILENCE_MS);
     }
 
     function handleZionVoiceFinalTranscript(finalChunk) {
+      touchZionVoiceActivity();
       const parsed = stripZionVoiceCommands(finalChunk);
       const inp = zionVoiceInputEl();
       if (!inp) return;
@@ -28530,17 +28802,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const next = [_zionVoiceBaseText, parsed.text]
         .filter(Boolean)
         .join(' ')
-        .replace(/\s+/g, ' ')
+        .replace(/\\s+/g, ' ')
         .trim();
-      inp.value = next;
-      _zionVoiceBaseText = next;
+      const corrected = correctZionVoiceText(next);
+      inp.value = corrected;
+      _zionVoiceBaseText = corrected;
       if (parsed.action === 'send') {
         clearZionVoiceSilenceTimer();
-        if (next) {
+        if (corrected) {
           sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
         }
         return;
       }
+      // Arm silence auto-send only after final results
       scheduleZionVoiceSilenceSend();
     }
 
@@ -28559,6 +28833,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       rec.interimResults = true;
       rec.lang = (navigator.language || 'en-US');
       rec.maxAlternatives = 1;
+      touchZionVoiceActivity();
       rec.onresult = function (event) {
         if (!_zionVoiceOn || _zionChatBusy) return;
         let interim = '';
@@ -28576,13 +28851,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (interim) {
+          // Interim = preview only; do not commit to base or arm auto-send
           const live = [_zionVoiceBaseText, interim.trim()]
             .filter(Boolean)
             .join(' ')
-            .replace(/\s+/g, ' ')
+            .replace(/\\s+/g, ' ')
             .trim();
           inpEl.value = live;
-          scheduleZionVoiceSilenceSend();
+          touchZionVoiceActivity();
         }
       };
       rec.onerror = function (ev) {
@@ -28600,7 +28876,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           } catch (_) {}
           return;
         }
-        // Network / other — soft restart if still on
         if (_zionVoiceOn && !_zionChatBusy) {
           try { startZionVoiceRecognition(); } catch (_) {}
         }
@@ -28638,6 +28913,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       startZionVoiceRecognition();
     }
 
+    function onZionComposerInput(source) {
+      // User typing turns mic off (stay-on exception)
+      if (_zionVoiceOn) {
+        stopZionVoiceRecognition();
+      }
+      touchZionVoiceActivity();
+    }
+
+    function refreshZionAgentChat() {
+      if (_zionVoiceOn) stopZionVoiceRecognition();
+      if (typeof loadZionAgent === 'function') loadZionAgent();
+    }
+
     function pauseZionVoiceForBusy() {
       if (!_zionVoiceOn) return;
       _zionVoicePausedBusy = true;
@@ -28662,6 +28950,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     // Init mic UI once DOM ready
     try { syncZionMicUi(); } catch (_) {}
     window.toggleZionVoice = toggleZionVoice;
+    window.onZionComposerInput = onZionComposerInput;
+    window.refreshZionAgentChat = refreshZionAgentChat;
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
       try {
@@ -28857,6 +29147,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (zionAgentWidgetState.open) {
         zionAgentWidgetState.unread = 0;
         syncZionChatSurfaces();
+        try { ensureZionDeviceLocation('widget-open'); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
         setTimeout(function () {
           const input = document.getElementById('zion-agent-widget-input');
@@ -29128,15 +29419,45 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const inp = document.getElementById(
         sendSource === 'widget' ? 'zion-agent-widget-input' : 'zion-agent-input'
       );
-      const msg = inp ? String(inp.value || '').trim() : '';
+      let msg = inp ? String(inp.value || '').trim() : '';
       if (!msg) {
         focusZionComposer(sendSource);
         return;
       }
+      msg = correctZionVoiceText(msg);
+      if (inp) inp.value = msg;
+
+      const locNl = handleZionLocationNl(msg);
+      if (locNl && locNl.handled) {
+        ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+        const started = Date.now();
+        const optimistic = (loadCachedZionChatMessages() || []).slice();
+        optimistic.push({ id: 'local-u-' + started, role: 'user', text: msg, at: started });
+        optimistic.push({
+          id: 'local-a-' + started,
+          role: 'assistant',
+          text: String(locNl.ack || '') + (String(locNl.ack || '').indexOf('[[ZION_TURN_ON_LOCATION]]') >= 0 ? '' : ''),
+          at: started + 1,
+        });
+        // If turning on, show compact button under ack when still off after prompt attempt
+        if (/location prompt|turn(ed)? on|Allow it/i.test(String(locNl.ack || ''))) {
+          optimistic[optimistic.length - 1].text =
+            String(locNl.ack || '') + '\n\n[[ZION_TURN_ON_LOCATION]]';
+        }
+        cacheZionChatMessages(optimistic);
+        paintZionChatThreads(optimistic);
+        focusZionComposer(sendSource);
+        return;
+      }
+
       if (_zionVoiceOn) {
         _zionVoiceSource = sendSource;
         _zionVoiceBaseText = '';
         clearZionVoiceSilenceTimer();
+        touchZionVoiceActivity();
       }
       ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
         const el = document.getElementById(id);
@@ -29172,9 +29493,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const waitMore = Math.max(0, minTypingMs - (Date.now() - started));
         if (waitMore) await new Promise(function (resolve) { setTimeout(resolve, waitMore); });
         clearZionTyping();
-        // Allow server reload before typewriter
         _zionChatBusy = false;
+        clearZionChatBusyUi();
         await loadZionAgent();
+        if (out && out.needsLocation) {
+          _zionLocAwaitingConsent = true;
+        }
         if (out && out.reply) {
           await typewriterZionBubbles(out.reply);
         } else {
@@ -29185,11 +29509,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
       } catch (err) {
         clearZionTyping();
+        clearZionChatBusyUi();
         alert('Zion chat failed: ' + (err.message || err));
         syncZionChatSurfaces();
       } finally {
-        _zionChatBusy = false;
-        setZionChatBusy(false);
+        clearZionChatBusyUi();
         focusZionComposer(sendSource);
         if (_zionChatNeedsRefresh) {
           _zionChatNeedsRefresh = false;
@@ -29216,6 +29540,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.saveZionAgentConfig = saveZionAgentConfig;
     window.sendZionAgentChat = sendZionAgentChat;
     window.locateZionDevice = locateZionDevice;
+    window.ensureZionDeviceLocation = ensureZionDeviceLocation;
+    window.clearZionChatBusyUi = clearZionChatBusyUi;
     window.decideZionChangeRequest = decideZionChangeRequest;
     window.toggleZionAgentWidget = toggleZionAgentWidget;
     window.openZionImprovementPopup = openZionImprovementPopup;
@@ -29224,6 +29550,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     try {
       paintZionLocationStatus();
+    } catch (_) {}
+    try {
+      // Soft auto-locate once if not opted out (permission prompt when needed)
+      if (!isZionLocationOptedOut()) {
+        const cachedLoc = readZionLocationCache();
+        if (!(cachedLoc && cachedLoc.source === 'device')) {
+          /* defer slightly so first paint is not blocked */
+          setTimeout(function () {
+            try { ensureZionDeviceLocation('boot'); } catch (_) {}
+          }, 600);
+        }
+      }
     } catch (_) {}
     try {
       ensureZionStack();

@@ -1563,6 +1563,7 @@ export async function zionAgentChat(
   mode: string;
   provider: ZionLlmProvider;
   model: string;
+  needsLocation?: boolean;
 }> {
   const text = String(userText || '').trim().slice(0, 4000);
   if (!text) {
@@ -1684,6 +1685,7 @@ export async function zionAgentChat(
         mode: getZionAgentStatus().label,
         provider: 'local',
         model: 'zion-lifestyle',
+        needsLocation: !!lifeOut.needsLocation,
       };
     }
     if (lifeOut.facts) lifestyleFacts = lifeOut.facts;

@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.196',
+    title: 'Zion voice, chat UX, and location reliability',
+    sections: ['zion', 'overview'],
+    items: [
+      'Voice: lexicon repairs + fuzzy send/clear/cancel/new-question; final transcripts commit to the box (interim preview only); 3s silence auto-send after finals with a corrector pass.',
+      'Composer stays editable while Zion replies (Send disabled only); mic moves to the action row with an iOS-style SVG and stay-on rules (pause while typing reply, off on typing/refresh/2 min idle).',
+      'Emoji feedback persists in sessionStorage (selected stays full color; no green pill). Location auto-asks on Zion open; status is Location on/off/asking…; denied flow offers Turn on location + NL on/off. Overpass uses bbox queries, longer timeout, and mirror retries.',
+    ],
+  },
+  {
     version: '1.2.195',
     title: 'Zion lifestyle — weather, food, fitness, nutrition',
     sections: ['zion', 'overview'],
