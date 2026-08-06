@@ -36,6 +36,17 @@ const GATE_BLOCK = [
   'Zion: Gatekeeper block — collapsed tape or crowded low-MC, not our circus.',
 ];
 
+const CLASSIFIER_LINES = [
+  'Zion: Classifier picked a lane family — specialists only, no free-for-all.',
+  'Zion: Setup class locked. MARL can argue among the invited bots.',
+  'Zion: HMC Classifier: right tool for the job, not every hammer.',
+];
+
+const CLASSIFIER_BLOCK = [
+  'Zion: Unknown setup and classifier said sit out — patience > FOMO.',
+  'Zion: Classifier blocked eligibility. Better empty hands than the wrong bot.',
+];
+
 const CLOSE_WIN = [
   'Zion: Green close — tell the bots I said well played (quietly, so they don\'t get cocky).',
   'Zion: Winner winner — compound the wisdom, not just the SOL.',
@@ -91,6 +102,8 @@ export function maybeZionFightLogComment(input: {
   win?: boolean;
   /** Gatekeeper plain-language summary when present */
   hmcGateSummary?: string | null;
+  /** Setup classifier plain-language summary when present */
+  hmcClassifierSummary?: string | null;
 }): void {
   if (!shouldComment()) return;
   const mint = String(input.mint || '').trim();
@@ -98,8 +111,11 @@ export function maybeZionFightLogComment(input: {
 
   let line: string;
   const gate = String(input.hmcGateSummary || '').trim();
+  const clf = String(input.hmcClassifierSummary || '').trim();
   if (gate && /Gatekeeper BLOCK/i.test(gate)) {
     line = `${pick(GATE_BLOCK)} (${gate.slice(0, 80)})`;
+  } else if (clf && /Classifier BLOCK/i.test(clf)) {
+    line = `${pick(CLASSIFIER_BLOCK)} (${clf.slice(0, 80)})`;
   } else {
     switch (input.event) {
       case 'cascade_open':
@@ -108,15 +124,21 @@ export function maybeZionFightLogComment(input: {
       case 'cascade_skip':
         line = gate
           ? `${pick(CASCADE_SKIP)} · ${gate.slice(0, 72)}`
-          : pick(CASCADE_SKIP);
+          : clf
+            ? `${pick(CASCADE_SKIP)} · ${clf.slice(0, 72)}`
+            : pick(CASCADE_SKIP);
         break;
       case 'close':
         line = pick(input.win ? CLOSE_WIN : CLOSE_LOSS);
         break;
       default:
-        line = gate
-          ? `${pick(OPEN_LINES)} · ${gate.slice(0, 72)}`
-          : pick(OPEN_LINES);
+        if (clf) {
+          line = `${pick(CLASSIFIER_LINES)} · ${clf.slice(0, 72)}`;
+        } else {
+          line = gate
+            ? `${pick(OPEN_LINES)} · ${gate.slice(0, 72)}`
+            : pick(OPEN_LINES);
+        }
     }
   }
 

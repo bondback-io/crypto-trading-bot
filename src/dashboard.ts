@@ -8331,6 +8331,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="hmc-classifier-card" data-mb-tab-scope="learning">
+        <details class="strat-adv-pack" id="hmc-classifier-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">HMC Setup Classifier <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Phase 2: after Gatekeeper allow, classify setup (momentum / dip / migration / slow_quality) and restrict which specialist lanes may compete. MARL ranks only eligible lanes. Default OFF. No TP/SL changes."></span></span>
+              <span id="hmc-clf-status-badge" class="badge status-badge" style="font-size:11px">Classifier OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable HMC Setup Classifier" onclick="event.stopPropagation()">
+              <input type="checkbox" id="hmc-clf-enabled" onchange="saveHmcClassifierConfig()" onclick="event.stopPropagation()" />
+              <span>Enable Classifier</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <label class="ctl-check mb-2" title="When setup is unknown or low confidence, allow all specialists">
+              <input type="checkbox" id="hmc-clf-unknown-trade" onchange="saveHmcClassifierConfig()" />
+              <span>Unknown setups can trade <span class="tip" tabindex="0" data-tip="ON (default): unknown / low-confidence setups keep all specialists eligible. OFF: block entry when setup is unknown."></span></span>
+            </label>
+            <p class="text-xs text-slate-500 mb-1">Eligibility map: momentum → Momentum Burst / Scalper / Trend Rider · dip → Dip Buyer · migration → Migration Sniper · slow_quality → High Win-Rate / Steady / Smart Money.</p>
+            <p class="text-xs text-slate-500 mb-0">Runs after Gatekeeper allow, before lane fight. Agent Decision Log source HMC Classifier; lane fight rows show setup + eligible list.</p>
+          </div>
+        </details>
+      </div>
+
       <div class="card" id="marl-card" data-mb-tab-scope="learning">
         <details class="strat-adv-pack" id="marl-details" style="margin-top:0;border:none;background:transparent">
           <summary>
@@ -9359,6 +9382,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <option value="accel_teacher">Teacher–Student</option>
               <option value="peak_protect">Peak Protect</option>
               <option value="hmc_gatekeeper">HMC Gatekeeper</option>
+              <option value="hmc_classifier">HMC Classifier</option>
               <option value="zion">Zion</option>
             </select>
           </label>
@@ -15415,6 +15439,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   escHtml(String(gate.plainLanguage).slice(0, 160)) +
                 '</div>'
               : '';
+            const clf = d.hmcClassifier || null;
+            const clfLine = clf && clf.plainLanguage
+              ? '<div class="tp-decision-why" style="color:' +
+                (clf.blocked ? '#f87171' : '#c4b5fd') +
+                '" title="' +
+                escHtml(
+                  (clf.setup || '') +
+                    ' · conf=' +
+                    (clf.confidence != null ? Number(clf.confidence).toFixed(2) : '') +
+                    ' · ' +
+                    (Array.isArray(clf.eligibleProfileIds)
+                      ? clf.eligibleProfileIds.join(', ')
+                      : '') +
+                    ' · ' +
+                    (clf.reasonCodes || []).join(', ')
+                ) +
+                '">' +
+                  '<span style="font-weight:700">Setup</span> · ' +
+                  escHtml(String(clf.plainLanguage).slice(0, 180)) +
+                '</div>'
+              : '';
             const tokenMeta =
               escHtml(d.symbol || '') +
               fmtLaneTokenActions(d.mint) +
@@ -15426,6 +15471,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<span class="tp-decision-score" style="color:' + outcomeColor + '">' + outcome + '</span>' +
                 '<div class="tp-decision-why">' + lanes + '</div>' +
                 gateLine +
+                clfLine +
                 marlLine +
                 skipLine +
               '</div>'
@@ -16660,6 +16706,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadHmcGatekeeperConfig === 'function') loadHmcGatekeeperConfig();
+      if (name === 'microbots' && typeof loadHmcClassifierConfig === 'function') loadHmcClassifierConfig();
       if (name === 'microbots' && typeof loadMarlStatus === 'function') loadMarlStatus();
       if (name === 'microbots' && typeof loadProfileRlStatus === 'function') loadProfileRlStatus();
       if (name === 'microbots' && typeof loadLearningAccelerators === 'function') loadLearningAccelerators();
@@ -27165,6 +27212,42 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.saveHmcGatekeeperConfig = saveHmcGatekeeperConfig;
     window.setHmcGatekeeperStrictness = setHmcGatekeeperStrictness;
     window.setHmcGatekeeperDebug = setHmcGatekeeperDebug;
+
+    async function loadHmcClassifierConfig() {
+      try {
+        const data = await fetchJSON('/api/config/hierarchical-coordination');
+        const c = data.hierarchicalCoordination || {};
+        const en = document.getElementById('hmc-clf-enabled');
+        if (en) en.checked = c.classifierEnabled === true && c.enabled !== false;
+        const unk = document.getElementById('hmc-clf-unknown-trade');
+        if (unk) unk.checked = c.unknownSetupsCanTrade !== false;
+        const badge = document.getElementById('hmc-clf-status-badge');
+        if (badge) {
+          const on = c.enabled !== false && c.classifierEnabled === true;
+          badge.textContent = on ? 'Classifier ON' : 'Classifier OFF';
+        }
+      } catch (err) {
+        console.warn('loadHmcClassifierConfig', err);
+      }
+    }
+    async function saveHmcClassifierConfig() {
+      const body = {
+        classifierEnabled: document.getElementById('hmc-clf-enabled')
+          ? document.getElementById('hmc-clf-enabled').checked
+          : false,
+        unknownSetupsCanTrade: document.getElementById('hmc-clf-unknown-trade')
+          ? document.getElementById('hmc-clf-unknown-trade').checked
+          : true,
+      };
+      await fetchJSON('/api/config/hierarchical-coordination', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadHmcClassifierConfig();
+    }
+    window.loadHmcClassifierConfig = loadHmcClassifierConfig;
+    window.saveHmcClassifierConfig = saveHmcClassifierConfig;
 
     let _profileRlStrength = 'medium';
     async function loadProfileRlStatus() {

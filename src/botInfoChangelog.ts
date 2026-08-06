@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.184',
+    title: 'HMC Setup Classifier (Phase 2)',
+    sections: ['coaches', 'learning', 'execution', 'overview', 'microbots'],
+    items: [
+      'Setup Classifier (toggleable, default OFF): after Gatekeeper allow, classifies momentum / dip / migration / slow_quality and restricts eligible specialist lanes; MARL ranks only that subset.',
+      'Unknown setups can trade (default ON) keeps all specialists eligible; OFF blocks unknown/low-confidence entries. Agent Decision Log source hmc_classifier; lane fight + Zion show setup/eligibility.',
+      'Independent Enable Classifier control under Micro Bots (same nesting as Gatekeeper). No TP/SL mutation; Paper / Live Sim / Live share path.',
+    ],
+  },
+  {
     version: '1.2.183',
     title: 'HMC Gatekeeper (Phase 1)',
     sections: ['coaches', 'learning', 'execution', 'overview', 'microbots'],

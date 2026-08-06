@@ -18,7 +18,8 @@ export type AgentSource =
   | 'accel_teacher'
   | 'peak_protect'
   | 'zion'
-  | 'hmc_gatekeeper';
+  | 'hmc_gatekeeper'
+  | 'hmc_classifier';
 
 export type AgentDecisionType =
   | 'advice'

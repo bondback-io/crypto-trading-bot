@@ -2641,17 +2641,36 @@ export interface TradeProfileLaneResult {
  */
 export function evaluateTradeProfileLanes(
   ctx: TradeProfileMatchContext,
-  opts?: { silent?: boolean }
+  opts?: { silent?: boolean; eligibleProfileIds?: string[] | null }
 ): TradeProfileLaneResult[] {
   const state = ensureState();
   if (!state.enabled) {
     return [];
   }
+  const eligibleSet =
+    opts?.eligibleProfileIds != null && opts.eligibleProfileIds.length > 0
+      ? new Set(opts.eligibleProfileIds.map(String))
+      : null;
   const results: TradeProfileLaneResult[] = [];
   for (const catalog of TRADE_PROFILE_CATALOG) {
     if (state.profiles[catalog.id] === false) continue;
     // Default = fallback only; Zion = manual KOL offers only (not copy/scanner lanes)
     if (catalog.id === 'default' || catalog.id === 'zion') continue;
+    if (eligibleSet && !eligibleSet.has(catalog.id)) {
+      const def = resolveTradeProfileDefinition(catalog.id);
+      results.push({
+        profileId: def.id,
+        name: def.name,
+        icon: def.icon,
+        color: def.color,
+        priority: def.priority,
+        score: 0,
+        reason: 'hmc_not_eligible',
+        passed: false,
+        failReason: 'hmc_not_eligible',
+      });
+      continue;
+    }
     const def = resolveTradeProfileDefinition(catalog.id);
     const floors = evaluateLaneEntryFloors(def, ctx);
     if (!floors.ok) {

@@ -36,6 +36,15 @@ export interface LaneOutcomeRecord {
     plainLanguage: string;
     advisory?: boolean;
   };
+  /** HMC Setup Classifier snapshot (Phase 2, optional). */
+  hmcClassifier?: {
+    setup: string;
+    confidence: number;
+    reasonCodes: string[];
+    plainLanguage: string;
+    eligibleProfileIds: string[];
+    blocked?: boolean;
+  };
   /** true when cascade stamped a buy; false when cascade skipped */
   opened?: boolean;
   /** Why cascade rejected after a lane win (compact) */
@@ -133,6 +142,7 @@ export function recordLaneFightOpen(input: {
     thoughts: string[];
   };
   hmcGate?: LaneOutcomeRecord['hmcGate'];
+  hmcClassifier?: LaneOutcomeRecord['hmcClassifier'];
 }): void {
   load();
   ring.push({
@@ -144,6 +154,7 @@ export function recordLaneFightOpen(input: {
     lanes: input.lanes,
     marl: input.marl,
     hmcGate: input.hmcGate,
+    hmcClassifier: input.hmcClassifier,
   });
   trimRing();
   persist();

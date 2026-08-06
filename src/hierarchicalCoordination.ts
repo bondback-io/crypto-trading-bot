@@ -1,6 +1,6 @@
 /**
- * Hierarchical Multi-Agent Coordination (HMC) — Phase 1 Gatekeeper.
- * Additive allow/block before setup classification and lane fight.
+ * Hierarchical Multi-Agent Coordination (HMC) — Phase 1 Gatekeeper + Phase 2 Setup Classifier.
+ * Additive allow/block then setup → eligible specialists before lane fight / MARL.
  * No TP/SL mutation; hard safety never fails open; Paper / Live Sim / Live share path.
  */
 
@@ -9,6 +9,9 @@ import {
   evaluateVolumeIntelligence,
   isVolumeIntelFastProfile,
 } from './volumeIntelligence';
+
+/** Specialist profile ids (mirrors TradeProfileId; avoid circular import). */
+export type HmcProfileId = string;
 
 export type GatekeeperStrictness = 'low' | 'medium' | 'high';
 export type HmcDebugLogging = 'off' | 'normal' | 'verbose';
@@ -24,9 +27,9 @@ export interface HierarchicalCoordinationConfig {
   minVolumeH1Usd: number;
   minLiquidityUsd: number;
   debugLogging: HmcDebugLogging;
-  /** Reserved — Phase 2+ */
+  /** Phase 2 — setup classifier on/off (nested under enabled) */
   classifierEnabled: boolean;
-  /** Reserved — Phase 2+ */
+  /** Phase 2 — unknown / low-confidence setups still allow all specialists */
   unknownSetupsCanTrade: boolean;
 }
 
@@ -89,26 +92,463 @@ export interface GatekeeperInput {
   candles?: unknown[] | null;
 }
 
-/** Stub for later setup-classifier phase. */
-export type SetupClassStub =
+export type SetupClass =
   | 'unknown'
   | 'momentum'
   | 'dip'
   | 'migration'
   | 'slow_quality';
 
+/** @deprecated use SetupClass */
+export type SetupClassStub = SetupClass;
+
+/** Specialist lanes that may compete in a lane fight (excludes default / zion). */
+export const HMC_SPECIALIST_PROFILE_IDS: HmcProfileId[] = [
+  'scalper',
+  'dip_buyer',
+  'trend_rider',
+  'migration_sniper',
+  'high_win_rate',
+  'momentum_burst',
+  'steady_compounder',
+  'reversal_scalper',
+  'smart_money_mirror',
+];
+
+/** Setup class → eligible TradeProfileId specialists. */
+export const SETUP_ELIGIBLE_PROFILES: Record<SetupClass, HmcProfileId[]> = {
+  momentum: ['momentum_burst', 'scalper', 'trend_rider'],
+  dip: ['dip_buyer'],
+  migration: ['migration_sniper'],
+  slow_quality: ['high_win_rate', 'steady_compounder', 'smart_money_mirror'],
+  unknown: [...HMC_SPECIALIST_PROFILE_IDS],
+};
+
+export interface SetupClassifierInput extends GatekeeperInput {
+  isMigration?: boolean;
+  nearMigration?: boolean;
+  earlyBuy?: boolean;
+  entrySource?: string | null;
+  tokenAgeHours?: number | null;
+  dropFromPeakPct?: number | null;
+  localPullbackPct?: number | null;
+  nearSupport?: boolean;
+  scannerReasons?: string[] | null;
+}
+
+export interface SetupClassifierResult {
+  setup: SetupClass;
+  confidence: number;
+  reasonCodes: string[];
+  plainLanguage: string;
+  eligibleProfileIds: HmcProfileId[];
+  /** When unknown and unknownSetupsCanTrade=false (or empty eligibles) */
+  blocked: boolean;
+  /** Classifier master/toggle off — caller should not filter lanes */
+  inactive?: boolean;
+}
+
+/** @deprecated use SetupClassifierResult */
 export interface SetupClassifierStubResult {
-  setup: SetupClassStub;
+  setup: SetupClass;
   confidence: number;
   note: string;
 }
 
-export function classifySetupStub(_input: GatekeeperInput): SetupClassifierStubResult {
+/** @deprecated use classifySetup */
+export function classifySetupStub(
+  input: GatekeeperInput
+): SetupClassifierStubResult {
+  const r = classifySetup(input);
   return {
-    setup: 'unknown',
-    confidence: 0,
-    note: 'Classifier deferred — Phase 2+',
+    setup: r.setup,
+    confidence: r.confidence,
+    note: r.plainLanguage,
   };
+}
+
+/** Low confidence below this is treated as unknown. */
+const CLASSIFIER_CONFIDENCE_FLOOR = 0.28;
+
+const CLASSIFIER_CACHE_TTL_MS = 45_000;
+const classifierCache = new Map<
+  string,
+  { at: number; result: SetupClassifierResult; key: string }
+>();
+
+export function clearClassifierCache(): void {
+  classifierCache.clear();
+}
+
+export function isClassifierActive(): boolean {
+  const cfg = getHierarchicalCoordinationConfig();
+  return cfg.enabled && cfg.classifierEnabled;
+}
+
+function finSigned(n: unknown): number | null {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : null;
+}
+
+function classifierCacheKey(
+  input: SetupClassifierInput,
+  cfg: HierarchicalCoordinationConfig
+): string {
+  const m = input.metrics || {};
+  return [
+    input.mint,
+    cfg.unknownSetupsCanTrade ? '1' : '0',
+    input.profileHint || '',
+    input.isMigration ? '1' : '0',
+    input.nearMigration ? '1' : '0',
+    input.earlyBuy ? '1' : '0',
+    String(input.entrySource || ''),
+    fin(input.tokenAgeHours),
+    fin(m.volumeM5Usd),
+    fin(m.volumeH1Usd),
+    finSigned(m.priceChangeH1Pct),
+    finSigned(m.priceChange24hPct),
+    finSigned(input.dropFromPeakPct),
+    finSigned(input.localPullbackPct),
+    input.nearSupport ? '1' : '0',
+  ].join('|');
+}
+
+function getClassifierCached(
+  mint: string,
+  key: string
+): SetupClassifierResult | null {
+  const hit = classifierCache.get(mint);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CLASSIFIER_CACHE_TTL_MS) {
+    classifierCache.delete(mint);
+    return null;
+  }
+  if (hit.key !== key) return null;
+  return hit.result;
+}
+
+function setClassifierCached(
+  mint: string,
+  key: string,
+  result: SetupClassifierResult
+): void {
+  classifierCache.set(mint, { at: Date.now(), key, result });
+  if (classifierCache.size > 400) {
+    const now = Date.now();
+    for (const [k, v] of classifierCache) {
+      if (now - v.at > CLASSIFIER_CACHE_TTL_MS) classifierCache.delete(k);
+    }
+  }
+}
+
+function eligibleForSetup(
+  setup: SetupClass,
+  unknownCanTrade: boolean
+): HmcProfileId[] {
+  if (setup === 'unknown') {
+    return unknownCanTrade ? [...SETUP_ELIGIBLE_PROFILES.unknown] : [];
+  }
+  return [...SETUP_ELIGIBLE_PROFILES[setup]];
+}
+
+function classifierPlain(
+  setup: SetupClass,
+  confidence: number,
+  codes: string[],
+  blocked: boolean,
+  eligible: HmcProfileId[]
+): string {
+  const conf = Math.round(confidence * 100);
+  const elig =
+    eligible.length > 6
+      ? `${eligible.length} specialists`
+      : eligible.join(', ') || 'none';
+  if (blocked) {
+    return `Classifier BLOCK: setup=${setup} (${conf}%) — ${codes.join(', ') || 'unknown not tradable'} · eligible=${elig}`;
+  }
+  return `Classifier: ${setup} (${conf}%) · eligible=${elig}${
+    codes.length ? ` · ${codes.slice(0, 4).join(', ')}` : ''
+  }`;
+}
+
+/**
+ * Rule-based setup classifier (Phase 2). When inactive, returns inactive marker
+ * so callers skip eligibility filtering. Fail-soft → unknown.
+ */
+export function classifySetup(
+  input: SetupClassifierInput
+): SetupClassifierResult {
+  const cfg = getHierarchicalCoordinationConfig();
+  if (!cfg.enabled || !cfg.classifierEnabled) {
+    return {
+      setup: 'unknown',
+      confidence: 0,
+      reasonCodes: [],
+      plainLanguage: 'Classifier off',
+      eligibleProfileIds: [...HMC_SPECIALIST_PROFILE_IDS],
+      blocked: false,
+      inactive: true,
+    };
+  }
+
+  const mint = String(input.mint || '').trim();
+  if (!mint) {
+    const eligible = eligibleForSetup('unknown', cfg.unknownSetupsCanTrade);
+    const blocked = eligible.length === 0;
+    return {
+      setup: 'unknown',
+      confidence: 0,
+      reasonCodes: ['MISSING_MINT'],
+      plainLanguage: classifierPlain(
+        'unknown',
+        0,
+        ['MISSING_MINT'],
+        blocked,
+        eligible
+      ),
+      eligibleProfileIds: eligible,
+      blocked,
+    };
+  }
+
+  const key = classifierCacheKey(input, cfg);
+  const cached = getClassifierCached(mint, key);
+  if (cached) return cached;
+
+  const scores: Record<Exclude<SetupClass, 'unknown'>, number> = {
+    migration: 0,
+    dip: 0,
+    momentum: 0,
+    slow_quality: 0,
+  };
+  const codes: string[] = [];
+
+  const hint = String(input.profileHint || '').toLowerCase();
+  const ageH = fin(input.tokenAgeHours);
+  const volM5 = fin(input.metrics?.volumeM5Usd);
+  const volH1 = fin(input.metrics?.volumeH1Usd);
+  const chH1 = finSigned(input.metrics?.priceChangeH1Pct);
+  const ch24 = finSigned(input.metrics?.priceChange24hPct);
+  const drop = finSigned(input.dropFromPeakPct);
+  const pullback = finSigned(input.localPullbackPct);
+  const entry = String(input.entrySource || '').toLowerCase();
+  const reasons = Array.isArray(input.scannerReasons)
+    ? input.scannerReasons.map((r) => String(r).toLowerCase())
+    : [];
+
+  // —— Migration ——
+  if (input.isMigration || entry === 'migration') {
+    scores.migration += 0.55;
+    codes.push('MIG_FLAG');
+  }
+  if (input.nearMigration) {
+    scores.migration += 0.35;
+    codes.push('MIG_NEAR');
+  }
+  if (hint === 'migration_sniper' || hint === 'migration') {
+    scores.migration += 0.4;
+    codes.push('MIG_HINT');
+  }
+  if (reasons.some((r) => r.includes('grad') || r.includes('migrat'))) {
+    scores.migration += 0.25;
+    codes.push('MIG_SCANNER');
+  }
+  if (ageH != null && ageH < 2) {
+    scores.migration += 0.15;
+    codes.push('MIG_FRESH');
+  }
+  if (input.earlyBuy && ageH != null && ageH < 6) {
+    scores.migration += 0.1;
+  }
+
+  // —— Dip ——
+  if (hint === 'dip_buyer') {
+    scores.dip += 0.45;
+    codes.push('DIP_HINT');
+  }
+  if (chH1 != null && chH1 <= -8) {
+    scores.dip += 0.35;
+    codes.push('DIP_H1_RED');
+  } else if (chH1 != null && chH1 <= -4) {
+    scores.dip += 0.2;
+    codes.push('DIP_H1_SOFT');
+  }
+  if (drop != null && drop >= 12) {
+    scores.dip += 0.3;
+    codes.push('DIP_FROM_PEAK');
+  } else if (pullback != null && pullback >= 8) {
+    scores.dip += 0.22;
+    codes.push('DIP_PULLBACK');
+  }
+  if (input.nearSupport) {
+    scores.dip += 0.2;
+    codes.push('DIP_SUPPORT');
+  }
+  if (ch24 != null && ch24 <= -15 && (chH1 == null || chH1 < 5)) {
+    scores.dip += 0.12;
+  }
+
+  // —— Momentum ——
+  if (
+    hint === 'momentum_burst' ||
+    hint === 'scalper' ||
+    hint === 'trend_rider' ||
+    hint === 'reversal_scalper'
+  ) {
+    scores.momentum += 0.35;
+    codes.push('MOM_HINT');
+  }
+  if (chH1 != null && chH1 >= 8) {
+    scores.momentum += 0.35;
+    codes.push('MOM_H1_GREEN');
+  } else if (chH1 != null && chH1 >= 3) {
+    scores.momentum += 0.18;
+    codes.push('MOM_H1_SOFT');
+  }
+  if (volM5 != null && volM5 >= 3_000 && (chH1 == null || chH1 > 0)) {
+    scores.momentum += 0.25;
+    codes.push('MOM_VOL_M5');
+  } else if (volM5 != null && volM5 >= 1_500 && chH1 != null && chH1 > 2) {
+    scores.momentum += 0.15;
+  }
+  if (volH1 != null && volM5 != null && volH1 > 0 && volM5 / volH1 > 0.35) {
+    scores.momentum += 0.1;
+    codes.push('MOM_VOL_BURST');
+  }
+
+  // —— Slow quality ——
+  if (
+    hint === 'high_win_rate' ||
+    hint === 'steady_compounder' ||
+    hint === 'smart_money_mirror'
+  ) {
+    scores.slow_quality += 0.4;
+    codes.push('SQ_HINT');
+  }
+  if (ageH != null && ageH >= 12) {
+    scores.slow_quality += 0.25;
+    codes.push('SQ_AGE');
+  } else if (ageH != null && ageH >= 6) {
+    scores.slow_quality += 0.12;
+  }
+  const absH1 = chH1 != null ? Math.abs(chH1) : null;
+  if (absH1 != null && absH1 < 6 && (drop == null || drop < 10)) {
+    scores.slow_quality += 0.2;
+    codes.push('SQ_CALM');
+  }
+  if (volH1 != null && volH1 >= 8_000 && (volM5 == null || volM5 < 4_000)) {
+    scores.slow_quality += 0.12;
+  }
+
+  let setup: SetupClass = 'unknown';
+  let confidence = 0;
+  const ranked = (
+    Object.entries(scores) as Array<[Exclude<SetupClass, 'unknown'>, number]>
+  ).sort((a, b) => b[1] - a[1]);
+  const best = ranked[0];
+  const second = ranked[1];
+  if (best && best[1] >= CLASSIFIER_CONFIDENCE_FLOOR) {
+    setup = best[0];
+    confidence = Math.min(0.95, best[1]);
+    if (second && second[1] > 0 && best[1] - second[1] < 0.12) {
+      // Ambiguous — prefer unknown unless clear winner
+      if (best[1] < 0.45) {
+        setup = 'unknown';
+        confidence = Math.min(0.4, best[1]);
+        codes.push('AMBIGUOUS');
+      } else {
+        confidence = Math.max(CLASSIFIER_CONFIDENCE_FLOOR, confidence - 0.1);
+        codes.push('CLOSE_SECOND');
+      }
+    }
+  } else {
+    codes.push('LOW_CONFIDENCE');
+    confidence = best ? Math.min(CLASSIFIER_CONFIDENCE_FLOOR, best[1]) : 0;
+  }
+
+  // Missing metrics fail soft → unknown with full eligibility when allowed
+  if (
+    volM5 == null &&
+    volH1 == null &&
+    chH1 == null &&
+    !input.isMigration &&
+    !input.nearMigration &&
+    !hint
+  ) {
+    setup = 'unknown';
+    confidence = 0;
+    codes.push('DATA_GAP');
+  }
+
+  const eligible = eligibleForSetup(setup, cfg.unknownSetupsCanTrade);
+  const blocked =
+    eligible.length === 0 ||
+    (setup === 'unknown' && !cfg.unknownSetupsCanTrade);
+
+  const result: SetupClassifierResult = {
+    setup,
+    confidence: Math.round(confidence * 1000) / 1000,
+    reasonCodes: [...new Set(codes)].slice(0, 12),
+    plainLanguage: classifierPlain(
+      setup,
+      confidence,
+      [...new Set(codes)].slice(0, 6),
+      blocked,
+      eligible
+    ),
+    eligibleProfileIds: eligible,
+    blocked,
+  };
+
+  setClassifierCached(mint, key, result);
+
+  if (cfg.debugLogging === 'verbose') {
+    console.log(
+      `[hmc_classifier] ${input.symbol || mint.slice(0, 8)}… ` +
+        `${result.setup} conf=${result.confidence} blocked=${result.blocked} ` +
+        `elig=${result.eligibleProfileIds.join(',')}`
+    );
+  } else if (
+    cfg.debugLogging === 'normal' &&
+    (result.blocked || result.setup !== 'unknown')
+  ) {
+    console.log(
+      `[hmc_classifier] ${input.symbol || mint.slice(0, 8)}… ${result.plainLanguage}`
+    );
+  }
+
+  return result;
+}
+
+/** Log classifier decision to Agent Decision Log. */
+export function recordClassifierDecision(input: {
+  result: SetupClassifierResult;
+  mint: string;
+  symbol?: string;
+  profileHint?: string | null;
+}): void {
+  try {
+    if (input.result.inactive) return;
+    const { recordAgentDecision } =
+      require('./agentDecisionLog') as typeof import('./agentDecisionLog');
+    const r = input.result;
+    recordAgentDecision({
+      agent: 'HMC Classifier',
+      source: 'hmc_classifier',
+      decisionType: r.blocked ? 'warning' : 'recommendation',
+      profileId: input.profileHint || undefined,
+      target: 'Setup eligibility',
+      summary: r.plainLanguage,
+      detail: `setup=${r.setup} conf=${r.confidence} elig=${r.eligibleProfileIds.join(',') || 'none'} codes=${r.reasonCodes.join(',') || 'none'}`,
+      applied: r.blocked ? 'applied' : 'observation_only',
+      mint: input.mint,
+      symbol: input.symbol,
+      dedupeKey: `hmc_clf:${input.mint}:${r.setup}:${r.blocked ? 'block' : 'ok'}:${r.eligibleProfileIds.slice(0, 3).join('+')}`,
+    });
+  } catch {
+    /* fail-open logging */
+  }
 }
 
 function clamp(n: number, lo: number, hi: number): number {

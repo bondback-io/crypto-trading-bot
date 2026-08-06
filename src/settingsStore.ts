@@ -232,7 +232,7 @@ export interface PersistedBotSettings {
       }
     >;
   };
-  /** HMC Phase 1 Gatekeeper (allow/block before lane fight) */
+  /** HMC Gatekeeper + Setup Classifier (Phases 1–2) */
   hierarchicalCoordination?: {
     enabled?: boolean;
     gatekeeperEnabled?: boolean;
