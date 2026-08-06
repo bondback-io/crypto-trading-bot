@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.204',
+    title: 'Market Scanner enable sticks',
+    sections: ['overview', 'microbots', 'alerts'],
+    items: [
+      'Fix: Market Scanner ON/OFF no longer false-reports OFF when a Smart Bot lane without scanner (e.g. Scalper) is mid-cascade — status, poll, AlphaScan, dip-watch, and specialty feeds use the global toggle.',
+      'Live Feed Enable checkbox binds to persisted config.marketScanner.enabled (not transient status), so Save cannot flip the master off after a race.',
+      'One-shot restore Market Scanner ON; 60%+ Win Rate pack no longer forces scanner OFF; Scalper-style profiles allowlist ta_market_scanner.',
+    ],
+  },
+  {
     version: '1.2.203',
     title: 'HMC classifier — restore trade volume',
     sections: ['microbots', 'learning', 'overview'],

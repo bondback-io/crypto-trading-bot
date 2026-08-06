@@ -2782,9 +2782,20 @@ export function createServer(): express.Application {
       }
     }
 
-    // Strategy toggle is the live gate — keep soft preference + toggle in sync
-    if (config.strategyToggles) {
-      config.strategyToggles.ta_market_scanner = ms.enabled !== false;
+    // Strategy toggle is the live gate — keep soft preference + toggle in sync.
+    // Use updateStrategyToggles so underlying flags stay aligned and recipe
+    // mode marks custom (user preference wins over synced recipes).
+    try {
+      const { updateStrategyToggles } =
+        require('./strategies') as typeof import('./strategies');
+      updateStrategyToggles(
+        { ta_market_scanner: ms.enabled !== false },
+        { persist: false, syncUnderlying: true, markCustom: true }
+      );
+    } catch {
+      if (config.strategyToggles) {
+        config.strategyToggles.ta_market_scanner = ms.enabled !== false;
+      }
     }
     persistUserSettings();
 

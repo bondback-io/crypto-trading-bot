@@ -2869,6 +2869,8 @@ const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
 const SELF_LEARNING_DEFAULT_ON_V1 = 'selfLearningDefaultOn_v1';
+/** One-shot: restore Market Scanner ON after profile-gate false-OFF / sticky enabled:false. */
+const MARKET_SCANNER_USER_ON_V1 = 'marketScannerUserOn_v1';
 const NOTIFY_EMAIL_BONDBACK_V1 = 'notifyEmailBondback_v1';
 /** Force-remap legacy isaac notify address even if v1 already ran / env was stale. */
 const NOTIFY_EMAIL_BONDBACK_V2 = 'notifyEmailBondback_v2';
@@ -4627,6 +4629,60 @@ export function applyPersistedSettings(opts?: {
     } catch (err) {
       console.warn(
         '[settings] selfLearningDefaultOn_v1 failed:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  if (!settingsMigrations[MARKET_SCANNER_USER_ON_V1]) {
+    try {
+      if (!config.marketScanner) {
+        config.marketScanner = {
+          enabled: true,
+          pollIntervalMs: 22_000,
+          lookbackHours: 6,
+          maxCandidatesPerPoll: 15,
+          cooldownMs: 45 * 60_000,
+          minRankScore: 42,
+          requireTaSetup: true,
+          minPatternConfidence: 55,
+          preferRealCandles: true,
+          syntheticPenalty: 8,
+          minConfluenceScore: 40,
+          playbookMode: 'auto',
+          pauseScannerOnlyInRiskOff: true,
+          requireRsForMomentum: true,
+          requireMtfAligned: false,
+          minLiquidityUsd: 8000,
+          minOrganicScore: 0,
+          preferOrganicVolume: true,
+          jupiterTrendingEnabled: true,
+          jupiterCategory: 'toptraded',
+          jupiterPumpFunOnly: true,
+          jupiterLimit: 100,
+          jupiterMergeIntervals: true,
+          minVolumeM5Usd: 1000,
+          minVolumeH1Usd: 2500,
+          minVolumeH6Usd: 10000,
+          minVolumeH24Usd: 15_000,
+        };
+      } else {
+        config.marketScanner.enabled = true;
+      }
+      const { updateStrategyToggles } =
+        require('./strategies') as typeof import('./strategies');
+      updateStrategyToggles(
+        { ta_market_scanner: true },
+        { persist: false, syncUnderlying: true, markCustom: true }
+      );
+      settingsMigrations[MARKET_SCANNER_USER_ON_V1] = true;
+      persistUserSettings();
+      console.log(
+        '[settings] Applied marketScannerUserOn_v1 — Market Scanner ON (user preference restored)'
+      );
+    } catch (err) {
+      console.warn(
+        '[settings] marketScannerUserOn_v1 failed:',
         err instanceof Error ? err.message : err
       );
     }

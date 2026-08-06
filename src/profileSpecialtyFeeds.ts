@@ -18,7 +18,7 @@ import {
   isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
@@ -137,7 +137,7 @@ function kolCandidateToLaunch(c: {
  * Returns number of candidates handed to the scanner handler.
  */
 export async function runProfileSpecialtyFeedPass(): Promise<number> {
-  if (!isStrategyEnabled('ta_market_scanner')) return 0;
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (!isSmartBotProfilesEnabled()) return 0;
   if (config.tradeProfiles?.enabled === false) return 0;
 

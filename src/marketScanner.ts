@@ -23,7 +23,7 @@ import {
 } from './marketData';
 import { fetchRecentLaunches } from './marketData';
 import { fetchBondingCurve, summarizeBondingCurve } from './bondingCurve';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledGlobal } from './strategies';
 import { seedPriceHistoryFromCandles } from './technicalLevels';
 import { analyzeChartPatterns } from './chartPatterns';
 import {
@@ -267,7 +267,9 @@ export function getScannerStatus(): ScannerStatus {
     lastPollMs,
     candidatesInFeed: feed.length,
     lastError,
-    enabled: isStrategyEnabled('ta_market_scanner'),
+    // Global master only — profile allowlists must not false-OFF status/UI
+    // while a non-scanner lane (e.g. Scalper) is mid-cascade.
+    enabled: isStrategyEnabledGlobal('ta_market_scanner'),
     regime: {
       regime: regime.regime,
       solChangeH1: regime.solChangeH1,
@@ -1191,7 +1193,7 @@ export function handOffScannerCandidate(
 }
 
 export async function runScannerPollOnce(): Promise<number> {
-  if (!isStrategyEnabled('ta_market_scanner')) return 0;
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (pollInFlight) return 0;
   const cfg = scannerCfg();
   const baseInterval = Math.max(22_000, Number(cfg.pollIntervalMs) || 22_000);

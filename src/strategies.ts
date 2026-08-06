@@ -1890,7 +1890,8 @@ export function frequencyImpactLabel(impact: TradeFrequencyImpact): string {
  */
 export const HIGH_WIN_RATE_PRESET: StrategyToggleMap = {
   smart_money_copy: true,
-  ta_market_scanner: false,
+  // User master preference — do not force Market Scanner OFF via this pack.
+  ta_market_scanner: true,
   wallet_convergence: true,
   migration_priority: true,
   near_migration_curve: true,

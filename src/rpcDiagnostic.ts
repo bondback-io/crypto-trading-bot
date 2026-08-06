@@ -7,7 +7,7 @@ import { config } from './config';
 import { getRpcStats } from './connection';
 import { getJitoStatus } from './jito';
 import { isPublicRpcUrl } from './rpcUrl';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledGlobal } from './strategies';
 
 export type RpcDiagTarget =
   | 'wallet_poll'
@@ -166,7 +166,7 @@ export function getRpcLoadDiagnostic(): RpcLoadDiagnostic {
 
   const scannerOn =
     config.marketScanner?.enabled !== false &&
-    isStrategyEnabled('ta_market_scanner');
+    isStrategyEnabledGlobal('ta_market_scanner');
   const alphaOn = config.alphaScan?.enabled === true;
   const zionOn =
     config.zion?.enabled === true && config.zion?.scanner?.enabled !== false;

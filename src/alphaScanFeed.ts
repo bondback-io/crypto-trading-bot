@@ -31,7 +31,7 @@ import {
   isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
@@ -467,7 +467,7 @@ export async function refreshAlphaScanBuckets(opts?: {
 export async function runAlphaScanFeedPass(): Promise<number> {
   const cfg = asCfg();
   if (!cfg.enabled) return 0;
-  if (!isStrategyEnabled('ta_market_scanner')) return 0;
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (!isSmartBotProfilesEnabled()) return 0;
   if (config.tradeProfiles?.enabled === false) return 0;
   if (!hasJupiterApiKey()) {

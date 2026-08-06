@@ -53,6 +53,9 @@ const CORE_SAFETY_MODULES: TradeProfileModules = {
 const SCALPER_STYLE_MODULES: TradeProfileModules = {
   ...CORE_SAFETY_MODULES,
   smart_money_copy: true,
+  // Keep scanner module allowlisted so cascade gates never false-OFF the
+  // global Market Scanner master (poll/status use global; specialty still gated).
+  ta_market_scanner: true,
   dead_market_exit: true,
   tiered_profit_taking: true,
   volume_spike_filter: true,

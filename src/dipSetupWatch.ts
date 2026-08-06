@@ -10,7 +10,7 @@ import {
   isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
-import { isStrategyEnabled } from './strategies';
+import { isStrategyEnabledGlobal } from './strategies';
 import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
@@ -141,7 +141,7 @@ function buildTargetDipEntries(w: {
 
 function isDipProfileEnabled(): boolean {
   if (!isSmartBotProfilesEnabled()) return false;
-  if (!isStrategyEnabled('ta_market_scanner')) return false;
+  if (!isStrategyEnabledGlobal('ta_market_scanner')) return false;
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
   if (config.tradeProfiles?.profiles?.dip_buyer === false) return false;

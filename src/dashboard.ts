@@ -25634,11 +25634,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!cfg) return;
       const en = document.getElementById('ms-enabled');
       if (en) {
-        // Prefer live strategy gate from status when present
-        en.checked =
-          status && status.enabled != null
-            ? Boolean(status.enabled)
-            : cfg.enabled !== false;
+        // Persisted soft preference / global toggle — never use transient
+        // status.enabled (profile-gate races used to flip the checkbox OFF).
+        en.checked = cfg.enabled !== false;
       }
       const reqTa = document.getElementById('ms-require-ta');
       if (reqTa) reqTa.checked = cfg.requireTaSetup !== false;
@@ -25782,11 +25780,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         fillMarketScannerForm(data.config || body, data.status || {});
         if (st) {
-          st.textContent =
-            'Saved' +
-            (data.status && data.status.enabled != null
-              ? (data.status.enabled ? ' · ON' : ' · OFF')
-              : '');
+          const on =
+            data.config && data.config.enabled != null
+              ? data.config.enabled !== false
+              : body.enabled !== false;
+          st.textContent = 'Saved' + (on ? ' · ON' : ' · OFF');
         }
         if (!silent) {
           /* status line is enough */
