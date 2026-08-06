@@ -5055,7 +5055,12 @@ export function createServer(): express.Application {
     const n = config.notifications;
     if (typeof body.enabled === 'boolean') n.enabled = body.enabled;
     if (typeof body.email === 'string' && body.email.trim()) {
-      n.email = body.email.trim().slice(0, 200);
+      const next = body.email.trim().slice(0, 200);
+      // Never persist the retired isaac default (stale env / UI / restore).
+      n.email =
+        next.toLowerCase() === 'isaacpascua87@gmail.com'
+          ? 'bondback2026@gmail.com'
+          : next;
     }
     if (body.lowEquitySol != null && Number.isFinite(Number(body.lowEquitySol))) {
       n.lowEquitySol = Math.max(0.01, Number(body.lowEquitySol));
@@ -5090,7 +5095,10 @@ export function createServer(): express.Application {
     if (typeof body.profitEmailTo === 'string') {
       const to = body.profitEmailTo.trim().slice(0, 200);
       if (!to || to.includes('@')) {
-        n.profitEmailTo = to || 'bondback2026@gmail.com';
+        n.profitEmailTo =
+          !to || to.toLowerCase() === 'isaacpascua87@gmail.com'
+            ? 'bondback2026@gmail.com'
+            : to;
       }
     }
     if (typeof body.dashboardEnabled === 'boolean') {

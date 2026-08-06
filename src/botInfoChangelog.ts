@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.185',
+    title: 'Notify email stuck on isaac — fixed',
+    sections: ['alerts', 'backup', 'overview'],
+    items: [
+      'Config → Notifications Email no longer reverts to isaacpascua87@gmail.com: boot/restore coerce + save path force bondback2026@gmail.com for that legacy address only; custom emails untouched.',
+      'Stale NOTIFY_EMAIL=isaac… env is ignored; site-backup-latest.json patched so GitHub auto-import cannot reintroduce isaac.',
+    ],
+  },
+  {
     version: '1.2.184',
     title: 'HMC Setup Classifier (Phase 2)',
     sections: ['coaches', 'learning', 'execution', 'overview', 'microbots'],

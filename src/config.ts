@@ -2727,8 +2727,14 @@ export const config: BotConfig = {
 
   notifications: {
     enabled: true,
-    email:
-      process.env.NOTIFY_EMAIL?.trim() || 'bondback2026@gmail.com',
+    // Inline default — helpers below cannot run before this object initializes.
+    email: (() => {
+      const env = String(process.env.NOTIFY_EMAIL || '').trim();
+      if (!env || env.toLowerCase() === 'isaacpascua87@gmail.com') {
+        return 'bondback2026@gmail.com';
+      }
+      return env;
+    })(),
     lowEquitySol: Number(process.env.NOTIFY_LOW_EQUITY_SOL) || 1,
     lowEquityEnabled: process.env.NOTIFY_LOW_EQUITY !== '0',
     lowEquityCooldownMs: Number(process.env.NOTIFY_LOW_EQUITY_COOLDOWN_MS) || 6 * 3600_000,
@@ -2849,6 +2855,40 @@ const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
 const SELF_LEARNING_DEFAULT_ON_V1 = 'selfLearningDefaultOn_v1';
 const NOTIFY_EMAIL_BONDBACK_V1 = 'notifyEmailBondback_v1';
+/** Force-remap legacy isaac notify address even if v1 already ran / env was stale. */
+const NOTIFY_EMAIL_BONDBACK_V2 = 'notifyEmailBondback_v2';
+const LEGACY_NOTIFY_EMAIL = 'isaacpascua87@gmail.com';
+const DEFAULT_NOTIFY_EMAIL = 'bondback2026@gmail.com';
+
+/** Resolve default notify email; ignore stale NOTIFY_EMAIL=isaac… env. */
+function resolveDefaultNotifyEmail(): string {
+  const env = String(process.env.NOTIFY_EMAIL || '').trim();
+  if (!env || env.toLowerCase() === LEGACY_NOTIFY_EMAIL) {
+    return DEFAULT_NOTIFY_EMAIL;
+  }
+  return env;
+}
+
+/**
+ * Remap legacy isaac notify addresses → bondback. Idempotent; does not touch
+ * custom third-party emails. Returns true if anything changed.
+ */
+function coerceLegacyNotifyEmails(): boolean {
+  if (!config.notifications) return false;
+  let changed = false;
+  const email = String(config.notifications.email || '').trim();
+  if (!email || email.toLowerCase() === LEGACY_NOTIFY_EMAIL) {
+    config.notifications.email = DEFAULT_NOTIFY_EMAIL;
+    changed = true;
+  }
+  const profit = String(config.notifications.profitEmailTo || '').trim();
+  if (profit.toLowerCase() === LEGACY_NOTIFY_EMAIL) {
+    config.notifications.profitEmailTo = DEFAULT_NOTIFY_EMAIL;
+    changed = true;
+  }
+  return changed;
+}
+
 /** Prefix for baked strategy-modules default stamps (strategyModulesDefault@<id>). */
 export const STRATEGY_MODULES_DEFAULT_MIGRATION_PREFIX =
   'strategyModulesDefault@';
@@ -4562,17 +4602,32 @@ export function applyPersistedSettings(opts?: {
     // Migrate only the previous built-in default (or empty) — keep custom addresses
     if (
       !prev ||
-      prev === 'isaacpascua87@gmail.com' ||
-      prev === 'bondback2026@gmail.com'
+      prev === LEGACY_NOTIFY_EMAIL ||
+      prev === DEFAULT_NOTIFY_EMAIL
     ) {
-      config.notifications.email =
-        process.env.NOTIFY_EMAIL?.trim() || 'bondback2026@gmail.com';
+      config.notifications.email = resolveDefaultNotifyEmail();
     }
     settingsMigrations[NOTIFY_EMAIL_BONDBACK_V1] = true;
     persistUserSettings();
     console.log(
       `[settings] Applied notifyEmailBondback_v1 — notify email ${config.notifications.email}`
     );
+  }
+
+  // v2: always coerce legacy isaac → bondback (v1 may have no-oped when
+  // NOTIFY_EMAIL env was still isaac; GitHub auto-import can restore it).
+  {
+    const changed = coerceLegacyNotifyEmails();
+    const firstRun = !settingsMigrations[NOTIFY_EMAIL_BONDBACK_V2];
+    if (firstRun || changed) {
+      settingsMigrations[NOTIFY_EMAIL_BONDBACK_V2] = true;
+      persistUserSettings();
+    }
+    if (changed) {
+      console.log(
+        `[settings] Applied notifyEmailBondback_v2 — notify email ${config.notifications.email}`
+      );
+    }
   }
 
   if (opts?.replaceStrategyToggles) {
