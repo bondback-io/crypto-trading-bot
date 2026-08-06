@@ -617,9 +617,7 @@ export async function notifyZionImprovementRequest(cr: {
 }): Promise<{ ok: boolean; error?: string; provider?: string }> {
   const { dashboardBaseUrl } =
     require('./zion') as typeof import('./zion');
-  const DEFAULT_TO = 'bondback2026@gmail.com';
-  const to =
-    String(config.notifications?.email || '').trim() || DEFAULT_TO;
+  const to = resolveOperatorNotifyEmail(config.notifications?.email);
   const link = `${dashboardBaseUrl()}/dashboard?tab=zion&improvement=${encodeURIComponent(cr.id)}`;
   const payloadPreview =
     cr.payload && Object.keys(cr.payload).length
@@ -809,6 +807,22 @@ export async function sendTestNotificationEmail(): Promise<{
 }
 
 /**
+ * Operator notify inbox for supervision / health / Zion IR emails.
+ * Coerces retired isaac default → bondback; never returns empty.
+ */
+export function resolveOperatorNotifyEmail(override?: string | null): string {
+  const LEGACY = 'isaacpascua87@gmail.com';
+  const DEFAULT = 'bondback2026@gmail.com';
+  const raw = String(
+    override != null && String(override).trim()
+      ? override
+      : config.notifications?.email || ''
+  ).trim();
+  if (!raw || raw.toLowerCase() === LEGACY) return DEFAULT;
+  return raw.slice(0, 200);
+}
+
+/**
  * Send an arbitrary email (performance digests, etc.) without notification
  * kind toggles / cooldowns. Uses Resend or SMTP like other alerts.
  */
@@ -818,7 +832,7 @@ export async function sendCustomEmail(opts: {
   text: string;
   html?: string;
 }): Promise<{ ok: boolean; error?: string; provider?: string }> {
-  const to = String(opts.to || '').trim();
+  const to = resolveOperatorNotifyEmail(opts.to);
   if (!to || !to.includes('@')) {
     return { ok: false, error: 'No valid recipient email' };
   }

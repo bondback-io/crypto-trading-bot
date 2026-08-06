@@ -2030,6 +2030,8 @@ export interface BotConfig {
     profitCloseSound: boolean;
     /** Soft confirm sound when user clicks Place Trade on a Zion offer (default ON) */
     zionPlaceTradeSound: boolean;
+    /** Soft unique chime when Zion posts a chat reply / health nudge (default ON) */
+    zionChatReplySound: boolean;
     /** Bright chime when any new position opens (default ON) */
     tradeOpenSound: boolean;
     /** Subtle soft tone when any position closes (default ON; profit still uses cash sound) */
@@ -2749,6 +2751,7 @@ export const config: BotConfig = {
     tradeRequestSound: true,
     profitCloseSound: true,
     zionPlaceTradeSound: true,
+    zionChatReplySound: true,
     tradeOpenSound: true,
     tradeCloseSound: true,
     tradeRequestPopups: true,

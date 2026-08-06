@@ -44,6 +44,9 @@ export interface ZionSupervisionState {
   nextCheckAt: number;
   lastActionEmailAt: number;
   lastActionEmailKey: string;
+  /** Rate-limit Zion chat health nudges (do not spam). */
+  lastChatNudgeAt: number;
+  lastChatNudgeKey: string;
   checkCount: number;
   actionRechecksLeft: number;
   lastEventCheckAt: number;
@@ -51,6 +54,10 @@ export interface ZionSupervisionState {
 
 const FILE = 'zion-supervision.json';
 const EMAIL_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+/** Chat nudges: same issue ≥90m; different issue ≥45m. Recovery ≥60m. */
+const CHAT_NUDGE_SAME_MS = 90 * 60 * 1000;
+const CHAT_NUDGE_DIFF_MS = 45 * 60 * 1000;
+const CHAT_RECOVERY_MS = 60 * 60 * 1000;
 const EVENT_DEBOUNCE_MS = 60_000;
 const DEFAULT_HEALTHY_MS = 900_000; // 15m
 const DEFAULT_WATCH_MS = 600_000; // 10m
@@ -95,6 +102,8 @@ function empty(): ZionSupervisionState {
     nextCheckAt: 0,
     lastActionEmailAt: 0,
     lastActionEmailKey: '',
+    lastChatNudgeAt: 0,
+    lastChatNudgeKey: '',
     checkCount: 0,
     actionRechecksLeft: 0,
     lastEventCheckAt: 0,
@@ -259,6 +268,14 @@ export function runZionSupervisionCheck(opts?: {
     void maybeSendActionEmail(st);
   }
 
+  if (config.zionAgent?.supervisionEnabled !== false) {
+    if (classification === 'Action needed') {
+      maybePostSupervisionChatNudge(st);
+    } else if (wasAction && classification === 'Normal') {
+      maybePostRecoveryChatNudge(st);
+    }
+  }
+
   if (st.checkCount % 3 === 0 || classification !== 'Normal' || wasAction) {
     logger.info(
       'Zion',
@@ -286,14 +303,87 @@ export function requestZionSupervisionEventCheck(reason: string): void {
   void reason;
 }
 
-async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
-  // Prefer issues that are sustained Action
-  const primary =
+function pickPrimaryIssue(
+  st: ZionSupervisionState
+): ZionSupervisionIssue | null {
+  return (
     st.openIssues.find(
       (i) =>
         (i.severity === 'action' && (i.tickCount >= 2 || i.key === 'risk_halt')) ||
         i.key === 'rpc_multi_lane_down'
-    ) || st.issues[0];
+    ) ||
+    st.issues[0] ||
+    null
+  );
+}
+
+/** Short chat nudge — never opens UI; dashboard unread/shake picks it up. */
+function maybePostSupervisionChatNudge(st: ZionSupervisionState): void {
+  const primary = pickPrimaryIssue(st);
+  if (!primary) return;
+  const now = Date.now();
+  const sameKey = st.lastChatNudgeKey === primary.key;
+  if (sameKey && now - st.lastChatNudgeAt < CHAT_NUDGE_SAME_MS) return;
+  if (!sameKey && now - st.lastChatNudgeAt < CHAT_NUDGE_DIFF_MS) return;
+
+  const fix = String(primary.recommendation || primary.why || '').trim();
+  const text = [
+    'Heads-up — Action needed',
+    '',
+    `Problem: ${primary.summary}`,
+    fix ? `Fix: ${fix}` : null,
+    '',
+    '~ Zion',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 900);
+
+  try {
+    const { appendZionChat } =
+      require('./zionAgentStore') as typeof import('./zionAgentStore');
+    appendZionChat('assistant', text);
+    st.lastChatNudgeAt = now;
+    st.lastChatNudgeKey = primary.key;
+    save(st);
+    logger.info('Zion', `Supervision chat nudge: ${primary.key}`);
+  } catch (err) {
+    console.warn(
+      '[zion-supervision] chat nudge failed:',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+function maybePostRecoveryChatNudge(st: ZionSupervisionState): void {
+  const now = Date.now();
+  if (now - st.lastChatNudgeAt < CHAT_RECOVERY_MS) return;
+  const key = 'recovery_ok';
+  if (st.lastChatNudgeKey === key && now - st.lastChatNudgeAt < CHAT_RECOVERY_MS) {
+    return;
+  }
+  const text = [
+    'All clear — system health is back to Normal.',
+    'No action needed right now.',
+    '',
+    '~ Zion',
+  ].join('\n');
+  try {
+    const { appendZionChat } =
+      require('./zionAgentStore') as typeof import('./zionAgentStore');
+    appendZionChat('assistant', text);
+    st.lastChatNudgeAt = now;
+    st.lastChatNudgeKey = key;
+    save(st);
+    logger.info('Zion', 'Supervision recovery chat nudge');
+  } catch {
+    /* fail-open */
+  }
+}
+
+async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
+  // Prefer issues that are sustained Action
+  const primary = pickPrimaryIssue(st);
   if (!primary) return;
 
   const now = Date.now();
@@ -302,11 +392,9 @@ async function maybeSendActionEmail(st: ZionSupervisionState): Promise<void> {
   if (!sameKey && now - st.lastActionEmailAt < EMAIL_COOLDOWN_MS / 2) return;
 
   try {
-    const { sendCustomEmail } =
+    const { sendCustomEmail, resolveOperatorNotifyEmail } =
       require('./emailNotifications') as typeof import('./emailNotifications');
-    const to =
-      String(config.notifications?.email || '').trim() ||
-      'bondback2026@gmail.com';
+    const to = resolveOperatorNotifyEmail(config.notifications?.email);
 
     const body = [
       'Hey — Zion here with a system heads-up.',

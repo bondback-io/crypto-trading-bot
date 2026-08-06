@@ -102,6 +102,10 @@ export function isZionPlaceTradeSoundEnabled(): boolean {
   return config.notifications?.zionPlaceTradeSound !== false;
 }
 
+export function isZionChatReplySoundEnabled(): boolean {
+  return config.notifications?.zionChatReplySound !== false;
+}
+
 export function isTradeOpenSoundEnabled(): boolean {
   return config.notifications?.tradeOpenSound !== false;
 }

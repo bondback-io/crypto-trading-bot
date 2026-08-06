@@ -538,11 +538,9 @@ export function runLearningHealthWatchdog(): string[] {
     config.zionAgent?.supervisionEmailEnabled !== false
   ) {
     try {
-      const { sendCustomEmail } =
+      const { sendCustomEmail, resolveOperatorNotifyEmail } =
         require('./emailNotifications') as typeof import('./emailNotifications');
-      const to =
-        String(config.notifications?.email || '').trim() ||
-        'bondback2026@gmail.com';
+      const to = resolveOperatorNotifyEmail(config.notifications?.email);
       void sendCustomEmail({
         to,
         subject: '[Bot] Learning Enhancements — action suggested',

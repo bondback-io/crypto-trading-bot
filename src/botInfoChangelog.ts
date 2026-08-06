@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.187',
+    title: 'Zion health chat nudges + reply sound',
+    sections: ['zion', 'alerts', 'coaches', 'overview'],
+    items: [
+      'Supervision / health / learning-watchdog emails resolve to bondback2026@gmail.com (isaac coerced). Zion posts short Action-needed / All-clear chat nudges without opening the popup — shake + unread badge until you read.',
+      'Rate-limited chat nudges (problem + recommended fix). Soft unique Zion chat reply sound (Config → Notifications toggle; quieter than trade chimes).',
+    ],
+  },
+  {
     version: '1.2.186',
     title: 'Closed Trades ring 500 + Profitable timeframe',
     sections: ['overview', 'execution', 'alerts'],

@@ -5934,6 +5934,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-agent-unread { position: absolute; top: -0.35rem; right: -0.22rem; display: none; min-width: 1.25rem; height: 1.25rem; padding: 0 0.25rem; place-items: center; border: 2px solid #0f172a; border-radius: 999px; color: #fff; background: #ef4444; font-size: 0.65rem; font-weight: 800; }
     .zion-agent-widget.has-unread .zion-agent-unread { display: grid; animation: zion-widget-pulse 1.8s ease-in-out infinite; }
     .zion-agent-widget.has-unread .zion-agent-launcher { animation: zion-widget-nudge 3s ease-in-out infinite; }
+    .zion-agent-widget.has-unread.is-shaking .zion-agent-launcher { animation: zion-widget-shake 0.55s ease-in-out; }
     .zion-agent-nudge { position: absolute; right: 0; bottom: calc(100% + 0.65rem); width: max-content; max-width: min(18rem, calc(100vw - 32px)); padding: 0.48rem 0.7rem; border: 1px solid var(--zion-peach-border); border-radius: 0.65rem; color: #fde7cf; background: #172033; box-shadow: 0 8px 22px rgba(0,0,0,.32); font-size: 0.75rem; opacity: 0; transform: translateY(5px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
     .zion-agent-widget.has-unread .zion-agent-nudge { opacity: 1; transform: none; }
     .zion-agent-panel { position: absolute; right: 0; bottom: calc(100% + 0.8rem); display: flex; flex-direction: column; width: min(25rem, calc(100vw - 32px)); max-height: min(40rem, calc(100dvh - 7rem)); padding: 0.85rem; border: 1px solid var(--zion-peach-border); border-radius: 1rem; background: linear-gradient(155deg, #172033, #0b1220); box-shadow: 0 20px 60px rgba(0,0,0,.5); opacity: 0; transform: translateY(10px) scale(.97); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
@@ -5945,6 +5946,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-agent-panel .zion-change-requests { max-height: 9rem; overflow-y: auto; }
     @keyframes zion-widget-pulse { 50% { transform: scale(1.12); } }
     @keyframes zion-widget-nudge { 0%, 84%, 100% { transform: none; } 88% { transform: translateX(-4px); } 92% { transform: translateX(3px); } }
+    @keyframes zion-widget-shake {
+      0%, 100% { transform: none; }
+      18% { transform: translateX(-7px) rotate(-2.5deg); }
+      36% { transform: translateX(6px) rotate(2deg); }
+      54% { transform: translateX(-5px) rotate(-1.5deg); }
+      72% { transform: translateX(4px); }
+    }
     @media (max-width: 640px) {
       .zion-agent-widget { right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px)); left: max(8px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; align-items: flex-end; }
       .zion-agent-panel { position: fixed; right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(72px, calc(env(safe-area-inset-bottom, 0px) + 64px)); left: max(8px, env(safe-area-inset-left, 0px)); width: auto; max-height: calc(100dvh - 88px - env(safe-area-inset-top, 0px)); border-radius: 1rem; }
@@ -9085,6 +9093,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <div class="toggle-row" title="Subtle soft tone when any position closes (losses / breakeven)"><span>Trade close sound</span><label class="switch"><input type="checkbox" id="notify-trade-close-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft cash sound when a profitable close hits the bell"><span>Profit close sound</span><label class="switch"><input type="checkbox" id="notify-profit-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Soft confirm sound when you click Place Trade on a Zion offer"><span>Place trade sound</span><label class="switch"><input type="checkbox" id="notify-place-sound" checked /><span class="slider"></span></label></div>
+              <div class="toggle-row" title="Soft unique chime when Zion replies in chat or posts a health nudge (not trade sounds)"><span>Zion chat reply sound</span><label class="switch"><input type="checkbox" id="notify-zion-chat-sound" checked /><span class="slider"></span></label></div>
               <div class="toggle-row" title="Auto-open Zion trade request cards while browsing"><span>Trade request popups</span><label class="switch"><input type="checkbox" id="notify-offer-popups" checked /><span class="slider"></span></label></div>
             </div>
           </div>
@@ -9767,6 +9776,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       tradeRequestSound: true,
       profitCloseSound: true,
       zionPlaceTradeSound: true,
+      zionChatReplySound: true,
       tradeOpenSound: true,
       tradeCloseSound: true,
       tradeRequestPopups: true,
@@ -9838,6 +9848,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       place: false,
       trade_open: false,
       trade_close: false,
+      zion_chat: false,
     };
 
     function anyNotifySoundPrefOn() {
@@ -9846,6 +9857,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         prefs.tradeRequestSound !== false ||
         prefs.profitCloseSound !== false ||
         prefs.zionPlaceTradeSound !== false ||
+        prefs.zionChatReplySound !== false ||
         prefs.tradeOpenSound !== false ||
         prefs.tradeCloseSound !== false
       );
@@ -10160,6 +10172,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       notifyHaptic(40);
     }
 
+    /**
+     * Soft “peach” reply cue — lower + warmer than trade open / place,
+     * quiet enough for chat nudges (not cash / not bright open chime).
+     */
+    function emitZionChatReplySound() {
+      playSoftTone(392, 0, 0.22, 0.018, 'sine');
+      playSoftTone(493.88, 0.12, 0.26, 0.016, 'triangle');
+      playSoftTone(587.33, 0.26, 0.34, 0.012, 'sine');
+      notifyHaptic([12, 24, 12]);
+    }
+
     /** Bright open chime — distinct from Zion request / place / profit. */
     function emitTradeOpenChime() {
       playSoftTone(659.25, 0, 0.14, 0.038, 'triangle');
@@ -10183,18 +10206,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const place = !!pending.place;
       const open = !!pending.trade_open;
       const close = !!pending.trade_close;
+      const zionChat = !!pending.zion_chat;
       _pendingNotifySounds = {
         trade_request: false,
         profit_close: false,
         place: false,
         trade_open: false,
         trade_close: false,
+        zion_chat: false,
       };
       if (trade) emitTradeRequestChime();
       if (open) emitTradeOpenChime();
       if (profit) emitProfitCashSound();
       else if (close) emitTradeCloseSound();
       if (place) emitZionPlaceConfirmSound();
+      if (zionChat) emitZionChatReplySound();
     }
 
     /** Soft two-tone chime via Web Audio (no asset file). */
@@ -10235,6 +10261,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       emitZionPlaceConfirmSound();
     }
     window.playZionPlaceConfirmSound = playZionPlaceConfirmSound;
+
+    /** Quiet unique chime when Zion replies in chat or posts a health nudge. */
+    function playZionChatReplySound() {
+      const prefs = window.__notifyPrefs || {};
+      if (prefs.zionChatReplySound === false) return;
+      if (!isNotifyAudioRunning()) {
+        queuePendingNotifySound('zion_chat');
+        unlockNotifyAudio();
+        return;
+      }
+      emitZionChatReplySound();
+    }
+    window.playZionChatReplySound = playZionChatReplySound;
 
     /** Bright chime when a new live/paper position opens. */
     function playTradeOpenChime() {
@@ -10448,6 +10487,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           data.tradeRequestPopups != null ||
           data.profitCloseSound != null ||
           data.zionPlaceTradeSound != null ||
+          data.zionChatReplySound != null ||
           data.tradeOpenSound != null ||
           data.tradeCloseSound != null ||
           data.enabled != null
@@ -10457,6 +10497,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             tradeRequestSound: data.tradeRequestSound !== false,
             profitCloseSound: data.profitCloseSound !== false,
             zionPlaceTradeSound: data.zionPlaceTradeSound !== false,
+            zionChatReplySound: data.zionChatReplySound !== false,
             tradeOpenSound: data.tradeOpenSound !== false,
             tradeCloseSound: data.tradeCloseSound !== false,
             tradeRequestPopups: data.tradeRequestPopups !== false,
@@ -22398,12 +22439,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           setChk('notify-trade-close-sound', n.tradeCloseSound !== false);
           setChk('notify-profit-sound', n.profitCloseSound !== false);
           setChk('notify-place-sound', n.zionPlaceTradeSound !== false);
+          setChk('notify-zion-chat-sound', n.zionChatReplySound !== false);
           setChk('notify-offer-popups', n.tradeRequestPopups !== false);
           window.__notifyPrefs = {
             dashboardEnabled: n.dashboardEnabled !== false,
             tradeRequestSound: n.tradeRequestSound !== false,
             profitCloseSound: n.profitCloseSound !== false,
             zionPlaceTradeSound: n.zionPlaceTradeSound !== false,
+            zionChatReplySound: n.zionChatReplySound !== false,
             tradeOpenSound: n.tradeOpenSound !== false,
             tradeCloseSound: n.tradeCloseSound !== false,
             tradeRequestPopups: n.tradeRequestPopups !== false,
@@ -28337,9 +28380,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       renderZionImprovementHistory(history);
       const assistantCount = msgs.filter((m) => m.role !== 'user').length;
       if (zionAgentWidgetState.initialized && !zionAgentWidgetState.open) {
-        const additions = Math.max(0, assistantCount - zionAgentWidgetState.assistantCount) +
-          Math.max(0, list.length - zionAgentWidgetState.pendingCount);
-        if (additions) zionAgentWidgetState.unread = Math.min(99, zionAgentWidgetState.unread + additions);
+        const msgAdds = Math.max(0, assistantCount - zionAgentWidgetState.assistantCount);
+        const irAdds = Math.max(0, list.length - zionAgentWidgetState.pendingCount);
+        const additions = msgAdds + irAdds;
+        if (additions) {
+          if (!zionAgentWidgetState.open) {
+            zionAgentWidgetState.unread = Math.min(99, zionAgentWidgetState.unread + additions);
+            const widget = document.getElementById('zion-agent-widget');
+            if (widget) {
+              widget.classList.add('is-shaking');
+              setTimeout(function () {
+                try { widget.classList.remove('is-shaking'); } catch (_) {}
+              }, 700);
+            }
+          }
+          if (msgAdds > 0 && typeof playZionChatReplySound === 'function') {
+            playZionChatReplySound();
+          }
+        }
       }
       if (zionAgentWidgetState.initialized && list.length > zionAgentWidgetState.pendingCount) {
         showZionIrNudgeChip('New improvement request ready to review');
@@ -28349,9 +28407,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       zionAgentWidgetState.pendingCount = list.length;
       const nudge = document.getElementById('zion-agent-nudge');
       if (nudge) {
-        nudge.textContent = list.length
-          ? list.length + ' Improvement Request' + (list.length === 1 ? '' : 's') + ' needs your review'
-          : 'Zion has an update for you';
+        const lastAsst = [...msgs].reverse().find(function (m) {
+          return m && m.role !== 'user';
+        });
+        const lastText = String((lastAsst && lastAsst.text) || '');
+        if (list.length) {
+          nudge.textContent =
+            list.length +
+            ' Improvement Request' +
+            (list.length === 1 ? '' : 's') +
+            ' needs your review';
+        } else if (/heads-up|action needed|all clear/i.test(lastText)) {
+          nudge.textContent = lastText.split('\\n')[0].slice(0, 72) || 'Zion has a system update';
+        } else if (zionAgentWidgetState.unread > 0) {
+          nudge.textContent = 'Zion has an update for you';
+        } else {
+          nudge.textContent = 'Zion has an update for you';
+        }
       }
       renderZionAgentWidgetState();
     }
@@ -29023,6 +29095,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             tradeCloseSound: !!(document.getElementById('notify-trade-close-sound') || {}).checked,
             profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
             zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
+            zionChatReplySound: !!(document.getElementById('notify-zion-chat-sound') || {}).checked,
             tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
           }),
         });
@@ -29033,6 +29106,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           tradeCloseSound: !!(document.getElementById('notify-trade-close-sound') || {}).checked,
           profitCloseSound: !!(document.getElementById('notify-profit-sound') || {}).checked,
           zionPlaceTradeSound: !!(document.getElementById('notify-place-sound') || {}).checked,
+          zionChatReplySound: !!(document.getElementById('notify-zion-chat-sound') || {}).checked,
           tradeRequestPopups: !!(document.getElementById('notify-offer-popups') || {}).checked,
         };
         try { updateNotifyAudioUnlockChip(); } catch (_) {}

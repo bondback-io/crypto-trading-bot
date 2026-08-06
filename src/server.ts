@@ -5113,6 +5113,9 @@ export function createServer(): express.Application {
     if (typeof body.zionPlaceTradeSound === 'boolean') {
       n.zionPlaceTradeSound = body.zionPlaceTradeSound;
     }
+    if (typeof body.zionChatReplySound === 'boolean') {
+      n.zionChatReplySound = body.zionChatReplySound;
+    }
     if (typeof body.tradeOpenSound === 'boolean') {
       n.tradeOpenSound = body.tradeOpenSound;
     }
@@ -5144,6 +5147,7 @@ export function createServer(): express.Application {
         isTradeRequestPopupEnabled,
         isProfitCloseSoundEnabled,
         isZionPlaceTradeSoundEnabled,
+        isZionChatReplySoundEnabled,
         isTradeOpenSoundEnabled,
         isTradeCloseSoundEnabled,
       } = require('./dashboardNotifications') as typeof import('./dashboardNotifications');
@@ -5156,6 +5160,7 @@ export function createServer(): express.Application {
         tradeRequestPopups: isTradeRequestPopupEnabled(),
         profitCloseSound: isProfitCloseSoundEnabled(),
         zionPlaceTradeSound: isZionPlaceTradeSoundEnabled(),
+        zionChatReplySound: isZionChatReplySoundEnabled(),
         tradeOpenSound: isTradeOpenSoundEnabled(),
         tradeCloseSound: isTradeCloseSoundEnabled(),
         ...feed,
