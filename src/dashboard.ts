@@ -77,7 +77,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .switch input:checked + .slider:before { transform: translateX(20px); }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .dot-running { background: #34d399; box-shadow: 0 0 8px #34d399; animation: status-pulse 1.6s ease-in-out infinite; }
-    .dot-paused { background: #fbbf24; }
+    .dot-paused { background: #F1BB72; }
     @keyframes status-pulse {
       0%, 100% { box-shadow: 0 0 4px #34d39988; opacity: 1; }
       50% { box-shadow: 0 0 10px #34d399; opacity: .85; }
@@ -187,15 +187,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       background: #0f172a88;
       line-height: 1.2;
     }
+    .run-status.run-toggleable {
+      cursor: pointer;
+      user-select: none;
+    }
+    .run-status.run-toggleable:hover {
+      filter: brightness(1.08);
+    }
+    .run-status.run-toggleable:focus-visible {
+      outline: 2px solid rgba(94, 234, 212, 0.55);
+      outline-offset: 2px;
+    }
+    .run-status.run-paused.run-toggleable:focus-visible {
+      outline-color: rgba(241, 187, 114, 0.65);
+    }
+    .run-status .run-pause-affordance {
+      width: 10px;
+      height: 10px;
+      opacity: 0.85;
+      margin-left: 0.05rem;
+    }
+    .run-status.run-running .run-pause-affordance {
+      color: #5eead4;
+      display: inline-block;
+    }
+    .run-status:not(.run-running) .run-pause-affordance {
+      display: none;
+    }
     .run-status.run-running {
       border-color: rgba(52, 211, 153, .45);
       background: rgba(6, 78, 59, .35);
       color: #6ee7b7;
     }
+    /* Match former Pause button peach (#F1BB72) */
     .run-status.run-paused {
-      border-color: rgba(251, 191, 36, .45);
+      border-color: rgba(241, 187, 114, .55);
       background: rgba(120, 53, 15, .35);
-      color: #fcd34d;
+      color: #F1BB72;
     }
     .run-status.run-stopped {
       border-color: rgba(248, 113, 113, .45);
@@ -237,7 +265,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .signal-light .dot-live { background: #34d399; box-shadow: 0 0 8px #34d399; }
     .signal-light .dot-quiet { background: #fbbf24; box-shadow: 0 0 6px #fbbf2488; }
-    .signal-light .dot-paused { background: #fbbf24; box-shadow: 0 0 6px #fbbf2488; }
+    .signal-light .dot-paused { background: #F1BB72; box-shadow: 0 0 6px #F1BB7288; }
     .signal-light .dot-off { background: #f87171; }
     .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 11px; font-weight: 700; }
     .badge-paper { background: #1d4ed833; color: #93c5fd; }
@@ -6738,10 +6766,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
       <div class="header-actions card status-bar">
         <div class="status-meta">
-          <span id="run-status" class="run-status run-running has-tip" title="Whether the copy-trading monitor is actively polling wallets">
+          <span id="run-status" class="run-status run-running run-toggleable has-tip" role="button" tabindex="0" onclick="togglePause()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();togglePause();}" title="Click to pause the monitor">
             <span id="status-dot" class="dot dot-running" aria-hidden="true"></span>
             <svg id="run-status-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             <strong id="status-text">Running</strong>
+            <svg id="run-status-pause-affordance" class="status-ico run-pause-affordance" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
           </span>
           <span id="mode-badge" class="badge badge-livesim status-badge has-tip" title="PAPER = basic sim. LIVE SIM = paper ledger + live market data / live filters (no real funds). LIVE = real swaps.">
             <svg id="mode-badge-icon" class="status-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10"/></svg>
@@ -6764,8 +6793,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </span>
         </div>
         <div class="status-controls">
-          <button id="btn-pause" class="btn btn-warning" onclick="togglePause()" title="Pause or resume the monitor without shutting down the bot">Pause</button>
-          <button id="mode-paper" onclick="setMode('paper')" class="btn btn-secondary" title="Paper trading — virtual fills, optional live marks">Paper</button>
           <button id="mode-liveSimulation" onclick="setMode('liveSimulation')" class="btn btn-primary" title="Live Simulation — same filters as live, virtual fills, forced live market data. No real funds. Green badge (left) = open trades in profit. Red badge (right) = open trades not in profit.">
             <span id="open-trades-badge-profit" class="open-trades-badge open-trades-badge-profit" hidden aria-live="polite">0</span>
             <span id="open-trades-badge" class="open-trades-badge open-trades-badge-loss" hidden aria-live="polite">0</span>
@@ -21762,19 +21789,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               : 'dot-running');
       }
       if (statusText) statusText.textContent = runLabel;
+      window._monitorPaused = !!mon.paused;
+      window._monitorRunning = !!mon.running;
       if (runWrap) {
-        runWrap.className = 'run-status run-' + runState + ' has-tip';
+        const toggleable = runState === 'running' || runState === 'paused';
+        runWrap.className =
+          'run-status run-' + runState + (toggleable ? ' run-toggleable' : '') + ' has-tip';
         runWrap.title =
           runState === 'running'
-            ? 'Monitor is running and polling wallets'
+            ? 'Monitor is running — click to pause'
             : runState === 'paused'
-              ? 'Monitor is paused — no new copy entries'
+              ? 'Monitor is paused — click to resume'
               : 'Monitor is stopped';
+        if (toggleable) {
+          runWrap.setAttribute('role', 'button');
+          runWrap.setAttribute('tabindex', '0');
+        } else {
+          runWrap.removeAttribute('role');
+          runWrap.removeAttribute('tabindex');
+        }
       }
       setStatusIcon(runIcon, runIconKey);
       syncOverviewRunModeStatus(runState, runLabel, runIconKey, status);
-
-      document.getElementById('btn-pause').textContent = mon.paused ? 'Resume' : 'Pause';
 
       const badge = document.getElementById('mode-badge');
       const modeLabelEl = document.getElementById('mode-badge-label');
@@ -23607,6 +23643,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     async function togglePause() {
+      const paused = !!window._monitorPaused;
+      const running = window._monitorRunning !== false;
+      if (!running && !paused) return;
+      if (paused) {
+        if (!confirm('Resume trading?')) return;
+      } else {
+        if (!confirm('Pause the system? New entries will stop until you resume.')) return;
+      }
       await fetchJSON('/api/monitor/toggle', { method: 'POST' });
       refresh();
     }
@@ -24930,9 +24974,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         el.className = 'run-status run-' + runState + ' has-tip';
         el.title =
           runState === 'running'
-            ? 'Monitor is running and polling wallets'
+            ? 'Monitor is running — click header status to pause'
             : runState === 'paused'
-              ? 'Monitor is paused — no new copy entries'
+              ? 'Monitor is paused — click header status to resume'
               : 'Monitor is stopped';
         const d = el.querySelector('[data-run-dot]');
         if (d) {

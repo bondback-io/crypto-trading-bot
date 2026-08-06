@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.207',
+    title: 'Running pill pause/resume',
+    sections: ['overview', 'modes'],
+    items: [
+      'Header Pause and Paper buttons removed (desktop + mobile); mode switches stay Live Sim / Live.',
+      'Click the Running status pill to pause (confirm) — peach Paused badge with the same Pause peach accent; click Paused to resume (confirm).',
+      'Running pill keeps green-dot + play + label and adds a small teal pause icon as the pause affordance.',
+    ],
+  },
+  {
     version: '1.2.206',
     title: 'Zion Gold → Smart Money Mirror auto-send',
     sections: ['zion', 'microbots', 'overview'],
