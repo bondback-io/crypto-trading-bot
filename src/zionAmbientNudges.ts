@@ -251,10 +251,16 @@ async function runTrendingNudge(): Promise<void> {
     const hasX = Boolean(
       String(process.env.X_BEARER_TOKEN || process.env.TWITTER_BEARER_TOKEN || '').trim()
     );
+    const mint = String(cand.mint || '').trim();
+    const label = String(cand.symbol || 'token').trim() || 'token';
+    const jup = mint ? `https://jup.ag/tokens/${encodeURIComponent(mint)}` : '';
+    const tokenLine = mint
+      ? `[${label}](${jup}) · [${mint}](${jup})`
+      : label;
     const lines = [
       'Trending attention (info only — not a buy)',
       '',
-      `${cand.symbol}${cand.mint ? ` · ${cand.mint.slice(0, 8)}…` : ''}`,
+      tokenLine,
       `Why: ${cand.why} (${cand.source})`,
     ];
     if (!hasX) {

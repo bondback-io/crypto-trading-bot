@@ -5772,6 +5772,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       min-width: 0; padding: 0.58rem 0.7rem; border: 1px solid #26354a; border-radius: 0.75rem 0.75rem 0.75rem 0.22rem;
       color: #dbeafe; background: #0b1220; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
     }
+    .zion-chat-bubble a { color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px; }
+    .zion-chat-bubble a:hover { color: #bae6fd; }
     .zion-chat-message.is-user .zion-chat-bubble { border-color: rgba(56, 189, 248, 0.34); border-radius: 0.75rem 0.75rem 0.22rem 0.75rem; color: #e0f2fe; background: rgba(14, 116, 144, 0.3); }
     .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
     .zion-chat-message.is-user .zion-chat-time { text-align: right; }
@@ -28302,7 +28304,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       let html = escHtml(raw);
       if (isUser) return html;
-      // NOTE: inside _DASHBOARD_HTML_RAW template literal — double-escape so browser gets real bold/newline regexes.
+      // NOTE: inside _DASHBOARD_HTML_RAW template literal — double-escape so browser gets real bold/newline/link regexes.
+      html = html.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
       html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\n/g, '<br>');
       return html;

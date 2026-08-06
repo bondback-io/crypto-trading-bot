@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.198',
+    title: 'Zion trending attention shows full Jupiter CA links',
+    sections: ['zion', 'overview'],
+    items: [
+      'Trending attention nudges show the full token mint (no ellipsis) with both the ticker and CA as clickable Jupiter token links.',
+      'Zion chat bubbles render markdown links ([label](url)) so ambient nudges and replies can open external pages in a new tab.',
+    ],
+  },
+  {
     version: '1.2.197',
     title: 'Overview Reset restores scanner signal flow',
     sections: ['overview', 'scanners'],
