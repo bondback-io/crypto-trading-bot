@@ -41,6 +41,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.202',
+    title: 'Zion wake-word mic + places reliability',
+    sections: ['zion', 'overview'],
+    items: [
+      'Zion mic: wake-word idle (say “Zion”) → active listen with chime, ≥5s speak floor, ~3s silence auto-send, 10s keep-alive; mic preference persists in localStorage and resumes on widget/tab open; busy clear resumes recognition.',
+      'Places: Overpass 429/503 Retry-After + mirror backoff, short in-memory cache, cinema 12→25 km expand, friendlier rate-limit copy + one delayed retry.',
+      'Location: high-accuracy refresh when stale before lifestyle asks; no Sunshine Coast-as-device payload; reverse-geocode area label in status (“Location: on · {area}”) and lifestyle replies.',
+      'Zion chat emoji feedback buttons use transparent backgrounds with a subtle rounded outline (dark UI), not solid green/teal fills.',
+    ],
+  },
+  {
     version: '1.2.201',
     title: 'Fix blank dashboard — Zion location string SyntaxError',
     sections: ['overview', 'zion', 'alerts'],

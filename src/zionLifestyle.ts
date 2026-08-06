@@ -13,6 +13,8 @@ export interface ZionDeviceLocation {
   at: number;
   /** device | fallback | denied */
   source?: 'device' | 'fallback' | 'denied';
+  /** Reverse-geocoded locality label (client or server) */
+  areaLabel?: string;
 }
 
 export interface ZionLifestyleChatOpts {
@@ -41,9 +43,57 @@ const OVERPASS_URLS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 const OVERPASS_TIMEOUT_MS = 45_000;
 const OVERPASS_QUERY_TIMEOUT_S = 40;
+const OVERPASS_CACHE_TTL_MS = 12 * 60 * 1000;
+const OVERPASS_BACKOFF_MS = [1500, 3000] as const;
+
+type OverpassCacheEntry = {
+  at: number;
+  places: ZionPlace[];
+  ok: boolean;
+  error?: string;
+};
+const overpassCache = new Map<string, OverpassCacheEntry>();
+
+function overpassCacheKey(opts: {
+  lat: number;
+  lon: number;
+  category: string;
+  query?: string;
+  radiusKm: number;
+  limit: number;
+}): string {
+  const latR = Math.round(opts.lat * 100) / 100;
+  const lonR = Math.round(opts.lon * 100) / 100;
+  const q = String(opts.query || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .slice(0, 40);
+  return `${latR},${lonR}|${opts.category}|${q}|r${opts.radiusKm}|n${opts.limit}`;
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(res: Response, attempt: number): number {
+  const raw = res.headers.get('retry-after');
+  if (raw) {
+    const secs = Number(raw);
+    if (Number.isFinite(secs) && secs >= 0) {
+      return Math.min(15_000, Math.max(500, secs * 1000));
+    }
+    const when = Date.parse(raw);
+    if (Number.isFinite(when)) {
+      return Math.min(15_000, Math.max(500, when - Date.now()));
+    }
+  }
+  return OVERPASS_BACKOFF_MS[Math.min(attempt, OVERPASS_BACKOFF_MS.length - 1)];
+}
 
 /** Ephemeral last known device/fallback location (RAM only). */
 let lastLocation: ZionDeviceLocation | null = null;
@@ -53,7 +103,14 @@ export function rememberZionLocation(
   loc: ZionDeviceLocation | null | undefined,
   timeZone?: string
 ): void {
-  if (loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+  // Never remember Sunshine Coast / denied fallback as a device fix
+  if (
+    loc &&
+    Number.isFinite(loc.lat) &&
+    Number.isFinite(loc.lon) &&
+    loc.source !== 'fallback' &&
+    loc.source !== 'denied'
+  ) {
     lastLocation = {
       lat: loc.lat,
       lon: loc.lon,
@@ -63,6 +120,7 @@ export function rememberZionLocation(
           : undefined,
       at: loc.at || Date.now(),
       source: loc.source || 'device',
+      areaLabel: loc.areaLabel ? String(loc.areaLabel).slice(0, 120) : undefined,
     };
   }
   if (timeZone && String(timeZone).trim()) {
@@ -93,6 +151,9 @@ export function resolveZionCoords(
         accuracy: loc.accuracy,
         at: loc.at || Date.now(),
         source,
+        areaLabel: loc.areaLabel
+          ? String(loc.areaLabel).slice(0, 120)
+          : undefined,
       },
       usedFallback,
     };
@@ -106,6 +167,11 @@ export function resolveZionCoords(
     loc: { ...ZION_FALLBACK_LOCATION, at: Date.now() },
     usedFallback: true,
   };
+}
+
+function areaPhrase(loc: ZionDeviceLocation): string {
+  const label = String(loc.areaLabel || '').trim();
+  return label || 'your area';
 }
 
 function weatherCodeLabel(code: number | undefined): string {
@@ -388,7 +454,9 @@ function overpassBbox(lat: number, lon: number, radiusKm: number): {
 
 function isRetryableOverpassError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err || '');
-  return /abort|timeout|network|fetch|ECONN|ETIMEDOUT|socket/i.test(msg);
+  return /abort|timeout|network|fetch|ECONN|ETIMEDOUT|socket|429|503|rate.?limit/i.test(
+    msg
+  );
 }
 
 export async function findPlaces(opts: {
@@ -398,9 +466,27 @@ export async function findPlaces(opts: {
   query?: string;
   limit?: number;
   radiusKm?: number;
-}): Promise<{ ok: boolean; places: ZionPlace[]; error?: string }> {
+}): Promise<{ ok: boolean; places: ZionPlace[]; error?: string; rateLimited?: boolean }> {
   const limit = Math.max(1, Math.min(opts.limit ?? 8, 15));
   const radiusKm = Math.max(0.5, Math.min(opts.radiusKm ?? 8, 40));
+  const cacheKey = overpassCacheKey({
+    lat: opts.lat,
+    lon: opts.lon,
+    category: opts.category,
+    query: opts.query,
+    radiusKm,
+    limit,
+  });
+  const cached = overpassCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < OVERPASS_CACHE_TTL_MS) {
+    return {
+      ok: cached.ok,
+      places: cached.places.slice(),
+      error: cached.error,
+      rateLimited: /rate.?limit|429|503|busy/i.test(String(cached.error || '')),
+    };
+  }
+
   const filters = overpassFilters(opts.category, opts.query);
   const box = overpassBbox(opts.lat, opts.lon, radiusKm);
   const bbox = `(${box.south},${box.west},${box.north},${box.east})`;
@@ -408,7 +494,15 @@ export async function findPlaces(opts: {
   const query = `[out:json][timeout:${OVERPASS_QUERY_TIMEOUT_S}];\n(\n${around}\n);\nout center tags ${limit * 3};`;
 
   let lastErr = 'Overpass unavailable';
-  const attemptFetch = async (endpoint: string): Promise<ZionPlace[] | null> => {
+  let sawRateLimit = false;
+
+  type AttemptResult = {
+    places: ZionPlace[] | null;
+    status?: number;
+    retryAfterMs?: number;
+  };
+
+  const attemptFetch = async (endpoint: string): Promise<AttemptResult> => {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -422,43 +516,78 @@ export async function findPlaces(opts: {
           ? AbortSignal.timeout(OVERPASS_TIMEOUT_MS)
           : undefined,
     });
+    if (res.status === 429 || res.status === 503) {
+      sawRateLimit = true;
+      lastErr = `Overpass HTTP ${res.status}`;
+      return {
+        places: null,
+        status: res.status,
+        retryAfterMs: parseRetryAfterMs(res, 0),
+      };
+    }
     if (!res.ok) {
       lastErr = `Overpass HTTP ${res.status}`;
-      return null;
+      return { places: null, status: res.status };
     }
     const data = (await res.json()) as {
       elements?: Array<Record<string, unknown>>;
     };
-    return parseOverpassElements(
-      data.elements || [],
-      opts.lat,
-      opts.lon
-    )
-      .filter((p) => p.distKm <= radiusKm + 0.15)
-      .slice(0, limit);
+    return {
+      places: parseOverpassElements(data.elements || [], opts.lat, opts.lon)
+        .filter((p) => p.distKm <= radiusKm + 0.15)
+        .slice(0, limit),
+      status: res.status,
+    };
   };
 
-  for (const endpoint of OVERPASS_URLS) {
+  for (let mi = 0; mi < OVERPASS_URLS.length; mi++) {
+    const endpoint = OVERPASS_URLS[mi];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const places = await attemptFetch(endpoint);
-        if (places) return { ok: true, places };
+        const result = await attemptFetch(endpoint);
+        if (result.places) {
+          overpassCache.set(cacheKey, {
+            at: Date.now(),
+            places: result.places,
+            ok: true,
+          });
+          return { ok: true, places: result.places };
+        }
+        if (result.status === 429 || result.status === 503) {
+          const backoff =
+            result.retryAfterMs ??
+            OVERPASS_BACKOFF_MS[Math.min(attempt, OVERPASS_BACKOFF_MS.length - 1)];
+          await sleepMs(backoff);
+          continue;
+        }
         break;
       } catch (err) {
         lastErr = err instanceof Error ? err.message : String(err);
         if (attempt === 0 && isRetryableOverpassError(err)) {
+          await sleepMs(OVERPASS_BACKOFF_MS[0]);
           continue;
         }
         break;
       }
     }
   }
+
+  const friendly = sawRateLimit
+    ? 'Maps are busy right now (rate limited). Trying again in a moment usually helps.'
+    : isRetryableOverpassError(lastErr)
+      ? 'Maps timed out — try again in a moment'
+      : lastErr;
+  overpassCache.set(cacheKey, {
+    at: Date.now() - Math.floor(OVERPASS_CACHE_TTL_MS * 0.7),
+    places: [],
+    ok: false,
+    error: friendly,
+  });
   return {
     ok: false,
     places: [],
-    error: isRetryableOverpassError(lastErr)
-      ? 'Maps timed out — try again in a moment'
-      : lastErr,
+    error: friendly,
+    rateLimited: sawRateLimit,
   };
 }
 
@@ -486,25 +615,56 @@ async function cinemaReply(
   loc: ZionDeviceLocation,
   usedFallback: boolean
 ): Promise<string> {
-  const found = await findPlaces({
+  let found = await findPlaces({
     lat: loc.lat,
     lon: loc.lon,
     category: 'cinema',
     limit: 3,
-    radiusKm: 25,
+    radiusKm: 12,
   });
+  let radiusUsed = 12;
+  if (found.ok && !found.places.length) {
+    found = await findPlaces({
+      lat: loc.lat,
+      lon: loc.lon,
+      category: 'cinema',
+      limit: 3,
+      radiusKm: 25,
+    });
+    radiusUsed = 25;
+  } else if (!found.ok && found.rateLimited) {
+    await sleepMs(OVERPASS_BACKOFF_MS[1]);
+    found = await findPlaces({
+      lat: loc.lat,
+      lon: loc.lon,
+      category: 'cinema',
+      limit: 3,
+      radiusKm: 12,
+    });
+    if (found.ok && !found.places.length) {
+      found = await findPlaces({
+        lat: loc.lat,
+        lon: loc.lon,
+        category: 'cinema',
+        limit: 3,
+        radiusKm: 25,
+      });
+      radiusUsed = 25;
+    }
+  }
+  const area = areaPhrase(loc);
   const fallbackNote = usedFallback
-    ? '\n\n_(Using Sunshine Coast fallback coords — turn on location for your device.)_'
+    ? '\n\n_(I don’t have your device location — turn on location for nearby results.)_'
     : '';
   if (!found.ok) {
     return (
-      `I couldn't reach OpenStreetMap for cinemas just now (${found.error || 'error'}). Try again shortly.` +
+      `I couldn't reach OpenStreetMap for cinemas near ${area} just now (${found.error || 'error'}). Try again shortly.` +
       fallbackNote
     );
   }
   const list = formatPlacesList(
     found.places,
-    'Nearby cinemas (OpenStreetMap, within ~25 km):'
+    `Nearby cinemas near ${area} (OpenStreetMap, within ~${radiusUsed} km):`
   );
   let showtimesNote: string;
   if (!hasShowtimesApiKey()) {
@@ -567,7 +727,7 @@ export async function processZionLifestyleChat(
   const text = String(userText || '').trim();
   if (!text) return { handled: false };
 
-  if (opts?.location) {
+  if (opts?.location && opts.location.source !== 'fallback' && opts.location.source !== 'denied') {
     rememberZionLocation(opts.location, opts.timeZone);
   } else if (opts?.timeZone) {
     rememberZionLocation(null, opts.timeZone);
@@ -600,19 +760,41 @@ export async function processZionLifestyleChat(
       return locationNeededReply();
     }
     const cat = mapPlaceCategory(text) || 'restaurant';
-    const found = await findPlaces({
+    let found = await findPlaces({
       lat: loc.lat,
       lon: loc.lon,
       category: cat,
       limit: 6,
       radiusKm: 10,
-    }).catch(() => ({ ok: false as const, places: [] as ZionPlace[], error: 'fail' }));
+    }).catch(() => ({
+      ok: false as const,
+      places: [] as ZionPlace[],
+      error: 'fail',
+      rateLimited: false,
+    }));
+    if (!found.ok && found.rateLimited) {
+      await sleepMs(OVERPASS_BACKOFF_MS[1]);
+      found = await findPlaces({
+        lat: loc.lat,
+        lon: loc.lon,
+        category: cat,
+        limit: 6,
+        radiusKm: 10,
+      }).catch(() => ({
+        ok: false as const,
+        places: [] as ZionPlace[],
+        error: 'fail',
+        rateLimited: true,
+      }));
+    }
     const osmBits = found.ok && found.places.length
       ? formatPlacesList(
           found.places,
-          'Nearby OpenStreetMap places (tags only — not social virality):'
+          `Nearby OpenStreetMap places near ${areaPhrase(loc)} (tags only — not social virality):`
         )
-      : 'I couldn’t pull OSM places right now.';
+      : found.rateLimited
+        ? 'Maps are busy right now (rate limited) — try again in a moment.'
+        : 'I couldn’t pull OSM places right now.';
     return {
       handled: true,
       reply:
@@ -627,12 +809,13 @@ export async function processZionLifestyleChat(
       return locationNeededReply();
     }
     const w = await getWeather(loc.lat, loc.lon, tz);
+    const area = areaPhrase(loc);
     return {
       handled: true,
       reply:
         (w.ok
-          ? `Weather near your area: **${w.line}** (Open-Meteo).`
-          : `Couldn't fetch weather for your area: ${w.line}`) + footer(),
+          ? `Weather near ${area}: **${w.line}** (Open-Meteo).`
+          : `Couldn't fetch weather for ${area}: ${w.line}`) + footer(),
     };
   }
 
@@ -650,15 +833,44 @@ export async function processZionLifestyleChat(
       return locationNeededReply();
     }
     const category = mapPlaceCategory(text) || 'restaurant';
-    const radiusKm =
-      category === 'cinema' ? 25 : category === 'gym' || category === 'futsal' ? 15 : 8;
-    const found = await findPlaces({
+    let radiusKm =
+      category === 'cinema' ? 12 : category === 'gym' || category === 'futsal' ? 15 : 8;
+    let found = await findPlaces({
       lat: loc.lat,
       lon: loc.lon,
       category,
       limit: category === 'cinema' ? 3 : 8,
       radiusKm,
     });
+    if (category === 'cinema' && found.ok && !found.places.length) {
+      radiusKm = 25;
+      found = await findPlaces({
+        lat: loc.lat,
+        lon: loc.lon,
+        category,
+        limit: 3,
+        radiusKm,
+      });
+    } else if (!found.ok && found.rateLimited) {
+      await sleepMs(OVERPASS_BACKOFF_MS[1]);
+      found = await findPlaces({
+        lat: loc.lat,
+        lon: loc.lon,
+        category,
+        limit: category === 'cinema' ? 3 : 8,
+        radiusKm,
+      });
+      if (category === 'cinema' && found.ok && !found.places.length) {
+        radiusKm = 25;
+        found = await findPlaces({
+          lat: loc.lat,
+          lon: loc.lon,
+          category,
+          limit: 3,
+          radiusKm,
+        });
+      }
+    }
     const label =
       category === 'pizza'
         ? 'pizza spots'
@@ -672,16 +884,19 @@ export async function processZionLifestyleChat(
                 ? 'futsal / pitches'
                 : category === 'fast_food'
                   ? 'fast food'
-                  : 'places to eat';
+                  : category === 'cinema'
+                    ? 'cinemas'
+                    : 'places to eat';
+    const area = areaPhrase(loc);
     if (!found.ok) {
       return {
         handled: true,
         reply:
-          `I couldn't reach OpenStreetMap for ${label} (${found.error || 'error'}). Soft-fail — try again in a bit.` +
+          `I couldn't reach OpenStreetMap for ${label} near ${area} (${found.error || 'error'}). Soft-fail — try again in a bit.` +
           footer(),
       };
     }
-    const heading = `Nearby ${label} (OpenStreetMap):`;
+    const heading = `Nearby ${label} near ${area} (OpenStreetMap):`;
     return {
       handled: true,
       reply: formatPlacesList(found.places, heading) + footer(),

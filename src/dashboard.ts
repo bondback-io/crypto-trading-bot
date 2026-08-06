@@ -5778,35 +5778,47 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-chat-time { font-size: 0.65rem; color: #64748b; line-height: 1.2; padding: 0 0.15rem; }
     .zion-chat-message.is-user .zion-chat-time { text-align: right; }
     .zion-feedback-row {
-      display: flex; flex-wrap: nowrap; align-items: center; gap: 0.15rem;
-      margin-top: 0.15rem; padding: 0 0.05rem;
+      display: flex; flex-wrap: nowrap; align-items: center; gap: 0.28rem;
+      margin-top: 0.2rem; padding: 0 0.05rem;
       background: transparent; border: 0; box-shadow: none;
     }
     .zion-feedback-btn {
-      border: 0; border-radius: 0.35rem; padding: 0.05rem;
-      width: 1.35rem; height: 1.35rem; line-height: 1;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 0.4rem;
+      padding: 0;
+      width: 1.55rem; height: 1.55rem; line-height: 1;
       display: inline-flex; align-items: center; justify-content: center;
-      color: inherit; background: transparent; font-size: 0.85rem;
-      cursor: pointer; opacity: 0.45; filter: grayscale(0.35);
+      color: inherit;
+      background: transparent;
+      font-size: 0.82rem;
+      cursor: pointer; opacity: 0.72; filter: grayscale(0.2);
       transform: scale(1);
-      transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease;
+      box-shadow: none;
+      transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
     .zion-feedback-btn:hover, .zion-feedback-btn:focus-visible {
-      opacity: 0.9; outline: none; transform: scale(1.18); filter: none;
+      opacity: 1; outline: none; transform: scale(1.08); filter: none;
+      border-color: rgba(148, 163, 184, 0.55);
+      background: transparent;
     }
     .zion-feedback-btn:active {
-      transform: scale(0.92);
+      transform: scale(0.94);
       animation: zion-fb-bounce 0.35s ease;
+      background: transparent;
     }
     .zion-feedback-btn.is-selected {
-      opacity: 1; filter: none; pointer-events: none; transform: scale(1.08);
+      opacity: 1; filter: none; pointer-events: none; transform: scale(1.04);
+      border-color: rgba(240, 160, 112, 0.55);
+      background: transparent;
     }
     .zion-feedback-row.has-selection .zion-feedback-btn:not(.is-selected) {
-      opacity: 0.28; filter: grayscale(0.85); pointer-events: none;
+      opacity: 0.32; filter: grayscale(0.85); pointer-events: none;
+      border-color: rgba(100, 116, 139, 0.22);
+      background: transparent;
     }
     @keyframes zion-fb-bounce {
       0% { transform: scale(1); }
-      40% { transform: scale(1.28); }
+      40% { transform: scale(1.2); }
       100% { transform: scale(1); }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -5872,6 +5884,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       opacity: 1; color: var(--zion-peach, #f0a070); border-color: rgba(240, 160, 112, 0.55);
       background: rgba(240, 160, 112, 0.12);
     }
+    .zion-mic-btn.is-on.is-listening {
+      box-shadow: 0 0 0 2px rgba(240, 160, 112, 0.35);
+      animation: zion-mic-listen-pulse 1.1s ease-in-out infinite;
+    }
     .zion-mic-btn.is-on:hover, .zion-mic-btn.is-on:focus-visible {
       color: #f8c4a0; border-color: rgba(248, 196, 160, 0.7);
     }
@@ -5886,8 +5902,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       display: none;
     }
     .zion-mic-btn.is-on .zion-mic-dot { display: block; }
+    .zion-mic-btn.is-on.is-listening .zion-mic-dot {
+      background: #fbbf24;
+      box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.85), 0 0 8px rgba(251, 191, 36, 0.65);
+    }
+    @keyframes zion-mic-listen-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+    }
     @media (prefers-reduced-motion: reduce) {
       .zion-mic-btn { transition: none; }
+      .zion-mic-btn.is-on.is-listening { animation: none; }
     }
     .zion-chat-send { min-height: 2.2rem; padding: 0.4rem 0.8rem; border: 0; border-radius: 0.6rem; color: #2b1807; background: var(--zion-peach); font-weight: 800; }
     .zion-chat-send:hover, .zion-chat-send:focus-visible { background: var(--zion-peach-bright); outline: none; }
@@ -16923,6 +16948,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         // Instant shared paint, then force-refresh server history for both surfaces
         try { syncZionChatSurfaces(); } catch (_) {}
         try { ensureZionDeviceLocation('zion-tab'); } catch (_) {}
+        try { restoreZionVoiceIfPreferred('main'); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
       }
       if (name === 'microbots' && typeof loadHmcGatekeeperConfig === 'function') loadHmcGatekeeperConfig();
@@ -28075,9 +28101,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     const ZION_LOC_CACHE_KEY = 'zionDeviceLocation_v1';
     const ZION_LOC_OPTOUT_KEY = 'zionDeviceLocationOptOut_v1';
     const ZION_LOC_TTL_MS = 25 * 60 * 1000;
+    const ZION_LOC_FRESH_MS = 3 * 60 * 1000;
+    const ZION_VOICE_MIC_PREF_KEY = 'zionVoiceMicPref_v1';
     const ZION_FALLBACK_COORDS = { lat: -26.65, lon: 153.0667 };
     let _zionLocAsking = false;
     let _zionLocAwaitingConsent = false;
+    let _zionAreaLabelCache = { key: '', label: '', at: 0 };
     /** In-memory source of truth so tab + widget always paint the same thread */
     let _zionChatMessagesLive = [];
     let _zionChatBusy = false;
@@ -28151,7 +28180,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         label = 'Location: asking…';
         cls = 'zion-loc-status is-asking';
       } else if (!optedOut && loc && loc.source === 'device') {
-        label = 'Location: on';
+        const area = String(loc.areaLabel || '').trim();
+        label = area ? ('Location: on · ' + area) : 'Location: on';
         cls = 'zion-loc-status is-ok';
       } else {
         label = 'Location: off';
@@ -28173,14 +28203,139 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           accuracy: cached.accuracy,
           at: cached.at,
           source: 'device',
+          areaLabel: cached.areaLabel || undefined,
         };
       }
-      return {
-        lat: ZION_FALLBACK_COORDS.lat,
-        lon: ZION_FALLBACK_COORDS.lon,
-        at: Date.now(),
-        source: 'fallback',
+      // Do not send Sunshine Coast as a device fix — omit coords so lifestyle asks for location
+      return null;
+    }
+    function reverseGeocodeZionArea(lat, lon, done) {
+      const key = (Math.round(lat * 100) / 100) + ',' + (Math.round(lon * 100) / 100);
+      if (
+        _zionAreaLabelCache.key === key &&
+        _zionAreaLabelCache.label &&
+        Date.now() - _zionAreaLabelCache.at < 30 * 60 * 1000
+      ) {
+        if (typeof done === 'function') done(_zionAreaLabelCache.label);
+        return;
+      }
+      const finish = function (label) {
+        const clean = String(label || '').replace(/\\s+/g, ' ').trim().slice(0, 80);
+        if (clean) {
+          _zionAreaLabelCache = { key: key, label: clean, at: Date.now() };
+        }
+        if (typeof done === 'function') done(clean || '');
       };
+      // Nominatim (OSM) — fail soft; BigDataCloud client endpoint as backup
+      const nomUrl =
+        'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' +
+        encodeURIComponent(String(lat)) +
+        '&lon=' +
+        encodeURIComponent(String(lon)) +
+        '&zoom=12&addressdetails=1';
+      fetch(nomUrl, {
+        headers: { Accept: 'application/json' },
+        signal:
+          typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+            ? AbortSignal.timeout(8000)
+            : undefined,
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error('nom ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          const a = (data && data.address) || {};
+          const city =
+            a.city || a.town || a.village || a.suburb || a.municipality || a.county || '';
+          const region = a.state || a.region || '';
+          const bits = [city, region].filter(Boolean);
+          if (bits.length) {
+            finish(bits.join(', '));
+            return;
+          }
+          throw new Error('nom empty');
+        })
+        .catch(function () {
+          const bdc =
+            'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' +
+            encodeURIComponent(String(lat)) +
+            '&longitude=' +
+            encodeURIComponent(String(lon)) +
+            '&localityLanguage=en';
+          fetch(bdc, {
+            signal:
+              typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+                ? AbortSignal.timeout(8000)
+                : undefined,
+          })
+            .then(function (res) {
+              if (!res.ok) throw new Error('bdc ' + res.status);
+              return res.json();
+            })
+            .then(function (data) {
+              const city =
+                (data && (data.city || data.locality || data.principalSubdivision)) || '';
+              const region = (data && data.principalSubdivision) || '';
+              const bits = [];
+              if (city) bits.push(city);
+              if (region && region !== city) bits.push(region);
+              finish(bits.join(', '));
+            })
+            .catch(function () {
+              finish('');
+            });
+        });
+    }
+    function looksLikeZionLifestyleMessage(raw) {
+      const t = String(raw || '').toLowerCase();
+      return /\\b(weather|forecast|temperature|raining|cinema|movie|movies|showtimes?|restaurant|cafe|pizza|gym|futsal|nearby|near me|around here|takeaway|hungry|lunch|dinner|umbrella|humid)\\b/i.test(
+        t
+      );
+    }
+    function refreshZionLocationIfStale(opts) {
+      const force = !!(opts && opts.force);
+      if (isZionLocationOptedOut()) return Promise.resolve(readZionLocationCache());
+      const cached = readZionLocationCache();
+      const stale =
+        !cached ||
+        cached.source !== 'device' ||
+        Date.now() - (Number(cached.at) || 0) > ZION_LOC_FRESH_MS;
+      if (!force && !stale) return Promise.resolve(cached);
+      if (!navigator.geolocation) return Promise.resolve(cached);
+      return new Promise(function (resolve) {
+        _zionLocAsking = true;
+        paintZionLocationStatus();
+        navigator.geolocation.getCurrentPosition(
+          function (pos) {
+            _zionLocAsking = false;
+            const next = {
+              lat: pos.coords.latitude,
+              lon: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              at: Date.now(),
+              source: 'device',
+              areaLabel: (cached && cached.areaLabel) || undefined,
+            };
+            writeZionLocationCache(next);
+            paintZionLocationStatus();
+            reverseGeocodeZionArea(next.lat, next.lon, function (area) {
+              if (area) {
+                next.areaLabel = area;
+                writeZionLocationCache(next);
+                paintZionLocationStatus();
+              }
+              resolve(next);
+            });
+          },
+          function () {
+            _zionLocAsking = false;
+            paintZionLocationStatus();
+            resolve(cached);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      });
     }
     function locateZionDevice(opts) {
       const force = !!(opts && opts.force);
@@ -28206,14 +28361,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           _zionLocAsking = false;
           _zionLocAwaitingConsent = false;
           setZionLocationOptOut(false);
-          writeZionLocationCache({
+          const next = {
             lat: pos.coords.latitude,
             lon: pos.coords.longitude,
             accuracy: pos.coords.accuracy,
             at: Date.now(),
             source: 'device',
-          });
+          };
+          writeZionLocationCache(next);
           paintZionLocationStatus();
+          reverseGeocodeZionArea(next.lat, next.lon, function (area) {
+            if (!area) return;
+            next.areaLabel = area;
+            writeZionLocationCache(next);
+            paintZionLocationStatus();
+          });
         },
         function (err) {
           _zionLocAsking = false;
@@ -28229,7 +28391,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             );
           }
         },
-        { enableHighAccuracy: false, timeout: 12000, maximumAge: ZION_LOC_TTL_MS }
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: ZION_LOC_FRESH_MS }
       );
     }
     function ensureZionDeviceLocation(reason) {
@@ -28239,6 +28401,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       const cached = readZionLocationCache();
       if (cached && cached.source === 'device') {
+        if (!cached.areaLabel) {
+          reverseGeocodeZionArea(cached.lat, cached.lon, function (area) {
+            if (!area) return;
+            cached.areaLabel = area;
+            writeZionLocationCache(cached);
+            paintZionLocationStatus();
+          });
+        }
         paintZionLocationStatus();
         return;
       }
@@ -28537,7 +28707,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (btn.classList.contains('is-unsupported')) return;
         btn.disabled = false;
       });
-      try { syncZionMicUi(); } catch (_) {}
+      // Resume mic after one-shot send — previously busy cleared without resume
+      if (_zionVoiceOn && _zionVoicePausedBusy) {
+        try { resumeZionVoiceAfterBusy(); } catch (_) {}
+      } else {
+        try { syncZionMicUi(); } catch (_) {}
+      }
     }
     function setZionChatBusy(busy) {
       _zionChatBusy = !!busy;
@@ -28573,16 +28748,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
 
-    /** Voice-to-chat (Web Speech API). Default OFF each page load. */
+    /** Voice-to-chat: wake-word idle → active listen (Web Speech API). */
     let _zionVoiceOn = false;
     let _zionVoiceSource = 'widget';
     let _zionVoiceRec = null;
     let _zionVoiceSilenceTimer = null;
-    let _zionVoiceInactivityTimer = null;
+    let _zionVoiceKeepAliveTimer = null;
     let _zionVoiceBaseText = '';
     let _zionVoicePausedBusy = false;
+    let _zionVoiceMode = 'wake-idle'; // wake-idle | active
+    let _zionVoiceActiveSince = 0;
+    let _zionVoiceKeepAliveUntil = 0;
     const ZION_VOICE_SILENCE_MS = 3000;
-    const ZION_VOICE_INACTIVITY_MS = 2 * 60 * 1000;
+    const ZION_VOICE_ACTIVE_FLOOR_MS = 5000;
+    const ZION_VOICE_KEEPALIVE_MS = 10000;
 
     const ZION_VOICE_LEXICON = {
       'take profit': ['take profits', 'take prof it', 'teak profit', 'take profit'],
@@ -28614,6 +28793,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return w.SpeechRecognition || w.webkitSpeechRecognition || null;
     }
 
+    function readZionVoiceMicPref() {
+      try {
+        return localStorage.getItem(ZION_VOICE_MIC_PREF_KEY) === 'on';
+      } catch (_) {
+        return false;
+      }
+    }
+    function writeZionVoiceMicPref(on) {
+      try {
+        localStorage.setItem(ZION_VOICE_MIC_PREF_KEY, on ? 'on' : 'off');
+      } catch (_) {}
+    }
+
     function zionLevenshtein(a, b) {
       const s = String(a || '');
       const t = String(b || '');
@@ -28637,10 +28829,67 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return row[m];
     }
 
+    function isZionWakeToken(token) {
+      const t = String(token || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      if (!t) return false;
+      if (t === 'zion' || t === 'zyon' || t === 'zionne' || t === 'xion' || t === 'sion') return true;
+      return zionLevenshtein(t, 'zion') <= 1;
+    }
+
+    function detectAndStripZionWake(raw) {
+      const text = String(raw || '').replace(/\\s+/g, ' ').trim();
+      if (!text) return { woke: false, rest: '' };
+      const parts = text.split(/\\s+/);
+      // Leading wake: "Zion …" or "Hey Zion …"
+      let idx = -1;
+      if (parts.length && isZionWakeToken(parts[0])) idx = 0;
+      else if (
+        parts.length >= 2 &&
+        /^(hey|hi|ok|okay|yo)$/i.test(parts[0]) &&
+        isZionWakeToken(parts[1])
+      ) {
+        idx = 1;
+      } else {
+        for (let i = 0; i < Math.min(parts.length, 4); i++) {
+          if (isZionWakeToken(parts[i])) {
+            idx = i;
+            break;
+          }
+        }
+      }
+      if (idx < 0) return { woke: false, rest: text };
+      const rest = parts.slice(idx + 1).join(' ').trim();
+      return { woke: true, rest: rest };
+    }
+
+    function playZionWakeChime() {
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        const ctx = new AC();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+        setTimeout(function () {
+          try { ctx.close(); } catch (_) {}
+        }, 400);
+      } catch (_) {}
+    }
+
     function correctZionVoiceText(raw) {
       let text = String(raw || '').replace(/\\s+/g, ' ').trim();
       if (!text) return '';
-      // Common English repairs
       text = text
         .replace(/\\bi\\b/g, 'I')
         .replace(/\\bim\\b/gi, "I'm")
@@ -28719,16 +28968,45 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return { text: text, action: null };
     }
 
-    function touchZionVoiceActivity() {
-      if (_zionVoiceInactivityTimer) {
-        clearTimeout(_zionVoiceInactivityTimer);
-        _zionVoiceInactivityTimer = null;
+    function clearZionVoiceKeepAlive() {
+      if (_zionVoiceKeepAliveTimer) {
+        clearTimeout(_zionVoiceKeepAliveTimer);
+        _zionVoiceKeepAliveTimer = null;
       }
-      if (!_zionVoiceOn) return;
-      _zionVoiceInactivityTimer = setTimeout(function () {
-        _zionVoiceInactivityTimer = null;
-        if (_zionVoiceOn) stopZionVoiceRecognition();
-      }, ZION_VOICE_INACTIVITY_MS);
+    }
+
+    function enterZionVoiceWakeIdle() {
+      clearZionVoiceSilenceTimer();
+      clearZionVoiceKeepAlive();
+      _zionVoiceMode = 'wake-idle';
+      _zionVoiceActiveSince = 0;
+      _zionVoiceKeepAliveUntil = 0;
+      _zionVoiceBaseText = '';
+      syncZionMicUi();
+    }
+
+    function touchZionVoiceKeepAlive() {
+      if (!_zionVoiceOn || _zionVoiceMode !== 'active') return;
+      clearZionVoiceKeepAlive();
+      _zionVoiceKeepAliveUntil = Date.now() + ZION_VOICE_KEEPALIVE_MS;
+      _zionVoiceKeepAliveTimer = setTimeout(function () {
+        _zionVoiceKeepAliveTimer = null;
+        if (!_zionVoiceOn) return;
+        // Soft return to wake-idle — mic stays on, preference preserved
+        enterZionVoiceWakeIdle();
+        if (!_zionChatBusy && !_zionVoicePausedBusy) {
+          try { startZionVoiceRecognition(); } catch (_) {}
+        }
+      }, ZION_VOICE_KEEPALIVE_MS);
+    }
+
+    function enterZionVoiceActive(opts) {
+      const playChime = !(opts && opts.silent);
+      _zionVoiceMode = 'active';
+      _zionVoiceActiveSince = Date.now();
+      if (playChime) playZionWakeChime();
+      touchZionVoiceKeepAlive();
+      syncZionMicUi();
     }
 
     function syncZionMicUi() {
@@ -28738,7 +29016,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (!btn) return;
         if (!supported) {
           btn.classList.add('is-unsupported');
-          btn.classList.remove('is-on');
+          btn.classList.remove('is-on', 'is-listening');
           btn.setAttribute('aria-pressed', 'false');
           btn.setAttribute('aria-label', 'Voice not supported in this browser');
           btn.title = 'Voice not supported in this browser';
@@ -28747,15 +29025,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         btn.classList.remove('is-unsupported');
         const on = _zionVoiceOn;
+        const listening = on && _zionVoiceMode === 'active';
         btn.classList.toggle('is-on', on);
+        btn.classList.toggle('is-listening', listening);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.setAttribute(
-          'aria-label',
-          on ? 'Voice input on — click to stop' : 'Voice input off — click to speak'
-        );
-        btn.title = on
-          ? 'Listening… (3s silence sends · say “send”, “clear”, or “cancel”)'
-          : 'Voice input (off)';
+        if (!on) {
+          btn.setAttribute('aria-label', 'Voice input off — click to speak');
+          btn.title = 'Voice input (off)';
+        } else if (_zionVoiceMode === 'wake-idle') {
+          btn.setAttribute('aria-label', 'Wake idle — say Zion');
+          btn.title = 'Listening for “Zion”…';
+        } else {
+          btn.setAttribute('aria-label', 'Listening — click to stop');
+          btn.title = 'Listening… (say “Zion” first · 3s silence sends · 10s keep-alive)';
+        }
         btn.disabled = false;
       });
     }
@@ -28776,12 +29059,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function stopZionVoiceRecognition(opts) {
-      clearZionVoiceSilenceTimer();
-      if (_zionVoiceInactivityTimer) {
-        clearTimeout(_zionVoiceInactivityTimer);
-        _zionVoiceInactivityTimer = null;
-      }
       const keepOn = opts && opts.keepOnFlag === true;
+      const persistOff = !(opts && opts.skipPersist === true);
+      if (!keepOn) {
+        clearZionVoiceSilenceTimer();
+        clearZionVoiceKeepAlive();
+      }
       if (_zionVoiceRec) {
         try {
           _zionVoiceRec.onresult = null;
@@ -28796,15 +29079,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceOn = false;
         _zionVoicePausedBusy = false;
         _zionVoiceBaseText = '';
+        _zionVoiceMode = 'wake-idle';
+        _zionVoiceActiveSince = 0;
+        _zionVoiceKeepAliveUntil = 0;
+        if (persistOff) writeZionVoiceMicPref(false);
       }
       syncZionMicUi();
     }
 
     function scheduleZionVoiceSilenceSend() {
       clearZionVoiceSilenceTimer();
+      if (_zionVoiceMode !== 'active') return;
+      const elapsed = Date.now() - (_zionVoiceActiveSince || 0);
+      const floorWait = Math.max(0, ZION_VOICE_ACTIVE_FLOOR_MS - elapsed);
+      const delay = floorWait + ZION_VOICE_SILENCE_MS;
       _zionVoiceSilenceTimer = setTimeout(function () {
         _zionVoiceSilenceTimer = null;
-        if (!_zionVoiceOn || _zionChatBusy) return;
+        if (!_zionVoiceOn || _zionChatBusy || _zionVoiceMode !== 'active') return;
         const inp = zionVoiceInputEl();
         if (!inp) return;
         const corrected = correctZionVoiceText(inp.value || '');
@@ -28812,12 +29103,53 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceBaseText = corrected;
         if (!corrected) return;
         sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
-      }, ZION_VOICE_SILENCE_MS);
+      }, delay);
     }
 
     function handleZionVoiceFinalTranscript(finalChunk) {
-      touchZionVoiceActivity();
-      const parsed = stripZionVoiceCommands(finalChunk);
+      const chunk = String(finalChunk || '');
+      if (_zionVoiceMode === 'wake-idle') {
+        const wake = detectAndStripZionWake(chunk);
+        if (!wake.woke) return;
+        enterZionVoiceActive({ silent: false });
+        const rest = correctZionVoiceText(wake.rest);
+        const inp = zionVoiceInputEl();
+        if (inp) {
+          inp.value = rest;
+          _zionVoiceBaseText = rest;
+          if (rest) {
+            const parsed = stripZionVoiceCommands(rest);
+            if (parsed.action === 'send' && parsed.text) {
+              inp.value = parsed.text;
+              _zionVoiceBaseText = parsed.text;
+              clearZionVoiceSilenceTimer();
+              sendZionAgentChat(_zionVoiceSource === 'widget' ? 'widget' : undefined);
+              return;
+            }
+            if (parsed.action === 'cancel') {
+              stopZionVoiceRecognition();
+              return;
+            }
+            if (parsed.action === 'clear' || parsed.action === 'new_question') {
+              inp.value = '';
+              _zionVoiceBaseText = '';
+              return;
+            }
+            inp.value = parsed.text;
+            _zionVoiceBaseText = parsed.text;
+            if (parsed.text) scheduleZionVoiceSilenceSend();
+          }
+        }
+        focusZionComposer(_zionVoiceSource);
+        return;
+      }
+
+      // Active mode
+      touchZionVoiceKeepAlive();
+      let working = chunk;
+      const leadingWake = detectAndStripZionWake(working);
+      if (leadingWake.woke) working = leadingWake.rest;
+      const parsed = stripZionVoiceCommands(working);
       const inp = zionVoiceInputEl();
       if (!inp) return;
       if (parsed.action === 'cancel') {
@@ -28846,8 +29178,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         return;
       }
-      // Arm silence auto-send only after final results
-      scheduleZionVoiceSilenceSend();
+      if (corrected) scheduleZionVoiceSilenceSend();
     }
 
     function startZionVoiceRecognition() {
@@ -28856,16 +29187,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         syncZionMicUi();
         return;
       }
-      stopZionVoiceRecognition({ keepOnFlag: true });
+      stopZionVoiceRecognition({ keepOnFlag: true, skipPersist: true });
       const inp = zionVoiceInputEl();
-      _zionVoiceBaseText = inp ? String(inp.value || '').trim() : '';
+      if (_zionVoiceMode === 'active') {
+        _zionVoiceBaseText = inp ? String(inp.value || '').trim() : '';
+      } else {
+        _zionVoiceBaseText = '';
+      }
       const rec = new Ctor();
       _zionVoiceRec = rec;
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = (navigator.language || 'en-US');
       rec.maxAlternatives = 1;
-      touchZionVoiceActivity();
       rec.onresult = function (event) {
         if (!_zionVoiceOn || _zionChatBusy) return;
         let interim = '';
@@ -28876,28 +29210,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           if (r.isFinal) finalChunk += t;
           else interim += t;
         }
-        const inpEl = zionVoiceInputEl();
-        if (!inpEl) return;
         if (finalChunk) {
           handleZionVoiceFinalTranscript(finalChunk);
           return;
         }
-        if (interim) {
-          // Interim = preview only; do not commit to base or arm auto-send
-          const live = [_zionVoiceBaseText, interim.trim()]
-            .filter(Boolean)
-            .join(' ')
-            .replace(/\\s+/g, ' ')
-            .trim();
-          inpEl.value = live;
-          touchZionVoiceActivity();
+        if (!interim) return;
+        if (_zionVoiceMode === 'wake-idle') {
+          // Wake-idle: no composer fill until wake fires (check interim for early cue)
+          const wake = detectAndStripZionWake(interim);
+          if (wake.woke) {
+            enterZionVoiceActive({ silent: false });
+            const inpEl = zionVoiceInputEl();
+            if (inpEl) {
+              const rest = correctZionVoiceText(wake.rest);
+              inpEl.value = rest;
+              _zionVoiceBaseText = rest;
+            }
+          }
+          return;
         }
+        const inpEl = zionVoiceInputEl();
+        if (!inpEl) return;
+        const live = [_zionVoiceBaseText, interim.trim()]
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\\s+/g, ' ')
+          .trim();
+        inpEl.value = live;
+        touchZionVoiceKeepAlive();
       };
       rec.onerror = function (ev) {
         const err = String((ev && ev.error) || '');
         if (err === 'aborted' || err === 'no-speech') return;
         if (err === 'not-allowed' || err === 'service-not-allowed') {
           stopZionVoiceRecognition();
+          writeZionVoiceMicPref(false);
           try {
             const btn = document.getElementById(
               _zionVoiceSource === 'widget'
@@ -28921,10 +29268,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       try {
         rec.start();
       } catch (err) {
-        stopZionVoiceRecognition();
+        stopZionVoiceRecognition({ skipPersist: true, keepOnFlag: true });
+        // Soft failure — keep preference; try again shortly
+        setTimeout(function () {
+          if (_zionVoiceOn && !_zionChatBusy) {
+            try { startZionVoiceRecognition(); } catch (_) {}
+          }
+        }, 400);
       }
       syncZionMicUi();
-      focusZionComposer(_zionVoiceSource);
+      if (_zionVoiceMode === 'active') focusZionComposer(_zionVoiceSource);
     }
 
     function toggleZionVoice(source) {
@@ -28936,26 +29289,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (_zionChatBusy) return;
       if (_zionVoiceOn && _zionVoiceSource === src) {
         stopZionVoiceRecognition();
+        writeZionVoiceMicPref(false);
         focusZionComposer(src);
         return;
       }
       _zionVoiceSource = src;
       _zionVoiceOn = true;
       _zionVoicePausedBusy = false;
+      writeZionVoiceMicPref(true);
+      enterZionVoiceWakeIdle();
       startZionVoiceRecognition();
     }
 
+    function restoreZionVoiceIfPreferred(source) {
+      if (!readZionVoiceMicPref()) return;
+      if (!getZionSpeechRecognitionCtor()) return;
+      if (_zionChatBusy) return;
+      const src = source === 'widget' ? 'widget' : 'main';
+      _zionVoiceSource = src;
+      _zionVoiceOn = true;
+      _zionVoicePausedBusy = false;
+      if (_zionVoiceMode !== 'active' || Date.now() > _zionVoiceKeepAliveUntil) {
+        enterZionVoiceWakeIdle();
+      }
+      if (!_zionVoiceRec) {
+        try { startZionVoiceRecognition(); } catch (_) {}
+      }
+      syncZionMicUi();
+    }
+
     function onZionComposerInput(source) {
-      // User typing turns mic off (stay-on exception)
+      // User typing turns mic off (explicit)
       if (_zionVoiceOn) {
         stopZionVoiceRecognition();
+        writeZionVoiceMicPref(false);
       }
-      touchZionVoiceActivity();
     }
 
     function refreshZionAgentChat() {
-      if (_zionVoiceOn) stopZionVoiceRecognition();
+      if (_zionVoiceOn) stopZionVoiceRecognition({ skipPersist: true, keepOnFlag: true });
       if (typeof loadZionAgent === 'function') loadZionAgent();
+      if (_zionVoiceOn && !_zionChatBusy) {
+        try { startZionVoiceRecognition(); } catch (_) {}
+      }
     }
 
     function pauseZionVoiceForBusy() {
@@ -28976,6 +29352,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function resumeZionVoiceAfterBusy() {
       if (!_zionVoiceOn || !_zionVoicePausedBusy) return;
       _zionVoicePausedBusy = false;
+      // Stay Active if keep-alive still running, else WakeIdle
+      if (_zionVoiceMode === 'active' && Date.now() < _zionVoiceKeepAliveUntil) {
+        touchZionVoiceKeepAlive();
+      } else {
+        enterZionVoiceWakeIdle();
+      }
       startZionVoiceRecognition();
     }
 
@@ -28984,6 +29366,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.toggleZionVoice = toggleZionVoice;
     window.onZionComposerInput = onZionComposerInput;
     window.refreshZionAgentChat = refreshZionAgentChat;
+    window.restoreZionVoiceIfPreferred = restoreZionVoiceIfPreferred;
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
       try {
@@ -29180,6 +29563,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         zionAgentWidgetState.unread = 0;
         syncZionChatSurfaces();
         try { ensureZionDeviceLocation('widget-open'); } catch (_) {}
+        try { restoreZionVoiceIfPreferred('widget'); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
         setTimeout(function () {
           const input = document.getElementById('zion-agent-widget-input');
@@ -29459,6 +29843,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       msg = correctZionVoiceText(msg);
       if (inp) inp.value = msg;
 
+      // Fresh high-accuracy fix before lifestyle-ish asks when cache is stale
+      if (looksLikeZionLifestyleMessage(msg) && !isZionLocationOptedOut()) {
+        try {
+          await refreshZionLocationIfStale({ force: false });
+        } catch (_) {}
+      }
+      try { paintZionLocationStatus(); } catch (_) {}
+
       const locNl = handleZionLocationNl(msg);
       if (locNl && locNl.handled) {
         ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
@@ -29489,7 +29881,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceSource = sendSource;
         _zionVoiceBaseText = '';
         clearZionVoiceSilenceTimer();
-        touchZionVoiceActivity();
+        if (_zionVoiceMode === 'active') {
+          touchZionVoiceKeepAlive();
+        }
       }
       ['zion-agent-input', 'zion-agent-widget-input'].forEach(function (id) {
         const el = document.getElementById(id);

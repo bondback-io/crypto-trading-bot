@@ -1549,6 +1549,7 @@ export interface ZionAgentChatLocation {
   accuracy?: number;
   at?: number;
   source?: 'device' | 'fallback' | 'denied';
+  areaLabel?: string;
 }
 
 export async function zionAgentChat(
@@ -1608,6 +1609,7 @@ export async function zionAgentChat(
           accuracy: locIn.accuracy,
           at: locIn.at || Date.now(),
           source: locIn.source || 'device',
+          areaLabel: locIn.areaLabel,
         },
         opts?.timeZone
       );
@@ -1657,6 +1659,7 @@ export async function zionAgentChat(
               accuracy: locIn.accuracy,
               at: locIn.at || Date.now(),
               source: locIn.source || 'device',
+              areaLabel: locIn.areaLabel,
             }
           : null,
       timeZone: opts?.timeZone,

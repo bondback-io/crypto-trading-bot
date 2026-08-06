@@ -4222,6 +4222,7 @@ export function createServer(): express.Application {
           accuracy?: number;
           at?: number;
           source?: string;
+          areaLabel?: string;
         };
       };
       const text = String(body.message || '');
@@ -4234,12 +4235,16 @@ export function createServer(): express.Application {
         accuracy?: number;
         at: number;
         source: 'device' | 'fallback' | 'denied';
+        areaLabel?: string;
       } | null = null;
       if (Number.isFinite(lat) && Number.isFinite(lon)) {
         const src =
           locRaw?.source === 'fallback' || locRaw?.source === 'denied'
             ? locRaw.source
             : 'device';
+        const areaLabel = String((locRaw as { areaLabel?: string })?.areaLabel || '')
+          .trim()
+          .slice(0, 120);
         location = {
           lat,
           lon,
@@ -4252,6 +4257,7 @@ export function createServer(): express.Application {
               ? Number(locRaw.at)
               : Date.now(),
           source: src,
+          areaLabel: areaLabel || undefined,
         };
       }
       const timeZone = String(body.timeZone || '').trim().slice(0, 80) || undefined;
