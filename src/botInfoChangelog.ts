@@ -41,6 +41,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.190',
+    title: 'HMC Low no longer starves quiet feeds',
+    sections: ['microbots', 'knobs', 'execution'],
+    items: [
+      'Gatekeeper strictness Low keeps soft activity findings advisory (even with Enforce soft blocks ON); hard safety (honeypot / anti-rug / high risk) still always blocks. Medium/High still honor soft-enforce.',
+      'Volume Intelligence collapse / fast hard floors are capped to Gatekeeper floors so VI default H1 $1500 (and fast mins ~800/2000) cannot outrank Low (400/1200).',
+    ],
+  },
+  {
     version: '1.2.189',
     title: 'Settings survive fresh deploy volumes',
     sections: ['backup', 'knobs', 'coaches', 'zion', 'microbots'],

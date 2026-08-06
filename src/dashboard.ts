@@ -8319,7 +8319,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </div>
             <label class="ctl-check mb-2" title="When off, soft blocks are advisory only; hard safety still blocks">
               <input type="checkbox" id="hmc-gk-soft-enforced" onchange="saveHmcGatekeeperConfig()" />
-              <span>Enforce soft blocks <span class="tip" tabindex="0" data-tip="OFF = soft findings log as advisory ALLOW. Hard safety (honeypot / anti-rug) always blocks."></span></span>
+              <span>Enforce soft blocks <span class="tip" tabindex="0" data-tip="OFF = soft findings log as advisory ALLOW. At strictness Low, soft findings stay advisory even when this is ON (hard safety still always blocks). Medium/High honor this checkbox."></span></span>
             </label>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
               <label class="ctl ctl-sm"><span>Min vol 5m ($)</span><input type="number" id="hmc-gk-vol-m5" value="800" min="0" step="100" onchange="saveHmcGatekeeperConfig()" /></label>

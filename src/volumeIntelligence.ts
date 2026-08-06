@@ -102,6 +102,13 @@ export interface VolumeIntelInput {
   profileId?: string | null;
   /** Candles for ZigZag divergence (optional). */
   candles?: ProfileTaCandle[] | null;
+  /**
+   * Cap absolute collapse floors (e.g. Gatekeeper LOW ≤ 400/1200 so VI
+   * default H1 $1500 cannot outrank Gatekeeper strictness).
+   */
+  collapseAbsCap?: { m5Usd?: number; h1Usd?: number } | null;
+  /** Cap fast-profile hardFloorFailFast mins the same way. */
+  fastMinVolumeCap?: { m5Usd?: number; h1Usd?: number } | null;
 }
 
 export interface VolumeDivergenceSnapshot {
@@ -558,10 +565,45 @@ export function evaluateVolumeIntelligence(
   // Do not synthesize a 1-sample ring from a lone Dex print — that used to
   // pair with H1/12 pace checks and false-flag “decaying”.
 
+  const collapseAbsM5Usd =
+    input.collapseAbsCap?.m5Usd != null &&
+    Number.isFinite(Number(input.collapseAbsCap.m5Usd))
+      ? Math.min(cfg.collapseAbsM5Usd, Math.max(0, Number(input.collapseAbsCap.m5Usd)))
+      : cfg.collapseAbsM5Usd;
+  const collapseAbsH1Usd =
+    input.collapseAbsCap?.h1Usd != null &&
+    Number.isFinite(Number(input.collapseAbsCap.h1Usd))
+      ? Math.min(cfg.collapseAbsH1Usd, Math.max(0, Number(input.collapseAbsCap.h1Usd)))
+      : cfg.collapseAbsH1Usd;
+  const fastMinVolumeM5Usd =
+    input.fastMinVolumeCap?.m5Usd != null &&
+    Number.isFinite(Number(input.fastMinVolumeCap.m5Usd))
+      ? Math.min(
+          cfg.fastMinVolumeM5Usd,
+          Math.max(0, Number(input.fastMinVolumeCap.m5Usd))
+        )
+      : cfg.fastMinVolumeM5Usd;
+  const fastMinVolumeH1Usd =
+    input.fastMinVolumeCap?.h1Usd != null &&
+    Number.isFinite(Number(input.fastMinVolumeCap.h1Usd))
+      ? Math.min(
+          cfg.fastMinVolumeH1Usd,
+          Math.max(0, Number(input.fastMinVolumeCap.h1Usd))
+        )
+      : cfg.fastMinVolumeH1Usd;
+
+  const effCfg: VolumeIntelligenceConfig = {
+    ...cfg,
+    collapseAbsM5Usd,
+    collapseAbsH1Usd,
+    fastMinVolumeM5Usd,
+    fastMinVolumeH1Usd,
+  };
+
   const soft = cfg.profileSoft?.[String(input.profileId || '')] || {};
   const decaySens = clamp(Number(soft.decaySensitivity) || 1, 0.5, 1.5);
 
-  const strength = strengthScore01(volM5, volH1, cfg);
+  const strength = strengthScore01(volM5, volH1, effCfg);
   const decay = detectDecay(
     volM5,
     volH1,
@@ -570,15 +612,15 @@ export function evaluateVolumeIntelligence(
       ? Number(input.priceChangePct)
       : null,
     {
-      ...cfg,
+      ...effCfg,
       shortTermDecayRatio: clamp(
-        cfg.shortTermDecayRatio / decaySens,
+        effCfg.shortTermDecayRatio / decaySens,
         0.2,
         0.95
       ),
     }
   );
-  const divergence = detectDivergence(input, cfg);
+  const divergence = detectDivergence(input, effCfg);
 
   let score01 = strength.score;
   if (decay.state === 'expanding') score01 = clamp01(score01 + 0.08);
@@ -593,14 +635,17 @@ export function evaluateVolumeIntelligence(
 
   const fast = isVolumeIntelFastProfile(input.profileId);
   const hardFloorFailFast =
-    cfg.blockCollapsedOnFastProfiles &&
+    effCfg.blockCollapsedOnFastProfiles &&
     fast &&
     (decay.state === 'collapsed' ||
       (volM5 != null &&
         volM5 > 0 &&
-        volM5 < cfg.fastMinVolumeM5Usd &&
-        (volH1 == null || volH1 < cfg.fastMinVolumeH1Usd)) ||
-      (volH1 != null && volH1 > 0 && volH1 < cfg.fastMinVolumeH1Usd && (volM5 == null || volM5 < cfg.fastMinVolumeM5Usd)));
+        volM5 < effCfg.fastMinVolumeM5Usd &&
+        (volH1 == null || volH1 < effCfg.fastMinVolumeH1Usd)) ||
+      (volH1 != null &&
+        volH1 > 0 &&
+        volH1 < effCfg.fastMinVolumeH1Usd &&
+        (volM5 == null || volM5 < effCfg.fastMinVolumeM5Usd)));
 
   const plain =
     decay.state === 'collapsed'

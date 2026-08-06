@@ -60,7 +60,10 @@ export interface GatekeeperResult {
   severity: GatekeeperSeverity;
   reasonCodes: string[];
   plainLanguage: string;
-  /** Soft findings present but softBlocksEnforced=false → advisory allow */
+  /**
+   * Soft findings present but softBlocksEnforced=false, or strictness is low
+   * → advisory allow (hard safety still blocks separately).
+   */
   advisory?: boolean;
 }
 
@@ -815,7 +818,8 @@ function plainFromCodes(
 
 /**
  * Evaluate Gatekeeper. Hard safety never fails open.
- * Soft blocks become advisory ALLOW when softBlocksEnforced=false.
+ * Soft blocks become advisory ALLOW when softBlocksEnforced=false,
+ * or always when strictness is `low` (Low must not secretly hard-reject).
  */
 export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
   const cfg = getHierarchicalCoordinationConfig();
@@ -903,7 +907,9 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
     softCodes.push('ACTIVITY_LOW_LIQUIDITY');
   }
 
-  // Volume intelligence collapse (reuse; no new RPC)
+  // Volume intelligence collapse (reuse; no new RPC).
+  // Cap VI collapse / fast hard floors to Gatekeeper strictness so LOW
+  // (400/1200) is not outranked by VI defaults (400/1500) or fast mins (800/2000).
   try {
     const snap = evaluateVolumeIntelligence({
       volumeM5Usd: volM5,
@@ -914,6 +920,14 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
         null,
       profileId: input.profileHint || null,
       candles: (input.candles as import('./profileTaIndicators').ProfileTaCandle[]) || null,
+      collapseAbsCap: {
+        m5Usd: cfg.minVolumeM5Usd,
+        h1Usd: cfg.minVolumeH1Usd,
+      },
+      fastMinVolumeCap: {
+        m5Usd: cfg.minVolumeM5Usd,
+        h1Usd: cfg.minVolumeH1Usd,
+      },
     });
     if (snap.decayState === 'collapsed' || snap.hardFloorFailFast) {
       softCodes.push('ACTIVITY_VOLUME_COLLAPSED');
@@ -965,7 +979,11 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
       plainLanguage: plainFromCodes('block', hardCodes, false),
     };
   } else if (softCodes.length) {
-    if (cfg.softBlocksEnforced) {
+    // Strictness Low: soft activity findings stay advisory even if
+    // softBlocksEnforced is checked — hard safety already handled above.
+    const enforceSoft =
+      cfg.softBlocksEnforced && cfg.gatekeeperStrictness !== 'low';
+    if (enforceSoft) {
       result = {
         decision: 'block',
         severity: 'soft',
