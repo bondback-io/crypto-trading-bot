@@ -26105,15 +26105,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '<td title="' + escIm(w.address) + '">' + escIm(name) + '</td>' +
                 '<td class="mint text-xs">' + escIm(tags) + '</td>' +
                 '<td><input type="checkbox" ' + (w.copyEnabled !== false ? 'checked' : '') +
-                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{copyEnabled:this.checked})" /></td>' +
+                  ' onchange="patchInfluencerWallet(\\'' + addr + '\\',{copyEnabled:this.checked})" /></td>' +
                 '<td><input type="checkbox" ' + (w.followSells !== false ? 'checked' : '') +
-                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{followSells:this.checked})" /></td>' +
+                  ' onchange="patchInfluencerWallet(\\'' + addr + '\\',{followSells:this.checked})" /></td>' +
                 '<td><input type="number" class="ctl-sm" style="width:4rem" min="0.25" max="2" step="0.05" value="' + size +
-                  '" onchange="patchInfluencerWallet(\'' + addr + '\',{sizeMult:parseFloat(this.value)})" /></td>' +
+                  '" onchange="patchInfluencerWallet(\\'' + addr + '\\',{sizeMult:parseFloat(this.value)})" /></td>' +
                 '<td class="mint">' + (w.pnl30dUsd != null ? Number(w.pnl30dUsd).toFixed(0) : '—') + '</td>' +
                 '<td class="mint">' + (w.winRate != null ? Number(w.winRate).toFixed(0) : '—') + '</td>' +
                 '<td><input type="checkbox" ' + (w.enabled !== false ? 'checked' : '') +
-                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{enabled:this.checked})" /></td>' +
+                  ' onchange="patchInfluencerWallet(\\'' + addr + '\\',{enabled:this.checked})" /></td>' +
                 '</tr>';
             }).join('');
           }

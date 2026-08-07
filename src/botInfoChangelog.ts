@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.222',
+    title: 'Dashboard Influencer Mirror JS fix',
+    sections: ['copy', 'overview', 'knobs'],
+    items: [
+      'Fix dashboard stall: Influencer Mirror wallet onchange handlers used broken quote escapes inside the HTML template literal, causing a client SyntaxError that froze the UI.',
+      'Same escape class as Trade Craft selectTradeCraftTrait — double-backslash so the browser receives valid JS string quotes.',
+    ],
+  },
+  {
     version: '1.2.221',
     title: 'Influencer Mirror + majors GK soft-pass',
     sections: ['copy', 'coaches', 'risk', 'scanners', 'execution'],
