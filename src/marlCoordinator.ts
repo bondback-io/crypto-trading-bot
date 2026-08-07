@@ -181,9 +181,63 @@ export function marlLaneScoreDelta(profileId: string): {
   } catch {
     /* optional */
   }
+  // Soft harvest context (avg capture / giveback) — ranking only, no PPP writes
+  try {
+    const harvest = softHarvestRankingNudge(profileId);
+    if (Math.abs(harvest.delta) >= 0.05) {
+      delta = Math.max(
+        -SCORE_CAP,
+        Math.min(SCORE_CAP, delta + harvest.delta * scale)
+      );
+      noteExtra += harvest.note ? ` · ${harvest.note}` : '';
+    }
+  } catch {
+    /* optional */
+  }
   if (Math.abs(delta) < 0.05) return { delta: 0, note: '' };
   const note = `MARL ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}${noteExtra}`;
   return { delta: Math.round(delta * 10) / 10, note };
+}
+
+/**
+ * Lightweight in-memory harvest nudge from recent episodes.
+ * Ranking only — never mutates PPP/PCL/TP/SL.
+ */
+function softHarvestRankingNudge(profileId: string): {
+  delta: number;
+  note: string;
+} {
+  try {
+    const { getProfileLearningEpisodes } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    // Cached ring read — keep small to avoid request-path stalls
+    const eps = getProfileLearningEpisodes(profileId, 24);
+    if (eps.length < 6) return { delta: 0, note: '' };
+    const caps = eps
+      .map((e) =>
+        e.mfeCaptureRatio != null && Number.isFinite(e.mfeCaptureRatio)
+          ? Number(e.mfeCaptureRatio)
+          : null
+      )
+      .filter((v): v is number => v != null);
+    const gbs = eps.map((e) => Math.max(0, Number(e.givebackFromPeakPct) || 0));
+    const avgCap =
+      caps.length > 0
+        ? caps.reduce((a, b) => a + b, 0) / caps.length
+        : null;
+    const avgGb = gbs.reduce((a, b) => a + b, 0) / gbs.length;
+    let delta = 0;
+    if (avgCap != null) delta += (avgCap - 0.55) * 2.5;
+    delta -= Math.min(1.5, Math.max(0, avgGb - 10) * 0.08);
+    delta = Math.max(-1.2, Math.min(1.2, delta));
+    if (Math.abs(delta) < 0.08) return { delta: 0, note: '' };
+    return {
+      delta: Math.round(delta * 10) / 10,
+      note: `harvest ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`,
+    };
+  } catch {
+    return { delta: 0, note: '' };
+  }
 }
 
 /** Soft entry size multiplier from agent confidence (1 when off). */

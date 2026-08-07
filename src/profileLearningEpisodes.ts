@@ -124,9 +124,25 @@ export interface ProfileLearningEpisode {
    * or left TP on table after peaking at/above TP (false).
    */
   peakProtectBeatFullTp?: boolean;
+  /** Near-miss: armed + large giveback without PPP exit reason */
+  peakProtectNearMiss?: boolean;
+  /** ms when PPP first armed */
+  peakProtectArmedAt?: number;
+  /** Seconds from open to PPP arm */
+  timeToArmSec?: number;
+  /** Peak unrealized % when PPP first armed */
+  peakAtArmPct?: number;
+  /** Giveback as % of peak unrealized at exit (0–100) */
+  givebackOfPeakAtExitPct?: number;
   /** Profit Capture Layer — first partial banked */
   pclPartialTaken?: boolean;
   pclRunnerFraction?: number;
+  /** Unrealized % when first PCL partial banked */
+  pclPartialAtPct?: number;
+  /** ms when first PCL partial banked */
+  pclPartialAtMs?: number;
+  /** Additional MFE after partial (maxRunup − partialAt) */
+  pclPostPartialMfePct?: number;
   /** Explicit exit/MFE capture ratio (0–1.2+), stamped at close */
   mfeCaptureRatio?: number;
   /** Permission window end (ms) at open */
@@ -152,6 +168,9 @@ export interface ProfileLearningEpisode {
   cfPeakExitPnlPct?: number;
   cfActualVsPeakGapPct?: number;
   cfTighterPppBetter?: boolean;
+  cfLooserPppBetter?: boolean;
+  cfLaterArmBetter?: boolean;
+  cfSkipPartialBetter?: boolean;
   cfEarlierTpBetter?: boolean;
   cfSlWiderWouldSurvive?: boolean;
   cfSummary?: string;

@@ -42,6 +42,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.213',
+    title: 'Profit-protection learning robustness',
+    sections: ['coaches', 'risk', 'learning', 'overview'],
+    items: [
+      'Denser PPP/PCL learning film: arm timing, near-miss, partial milestones, permission exits, and CF looser/later-arm/skip-partial stamps feed Self-Learn, ML, and Profile RL.',
+      'Self-Learn/ML nudge peak-protect arm/giveback + PCL permission/early partial on a denser exit-policy micro path; Profile RL rewards harvest outcomes; MARL soft-ranks by capture/giveback only.',
+      'Overview Reset salvages open trades as dashboard_reset episodes before clearing; Trade Craft film shows PPP/PCL/CF columns; Bot Info checklist for harvest learning.',
+    ],
+  },
+  {
     version: '1.2.212',
     title: 'Trade Craft Progress',
     sections: ['coaches', 'risk', 'learning', 'overview'],

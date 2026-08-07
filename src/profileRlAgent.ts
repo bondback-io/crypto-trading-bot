@@ -327,6 +327,27 @@ export function computeProfileRlReward(
   }
   taPart = clamp(taPart, -0.05, 0.05);
 
+  // Profit-protection film → soft protect bias (not TA-only)
+  let protectPart = 0;
+  if (episode.peakProtectBeatFullTp === true) protectPart += 0.04;
+  if (episode.peakProtectBeatFullTp === false) protectPart -= 0.03;
+  if (episode.peakProtectNearMiss === true) protectPart -= 0.025;
+  if (episode.pclLearningDelta != null && Number.isFinite(episode.pclLearningDelta)) {
+    protectPart += clamp(Number(episode.pclLearningDelta) * 0.4, -0.05, 0.05);
+  }
+  const capture =
+    episode.mfeCaptureRatio != null && Number.isFinite(episode.mfeCaptureRatio)
+      ? Number(episode.mfeCaptureRatio)
+      : null;
+  if (capture != null) {
+    protectPart += clamp((capture - 0.55) * 0.08, -0.04, 0.04);
+  }
+  const gbPeak = Number(episode.givebackOfPeakAtExitPct);
+  if (Number.isFinite(gbPeak) && gbPeak >= 40) {
+    protectPart -= clamp((gbPeak - 40) / 200, 0, 0.03);
+  }
+  protectPart = clamp(protectPart, -0.08, 0.08);
+
   let replayBonus = 0;
   let cfBonus = 0;
   try {
@@ -350,6 +371,7 @@ export function computeProfileRlReward(
       exitPart +
       ddPart +
       taPart +
+      protectPart +
       replayBonus +
       cfBonus,
     -3,
@@ -363,7 +385,7 @@ export function computeProfileRlReward(
       entry: Number(entryPart.toFixed(3)),
       exit: Number(exitPart.toFixed(3)),
       dd: Number(ddPart.toFixed(3)),
-      ta: Number(taPart.toFixed(3)),
+      ta: Number((taPart + protectPart).toFixed(3)),
       replayBonus: replayBonus ? Number(replayBonus.toFixed(3)) : undefined,
       cfBonus: cfBonus ? Number(cfBonus.toFixed(3)) : undefined,
     },
@@ -396,7 +418,12 @@ function activePolicyDims(episode: ProfileLearningEpisode): Array<keyof ProfileR
   if (
     episode.givebackFromPeakPct != null ||
     episode.exitQualityScore != null ||
-    episode.peakProtectArmed != null
+    episode.peakProtectArmed != null ||
+    episode.peakProtectBeatFullTp != null ||
+    episode.peakProtectNearMiss === true ||
+    episode.pclPartialTaken === true ||
+    episode.pclLearningDelta != null ||
+    episode.mfeCaptureRatio != null
   ) {
     dims.push('exitAggressiveness');
   }
@@ -579,7 +606,8 @@ function applyPpoPolicyUpdate(
   agent: ProfileRlAgentState,
   reward: number,
   dims: Array<keyof ProfileRlPolicy>,
-  cfg: ProfileRlConfig
+  cfg: ProfileRlConfig,
+  episode?: ProfileLearningEpisode
 ): string | null {
   const scale = strengthScale(cfg.strength) * modeScale(agent.mode);
   if (scale <= 0) return null;
@@ -587,7 +615,23 @@ function applyPpoPolicyUpdate(
   const before = { ...agent.policy };
   let changed = false;
   for (const dim of dims) {
-    const delta = clamp(reward * 0.03 * scale, -PPO_EPS, PPO_EPS);
+    let delta = clamp(reward * 0.03 * scale, -PPO_EPS, PPO_EPS);
+    // Protection bias: near-miss / left-on-table → nudge exit aggressiveness up
+    if (dim === 'exitAggressiveness' && episode) {
+      if (
+        episode.peakProtectNearMiss === true ||
+        episode.peakProtectBeatFullTp === false ||
+        (Number(episode.givebackOfPeakAtExitPct) || 0) >= 45
+      ) {
+        delta += 0.015 * scale;
+      } else if (
+        episode.peakProtectBeatFullTp === true &&
+        (episode.mfeCaptureRatio == null || episode.mfeCaptureRatio >= 0.55)
+      ) {
+        delta -= 0.01 * scale;
+      }
+      delta = clamp(delta, -PPO_EPS, PPO_EPS);
+    }
     const next = clamp(agent.policy[dim] + delta, -1, 1);
     if (Math.abs(next - agent.policy[dim]) >= 0.005) {
       agent.policy[dim] = next;
@@ -644,11 +688,23 @@ export function notifyProfileRlTradeClosed(input: {
   const dims = activePolicyDims(input.episode);
   let policySummary: string | null = null;
   if (cfg.enabled && agent.mode !== 'shadow') {
-    policySummary = applyPpoPolicyUpdate(agent, reward, dims, cfg);
+    policySummary = applyPpoPolicyUpdate(
+      agent,
+      reward,
+      dims,
+      cfg,
+      input.episode
+    );
   } else if (cfg.enabled) {
     // Shadow still learns internally for observation
     const shadowAgent = { ...agent, mode: 'hybrid' as ProfileRlMode };
-    policySummary = applyPpoPolicyUpdate(shadowAgent, reward, dims, cfg);
+    policySummary = applyPpoPolicyUpdate(
+      shadowAgent,
+      reward,
+      dims,
+      cfg,
+      input.episode
+    );
     if (policySummary) agent.policy = shadowAgent.policy;
   }
 

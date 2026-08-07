@@ -86,6 +86,10 @@ const FEATURE_NAMES = [
   'avg_exit_quality',
   'ppp_armed_share',
   'ppp_beat_tp_share',
+  'avg_mfe_capture',
+  'perm_exit_share',
+  'scratch_block_share',
+  'deferred_arm_share',
 ] as const;
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -177,6 +181,18 @@ export function buildWindowFeatures(
     ? pppBeat.filter((e) => e.peakProtectBeatFullTp === true).length /
       pppBeat.length
     : 0;
+  const caps = episodes
+    .map((e) => e.mfeCaptureRatio)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const permExitShare =
+    episodes.filter((e) => e.exitedDuringPermission === true).length /
+    episodes.length;
+  const scratchBlockShare =
+    episodes.filter((e) => (Number(e.pclScratchBlockedCount) || 0) > 0).length /
+    episodes.length;
+  const deferredArmShare =
+    episodes.filter((e) => e.pclPppArmDeferred === true).length /
+    episodes.length;
 
   return [
     mean(pnls) / 20, // scale
@@ -204,6 +220,10 @@ export function buildWindowFeatures(
     exitQs.length ? mean(exitQs) / 100 : 0,
     pppArmedShare,
     pppBeatShare,
+    caps.length ? mean(caps) : 0,
+    permExitShare,
+    scratchBlockShare,
+    deferredArmShare,
   ];
 }
 
@@ -544,6 +564,8 @@ export function buildMlLedCandidates(
     earlyPartialFraction: number;
     minConviction?: number;
     hardTimeLimitSecMax?: number;
+    peakProtectArmOfTpPct?: number;
+    peakProtectGivebackOfPeakPct?: number;
   }
 ): Array<{ summary: string; patch: LearningProposalPatch }> {
   if (episodes.length < 80) return [];
@@ -573,6 +595,77 @@ export function buildMlLedCandidates(
       },
     });
   }
+
+  const pppBeat = episodes.filter((e) => e.peakProtectBeatFullTp != null);
+  const pppMissRate = pppBeat.length
+    ? pppBeat.filter((e) => e.peakProtectBeatFullTp === false).length /
+      pppBeat.length
+    : 0;
+  const nearMissRate =
+    episodes.filter((e) => e.peakProtectNearMiss === true).length /
+    episodes.length;
+  const curArm =
+    current.peakProtectArmOfTpPct != null &&
+    Number.isFinite(current.peakProtectArmOfTpPct) &&
+    current.peakProtectArmOfTpPct > 0
+      ? Number(current.peakProtectArmOfTpPct)
+      : 50;
+  const curPppGive =
+    current.peakProtectGivebackOfPeakPct != null &&
+    Number.isFinite(current.peakProtectGivebackOfPeakPct) &&
+    current.peakProtectGivebackOfPeakPct > 0
+      ? Number(current.peakProtectGivebackOfPeakPct)
+      : 33;
+
+  if (pppMissRate >= 0.22 || nearMissRate >= 0.15 || left >= 0.2) {
+    const nextGive = clamp(Math.round(curPppGive * 0.95), 10, 80);
+    if (nextGive !== Math.round(curPppGive)) {
+      out.push({
+        summary: `ML-led: tighten peak-protect giveback ${curPppGive}→${nextGive}% of peak`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectGivebackOfPeakPct: nextGive },
+          },
+        },
+      });
+    }
+  } else if (
+    pppBeat.length >= 8 &&
+    pppMissRate < 0.12 &&
+    episodes.filter((e) => e.cfLaterArmBetter === true).length /
+      episodes.length >=
+      0.18
+  ) {
+    const nextArm = clamp(Math.round(curArm * 1.04), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `ML-led: later peak-protect arm ${curArm}→${nextArm}% of TP`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
+  } else if (
+    pppBeat.length >= 8 &&
+    pppBeat.filter((e) => e.peakProtectBeatFullTp === true).length /
+      pppBeat.length >=
+      0.35
+  ) {
+    const nextArm = clamp(Math.round(curArm * 0.96), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `ML-led: earlier peak-protect arm ${curArm}→${nextArm}% of TP`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
+  }
+
   const losers = episodes.filter((e) => (e.pnlPct || 0) <= 0);
   const weak =
     losers.filter((e) => (e.convictionScore ?? 50) < 45).length /
@@ -600,7 +693,7 @@ export function buildMlLedCandidates(
       patch: { exitRules: { hardTimeLimitSecMax: next } },
     });
   }
-  return out.slice(0, 3);
+  return out.slice(0, 4);
 }
 
 /** Holdout gate: score candidate on last 25% of episodes. */

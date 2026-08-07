@@ -4831,6 +4831,11 @@ export function applyTradeProfileLearning(
     patch?: {
       exitRules?: Partial<TradeProfileExitRules>;
       match?: Record<string, number | boolean>;
+      pclFamilyOverride?: {
+        family: 'fast' | 'dip_trend' | 'quality';
+        permissionSec?: number;
+        earlyPartialTpPct?: number;
+      };
     };
     entryTighten?: Record<string, number | boolean>;
   }
@@ -4846,10 +4851,63 @@ export function applyTradeProfileLearning(
     ...(suggestion.patch?.match as Partial<TradeProfileMatchRules> | undefined),
     ...(suggestion.entryTighten as Partial<TradeProfileMatchRules> | undefined),
   };
-  return updateTradeProfileParams(id, {
+  const status = updateTradeProfileParams(id, {
     exitRules: exitPatch,
     match: Object.keys(matchPatch).length ? matchPatch : undefined,
   });
+
+  // Bounded PCL family override (permission / early partial) — ranking path only
+  const fo = suggestion.patch?.pclFamilyOverride;
+  if (fo && (fo.family === 'fast' || fo.family === 'dip_trend' || fo.family === 'quality')) {
+    try {
+      const {
+        getProfitCaptureLayerConfig,
+        setProfitCaptureLayerConfig,
+        PCL_PERMISSION_SEC,
+      } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      const cur = getProfitCaptureLayerConfig();
+      const prev = cur.familyOverrides?.[fo.family] || {};
+      const basePerm =
+        prev.permissionSec != null && Number.isFinite(Number(prev.permissionSec))
+          ? Number(prev.permissionSec)
+          : PCL_PERMISSION_SEC[fo.family];
+      const nextOv: {
+        permissionSec?: number;
+        earlyPartialTpPct?: number;
+      } = { ...prev };
+      if (fo.permissionSec != null && Number.isFinite(Number(fo.permissionSec))) {
+        const target = Number(fo.permissionSec);
+        // ±10% step vs current family permission
+        const lo = Math.max(20, Math.round(basePerm * 0.9));
+        const hi = Math.min(180, Math.round(basePerm * 1.1));
+        nextOv.permissionSec = Math.max(lo, Math.min(hi, Math.round(target)));
+      }
+      if (
+        fo.earlyPartialTpPct != null &&
+        Number.isFinite(Number(fo.earlyPartialTpPct))
+      ) {
+        const curPartial =
+          prev.earlyPartialTpPct != null &&
+          Number.isFinite(Number(prev.earlyPartialTpPct))
+            ? Number(prev.earlyPartialTpPct)
+            : 15;
+        const target = Number(fo.earlyPartialTpPct);
+        const lo = Math.max(8, Math.round(curPartial * 0.9));
+        const hi = Math.min(60, Math.round(curPartial * 1.1));
+        nextOv.earlyPartialTpPct = Math.max(lo, Math.min(hi, Math.round(target)));
+      }
+      setProfitCaptureLayerConfig({
+        familyOverrides: {
+          ...(cur.familyOverrides || {}),
+          [fo.family]: nextOv,
+        },
+      });
+    } catch {
+      /* optional */
+    }
+  }
+
+  return status;
 }
 
 /**

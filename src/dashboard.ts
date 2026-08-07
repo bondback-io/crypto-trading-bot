@@ -15266,7 +15266,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       box.innerHTML =
         '<table class="tc-table"><thead><tr>' +
-        '<th>Token</th><th>Bot</th><th>PnL</th><th>Hold</th><th>MFE</th><th>Capture</th><th>Giveback</th><th>Exit</th><th>Entry</th><th>TA / vol</th>' +
+        '<th>Token</th><th>Bot</th><th>PnL</th><th>Hold</th><th>MFE</th><th>Capture</th><th>Giveback</th><th>PPP/PCL</th><th>Exit</th><th>Entry</th><th>TA / vol</th>' +
         '</tr></thead><tbody>' +
         rows
           .map(function (r) {
@@ -15281,8 +15281,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             if (r.taConfluenceAtEntry != null) taBits.push('conf ' + tcFmt(r.taConfluenceAtEntry));
             if (r.volumeStateAtEntry) taBits.push('in ' + r.volumeStateAtEntry);
             if (r.volumeStateAtExit) taBits.push('out ' + r.volumeStateAtExit);
-            if (r.pclPartialTaken) taBits.push('PCL partial');
-            if (r.peakProtectArmed) taBits.push('PPP armed');
+            const harvestBits = [];
+            if (r.pclPartialTaken) {
+              harvestBits.push(
+                r.pclPartialAtPct != null
+                  ? 'PCL @' + tcFmt(r.pclPartialAtPct, '%')
+                  : 'PCL partial'
+              );
+            }
+            if (r.peakProtectArmed) {
+              harvestBits.push(
+                r.timeToArmSec != null
+                  ? 'PPP arm ' + tcFmt(r.timeToArmSec, 's')
+                  : 'PPP armed'
+              );
+            }
+            if (r.peakProtectBeatFullTp === true) harvestBits.push('PPP beat');
+            if (r.peakProtectBeatFullTp === false) harvestBits.push('PPP miss');
+            if (r.peakProtectNearMiss) harvestBits.push('near-miss');
+            if (r.exitedDuringPermission) harvestBits.push('perm exit');
+            if (r.pclPppArmDeferred) harvestBits.push('arm deferred');
+            if (r.givebackOfPeakAtExitPct != null) {
+              harvestBits.push('gbPeak ' + tcFmt(r.givebackOfPeakAtExitPct, '%'));
+            }
+            if (r.cfSummary) harvestBits.push(String(r.cfSummary).slice(0, 36));
             return (
               '<tr>' +
               '<td>' +
@@ -15307,6 +15329,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '</td>' +
               '<td class="num">' +
               tcFmt(r.givebackFromPeakPct, '%') +
+              '</td>' +
+              '<td>' +
+              escHtml(harvestBits.join(' · ') || '—') +
               '</td>' +
               '<td>' +
               escHtml(String(r.exitKey || r.exitReason || '').slice(0, 42)) +

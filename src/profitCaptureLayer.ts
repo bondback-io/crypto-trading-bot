@@ -440,16 +440,37 @@ export const PCL_POST_PARTIAL_GIVEBACK_MULT = 0.85;
  * Trail activation nudge after partial — breakeven-ish (small green).
  * Does not remove hard SL.
  */
-export function applyPclPartialRunnerNudge(position: {
-  trailingActivationProfit?: number;
-  trailingActive?: boolean;
-  pclPartialTaken?: boolean;
-  pclRunnerFraction?: number;
-  partialSellDone?: boolean;
-}): void {
+export function applyPclPartialRunnerNudge(
+  position: {
+    trailingActivationProfit?: number;
+    trailingActive?: boolean;
+    pclPartialTaken?: boolean;
+    pclRunnerFraction?: number;
+    partialSellDone?: boolean;
+    pclPartialAtPct?: number;
+    pclPartialAtMs?: number;
+    entryPriceSol?: number;
+    highWaterMarkSol?: number;
+  },
+  opts?: { markPnlPct?: number; nowMs?: number }
+): void {
   if (!isProfitCaptureLayerEnabled()) return;
+  const already = position.pclPartialTaken === true;
   position.pclPartialTaken = true;
   position.partialSellDone = true;
+  if (!already) {
+    const now = opts?.nowMs ?? Date.now();
+    position.pclPartialAtMs = now;
+    if (opts?.markPnlPct != null && Number.isFinite(opts.markPnlPct)) {
+      position.pclPartialAtPct = Number(opts.markPnlPct);
+    } else {
+      const entry = Number(position.entryPriceSol) || 0;
+      const hwm = Number(position.highWaterMarkSol) || entry;
+      if (entry > 0 && hwm > 0) {
+        position.pclPartialAtPct = ((hwm - entry) / entry) * 100;
+      }
+    }
+  }
   if (
     position.trailingActivationProfit == null ||
     !Number.isFinite(Number(position.trailingActivationProfit)) ||

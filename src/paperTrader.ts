@@ -381,6 +381,9 @@ export interface Position {
   gateDecision?: 'allow' | 'block' | string;
   pclPartialTaken?: boolean;
   pclRunnerFraction?: number;
+  /** Unrealized % / ms when first PCL partial banked */
+  pclPartialAtPct?: number;
+  pclPartialAtMs?: number;
   /** Times PCL blocked a tiny-green soft scratch while open */
   pclScratchBlockedCount?: number;
   /** PPP arm deferred at least once during permission */
@@ -768,8 +771,13 @@ function maybeRecordLearningEpisode(
         : undefined;
     let peakProtectGivebackOfPeakPct: number | undefined;
     let peakProtectBeatFullTp: boolean | undefined;
+    let peakProtectNearMiss: boolean | undefined;
     try {
-      const { resolvePeakProtectParams, peakProtectBeatFullTpHeuristic } =
+      const {
+        resolvePeakProtectParams,
+        peakProtectBeatFullTpHeuristic,
+        peakProtectNearMissHeuristic,
+      } =
         require('./peakProfitProtection') as typeof import('./peakProfitProtection');
       const resolved = resolvePeakProtectParams({
         profileId,
@@ -786,6 +794,14 @@ function maybeRecordLearningEpisode(
         peakUnrealizedPct: metrics.peakUnrealizedPct,
         exitUnrealizedPct: metrics.exitUnrealizedPct,
         takeProfitPct: effectivePositionTakeProfitPct(position),
+        peakProtectArmed: position.peakProtectArmed === true,
+        givebackFromPeakPct: metrics.givebackFromPeakPct,
+      });
+      peakProtectNearMiss = peakProtectNearMissHeuristic({
+        exitReason: position.reason,
+        peakProtectArmed: position.peakProtectArmed === true,
+        givebackFromPeakPct: metrics.givebackFromPeakPct,
+        peakUnrealizedPct: metrics.peakUnrealizedPct,
       });
     } catch {
       /* optional */
@@ -918,12 +934,59 @@ function maybeRecordLearningEpisode(
       peakProtectGivebackOfPeakPct,
       peakProtectArmed: position.peakProtectArmed === true ? true : undefined,
       peakProtectBeatFullTp,
+      peakProtectNearMiss:
+        peakProtectNearMiss === true ? true : undefined,
+      peakProtectArmedAt:
+        position.peakProtectArmedAt != null &&
+        Number.isFinite(Number(position.peakProtectArmedAt))
+          ? Number(position.peakProtectArmedAt)
+          : undefined,
+      timeToArmSec: (() => {
+        const armedAt = Number(position.peakProtectArmedAt) || 0;
+        const openedAt = Number(position.openedAt) || 0;
+        if (!(armedAt > 0 && openedAt > 0 && armedAt >= openedAt)) return undefined;
+        return Math.round((armedAt - openedAt) / 1000);
+      })(),
+      peakAtArmPct:
+        position.peakProtectPeakAtArm != null &&
+        Number.isFinite(Number(position.peakProtectPeakAtArm))
+          ? Math.round(Number(position.peakProtectPeakAtArm) * 10) / 10
+          : undefined,
+      givebackOfPeakAtExitPct: (() => {
+        const peak = Math.max(0, Number(metrics.peakUnrealizedPct) || 0);
+        const exitU = Number.isFinite(metrics.exitUnrealizedPct)
+          ? Number(metrics.exitUnrealizedPct)
+          : pnlPct;
+        if (!(peak > 0.5)) return undefined;
+        return (
+          Math.round(
+            Math.max(0, Math.min(100, ((peak - exitU) / peak) * 100)) * 10
+          ) / 10
+        );
+      })(),
       pclPartialTaken: position.pclPartialTaken === true ? true : undefined,
       pclRunnerFraction:
         position.pclRunnerFraction != null &&
         Number.isFinite(Number(position.pclRunnerFraction))
           ? Number(position.pclRunnerFraction)
           : undefined,
+      pclPartialAtPct:
+        position.pclPartialAtPct != null &&
+        Number.isFinite(Number(position.pclPartialAtPct))
+          ? Math.round(Number(position.pclPartialAtPct) * 10) / 10
+          : undefined,
+      pclPartialAtMs:
+        position.pclPartialAtMs != null &&
+        Number.isFinite(Number(position.pclPartialAtMs))
+          ? Number(position.pclPartialAtMs)
+          : undefined,
+      pclPostPartialMfePct: (() => {
+        if (position.pclPartialTaken !== true) return undefined;
+        const at = Number(position.pclPartialAtPct);
+        const mfe = Math.max(0, Number(metrics.maxRunupPct) || 0);
+        if (!Number.isFinite(at)) return undefined;
+        return Math.round(Math.max(0, mfe - at) * 10) / 10;
+      })(),
       mfeCaptureRatio: (() => {
         const mfe = Math.max(0, Number(metrics.maxRunupPct) || 0);
         const exitU = Number.isFinite(metrics.exitUnrealizedPct)
@@ -3134,13 +3197,54 @@ export class PaperTrader {
   /**
    * Reset paper balance to config.paper.startingBalanceSol and clear open positions.
    * Closed trade history is kept unless clearHistory is true.
+   * Before clearing, mark-to-market force-closes opens as `dashboard_reset`
+   * so learning episodes are salvaged (session still resets).
    */
   reset(options?: { clearHistory?: boolean }): {
     balanceSol: number;
     clearedOpen: number;
     clearedHistory: boolean;
   } {
-    const clearedOpen = this.positions.size;
+    const openSnapshot = Array.from(this.positions.values());
+    const clearedOpen = openSnapshot.length;
+
+    // Salvage learning film before wiping the open book
+    for (const position of openSnapshot) {
+      if (!position || position.status === 'closed') continue;
+      try {
+        const mark =
+          this.priceCache.get(position.mint) ||
+          (Number(position.entryPriceSol) > 0
+            ? Number(position.entryPriceSol)
+            : 0);
+        if (!(mark > 0)) continue;
+        if (position.tradeMode === 'live') {
+          // No on-chain sell on Overview Reset — stamp MTM close for learning only
+          const entry = Number(position.entryPriceSol) || mark;
+          const pnlPct = entry > 0 ? ((mark - entry) / entry) * 100 : 0;
+          const cost = Number(position.costSol) || 0;
+          const pnlSol = cost > 0 ? (pnlPct / 100) * cost : 0;
+          position.status = 'closed';
+          position.closedAt = Date.now();
+          position.exitPriceSol = mark;
+          position.reason = 'dashboard_reset';
+          position.pnlPct = pnlPct;
+          position.pnlSol = pnlSol;
+          this.positions.delete(position.id);
+          maybeRecordLearningEpisode(position, pnlSol, pnlPct);
+          maybeRecordLaneOutcome(position, pnlSol, pnlPct);
+          maybeRecordScannerOutcome(position, pnlPct);
+        } else {
+          this.simulateSell(position.id, mark, 'dashboard_reset');
+        }
+      } catch (err) {
+        console.warn(
+          `[paper] reset salvage failed for ${position.symbol || position.mint.slice(0, 8)}:`,
+          err
+        );
+      }
+    }
+
     this.positions.clear();
     this.balanceSol = config.paper.startingBalanceSol;
     this.startingBalanceSol = config.paper.startingBalanceSol;
@@ -3160,7 +3264,9 @@ export class PaperTrader {
     this.log(
       'info',
       `Paper reset → ${this.balanceSol.toFixed(4)} SOL` +
-        (clearedOpen ? ` (closed ${clearedOpen} open position(s))` : '') +
+        (clearedOpen
+          ? ` (salvaged ${clearedOpen} open position(s) as dashboard_reset)`
+          : '') +
         (clearHistory ? ' · history cleared' : ' · closed history kept')
     );
 
@@ -3377,7 +3483,10 @@ export class PaperTrader {
           try {
             const { applyPclPartialRunnerNudge } =
               require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
-            applyPclPartialRunnerNudge(position);
+            applyPclPartialRunnerNudge(position, {
+              markPnlPct,
+              nowMs,
+            });
             position.pclRunnerFraction = Math.max(
               0,
               1 - Number(adapt.fraction)
@@ -4435,7 +4544,13 @@ export class PaperTrader {
             try {
               const { applyPclPartialRunnerNudge } =
                 require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
-              applyPclPartialRunnerNudge(position);
+              applyPclPartialRunnerNudge(position, {
+                markPnlPct:
+                  ((currentPrice - position.entryPriceSol) /
+                    position.entryPriceSol) *
+                  100,
+                nowMs: Date.now(),
+              });
               position.pclRunnerFraction = Math.max(
                 0,
                 1 - Number(adapt.fraction)

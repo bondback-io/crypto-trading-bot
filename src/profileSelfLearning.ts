@@ -24,6 +24,15 @@ export type MutationSource = 'heuristic' | 'hybrid' | 'ml';
 export interface LearningProposalPatch {
   exitRules?: Partial<TradeProfileExitRules>;
   match?: Partial<TradeProfileMatchRules>;
+  /**
+   * Bounded PCL family override (permission / early partial).
+   * Applied via setProfitCaptureLayerConfig — never writes hard SL/anti-rug.
+   */
+  pclFamilyOverride?: {
+    family: 'fast' | 'dip_trend' | 'quality';
+    permissionSec?: number;
+    earlyPartialTpPct?: number;
+  };
 }
 
 export interface LearningProposal {
@@ -298,6 +307,29 @@ export function scaleLearningPatch(
   return {
     exitRules: Object.keys(exitRules).length ? exitRules : undefined,
     match: Object.keys(match).length ? match : undefined,
+    pclFamilyOverride: patch.pclFamilyOverride
+      ? {
+          family: patch.pclFamilyOverride.family,
+          permissionSec:
+            patch.pclFamilyOverride.permissionSec != null
+              ? Math.round(
+                  Number(
+                    scaleNum(patch.pclFamilyOverride.permissionSec) ??
+                      patch.pclFamilyOverride.permissionSec
+                  )
+                )
+              : undefined,
+          earlyPartialTpPct:
+            patch.pclFamilyOverride.earlyPartialTpPct != null
+              ? Math.round(
+                  Number(
+                    scaleNum(patch.pclFamilyOverride.earlyPartialTpPct) ??
+                      patch.pclFamilyOverride.earlyPartialTpPct
+                  ) * 10
+                ) / 10
+              : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -562,6 +594,7 @@ const PATCH_LABELS: Record<string, string> = {
   requireCluster: 'require cluster',
   heikinAshiExitEnabled: 'Heikin-Ashi exit',
   trailTightenFactor: 'trail tighten ×',
+  permissionSec: 'PCL permission sec',
 };
 
 /** Flatten a learning patch into a short "knob: value" list for UI hover. */
@@ -591,6 +624,14 @@ export function humanizeLearningPatch(patch: LearningProposalPatch | null | unde
   }
   if (patch.match) {
     pushObj(patch.match as Record<string, unknown>);
+  }
+  if (patch.pclFamilyOverride) {
+    const fo = patch.pclFamilyOverride;
+    bits.push(`PCL ${fo.family}`);
+    if (fo.permissionSec != null) bits.push(`permission=${fo.permissionSec}s`);
+    if (fo.earlyPartialTpPct != null) {
+      bits.push(`early partial=${fo.earlyPartialTpPct}%`);
+    }
   }
   return bits.slice(0, 8).join(', ');
 }
@@ -1155,6 +1196,9 @@ export interface SoftExitFeedbackReport {
   avgExitQuality: number | null;
   /** Hint weights for ranking candidates (not applied as patches by themselves) */
   preferTightenGiveback: boolean;
+  preferLoosenGiveback: boolean;
+  preferLaterArm: boolean;
+  preferSkipPartial: boolean;
   preferTighterTrail: boolean;
   preferLooserFade: boolean;
   preferEarlierTrailArm: boolean;
@@ -1177,6 +1221,9 @@ export function buildSoftExitFeedback(
       avgEntryQuality: null,
       avgExitQuality: null,
       preferTightenGiveback: false,
+      preferLoosenGiveback: false,
+      preferLaterArm: false,
+      preferSkipPartial: false,
       preferTighterTrail: false,
       preferLooserFade: false,
       preferEarlierTrailArm: false,
@@ -1226,6 +1273,35 @@ export function buildSoftExitFeedback(
       0.22;
   // Early stops with shallow MAE → fade threshold may be too tight (looser fade)
   const preferLooserFade = earlySlRate >= 0.2 && avgMaeAbs < 9;
+  const nearMissRate =
+    episodes.filter((e) => e.peakProtectNearMiss === true).length / n;
+  const looserScratchRate =
+    episodes.filter(
+      (e) =>
+        (e.givebackFromPeakPct || 0) < 6 &&
+        (e.maxRunupPct || 0) >= 12 &&
+        (e.pnlPct || 0) > 0 &&
+        (e.pnlPct || 0) < (e.maxRunupPct || 0) * 0.55
+    ).length / n;
+  const preferLoosenGiveback =
+    !preferTightenGiveback && looserScratchRate >= 0.2;
+  const preferLaterArm =
+    nearMissRate >= 0.15 ||
+    episodes.filter((e) => e.cfLaterArmBetter === true).length / n >= 0.18;
+  const preferSkipPartial =
+    episodes.filter((e) => e.cfSkipPartialBetter === true).length / n >= 0.15 ||
+    (episodes.filter((e) => e.pclPartialTaken === true).length / n >= 0.2 &&
+      episodes.filter(
+        (e) =>
+          e.pclPartialTaken === true &&
+          (e.pclPostPartialMfePct == null || e.pclPostPartialMfePct < 2) &&
+          (e.givebackFromPeakPct || 0) >= 8
+      ).length /
+        Math.max(
+          1,
+          episodes.filter((e) => e.pclPartialTaken === true).length
+        ) >=
+        0.4);
 
   return {
     n,
@@ -1239,6 +1315,9 @@ export function buildSoftExitFeedback(
     avgEntryQuality,
     avgExitQuality,
     preferTightenGiveback,
+    preferLoosenGiveback,
+    preferLaterArm,
+    preferSkipPartial,
     preferTighterTrail,
     preferLooserFade,
     preferEarlierTrailArm,
@@ -1375,19 +1454,7 @@ export function buildTimingLearningCandidates(
         },
       });
     }
-  } else if (pppBanked >= 0.2 && pppExits >= 0.15) {
-    const nextArm = clamp(Math.round(curArm * 0.95), 10, 95);
-    if (nextArm !== Math.round(curArm)) {
-      out.push({
-        summary: `Timing: arm peak-protect earlier ${curArm}→${nextArm}% of TP`,
-        patch: {
-          exitRules: {
-            exitPolicy: { peakProtectArmOfTpPct: nextArm },
-          },
-        },
-      });
-    }
-  } else if (pppExits >= 0.28 && leftOnTable < 0.15) {
+  } else if (fb.preferLoosenGiveback || (pppExits >= 0.28 && leftOnTable < 0.15)) {
     const nextGive = clamp(Math.round(curGive * 1.05), 10, 80);
     if (nextGive !== Math.round(curGive)) {
       out.push({
@@ -1399,9 +1466,157 @@ export function buildTimingLearningCandidates(
         },
       });
     }
+  } else if (pppBanked >= 0.2 && pppExits >= 0.15 && !fb.preferLaterArm) {
+    const nextArm = clamp(Math.round(curArm * 0.95), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `Timing: arm peak-protect earlier ${curArm}→${nextArm}% of TP`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
+  } else if (fb.preferLaterArm) {
+    const nextArm = clamp(Math.round(curArm * 1.05), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `Timing: arm peak-protect later ${curArm}→${nextArm}% of TP`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
   }
 
-  return out.slice(0, 3);
+  // Profit Capture Layer harvest film → bounded permission / early-partial nudges
+  const n = episodes.length;
+  const partialRate =
+    episodes.filter((e) => e.pclPartialTaken === true).length / n;
+  const permExitRate =
+    episodes.filter((e) => e.exitedDuringPermission === true).length / n;
+  const deferredArmRate =
+    episodes.filter((e) => e.pclPppArmDeferred === true).length / n;
+  const scratchBlocked =
+    episodes.reduce((s, e) => s + (Number(e.pclScratchBlockedCount) || 0), 0) /
+    n;
+  const familyCounts = {
+    fast: 0,
+    dip_trend: 0,
+    quality: 0,
+    default: 0,
+  };
+  for (const e of episodes) {
+    const f = e.pclFamily || 'default';
+    if (f in familyCounts) familyCounts[f as keyof typeof familyCounts] += 1;
+  }
+  const dominantFamily = (
+    Object.entries(familyCounts).sort((a, b) => b[1] - a[1])[0] || [
+      'default',
+      0,
+    ]
+  )[0] as 'fast' | 'dip_trend' | 'quality' | 'default';
+
+  if (permExitRate >= 0.18 || scratchBlocked >= 0.4) {
+    const basePerm =
+      dominantFamily === 'fast'
+        ? 35
+        : dominantFamily === 'dip_trend'
+          ? 120
+          : dominantFamily === 'quality'
+            ? 90
+            : 60;
+    const nextPerm = clamp(Math.round(basePerm * 1.1), 20, 180);
+    if (dominantFamily !== 'default') {
+      out.push({
+        summary: `Timing: lengthen PCL ${dominantFamily} permission → ${nextPerm}s (permission exits / scratch blocks)`,
+        patch: {
+          pclFamilyOverride: {
+            family: dominantFamily,
+            permissionSec: nextPerm,
+          },
+        },
+      });
+    }
+  }
+
+  const earlyPartialHint = episodes
+    .map((e) => e.pclPartialAtPct)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const avgPartialAt = earlyPartialHint.length
+    ? earlyPartialHint.reduce((a, b) => a + b, 0) / earlyPartialHint.length
+    : null;
+
+  if (
+    fb.preferSkipPartial ||
+    (partialRate >= 0.25 &&
+      episodes.filter(
+        (e) =>
+          e.pclPartialTaken === true &&
+          (e.pclPostPartialMfePct == null || Number(e.pclPostPartialMfePct) < 2)
+      ).length /
+        Math.max(1, episodes.filter((e) => e.pclPartialTaken === true).length) >=
+        0.35)
+  ) {
+    const nextPartial = clamp(
+      Math.round((avgPartialAt != null ? avgPartialAt : 15) * 1.08),
+      8,
+      60
+    );
+    out.push({
+      summary: `Timing: delay early partial → ${nextPartial}% (skip/weak post-partial MFE)`,
+      patch: {
+        exitRules: {
+          exitPolicy: { earlyPartialTpPct: nextPartial },
+        },
+        ...(dominantFamily !== 'default'
+          ? {
+              pclFamilyOverride: {
+                family: dominantFamily as 'fast' | 'dip_trend' | 'quality',
+                earlyPartialTpPct: nextPartial,
+              },
+            }
+          : {}),
+      },
+    });
+  } else if (
+    partialRate < 0.12 &&
+    leftOnTable >= 0.2 &&
+    episodes.filter((e) => (e.maxRunupPct || 0) >= 20).length / n >= 0.25
+  ) {
+    const nextPartial = clamp(
+      Math.round((avgPartialAt != null ? avgPartialAt : 18) * 0.92),
+      8,
+      50
+    );
+    out.push({
+      summary: `Timing: earlier early partial → ${nextPartial}% (low partial rate + leave-on-table)`,
+      patch: {
+        exitRules: {
+          exitPolicy: { earlyPartialTpPct: nextPartial },
+        },
+      },
+    });
+  }
+
+  if (deferredArmRate >= 0.25 && fb.preferLaterArm) {
+    const nextArm = clamp(Math.round(curArm * 1.04), 10, 95);
+    if (nextArm !== Math.round(curArm)) {
+      out.push({
+        summary: `Timing: later peak-protect arm ${curArm}→${nextArm}% (deferred arm + CF)`,
+        patch: {
+          exitRules: {
+            exitPolicy: { peakProtectArmOfTpPct: nextArm },
+          },
+        },
+      });
+    }
+  }
+
+  return out.slice(0, 5);
 }
 
 export function buildEntryLearningCandidates(
@@ -1695,6 +1910,22 @@ export function clampLearningPatch(
         25
       );
     }
+    if (ep.peakProtectArmOfTpPct != null) {
+      ep.peakProtectArmOfTpPct = clampDeltaPct(
+        Number(ep.peakProtectArmOfTpPct),
+        Number(catPol.peakProtectArmOfTpPct) || 50,
+        10,
+        95
+      );
+    }
+    if (ep.peakProtectGivebackOfPeakPct != null) {
+      ep.peakProtectGivebackOfPeakPct = clampDeltaPct(
+        Number(ep.peakProtectGivebackOfPeakPct),
+        Number(catPol.peakProtectGivebackOfPeakPct) || 33,
+        10,
+        80
+      );
+    }
     exitRules.exitPolicy = ep;
   }
 
@@ -1752,9 +1983,40 @@ export function clampLearningPatch(
     }
   }
 
+  let pclFamilyOverride = patch.pclFamilyOverride;
+  if (pclFamilyOverride) {
+    const fam = pclFamilyOverride.family;
+    if (fam !== 'fast' && fam !== 'dip_trend' && fam !== 'quality') {
+      pclFamilyOverride = undefined;
+    } else {
+      const next: NonNullable<LearningProposalPatch['pclFamilyOverride']> = {
+        family: fam,
+      };
+      if (pclFamilyOverride.permissionSec != null) {
+        next.permissionSec = clamp(
+          Math.round(Number(pclFamilyOverride.permissionSec)),
+          20,
+          180
+        );
+      }
+      if (pclFamilyOverride.earlyPartialTpPct != null) {
+        next.earlyPartialTpPct = clamp(
+          Math.round(Number(pclFamilyOverride.earlyPartialTpPct)),
+          8,
+          60
+        );
+      }
+      pclFamilyOverride =
+        next.permissionSec != null || next.earlyPartialTpPct != null
+          ? next
+          : undefined;
+    }
+  }
+
   return {
     exitRules: Object.keys(exitRules).length ? exitRules : undefined,
     match: Object.keys(match).length ? match : undefined,
+    pclFamilyOverride,
   };
 }
 
@@ -1822,7 +2084,21 @@ export function runSelfLearnTick(input: {
   const episodes = getProfileLearningEpisodes(input.profileId, 120);
   state = refreshSelfLearnMetrics(state, input.profileId);
 
-  const microEvery = state.microEveryTrades || 4;
+  const microEveryBase = state.microEveryTrades || 4;
+  // Denser exit-policy micro for PPP/PCL harvest when enough film exists
+  const harvestFilmN = episodes.filter(
+    (e) =>
+      e.pclPartialTaken === true ||
+      e.peakProtectArmed === true ||
+      e.peakProtectNearMiss === true ||
+      e.exitedDuringPermission === true ||
+      e.pclPppArmDeferred === true ||
+      e.peakProtectBeatFullTp != null
+  ).length;
+  const harvestDense = episodes.length >= 6 && harvestFilmN >= 4;
+  const microEvery = harvestDense
+    ? Math.min(microEveryBase, 3)
+    : microEveryBase;
   state.nextEligibleIn = Math.max(0, microEvery - (state.tradesSinceMicro || 0));
 
   // Rollback check: post-upgrade window (~12 trades) worse than previous score
@@ -1939,6 +2215,14 @@ export function runSelfLearnTick(input: {
           cf?.preferTightenGiveback ||
           ts?.preferTightenGiveback ||
           false,
+        preferLoosenGiveback:
+          softExit.preferLoosenGiveback ||
+          cf?.preferLoosenGiveback ||
+          false,
+        preferLaterArm:
+          softExit.preferLaterArm || cf?.preferLaterArm || false,
+        preferSkipPartial:
+          softExit.preferSkipPartial || cf?.preferSkipPartial || false,
         preferTighterTrail:
           softExit.preferTighterTrail ||
           replay?.preferTighterTrail ||
@@ -2080,7 +2364,7 @@ export function runSelfLearnTick(input: {
       input.catalogMatch,
       scaledFinal
     );
-    if (!clamped.exitRules && !clamped.match) continue;
+    if (!clamped.exitRules && !clamped.match && !clamped.pclFamilyOverride) continue;
 
     const hAfter = shadowScoreCandidate(window, clamped, scoreBefore);
     let hDelta = hAfter - scoreBefore;
@@ -2091,6 +2375,27 @@ export function runSelfLearnTick(input: {
     }
     if (accelSoftExit.preferTightenGiveback && !softExit.preferTightenGiveback && /giveback|peak.?protect/i.test(sum)) {
       hDelta += 0.2;
+    }
+    if (
+      (softExit.preferLoosenGiveback || accelSoftExit.preferLoosenGiveback) &&
+      /looser peak-protect|looser.*giveback/i.test(sum)
+    ) {
+      hDelta += 0.3;
+    }
+    if (
+      (softExit.preferLaterArm || accelSoftExit.preferLaterArm) &&
+      /later.*peak-protect|arm peak-protect later/i.test(sum)
+    ) {
+      hDelta += 0.3;
+    }
+    if (
+      (softExit.preferSkipPartial || accelSoftExit.preferSkipPartial) &&
+      /delay early partial|skip/i.test(sum)
+    ) {
+      hDelta += 0.28;
+    }
+    if (/PCL.*permission|early partial|peak-protect/i.test(sum) && harvestDense) {
+      hDelta += 0.15;
     }
     if (softExit.preferTighterTrail && /tighten trail|momentum-fade.*tighter|Timing:/i.test(sum)) {
       hDelta += 0.3;
@@ -2152,7 +2457,7 @@ export function runSelfLearnTick(input: {
       kind:
         clamped.exitRules && clamped.match
           ? 'mixed'
-          : clamped.exitRules
+          : clamped.exitRules || clamped.pclFamilyOverride
             ? 'exit'
             : 'entry',
       source,
@@ -2253,9 +2558,17 @@ export function runSelfLearnTick(input: {
       bestNearProposal?.source || 'heuristic';
 
     if (bestNearProposal) {
+      const harvestMicro =
+        harvestDense &&
+        /peak.?protect|PCL|early partial|giveback|Timing:/i.test(
+          String(bestNearProposal.summary || '')
+        );
       const microScaled = scaleLearningPatch(
         bestNearProposal.patch,
-        Math.min(0.4, confidence.nudgeScale * 0.35)
+        Math.min(
+          harvestMicro ? 0.28 : 0.4,
+          confidence.nudgeScale * (harvestMicro ? 0.28 : 0.35)
+        )
       );
       microPatch = clampLearningPatch(
         input.profileId,
@@ -2266,7 +2579,11 @@ export function runSelfLearnTick(input: {
       microSummary = bestNearProposal.summary.startsWith('Micro:')
         ? bestNearProposal.summary
         : `Micro: ${bestNearProposal.summary}`;
-      if (microPatch.exitRules || microPatch.match) {
+      if (
+        microPatch.exitRules ||
+        microPatch.match ||
+        microPatch.pclFamilyOverride
+      ) {
         microScoreAfter = shadowScoreCandidate(window, microPatch, scoreBefore);
         microSource = bestNearProposal.source || 'heuristic';
       } else {
@@ -2275,15 +2592,27 @@ export function runSelfLearnTick(input: {
     }
 
     if (!microPatch) {
-      const mild = buildExitLearningCandidates(
-        input.profileId,
-        episodes,
-        currentPolicy
-      ).slice(-1)[0];
+      const mildPool = [
+        ...buildTimingLearningCandidates(episodes, currentPolicy, accelSoftExit),
+        ...buildExitLearningCandidates(
+          input.profileId,
+          episodes,
+          currentPolicy
+        ),
+      ];
+      const mild =
+        (harvestDense
+          ? mildPool.find((c) =>
+              /peak.?protect|PCL|early partial|Timing:/i.test(c.summary)
+            )
+          : null) || mildPool.slice(-1)[0];
       if (mild) {
         const microScaled = scaleLearningPatch(
           mild.patch,
-          Math.min(0.4, confidence.nudgeScale * 0.35)
+          Math.min(
+            harvestDense ? 0.28 : 0.4,
+            confidence.nudgeScale * (harvestDense ? 0.28 : 0.35)
+          )
         );
         const clamped = clampLearningPatch(
           input.profileId,
@@ -2291,7 +2620,7 @@ export function runSelfLearnTick(input: {
           input.catalogMatch,
           microScaled
         );
-        if (clamped.exitRules || clamped.match) {
+        if (clamped.exitRules || clamped.match || clamped.pclFamilyOverride) {
           microPatch = clamped;
           microSummary = `Micro: ${mild.summary}`;
           microScoreAfter = shadowScoreCandidate(window, clamped, scoreBefore);
@@ -2301,10 +2630,11 @@ export function runSelfLearnTick(input: {
     }
 
     if (microPatch) {
-      if (/Timing:/i.test(microSummary)) {
+      if (/Timing:|peak.?protect|PCL|early partial/i.test(microSummary)) {
         console.log(
           `[learning-timing] ${input.profileId} micro: ${microSummary} ` +
-            `Δ=${(microScoreAfter - scoreBefore).toFixed(2)}`
+            `Δ=${(microScoreAfter - scoreBefore).toFixed(2)}` +
+            (harvestDense ? ' · harvest-dense' : '')
         );
       }
       state.pendingProposal = {
@@ -2316,7 +2646,7 @@ export function runSelfLearnTick(input: {
         kind:
           microPatch.exitRules && microPatch.match
             ? 'mixed'
-            : microPatch.exitRules
+            : microPatch.exitRules || microPatch.pclFamilyOverride
               ? 'exit'
               : 'entry',
         source: microSource,

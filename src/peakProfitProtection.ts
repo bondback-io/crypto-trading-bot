@@ -423,17 +423,47 @@ export function peakProtectBeatFullTpHeuristic(input: {
   peakUnrealizedPct: number;
   exitUnrealizedPct: number;
   takeProfitPct: number;
+  peakProtectArmed?: boolean;
+  givebackFromPeakPct?: number;
 }): boolean | undefined {
-  if (!/peak\s*protection/i.test(String(input.exitReason || ''))) {
-    return undefined;
-  }
   const peak = Number(input.peakUnrealizedPct) || 0;
   const exit = Number(input.exitUnrealizedPct) || 0;
   const tp = Number(input.takeProfitPct) || 0;
-  if (!(tp > 0)) return undefined;
-  // Never reached TP — protection may have banked vs fade to SL
-  if (peak < tp) return true;
-  // Peaked at/above TP but exited below — left TP on table
-  if (peak >= tp && exit < tp) return false;
+  const giveback = Math.max(0, Number(input.givebackFromPeakPct) || 0);
+  const isPppExit = /peak\s*protection/i.test(String(input.exitReason || ''));
+
+  if (isPppExit) {
+    if (!(tp > 0)) return undefined;
+    // Never reached TP — protection may have banked vs fade to SL
+    if (peak < tp) return true;
+    // Peaked at/above TP but exited below — left TP on table
+    if (peak >= tp && exit < tp) return false;
+    return undefined;
+  }
+
+  // Near-miss denser label: armed, large giveback, didn't exit via PPP
+  if (
+    input.peakProtectArmed === true &&
+    giveback >= 12 &&
+    peak >= Math.max(8, tp * 0.55) &&
+    exit < peak * 0.75
+  ) {
+    return false;
+  }
+  return undefined;
+}
+
+/** Armed + large giveback without PPP exit — sparse signal densifier. */
+export function peakProtectNearMissHeuristic(input: {
+  exitReason?: string;
+  peakProtectArmed?: boolean;
+  givebackFromPeakPct?: number;
+  peakUnrealizedPct?: number;
+}): boolean | undefined {
+  if (/peak\s*protection/i.test(String(input.exitReason || ''))) return false;
+  if (input.peakProtectArmed !== true) return undefined;
+  const giveback = Math.max(0, Number(input.givebackFromPeakPct) || 0);
+  const peak = Math.max(0, Number(input.peakUnrealizedPct) || 0);
+  if (giveback >= 12 && peak >= 8) return true;
   return undefined;
 }

@@ -10,6 +10,9 @@ export interface CounterfactualStamp {
   cfPeakExitPnlPct?: number;
   cfActualVsPeakGapPct?: number;
   cfTighterPppBetter?: boolean;
+  cfLooserPppBetter?: boolean;
+  cfLaterArmBetter?: boolean;
+  cfSkipPartialBetter?: boolean;
   cfEarlierTpBetter?: boolean;
   cfSlWiderWouldSurvive?: boolean;
   cfSummary?: string;
@@ -53,6 +56,42 @@ export function computeCounterfactuals(input: {
   const cfTighterPppBetter =
     giveback >= 10 && tighterExitProxy > actual + 1.5;
 
+  const looserGivebackPct = Math.min(
+    80,
+    (input.peakProtectGivebackOfPeakPct ?? 33) * 1.25
+  );
+  const looserExitProxy =
+    peak > 0 ? peak * (1 - looserGivebackPct / 100) : actual;
+  // Scratched too early into a still-running peak → slightly looser PPP might help
+  const cfLooserPppBetter =
+    giveback < 6 &&
+    peak >= 12 &&
+    actual > 0 &&
+    actual < peak * 0.55 &&
+    /fade|stall|scratch|timer|permission/i.test(
+      String(ep.exitReason || ep.exitKey || '')
+    ) &&
+    looserExitProxy > actual + 2;
+
+  const timeToArm = Number(ep.timeToArmSec);
+  const cfLaterArmBetter =
+    Number.isFinite(timeToArm) &&
+    timeToArm >= 0 &&
+    timeToArm < 25 &&
+    peak >= 15 &&
+    giveback >= 10 &&
+    actual < peak * 0.6;
+
+  const partialAt = Number(ep.pclPartialAtPct);
+  const postPartial = Number(ep.pclPostPartialMfePct);
+  const cfSkipPartialBetter =
+    ep.pclPartialTaken === true &&
+    Number.isFinite(partialAt) &&
+    Number.isFinite(postPartial) &&
+    postPartial < 2 &&
+    actual < partialAt * 0.85 &&
+    giveback >= 8;
+
   const tp = input.takeProfitPct ?? null;
   const cfEarlierTpBetter =
     tp != null &&
@@ -72,6 +111,9 @@ export function computeCounterfactuals(input: {
     bits.push(`peak gap ${cfActualVsPeakGapPct.toFixed(1)}%`);
   }
   if (cfTighterPppBetter) bits.push('tighter PPP may help');
+  if (cfLooserPppBetter) bits.push('looser PPP may help');
+  if (cfLaterArmBetter) bits.push('later PPP arm may help');
+  if (cfSkipPartialBetter) bits.push('skip/delay partial may help');
   if (cfEarlierTpBetter) bits.push('earlier TP may help');
   if (cfSlWiderWouldSurvive) bits.push('wider SL might have survived');
 
@@ -84,6 +126,9 @@ export function computeCounterfactuals(input: {
     cfPeakExitPnlPct: Number(cfPeakExitPnlPct.toFixed(2)),
     cfActualVsPeakGapPct: Number(cfActualVsPeakGapPct.toFixed(2)),
     cfTighterPppBetter,
+    cfLooserPppBetter: cfLooserPppBetter || undefined,
+    cfLaterArmBetter: cfLaterArmBetter || undefined,
+    cfSkipPartialBetter: cfSkipPartialBetter || undefined,
     cfEarlierTpBetter,
     cfSlWiderWouldSurvive,
     cfSummary,
@@ -118,6 +163,9 @@ export function computeAndStampCounterfactuals(input: {
 
 export interface CounterfactualHints {
   preferTightenGiveback: boolean;
+  preferLoosenGiveback: boolean;
+  preferLaterArm: boolean;
+  preferSkipPartial: boolean;
   preferTighterTrail: boolean;
   preferEarlierTp: boolean;
   weightBoost: number;
@@ -133,6 +181,9 @@ export function buildCounterfactualHints(
   if (withCf.length < 3) {
     return {
       preferTightenGiveback: false,
+      preferLoosenGiveback: false,
+      preferLaterArm: false,
+      preferSkipPartial: false,
       preferTighterTrail: false,
       preferEarlierTp: false,
       weightBoost: 1,
@@ -142,6 +193,12 @@ export function buildCounterfactualHints(
   const n = withCf.length;
   const tighterRate =
     withCf.filter((e) => e.cfTighterPppBetter === true).length / n;
+  const looserRate =
+    withCf.filter((e) => e.cfLooserPppBetter === true).length / n;
+  const laterArmRate =
+    withCf.filter((e) => e.cfLaterArmBetter === true).length / n;
+  const skipPartialRate =
+    withCf.filter((e) => e.cfSkipPartialBetter === true).length / n;
   const earlierTpRate =
     withCf.filter((e) => e.cfEarlierTpBetter === true).length / n;
   const avgGap =
@@ -149,17 +206,31 @@ export function buildCounterfactualHints(
 
   const cfg = getLearningAcceleratorsConfig();
   const apply = cfg.counterfactualApplyHints;
-  const boost = apply && (tighterRate >= 0.25 || avgGap >= 6) ? 1.2 : 1;
+  const boost =
+    apply &&
+    (tighterRate >= 0.25 ||
+      looserRate >= 0.22 ||
+      laterArmRate >= 0.2 ||
+      avgGap >= 6)
+      ? 1.2
+      : 1;
+
+  const bits: string[] = [];
+  if (avgGap >= 4) bits.push(`avg peak gap ${avgGap.toFixed(1)}%`);
+  if (tighterRate >= 0.2) bits.push(`tighter PPP ${(tighterRate * 100).toFixed(0)}%`);
+  if (looserRate >= 0.18) bits.push(`looser PPP ${(looserRate * 100).toFixed(0)}%`);
+  if (laterArmRate >= 0.15) bits.push(`later arm ${(laterArmRate * 100).toFixed(0)}%`);
+  if (skipPartialRate >= 0.15) bits.push(`skip partial ${(skipPartialRate * 100).toFixed(0)}%`);
 
   return {
-    preferTightenGiveback: apply && tighterRate >= 0.28,
+    preferTightenGiveback: apply && tighterRate >= 0.28 && looserRate < tighterRate,
+    preferLoosenGiveback: apply && looserRate >= 0.22 && looserRate > tighterRate,
+    preferLaterArm: apply && laterArmRate >= 0.2,
+    preferSkipPartial: apply && skipPartialRate >= 0.18,
     preferTighterTrail: apply && (tighterRate >= 0.22 || avgGap >= 8),
     preferEarlierTp: apply && earlierTpRate >= 0.2,
     weightBoost: boost,
-    summary:
-      avgGap >= 4
-        ? `CF avg peak gap ${avgGap.toFixed(1)}% · tighter PPP ${(tighterRate * 100).toFixed(0)}%`
-        : '',
+    summary: bits.length ? `CF ${bits.join(' · ')}` : '',
   };
 }
 
@@ -177,6 +248,27 @@ export function refreshCounterfactualHints(
         hints.preferTightenGiveback
           ? 'now prefers tighter PPP giveback'
           : 'dropped tighter PPP preference'
+      );
+    }
+    if (prev.preferLoosenGiveback !== hints.preferLoosenGiveback) {
+      flips.push(
+        hints.preferLoosenGiveback
+          ? 'now prefers looser PPP giveback'
+          : 'dropped looser PPP preference'
+      );
+    }
+    if (prev.preferLaterArm !== hints.preferLaterArm) {
+      flips.push(
+        hints.preferLaterArm
+          ? 'now prefers later PPP arm'
+          : 'dropped later PPP arm preference'
+      );
+    }
+    if (prev.preferSkipPartial !== hints.preferSkipPartial) {
+      flips.push(
+        hints.preferSkipPartial
+          ? 'now prefers skip/delay partial'
+          : 'dropped skip-partial preference'
       );
     }
     if (prev.preferTighterTrail !== hints.preferTighterTrail) {
@@ -226,6 +318,8 @@ export function getCounterfactualRlBonus(episode: ProfileLearningEpisode): numbe
   if (episode.cfTighterPppBetter === false && (episode.givebackFromPeakPct || 0) < 8) {
     bonus += 0.02;
   }
+  if (episode.cfLooserPppBetter === true) bonus -= 0.01;
+  if (episode.cfLaterArmBetter === true) bonus -= 0.01;
   if (episode.taExitBeatHold === true && (episode.cfActualVsPeakGapPct || 0) < 6) {
     bonus += 0.02;
   }

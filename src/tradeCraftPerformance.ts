@@ -51,6 +51,22 @@ export interface TradeFilmRow {
   timingReward?: number;
   pclPartialTaken?: boolean;
   peakProtectArmed?: boolean;
+  peakProtectBeatFullTp?: boolean;
+  peakProtectNearMiss?: boolean;
+  timeToArmSec?: number;
+  peakAtArmPct?: number;
+  givebackOfPeakAtExitPct?: number;
+  pclPartialAtPct?: number;
+  pclPostPartialMfePct?: number;
+  pclFamily?: string;
+  exitedDuringPermission?: boolean;
+  pclScratchBlockedCount?: number;
+  pclPppArmDeferred?: boolean;
+  cfSummary?: string;
+  cfTighterPppBetter?: boolean;
+  cfLooserPppBetter?: boolean;
+  cfLaterArmBetter?: boolean;
+  cfSkipPartialBetter?: boolean;
   taModeAtOpen?: string;
   taConfluenceAtEntry?: number;
   nearSupportAtEntry?: boolean;
@@ -728,6 +744,22 @@ function toFilm(ep: ProfileLearningEpisode): TradeFilmRow {
     timingReward: ep.timingReward,
     pclPartialTaken: ep.pclPartialTaken,
     peakProtectArmed: ep.peakProtectArmed,
+    peakProtectBeatFullTp: ep.peakProtectBeatFullTp,
+    peakProtectNearMiss: ep.peakProtectNearMiss,
+    timeToArmSec: ep.timeToArmSec,
+    peakAtArmPct: ep.peakAtArmPct,
+    givebackOfPeakAtExitPct: ep.givebackOfPeakAtExitPct,
+    pclPartialAtPct: ep.pclPartialAtPct,
+    pclPostPartialMfePct: ep.pclPostPartialMfePct,
+    pclFamily: ep.pclFamily,
+    exitedDuringPermission: ep.exitedDuringPermission,
+    pclScratchBlockedCount: ep.pclScratchBlockedCount,
+    pclPppArmDeferred: ep.pclPppArmDeferred,
+    cfSummary: ep.cfSummary,
+    cfTighterPppBetter: ep.cfTighterPppBetter,
+    cfLooserPppBetter: ep.cfLooserPppBetter,
+    cfLaterArmBetter: ep.cfLaterArmBetter,
+    cfSkipPartialBetter: ep.cfSkipPartialBetter,
     taModeAtOpen: ep.taModeAtOpen,
     taConfluenceAtEntry: ep.taConfluenceAtEntry,
     nearSupportAtEntry: ep.nearSupportAtEntry,
