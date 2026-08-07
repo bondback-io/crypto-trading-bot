@@ -160,29 +160,112 @@ function buildTargetEntries(w: {
   return out;
 }
 
+function isReversalDominant(input: {
+  playbook?: string;
+  chartPatternIds?: string[];
+  priceChangePct?: number;
+  priceChangeH1Pct?: number;
+}): boolean {
+  const pb = String(input.playbook || '').toLowerCase();
+  const pats = (input.chartPatternIds || []).join(' ').toLowerCase();
+  const chg = input.priceChangeH1Pct ?? input.priceChangePct ?? 0;
+  // Wick / reversal playbooks or deep dump + reclaim patterns dominate Scalper.
+  if (
+    pb.includes('reversal') ||
+    pb.includes('wick') ||
+    pb.includes('dip_reclaim') ||
+    /hammer|shooting.?star|pin.?bar|wedge|double.?bottom|rsi/.test(pats)
+  ) {
+    return true;
+  }
+  return chg <= -12;
+}
+
+function isMomentumBurstDominant(input: {
+  playbook?: string;
+  chartPatternIds?: string[];
+  priceChangePct?: number;
+  priceChangeH1Pct?: number;
+  volumeM5Usd?: number;
+  nearSupport?: boolean;
+  nearMultiTfSupport?: boolean;
+  supportTfHits?: SrTimeframe[];
+}): boolean {
+  const pb = String(input.playbook || '').toLowerCase();
+  const pats = (input.chartPatternIds || []).join(' ').toLowerCase();
+  const chg = input.priceChangeH1Pct ?? input.priceChangePct ?? 0;
+  const volM5 = input.volumeM5Usd ?? 0;
+  const atSupport =
+    input.nearMultiTfSupport === true ||
+    input.nearSupport === true ||
+    (Array.isArray(input.supportTfHits) && input.supportTfHits.length >= 2);
+  // Volume-expansion / breakout mid-air — MB owns; at support Scalper reclaim wins.
+  if (atSupport && chg < 22) return false;
+  if (
+    pb.includes('momentum') ||
+    pb.includes('burst') ||
+    pb.includes('break') ||
+    /bull.?flag|volume.?expansion|breakout/.test(pats)
+  ) {
+    return chg >= 10 || volM5 >= 2_500;
+  }
+  return chg >= 18 || (chg >= 12 && volM5 >= 3_000 && !atSupport);
+}
+
+function atSupportReclaimSetup(input: {
+  nearSupport?: boolean;
+  nearMultiTfSupport?: boolean;
+  supportTfHits?: SrTimeframe[];
+  supportPriceSol?: number | null;
+}): boolean {
+  if (input.nearMultiTfSupport === true || input.nearSupport === true) {
+    return true;
+  }
+  if (Array.isArray(input.supportTfHits) && input.supportTfHits.length >= 1) {
+    return true;
+  }
+  return (
+    input.supportPriceSol != null &&
+    Number.isFinite(input.supportPriceSol) &&
+    Number(input.supportPriceSol) > 0
+  );
+}
+
 function pickPreferredProfile(input: {
   marketCapUsd?: number;
+  volumeM5Usd?: number;
   priceChangePct?: number;
   priceChangeH1Pct?: number;
   playbook?: string;
   chartPatternIds?: string[];
   preferredProfileId?: string;
+  nearSupport?: boolean;
+  nearMultiTfSupport?: boolean;
+  supportTfHits?: SrTimeframe[];
+  supportPriceSol?: number | null;
+  /** When true, honor explicit preferredProfileId from caller */
+  honorExplicitPrefer?: boolean;
 }): ScalperFamilyProfileId {
   const pref = String(input.preferredProfileId || '');
   if (
-    pref === 'scalper' ||
-    pref === 'momentum_burst' ||
-    pref === 'reversal_scalper'
+    input.honorExplicitPrefer !== false &&
+    (pref === 'scalper' ||
+      pref === 'momentum_burst' ||
+      pref === 'reversal_scalper')
   ) {
-    return pref;
+    // Still re-route mid-air MB stamps toward Scalper when armed at support.
+    if (
+      pref !== 'scalper' &&
+      atSupportReclaimSetup(input) &&
+      !isReversalDominant(input) &&
+      !isMomentumBurstDominant(input)
+    ) {
+      return 'scalper';
+    }
+    return pref as ScalperFamilyProfileId;
   }
-  const pb = String(input.playbook || '').toLowerCase();
-  const pats = (input.chartPatternIds || []).join(' ').toLowerCase();
-  if (
-    pb.includes('reversal') ||
-    pb.includes('dip_reclaim') ||
-    /wedge|double.?bottom|rsi/.test(pats)
-  ) {
+
+  if (isReversalDominant(input)) {
     try {
       if (
         resolveTradeProfileDefinition('reversal_scalper') &&
@@ -195,12 +278,19 @@ function pickPreferredProfile(input: {
       /* fall through */
     }
   }
-  const chg = input.priceChangeH1Pct ?? input.priceChangePct ?? 0;
-  if (chg >= 12 || pb.includes('momentum') || pb.includes('break')) {
+
+  if (isMomentumBurstDominant(input)) {
     return 'momentum_burst';
   }
+
+  // Default Mode B bias: small-MC at / near support → Scalper reclaim.
   const mc = input.marketCapUsd ?? 0;
-  if (mc > 0 && mc <= SCALPER_MC_MAX) return 'scalper';
+  if (
+    atSupportReclaimSetup(input) ||
+    (mc > 0 && mc <= SCALPER_MC_MAX)
+  ) {
+    return 'scalper';
+  }
   return 'momentum_burst';
 }
 
@@ -364,6 +454,22 @@ export function considerScalperWatchSetup(input: {
     existing.supportTfHits = input.supportTfHits ?? existing.supportTfHits;
     existing.resistanceTfHits =
       input.resistanceTfHits ?? existing.resistanceTfHits;
+    // Soft re-prefer Scalper when armed / reclaiming at support
+    const nextPref = pickPreferredProfile({
+      ...input,
+      marketCapUsd: existing.marketCapUsd,
+      volumeM5Usd: existing.volumeM5Usd,
+      nearSupport: existing.nearSupport,
+      nearMultiTfSupport: existing.nearMultiTfSupport,
+      supportTfHits: existing.supportTfHits,
+      supportPriceSol: existing.supportPriceSol,
+      preferredProfileId: existing.preferredProfileId,
+      honorExplicitPrefer: false,
+    });
+    if (nextPref !== existing.preferredProfileId) {
+      existing.preferredProfileId = nextPref;
+      existing.lastReason = `prefer ${nextPref} at support`;
+    }
     existing.targetEntries = buildTargetEntries(existing);
     return existing;
   }
@@ -435,6 +541,11 @@ function buildHandoff(
     candleSource: 'synthetic',
     preferredProfileId: w.preferredProfileId,
   };
+  const reclaimPrefer =
+    w.preferredProfileId === 'scalper' &&
+    (w.nearMultiTfSupport === true ||
+      w.nearSupport === true ||
+      (Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2));
   return {
     id: `scalper-watch-${w.mint.slice(0, 8)}-${now}`,
     mint: w.mint,
@@ -442,7 +553,7 @@ function buildHandoff(
     name: w.name,
     timestamp: now,
     status: 'seen',
-    rankScore: 86,
+    rankScore: reclaimPrefer ? 92 : 86,
     reasons: [
       'scalper-watch:triggered',
       w.nearMultiTfSupport
@@ -450,6 +561,7 @@ function buildHandoff(
         : w.nearSupport
           ? 'near support'
           : 'reclaim',
+      reclaimPrefer ? 'scalp_reclaim_burst' : `profile:${w.preferredProfileId}`,
       `profile:${w.preferredProfileId}`,
       w.supportTfHits?.length
         ? `hits:${w.supportTfHits.join('+')}`
@@ -547,7 +659,20 @@ export async function tickScalperSetupWatches(opts?: {
       w.armedAt = now;
       w.updatedAt = now;
       w.lastReason = 'armed multi-TF support';
-      console.log(`[scalper-watch] ARMED ${w.symbol}`);
+      // Armed at support → soft-prefer Scalper unless reversal wick / MB expansion dominate
+      w.preferredProfileId = pickPreferredProfile({
+        marketCapUsd: w.marketCapUsd,
+        volumeM5Usd: w.volumeM5Usd,
+        nearSupport: true,
+        nearMultiTfSupport: w.nearMultiTfSupport,
+        supportTfHits: w.supportTfHits,
+        supportPriceSol: w.supportPriceSol,
+        preferredProfileId: w.preferredProfileId,
+        honorExplicitPrefer: false,
+      });
+      console.log(
+        `[scalper-watch] ARMED ${w.symbol} → ${w.preferredProfileId}`
+      );
     }
 
     if (w.status === 'armed') {
@@ -583,6 +708,20 @@ export async function tickScalperSetupWatches(opts?: {
       if (isScannerMintOnCooldown(w.mint)) {
         w.lastReason = 'cooldown';
         continue;
+      }
+
+      // Reclaim / hold at support → prefer Scalper handoff
+      if (reclaim || holdOk) {
+        w.preferredProfileId = pickPreferredProfile({
+          marketCapUsd: w.marketCapUsd,
+          volumeM5Usd: w.volumeM5Usd,
+          nearSupport: true,
+          nearMultiTfSupport: w.nearMultiTfSupport ?? nearConfluence,
+          supportTfHits: w.supportTfHits,
+          supportPriceSol: w.supportPriceSol,
+          preferredProfileId: w.preferredProfileId,
+          honorExplicitPrefer: false,
+        });
       }
 
       w.status = 'triggered';

@@ -384,6 +384,19 @@ export function resolveDetectedEntryStyle(ctx: {
   const sid = String(ctx.shortTermStrategyId || '');
   const prefer = String(ctx.preferProfileId || '');
 
+  const scalperFamilyPrefer =
+    prefer === 'scalper' ||
+    prefer === 'momentum_burst' ||
+    prefer === 'reversal_scalper' ||
+    sid === 'quick_scalper' ||
+    sid === 'micro_scalper' ||
+    sid === 'momentum_burst' ||
+    sid === 'reversal_scalp';
+  const mbExpansionDominant =
+    prefer === 'momentum_burst' ||
+    sid === 'momentum_burst' ||
+    (chgH1 != null && chgH1 >= 18 && !nearLevel);
+
   if (
     ctx.isMigration ||
     ctx.migrationFresh ||
@@ -396,32 +409,35 @@ export function resolveDetectedEntryStyle(ctx: {
   } else if (
     sid === 'post_run_dip' ||
     prefer === 'dip_buyer' ||
-    (drop != null && drop >= 8 && nearLevel)
+    // Deep Fib dips stay Dip; Mode B scalper-family at support is scalp reclaim
+    (drop != null && drop >= 8 && nearLevel && !scalperFamilyPrefer)
   ) {
     style = 'support_dip_reclaim';
   } else if (
     sid === 'reversal_scalp' ||
     prefer === 'reversal_scalper' ||
-    (drop != null && drop >= 12 && nearLevel)
+    (drop != null && drop >= 12 && nearLevel && prefer !== 'scalper')
   ) {
     style = 'reversal_reclaim';
   } else if (
-    sid === 'momentum_burst' ||
-    prefer === 'momentum_burst' ||
-    (chgH1 != null && chgH1 >= 10 && hasLevel)
-  ) {
-    style = hasLevel
-      ? 'level_momentum_expansion'
-      : 'level_momentum_expansion';
-    if (!hasLevel) lateChase = true;
-  } else if (
-    prefer === 'scalper' ||
-    sid === 'quick_scalper' ||
-    (nearLevel &&
-      (reclaim.reclaimed || reclaim.nearLevel) &&
-      (chgH1 == null || chgH1 < 18))
+    !mbExpansionDominant &&
+    (prefer === 'scalper' ||
+      sid === 'quick_scalper' ||
+      sid === 'micro_scalper' ||
+      (nearLevel &&
+        (reclaim.reclaimed || reclaim.nearLevel) &&
+        (chgH1 == null || chgH1 < 18)) ||
+      (ctx.nearMultiTfSupport === true &&
+        (reclaim.reclaimed || reclaim.nearLevel) &&
+        (chgH1 == null || chgH1 < 22)))
   ) {
     style = 'scalp_reclaim_burst';
+  } else if (
+    mbExpansionDominant ||
+    (chgH1 != null && chgH1 >= 10 && hasLevel)
+  ) {
+    style = 'level_momentum_expansion';
+    if (!hasLevel) lateChase = true;
   } else if (
     prefer === 'smart_money_mirror' ||
     (ctx.smartMoneyScore != null &&

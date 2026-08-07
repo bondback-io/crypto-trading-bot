@@ -43,21 +43,21 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.229',
+    title: 'Scalper Mode B support-reclaim priority',
+    sections: ['microbots', 'scanners', 'overview'],
+    items: [
+      'Scalper lane / Mode B watch soft-prefers support reclaim and near multi-TF support (scalp_reclaim_burst DNA); late chase away from support is tightened.',
+      'When armed or reclaiming at support, preferredProfileId prefers scalper unless reversal wick or MB volume-expansion dominate; MC ≤$180k mutual exclusion with Dip unchanged.',
+    ],
+  },
+  {
     version: '1.2.228',
     title: 'Smart Mirror Watchlist timeout UX',
     sections: ['copy', 'scanners', 'overview'],
     items: [
       'Smart Mirror Watchlist no longer shows Discover’s “GMGN curated fallback” on AbortError; Refresh uses a 60s timeout and clearer RPC/metrics messaging.',
       'Watchlist build: light-concurrency holdings fetch + 45s deadline so slow utility RPC returns a partial list instead of hanging past the client abort.',
-    ],
-  },
-  {
-    version: '1.2.227',
-    title: 'Scalper Mode B support-reclaim priority',
-    sections: ['microbots', 'scanners', 'overview'],
-    items: [
-      'Scalper lane / Mode B watch soft-prefers support reclaim and near multi-TF support (scalp_reclaim_burst DNA); late chase away from support is tightened.',
-      'When armed or reclaiming at support, preferredProfileId prefers scalper unless reversal wick or MB volume-expansion dominate; MC ≤$180k mutual exclusion with Dip unchanged.',
     ],
   },
   {

@@ -543,6 +543,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Max hold 1–3.5 minutes · trail after +12%',
       'Smaller position size (~65%)',
       'Focus: small MC (≤$180k) + volume spike',
+      'Prioritizes support reclaim / multi-TF S (Mode B)',
       'Aggressive dead-market exit · early stall cut',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
@@ -3337,6 +3338,19 @@ function scoreProfile(
       isScalp &&
       (ctx.shortTermStrategyId === 'quick_scalper' ||
         ctx.shortTermStrategyId === 'micro_scalper');
+    const atSupportReclaim =
+      ctx.nearMultiTfSupport === true ||
+      ctx.nearSupport === true ||
+      (ctx.nearKeyFib === true &&
+        ctx.srConfluenceScore != null &&
+        Number(ctx.srConfluenceScore) >= 40);
+    const styleTag = String(ctx.detectedEntryStyle || '');
+    // Soft prefer reclaim / MTF support — never treat Dip Fib reclaim as Scalper DNA
+    const reclaimDna =
+      styleTag === 'scalp_reclaim_burst' ||
+      (atSupportReclaim &&
+        styleTag !== 'late_chase' &&
+        styleTag !== 'support_dip_reclaim');
     // Specialty engines belong to other profiles — do not claim them as Scalper
     if (
       ctx.shortTermStrategyId === 'momentum_burst' ||
@@ -3374,8 +3388,50 @@ function scoreProfile(
         score += 6;
         bits.push('vol1h confirm');
       }
+    } else if (
+      smallMc &&
+      reclaimDna &&
+      !isMig &&
+      ctx.preferProfileId === 'scalper'
+    ) {
+      // Mode B watch handoff: support reclaim stamped to Scalper
+      score += 70;
+      bits.push('scalper watch reclaim');
     } else {
       return { score: 0, reason: 'not a scalp / small-MC setup' };
+    }
+
+    // Soft prefer: support reclaim / multi-TF confluence (Mode B sweet spot)
+    if (reclaimDna || styleTag === 'scalp_reclaim_burst') {
+      const reclaimBump =
+        styleTag === 'scalp_reclaim_burst'
+          ? 22
+          : ctx.nearMultiTfSupport === true
+            ? 18
+            : 12;
+      score += reclaimBump;
+      bits.push(
+        styleTag === 'scalp_reclaim_burst'
+          ? 'scalp_reclaim_burst'
+          : ctx.nearMultiTfSupport === true
+            ? 'mtf support reclaim'
+            : 'near support reclaim'
+      );
+    } else if (!atSupportReclaim && ctx.lateChase !== true) {
+      // Mid-air / not near support — soft deprioritize vs reclaim setups
+      score = Math.max(0, score - 16);
+      bits.push('mid-air soft penalty');
+    }
+    if (ctx.lateChase === true || styleTag === 'late_chase') {
+      // Tighten late-chase beyond DNA −40 when chasing without support
+      score = Math.max(0, score - (atSupportReclaim ? 8 : 18));
+      bits.push(
+        atSupportReclaim ? 'late_chase soft' : 'late_chase mid-air'
+      );
+    }
+    if (ctx.preferProfileId === 'scalper' && atSupportReclaim) {
+      score += 14;
+      bits.push('watch prefer scalper@S');
     }
   }
 
