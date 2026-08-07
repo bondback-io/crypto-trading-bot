@@ -23,7 +23,7 @@ import type { TradeProfileId } from './tradeProfiles';
 
 export type ProfileTaMode = 'off' | 'soft' | 'hard';
 export type ProfileTaWhaleMode = 'off' | 'soft' | 'hard';
-export type ProfileTaTimeframe = '5m' | '15m' | '1h' | '4h';
+export type ProfileTaTimeframe = '5m' | '15m' | '30m' | '1h' | '4h';
 
 export type ProfileTaToolId =
   | 'ha'
@@ -146,6 +146,11 @@ export interface ProfileTaEntryContext {
   nearResistance?: boolean | null;
   nearKeyFib?: boolean | null;
   nearStrongSupport?: boolean | null;
+  /** Multi-TF S/R confluence (from scanner enrich / watch) */
+  nearMultiTfSupport?: boolean | null;
+  nearMultiTfResistance?: boolean | null;
+  srConfluenceScore?: number | null;
+  supportTfHits?: string[] | null;
   chartPatternIds?: string[] | null;
   indicators?: IndicatorReport | null;
   /** Precomputed HA state (optional — computed from candles if missing) */
@@ -285,11 +290,20 @@ function basePlaybook(
 /** Catalog defaults — unique TA identity per lane. */
 export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
   scalper: basePlaybook('scalper', {
-    taMode: 'off',
-    entryTools: tools({ volumeExpansion: true, rsi: true }),
-    exitTools: tools({}),
-    timeframes: ['5m'],
-    minConfluenceScore: 25,
+    taMode: 'soft',
+    entryTools: tools({
+      supportResistance: true,
+      volumeExpansion: true,
+      rsi: true,
+    }),
+    exitTools: tools({ supportResistance: true }),
+    timeframes: ['5m', '15m', '30m'],
+    minConfluenceScore: 28,
+    supportResistance: {
+      preferNearSupport: true,
+      avoidNearResistance: false,
+      preferFibConfluence: false,
+    },
     whaleMode: 'off',
     learningEnabled: false,
   }),
@@ -310,16 +324,23 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       macdHistSlope: true,
       ha: true,
       rsi: true,
+      supportResistance: true,
     }),
     exitTools: tools({
       ha: true,
       volumeExpansion: true,
       macdHistSlope: true,
       macd: true,
+      supportResistance: true,
     }),
-    timeframes: ['5m', '15m', '1h'],
+    timeframes: ['5m', '15m', '30m', '1h'],
     minConfluenceScore: 40,
     heikinAshi: { minConsecutive: 1, preferStrengthening: true },
+    supportResistance: {
+      preferNearSupport: true,
+      avoidNearResistance: true,
+      preferFibConfluence: false,
+    },
     whaleMode: 'soft',
     learningEnabled: true,
   }),
@@ -340,7 +361,7 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       supportResistance: true,
       rsiDivergence: true,
     }),
-    timeframes: ['5m', '15m', '1h'],
+    timeframes: ['5m', '15m', '30m', '1h'],
     minConfluenceScore: 50,
     heikinAshi: { minConsecutive: 1, preferStrengthening: false },
     supportResistance: {
@@ -542,7 +563,7 @@ export function deepMergePlaybook(
   if (Array.isArray(patch.timeframes)) {
     out.timeframes = patch.timeframes.filter(
       (t): t is ProfileTaTimeframe =>
-        t === '5m' || t === '15m' || t === '1h' || t === '4h'
+        t === '5m' || t === '15m' || t === '30m' || t === '1h' || t === '4h'
     );
   }
   if (patch.entryTools) out.entryTools = { ...out.entryTools, ...patch.entryTools };
@@ -705,8 +726,17 @@ export function evaluateProfileTaEntry(
       : evaluateHaState(ctx.candles);
   const whale = resolveWhaleState(ctx);
   const ind = ctx.indicators;
-  const nearSupport = ctx.nearSupport === true || ctx.nearStrongSupport === true;
-  const nearResistance = ctx.nearResistance === true;
+  const nearMultiTfSupport = ctx.nearMultiTfSupport === true;
+  const nearMultiTfResistance = ctx.nearMultiTfResistance === true;
+  const supportTfHits = Array.isArray(ctx.supportTfHits)
+    ? ctx.supportTfHits.filter(Boolean)
+    : [];
+  const nearSupport =
+    ctx.nearSupport === true ||
+    ctx.nearStrongSupport === true ||
+    nearMultiTfSupport;
+  const nearResistance =
+    ctx.nearResistance === true || nearMultiTfResistance;
   const nearFib = ctx.nearKeyFib === true;
   const patterns = Array.isArray(ctx.chartPatternIds)
     ? ctx.chartPatternIds.filter(Boolean)
@@ -714,6 +744,13 @@ export function evaluateProfileTaEntry(
   const pta = resolveProfileTaIndicators(ctx);
   const divSens = clamp(learned.divergenceSensitivity ?? 1, 0.5, 1.5);
   const histSens = clamp(learned.histSlopeSensitivity ?? 1, 0.5, 1.5);
+  const tfLabels = Array.isArray(playbook.timeframes)
+    ? playbook.timeframes
+    : [];
+  const hitOnPlaybookTf =
+    supportTfHits.length > 0 &&
+    (tfLabels.length === 0 ||
+      supportTfHits.some((t) => tfLabels.includes(t as ProfileTaTimeframe)));
 
   const et = playbook.entryTools;
 
@@ -753,28 +790,72 @@ export function evaluateProfileTaEntry(
 
   if (et.supportResistance) {
     enabledTools.push('supportResistance');
+    const wantMtf =
+      playbook.profileId === 'reversal_scalper' ||
+      playbook.profileId === 'scalper' ||
+      playbook.profileId === 'momentum_burst';
+    const mtfAvailable = supportTfHits.length > 0 || ctx.srConfluenceScore != null;
+    const supportOk = nearMultiTfSupport
+      ? true
+      : hitOnPlaybookTf
+        ? nearSupport
+        : nearSupport;
+    // Reversal Hard: require multi-TF confluence when film is available
+    const requireMtf =
+      mode === 'hard' &&
+      playbook.profileId === 'reversal_scalper' &&
+      mtfAvailable &&
+      playbook.supportResistance.preferNearSupport;
     const required =
-      mode === 'hard' && playbook.supportResistance.preferNearSupport;
+      requireMtf ||
+      (mode === 'hard' && playbook.supportResistance.preferNearSupport);
     if (playbook.supportResistance.preferNearSupport) {
-      const pts = toolWeight(playbook, 'supportResistance', nearSupport ? 18 : 0);
-      score += nearSupport ? pts : mode === 'soft' ? -3 : 0;
+      const basePts = nearMultiTfSupport ? 24 : supportOk ? 18 : 0;
+      const pts = toolWeight(playbook, 'supportResistance', basePts);
+      const passed = requireMtf ? nearMultiTfSupport : supportOk;
+      score += passed ? pts : mode === 'soft' ? -3 : 0;
+      // Soft size boost when confluence high (scalper family)
+      if (mode === 'soft' && nearMultiTfSupport && wantMtf) {
+        score += 4;
+      }
+      // Dip buyer: optional multi-TF as extra score
+      if (
+        playbook.profileId === 'dip_buyer' &&
+        nearMultiTfSupport &&
+        Number(ctx.srConfluenceScore ?? 0) >= 40
+      ) {
+        score += 6;
+      }
       conditions.push({
         id: 'supportResistance',
-        passed: nearSupport,
-        score: nearSupport ? pts : 0,
-        detail: nearSupport ? 'near support' : 'not near support',
+        passed,
+        score: passed ? pts : 0,
+        detail: nearMultiTfSupport
+          ? `multi-TF support (${supportTfHits.join('+') || 'conf'})`
+          : supportOk
+            ? tfLabels.length
+              ? `near support (${tfLabels.join('/')})`
+              : 'near support'
+            : requireMtf
+              ? 'need multi-TF support'
+              : 'not near support',
         required,
       });
     }
-    if (playbook.supportResistance.avoidNearResistance && nearResistance) {
+    if (
+      playbook.supportResistance.avoidNearResistance &&
+      (nearResistance || nearMultiTfResistance)
+    ) {
       const sens = clamp(learned.resistanceExitSensitivity || 1, 0.5, 1.5);
-      const pen = Math.round(10 * sens);
+      const pen = Math.round((nearMultiTfResistance ? 14 : 10) * sens);
       score -= pen;
       conditions.push({
         id: 'resistance',
         passed: false,
         score: -pen,
-        detail: 'near resistance (avoid)',
+        detail: nearMultiTfResistance
+          ? 'multi-TF resistance (avoid)'
+          : 'near resistance (avoid)',
         required: false,
       });
     }
@@ -1228,9 +1309,13 @@ export function evaluateProfileTaExitHints(
 
   if (
     (xt.supportResistance || playbook.supportResistance.avoidNearResistance) &&
-    ctx.nearResistance === true
+    (ctx.nearResistance === true || ctx.nearMultiTfResistance === true)
   ) {
-    conditions.push('near resistance');
+    conditions.push(
+      ctx.nearMultiTfResistance === true
+        ? 'multi-TF resistance'
+        : 'near resistance'
+    );
     if (adjSens >= 1 && playbook.taMode === 'hard') {
       tightenTrail = true;
       if (adjSens >= 1.2) suggestExit = true;
@@ -1387,6 +1472,11 @@ export interface ProfileTaOpenStamp {
   haConsecutiveAtEntry?: number;
   nearSupportAtEntry?: boolean;
   nearResistanceAtEntry?: boolean;
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  supportTfHits?: string[];
+  srConfluenceScore?: number;
+  scalperWatchTriggered?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: ZigZagStructure | string;
@@ -1437,6 +1527,15 @@ export function runProfileTaEntryGate(
       haConsecutiveAtEntry: result.snapshot.haConsecutive,
       nearSupportAtEntry: result.snapshot.nearSupport,
       nearResistanceAtEntry: result.snapshot.nearResistance,
+      nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+      nearMultiTfResistance: ctx.nearMultiTfResistance === true,
+      supportTfHits: Array.isArray(ctx.supportTfHits)
+        ? ctx.supportTfHits.filter(Boolean).map(String)
+        : undefined,
+      srConfluenceScore:
+        ctx.srConfluenceScore != null && Number.isFinite(ctx.srConfluenceScore)
+          ? Number(ctx.srConfluenceScore)
+          : undefined,
       whaleStateAtEntry: result.snapshot.whaleState,
       profileTaPlainLanguage: result.plainLanguage,
       zigzagStructureAtEntry: pta.zigzag.structure,

@@ -251,6 +251,8 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p class="mint" style="margin:0.55rem 0 0.35rem">Named presets (${nPresets}):</p>
         ${slots.presetsList}
 
+        <div class="botinfo-callout"><strong>Multi-TF S/R + Scalper watch (Mode B):</strong> Scalper / Momentum Burst / Reversal only immediate-buy when price is already at multi-TF support confluence (≥2 TFs including 15m/30m/1h/4h). Otherwise they park on the Scalper-family watchlist until touch + reclaim. Dip Buyer Fib watch stays separate. Checklist: Profile TA S/R ON for those lanes · watch strip visible on Live Feed / Micro Bots · Require TA still master for other profiles.</div>
+
         <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Exit harvest layers</strong> (soft — never replace hard TP/SL)</p>
 
         <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>Peak Profit Protection</strong> — soft exit when price gives back a share of the peak after arming</p>
@@ -294,7 +296,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>When <strong>Smart Bot Profiles</strong> / multi-profile is enabled, eligible profiles score each signal; the winner stamps the trade (lane fight). Disabled profiles never enter. Default is the legacy global fallback. Catalog currently has <strong>${nProfiles}</strong> profiles.</p>
         ${slots.profilesGrid}
         <ul>
-          <li><strong>Watchlists</strong> — Dip setup watch and Graduation (migration) watch live on the Micro Bots tab.</li>
+          <li><strong>Watchlists</strong> — Dip setup watch, Scalper-family multi-TF S/R watch (Mode B), and Graduation (migration) watch live on the Live Feed / Micro Bots strip.</li>
           <li><strong>Migration Sniper / Reversal Scalper</strong> — Reversal may show <em>Paused (perf)</em> after the v1.2.91 review. Migration Sniper is an <strong>event lane</strong> (default ON at conservative size): no TA required.</li>
           <li><strong>Trend Rider</strong> — mature continuation (age ≥1.5h · MC ≥$75k · holders/vol floors). Quiet wins were often Pump.fun-only blocking Jupiter <code>toporganicscore</code> (non-<code>pump</code> mints), not Learning Mode. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA.</li>
           <li><strong>Migration Sniper</strong> — watch ~80% → arm on quality → enter from ~90% → hold through migration → exit on first spike + volume (SL ~15%, post-mig max ~4m). Grad-watch funnel tallies show watch/arm/trigger blockers.</li>

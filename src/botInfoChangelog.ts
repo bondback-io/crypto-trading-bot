@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.217',
+    title: 'Multi-TF S/R + Scalper Mode B watch',
+    sections: ['risk', 'tradecraft', 'microbots', 'scanners', 'learning'],
+    items: [
+      'Real multi-TF OHLCV (5m/15m/30m/1h/4h) + S/R confluence; Mode B immediate only at multi-TF support (≥2 TFs incl. higher TF).',
+      'New Scalper-family setup watch (parallel to Dip); PTA soft S/R defaults for Scalper/MB + 30m TF; episode stamps for confluence / watch trigger.',
+    ],
+  },
+  {
     version: '1.2.216',
     title: 'Trade Craft manual + soft craft learning',
     sections: ['tradecraft', 'learning', 'coaches', 'lifecycle'],

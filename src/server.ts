@@ -4519,16 +4519,19 @@ export function createServer(): express.Application {
     res.json(getTradeProfilesStatus());
   });
 
-  /** Lightweight dip + graduation watchlist status for Micro Bots UI. */
+  /** Lightweight dip + graduation + scalper-family watchlist status for Micro Bots UI. */
   app.get('/api/setup-watches', (_req: Request, res: Response) => {
     try {
       const { getDipSetupWatchStatus } =
         require('./dipSetupWatch') as typeof import('./dipSetupWatch');
       const { getMigrationGradWatchStatus, getMigrationSniperFunnel } =
         require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+      const { getScalperSetupWatchStatus } =
+        require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
       res.json({
         dipWatch: getDipSetupWatchStatus(16),
         gradWatch: getMigrationGradWatchStatus(16),
+        scalperWatch: getScalperSetupWatchStatus(16),
         migSniperFunnel: getMigrationSniperFunnel(),
       });
     } catch (err) {
@@ -4537,6 +4540,7 @@ export function createServer(): express.Application {
         error: err instanceof Error ? err.message : String(err),
         dipWatch: { active: 0, entries: [] },
         gradWatch: { active: 0, entries: [] },
+        scalperWatch: { active: 0, entries: [] },
         migSniperFunnel: null,
       });
     }
@@ -4569,7 +4573,20 @@ export function createServer(): express.Application {
         res.json(unwatchMigrationGrad(mint));
         return;
       }
-      res.status(400).json({ ok: false, error: 'kind must be dip or grad' });
+      if (
+        kind === 'scalper' ||
+        kind === 'scalper_family' ||
+        kind === 'momentum_burst' ||
+        kind === 'reversal_scalper'
+      ) {
+        const { unwatchScalperSetup } =
+          require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+        res.json(unwatchScalperSetup(mint));
+        return;
+      }
+      res
+        .status(400)
+        .json({ ok: false, error: 'kind must be dip, grad, or scalper' });
     } catch (err) {
       res.status(500).json({
         ok: false,

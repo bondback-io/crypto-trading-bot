@@ -68,6 +68,11 @@ export interface ProfileLearningEpisode {
   haConsecutiveAtEntry?: number;
   nearSupportAtEntry?: boolean;
   nearResistanceAtEntry?: boolean;
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  supportTfHits?: string[];
+  srConfluenceScore?: number;
+  scalperWatchTriggered?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;

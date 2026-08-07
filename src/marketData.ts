@@ -23,6 +23,16 @@ export interface MarketCandle {
   volume?: number;
 }
 
+/** Supported OHLCV timeframes for multi-TF S/R. */
+export type OhlcvTfLabel = '5m' | '15m' | '30m' | '1h' | '4h';
+export const OHLCV_TF_LABELS: readonly OhlcvTfLabel[] = [
+  '5m',
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+] as const;
+
 export interface LaunchEvent {
   mint: string;
   symbol: string;
@@ -56,6 +66,8 @@ export interface LaunchEvent {
   solUsd?: number;
   /** Real OHLCV vs synthetic path */
   candleSource?: 'real' | 'synthetic';
+  /** Multi-TF OHLCV (5m/15m/30m/1h/4h) when enrich fetched them */
+  candlesByTf?: Partial<Record<OhlcvTfLabel, MarketCandle[]>>;
   volumeM5Usd?: number;
   volumeH1Usd?: number;
   volumeH6Usd?: number;
@@ -2100,20 +2112,47 @@ export async function refreshOpenMarketActivity(
 }
 
 const OHLCV_CACHE_TTL_MS = 105_000;
+
+const OHLCV_TF_MS: Record<OhlcvTfLabel, number> = {
+  '5m': 5 * 60_000,
+  '15m': 15 * 60_000,
+  '30m': 30 * 60_000,
+  '1h': 60 * 60_000,
+  '4h': 4 * 60 * 60_000,
+};
+
+/** Gecko minute aggregate for ≤60m; hour aggregate for 4h. */
+const GECKO_TF_SPEC: Record<
+  OhlcvTfLabel,
+  { path: 'minute' | 'hour'; aggregate: number; limit: number }
+> = {
+  '5m': { path: 'minute', aggregate: 5, limit: 100 },
+  '15m': { path: 'minute', aggregate: 15, limit: 100 },
+  '30m': { path: 'minute', aggregate: 30, limit: 100 },
+  '1h': { path: 'minute', aggregate: 60, limit: 100 },
+  '4h': { path: 'hour', aggregate: 4, limit: 48 },
+};
+
+function ohlcvCacheKey(mint: string, tf: OhlcvTfLabel = '5m'): string {
+  return `${mint}:${tf}`;
+}
+
 const ohlcvCache = new Map<
   string,
   {
     candles: MarketCandle[];
-    source: 'geckoterminal' | 'dex_sparse' | 'none';
+    source: 'geckoterminal' | 'dex_sparse' | 'resampled' | 'none';
     solUsd?: number;
     at: number;
+    tf: OhlcvTfLabel;
   }
 >();
 
 export interface FetchTokenOhlcvResult {
   candles: MarketCandle[];
-  source: 'geckoterminal' | 'dex_sparse' | 'none';
+  source: 'geckoterminal' | 'dex_sparse' | 'resampled' | 'none';
   solUsd?: number;
+  tf?: OhlcvTfLabel;
 }
 
 const geckoOhlcvInflight = new Map<
@@ -2177,14 +2216,70 @@ function clearGeckoCooldownOnSuccess(): void {
   }
 }
 
-function staleOhlcv(mint: string): FetchTokenOhlcvResult | null {
-  const cached = ohlcvCache.get(mint);
+function staleOhlcv(
+  mint: string,
+  tf: OhlcvTfLabel = '5m'
+): FetchTokenOhlcvResult | null {
+  const cached = ohlcvCache.get(ohlcvCacheKey(mint, tf));
   if (!cached || !cached.candles.length) return null;
   return {
     candles: cached.candles,
     source: cached.source,
     solUsd: cached.solUsd,
+    tf: cached.tf,
   };
+}
+
+/** Aggregate lower-TF candles into a higher TF (OHLCV). */
+export function resampleOhlcvCandles(
+  candles: MarketCandle[],
+  tf: OhlcvTfLabel
+): MarketCandle[] {
+  const bucketMs = OHLCV_TF_MS[tf];
+  if (!(bucketMs > 0) || !candles.length) return [];
+  const buckets = new Map<
+    number,
+    {
+      time: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    }
+  >();
+  for (const c of candles) {
+    if (!(c.priceSol > 0) || !(c.time > 0)) continue;
+    const key = Math.floor(c.time / bucketMs) * bucketMs;
+    const high = c.high != null && c.high > 0 ? c.high : c.priceSol;
+    const low = c.low != null && c.low > 0 ? c.low : c.priceSol;
+    const vol = c.volume != null && Number.isFinite(c.volume) ? c.volume : 0;
+    const prev = buckets.get(key);
+    if (!prev) {
+      buckets.set(key, {
+        time: key,
+        open: c.priceSol,
+        high,
+        low,
+        close: c.priceSol,
+        volume: vol,
+      });
+    } else {
+      prev.high = Math.max(prev.high, high);
+      prev.low = Math.min(prev.low, low);
+      prev.close = c.priceSol;
+      prev.volume += vol;
+    }
+  }
+  return [...buckets.values()]
+    .sort((a, b) => a.time - b.time)
+    .map((b) => {
+      const c: MarketCandle = { time: b.time, priceSol: b.close };
+      if (b.high > 0) c.high = b.high;
+      if (b.low > 0) c.low = b.low;
+      if (b.volume > 0) c.volume = b.volume;
+      return c;
+    });
 }
 
 function usdClosesToSolCandles(
@@ -2318,18 +2413,20 @@ function sparseCandlesFromPriceSol(
 
 async function fetchGeckoOhlcv(
   mint: string,
-  solUsd: number
+  solUsd: number,
+  tf: OhlcvTfLabel = '5m'
 ): Promise<MarketCandle[]> {
   if (isGeckoTerminalInCooldown()) {
     return [];
   }
+  const spec = GECKO_TF_SPEC[tf] ?? GECKO_TF_SPEC['5m'];
   try {
     const url =
       `https://api.geckoterminal.com/api/v2/networks/solana/tokens/` +
-      `${encodeURIComponent(mint)}/ohlcv/minute?aggregate=5&limit=100`;
+      `${encodeURIComponent(mint)}/ohlcv/${spec.path}?aggregate=${spec.aggregate}&limit=${spec.limit}`;
     const res = await loggedFetch(url, {
       context: 'GeckoTerminal',
-      label: 'ohlcv',
+      label: `ohlcv:${tf}`,
       timeoutMs: 12_000,
       logBodyOnError: false,
       headers: {
@@ -2367,25 +2464,30 @@ async function fetchGeckoOhlcv(
     clearGeckoCooldownOnSuccess();
     return usdClosesToSolCandles(rows, solUsd);
   } catch (err) {
-    logger.warn('MarketData', 'GeckoTerminal OHLCV failed', errorToMeta(err));
+    logger.warn('MarketData', 'GeckoTerminal OHLCV failed', {
+      tf,
+      ...errorToMeta(err),
+    });
     return [];
   }
 }
 
 /**
- * Real OHLCV for scanner ranking / TA.
- * GeckoTerminal → Dex sparse snapshot reconstruction → soft-fail.
- * No Birdeye dependency. Cached ~90–120s; serves stale during cooldown.
+ * Real OHLCV for scanner ranking / TA (single TF; default 5m).
+ * GeckoTerminal → Dex sparse (5m) / resample from 5m → soft-fail.
+ * Cached ~90–120s keyed by {mint, tf}; serves stale during cooldown.
  */
 export async function fetchTokenOhlcvCandles(
   mint: string,
-  opts?: { force?: boolean; solUsd?: number }
+  opts?: { force?: boolean; solUsd?: number; tf?: OhlcvTfLabel }
 ): Promise<FetchTokenOhlcvResult> {
   if (!isCopyTargetMint(mint)) {
-    return { candles: [], source: 'none' };
+    return { candles: [], source: 'none', tf: opts?.tf ?? '5m' };
   }
 
-  const cached = ohlcvCache.get(mint);
+  const tf: OhlcvTfLabel = opts?.tf ?? '5m';
+  const key = ohlcvCacheKey(mint, tf);
+  const cached = ohlcvCache.get(key);
   if (
     !opts?.force &&
     cached &&
@@ -2395,11 +2497,12 @@ export async function fetchTokenOhlcvCandles(
       candles: cached.candles,
       source: cached.source,
       solUsd: cached.solUsd,
+      tf,
     };
   }
 
   if (!opts?.force) {
-    const pending = geckoOhlcvInflight.get(mint);
+    const pending = geckoOhlcvInflight.get(key);
     if (pending) return pending;
   }
 
@@ -2410,34 +2513,103 @@ export async function fetchTokenOhlcvCandles(
       let source: FetchTokenOhlcvResult['source'] = 'none';
 
       if (!isGeckoTerminalInCooldown()) {
-        candles = await fetchGeckoOhlcv(mint, solUsd);
+        candles = await fetchGeckoOhlcv(mint, solUsd, tf);
         if (candles.length >= 8) source = 'geckoterminal';
       } else {
-        const stale = staleOhlcv(mint);
+        const stale = staleOhlcv(mint, tf);
         if (stale && stale.candles.length >= 8) return stale;
       }
 
-      if (candles.length < 8) {
+      // Fallback: resample from 5m when higher TF fetch is thin
+      if (candles.length < 8 && tf !== '5m') {
+        const base = await fetchTokenOhlcvCandles(mint, {
+          solUsd,
+          tf: '5m',
+          force: opts?.force,
+        });
+        if (base.candles.length >= 8) {
+          const resampled = resampleOhlcvCandles(base.candles, tf);
+          if (resampled.length >= 4) {
+            candles = resampled;
+            source =
+              base.source === 'geckoterminal' || base.source === 'dex_sparse'
+                ? 'resampled'
+                : base.source;
+          }
+        }
+      }
+
+      if (candles.length < 8 && tf === '5m') {
         candles = await fetchDexSparseOhlcv(mint, solUsd);
         if (candles.length >= 8) {
           source = 'dex_sparse';
         } else {
-          const stale = staleOhlcv(mint);
+          const stale = staleOhlcv(mint, tf);
           if (stale && stale.candles.length > 0) return stale;
           candles = [];
           source = 'none';
         }
       }
 
-      ohlcvCache.set(mint, { candles, source, solUsd, at: Date.now() });
-      return { candles, source, solUsd };
+      if (candles.length < 4 && tf !== '5m') {
+        const stale = staleOhlcv(mint, tf);
+        if (stale && stale.candles.length > 0) return stale;
+        candles = [];
+        source = 'none';
+      }
+
+      ohlcvCache.set(key, { candles, source, solUsd, at: Date.now(), tf });
+      return { candles, source, solUsd, tf };
     } finally {
-      geckoOhlcvInflight.delete(mint);
+      geckoOhlcvInflight.delete(key);
     }
   })();
 
-  geckoOhlcvInflight.set(mint, job);
+  geckoOhlcvInflight.set(key, job);
   return job;
+}
+
+/** Fetch OHLCV for all multi-TF labels; 5m first so higher TFs can resample. */
+export async function fetchMultiTfOhlcv(
+  mint: string,
+  opts?: { force?: boolean; solUsd?: number; tfs?: OhlcvTfLabel[] }
+): Promise<{
+  byTf: Partial<Record<OhlcvTfLabel, MarketCandle[]>>;
+  solUsd?: number;
+  primarySource: FetchTokenOhlcvResult['source'];
+}> {
+  const tfs = opts?.tfs?.length ? opts.tfs : [...OHLCV_TF_LABELS];
+  const byTf: Partial<Record<OhlcvTfLabel, MarketCandle[]>> = {};
+  let solUsd = opts?.solUsd;
+  let primarySource: FetchTokenOhlcvResult['source'] = 'none';
+
+  // Always resolve 5m first when requested or needed for resample
+  const need5 = tfs.includes('5m') || tfs.some((t) => t !== '5m');
+  if (need5) {
+    const base = await fetchTokenOhlcvCandles(mint, {
+      force: opts?.force,
+      solUsd,
+      tf: '5m',
+    });
+    solUsd = base.solUsd ?? solUsd;
+    primarySource = base.source;
+    if (tfs.includes('5m') && base.candles.length) {
+      byTf['5m'] = base.candles;
+    }
+  }
+
+  for (const tf of tfs) {
+    if (tf === '5m') continue;
+    const res = await fetchTokenOhlcvCandles(mint, {
+      force: opts?.force,
+      solUsd,
+      tf,
+    });
+    solUsd = res.solUsd ?? solUsd;
+    if (res.candles.length) byTf[tf] = res.candles;
+  }
+
+  return { byTf, solUsd, primarySource };
 }
 
 /** Best-effort DexScreener volume / change enrich onto a launch event. */
@@ -2486,6 +2658,7 @@ async function enrichDexPairMetrics(
 
 /**
  * Replace synthetic candles with real OHLCV when preferRealCandles and ≥16 bars.
+ * Also best-effort multi-TF OHLCV for S/R confluence (5m→4h).
  */
 export async function enrichLaunchWithRealCandles(
   event: LaunchEvent
@@ -2502,17 +2675,30 @@ export async function enrichLaunchWithRealCandles(
   }
 
   try {
-    const ohlcv = await fetchTokenOhlcvCandles(next.mint, {
+    const multi = await fetchMultiTfOhlcv(next.mint, {
       solUsd: next.solUsd,
     });
-    if (ohlcv.candles.length >= 16) {
-      const last = ohlcv.candles[ohlcv.candles.length - 1]!;
+    const primary = multi.byTf['5m'] ?? [];
+    const candlesByTf =
+      Object.keys(multi.byTf).length > 0 ? multi.byTf : undefined;
+    if (primary.length >= 16) {
+      const last = primary[primary.length - 1]!;
       return {
         ...next,
-        candles: ohlcv.candles,
+        candles: primary,
+        candlesByTf,
         lastPriceSol: last.priceSol > 0 ? last.priceSol : next.lastPriceSol,
-        solUsd: ohlcv.solUsd ?? next.solUsd,
+        solUsd: multi.solUsd ?? next.solUsd,
         candleSource: 'real',
+      };
+    }
+    // Thin 5m but other TFs present — keep synthetic primary candles, attach MTF
+    if (candlesByTf) {
+      return {
+        ...next,
+        candlesByTf,
+        solUsd: multi.solUsd ?? next.solUsd,
+        candleSource: next.candleSource ?? 'synthetic',
       };
     }
   } catch (err) {

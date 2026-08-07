@@ -28,6 +28,8 @@ import { seedPriceHistoryFromCandles } from './technicalLevels';
 import { analyzeChartPatterns } from './chartPatterns';
 import {
   getTechnicalLevelsForStrategy,
+  analyzeSrConfluenceFromCandles,
+  type SrTimeframe,
 } from './technicalLevels';
 import { evaluateIndicators } from './indicators';
 import { evaluatePostRunDip } from './postRunDip';
@@ -85,8 +87,15 @@ export interface ScannerCandidate {
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
+  /** Multi-TF S/R confluence (Mode B) */
+  srConfluenceScore?: number;
+  supportTfHits?: SrTimeframe[];
+  resistanceTfHits?: SrTimeframe[];
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
   supportPriceSol?: number | null;
+  resistancePriceSol?: number | null;
   lastPriceSol?: number | null;
   /** Key Fib retracement prices (SOL) for Target Dip Entry MC */
   fib05PriceSol?: number | null;
@@ -430,9 +439,15 @@ export interface RankLaunchResult {
   mtfAligned?: boolean;
   veto?: string;
   supportPriceSol?: number | null;
+  resistancePriceSol?: number | null;
   lastPriceSol?: number | null;
   fib05PriceSol?: number | null;
   fib618PriceSol?: number | null;
+  srConfluenceScore?: number;
+  supportTfHits?: SrTimeframe[];
+  resistanceTfHits?: SrTimeframe[];
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
 }
 
 /** Rank a launch for scanner entry — higher is better. */
@@ -525,8 +540,14 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   let nearSupport = false;
   let nearResistance = false;
   let supportPriceSol: number | null = null;
+  let resistancePriceSol: number | null = null;
   let fib05PriceSol: number | null = null;
   let fib618PriceSol: number | null = null;
+  let srConfluenceScore: number | undefined;
+  let supportTfHits: SrTimeframe[] | undefined;
+  let resistanceTfHits: SrTimeframe[] | undefined;
+  let nearMultiTfSupport = false;
+  let nearMultiTfResistance = false;
   const lastPriceSol =
     event.lastPriceSol > 0
       ? event.lastPriceSol
@@ -545,6 +566,43 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     .filter((p) => p > 0);
   const mtf = analyzeMultiTf(closes);
 
+  // Multi-TF S/R confluence when enrich attached candlesByTf
+  try {
+    const byTf = event.candlesByTf;
+    if (byTf && Object.keys(byTf).length > 0) {
+      const conf = analyzeSrConfluenceFromCandles(event.mint, byTf, {
+        priceSol: lastPriceSol,
+      });
+      srConfluenceScore = conf.confluenceScore;
+      supportTfHits = conf.supportTfHits;
+      resistanceTfHits = conf.resistanceTfHits;
+      nearMultiTfSupport = conf.nearMultiTfSupport;
+      nearMultiTfResistance = conf.nearMultiTfResistance;
+      if (conf.primarySupport != null && conf.primarySupport > 0) {
+        supportPriceSol = conf.primarySupport;
+      }
+      if (conf.primaryResistance != null && conf.primaryResistance > 0) {
+        resistancePriceSol = conf.primaryResistance;
+      }
+      if (nearMultiTfSupport) {
+        score += 10;
+        reasons.push('mtf-S conf');
+        taSetup = true;
+        nearSupport = true;
+      } else if ((supportTfHits?.length ?? 0) >= 1) {
+        score += 4;
+        reasons.push('mtf-S hit');
+      }
+      if (nearMultiTfResistance) {
+        score -= 6;
+        reasons.push('mtf-R conf');
+        nearResistance = true;
+      }
+    }
+  } catch {
+    /* thin multi-TF */
+  }
+
   try {
     techSnap = getTechnicalLevelsForStrategy({
       mint: event.mint,
@@ -552,15 +610,29 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       candles: event.candles,
     });
     nearKeyFib = Boolean(techSnap.nearFibZone);
-    nearSupport = Boolean(techSnap.nearSupportZone);
+    nearSupport = nearSupport || Boolean(techSnap.nearSupportZone);
     const res = techSnap.nearestResistance;
-    nearResistance =
+    const singleNearRes =
       res != null &&
       res.distancePct != null &&
       Math.abs(res.distancePct) <= 4;
+    nearResistance = nearResistance || singleNearRes;
     const supPx = techSnap.nearestSupport?.mid;
-    if (supPx != null && Number.isFinite(supPx) && supPx > 0) {
+    if (
+      supportPriceSol == null &&
+      supPx != null &&
+      Number.isFinite(supPx) &&
+      supPx > 0
+    ) {
       supportPriceSol = Number(supPx);
+    }
+    if (
+      resistancePriceSol == null &&
+      res?.mid != null &&
+      Number.isFinite(res.mid) &&
+      res.mid > 0
+    ) {
+      resistancePriceSol = Number(res.mid);
     }
     for (const z of techSnap.fibZones || []) {
       const ratio = Number(z.ratio);
@@ -592,7 +664,7 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
       reasons.push('near Fib');
       taSetup = true;
     }
-    if (nearSupport) {
+    if (nearSupport && !nearMultiTfSupport) {
       score += 10;
       reasons.push('near support');
       taSetup = true;
@@ -814,9 +886,15 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
     mtfAligned: mtf.mtfAligned,
     veto,
     supportPriceSol,
+    resistancePriceSol,
     lastPriceSol,
     fib05PriceSol,
     fib618PriceSol,
+    srConfluenceScore,
+    supportTfHits,
+    resistanceTfHits,
+    nearMultiTfSupport,
+    nearMultiTfResistance,
   };
 }
 
@@ -1014,24 +1092,68 @@ export async function selectScannerCandidates(
 
     if (ranked.veto?.startsWith('bearish:')) return null;
     if (score < minRank) return null;
-    // Scalper lane does not require TA — still queue small-MC names so the
-    // cascade can win scalper when Require TA setup is ON (LM does not bypass TA).
+    // Mode B: small-MC scalper-family immediate only at multi-TF support confluence.
+    // Non-confluent names with S/R targets go to scalperSetupWatch instead.
     const scalperMcEligible =
       event.marketCapUsd != null &&
       event.marketCapUsd > 0 &&
       event.marketCapUsd <= 180_000;
-    if (requireTa && !ranked.taSetup && !scalperMcEligible) return null;
+    const hasSrTargets =
+      (ranked.supportPriceSol != null && ranked.supportPriceSol > 0) ||
+      (ranked.supportTfHits != null && ranked.supportTfHits.length > 0);
+    const scalperConfluentNow =
+      scalperMcEligible && ranked.nearMultiTfSupport === true;
+
+    // Offer scalper watch early (even if we drop from immediate queue)
+    if (scalperMcEligible && hasSrTargets && !scalperConfluentNow) {
+      try {
+        const { offerScalperWatchFromCandidate } =
+          require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+        offerScalperWatchFromCandidate({
+          mint: event.mint,
+          symbol: event.symbol,
+          name: event.name,
+          marketCapUsd: event.marketCapUsd,
+          volumeH1Usd: event.volumeH1Usd,
+          volumeM5Usd: event.volumeM5Usd,
+          holderCount: event.holderCount,
+          priceChangeH1Pct: event.priceChangeH1Pct,
+          priceChangePct: event.priceChangePct,
+          nearKeyFib: ranked.nearKeyFib,
+          nearSupport: ranked.nearSupport,
+          nearMultiTfSupport: ranked.nearMultiTfSupport,
+          nearMultiTfResistance: ranked.nearMultiTfResistance,
+          srConfluenceScore: ranked.srConfluenceScore,
+          supportTfHits: ranked.supportTfHits,
+          resistanceTfHits: ranked.resistanceTfHits,
+          lastPriceSol: ranked.lastPriceSol ?? null,
+          supportPriceSol: ranked.supportPriceSol ?? null,
+          resistancePriceSol: ranked.resistancePriceSol ?? null,
+          playbook: ranked.playbook,
+          chartPatternIds: ranked.chartPatternIds,
+        });
+      } catch {
+        /* watch module may not be ready during boot */
+      }
+    }
+
+    // Mode B: small-MC scalper band without multi-TF support → watch only (no immediate)
+    if (scalperMcEligible && !scalperConfluentNow) {
+      return null;
+    }
+    if (requireTa && !ranked.taSetup && !scalperConfluentNow) return null;
     if (cfg.requireMtfAligned === true && !ranked.mtfAligned) return null;
     if (
       requireTa &&
-      !scalperMcEligible &&
+      !scalperConfluentNow &&
       (ranked.confluence == null || ranked.confluence < minConfluence)
     ) {
       return null;
     }
-    if (requireTa && !scalperMcEligible && !ranked.playbook) return null;
-    if (requireTa && !ranked.taSetup && scalperMcEligible) {
-      ranked.reasons.push('scalper-mc-eligible');
+    if (requireTa && !scalperConfluentNow && !ranked.playbook) return null;
+    if (scalperConfluentNow) {
+      ranked.reasons.push('scalper-mtf-support');
+      if (!ranked.taSetup) ranked.reasons.push('scalper-mc-eligible');
     }
 
     const id = `scan-${event.mint.slice(0, 8)}-${now}`;
@@ -1064,7 +1186,13 @@ export async function selectScannerCandidates(
       nearKeyFib: ranked.nearKeyFib,
       nearSupport: ranked.nearSupport,
       nearResistance: ranked.nearResistance,
+      srConfluenceScore: ranked.srConfluenceScore,
+      supportTfHits: ranked.supportTfHits,
+      resistanceTfHits: ranked.resistanceTfHits,
+      nearMultiTfSupport: ranked.nearMultiTfSupport,
+      nearMultiTfResistance: ranked.nearMultiTfResistance,
       supportPriceSol: ranked.supportPriceSol ?? null,
+      resistancePriceSol: ranked.resistancePriceSol ?? null,
       lastPriceSol: ranked.lastPriceSol ?? null,
       fib05PriceSol: ranked.fib05PriceSol ?? null,
       fib618PriceSol: ranked.fib618PriceSol ?? null,
@@ -1340,6 +1468,51 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     } catch (err) {
       logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
+    }
+    try {
+      const {
+        offerScalperWatchFromCandidate,
+        tickScalperSetupWatches,
+      } = require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      for (const c of picked) {
+        offerScalperWatchFromCandidate({
+          mint: c.mint,
+          symbol: c.symbol,
+          name: c.name,
+          marketCapUsd: c.marketCapUsd,
+          volumeH1Usd: c.volumeH1Usd,
+          volumeM5Usd: c.volumeM5Usd,
+          holderCount: c.holderCount,
+          priceChangeH1Pct: c.priceChangeH1Pct,
+          priceChangePct: c.priceChangePct,
+          nearKeyFib: c.nearKeyFib,
+          nearSupport: c.nearSupport,
+          nearMultiTfSupport: c.nearMultiTfSupport,
+          nearMultiTfResistance: c.nearMultiTfResistance,
+          srConfluenceScore: c.srConfluenceScore,
+          supportTfHits: c.supportTfHits,
+          resistanceTfHits: c.resistanceTfHits,
+          lastPriceSol: c.lastPriceSol ?? null,
+          supportPriceSol: c.supportPriceSol ?? null,
+          resistancePriceSol: c.resistancePriceSol ?? null,
+          playbook: c.playbook,
+          chartPatternIds: c.chartPatternIds,
+          preferredProfileId: c.preferredProfileId,
+          specialtyFeed: c.specialtyFeed,
+        });
+      }
+      const sTriggered = await tickScalperSetupWatches();
+      if (sTriggered > 0) {
+        console.log(
+          `[marketScanner] scalper-watch triggered ${sTriggered} candidate(s)`
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'Scalper watch tick failed',
+        errorToMeta(err)
+      );
     }
     try {
       const {

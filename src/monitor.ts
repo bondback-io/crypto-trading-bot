@@ -681,6 +681,14 @@ export interface TradeSignal {
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   nearResistance?: boolean;
+  /** Multi-TF S/R confluence stamps */
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  srConfluenceScore?: number;
+  supportTfHits?: string[];
+  resistanceTfHits?: string[];
+  supportPriceSol?: number | null;
+  resistancePriceSol?: number | null;
   chartPatternIds?: string[];
   chartPatternSummary?: string | null;
   chartPatternHits?: Array<{
@@ -741,9 +749,16 @@ function applyProfileTaPlaybookGate(
       profileId,
       {
         candles: signal.candles,
-        nearSupport: signal.nearSupport === true,
-        nearResistance: signal.nearResistance === true,
+        nearSupport:
+          signal.nearSupport === true || signal.nearMultiTfSupport === true,
+        nearResistance:
+          signal.nearResistance === true ||
+          signal.nearMultiTfResistance === true,
         nearKeyFib: signal.nearKeyFib === true,
+        nearMultiTfSupport: signal.nearMultiTfSupport === true,
+        nearMultiTfResistance: signal.nearMultiTfResistance === true,
+        srConfluenceScore: signal.srConfluenceScore,
+        supportTfHits: signal.supportTfHits,
         chartPatternIds: signal.chartPatternIds ?? null,
         indicators: ind,
         smartMoneyScore: sm,
@@ -759,6 +774,31 @@ function applyProfileTaPlaybookGate(
       getProfileTaPlaybook
     );
     Object.assign(buyOpts, gate.stamp);
+    if (
+      Array.isArray(signal.scannerReasons) &&
+      signal.scannerReasons.some((r) =>
+        /scalper-watch:triggered/i.test(String(r))
+      )
+    ) {
+      (buyOpts as { scalperWatchTriggered?: boolean }).scalperWatchTriggered =
+        true;
+    }
+    // Also stamp multi-TF fields directly from signal when gate was soft/off
+    if (signal.nearMultiTfSupport === true) {
+      (buyOpts as { nearMultiTfSupport?: boolean }).nearMultiTfSupport = true;
+    }
+    if (signal.nearMultiTfResistance === true) {
+      (buyOpts as { nearMultiTfResistance?: boolean }).nearMultiTfResistance =
+        true;
+    }
+    if (signal.srConfluenceScore != null) {
+      (buyOpts as { srConfluenceScore?: number }).srConfluenceScore =
+        signal.srConfluenceScore;
+    }
+    if (Array.isArray(signal.supportTfHits) && signal.supportTfHits.length) {
+      (buyOpts as { supportTfHits?: string[] }).supportTfHits =
+        signal.supportTfHits;
+    }
     if (gate.result && gate.result.mode !== 'off') {
       console.log(
         `[monitor] ${gate.skip ? 'STRATEGY_SKIP' : 'STRATEGY_TAKE'} profile_ta_playbook — ` +
@@ -2923,16 +2963,24 @@ async function handleScannerCandidate(
     const setupWatchHandoff =
       preferId === 'migration_sniper' ||
       preferId === 'dip_buyer' ||
-      reasonBits.includes('grad-watch:triggered') ||
-      reasonBits.includes('dip-watch:triggered');
-    // Small-MC scalps may win the Scalper lane without Fib/playbook — do not
-    // drop them here when Require TA is ON (Scalper itself has no TA module).
-    const scalperMcEligible =
       preferId === 'scalper' ||
-      reasonBits.includes('scalper-mc-eligible') ||
-      (candidate.marketCapUsd != null &&
-        candidate.marketCapUsd > 0 &&
-        candidate.marketCapUsd <= 180_000);
+      preferId === 'momentum_burst' ||
+      preferId === 'reversal_scalper' ||
+      reasonBits.includes('grad-watch:triggered') ||
+      reasonBits.includes('dip-watch:triggered') ||
+      reasonBits.includes('scalper-watch:triggered');
+    // Mode B: small-MC immediate only when already at multi-TF support confluence.
+    const nearMultiTfSupport =
+      (candidate as { nearMultiTfSupport?: boolean }).nearMultiTfSupport ===
+        true || reasonBits.includes('scalper-mtf-support');
+    const scalperMcEligible =
+      nearMultiTfSupport &&
+      (preferId === 'scalper' ||
+        reasonBits.includes('scalper-mc-eligible') ||
+        reasonBits.includes('scalper-mtf-support') ||
+        (candidate.marketCapUsd != null &&
+          candidate.marketCapUsd > 0 &&
+          candidate.marketCapUsd <= 180_000));
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
     if (!hybrid && requireTa && !setupWatchHandoff && !scalperMcEligible) {
@@ -3030,6 +3078,14 @@ async function handleScannerCandidate(
       entrySource: hybrid ? 'hybrid' : 'scanner',
       nearKeyFib: candidate.nearKeyFib,
       nearSupport: candidate.nearSupport,
+      nearResistance: candidate.nearResistance,
+      nearMultiTfSupport: candidate.nearMultiTfSupport,
+      nearMultiTfResistance: candidate.nearMultiTfResistance,
+      srConfluenceScore: candidate.srConfluenceScore,
+      supportTfHits: candidate.supportTfHits,
+      resistanceTfHits: candidate.resistanceTfHits,
+      supportPriceSol: candidate.supportPriceSol ?? null,
+      resistancePriceSol: candidate.resistancePriceSol ?? null,
       chartPatternIds: candidate.chartPatternIds,
       candles: launch.candles,
       priceSol: launch.lastPriceSol || launch.entryPriceSol,
@@ -6212,11 +6268,17 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const runModuleFilters = async (): Promise<boolean> => {
   const reasonBitsEarly = (signal.scannerReasons || []).join(' ');
   const setupWatchHandoff =
-    /grad-watch:triggered|dip-watch:triggered/i.test(reasonBitsEarly) ||
+    /grad-watch:triggered|dip-watch:triggered|scalper-watch:triggered/i.test(
+      reasonBitsEarly
+    ) ||
     (signal.candidateTradeProfileId === 'migration_sniper' &&
       /grad-watch/i.test(reasonBitsEarly)) ||
     (signal.candidateTradeProfileId === 'dip_buyer' &&
-      /dip-watch/i.test(reasonBitsEarly));
+      /dip-watch/i.test(reasonBitsEarly)) ||
+    ((signal.candidateTradeProfileId === 'scalper' ||
+      signal.candidateTradeProfileId === 'momentum_burst' ||
+      signal.candidateTradeProfileId === 'reversal_scalper') &&
+      /scalper-watch/i.test(reasonBitsEarly));
 
   // Wallet quality gate — every source wallet must pass (or be unknown during grace)
   if (
@@ -6776,11 +6838,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   // Scanner-only: fail-closed when no TA setup (stricter than copy fail-open).
   // Risk Off always skips this gate (ops-only soak must not be vetoed by TA).
   // Setup-watch handoffs are synthetic (no Fib/candles) — lane floors still apply.
-  // Scalper lane has no ta_market_scanner module — exempt when it wins the cascade.
+  // Scalper lane: Mode B — exempt only when multi-TF support confluence (or watch handoff).
   // Trend / Compounder Jupiter|KOL specialty handoffs are also exempt (mature feeds).
   // Learning Mode does not bypass Require TA for other profiles / generic scanner.
   const reasonBits = reasonBitsEarly;
-  const scalperLaneWin = signal.candidateTradeProfileId === 'scalper';
+  const scalperLaneWin =
+    signal.candidateTradeProfileId === 'scalper' &&
+    (signal.nearMultiTfSupport === true ||
+      /scalper-mtf-support|scalper-watch:triggered/i.test(reasonBits));
   const matureSpecialtyTaExempt =
     (signal.candidateTradeProfileId === 'trend_rider' ||
       signal.candidateTradeProfileId === 'steady_compounder') &&

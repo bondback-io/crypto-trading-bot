@@ -7841,6 +7841,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
         </div>
 
+        <div id="scalper-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
+              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B)</span>
+              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Mutual exclusion with Dip. Unwatch cools 15m.</p>
+            </div>
+            <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="scalper-watch-list" class="setup-watch-list text-slate-400">No active scalper-family setups</div>
+        </div>
+
         <div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
@@ -8852,6 +8864,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="flex flex-wrap gap-2 mb-2" id="pta-timeframes">
               <label class="ctl-check"><input type="checkbox" data-pta-tf="5m" onchange="saveProfileTaPlaybook()" /><span>5m</span></label>
               <label class="ctl-check"><input type="checkbox" data-pta-tf="15m" onchange="saveProfileTaPlaybook()" /><span>15m</span></label>
+              <label class="ctl-check"><input type="checkbox" data-pta-tf="30m" onchange="saveProfileTaPlaybook()" /><span>30m</span></label>
               <label class="ctl-check"><input type="checkbox" data-pta-tf="1h" onchange="saveProfileTaPlaybook()" /><span>1h</span></label>
               <label class="ctl-check"><input type="checkbox" data-pta-tf="4h" onchange="saveProfileTaPlaybook()" /><span>4h</span></label>
             </div>
@@ -12502,6 +12515,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const data = tp || {};
       const dipCount = document.getElementById('dip-watch-count');
       const dipList = document.getElementById('dip-watch-list');
+      const scalperCount = document.getElementById('scalper-watch-count');
+      const scalperList = document.getElementById('scalper-watch-list');
       const gradCount = document.getElementById('grad-watch-count');
       const gradList = document.getElementById('grad-watch-list');
 
@@ -12514,6 +12529,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '<span class="setup-watch-pct is-drop" data-watch-pct="1">−' +
             Number(e.dropFromPeakPct).toFixed(0) +
             '%</span>'
+          );
+        }
+        if (kind === 'scalper') {
+          const hits = Array.isArray(e.supportTfHits) ? e.supportTfHits.join('+') : '';
+          const conf =
+            e.srConfluenceScore != null && isFinite(Number(e.srConfluenceScore))
+              ? 'S/R ' + Math.round(Number(e.srConfluenceScore))
+              : hits
+                ? hits
+                : '—';
+          return (
+            '<span class="setup-watch-pct" data-watch-pct="1">' +
+            escHtml(conf) +
+            '</span>'
           );
         }
         if (e.curveProgressPct == null || !isFinite(Number(e.curveProgressPct))) {
@@ -12579,6 +12608,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 '</span>';
             }
           }
+        } else if (kind === 'scalper') {
+          const pref = e.preferredProfileId
+            ? '<span class="setup-watch-mc">' +
+              escHtml(String(e.preferredProfileId)) +
+              '</span>'
+            : '';
+          const entries = Array.isArray(e.targetEntries) ? e.targetEntries : [];
+          const bits = entries
+            .slice(0, 2)
+            .map(function (t) {
+              const label = escHtml(String(t.label || 'Level'));
+              const mcN = Number(t.mcUsd);
+              if (!isFinite(mcN) || mcN <= 0) return '';
+              return label + ' ~$' + Math.round(mcN).toLocaleString();
+            })
+            .filter(Boolean);
+          target =
+            pref +
+            (bits.length
+              ? '<span class="setup-watch-mc setup-watch-target" title="Approx MC at Support / Resistance">Targets: ' +
+                bits.join(' · ') +
+                '</span>'
+              : '');
         }
         const reason =
           e.lastReason
@@ -12666,6 +12718,33 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             htmlParts.push(watchRowHtml('dip', e));
           });
           dipList.innerHTML = htmlParts.join('');
+        }
+      }
+
+      if (scalperCount || scalperList) {
+        const sw = data.scalperWatch || { active: 0, entries: [] };
+        if (scalperCount) scalperCount.textContent = (sw.active || 0) + ' active';
+        if (scalperList) {
+          const rows = (sw.entries || [])
+            .filter(function (e) {
+              return e.status === 'watching' || e.status === 'armed';
+            })
+            .slice(0, 16);
+          const terminal = (sw.recentTerminal || []).slice(0, 2);
+          const htmlParts = [];
+          if (rows.length) {
+            rows.forEach(function (e) {
+              htmlParts.push(watchRowHtml('scalper', e));
+            });
+          } else {
+            htmlParts.push(
+              '<div class="setup-watch-empty">No active scalper-family setups</div>'
+            );
+          }
+          terminal.forEach(function (e) {
+            htmlParts.push(watchRowHtml('scalper', e));
+          });
+          scalperList.innerHTML = htmlParts.join('');
         }
       }
 
@@ -12799,7 +12878,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const kind = btn.getAttribute('data-watch-unwatch');
       const mint = btn.getAttribute('data-mint');
       if (!kind || !mint) return;
-      const label = kind === 'grad' ? 'graduation' : 'dip';
+      const label = kind === 'grad' ? 'graduation' : kind === 'scalper' ? 'scalper-family' : 'dip';
       if (
         !confirm(
           'Unwatch this ' +

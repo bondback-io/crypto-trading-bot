@@ -267,6 +267,11 @@ export interface BuyOptions {
   haConsecutiveAtEntry?: number;
   nearSupportAtEntry?: boolean;
   nearResistanceAtEntry?: boolean;
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  supportTfHits?: string[];
+  srConfluenceScore?: number;
+  scalperWatchTriggered?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -874,6 +879,11 @@ export async function executeBuy(
         haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
         nearSupportAtEntry: meta?.nearSupportAtEntry,
         nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+        nearMultiTfSupport: meta?.nearMultiTfSupport,
+        nearMultiTfResistance: meta?.nearMultiTfResistance,
+        supportTfHits: meta?.supportTfHits,
+        srConfluenceScore: meta?.srConfluenceScore,
+        scalperWatchTriggered: meta?.scalperWatchTriggered,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
@@ -1018,6 +1028,11 @@ export async function executeBuy(
         haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
         nearSupportAtEntry: meta?.nearSupportAtEntry,
         nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+        nearMultiTfSupport: meta?.nearMultiTfSupport,
+        nearMultiTfResistance: meta?.nearMultiTfResistance,
+        supportTfHits: meta?.supportTfHits,
+        srConfluenceScore: meta?.srConfluenceScore,
+        scalperWatchTriggered: meta?.scalperWatchTriggered,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,

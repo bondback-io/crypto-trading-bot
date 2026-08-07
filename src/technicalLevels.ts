@@ -138,6 +138,8 @@ const DEFAULTS = {
   favourVolumeReaction: true,
   requireBreakCloseInvalidation: true,
   fibTreatAsZones: true,
+  srConfluenceMinHits: 2,
+  srConfluenceRequireHigherTf: true,
 };
 
 /** Per-mint ring buffer (SOL or USD — consistent per mint). */
@@ -1323,4 +1325,236 @@ export function technicalLevelsPublic(
     swingStrength: config.technicalLevels?.swingStrength ?? 'medium',
     fibTreatAsZones: config.technicalLevels?.fibTreatAsZones !== false,
   };
+}
+
+/** Multi-TF S/R timeframe labels (aligned with OHLCV + Profile TA). */
+export type SrTimeframe = '5m' | '15m' | '30m' | '1h' | '4h';
+
+export const SR_TIMEFRAMES: readonly SrTimeframe[] = [
+  '5m',
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+] as const;
+
+/** Higher TFs that count toward Mode B confluence (not 5m-only). */
+export const SR_HIGHER_TFS: readonly SrTimeframe[] = [
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+] as const;
+
+const TF_RANK: Record<SrTimeframe, number> = {
+  '5m': 1,
+  '15m': 2,
+  '30m': 3,
+  '1h': 4,
+  '4h': 5,
+};
+
+export interface PerTfTechnicalSnapshot {
+  tf: SrTimeframe;
+  snapshot: TechnicalSnapshot;
+  nearSupport: boolean;
+  nearResistance: boolean;
+  nearestSupportMid: number | null;
+  nearestResistanceMid: number | null;
+}
+
+export interface SrConfluenceResult {
+  supportTfHits: SrTimeframe[];
+  resistanceTfHits: SrTimeframe[];
+  confluenceScore: number;
+  nearMultiTfSupport: boolean;
+  nearMultiTfResistance: boolean;
+  primarySupport: number | null;
+  primaryResistance: number | null;
+  perTf: PerTfTechnicalSnapshot[];
+}
+
+function isSrTimeframe(t: string): t is SrTimeframe {
+  return (SR_TIMEFRAMES as readonly string[]).includes(t);
+}
+
+/**
+ * Analyze S/R independently on each TF candle series.
+ * Fail-open per TF when history is thin.
+ */
+export function analyzeTechnicalsPerTf(
+  mint: string | null | undefined,
+  candlesByTf: Partial<Record<SrTimeframe | string, Array<{
+    time: number;
+    priceSol?: number;
+    price?: number;
+    volume?: number;
+  }>>>,
+  opts?: {
+    priceSol?: number | null;
+    nearPct?: number;
+    nowMs?: number;
+    /** Restrict to these TFs (default: all present) */
+    timeframes?: SrTimeframe[];
+  }
+): PerTfTechnicalSnapshot[] {
+  const want = opts?.timeframes?.length
+    ? opts.timeframes.filter(isSrTimeframe)
+    : SR_TIMEFRAMES.slice();
+  const out: PerTfTechnicalSnapshot[] = [];
+  for (const tf of want) {
+    const candles = candlesByTf?.[tf];
+    if (!candles || candles.length < 3) continue;
+    const snap = analyzeTechnicals({
+      mint: mint ?? null,
+      priceSol: opts?.priceSol,
+      candles,
+      nearPct: opts?.nearPct,
+      nowMs: opts?.nowMs,
+    });
+    const nearRes =
+      snap.nearestResistance != null &&
+      snap.nearestResistance.distancePct != null &&
+      Math.abs(snap.nearestResistance.distancePct) <= (opts?.nearPct ?? cfg().nearPct) * 2;
+    out.push({
+      tf,
+      snapshot: snap,
+      nearSupport: snap.nearSupport,
+      nearResistance: nearRes || Boolean(snap.nearestResistance?.near),
+      nearestSupportMid:
+        snap.nearestSupport?.mid != null && snap.nearestSupport.mid > 0
+          ? snap.nearestSupport.mid
+          : null,
+      nearestResistanceMid:
+        snap.nearestResistance?.mid != null && snap.nearestResistance.mid > 0
+          ? snap.nearestResistance.mid
+          : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Mode B ready confluence: ≥minHits TFs near support, including ≥1 higher TF
+ * (15m/30m/1h/4h) when requireHigherTf is on.
+ */
+export function computeSrConfluence(
+  perTf: PerTfTechnicalSnapshot[],
+  opts?: {
+    minHits?: number;
+    requireHigherTf?: boolean;
+  }
+): SrConfluenceResult {
+  const minHits = Math.max(
+    1,
+    Number(
+      opts?.minHits ??
+        config.technicalLevels?.srConfluenceMinHits ??
+        DEFAULTS.srConfluenceMinHits
+    ) || 2
+  );
+  const requireHigher =
+    opts?.requireHigherTf ??
+    config.technicalLevels?.srConfluenceRequireHigherTf !== false;
+
+  const supportTfHits = perTf
+    .filter((p) => p.nearSupport)
+    .map((p) => p.tf);
+  const resistanceTfHits = perTf
+    .filter((p) => p.nearResistance)
+    .map((p) => p.tf);
+
+  const hasHigherSupport = supportTfHits.some((t) =>
+    (SR_HIGHER_TFS as readonly string[]).includes(t)
+  );
+  const nearMultiTfSupport =
+    supportTfHits.length >= minHits && (!requireHigher || hasHigherSupport);
+
+  const hasHigherResist = resistanceTfHits.some((t) =>
+    (SR_HIGHER_TFS as readonly string[]).includes(t)
+  );
+  const nearMultiTfResistance =
+    resistanceTfHits.length >= minHits && (!requireHigher || hasHigherResist);
+
+  // Prefer higher-TF agreement for primary levels
+  const pickPrimary = (
+    hits: SrTimeframe[],
+    kind: 'support' | 'resistance'
+  ): number | null => {
+    if (!hits.length) {
+      // Fall back to strongest single TF mid even without confluence
+      const ranked = [...perTf].sort(
+        (a, b) => TF_RANK[b.tf] - TF_RANK[a.tf]
+      );
+      for (const p of ranked) {
+        const mid =
+          kind === 'support'
+            ? p.nearestSupportMid
+            : p.nearestResistanceMid;
+        if (mid != null && mid > 0) return mid;
+      }
+      return null;
+    }
+    const ordered = [...hits].sort((a, b) => TF_RANK[b] - TF_RANK[a]);
+    for (const tf of ordered) {
+      const row = perTf.find((p) => p.tf === tf);
+      const mid =
+        kind === 'support'
+          ? row?.nearestSupportMid
+          : row?.nearestResistanceMid;
+      if (mid != null && mid > 0) return mid;
+    }
+    return null;
+  };
+
+  const primarySupport = pickPrimary(supportTfHits, 'support');
+  const primaryResistance = pickPrimary(resistanceTfHits, 'resistance');
+
+  // Score: 0–100 from hit count + higher-TF bonus + resistance soft penalty later
+  let confluenceScore = 0;
+  if (supportTfHits.length) {
+    confluenceScore += Math.min(55, supportTfHits.length * 18);
+    if (hasHigherSupport) confluenceScore += 20;
+    if (nearMultiTfSupport) confluenceScore += 15;
+  }
+  if (nearMultiTfResistance) {
+    confluenceScore = Math.max(0, confluenceScore - 10);
+  }
+  confluenceScore = Math.max(0, Math.min(100, Math.round(confluenceScore)));
+
+  return {
+    supportTfHits,
+    resistanceTfHits,
+    confluenceScore,
+    nearMultiTfSupport,
+    nearMultiTfResistance,
+    primarySupport,
+    primaryResistance,
+    perTf,
+  };
+}
+
+/** Convenience: candlesByTf → confluence in one call. */
+export function analyzeSrConfluenceFromCandles(
+  mint: string | null | undefined,
+  candlesByTf: Partial<Record<SrTimeframe | string, Array<{
+    time: number;
+    priceSol?: number;
+    price?: number;
+    volume?: number;
+  }>>>,
+  opts?: {
+    priceSol?: number | null;
+    nearPct?: number;
+    nowMs?: number;
+    timeframes?: SrTimeframe[];
+    minHits?: number;
+    requireHigherTf?: boolean;
+  }
+): SrConfluenceResult {
+  const perTf = analyzeTechnicalsPerTf(mint, candlesByTf, opts);
+  return computeSrConfluence(perTf, {
+    minHits: opts?.minHits,
+    requireHigherTf: opts?.requireHigherTf,
+  });
 }

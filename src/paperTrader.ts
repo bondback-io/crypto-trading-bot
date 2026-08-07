@@ -408,6 +408,11 @@ export interface Position {
   haConsecutiveAtEntry?: number;
   nearSupportAtEntry?: boolean;
   nearResistanceAtEntry?: boolean;
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  supportTfHits?: string[];
+  srConfluenceScore?: number;
+  scalperWatchTriggered?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -881,6 +886,11 @@ function maybeRecordLearningEpisode(
       haConsecutiveAtEntry: position.haConsecutiveAtEntry,
       nearSupportAtEntry: position.nearSupportAtEntry,
       nearResistanceAtEntry: position.nearResistanceAtEntry,
+      nearMultiTfSupport: position.nearMultiTfSupport,
+      nearMultiTfResistance: position.nearMultiTfResistance,
+      supportTfHits: position.supportTfHits,
+      srConfluenceScore: position.srConfluenceScore,
+      scalperWatchTriggered: position.scalperWatchTriggered,
       whaleStateAtEntry: position.whaleStateAtEntry,
       profileTaPlainLanguage: position.profileTaPlainLanguage,
       zigzagStructureAtEntry: position.zigzagStructureAtEntry,
@@ -1976,6 +1986,11 @@ export class PaperTrader {
     haConsecutiveAtEntry?: number;
     nearSupportAtEntry?: boolean;
     nearResistanceAtEntry?: boolean;
+    nearMultiTfSupport?: boolean;
+    nearMultiTfResistance?: boolean;
+    supportTfHits?: string[];
+    srConfluenceScore?: number;
+    scalperWatchTriggered?: boolean;
     whaleStateAtEntry?: string;
     profileTaPlainLanguage?: string;
     zigzagStructureAtEntry?: string;
@@ -2074,6 +2089,11 @@ export class PaperTrader {
       haConsecutiveAtEntry: input.haConsecutiveAtEntry,
       nearSupportAtEntry: input.nearSupportAtEntry,
       nearResistanceAtEntry: input.nearResistanceAtEntry,
+      nearMultiTfSupport: input.nearMultiTfSupport,
+      nearMultiTfResistance: input.nearMultiTfResistance,
+      supportTfHits: input.supportTfHits,
+      srConfluenceScore: input.srConfluenceScore,
+      scalperWatchTriggered: input.scalperWatchTriggered,
       whaleStateAtEntry: input.whaleStateAtEntry,
       profileTaPlainLanguage: input.profileTaPlainLanguage,
       zigzagStructureAtEntry: input.zigzagStructureAtEntry,
@@ -2479,6 +2499,11 @@ export class PaperTrader {
       haConsecutiveAtEntry?: number;
       nearSupportAtEntry?: boolean;
       nearResistanceAtEntry?: boolean;
+      nearMultiTfSupport?: boolean;
+      nearMultiTfResistance?: boolean;
+      supportTfHits?: string[];
+      srConfluenceScore?: number;
+      scalperWatchTriggered?: boolean;
       whaleStateAtEntry?: string;
       profileTaPlainLanguage?: string;
       zigzagStructureAtEntry?: string;
@@ -2663,6 +2688,11 @@ export class PaperTrader {
       haConsecutiveAtEntry: meta?.haConsecutiveAtEntry,
       nearSupportAtEntry: meta?.nearSupportAtEntry,
       nearResistanceAtEntry: meta?.nearResistanceAtEntry,
+      nearMultiTfSupport: meta?.nearMultiTfSupport,
+      nearMultiTfResistance: meta?.nearMultiTfResistance,
+      supportTfHits: meta?.supportTfHits,
+      srConfluenceScore: meta?.srConfluenceScore,
+      scalperWatchTriggered: meta?.scalperWatchTriggered,
       whaleStateAtEntry: meta?.whaleStateAtEntry,
       profileTaPlainLanguage: meta?.profileTaPlainLanguage,
       zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,

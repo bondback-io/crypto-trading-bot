@@ -218,6 +218,13 @@ export function considerDipWatchSetup(input: {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
   if (isManualUnwatchCooldown(input.mint)) return null;
+  try {
+    const { isMintOnActiveScalperWatch } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    if (isMintOnActiveScalperWatch(input.mint)) return null;
+  } catch {
+    /* optional */
+  }
 
   const m = dipMatch();
   const minMc = m.minMarketCapUsd ?? 500_000;
@@ -519,6 +526,12 @@ export function getDipSetupWatchStatus(limit = 20): {
     entries,
     recentTerminal,
   };
+}
+
+/** True when mint is on an active (watching/armed) dip watch — mutual exclusion. */
+export function isMintOnActiveDipWatch(mint: string): boolean {
+  const w = watches.get(String(mint || '').trim());
+  return w != null && (w.status === 'watching' || w.status === 'armed');
 }
 
 /** Offer specialty / scanner candidates into the watchlist (non-blocking). */

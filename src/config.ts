@@ -647,6 +647,10 @@ export interface TechnicalLevelsConfig {
    * not single tick prices. Pump.fun default: true.
    */
   fibTreatAsZones: boolean;
+  /** Min TF hits for multi-TF support confluence (Mode B) */
+  srConfluenceMinHits: number;
+  /** Higher-TF labels that must include ≥1 hit for Mode B confluence */
+  srConfluenceRequireHigherTf: boolean;
 }
 
 export const DEFAULT_TECHNICAL_LEVELS: TechnicalLevelsConfig = {
@@ -677,6 +681,8 @@ export const DEFAULT_TECHNICAL_LEVELS: TechnicalLevelsConfig = {
   favourVolumeReaction: true,
   requireBreakCloseInvalidation: true,
   fibTreatAsZones: true,
+  srConfluenceMinHits: 2,
+  srConfluenceRequireHigherTf: true,
 };
 
 /** Chart pattern recognition (entry + confirmation). Default OFF. */
