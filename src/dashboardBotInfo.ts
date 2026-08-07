@@ -209,6 +209,11 @@ export const BOT_INFO_CSS = `
       background: #0f172a; border-left: 3px solid #34d399; font-size: 0.8rem; color: #94a3b8; line-height: 1.45;
     }
     .botinfo-callout strong { color: #a7f3d0; }
+    .botinfo-where {
+      margin: 0.35rem 0 0.75rem; padding: 0.5rem 0.7rem; border-radius: 8px;
+      background: #0f172a88; border: 1px dashed #334155; font-size: 0.78rem; color: #94a3b8; line-height: 1.45;
+    }
+    .botinfo-where strong { color: #7dd3fc; font-weight: 600; }
     .botinfo-svg-wrap {
       margin: 0.65rem 0 0.75rem; padding: 0.5rem; border-radius: 10px;
       background: #0f172a; border: 1px solid #1e293b; overflow-x: auto;

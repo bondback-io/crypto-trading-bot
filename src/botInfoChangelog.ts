@@ -41,6 +41,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.209',
+    title: 'Bot Info major-feature guides',
+    sections: ['coaches', 'risk', 'microbots', 'learning', 'overview', 'zion'],
+    items: [
+      'Coaches chapter: detailed HMC Gatekeeper, HMC Setup Classifier, MARL, Profile RL, and PCL-as-exit-coach guides with live examples + Where to find paths.',
+      'Risk chapter: Peak Profit Protection and Profit Capture Layer operator manuals (permission windows, PPP retune, partial+runner, anti-scratch).',
+      'Overview / Micro Bots / Learning / Zion: short stack pointers (HMC·PCL·PPP, Gold→SMM auto-send, quality stamp / learning reshape).',
+    ],
+  },
+  {
     version: '1.2.208',
     title: 'Profit Capture Layer',
     sections: ['microbots', 'risk', 'learning', 'zion', 'knobs'],

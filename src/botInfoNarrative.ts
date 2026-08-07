@@ -52,6 +52,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
           <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
           <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip). Coach stack (MARL, Profile RL, TA, accelerators) is documented under <em>Coaches &amp; Stack</em>.</li>
+          <li><strong>Newer stack pieces</strong> — <em>HMC Gatekeeper</em> (door check before lanes) · <em>HMC Setup Classifier</em> (which specialists may fight) · <em>Peak Profit Protection</em> + <em>Profit Capture Layer</em> (soft harvest while open) · Zion <em>Gold → Smart Money Mirror</em> auto-send. Full guides live under Coaches, Risk, and Zion.</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and this manual.</li>
         </ul>
         <div class="botinfo-actions">
@@ -88,9 +89,42 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.modulesByGroup}
         <p class="mint" style="margin:0.55rem 0 0.35rem">Named presets (${nPresets}):</p>
         ${slots.presetsList}
+
+        <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Exit harvest layers</strong> (soft — never replace hard TP/SL)</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>Peak Profit Protection</strong> — soft exit when price gives back a share of the peak after arming</p>
+        <ul>
+          <li>Arms when unrealized peak reaches a % of the lane’s target TP (global + optional scalper-style / per-bot overrides).</li>
+          <li>Once armed, full-exits if price gives back a % of that peak. Stale-peak can tighten giveback if no new high.</li>
+          <li>Never overwrites hard TP, hard SL, trail, anti-rug, or dead-market exits. Self-learn may nudge arm/giveback only.</li>
+          <li>Fast lanes (Scalper, Momentum Burst, Reversal, Migration Sniper) use tighter scalper-style defaults; PCL can retune arm/giveback by family when enabled.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Target TP is +40%. PPP arms at 65% of that (~+26%). Price spikes to +30%, then slips back 45% of the peak move — Peak Protect banks the runner so a round-trip fade does not erase the win. Hard TP still fires if price rips straight to target.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → scroll to <em>Peak Profit Protection</em> card (near Profit Capture Layer). Open positions show Armed / Waiting. Bot Performance → Agent Decision Log → filter Peak Protect. Per-bot arm/giveback: Micro Bots → profile Exit &amp; sizing.</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>Profit Capture Layer (PCL)</strong> — short permission window + partial/runner harvest coach</p>
+        <ul>
+          <li>After entry, a family permission window softens over-early tiny green scratches: fast ~35s · dip/trend ~120s · quality ~90s (high entry quality ≥70 extends ~+40%).</li>
+          <li>Retunes PPP (fast ~60/40 arm/giveback; dip-trend &amp; quality ~65/45) with min-open / min-profit floors; defers arming while permission is active.</li>
+          <li>Banks a meaningful early partial, then manages the runner (post-partial giveback ×0.85; trail nudge toward small green). Anti-scratch blocks tiny green exits on medium+ quality setups.</li>
+          <li>Learning reshape boosts MFE capture / partials and penalizes scratchy tiny greens (strength 0–1, default 0.35). Never disables hard SL or anti-rug.</li>
+        </ul>
+        <div class="botinfo-flow" aria-label="PCL harvest flow">
+          <div class="botinfo-flow-step"><span class="k">1. Entry</span><span class="v">Quality stamp</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">2. Permission</span><span class="v">Hold the scratch</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">3. Partial</span><span class="v">Bank + runner</span></div>
+          <span class="botinfo-flow-arrow" aria-hidden="true">→</span>
+          <div class="botinfo-flow-step"><span class="k">4. PPP</span><span class="v">Protect peak</span></div>
+        </div>
+        <div class="botinfo-callout"><strong>Live example:</strong> Scalper catches a hot mint. For ~35s PCL says “don’t scratch +1.5% yet.” Price runs; PCL banks ~half near the early partial, leaves a runner, then Peak Protect watches the peak. Hard SL still cuts a real dump immediately.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → <em>Profit Capture Layer</em> card (directly under Peak Protect). Open-trade rows show permission / partial / PPP lines. Zion comments when PCL is active. Learning strength + family permission seconds are on that same card.</p>
+
         <div class="botinfo-actions">
           ${btn('settings', 'Open Settings')}
           ${btn('config', 'Open Config')}
+          ${btn('microbots', 'Open PPP / PCL')}
         </div>
       </article>
 
@@ -108,7 +142,10 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>
           <li>Lane decisions appear on Overview / Micro Bots so you can see why a profile won or skipped.</li>
           <li><strong>Coaches</strong> — each bot has personal self-learn / ML / TA / Profile RL; MARL is the shared team coach. See <em>Coaches &amp; Stack</em> for how they cooperate and which toggles must be ON.</li>
+          <li><strong>HMC · PCL · Peak Protect</strong> — Gatekeeper + Setup Classifier live under Micro Bots → <em>Learning</em> routing tab; Peak Protect + Profit Capture Layer cards sit just below (same Micro Bots page). Full process + examples under <em>Coaches</em> and <em>Risk</em>.</li>
         </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> A thin low-MC mint hits the feed. Gatekeeper may soft-block congestion before any lane scores it. If allowed, Classifier may prefer dip specialists; the winner stamps TP/SL; while open, PCL + Peak Protect harvest without rewriting those hard exits.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → Profile routing tabs <em>Profiles</em> / <em>Scoring</em> / <em>Learning</em>. Learning tab → HMC Gatekeeper, HMC Setup Classifier, MARL, Profile RL. Scroll for Peak Profit Protection + Profit Capture Layer. Lane fight log on Overview and Micro Bots.</p>
         <div class="botinfo-actions">${btn('microbots', 'Open Micro Bots')}</div>
       </article>
 
@@ -141,8 +178,11 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Profile TA Playbooks</strong> — per-lane Off/Soft/Hard identity (HA, Fib/S-R, RSI/EMA/VWAP, patterns, optional whale). Soft = confirmation/conviction only; Hard = confluence gate. Global Require TA remains scanner master. Learning nudges tool weights / minConf only — never TP/SL or Peak Protect cores.</li>
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
           <li><strong>Learning Mode (global)</strong> softens conviction / wallet-quality / cluster / some MC floors and raises throughput — it does <em>not</em> bypass Require TA setup, anti-rug floors, daily-loss halts, or disabled profiles. Scalper scanner entries are exempt from Require TA when that lane wins. Trend Rider / Steady Compounder <em>specialty</em> Jupiter/KOL handoffs also bypass Require TA and Pump.fun-only (lane floors still apply).</li>
-          <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, and Peak Protect fit together (priority, defaults, activation checklist) lives in the next chapter: <em>Coaches &amp; Stack</em>.</li>
+          <li><strong>PCL learning reshape</strong> — when Profit Capture Layer is ON, episode timing rewards boost good MFE capture / meaningful partials and penalize tiny green scratches (scaled by Learning strength). Entry <em>quality stamp</em> also stretches permission windows and can block scratchy exits. Does not invent new knobs — reshapes how film scores exits.</li>
+          <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, Peak Protect, and PCL fit together (priority, defaults, activation checklist) lives in the next chapter: <em>Coaches &amp; Stack</em>.</li>
         </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Two closes both finish +2%. One scratched immediately; one banked a partial then trailed the runner. With PCL reshape ON, the second episode “looks smarter” to learning — the first gets a tiny-scratch penalty — so future upgrades favor harvest habits, not panic taps.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Learning strength on the <em>Profit Capture Layer</em> card · Back Up → learning journal · Bot Performance → Learning Progress.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open learning controls')}
           ${btn('backup', 'Open learning journal')}
@@ -162,9 +202,11 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Profile TA + weight learning</strong> — per-lane Off/Soft/Hard confluence; learns tool weights / sensitivities only — never TP/SL or Peak Protect cores.</li>
           <li><strong>Profile RL</strong> — personal soft coach (setup-worth, size confidence, TA sensitivity, exit-hint aggressiveness). Shadow / Hybrid / Lead via readiness score (not trade count alone). Default global OFF.</li>
           <li><strong>HMC Gatekeeper</strong> — Phase 1 hierarchical coordination: allow/block before lane fight (volume, liquidity, safety, low-MC congestion). Hard safety never fails open. Soft blocks optional. Default ON · medium.</li>
+          <li><strong>HMC Setup Classifier</strong> — Phase 2: setup → eligible specialist lanes (momentum / dip / migration / slow_quality). Soft eligibility ON = preferred lanes score normally, others still compete with a penalty; OFF = hard maps. Default classifier OFF.</li>
           <li><strong>MARL</strong> — team coach: lane ranking, size confidence, low-MC pile-in, lagging support. Soft only; never writes TP/SL. Default OFF.</li>
           <li><strong>Learning Accelerators</strong> — experience replay, counterfactual exit what-ifs, teacher→student soft TA tips. Offline/soft hints only. Master default OFF.</li>
-          <li><strong>Peak Profit Protection</strong> — soft exit on peak giveback; arm/giveback can learn via self-learn exitPolicy. Never replaces hard TP.</li>
+          <li><strong>Peak Profit Protection</strong> — soft exit on peak giveback; arm/giveback can learn via self-learn exitPolicy. Never replaces hard TP. Detail under <em>Risk</em>.</li>
+          <li><strong>Profit Capture Layer</strong> — exit-side harvest coach (permission window, partial+runner, PPP retune, learning reshape). Never disables hard SL / anti-rug. Detail under <em>Risk</em>.</li>
           <li><strong>Learning Mode</strong> — softens entry gates + fairness for low-sample bots. Does not bypass anti-rug or Require TA (except documented specialty exemptions).</li>
           <li><strong>Anti-rug / risk / Require TA</strong> — hard safety. Always win conflicts.</li>
           <li><strong>Zion</strong> — explains and supervises; does not mutate learning knobs or TP/SL.</li>
@@ -173,14 +215,64 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p class="mint" style="margin:0 0 0.45rem"><strong>Priority when layers overlap</strong></p>
         <ul>
           <li>0 · <strong>HMC Gatekeeper</strong> allow/block (before lanes)</li>
+          <li>0b · <strong>HMC Setup Classifier</strong> eligible / preferred specialists (after allow)</li>
           <li>1 · Safety / anti-rug</li>
           <li>2 · Micro-bot hard rules &amp; stamped TP/SL</li>
           <li>3 · MARL team assignment / low-MC coordination</li>
           <li>4 · Profile RL soft confidence / TA / exit hints</li>
           <li>5 · TA playbooks, accelerators, Learning Mode</li>
           <li>6 · Self-learn + ML (actual knob mutations)</li>
+          <li>Open · Peak Protect + PCL harvest (soft exits only)</li>
         </ul>
         <p>MARL and Profile RL both add soft score/size deltas (MARL first, then RL). Bounded stack — not a race to overwrite strategy. <strong>Global Micro-Bot TP</strong>, if set, pauses exit self-learning so one global TP does not fight per-bot exit evolution.</p>
+
+        <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Major feature guides</strong></p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>HMC Gatekeeper</strong> — door check before any lane fight</p>
+        <ul>
+          <li>Runs after enrich, before profiles compete. Allow = lanes may fight; Block = skip the mint.</li>
+          <li>Checks volume (5m / 1h), liquidity, safety / anti-rug signals, and low-MC congestion-style soft findings.</li>
+          <li>Hard safety never fails open. Soft blocks: Enforce soft blocks ON (medium/high) can block; Low strictness keeps soft findings advisory even when enforce is ON.</li>
+          <li>Default ON · medium. Strictness Low / Medium / High scales activity floors. No TP/SL changes.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Think bouncer at a club. A mint with almost no 5m volume and thin liquidity gets a polite “not tonight” before Scalper and Dip Buyer even argue. A clean, liquid setup walks in and the lane fight starts.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → Profile routing <em>Learning</em> → <em>HMC Gatekeeper</em> card. Overview / Micro Bots lane fight log (HMC gate line). Bot Performance → Agent Decision Log → source HMC Gatekeeper.</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>HMC Setup Classifier</strong> — which specialists get to compete</p>
+        <ul>
+          <li>Phase 2, after Gatekeeper allow. Labels momentum / dip / migration / slow_quality (or unknown) and maps preferred + eligible specialist lanes.</li>
+          <li>Maps (widened): momentum → MB / Scalper / Trend / Reversal / Steady · dip → Dip Buyer / Reversal / Scalper / Trend / Steady · migration → Sniper / Scalper / MB / Trend · slow_quality → HWR / Steady / SMM / Trend.</li>
+          <li><strong>Soft eligibility ON</strong> (code default): preferred lanes score normally; others still fight with ~−15% score. <strong>OFF</strong> = hard maps (only eligible specialists). Many operators leave Soft OFF for sharper specialty focus.</li>
+          <li>High-confidence clear winner (~≥0.65) can narrow; ambiguous / close-second / low conf widens to all specialists. Unknown setups can trade (default ON) keeps everyone in; OFF blocks unknown. Classifier master default OFF. No TP/SL changes.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> A clear dip pullback: Classifier prefers Dip Buyer &amp; friends. With Soft ON, Trend Rider can still “raise a hand” but starts behind. With Soft OFF, only the dip map lanes enter the fight — like assigning the right specialist team, not letting every lane shout.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → <em>Learning</em> → <em>HMC Setup Classifier</em> card (under Gatekeeper). Lane fight rows show setup + eligible list. Agent Decision Log → HMC Classifier.</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>MARL</strong> — shared team coach for lane priority &amp; size</p>
+        <ul>
+          <li>Soft coordination only: reorders who should win the fight, trims size confidence, limits low-MC pile-ins, can support lagging lanes.</li>
+          <li>One shared team state with per-profile preference weights — not a clone of each bot’s private episodes.</li>
+          <li>Never writes TP/SL, timers, or self-learn overrides. Default OFF until you enable it.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Three bots all like the same tiny mint. MARL nudges “don’t all pile in at full size” and bumps the lane that has been earning lately — like a captain rotating who takes the shot.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → <em>Learning</em> → Multi-Agent RL card. Lane fight log + Agent Decision Log (MARL).</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>Profile RL</strong> — each bot’s personal soft coach</p>
+        <ul>
+          <li>Per-profile policy: setup-worth lane bump, size confidence, TA sensitivity, exit-hint aggressiveness.</li>
+          <li>Shadow / Hybrid / Lead by readiness score (not trade count alone). Isolated memory per lane.</li>
+          <li>Never mutates TP/SL, Peak Protect cores, or self-learn overrides. Default global OFF.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> High Win-Rate’s private coach whispers “this setup looks like your winners — size up a touch / trust TA more,” while Scalper’s coach stays cautious. Same mint, different personal taste — without rewriting hard exits.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → <em>Learning</em> → Profile RL Agents card. Bot Performance → Agent Decision Log (Profile RL) + Learning Progress readiness.</p>
+
+        <p class="mint" style="margin:0.55rem 0 0.35rem"><strong>Profit Capture Layer (as exit coach)</strong> — harvest habits while open</p>
+        <ul>
+          <li>Sits with Peak Protect on the open path: permission window → meaningful partial + runner → PPP protect. Learning reshape grades the film afterward.</li>
+          <li>Additive with Peak Protect (detail + family timings under <em>Risk</em>). Hard SL / anti-rug always win.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Entry coaches picked the lane; PCL is the “don’t leave money on the table / don’t scratch too early” coach once you’re in. See Risk for the full harvest flow.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Peak Protect + Profit Capture Layer cards · Risk chapter in this manual · open-position PCL/PPP lines.</p>
 
         <p class="mint" style="margin:0.55rem 0 0.45rem"><strong>Close path (final exit → learn)</strong></p>
         <div class="botinfo-flow" aria-label="Learning close path">
@@ -199,7 +291,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
         <p class="mint" style="margin:0 0 0.45rem"><strong>Entry path (who gets the mint)</strong></p>
         <ul>
-          <li>Lane floors / match → Learning Mode fairness → <strong>MARL rank</strong> → <strong>Profile RL rank</strong> → filters / anti-rug → MARL/RL size → TA playbook gate → buy → Peak Protect while open. <strong>HMC Gatekeeper</strong> runs after enrich, before lanes.</li>
+          <li><strong>HMC Gatekeeper</strong> (after enrich) → <strong>Setup Classifier</strong> (if ON) → lane floors / match → Learning Mode fairness → <strong>MARL rank</strong> → <strong>Profile RL rank</strong> → filters / anti-rug → MARL/RL size → TA playbook gate → buy → <strong>PCL + Peak Protect</strong> while open.</li>
           <li><strong>Smart Bot Profiles</strong> must be ON for full lane + MARL/RL ranking. Size multipliers still apply at buy when coaches are enabled.</li>
         </ul>
 
@@ -207,15 +299,16 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <ul>
           <li>Self-learn needs ~<strong>8+</strong> closed episodes; ML stays shadow longer (~50+ before hybrid).</li>
           <li>MARL, Profile RL, and Accelerators often default <strong>OFF</strong> until you enable them on Micro Bots.</li>
+          <li>HMC Classifier defaults <strong>OFF</strong>; Gatekeeper defaults ON.</li>
           <li>Counterfactuals may stamp without steering unless apply-hints is ON.</li>
           <li>Self-learn Mode <code>shadow</code> = proposals only; use <code>auto</code> to apply.</li>
           <li>Partials do not create episodes — only final closes.</li>
           <li>Require TA / risk halt / max positions can limit how fast episode rings fill.</li>
         </ul>
 
-        <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
-        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed (includes HMC Gate when present). Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (HMC Gatekeeper, MARL, Profile RL, accelerators, TA, ML, sparse Zion) — logging only.</p>
-        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → HMC Gatekeeper / Self-Learn / Profile TA / Profile RL / MARL / Accelerators.</p>
+        <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · review HMC Gatekeeper / Classifier · enable Peak Protect + PCL for harvest · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
+        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed (includes HMC Gate / Classifier when present). Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (HMC Gatekeeper, HMC Classifier, MARL, Profile RL, accelerators, TA, ML, Peak Protect, sparse Zion) — logging only.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → Learning → HMC / Self-Learn / Profile TA / Profile RL / MARL / Accelerators · Peak Protect / PCL cards below.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open Micro Bots coaches')}
           ${btn('botperf', 'Open Bot Performance')}
@@ -249,13 +342,16 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
         <h3><span class="botinfo-sec-num">09</span> Zion (KOL Token Scanner)</h3>
-        <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional <strong>Auto-send Platinum to HWR</strong> can auto-execute Platinum-tier offers into High Win-Rate.</p>
+        <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional auto-send routes can execute top tiers into specialist profiles without changing Zion’s knobs.</p>
         <ul>
-          <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR.</li>
-          <li>Popup tiers: <strong>Platinum</strong> (score ≥85, ≥10 KOLs, ≥$750k vol 1h — optional auto → HWR) · <strong>Gold</strong> (score ≥85, ≥8 KOLs, ≥$500k vol 1h) · <strong>Green</strong> (score 70–84, ≥4 KOLs, ≥$250k vol) · else default teal. Holders &amp; risk row shows top10 / bundle / insider / dev / snipers / pro traders when known.</li>
+          <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR, Auto-send Gold to Smart Money.</li>
+          <li>Popup tiers: <strong>Platinum</strong> (score ≥85, ≥10 KOLs, ≥$750k vol 1h — optional auto → HWR) · <strong>Gold</strong> (score ≥85, ≥8 KOLs, ≥$500k vol 1h — optional auto → Smart Money Mirror) · <strong>Green</strong> (score 70–84, ≥4 KOLs, ≥$250k vol) · else default teal. Holders &amp; risk row shows top10 / bundle / insider / dev / snipers / pro traders when known.</li>
+          <li><strong>Gold → SMM auto-send</strong> (default OFF): when ON, Gold offers auto-open on Smart Money Mirror with SMM sizing/exits, synthetic decision, and lane-fight open; OFF stays manual Place Trade. Platinum → HWR stays exclusive (Platinum never routes to Gold/SMM). Both toggles work independently.</li>
           <li>Uses the secondary RPC lane so KOL scanning does not starve copy/trading.</li>
-          <li>Separate from copy-monitor and market scanner entry paths.</li>
+          <li>Separate from copy-monitor and market scanner entry paths. PCL/PPP still apply once a Zion-routed trade is open (same harvest stack).</li>
         </ul>
+        <div class="botinfo-callout"><strong>Live example:</strong> Eight KOLs pile into a liquid mint at Gold tier. With Auto-send Gold ON, Smart Money Mirror opens it for you with SMM exits — you are not forced to tap Place Trade. Platinum still only auto-routes to High Win-Rate if that toggle is ON.</div>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Zion → toggles <em>Auto-send Platinum to HWR</em> and <em>Auto-send Gold to Smart Money</em>. Offers appear as Zion popups; opens show on Overview / lane fight like other profiles.</p>
         <div class="botinfo-actions">${btn('zion', 'Open Zion')}</div>
       </article>
 
