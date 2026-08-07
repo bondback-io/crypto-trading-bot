@@ -7958,8 +7958,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
-              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B)</span>
-              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Mutual exclusion with Dip. Unwatch cools 15m.</p>
+              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for small-MC Mode B (≤$180k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Late chase away from support is tightened; not Dip Buyer Fib dips. Mutual exclusion with Dip."></span></span>
+              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Scalper prioritizes support reclaim. Mutual exclusion with Dip. Unwatch cools 15m.</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -18230,7 +18230,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (err) {
         const msg = err && err.message ? err.message : String(err);
         if (err && err.name === 'AbortError') {
-          throw new Error('Request timed out — GMGN may be blocked; try again for curated fallback');
+          throw new Error(
+            'Request timed out — bot slow or upstream blocked; retry (Discover auto-falls back to curated)'
+          );
         }
         if (/failed to fetch|networkerror|load failed/i.test(msg)) {
           throw new Error('Cannot reach bot server — is it running on this port?');
@@ -26258,7 +26260,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
       if (list) list.textContent = 'Loading…';
       try {
-        const data = await fetchJSON('/api/influencer-mirror/watchlist');
+        // Holdings + metrics are sequential RPC/HTTP; default 20s AbortError is too tight
+        // and used to show a misleading "GMGN curated fallback" message (Discover-only).
+        const data = await fetchJSON('/api/influencer-mirror/watchlist', {
+          timeoutMs: 60000,
+        });
         const influencers = data.influencers || [];
         if (count) count.textContent = String(influencers.length);
         if (!influencers.length) {
@@ -26356,7 +26362,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             .join('');
         }
       } catch (err) {
-        if (list) list.textContent = err.message || String(err);
+        const raw = err && err.message ? err.message : String(err);
+        if (list) {
+          list.textContent = /timed out/i.test(raw)
+            ? 'Watchlist timed out loading holdings (Solana RPC / token metrics) — retry Refresh; not soft-watch-cap related. Import influencers on Smart Wallets if list is empty.'
+            : raw;
+        }
         if (count) count.textContent = '—';
       }
     }

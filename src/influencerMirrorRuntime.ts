@@ -666,12 +666,29 @@ export async function buildSmartMirrorWatchlist(opts?: {
   const openMints = new Set(
     paperTrader.getOpenPositions().map((p) => p.mint)
   );
+  // Stay under dashboard client timeout (60s) even when utility RPC is slow.
+  const deadline = Date.now() + 45_000;
 
-  // Fetch holdings sequentially with light concurrency to limit RPC
+  // Fetch holdings with light concurrency (was fully sequential → easy 20s+ client abort)
   const holdingsByWallet = new Map<string, InfluencerTokenSnap[]>();
-  for (const w of wallets) {
-    holdingsByWallet.set(w.address, await getWalletHoldingsCached(w.address));
+  const concurrency = 3;
+  let cursor = 0;
+  async function holdingsWorker(): Promise<void> {
+    while (cursor < wallets.length) {
+      const i = cursor++;
+      const w = wallets[i]!;
+      if (Date.now() > deadline) {
+        holdingsByWallet.set(w.address, []);
+        continue;
+      }
+      holdingsByWallet.set(w.address, await getWalletHoldingsCached(w.address));
+    }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, Math.max(wallets.length, 1)) }, () =>
+      holdingsWorker()
+    )
+  );
 
   // Cross-hold map
   const mintHolders = new Map<string, Set<string>>();
@@ -683,7 +700,7 @@ export async function buildSmartMirrorWatchlist(opts?: {
     }
   }
 
-  // Enrich top mints with metrics (best-effort, capped)
+  // Enrich top mints with metrics (best-effort, capped + deadline)
   const uniqueMints = [...mintHolders.keys()].slice(0, 40);
   const metricsMap = new Map<
     string,
@@ -694,7 +711,7 @@ export async function buildSmartMirrorWatchlist(opts?: {
       require('./tokenMetrics') as typeof import('./tokenMetrics');
     let n = 0;
     for (const mint of uniqueMints) {
-      if (n >= 20) break;
+      if (n >= 20 || Date.now() > deadline) break;
       n++;
       try {
         const raw = await fetchTokenMetrics(mint);
