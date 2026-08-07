@@ -13,6 +13,7 @@ export const BOT_INFO_SECTION_IDS = [
   'risk',
   'microbots',
   'learning',
+  'tradecraft',
   'coaches',
   'scanners',
   'execution',
@@ -41,6 +42,16 @@ export interface BotInfoChangelogEntry {
  * Newest first. Keep ~10–14 recent patches; older history can be trimmed.
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
+  {
+    version: '1.2.216',
+    title: 'Trade Craft manual + soft craft learning',
+    sections: ['tradecraft', 'learning', 'coaches', 'lifecycle'],
+    items: [
+      'New Bot Info Trade Craft chapter: easy scorecard, deep trait→film manual, trade/learn workflow SVGs, live Combined craft example, operator checklist.',
+      'Bot Info polish: sticky chip nav under tabs, higher section scroll-margin, lifecycle 2-col mid breakpoint and less 3D/vertical waste.',
+      'Self-Learn soft-aligns Timing/PPP/PCL candidates from Harvest/Exits craft deltas (±4); PPP shadow + ML patch features + ML-led PCL candidates.',
+    ],
+  },
   {
     version: '1.2.215',
     title: 'Trade Craft Progress script fix',

@@ -32,7 +32,7 @@ export const BOT_INFO_CSS = `
       margin: 0.35rem 0 0; font-size: 0.875rem; color: #94a3b8; line-height: 1.5; max-width: 42rem;
     }
     .botinfo-subnav {
-      position: sticky; top: 0; z-index: 20;
+      position: sticky; top: 3rem; z-index: 20;
       display: flex; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch;
       padding: 0.5rem 0 0.65rem; margin: 0 0 0.75rem;
       background: linear-gradient(180deg, var(--bg) 70%, transparent);
@@ -89,7 +89,7 @@ export const BOT_INFO_CSS = `
     .botinfo-card {
       background: #1e293b; border: 1px solid #334155; border-radius: 12px;
       padding: 1rem 1.1rem 1.15rem; margin-bottom: 0.85rem;
-      scroll-margin-top: 3.25rem;
+      scroll-margin-top: 6rem;
     }
     .botinfo-card h3 {
       margin: 0 0 0.45rem; font-size: 1rem; font-weight: 700; color: #f8fafc;
@@ -221,13 +221,14 @@ export const BOT_INFO_CSS = `
     .botinfo-svg-wrap svg { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto; }
     .botinfo-svg-wrap.botinfo-lifecycle-iso svg { max-width: 920px; }
     .botinfo-hero-img {
-      display: block; width: 100%; max-width: 920px; height: auto; margin: 0.35rem 0 0.85rem;
+      display: block; width: 100%; max-width: 920px; max-height: 280px; height: auto;
+      margin: 0.25rem 0 0.55rem; object-fit: cover; object-position: center top;
       border-radius: 12px; border: 1px solid #334155; background: #0f172a;
       box-shadow: 0 12px 28px -18px rgba(0,0,0,0.75), 0 0 0 1px rgba(6,78,59,0.25);
     }
     .botinfo-lifecycle-stages {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
-      gap: 0.65rem; margin: 0.75rem 0 0.85rem;
+      gap: 0.65rem; margin: 0.55rem 0 0.65rem;
       perspective: 900px;
     }
     .botinfo-lifecycle-stage {
@@ -245,6 +246,34 @@ export const BOT_INFO_CSS = `
       transform: rotateX(0deg) translateY(-2px);
       border-color: #05966988;
     }
+    .botinfo-craft-live {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+      gap: 0.45rem; margin: 0.45rem 0 0.35rem;
+    }
+    .botinfo-craft-kpi {
+      padding: 0.45rem 0.5rem; border-radius: 8px; background: #0f172a; border: 1px solid #334155;
+    }
+    .botinfo-craft-kpi .k {
+      display: block; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em;
+      text-transform: uppercase; color: #64748b; margin-bottom: 0.15rem;
+    }
+    .botinfo-craft-kpi .v {
+      display: block; font-size: 0.88rem; font-weight: 700; color: #e2e8f0; font-variant-numeric: tabular-nums;
+    }
+    .botinfo-craft-kpi .v.up { color: #34d399; }
+    .botinfo-craft-kpi .v.down { color: #f87171; }
+    .botinfo-traits-table {
+      width: 100%; border-collapse: collapse; margin: 0.45rem 0 0.65rem;
+      font-size: 0.74rem; color: #94a3b8;
+    }
+    .botinfo-traits-table th, .botinfo-traits-table td {
+      text-align: left; padding: 0.4rem 0.45rem; border-bottom: 1px solid #1e293b; vertical-align: top;
+    }
+    .botinfo-traits-table th {
+      color: #cbd5e1; font-weight: 700; background: #0f172a; position: sticky; top: 0;
+    }
+    .botinfo-traits-table td strong { color: #e2e8f0; }
+    .botinfo-traits-wrap { overflow-x: auto; margin: 0.35rem 0 0.55rem; }
     .botinfo-lifecycle-stage .bi-ico {
       width: 2.1rem; height: 2.1rem; margin-bottom: 0.45rem;
       border-radius: 8px; background: #064e3b44; border: 1px solid #065f4644;
@@ -265,16 +294,28 @@ export const BOT_INFO_CSS = `
       margin: 0.45rem 0 0; font-size: 0.72rem; color: #a7f3d0; line-height: 1.4;
       padding-top: 0.4rem; border-top: 1px dashed #334155;
     }
+    @media (max-width: 900px) {
+      .botinfo-lifecycle-stages {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        perspective: none;
+      }
+      .botinfo-lifecycle-stage { transform: none; }
+      .botinfo-lifecycle-stage:hover { transform: translateY(-1px); }
+      .botinfo-hero-img { max-height: 220px; }
+      .botinfo-svg-wrap.botinfo-lifecycle-iso svg { max-height: 200px; }
+    }
     @media (max-width: 640px) {
       .botinfo-modes { grid-template-columns: 1fr; }
       .botinfo-durability { grid-template-columns: 1fr; }
       .botinfo-flow-arrow { display: none; }
       .botinfo-flow-step { flex: 1 1 calc(50% - 0.4rem); }
       .botinfo-matrix .hide-sm { display: none; }
-      .botinfo-card { padding: 0.85rem 0.8rem; scroll-margin-top: 3.5rem; }
+      .botinfo-card { padding: 0.85rem 0.8rem; scroll-margin-top: 6.5rem; }
       .botinfo-hero h2 { font-size: 1.05rem; }
+      .botinfo-subnav { top: 2.75rem; }
       .botinfo-lifecycle-stages { grid-template-columns: 1fr; }
       .botinfo-lifecycle-stage { transform: none; }
+      .botinfo-hero-img { max-height: 180px; }
     }
 `;
 
@@ -286,6 +327,7 @@ const SECTIONS: { id: string; label: string }[] = [
   { id: 'risk', label: 'Risk & Modules' },
   { id: 'microbots', label: 'Micro Bots' },
   { id: 'learning', label: 'Learning & ML' },
+  { id: 'tradecraft', label: 'Trade Craft' },
   { id: 'coaches', label: 'Coaches & Stack' },
   { id: 'scanners', label: 'Scanners' },
   { id: 'execution', label: 'Execution' },
@@ -524,7 +566,7 @@ function lifecycleIsoSvg(): string {
     })
     .join('');
   return `<div class="botinfo-svg-wrap botinfo-lifecycle-iso" role="img" aria-label="Trading bot lifecycle from signal to learn">
-        <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
+        <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg" style="max-height:220px">
           <defs>
             <linearGradient id="lcBg" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stop-color="#064e3b"/>
@@ -543,6 +585,125 @@ function lifecycleIsoSvg(): string {
           <text x="86" y="136" fill="#64748b" font-size="9" font-family="system-ui,sans-serif">continues →</text>
         </svg>
       </div>`;
+}
+
+/** Trade path: open → manage → partial → close → episode+CF → craft. */
+function tradeCraftTradePathSvg(): string {
+  const steps = [
+    ['Open', 'Stamps'],
+    ['Manage', 'HWM · PPP · PCL'],
+    ['Partial', 'No episode'],
+    ['Close', 'Final exit'],
+    ['Episode', '+ CF film'],
+    ['Craft', 'Aggregate'],
+  ];
+  const boxes = steps
+    .map(([k, v], i) => {
+      const x = 18 + i * 105;
+      return `<rect x="${x}" y="42" width="92" height="52" rx="8" fill="#1e293b" stroke="${i === 5 ? '#059669' : '#334155'}"/>
+        <text x="${x + 46}" y="64" text-anchor="middle" fill="#34d399" font-size="11" font-family="system-ui,sans-serif" font-weight="700">${esc(k)}</text>
+        <text x="${x + 46}" y="80" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="system-ui,sans-serif">${esc(v)}</text>`;
+    })
+    .join('');
+  const arrows = [0, 1, 2, 3, 4]
+    .map((i) => {
+      const x1 = 18 + i * 105 + 92;
+      return `<path d="M${x1} 68 H${x1 + 12}" stroke="#475569" stroke-width="2" marker-end="url(#tcTradeArr)"/>`;
+    })
+    .join('');
+  return `<div class="botinfo-svg-wrap" role="img" aria-label="Trade craft trade path from open to craft">
+        <svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tcTradeArr" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L5,3 L0,6 Z" fill="#64748b"/>
+            </marker>
+          </defs>
+          <rect width="640" height="120" rx="12" fill="#0b1220"/>
+          <text x="18" y="26" fill="#a7f3d0" font-size="12" font-family="system-ui,sans-serif" font-weight="700">Trade path — film into craft</text>
+          ${boxes}${arrows}
+        </svg>
+      </div>`;
+}
+
+/** Learn path: episode → self-learn → soft craft boost → apply → next trade → craft re-reads. */
+function tradeCraftLearnPathSvg(): string {
+  const steps = [
+    ['Episode', 'Same film'],
+    ['Self-Learn', 'PPP · PCL micro'],
+    ['Craft soft', 'Boost / penalize'],
+    ['Apply', 'Micro / Level'],
+    ['Next trade', 'New knobs'],
+    ['Re-read', 'Craft again'],
+  ];
+  const boxes = steps
+    .map(([k, v], i) => {
+      const x = 18 + i * 105;
+      return `<rect x="${x}" y="42" width="92" height="52" rx="8" fill="#1e293b" stroke="${i === 2 ? '#059669' : '#334155'}"/>
+        <text x="${x + 46}" y="64" text-anchor="middle" fill="#34d399" font-size="11" font-family="system-ui,sans-serif" font-weight="700">${esc(k)}</text>
+        <text x="${x + 46}" y="80" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="system-ui,sans-serif">${esc(v)}</text>`;
+    })
+    .join('');
+  const arrows = [0, 1, 2, 3, 4]
+    .map((i) => {
+      const x1 = 18 + i * 105 + 92;
+      return `<path d="M${x1} 68 H${x1 + 12}" stroke="#475569" stroke-width="2" marker-end="url(#tcLearnArr)"/>`;
+    })
+    .join('');
+  return `<div class="botinfo-svg-wrap" role="img" aria-label="Trade craft learn path with soft craft boost">
+        <svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="tcLearnArr" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L5,3 L0,6 Z" fill="#64748b"/>
+            </marker>
+          </defs>
+          <rect width="640" height="120" rx="12" fill="#0b1220"/>
+          <text x="18" y="26" fill="#a7f3d0" font-size="12" font-family="system-ui,sans-serif" font-weight="700">Learn path — soft craft alignment</text>
+          ${boxes}${arrows}
+        </svg>
+      </div>`;
+}
+
+function tradeCraftLiveSlotHtml(): string {
+  let craft: import('./tradeCraftPerformance').TradeCraftPerformance | null = null;
+  try {
+    const mod =
+      require('./tradeCraftPerformance') as typeof import('./tradeCraftPerformance');
+    craft = mod.buildTradeCraftPerformance('all', 50);
+  } catch {
+    craft = null;
+  }
+  const fmt = (n: number | null | undefined, dig = 0): string =>
+    n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toFixed(dig);
+  const trend = craft?.trend ? String(craft.trend).toUpperCase() : '—';
+  const trendCls =
+    craft?.trend === 'improving' ? 'up' : craft?.trend === 'declining' ? 'down' : '';
+  const traits = craft?.traits || [];
+  const ranked = [...traits]
+    .filter((t) => t.score != null)
+    .sort((a, b) => Number(b.score) - Number(a.score));
+  const top = ranked[0];
+  const bottom = ranked[ranked.length - 1];
+  const harvest = traits.find((t) => t.id === 'harvest');
+  const capture =
+    harvest?.kpis?.capturePct != null ? String(harvest.kpis.capturePct) : '—';
+  const learnLine =
+    craft?.trend === 'declining'
+      ? 'Harvest/Exits soft-boost Self-Learn tighten candidates when early→late slips ≥4.'
+      : craft?.trend === 'improving'
+        ? 'Improving craft soft-reinforces matching Timing/PPP/PCL micro nudges — not a hard Level score.'
+        : 'Craft is diagnostics-only; Self-Learn soft-aligns when Harvest/Exits early→late moves ±4+.';
+  return `<div class="botinfo-callout" id="botinfo-tradecraft-live" data-botinfo-craft-live="1">
+          <strong>Live example (Combined · last ${esc(String(craft?.window || 50))} closes):</strong>
+          <div class="botinfo-craft-live">
+            <div class="botinfo-craft-kpi"><span class="k">Craft</span><span class="v" data-craft-kpi="score">${esc(fmt(craft?.craftScore, 1))}</span></div>
+            <div class="botinfo-craft-kpi"><span class="k">Trend</span><span class="v ${trendCls}" data-craft-kpi="trend">${esc(trend)}</span></div>
+            <div class="botinfo-craft-kpi"><span class="k">Top trait</span><span class="v" data-craft-kpi="top">${esc(top ? `${top.label} ${fmt(top.score, 0)}` : '—')}</span></div>
+            <div class="botinfo-craft-kpi"><span class="k">Bottom</span><span class="v" data-craft-kpi="bottom">${esc(bottom ? `${bottom.label} ${fmt(bottom.score, 0)}` : '—')}</span></div>
+            <div class="botinfo-craft-kpi"><span class="k">Capture %</span><span class="v" data-craft-kpi="capture">${esc(capture)}</span></div>
+            <div class="botinfo-craft-kpi"><span class="k">PCL</span><span class="v" data-craft-kpi="pcl">${esc(craft?.pclEnabled ? 'ON' : 'OFF')}</span></div>
+          </div>
+          <span data-craft-kpi="learn">${esc(learnLine)}</span>
+        </div>`;
 }
 
 /**
@@ -574,6 +735,9 @@ export function buildBotInfoPanelHtml(
     durabilityCards: durabilityCards(),
     overviewSvg: overviewSvg(),
     lifecycleSvg: lifecycleIsoSvg(),
+    tradeCraftTradeSvg: tradeCraftTradePathSvg(),
+    tradeCraftLearnSvg: tradeCraftLearnPathSvg(),
+    tradeCraftLive: tradeCraftLiveSlotHtml(),
     pipelineFlow: pipelineFlow(),
     whatsNew: whatsNewBlock(),
     openBtn,

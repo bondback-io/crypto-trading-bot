@@ -572,6 +572,76 @@ function trendFromDelta(delta: number | null, n: number): CraftTrendLabel {
   return 'stable';
 }
 
+/** Pure trait scores for a closed-episode window (also used by Self-Learn soft craft boost). */
+export function buildCraftTraits(eps: ProfileLearningEpisode[]): {
+  traits: TraitScore[];
+  exitMix: ExitMixBucket[];
+} {
+  return buildTraits(eps);
+}
+
+/**
+ * Lightweight craft deltas for Self-Learn ranking (no chart/film).
+ * Bounded soft hints only — never a hard Level objective.
+ */
+export function craftLearningHints(
+  episodes: ProfileLearningEpisode[]
+): {
+  n: number;
+  craftScore: number | null;
+  craftDelta: number | null;
+  trend: CraftTrendLabel;
+  harvestDelta: number | null;
+  exitsDelta: number | null;
+  harvestScore: number | null;
+  exitsScore: number | null;
+  summary: string;
+} {
+  const eps = episodes.slice(-Math.min(100, Math.max(episodes.length, 0)));
+  if (eps.length < 4) {
+    return {
+      n: eps.length,
+      craftScore: null,
+      craftDelta: null,
+      trend: 'stable',
+      harvestDelta: null,
+      exitsDelta: null,
+      harvestScore: null,
+      exitsScore: null,
+      summary: '',
+    };
+  }
+  const { traits } = buildTraits(eps);
+  const craftScore = blendCraft(traits);
+  const { early, late } = halfSplit(eps);
+  const earlyCraft = blendCraft(buildTraits(early).traits);
+  const lateCraft = blendCraft(buildTraits(late).traits);
+  const craftDelta =
+    earlyCraft != null && lateCraft != null
+      ? Math.round((lateCraft - earlyCraft) * 10) / 10
+      : null;
+  const trend = trendFromDelta(craftDelta, eps.length);
+  const harvest = traits.find((t) => t.id === 'harvest');
+  const exits = traits.find((t) => t.id === 'exits');
+  const bits: string[] = [];
+  if (craftScore != null) bits.push(`craft ${craftScore}`);
+  if (craftDelta != null) bits.push(`Δ${craftDelta >= 0 ? '+' : ''}${craftDelta}`);
+  bits.push(String(trend).toUpperCase());
+  if (harvest?.delta != null) bits.push(`harvest ${harvest.delta >= 0 ? '+' : ''}${harvest.delta}`);
+  if (exits?.delta != null) bits.push(`exits ${exits.delta >= 0 ? '+' : ''}${exits.delta}`);
+  return {
+    n: eps.length,
+    craftScore,
+    craftDelta,
+    trend,
+    harvestDelta: harvest?.delta ?? null,
+    exitsDelta: exits?.delta ?? null,
+    harvestScore: harvest?.score ?? null,
+    exitsScore: exits?.score ?? null,
+    summary: bits.length ? `Craft ${bits.join(' · ')}` : '',
+  };
+}
+
 function buildTraits(eps: ProfileLearningEpisode[]): {
   traits: TraitScore[];
   exitMix: ExitMixBucket[];

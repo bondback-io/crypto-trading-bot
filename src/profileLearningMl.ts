@@ -90,6 +90,12 @@ const FEATURE_NAMES = [
   'perm_exit_share',
   'scratch_block_share',
   'deferred_arm_share',
+  // PPP / PCL patch slots (append-only for model fail-open)
+  'patch_ppp_arm_delta',
+  'patch_ppp_giveback_delta',
+  'patch_pcl_perm_delta',
+  'patch_pcl_early_partial_delta',
+  'patch_has_pcl',
 ] as const;
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -224,6 +230,12 @@ export function buildWindowFeatures(
     permExitShare,
     scratchBlockShare,
     deferredArmShare,
+    // PPP/PCL patch slots — filled by buildPatchFeatures
+    0,
+    0,
+    0,
+    0,
+    0,
   ];
 }
 
@@ -237,6 +249,8 @@ export function buildPatchFeatures(
     earlyPartialTpPct?: number;
     minConviction?: number;
     hardTimeLimitSecMax?: number;
+    peakProtectArmOfTpPct?: number;
+    peakProtectGivebackOfPeakPct?: number;
   }
 ): number[] {
   const base = buildWindowFeatures(episodes);
@@ -246,6 +260,8 @@ export function buildPatchFeatures(
   const partCur = safeNum(current?.earlyPartialTpPct, 15);
   const convCur = safeNum(current?.minConviction, 40);
   const timerCur = safeNum(current?.hardTimeLimitSecMax, 300);
+  const pppArmCur = safeNum(current?.peakProtectArmOfTpPct, 50);
+  const pppGiveCur = safeNum(current?.peakProtectGivebackOfPeakPct, 33);
 
   const giveNext =
     ep.profitGivebackPts != null ? Number(ep.profitGivebackPts) : giveCur;
@@ -261,6 +277,21 @@ export function buildPatchFeatures(
     patch.exitRules?.hardTimeLimitSecMax != null
       ? Number(patch.exitRules.hardTimeLimitSecMax)
       : timerCur;
+  const pppArmNext =
+    ep.peakProtectArmOfTpPct != null
+      ? Number(ep.peakProtectArmOfTpPct)
+      : pppArmCur;
+  const pppGiveNext =
+    ep.peakProtectGivebackOfPeakPct != null
+      ? Number(ep.peakProtectGivebackOfPeakPct)
+      : pppGiveCur;
+  const pcl = patch.pclFamilyOverride;
+  const pclPermNext =
+    pcl?.permissionSec != null ? Number(pcl.permissionSec) : 60;
+  const pclPartNext =
+    pcl?.earlyPartialTpPct != null
+      ? Number(pcl.earlyPartialTpPct)
+      : partCur;
 
   // indices 12..18 are patch slots in buildWindowFeatures (11 = ha_enabled_share)
   base[12] = (giveCur - giveNext) / 10; // tighten giveback → positive
@@ -270,6 +301,14 @@ export function buildPatchFeatures(
   base[16] = (timerCur - timerNext) / 120;
   base[17] = patch.exitRules ? 1 : 0;
   base[18] = patch.match ? 1 : 0;
+  // Append PPP / PCL patch features (fail-open for older shorter weight vectors)
+  while (base.length < FEATURE_NAMES.length - 1) base.push(0);
+  base[28] = (pppArmCur - pppArmNext) / 20;
+  base[29] = (pppGiveCur - pppGiveNext) / 20;
+  base[30] = pcl?.permissionSec != null ? (pclPermNext - 60) / 60 : 0;
+  base[31] =
+    pcl?.earlyPartialTpPct != null ? (partCur - pclPartNext) / 10 : 0;
+  base[32] = pcl ? 1 : 0;
   return base;
 }
 
@@ -693,7 +732,97 @@ export function buildMlLedCandidates(
       patch: { exitRules: { hardTimeLimitSecMax: next } },
     });
   }
-  return out.slice(0, 4);
+
+  // PCL permission / early-partial when film supports (align with Timing candidates)
+  const n = episodes.length;
+  const permExitRate =
+    episodes.filter((e) => e.exitedDuringPermission === true).length / n;
+  const scratchBlocked =
+    episodes.reduce((s, e) => s + (Number(e.pclScratchBlockedCount) || 0), 0) /
+    n;
+  const familyCounts: Record<string, number> = {
+    fast: 0,
+    dip_trend: 0,
+    quality: 0,
+    default: 0,
+  };
+  for (const e of episodes) {
+    const f = e.pclFamily || 'default';
+    if (f in familyCounts) familyCounts[f]! += 1;
+  }
+  const dominantFamily = (
+    Object.entries(familyCounts).sort((a, b) => b[1] - a[1])[0] || [
+      'default',
+      0,
+    ]
+  )[0] as 'fast' | 'dip_trend' | 'quality' | 'default';
+  if (
+    (permExitRate >= 0.18 || scratchBlocked >= 0.4) &&
+    dominantFamily !== 'default'
+  ) {
+    const basePerm =
+      dominantFamily === 'fast'
+        ? 35
+        : dominantFamily === 'dip_trend'
+          ? 120
+          : dominantFamily === 'quality'
+            ? 90
+            : 60;
+    const nextPerm = clamp(Math.round(basePerm * 1.1), 20, 180);
+    out.push({
+      summary: `ML-led: lengthen PCL ${dominantFamily} permission → ${nextPerm}s`,
+      patch: {
+        pclFamilyOverride: {
+          family: dominantFamily,
+          permissionSec: nextPerm,
+        },
+      },
+    });
+  }
+  const skipPartialRate =
+    episodes.filter((e) => e.cfSkipPartialBetter === true).length / n;
+  const partialRate =
+    episodes.filter((e) => e.pclPartialTaken === true).length / n;
+  if (
+    skipPartialRate >= 0.15 ||
+    (partialRate >= 0.25 &&
+      episodes.filter(
+        (e) =>
+          e.pclPartialTaken === true &&
+          (e.pclPostPartialMfePct == null || Number(e.pclPostPartialMfePct) < 2)
+      ).length /
+        Math.max(
+          1,
+          episodes.filter((e) => e.pclPartialTaken === true).length
+        ) >=
+        0.35)
+  ) {
+    const nextPartial = clamp(
+      Math.round(current.earlyPartialTpPct * 1.08),
+      8,
+      60
+    );
+    if (nextPartial !== Math.round(current.earlyPartialTpPct)) {
+      out.push({
+        summary: `ML-led: delay early partial → ${nextPartial}%`,
+        patch: {
+          exitRules: {
+            exitPolicy: { earlyPartialTpPct: nextPartial },
+          },
+          ...(dominantFamily !== 'default'
+            ? {
+                pclFamilyOverride: {
+                  family: dominantFamily as 'fast' | 'dip_trend' | 'quality',
+                  earlyPartialTpPct: nextPartial,
+                },
+              }
+            : {}),
+        },
+      });
+    }
+  }
+
+  return out.slice(0, 6);
 }
 
 /** Holdout gate: score candidate on last 25% of episodes. */

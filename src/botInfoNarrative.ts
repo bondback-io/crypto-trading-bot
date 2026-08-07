@@ -20,6 +20,9 @@ export interface BotInfoSlots {
   durabilityCards: string;
   overviewSvg: string;
   lifecycleSvg: string;
+  tradeCraftTradeSvg: string;
+  tradeCraftLearnSvg: string;
+  tradeCraftLive: string;
   pipelineFlow: string;
   whatsNew?: string;
   openBtn: (tab: string, label: string) => string;
@@ -277,7 +280,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <div class="botinfo-flow-step"><span class="k">4. PPP</span><span class="v">Protect peak</span></div>
         </div>
         <div class="botinfo-callout"><strong>Live example:</strong> Scalper catches a hot mint. For ~35s PCL says “don’t scratch +1.5% yet.” Price runs; PCL banks ~half near the early partial, leaves a runner, then Peak Protect watches the peak. Hard SL still cuts a real dump immediately.</div>
-        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → <em>Profit Capture Layer</em> card (directly under Peak Protect). Open-trade rows show permission / partial / PPP lines. Zion comments when PCL is active. Learning strength + family permission seconds are on that same card. <strong>Progress:</strong> Bot Performance → <em>Trade Craft Progress</em> (Harvest tab + Combined).</p>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → <em>Profit Capture Layer</em> card (directly under Peak Protect). Open-trade rows show permission / partial / PPP lines. Zion comments when PCL is active. Learning strength + family permission seconds are on that same card. <strong>Progress:</strong> Bot Performance → <em>Trade Craft Progress</em> (Harvest tab + Combined) · full guide in <a href="#botinfo-sec-tradecraft" onclick="showBotInfoSection('tradecraft'); return false;">Trade Craft</a>.</p>
 
         <div class="botinfo-actions">
           ${btn('settings', 'Open Settings')}
@@ -337,18 +340,76 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li>Learning data lives under DATA_DIR; inspect the journal on the Back Up tab. Ephemeral disks lose progress on deploy.</li>
           <li><strong>Learning Mode (global)</strong> softens conviction / wallet-quality / cluster / some MC floors and raises throughput — it does <em>not</em> bypass Require TA setup, anti-rug floors, daily-loss halts, or disabled profiles. Scalper scanner entries are exempt from Require TA when that lane wins. Trend Rider / Steady Compounder <em>specialty</em> Jupiter/KOL handoffs also bypass Require TA and Pump.fun-only (lane floors still apply).</li>
           <li><strong>PCL learning reshape</strong> — when Profit Capture Layer is ON, episode timing rewards boost good MFE capture / meaningful partials and penalize tiny green scratches (scaled by Learning strength). Entry <em>quality stamp</em> also stretches permission windows and can block scratchy exits. Does not invent new knobs — reshapes how film scores exits.</li>
-          <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, Peak Protect, and PCL fit together (priority, defaults, activation checklist) lives in the next chapter: <em>Coaches &amp; Stack</em>.</li>
+          <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, Peak Protect, and PCL fit together (priority, defaults, activation checklist) lives in <em>Coaches &amp; Stack</em>. Scorecard of harvest / exits / TA craft: <a href="#botinfo-sec-tradecraft" onclick="showBotInfoSection('tradecraft'); return false;">Trade Craft</a>.</li>
         </ul>
         <div class="botinfo-callout"><strong>Live example:</strong> Two closes both finish +2%. One scratched immediately; one banked a partial then trailed the runner. With PCL reshape ON, the second episode “looks smarter” to learning — the first gets a tiny-scratch penalty — so future upgrades favor harvest habits, not panic taps.</div>
-        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Learning strength on the <em>Profit Capture Layer</em> card · Back Up → learning journal · Bot Performance → Learning Progress + <em>Trade Craft Progress</em>.</p>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Learning strength on the <em>Profit Capture Layer</em> card · Back Up → learning journal · Bot Performance → Learning Progress + <em>Trade Craft Progress</em> · manual chapter <a href="#botinfo-sec-tradecraft" onclick="showBotInfoSection('tradecraft'); return false;">Trade Craft</a>.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open learning controls')}
           ${btn('backup', 'Open learning journal')}
         </div>
       </article>
 
+      <article class="botinfo-card" id="botinfo-sec-tradecraft" data-botinfo-section="tradecraft">
+        <h3><span class="botinfo-sec-num">07</span> Trade Craft</h3>
+        <p>Trade Craft is a <strong>scorecard of recent closes</strong> — the same episode “game film” Self-Learn already uses, re-scored into harvest / hold / profit / exit / TA / decision skills. It is <strong>diagnostics only</strong>: it does not change strategy, TP/SL, or lane rules by itself. Self-Learn may soft-align Timing/PPP/PCL micro candidates when Harvest or Exits early→late move ±4 or more.</p>
+
+        <p class="mint" style="margin:0 0 0.45rem"><strong>Easy version</strong></p>
+        <ul>
+          <li><strong>Seven traits</strong> — Harvest (PCL capture vs scratch), Holding time, Profit-taking, Profit improvement, Exit efficiency, TA craft, Decision stack.</li>
+          <li><strong>Combined</strong> pools all micro-bots; pick a profile to isolate one lane. Window 20 / 50 / 100 = how many recent closes feed the score.</li>
+          <li><strong>Early → late</strong> splits the window in half. <code>STABLE</code> / <code>IMPROVING</code> / <code>DECLINING</code> comes from craft delta (~±4 points).</li>
+          <li>Craft never invents knobs. Tip: open Bot Performance → <em>Trade Craft Progress</em> for charts + film table.</li>
+        </ul>
+        <div class="botinfo-callout"><strong>Plain language:</strong> Think report card after the game — not a new playbook. Coaches still propose the tweaks; Craft tells you whether harvest and exits are getting cleaner.</div>
+
+        <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Deep manual — traits → film fields</strong></p>
+        <div class="botinfo-traits-wrap">
+          <table class="botinfo-traits-table">
+            <thead>
+              <tr><th>Trait</th><th>Watches</th><th>Episode / film fields</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Harvest (PCL)</strong></td><td>MFE capture, giveback, scratchy greens, partials, timing reward</td><td><code>mfeCaptureRatio</code> · <code>givebackFromPeakPct</code> · <code>pclPartialTaken</code> · <code>timingReward</code></td></tr>
+              <tr><td><strong>Holding time</strong></td><td>Win vs loss hold, premature exits</td><td><code>holdSec</code> · peak vs capture on short holds</td></tr>
+              <tr><td><strong>Profit-taking</strong></td><td>Exit quality, partials, left-on-table, PPP beat rate</td><td><code>exitQualityScore</code> · <code>peakProtectBeatFullTp</code> · max runup vs exit</td></tr>
+              <tr><td><strong>Profit improve</strong></td><td>Avg PnL, win rate, timing</td><td><code>pnlPct</code> · <code>timingReward</code></td></tr>
+              <tr><td><strong>Exits</strong></td><td>Hard SL vs soft/scared, quick SL, CF wider-SL survive</td><td><code>exitKey</code> · <code>cfSlWiderWouldSurvive</code></td></tr>
+              <tr><td><strong>TA craft</strong></td><td>Confluence, tool pass, held into profit</td><td><code>taModeAtOpen</code> · <code>taConfluenceAtEntry</code> · TA tool stamps</td></tr>
+              <tr><td><strong>Decisions</strong></td><td>Entry quality, conviction, HMC, <strong>CF peak gap</strong></td><td><code>entryQualityScore</code> · <code>hmcConfidence</code> · <code>cfActualVsPeakGapPct</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>Film columns also show PPP arm timing, near-miss, permission exits, PCL family, and CF preference flags (<code>cfTighterPppBetter</code>, <code>cfLooserPppBetter</code>, <code>cfLaterArmBetter</code>, <code>cfSkipPartialBetter</code>).</li>
+          <li>Naming: use <strong>PCL</strong> (Profit Capture Layer) and <strong>CF peak gap</strong> — not “PCI”.</li>
+          <li><code>pclFamilyOverride</code> from Self-Learn is <em>family-global</em> (fast / dip_trend / quality), not a full per-profile PCL rewrite.</li>
+        </ul>
+
+        <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Workflows</strong></p>
+        ${slots.tradeCraftTradeSvg}
+        ${slots.tradeCraftLearnSvg}
+
+        ${slots.tradeCraftLive}
+
+        <p class="mint" style="margin:0.75rem 0 0.45rem"><strong>Operator checklist</strong></p>
+        <ul>
+          <li>Self-learn ON + Mode <code>auto</code> if you want micro/Level applies.</li>
+          <li>Enable Learning Accelerators + CF apply hints when you want counterfactual preferences to steer soft ranks.</li>
+          <li>Enable Profile RL if you want personal harvest soft coaching.</li>
+          <li>Toggle <em>Live Mode Learning</em> only when intentionally training on Live (default OFF).</li>
+          <li>Verify Harvest / Exits early→late on Bot Performance → Trade Craft Progress (Combined or per bot).</li>
+        </ul>
+        <p class="botinfo-where"><strong>Where to find:</strong> Bot Performance → <em>Trade Craft Progress</em> · Micro Bots → Peak Protect + Profit Capture Layer · Learning journal on Back Up · related chapters <em>Learning &amp; ML</em>, <em>Coaches &amp; Stack</em>, <em>Risk</em>.</p>
+        <div class="botinfo-actions">
+          ${btn('botperf', 'Open Trade Craft Progress')}
+          ${btn('microbots', 'Open PPP / PCL')}
+          ${btn('backup', 'Open learning journal')}
+        </div>
+      </article>
+
       <article class="botinfo-card" id="botinfo-sec-coaches" data-botinfo-section="coaches">
-        <h3><span class="botinfo-sec-num">07</span> Coaches &amp; learning stack</h3>
+        <h3><span class="botinfo-sec-num">08</span> Coaches &amp; learning stack</h3>
         <p>Every micro-bot can grow from closed trades with a layered coach stack. Layers are <strong>additive</strong>: safety wins first, stamped TP/SL stay hard, then soft coaches nudge ranking, size, TA, and learning signals. They are designed to support each other — not rewrite each other’s cores.</p>
         <div class="botinfo-callout"><strong>Isolation:</strong> each profile keeps its own episodes, self-learn overrides, ML model, TA playbook weights, and Profile RL agent. <strong>MARL</strong> is the shared team coach (per-profile preference weights in one team state) — not a clone of any bot’s private memory.</div>
 
@@ -465,7 +526,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         </ul>
 
         <div class="botinfo-callout"><strong>Activation checklist:</strong> Self-learn ON + Mode <code>auto</code> · ≥8 episodes per bot · Smart Bot Profiles ON · enable MARL / Profile RL if you want live coaching · review HMC Gatekeeper / Classifier · enable Peak Protect + PCL for harvest · enable Accelerators (+ CF apply hints if desired) · clear Global TP if exit evolution should run · review Require TA if scanners never open. Then more closed trades are what grow readiness, Level, and win quality.</div>
-        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Profit-protection learning film → Self-Learn / ML / RL:</strong> closed trades stamp denser PPP/PCL process fields (arm timing, near-miss, partial milestones, permission exits, CF looser/later/skip-partial). Self-Learn + ML nudge arm/giveback / permission / early partial on the exit-policy <em>micro</em> path; Profile RL rewards harvest outcomes and biases exit aggressiveness; MARL may soft-rank by avg capture/giveback only (never writes PPP). <strong>Checklist:</strong> Self-learn Mode <code>auto</code> · enable Profile RL / Accelerators (+ CF apply hints) for harvest · toggle Live Mode Learning only if training on Live (default OFF) · use Bot Performance → Trade Craft Progress to verify early→late Harvest/Exits improving.</p>
+        <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Profit-protection learning film → Self-Learn / ML / RL:</strong> closed trades stamp denser PPP/PCL process fields (arm timing, near-miss, partial milestones, permission exits, CF looser/later/skip-partial). Self-Learn + ML nudge arm/giveback / permission / early partial on the exit-policy <em>micro</em> path; Profile RL rewards harvest outcomes and biases exit aggressiveness; MARL may soft-rank by avg capture/giveback only (never writes PPP). Soft craft alignment: when Trade Craft Harvest/Exits early→late slips ≥4, matching Timing/PPP/PCL candidates get a bounded soft boost (see <a href="#botinfo-sec-tradecraft" onclick="showBotInfoSection('tradecraft'); return false;">Trade Craft</a>). <strong>Checklist:</strong> Self-learn Mode <code>auto</code> · enable Profile RL / Accelerators (+ CF apply hints) for harvest · toggle Live Mode Learning only if training on Live (default OFF) · use Bot Performance → Trade Craft Progress to verify early→late Harvest/Exits improving.</p>
         <p class="mint" style="margin:0.45rem 0 0.55rem"><strong>Two logs:</strong> Overview / Micro Bots <em>lane fight log</em> = execution &amp; conflict feed (includes HMC Gate / Classifier when present). Bot Performance <em>Agent Decision Log</em> = coach reasoning/advice (HMC Gatekeeper, HMC Classifier, MARL, Profile RL, accelerators, TA, ML, Peak Protect, sparse Zion) — logging only.</p>
         <p class="mint" style="margin:0.45rem 0 0.55rem">Live status: Bot Performance → Learning Progress &amp; System Diagnostics + Agent Decision Log. Controls: Micro Bots → Learning → HMC / Self-Learn / Profile TA / Profile RL / MARL / Accelerators · Peak Protect / PCL cards below.</p>
         <div class="botinfo-actions">
@@ -476,7 +537,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-scanners" data-botinfo-section="scanners">
-        <h3><span class="botinfo-sec-num">08</span> Market scanners &amp; Pump.fun</h3>
+        <h3><span class="botinfo-sec-num">09</span> Market scanners &amp; Pump.fun</h3>
         <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
@@ -489,7 +550,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-execution" data-botinfo-section="execution">
-        <h3><span class="botinfo-sec-num">09</span> Jupiter, RPC &amp; MEV</h3>
+        <h3><span class="botinfo-sec-num">10</span> Jupiter, RPC &amp; MEV</h3>
         <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
         <ul>
           <li><strong>MEV / Jito</strong> — tip bundles and sandwich abort (live only; module <code>mev_protection</code>).</li>
@@ -500,7 +561,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
-        <h3><span class="botinfo-sec-num">10</span> Zion (KOL Token Scanner)</h3>
+        <h3><span class="botinfo-sec-num">11</span> Zion (KOL Token Scanner)</h3>
         <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional auto-send routes can execute top tiers into specialist profiles without changing Zion’s knobs.</p>
         <ul>
           <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR, Auto-send Gold to Smart Money.</li>
@@ -515,7 +576,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-copy" data-botinfo-section="copy">
-        <h3><span class="botinfo-sec-num">11</span> Copy trading &amp; smart wallets</h3>
+        <h3><span class="botinfo-sec-num">12</span> Copy trading &amp; smart wallets</h3>
         <p>The monitor loop polls tracked wallets, scores quality, detects convergence / smart-money flow, then runs the same filter → profile → size path as scanner entries.</p>
         <ul>
           <li><strong>Smart Wallets</strong> — discover via Kolscan, GMGN, Birdeye, Dex, Axiom, Photon, BullX, Nansen, or paste manually.</li>
@@ -526,7 +587,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backtester" data-botinfo-section="backtester">
-        <h3><span class="botinfo-sec-num">12</span> Backtester</h3>
+        <h3><span class="botinfo-sec-num">13</span> Backtester</h3>
         <p>Replay historical launches with Live-Sim-style decisions and exits. Paper-only — no live capital. Compare KPIs to recent Live Sim runs; breakdowns by Risk On/Off and profile.</p>
         <ul>
           <li><strong>Smart Advisor</strong> — shadow proposals from BT results; does not auto-apply to live.</li>
@@ -537,7 +598,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-alerts" data-botinfo-section="alerts">
-        <h3><span class="botinfo-sec-num">13</span> Email &amp; notifications</h3>
+        <h3><span class="botinfo-sec-num">14</span> Email &amp; notifications</h3>
         <p>In-app bell feed plus optional email (Resend or SMTP via env). Events can still log when mail is not configured.</p>
         <ul>
           <li>Low equity, insufficient funds, profitable close, Zion offer / placed.</li>
@@ -551,7 +612,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backup" data-botinfo-section="backup">
-        <h3><span class="botinfo-sec-num">14</span> Backup &amp; persistence</h3>
+        <h3><span class="botinfo-sec-num">15</span> Backup &amp; persistence</h3>
         <p>Settings, wallets, paper balance, profile knobs, learning episodes, and notifications save as JSON under <code>DATA_DIR</code>. Auto-saves on config changes, imports, top-ups, and backtests.</p>
         ${slots.durabilityCards}
         <ul>
@@ -565,7 +626,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-knobs" data-botinfo-section="knobs">
-        <h3><span class="botinfo-sec-num">15</span> High-impact knobs</h3>
+        <h3><span class="botinfo-sec-num">16</span> High-impact knobs</h3>
         <p>Start here before fine-tuning individual micro-bots. Most controls have <code>?</code> tips on the live screens.</p>
         <ul>
           <li><strong>Mode + Risk On/Off</strong> — posture for the whole bot.</li>

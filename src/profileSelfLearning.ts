@@ -754,6 +754,14 @@ export function shadowScoreExitCandidate(
     patch.exitRules?.hardTimeLimitSecMax != null
       ? Number(patch.exitRules.hardTimeLimitSecMax)
       : null;
+  const pppArm =
+    pol.peakProtectArmOfTpPct != null
+      ? Number(pol.peakProtectArmOfTpPct)
+      : null;
+  const pppGive =
+    pol.peakProtectGivebackOfPeakPct != null
+      ? Number(pol.peakProtectGivebackOfPeakPct)
+      : null;
 
   if (episodes.length === 0) return 0;
   let simulated = 0;
@@ -771,6 +779,41 @@ export function shadowScoreExitCandidate(
       const actualGivebackPts = peakPts - (e.exitUnrealizedPct || 0);
       if (actualGivebackPts > giveback + 2) {
         pnl = Math.max(pnl, lockedPts * 0.85);
+      }
+    }
+
+    // Peak Protect arm (% of TP) + giveback (% of peak) — shadow parity with Timing candidates
+    if (pppArm != null && pppGive != null && peak > 0) {
+      const tpProxy = Math.max(peak, Number(e.pnlPct) || 0, 20);
+      const armPct = (pppArm / 100) * tpProxy;
+      if (peak >= armPct * 0.85) {
+        const allowedGive = (pppGive / 100) * peak;
+        const actualGive = Math.max(0, peak - (e.exitUnrealizedPct || pnl));
+        if (actualGive > allowedGive + 1.5) {
+          const locked = Math.max(armPct * 0.5, peak - allowedGive);
+          pnl = Math.max(pnl, locked * 0.8);
+        }
+        if (
+          e.peakProtectNearMiss === true &&
+          pppArm > 40 &&
+          (e.pnlPct || 0) < peak * 0.55
+        ) {
+          // Later/earlier arm hint: mild credit when near-miss film is dense
+          pnl += 0.4;
+        }
+        if (
+          e.peakProtectBeatFullTp === false &&
+          pppGive < 40 &&
+          actualGive > allowedGive
+        ) {
+          pnl += 0.6;
+        }
+      }
+    } else if (pppGive != null && peak > 0 && e.peakProtectArmed === true) {
+      const allowedGive = (pppGive / 100) * peak;
+      const actualGive = Math.max(0, Number(e.givebackFromPeakPct) || 0);
+      if (actualGive > allowedGive + 2) {
+        pnl = Math.max(pnl, (peak - allowedGive) * 0.75);
       }
     }
 
@@ -2195,6 +2238,33 @@ export function runSelfLearnTick(input: {
   }
 
   const softExit = buildSoftExitFeedback(episodes);
+  let craftHints: {
+    harvestDelta: number | null;
+    exitsDelta: number | null;
+    craftDelta: number | null;
+    trend: string;
+    summary: string;
+  } = {
+    harvestDelta: null,
+    exitsDelta: null,
+    craftDelta: null,
+    trend: 'stable',
+    summary: '',
+  };
+  try {
+    const { craftLearningHints } =
+      require('./tradeCraftPerformance') as typeof import('./tradeCraftPerformance');
+    const h = craftLearningHints(episodes.slice(-LEARNING_SCORE_WINDOW));
+    craftHints = {
+      harvestDelta: h.harvestDelta,
+      exitsDelta: h.exitsDelta,
+      craftDelta: h.craftDelta,
+      trend: h.trend,
+      summary: h.summary,
+    };
+  } catch {
+    /* craft optional */
+  }
   let accelSoftExit = softExit;
   try {
     const { applyReplayBatchHints } =
@@ -2319,6 +2389,8 @@ export function runSelfLearnTick(input: {
     earlyPartialTpPct: currentPolicy.earlyPartialTpPct,
     minConviction: Number(input.currentMatch.minConviction) || 40,
     hardTimeLimitSecMax: currentPolicy.hardTimeLimitSecMax,
+    peakProtectArmOfTpPct: currentPolicy.peakProtectArmOfTpPct,
+    peakProtectGivebackOfPeakPct: currentPolicy.peakProtectGivebackOfPeakPct,
   };
 
   let mlAdvice: import('./profileLearningMl').MlAdvice | null = null;
@@ -2418,6 +2490,35 @@ export function runSelfLearnTick(input: {
       clamped.match
     ) {
       hDelta += 0.2;
+    }
+
+    // Soft craft alignment (diagnostics → rank only; never hard Level margin)
+    const harvestLike =
+      /peak.?protect|PCL|giveback|early partial|Timing:|profit-lock|partial/i.test(
+        sum
+      );
+    const exitsLike =
+      /Timing:|trail|momentum-fade|hard.?SL|timer|fade/i.test(sum);
+    const tightenLike =
+      /tighten|earlier peak-protect|lengthen PCL|delay early partial/i.test(sum);
+    const loosenLike =
+      /looser peak-protect|looser.*giveback|arm peak-protect later/i.test(sum);
+    const hDeltaCraft = craftHints.harvestDelta;
+    const eDeltaCraft = craftHints.exitsDelta;
+    if (hDeltaCraft != null && hDeltaCraft <= -4 && harvestLike) {
+      if (tightenLike) hDelta += 0.32;
+      else if (loosenLike) hDelta -= 0.22;
+      else hDelta += 0.18;
+    } else if (hDeltaCraft != null && hDeltaCraft >= 4 && harvestLike) {
+      if (tightenLike || /PCL|peak.?protect|Timing:/i.test(sum)) hDelta += 0.15;
+      if (loosenLike) hDelta -= 0.12;
+    }
+    if (eDeltaCraft != null && eDeltaCraft <= -4 && exitsLike) {
+      if (/tighten|earlier|shorten/i.test(sum)) hDelta += 0.28;
+      else if (/looser/i.test(sum)) hDelta -= 0.18;
+      else hDelta += 0.14;
+    } else if (eDeltaCraft != null && eDeltaCraft >= 4 && exitsLike) {
+      hDelta += 0.12;
     }
 
     let mDelta = 0;
@@ -2634,7 +2735,12 @@ export function runSelfLearnTick(input: {
         console.log(
           `[learning-timing] ${input.profileId} micro: ${microSummary} ` +
             `Δ=${(microScoreAfter - scoreBefore).toFixed(2)}` +
-            (harvestDense ? ' · harvest-dense' : '')
+            (harvestDense ? ' · harvest-dense' : '') +
+            (craftHints.summary ? ` · ${craftHints.summary}` : '')
+        );
+      } else if (craftHints.summary) {
+        console.log(
+          `[learning-craft] ${input.profileId} micro: ${microSummary} · ${craftHints.summary}`
         );
       }
       state.pendingProposal = {

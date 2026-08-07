@@ -10090,6 +10090,56 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.showBotInfoSection = showBotInfoSection;
     window.updateBotInfoSectionBadges = updateBotInfoSectionBadges;
 
+    function refreshBotInfoTradeCraftLive() {
+      const root = document.getElementById('botinfo-tradecraft-live');
+      if (!root) return;
+      fetch('/api/trade-craft-performance?profileId=all&window=50')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          const c = data && data.craft ? data.craft : null;
+          if (!c) return;
+          function setKpi(key, text, cls) {
+            const el = root.querySelector('[data-craft-kpi="' + key + '"]');
+            if (!el) return;
+            el.textContent = text;
+            if (cls !== undefined) {
+              el.classList.remove('up', 'down');
+              if (cls) el.classList.add(cls);
+            }
+          }
+          const fmt = function (n, dig) {
+            if (n == null || !isFinite(Number(n))) return '—';
+            return Number(n).toFixed(dig == null ? 0 : dig);
+          };
+          setKpi('score', fmt(c.craftScore, 1));
+          const trend = c.trend ? String(c.trend).toUpperCase() : '—';
+          const tCls = c.trend === 'improving' ? 'up' : c.trend === 'declining' ? 'down' : '';
+          setKpi('trend', trend, tCls);
+          const traits = Array.isArray(c.traits) ? c.traits.slice() : [];
+          const ranked = traits.filter(function (t) { return t && t.score != null; })
+            .sort(function (a, b) { return Number(b.score) - Number(a.score); });
+          const top = ranked[0];
+          const bottom = ranked[ranked.length - 1];
+          setKpi('top', top ? (top.label + ' ' + fmt(top.score, 0)) : '—');
+          setKpi('bottom', bottom ? (bottom.label + ' ' + fmt(bottom.score, 0)) : '—');
+          const harvest = traits.find(function (t) { return t && t.id === 'harvest'; });
+          const cap = harvest && harvest.kpis && harvest.kpis.capturePct != null
+            ? String(harvest.kpis.capturePct) : '—';
+          setKpi('capture', cap);
+          setKpi('pcl', c.pclEnabled ? 'ON' : 'OFF');
+          const learnEl = root.querySelector('[data-craft-kpi="learn"]');
+          if (learnEl) {
+            learnEl.textContent = c.trend === 'declining'
+              ? 'Harvest/Exits soft-boost Self-Learn tighten candidates when early→late slips ≥4.'
+              : c.trend === 'improving'
+                ? 'Improving craft soft-reinforces matching Timing/PPP/PCL micro nudges — not a hard Level score.'
+                : 'Craft is diagnostics-only; Self-Learn soft-aligns when Harvest/Exits early→late moves ±4+.';
+          }
+        })
+        .catch(function () {});
+    }
+    window.refreshBotInfoTradeCraftLive = refreshBotInfoTradeCraftLive;
+
     let _botInfoSpyBound = false;
     function initBotInfoScrollSpy() {
       if (_botInfoSpyBound || typeof IntersectionObserver === 'undefined') return;
@@ -17648,6 +17698,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { ensureBotInfoSeenBaseline(); } catch (_) {}
         try { initBotInfoScrollSpy(); } catch (_) {}
         try { updateBotInfoSectionBadges(); } catch (_) {}
+        try { refreshBotInfoTradeCraftLive(); } catch (_) {}
       }
       if (name === 'overview' || name === 'trades' || name === 'scanner') {
         ensurePosHoldTicker();
