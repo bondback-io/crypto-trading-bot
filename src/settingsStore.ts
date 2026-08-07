@@ -206,6 +206,21 @@ export interface PersistedBotSettings {
     stalePeakTightenSec?: number;
     staleGivebackTightenMult?: number;
   };
+  /** Additive Profit Capture Layer */
+  profitCaptureLayer?: {
+    enabled?: boolean;
+    learningStrength?: number;
+    familyOverrides?: Record<
+      string,
+      {
+        permissionSec?: number;
+        peakProtectArmOfTpPct?: number;
+        peakProtectGivebackOfPeakPct?: number;
+        earlyPartialTpPct?: number;
+        earlyPartialFraction?: number;
+      }
+    >;
+  };
   /** Additive Volume Intelligence (strength / decay / divergence) */
   volumeIntelligence?: {
     enabled?: boolean;

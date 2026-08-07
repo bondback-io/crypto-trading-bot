@@ -99,6 +99,38 @@ function updatePeakProtectArmState(
       resolvePeakProtectParams,
     } = require('./peakProfitProtection') as typeof import('./peakProfitProtection');
     if (!getPeakProfitProtectionConfig().enabled) return;
+
+    // PCL: defer arming during profit permission window
+    try {
+      const {
+        isProfitCaptureLayerEnabled,
+        isProfitPermissionActive,
+      } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      if (
+        isProfitCaptureLayerEnabled() &&
+        isProfitPermissionActive({
+          profitPermissionUntilMs: position.profitPermissionUntilMs,
+          nowMs,
+        })
+      ) {
+        const polDefer = (position.profileExitPolicy || {}) as {
+          peakProtectArmOfTpPct?: number;
+          peakProtectGivebackOfPeakPct?: number;
+        };
+        const resolvedDefer = resolvePeakProtectParams({
+          profileId: position.tradeProfileId,
+          takeProfitPct: effectivePositionTakeProfitPct(position),
+          policyArmOfTpPct: polDefer.peakProtectArmOfTpPct,
+          policyGivebackOfPeakPct: polDefer.peakProtectGivebackOfPeakPct,
+          entryQualityScore: position.entryQualityScore,
+        });
+        position.peakProtectArmAtPct = resolvedDefer.armAtPct;
+        return;
+      }
+    } catch {
+      /* fail soft */
+    }
+
     const pol = (position.profileExitPolicy || {}) as {
       peakProtectArmOfTpPct?: number;
       peakProtectGivebackOfPeakPct?: number;
@@ -108,8 +140,13 @@ function updatePeakProtectArmState(
       takeProfitPct: effectivePositionTakeProfitPct(position),
       policyArmOfTpPct: pol.peakProtectArmOfTpPct,
       policyGivebackOfPeakPct: pol.peakProtectGivebackOfPeakPct,
+      entryQualityScore: position.entryQualityScore,
     });
     position.peakProtectArmAtPct = resolved.armAtPct;
+    if (resolved.minOpenSec > 0) {
+      const openSec = (nowMs - (position.openedAt || nowMs)) / 1000;
+      if (openSec < resolved.minOpenSec) return;
+    }
     if (
       resolved.enabled &&
       peakUnrealizedPct >= resolved.armAtPct &&
@@ -126,6 +163,56 @@ function updatePeakProtectArmState(
     }
   } catch {
     /* optional */
+  }
+}
+
+/** Stamp Profit Capture Layer fields at open (fail soft). */
+function stampProfitCaptureLayerAtOpen(
+  position: Position,
+  meta?: {
+    convictionScore?: number;
+    tradeProfileScore?: number;
+    hmcSetup?: string;
+    hmcConfidence?: number;
+    gateDecision?: string;
+    entryQualityScore?: number;
+  }
+): void {
+  try {
+    const {
+      isProfitCaptureLayerEnabled,
+      computeEntryQualityScore,
+      computeProfitPermissionUntilMs,
+    } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+    if (!isProfitCaptureLayerEnabled()) return;
+    if (meta?.hmcSetup) position.hmcSetup = String(meta.hmcSetup);
+    if (meta?.hmcConfidence != null && Number.isFinite(Number(meta.hmcConfidence))) {
+      position.hmcConfidence = Number(meta.hmcConfidence);
+    }
+    if (meta?.gateDecision) position.gateDecision = String(meta.gateDecision);
+    const q =
+      meta?.entryQualityScore != null &&
+      Number.isFinite(Number(meta.entryQualityScore))
+        ? Number(meta.entryQualityScore)
+        : computeEntryQualityScore({
+            convictionScore:
+              meta?.convictionScore ?? position.convictionScore,
+            hmcConfidence: position.hmcConfidence,
+            tradeProfileScore:
+              meta?.tradeProfileScore ?? position.tradeProfileScore,
+          });
+    position.entryQualityScore = q;
+    position.profitPermissionUntilMs = computeProfitPermissionUntilMs({
+      openedAt: position.openedAt,
+      profileId: position.tradeProfileId,
+      entryQualityScore: q,
+    });
+    position.pclPartialTaken = false;
+  } catch (err) {
+    console.warn(
+      '[pcl] stamp at open failed (fail soft):',
+      err instanceof Error ? err.message : err
+    );
   }
 }
 
@@ -276,6 +363,15 @@ export interface Position {
   peakProtectLastPeakAt?: number;
   /** Resolved arm threshold (% of equity) at last eval */
   peakProtectArmAtPct?: number;
+  /** Profit Capture Layer — permission window end (ms) */
+  profitPermissionUntilMs?: number;
+  /** 0–100 entry quality from conviction + HMC + lane score */
+  entryQualityScore?: number;
+  hmcSetup?: string;
+  hmcConfidence?: number;
+  gateDecision?: 'allow' | 'block' | string;
+  pclPartialTaken?: boolean;
+  pclRunnerFraction?: number;
   /** Quality tier derived from conviction at entry (drives dynamic TP) */
   qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
@@ -623,6 +719,9 @@ function maybeRecordLearningEpisode(
       exitUnrealizedPct: metrics.exitUnrealizedPct,
       holdSec,
       convictionScore: position.convictionScore,
+      entryQualityScoreAtOpen: position.entryQualityScore,
+      pclPartialTaken: position.pclPartialTaken === true,
+      exitReason: position.reason,
     });
     console.log(
       `[learning-episode] ${position.symbol || position.mint.slice(0, 8)} ` +
@@ -806,6 +905,19 @@ function maybeRecordLearningEpisode(
       peakProtectGivebackOfPeakPct,
       peakProtectArmed: position.peakProtectArmed === true ? true : undefined,
       peakProtectBeatFullTp,
+      pclPartialTaken: position.pclPartialTaken === true ? true : undefined,
+      pclRunnerFraction:
+        position.pclRunnerFraction != null &&
+        Number.isFinite(Number(position.pclRunnerFraction))
+          ? Number(position.pclRunnerFraction)
+          : undefined,
+      hmcSetup: position.hmcSetup,
+      hmcConfidence:
+        position.hmcConfidence != null &&
+        Number.isFinite(Number(position.hmcConfidence))
+          ? Number(position.hmcConfidence)
+          : undefined,
+      gateDecision: position.gateDecision,
       recoveryStageAtClose: (() => {
         try {
           if (profileId === 'dip_buyer') {
@@ -1735,6 +1847,10 @@ export class PaperTrader {
     macdHistSlopeAtEntry?: string;
     rsiDivergenceAtEntry?: string;
     volumeDivergenceAtEntry?: string;
+    hmcSetup?: string;
+    hmcConfidence?: number;
+    gateDecision?: string;
+    entryQualityScore?: number;
   }): Position {
     if (this.hasOpenMint(input.mint)) {
       throw new Error(
@@ -1874,6 +1990,15 @@ export class PaperTrader {
       },
       seedShortTermPosition
     );
+
+    stampProfitCaptureLayerAtOpen(position, {
+      convictionScore: input.convictionScore,
+      tradeProfileScore: input.tradeProfileScore,
+      hmcSetup: input.hmcSetup,
+      hmcConfidence: input.hmcConfidence,
+      gateDecision: input.gateDecision,
+      entryQualityScore: input.entryQualityScore,
+    });
 
     if (position.shortTermStrategyId === 'migration_event') {
       const act = this.marketActivityCache.get(position.mint);
@@ -2225,6 +2350,10 @@ export class PaperTrader {
       macdHistSlopeAtEntry?: string;
       rsiDivergenceAtEntry?: string;
       volumeDivergenceAtEntry?: string;
+      hmcSetup?: string;
+      hmcConfidence?: number;
+      gateDecision?: string;
+      entryQualityScore?: number;
     }
   ): Position | null {
     const spendSol = clampToMaxAllowedTradeSol(
@@ -2450,6 +2579,15 @@ export class PaperTrader {
       },
       seedShortTermPosition
     );
+
+    stampProfitCaptureLayerAtOpen(position, {
+      convictionScore: meta?.convictionScore,
+      tradeProfileScore: meta?.tradeProfileScore,
+      hmcSetup: meta?.hmcSetup,
+      hmcConfidence: meta?.hmcConfidence,
+      gateDecision: meta?.gateDecision,
+      entryQualityScore: meta?.entryQualityScore,
+    });
 
     if (position.shortTermStrategyId === 'migration_event') {
       const act = this.marketActivityCache.get(position.mint);
@@ -3065,6 +3203,41 @@ export class PaperTrader {
     );
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
+    // PCL exit priority: hard SL / disaster first (never softened)
+    {
+      const rulesEarly = getStrategyRiskRules(position.strategyKind);
+      const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
+      const hardSl = hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
+      if (markPnlPct <= hardSl) {
+        const ageMs = Math.max(0, nowMs - (position.openedAt || nowMs));
+        const swingGrace =
+          !position.scalpMode &&
+          !!position.tradeProfileId &&
+          SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
+          ageMs < SWING_HARD_SL_GRACE_MS &&
+          markPnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
+        if (!swingGrace) {
+          this.simulateSell(
+            position.id,
+            markPrice,
+            `hard stop-loss ${hardSl}%`,
+            {
+              minFillPriceSol: hardStopMinFillPriceSol(
+                position.entryPriceSol,
+                hardSl
+              ),
+            }
+          );
+          return {
+            kind: 'hard_sl',
+            reason: `hard stop-loss ${hardSl}%`,
+            markPnlPct,
+            stillOpen: this.positions.has(positionId),
+          };
+        }
+      }
+    }
+
     // Adaptive profile exit (sync / backtest)
     // Skipped when Global Micro-Bot Take Profit master override is ON (fixed % only).
     if (
@@ -3112,6 +3285,9 @@ export class PaperTrader {
           tradeProfileId: position.tradeProfileId,
           peakProtectArmedAt: position.peakProtectArmedAt,
           peakProtectLastPeakAt: position.peakProtectLastPeakAt,
+          profitPermissionUntilMs: position.profitPermissionUntilMs,
+          entryQualityScore: position.entryQualityScore,
+          pclPartialTaken: position.pclPartialTaken === true,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -3121,13 +3297,24 @@ export class PaperTrader {
           position.trailingStopPct = adapt.newTrailingStopPct;
           position.profileTrailTightened = true;
         } else if (adapt.type === 'partial' && adapt.fraction != null) {
-          this.simulateSell(position.id, markPrice, adapt.reason || 'Profile early partial', {
+          this.simulateSell(position.id, markPrice, adapt.reason || 'partial TP (PCL)', {
             fraction: adapt.fraction,
           });
           position.partialSellDone = true;
+          try {
+            const { applyPclPartialRunnerNudge } =
+              require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+            applyPclPartialRunnerNudge(position);
+            position.pclRunnerFraction = Math.max(
+              0,
+              1 - Number(adapt.fraction)
+            );
+          } catch {
+            position.pclPartialTaken = true;
+          }
           return {
             kind: 'partial',
-            reason: adapt.reason || 'Profile early partial',
+            reason: adapt.reason || 'partial TP (PCL)',
             markPnlPct,
             stillOpen: this.positions.has(positionId),
           };
@@ -3353,6 +3540,35 @@ export class PaperTrader {
           }
         }
         const tag = shortTermExitLogTag(scalpAction.exitKind);
+        if (
+          scalpAction.exitKind !== 'scalp_sl' &&
+          scalpAction.exitKind !== 'scalp_tp'
+        ) {
+          try {
+            const {
+              isProfitPermissionActive,
+              shouldBlockTinyGreenScratch,
+            } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+            if (
+              isProfitPermissionActive({
+                profitPermissionUntilMs: position.profitPermissionUntilMs,
+                nowMs,
+              }) ||
+              shouldBlockTinyGreenScratch({
+                pnlPct: markPnlPct,
+                profitPermissionUntilMs: position.profitPermissionUntilMs,
+                pclPartialTaken: position.pclPartialTaken,
+                qualityTier: position.qualityTier,
+                entryQualityScore: position.entryQualityScore,
+                nowMs,
+              })
+            ) {
+              return null;
+            }
+          } catch {
+            /* fail soft */
+          }
+        }
         const minFill =
           scalpAction.exitKind === 'scalp_sl'
             ? hardStopMinFillPriceSol(
@@ -3875,8 +4091,67 @@ export class PaperTrader {
 
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
+      // PCL exit priority 1: hard SL / disaster first (never softened)
+      {
+        const rulesEarly = getStrategyRiskRules(position.strategyKind);
+        const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
+        const hardSl = hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
+        if (markPnlPctAsync <= hardSl) {
+          const ageMs = Math.max(
+            0,
+            Date.now() - (position.openedAt || Date.now())
+          );
+          const swingGrace =
+            !position.scalpMode &&
+            !!position.tradeProfileId &&
+            SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
+            ageMs < SWING_HARD_SL_GRACE_MS &&
+            markPnlPctAsync > SWING_HARD_SL_GRACE_RUG_PCT;
+          if (!swingGrace) {
+            await this.closePositionByRules(
+              position,
+              currentPrice,
+              `hard stop-loss ${hardSl}%`,
+              {
+                minFillPriceSol: hardStopMinFillPriceSol(
+                  position.entryPriceSol,
+                  hardSl
+                ),
+              }
+            );
+            continue;
+          }
+        }
+      }
+
       // Dead / inactive market force-exit (paper + live tracked)
-      const deadReason = this.evaluateDeadMarketExit(position);
+      // Softened during PCL permission / tiny-green scratch block
+      let skipDeadScratch = false;
+      try {
+        const {
+          isProfitPermissionActive,
+          shouldBlockTinyGreenScratch,
+        } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+        if (
+          isProfitPermissionActive({
+            profitPermissionUntilMs: position.profitPermissionUntilMs,
+          }) ||
+          shouldBlockTinyGreenScratch({
+            pnlPct: markPnlPctAsync,
+            profitPermissionUntilMs: position.profitPermissionUntilMs,
+            pclPartialTaken: position.pclPartialTaken,
+            qualityTier: position.qualityTier,
+            entryQualityScore: position.entryQualityScore,
+          })
+        ) {
+          skipDeadScratch = true;
+        }
+      } catch {
+        /* fail soft */
+      }
+      const deadReason = skipDeadScratch
+        ? null
+        : this.evaluateDeadMarketExit(position);
       if (deadReason) {
         const scalpTag = position.scalpMode
           ? ` [scalp=${position.shortTermStrategyId || 'scalp'}]`
@@ -4017,6 +4292,9 @@ export class PaperTrader {
             tradeProfileId: position.tradeProfileId,
             peakProtectArmedAt: position.peakProtectArmedAt,
             peakProtectLastPeakAt: position.peakProtectLastPeakAt,
+            profitPermissionUntilMs: position.profitPermissionUntilMs,
+            entryQualityScore: position.entryQualityScore,
+            pclPartialTaken: position.pclPartialTaken === true,
             volumeDecayState: (position.volumeDecayState as
               | 'expanding'
               | 'stable'
@@ -4075,10 +4353,21 @@ export class PaperTrader {
               );
             }
           } else if (adapt.type === 'partial' && adapt.fraction != null) {
-            this.simulateSell(position.id, currentPrice, adapt.reason || 'Profile early partial', {
+            this.simulateSell(position.id, currentPrice, adapt.reason || 'partial TP (PCL)', {
               fraction: adapt.fraction,
             });
             position.partialSellDone = true;
+            try {
+              const { applyPclPartialRunnerNudge } =
+                require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+              applyPclPartialRunnerNudge(position);
+              position.pclRunnerFraction = Math.max(
+                0,
+                1 - Number(adapt.fraction)
+              );
+            } catch {
+              position.pclPartialTaken = true;
+            }
             this.log('sell', `${label}: [PROFILE_EARLY_PARTIAL] ${adapt.reason}`);
             continue;
           } else if (adapt.type === 'full' && adapt.reason) {
@@ -4233,6 +4522,38 @@ export class PaperTrader {
             }
           }
           const tag = shortTermExitLogTag(scalpAction.exitKind);
+          // PCL: soften stall / fade / timer scratch during permission (keep hard SL + TP)
+          if (
+            scalpAction.exitKind !== 'scalp_sl' &&
+            scalpAction.exitKind !== 'scalp_tp'
+          ) {
+            try {
+              const {
+                isProfitPermissionActive,
+                shouldBlockTinyGreenScratch,
+              } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+              const softPnlPct =
+                ((currentPrice - position.entryPriceSol) /
+                  position.entryPriceSol) *
+                100;
+              if (
+                isProfitPermissionActive({
+                  profitPermissionUntilMs: position.profitPermissionUntilMs,
+                }) ||
+                shouldBlockTinyGreenScratch({
+                  pnlPct: softPnlPct,
+                  profitPermissionUntilMs: position.profitPermissionUntilMs,
+                  pclPartialTaken: position.pclPartialTaken,
+                  qualityTier: position.qualityTier,
+                  entryQualityScore: position.entryQualityScore,
+                })
+              ) {
+                continue;
+              }
+            } catch {
+              /* fail soft */
+            }
+          }
           console.log(
             `[scalp] ${tag} strategy=${strat} ${label} — ${scalpAction.reason}`
           );
@@ -4281,7 +4602,12 @@ export class PaperTrader {
           await this.closePositionByRules(position, currentPrice, trailAct.reason);
           continue;
         }
-        continue;
+        // After PCL partial: do not skip runner trail / TP management
+        if (position.pclPartialTaken) {
+          /* fall through */
+        } else {
+          continue;
+        }
       }
 
       // Advanced profit strategy (paper + live)

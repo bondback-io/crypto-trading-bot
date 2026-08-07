@@ -66,8 +66,8 @@ export interface ProfileExitPolicy {
 
 export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
   scalper: {
-    earlyPartialTpPct: 12,
-    earlyPartialFraction: 0.45,
+    earlyPartialTpPct: 13,
+    earlyPartialFraction: 0.55,
     trailTightenFactor: 0.7,
     momentumFadeDropPct: 5,
     aggressiveDeadMarket: true,
@@ -75,15 +75,15 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 28,
     profitGivebackPts: 14,
     profitFloorPct: 0,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 60,
+    peakProtectGivebackOfPeakPct: 40,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
   },
   reversal_scalper: {
-    earlyPartialTpPct: 10,
-    earlyPartialFraction: 0.5,
+    earlyPartialTpPct: 12,
+    earlyPartialFraction: 0.55,
     trailTightenFactor: 0.65,
     momentumFadeDropPct: 5,
     aggressiveDeadMarket: true,
@@ -91,15 +91,15 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 22,
     profitGivebackPts: 12,
     profitFloorPct: 0,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 60,
+    peakProtectGivebackOfPeakPct: 40,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
   },
   momentum_burst: {
     earlyPartialTpPct: 18,
-    earlyPartialFraction: 0.35,
+    earlyPartialFraction: 0.4,
     trailTightenFactor: 0.75,
     momentumFadeDropPct: 6,
     aggressiveDeadMarket: true,
@@ -107,8 +107,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 35,
     profitGivebackPts: 18,
     profitFloorPct: 0,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 60,
+    peakProtectGivebackOfPeakPct: 40,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -123,15 +123,15 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 40,
     profitGivebackPts: 22,
     profitFloorPct: 8,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 65,
+    peakProtectGivebackOfPeakPct: 45,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: false,
   },
   trend_rider: {
-    earlyPartialTpPct: 0,
-    earlyPartialFraction: 0,
+    earlyPartialTpPct: 18,
+    earlyPartialFraction: 0.3,
     trailTightenFactor: 0.9,
     momentumFadeDropPct: 10,
     aggressiveDeadMarket: false,
@@ -139,15 +139,15 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 25,
     profitGivebackPts: 12,
     profitFloorPct: 5,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 65,
+    peakProtectGivebackOfPeakPct: 45,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
   },
   steady_compounder: {
-    earlyPartialTpPct: 6,
-    earlyPartialFraction: 0.4,
+    earlyPartialTpPct: 15,
+    earlyPartialFraction: 0.3,
     trailTightenFactor: 0.85,
     momentumFadeDropPct: 7,
     aggressiveDeadMarket: false,
@@ -155,15 +155,15 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 18,
     profitGivebackPts: 8,
     profitFloorPct: 3,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 65,
+    peakProtectGivebackOfPeakPct: 45,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
   },
   high_win_rate: {
     earlyPartialTpPct: 20,
-    earlyPartialFraction: 0.35,
+    earlyPartialFraction: 0.3,
     trailTightenFactor: 0.8,
     momentumFadeDropPct: 8,
     aggressiveDeadMarket: false,
@@ -171,8 +171,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 45,
     profitGivebackPts: 20,
     profitFloorPct: 10,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 65,
+    peakProtectGivebackOfPeakPct: 45,
     extendHoldIfTaOk: true,
     cutIfStructureBroken: true,
     heikinAshiExitEnabled: true,
@@ -187,14 +187,14 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 40,
     profitGivebackPts: 22,
     profitFloorPct: 8,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 65,
+    peakProtectGivebackOfPeakPct: 45,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
   },
   migration_sniper: {
-    earlyPartialTpPct: 14,
+    earlyPartialTpPct: 16,
     earlyPartialFraction: 0.4,
     trailTightenFactor: 0.7,
     momentumFadeDropPct: 6,
@@ -203,8 +203,8 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
     profitLockArmPct: 30,
     profitGivebackPts: 16,
     profitFloorPct: 0,
-    peakProtectArmOfTpPct: 0,
-    peakProtectGivebackOfPeakPct: 0,
+    peakProtectArmOfTpPct: 60,
+    peakProtectGivebackOfPeakPct: 40,
     extendHoldIfTaOk: false,
     cutIfStructureBroken: false,
     heikinAshiExitEnabled: false,
@@ -526,6 +526,10 @@ export function evaluateAdaptiveProfileExit(input: {
     | 'insufficient'
     | null;
   volumeExitTightenMult?: number | null;
+  /** Profit Capture Layer stamps */
+  profitPermissionUntilMs?: number | null;
+  entryQualityScore?: number | null;
+  pclPartialTaken?: boolean;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const tier = input.qualityTier || 'medium';
@@ -539,6 +543,57 @@ export function evaluateAdaptiveProfileExit(input: {
             input.entryPriceSol) *
           100
         : Math.max(0, pnl);
+
+  let pclOn = false;
+  let permActive = false;
+  try {
+    const {
+      isProfitCaptureLayerEnabled,
+      isProfitPermissionActive,
+      permissionFadeThresholdMult,
+      shouldBlockTinyGreenScratch,
+    } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+    pclOn = isProfitCaptureLayerEnabled();
+    permActive =
+      pclOn &&
+      isProfitPermissionActive({
+        profitPermissionUntilMs: input.profitPermissionUntilMs,
+        nowMs: now,
+      });
+    // Scratch block helper kept for fade/quality soft exits below
+    void permissionFadeThresholdMult;
+    void shouldBlockTinyGreenScratch;
+  } catch {
+    pclOn = false;
+    permActive = false;
+  }
+
+  // PCL priority: meaningful partial BEFORE PPP while harvesting
+  const tryEarlyPartial = (): AdaptiveExitAction | null => {
+    if (
+      pol.earlyPartialTpPct > 0 &&
+      pol.earlyPartialFraction > 0 &&
+      !input.partialSellDone &&
+      !input.bagTrimDone &&
+      !input.pclPartialTaken &&
+      pnl >= pol.earlyPartialTpPct &&
+      pnl < input.takeProfitPct
+    ) {
+      return {
+        type: 'partial',
+        fraction: pol.earlyPartialFraction,
+        reason: pclOn
+          ? `partial TP (PCL) @ +${pnl.toFixed(1)}% (policy ${pol.earlyPartialTpPct}%, bank ${(pol.earlyPartialFraction * 100).toFixed(0)}%)`
+          : `Profile early partial @ +${pnl.toFixed(1)}% (policy ${pol.earlyPartialTpPct}%)`,
+      };
+    }
+    return null;
+  };
+
+  if (pclOn) {
+    const partialFirst = tryEarlyPartial();
+    if (partialFirst) return partialFirst;
+  }
 
   // 1a) Peak Profit Protection (TP-relative arm + proportional giveback)
   try {
@@ -560,6 +615,10 @@ export function evaluateAdaptiveProfileExit(input: {
         peakProtectLastPeakAt: input.peakProtectLastPeakAt,
         nowMs: now,
         volumeExitTightenMult: input.volumeExitTightenMult,
+        openedAt: input.openedAt,
+        deferArm: permActive,
+        pclPartialTaken: input.pclPartialTaken === true,
+        entryQualityScore: input.entryQualityScore,
       });
       if (ppp.shouldExit && ppp.reason) {
         return { type: 'full', reason: ppp.reason };
@@ -622,20 +681,10 @@ export function evaluateAdaptiveProfileExit(input: {
 
   // Soft timer deferral is handled by caller when extendHoldIfTaOk + taStructureOk
 
-  // 3) Early partial — once, before full TP
-  if (
-    pol.earlyPartialTpPct > 0 &&
-    pol.earlyPartialFraction > 0 &&
-    !input.partialSellDone &&
-    !input.bagTrimDone &&
-    pnl >= pol.earlyPartialTpPct &&
-    pnl < input.takeProfitPct
-  ) {
-    return {
-      type: 'partial',
-      fraction: pol.earlyPartialFraction,
-      reason: `Profile early partial @ +${pnl.toFixed(1)}% (policy ${pol.earlyPartialTpPct}%)`,
-    };
+  // 3) Early partial — once, before full TP (legacy order when PCL off)
+  if (!pclOn) {
+    const partialLegacy = tryEarlyPartial();
+    if (partialLegacy) return partialLegacy;
   }
 
   // 4) Tighten trail after armed
@@ -672,6 +721,33 @@ export function evaluateAdaptiveProfileExit(input: {
     // Soft urgency: only absolute collapse / confirmed bearish-div lower fade
     // threshold (not generic “decaying” — too common after pumps).
     let fadeThresh = pol.momentumFadeDropPct;
+    if (pclOn) {
+      try {
+        const { permissionFadeThresholdMult, shouldBlockTinyGreenScratch } =
+          require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+        fadeThresh *= permissionFadeThresholdMult({
+          profitPermissionUntilMs: input.profitPermissionUntilMs,
+          nowMs: now,
+        });
+        // High quality → wider first pullback
+        const q = Number(input.entryQualityScore);
+        if (Number.isFinite(q) && q >= 70) fadeThresh *= 1.15;
+        if (
+          shouldBlockTinyGreenScratch({
+            pnlPct: pnl,
+            profitPermissionUntilMs: input.profitPermissionUntilMs,
+            pclPartialTaken: input.pclPartialTaken,
+            qualityTier: input.qualityTier,
+            entryQualityScore: input.entryQualityScore,
+            nowMs: now,
+          })
+        ) {
+          fadeThresh = Math.max(fadeThresh, pol.momentumFadeDropPct * 2);
+        }
+      } catch {
+        /* fail soft */
+      }
+    }
     const decay = input.volumeDecayState;
     const div = input.volumeDivergenceState;
     let volUrgency = false;
@@ -708,41 +784,44 @@ export function evaluateAdaptiveProfileExit(input: {
 
   // 5b) Soft volume-decay exit urgency while green (never overrides hard SL).
   // Collapsed only for decay path — “decaying” alone no longer force-exits.
-  try {
-    const {
-      getVolumeIntelligenceConfig,
-    } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
-    const viCfg = getVolumeIntelligenceConfig();
-    if (
-      viCfg.enabled &&
-      viCfg.exitUrgencyOnDecay &&
-      pnl > 3 &&
-      pnl < input.takeProfitPct * 0.9 &&
-      input.volumeDecayState === 'collapsed' &&
-      peakUnrealized >= Math.max(6, input.takeProfitPct * 0.35) &&
-      peakUnrealized - pnl >= 4
-    ) {
-      return {
-        type: 'full',
-        reason: `Open trade volume decay — tighten exit bias (peak +${peakUnrealized.toFixed(1)}% → +${pnl.toFixed(1)}%)`,
-      };
+  // Soften during PCL permission window.
+  if (!permActive) {
+    try {
+      const {
+        getVolumeIntelligenceConfig,
+      } = require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+      const viCfg = getVolumeIntelligenceConfig();
+      if (
+        viCfg.enabled &&
+        viCfg.exitUrgencyOnDecay &&
+        pnl > 3 &&
+        pnl < input.takeProfitPct * 0.9 &&
+        input.volumeDecayState === 'collapsed' &&
+        peakUnrealized >= Math.max(6, input.takeProfitPct * 0.35) &&
+        peakUnrealized - pnl >= 4
+      ) {
+        return {
+          type: 'full',
+          reason: `Open trade volume decay — tighten exit bias (peak +${peakUnrealized.toFixed(1)}% → +${pnl.toFixed(1)}%)`,
+        };
+      }
+      if (
+        viCfg.enabled &&
+        viCfg.exitUrgencyOnBearishDivergence &&
+        input.volumeDivergenceState === 'bearish_divergence' &&
+        pnl > 4 &&
+        pnl < input.takeProfitPct * 0.85 &&
+        peakUnrealized >= Math.max(8, input.takeProfitPct * 0.4) &&
+        peakUnrealized - pnl >= 5
+      ) {
+        return {
+          type: 'full',
+          reason: `Bearish volume divergence detected — soft exit while +${pnl.toFixed(1)}% (peak +${peakUnrealized.toFixed(1)}%)`,
+        };
+      }
+    } catch {
+      /* fail soft */
     }
-    if (
-      viCfg.enabled &&
-      viCfg.exitUrgencyOnBearishDivergence &&
-      input.volumeDivergenceState === 'bearish_divergence' &&
-      pnl > 4 &&
-      pnl < input.takeProfitPct * 0.85 &&
-      peakUnrealized >= Math.max(8, input.takeProfitPct * 0.4) &&
-      peakUnrealized - pnl >= 5
-    ) {
-      return {
-        type: 'full',
-        reason: `Bearish volume divergence detected — soft exit while +${pnl.toFixed(1)}% (peak +${peakUnrealized.toFixed(1)}%)`,
-      };
-    }
-  } catch {
-    /* fail soft */
   }
 
   // 6) Quality breakdown: green but conviction collapsed + held a bit
@@ -752,7 +831,8 @@ export function evaluateAdaptiveProfileExit(input: {
     pnl < input.takeProfitPct * 0.85 &&
     input.convictionScore != null &&
     input.convictionScore < 35 &&
-    now - input.openedAt > 90_000
+    now - input.openedAt > 90_000 &&
+    !permActive
   ) {
     return {
       type: 'full',

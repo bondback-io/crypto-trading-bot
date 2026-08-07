@@ -196,6 +196,25 @@ function buildContextPack(opts?: { slim?: boolean }): string {
     lines.push(
       `Open ${open.length} · Closed ${closed.length} · WR ${stats?.winRatePct ?? '—'}% · PF ${stats?.profitFactor ?? '—'}`
     );
+    for (const o of open.slice(0, slim ? 3 : 6)) {
+      try {
+        const { formatPclZionOneLiner } =
+          require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+        const one = formatPclZionOneLiner({
+          profitPermissionUntilMs: o.profitPermissionUntilMs,
+          pclPartialTaken: o.pclPartialTaken,
+          pclRunnerFraction: o.pclRunnerFraction,
+          peakProtectArmed: o.peakProtectArmed,
+        });
+        if (one) {
+          lines.push(
+            `  open ${o.symbol || o.mint?.slice(0, 6)} ${o.tradeProfileId || '?'}: ${one}`
+          );
+        }
+      } catch {
+        /* optional */
+      }
+    }
     for (const c of closed.slice(slim ? -4 : -8)) {
       lines.push(
         `  closed ${c.symbol || c.mint?.slice(0, 6)} ${c.tradeProfileId || '?'} pnl=${Number(c.pnlSol || 0).toFixed(3)}`

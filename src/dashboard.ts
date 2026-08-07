@@ -8700,16 +8700,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="strat-adv-body">
             <p class="text-xs text-slate-400 mb-2">Arm when peak reaches a share of target TP; exit if price gives back a share of that peak. Target TP stays the ceiling.</p>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
-              <label class="ctl ctl-sm"><span>Arm % of TP</span><input type="number" id="ppp-arm" value="50" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
-              <label class="ctl ctl-sm"><span>Giveback % of peak</span><input type="number" id="ppp-giveback" value="33" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Arm % of TP</span><input type="number" id="ppp-arm" value="65" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Giveback % of peak</span><input type="number" id="ppp-giveback" value="45" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
               <label class="ctl ctl-sm"><span>Stale peak (sec)</span><input type="number" id="ppp-stale" value="45" min="0" max="600" step="5" onchange="savePeakProfitProtection()" title="0 = off. Tighten giveback if no new peak after arm." /></label>
             </div>
             <div class="text-xs font-semibold text-slate-300 mb-1">Scalper-style (more aggressive)</div>
             <div class="grid grid-cols-2 gap-2 mb-2">
-              <label class="ctl ctl-sm"><span>Scalper arm % of TP</span><input type="number" id="ppp-scalper-arm" value="40" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
-              <label class="ctl ctl-sm"><span>Scalper giveback %</span><input type="number" id="ppp-scalper-giveback" value="30" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Scalper arm % of TP</span><input type="number" id="ppp-scalper-arm" value="60" min="10" max="95" step="1" onchange="savePeakProfitProtection()" /></label>
+              <label class="ctl ctl-sm"><span>Scalper giveback %</span><input type="number" id="ppp-scalper-giveback" value="40" min="10" max="80" step="1" onchange="savePeakProfitProtection()" /></label>
             </div>
             <p class="text-xs mint mb-0">Fast profiles: Scalper, Momentum Burst, Reversal Scalper, Migration Sniper.</p>
+          </div>
+        </details>
+      </div>
+
+      <div class="card" id="pcl-card">
+        <details class="strat-adv-pack" id="pcl-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Profit Capture Layer <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Additive harvest layer: short permission window softens over-early scratch exits, retunes PPP arm timing, banks a meaningful partial, then manages the runner. Never disables hard SL or anti-rug."></span></span>
+              <span id="pcl-status-badge" class="badge status-badge" style="font-size:11px">PCL OFF</span>
+            </span>
+            <label class="ctl-check" title="Enable Profit Capture Layer" onclick="event.stopPropagation()">
+              <input type="checkbox" id="pcl-enabled" onchange="saveProfitCaptureLayer()" onclick="event.stopPropagation()" />
+              <span>Enable</span>
+            </label>
+          </summary>
+          <div class="strat-adv-body">
+            <p class="text-xs text-slate-400 mb-2">Permission windows + partial/runner harvest. Hard SL always wins. Learning strength scales reward reshape only.</p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+              <label class="ctl ctl-sm"><span>Learning strength</span><input type="number" id="pcl-learn" value="0.35" min="0" max="1" step="0.05" onchange="saveProfitCaptureLayer()" title="0–1 · scales PCL learning boosts/penalties" /></label>
+              <label class="ctl ctl-sm"><span>Fast permission (s)</span><input type="number" id="pcl-perm-fast" value="35" min="5" max="300" step="5" onchange="saveProfitCaptureLayer()" /></label>
+              <label class="ctl ctl-sm"><span>Dip/Trend permission (s)</span><input type="number" id="pcl-perm-dip" value="120" min="5" max="600" step="5" onchange="saveProfitCaptureLayer()" /></label>
+              <label class="ctl ctl-sm"><span>Quality permission (s)</span><input type="number" id="pcl-perm-quality" value="90" min="5" max="600" step="5" onchange="saveProfitCaptureLayer()" /></label>
+            </div>
+            <p class="text-xs mint mb-0">High entry quality (≥70) extends the window by +40%. Family PPP/partial defaults live in exit policies.</p>
           </div>
         </details>
       </div>
@@ -16997,6 +17022,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'microbots' && typeof loadLearningAccelerators === 'function') loadLearningAccelerators();
       if (name === 'microbots' && typeof loadLearningEnhancements === 'function') loadLearningEnhancements();
       if (name === 'microbots' && typeof loadPeakProfitProtection === 'function') loadPeakProfitProtection();
+      if (name === 'microbots' && typeof loadProfitCaptureLayer === 'function') loadProfitCaptureLayer();
       if (name === 'microbots' && typeof loadProfileTaPlaybooks === 'function') loadProfileTaPlaybooks();
       if (name === 'backup') { try { refreshLearningHealth({ reset: true }); } catch (_) {} try { refreshSiteBackupStatus(); } catch (_) {} try { refreshGithubBackupStatus(); } catch (_) {} try { refreshBotPerfEmailStatus(); } catch (_) {} }
       if (name === 'botinfo') {
@@ -19061,6 +19087,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           pppText += ' · armed peak +' + Number(p.peakProtectPeakAtArm).toFixed(1) + '%';
         }
         lines.push({ label: 'Peak protect', text: pppText });
+      }
+
+      if (
+        p.profitPermissionUntilMs != null ||
+        p.pclPartialTaken ||
+        p.pclRunnerFraction != null ||
+        p.entryQualityScore != null
+      ) {
+        const nowMs = Date.now();
+        const until = Number(p.profitPermissionUntilMs) || 0;
+        const active = until > nowMs;
+        let pclText = active
+          ? 'Permission Y · ' + Math.max(1, Math.ceil((until - nowMs) / 1000)) + 's left'
+          : until > 0
+            ? 'Permission N (expired)'
+            : 'Permission —';
+        if (p.pclPartialTaken) {
+          pclText += ' · partial taken';
+          if (p.pclRunnerFraction != null && Number.isFinite(Number(p.pclRunnerFraction))) {
+            pclText += ' · runner ' + Math.round(Number(p.pclRunnerFraction) * 100) + '%';
+          }
+        } else {
+          pclText += ' · no partial yet';
+        }
+        pclText += p.peakProtectArmed ? ' · PPP armed' : ' · PPP waiting';
+        if (p.entryQualityScore != null && Number.isFinite(Number(p.entryQualityScore))) {
+          pclText += ' · Q ' + Math.round(Number(p.entryQualityScore));
+        }
+        lines.push({ label: 'Profit capture', text: pclText });
       }
 
       if (p.convictionScore != null && Number.isFinite(Number(p.convictionScore))) {
@@ -27910,15 +27965,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const badge = document.getElementById('ppp-status-badge');
         if (badge) badge.textContent = m.enabled !== false ? 'PPP ON' : 'PPP OFF';
         const arm = document.getElementById('ppp-arm');
-        if (arm) arm.value = m.armOfTpPct != null ? m.armOfTpPct : 50;
+        if (arm) arm.value = m.armOfTpPct != null ? m.armOfTpPct : 65;
         const gb = document.getElementById('ppp-giveback');
-        if (gb) gb.value = m.givebackOfPeakPct != null ? m.givebackOfPeakPct : 33;
+        if (gb) gb.value = m.givebackOfPeakPct != null ? m.givebackOfPeakPct : 45;
         const stale = document.getElementById('ppp-stale');
         if (stale) stale.value = m.stalePeakTightenSec != null ? m.stalePeakTightenSec : 45;
         const sArm = document.getElementById('ppp-scalper-arm');
-        if (sArm) sArm.value = m.scalperArmOfTpPct != null ? m.scalperArmOfTpPct : 40;
+        if (sArm) sArm.value = m.scalperArmOfTpPct != null ? m.scalperArmOfTpPct : 60;
         const sGb = document.getElementById('ppp-scalper-giveback');
-        if (sGb) sGb.value = m.scalperGivebackOfPeakPct != null ? m.scalperGivebackOfPeakPct : 30;
+        if (sGb) sGb.value = m.scalperGivebackOfPeakPct != null ? m.scalperGivebackOfPeakPct : 40;
       } catch (err) {
         console.warn('loadPeakProfitProtection', err);
       }
@@ -27928,12 +27983,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         enabled: document.getElementById('ppp-enabled')
           ? document.getElementById('ppp-enabled').checked
           : true,
-        armOfTpPct: Number(document.getElementById('ppp-arm')?.value || 50),
-        givebackOfPeakPct: Number(document.getElementById('ppp-giveback')?.value || 33),
+        armOfTpPct: Number(document.getElementById('ppp-arm')?.value || 65),
+        givebackOfPeakPct: Number(document.getElementById('ppp-giveback')?.value || 45),
         stalePeakTightenSec: Number(document.getElementById('ppp-stale')?.value || 45),
-        scalperArmOfTpPct: Number(document.getElementById('ppp-scalper-arm')?.value || 40),
+        scalperArmOfTpPct: Number(document.getElementById('ppp-scalper-arm')?.value || 60),
         scalperGivebackOfPeakPct: Number(
-          document.getElementById('ppp-scalper-giveback')?.value || 30
+          document.getElementById('ppp-scalper-giveback')?.value || 40
         ),
       };
       await fetchJSON('/api/config/peak-profit-protection', {
@@ -27945,6 +28000,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadPeakProfitProtection = loadPeakProfitProtection;
     window.savePeakProfitProtection = savePeakProfitProtection;
+
+    async function loadProfitCaptureLayer() {
+      try {
+        const data = await fetchJSON('/api/profit-capture-layer');
+        const m = data.profitCaptureLayer || {};
+        const en = document.getElementById('pcl-enabled');
+        if (en) en.checked = m.enabled !== false;
+        const badge = document.getElementById('pcl-status-badge');
+        if (badge) badge.textContent = m.enabled !== false ? 'PCL ON' : 'PCL OFF';
+        const ls = document.getElementById('pcl-learn');
+        if (ls) ls.value = m.learningStrength != null ? m.learningStrength : 0.35;
+        const fo = m.familyOverrides || {};
+        const fast = document.getElementById('pcl-perm-fast');
+        if (fast) fast.value = (fo.fast && fo.fast.permissionSec != null) ? fo.fast.permissionSec : 35;
+        const dip = document.getElementById('pcl-perm-dip');
+        if (dip) dip.value = (fo.dip_trend && fo.dip_trend.permissionSec != null) ? fo.dip_trend.permissionSec : 120;
+        const qual = document.getElementById('pcl-perm-quality');
+        if (qual) qual.value = (fo.quality && fo.quality.permissionSec != null) ? fo.quality.permissionSec : 90;
+      } catch (err) {
+        console.warn('loadProfitCaptureLayer', err);
+      }
+    }
+    async function saveProfitCaptureLayer() {
+      const body = {
+        enabled: document.getElementById('pcl-enabled')
+          ? document.getElementById('pcl-enabled').checked
+          : true,
+        learningStrength: Number(document.getElementById('pcl-learn')?.value || 0.35),
+        familyOverrides: {
+          fast: { permissionSec: Number(document.getElementById('pcl-perm-fast')?.value || 35) },
+          dip_trend: { permissionSec: Number(document.getElementById('pcl-perm-dip')?.value || 120) },
+          quality: { permissionSec: Number(document.getElementById('pcl-perm-quality')?.value || 90) },
+        },
+      };
+      await fetchJSON('/api/config/profit-capture-layer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadProfitCaptureLayer();
+    }
+    window.loadProfitCaptureLayer = loadProfitCaptureLayer;
+    window.saveProfitCaptureLayer = saveProfitCaptureLayer;
 
     let _ptaCache = null;
     let _ptaSelected = 'scalper';

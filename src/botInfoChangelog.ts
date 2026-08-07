@@ -41,6 +41,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.208',
+    title: 'Profit Capture Layer',
+    sections: ['microbots', 'risk', 'learning', 'zion', 'knobs'],
+    items: [
+      'Additive Profit Capture Layer: short permission windows soften over-early scratch exits; hard SL / anti-rug unchanged.',
+      'PPP retuned (fast 60/40, dip-trend/quality 65/45) with min-open / min-profit floor, deferred arm in permission, stronger giveback after partial.',
+      'Earlier meaningful partials + runner trail nudge; live/sync exit priority rebalanced; learning boosts MFE capture / partials and penalizes tiny scratch.',
+      'Dashboard PCL card (enable + learning strength + family permission overrides), open-trade permission/partial/PPP lines, Zion one-liners.',
+    ],
+  },
+  {
     version: '1.2.207',
     title: 'Running pill pause/resume',
     sections: ['overview', 'modes'],

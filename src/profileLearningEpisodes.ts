@@ -124,6 +124,12 @@ export interface ProfileLearningEpisode {
    * or left TP on table after peaking at/above TP (false).
    */
   peakProtectBeatFullTp?: boolean;
+  /** Profit Capture Layer — first partial banked */
+  pclPartialTaken?: boolean;
+  pclRunnerFraction?: number;
+  hmcSetup?: string;
+  hmcConfidence?: number;
+  gateDecision?: string;
   /** Fast Profiles Recovery stage active when the trade closed (0–4). */
   recoveryStageAtClose?: number;
   /** Counterfactual exit evaluation (additive — learning accelerators) */
@@ -260,6 +266,11 @@ export function computeEpisodeTimingQuality(input: {
   exitUnrealizedPct: number;
   holdSec?: number;
   convictionScore?: number | null;
+  /** Stamped PCL entry quality (preferred over derived). */
+  entryQualityScoreAtOpen?: number | null;
+  pclPartialTaken?: boolean;
+  exitReason?: string;
+  exitKey?: string;
 }): {
   entryQualityScore: number;
   exitQualityScore: number;
@@ -279,16 +290,26 @@ export function computeEpisodeTimingQuality(input: {
       : null;
 
   // Entry quality: shallow MAE + decent conviction → higher. Deep MAE early → lower.
-  const maeAbs = Math.abs(mae);
   let entryQ = 72;
-  entryQ -= Math.min(40, maeAbs * 1.15);
-  if (holdSec > 0 && holdSec < 45 && maeAbs >= 8) entryQ -= 12;
-  if (mfe >= 15 && maeAbs <= 4) entryQ += 8;
-  if (conv != null) {
-    if (conv >= 55) entryQ += 6;
-    else if (conv < 30) entryQ -= 10;
+  if (
+    input.entryQualityScoreAtOpen != null &&
+    Number.isFinite(Number(input.entryQualityScoreAtOpen))
+  ) {
+    entryQ = Math.max(
+      0,
+      Math.min(100, Math.round(Number(input.entryQualityScoreAtOpen)))
+    );
+  } else {
+    const maeAbs = Math.abs(mae);
+    entryQ -= Math.min(40, maeAbs * 1.15);
+    if (holdSec > 0 && holdSec < 45 && maeAbs >= 8) entryQ -= 12;
+    if (mfe >= 15 && maeAbs <= 4) entryQ += 8;
+    if (conv != null) {
+      if (conv >= 55) entryQ += 6;
+      else if (conv < 30) entryQ -= 10;
+    }
+    entryQ = Math.max(0, Math.min(100, Math.round(entryQ)));
   }
-  entryQ = Math.max(0, Math.min(100, Math.round(entryQ)));
 
   // Exit quality: capture of MFE; punish giveback after peak
   const capture =
@@ -297,14 +318,32 @@ export function computeEpisodeTimingQuality(input: {
   exitQ -= Math.min(35, giveback * 0.85);
   if (mfe >= 25 && exitU < mfe * 0.35) exitQ -= 15;
   if (pnl > 0 && giveback < 5) exitQ += 5;
+  if (input.pclPartialTaken && pnl > 0) exitQ += 4;
   exitQ = Math.max(0, Math.min(100, Math.round(exitQ)));
 
   // Risk-adjusted timing reward (same units-ish as pnl %)
   const mfeCapturePts = mfe > 0 ? Math.min(mfe, Math.max(0, exitU)) * 0.35 : 0;
-  const maePenalty = maeAbs * 0.25;
+  const maePenalty = Math.abs(mae) * 0.25;
   const givebackPenalty = Math.min(20, giveback * 0.2);
-  const timingReward =
+  let timingReward =
     pnl + mfeCapturePts - maePenalty - givebackPenalty + (exitQ - 50) * 0.04;
+
+  try {
+    const { computePclLearningRewardDelta } =
+      require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+    timingReward += computePclLearningRewardDelta({
+      pnlPct: pnl,
+      maxRunupPct: mfe,
+      exitUnrealizedPct: exitU,
+      holdSec,
+      entryQualityScore: entryQ,
+      pclPartialTaken: input.pclPartialTaken === true,
+      exitReason: input.exitReason,
+      exitKey: input.exitKey,
+    });
+  } catch {
+    /* fail soft */
+  }
 
   return {
     entryQualityScore: entryQ,

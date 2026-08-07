@@ -2099,6 +2099,9 @@ export interface BotConfig {
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
+  /** Additive Profit Capture Layer — permission window + harvest bias. */
+  profitCaptureLayer: import('./profitCaptureLayer').ProfitCaptureLayerConfig;
+
   /** Additive Volume Intelligence — strength, decay, price-volume divergence. */
   volumeIntelligence: import('./volumeIntelligence').VolumeIntelligenceConfig;
 
@@ -2375,12 +2378,18 @@ export const config: BotConfig = {
 
   peakProfitProtection: {
     enabled: true,
-    armOfTpPct: 50,
-    givebackOfPeakPct: 33,
-    scalperArmOfTpPct: 40,
-    scalperGivebackOfPeakPct: 30,
+    armOfTpPct: 65,
+    givebackOfPeakPct: 45,
+    scalperArmOfTpPct: 60,
+    scalperGivebackOfPeakPct: 40,
     stalePeakTightenSec: 45,
     staleGivebackTightenMult: 0.75,
+  },
+
+  profitCaptureLayer: {
+    enabled: true,
+    learningStrength: 0.35,
+    familyOverrides: {},
   },
 
   volumeIntelligence: {
@@ -3118,14 +3127,21 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
         enabled: true,
-        armOfTpPct: 50,
-        givebackOfPeakPct: 33,
-        scalperArmOfTpPct: 40,
-        scalperGivebackOfPeakPct: 30,
+        armOfTpPct: 65,
+        givebackOfPeakPct: 45,
+        scalperArmOfTpPct: 60,
+        scalperGivebackOfPeakPct: 40,
         stalePeakTightenSec: 45,
         staleGivebackTightenMult: 0.75,
       }
     ) as PersistedBotSettings['peakProfitProtection'],
+    profitCaptureLayer: cloneJson(
+      config.profitCaptureLayer || {
+        enabled: true,
+        learningStrength: 0.35,
+        familyOverrides: {},
+      }
+    ) as PersistedBotSettings['profitCaptureLayer'],
     volumeIntelligence: cloneJson(
       config.volumeIntelligence || {
         enabled: true,
@@ -4051,11 +4067,11 @@ function applySettingsSnapshot(
       Math.min(hi, Math.max(lo, n));
     config.peakProfitProtection = {
       enabled: s.enabled !== false,
-      armOfTpPct: clamp(Number(s.armOfTpPct) || 50, 10, 95),
-      givebackOfPeakPct: clamp(Number(s.givebackOfPeakPct) || 33, 10, 80),
-      scalperArmOfTpPct: clamp(Number(s.scalperArmOfTpPct) || 40, 10, 95),
+      armOfTpPct: clamp(Number(s.armOfTpPct) || 65, 10, 95),
+      givebackOfPeakPct: clamp(Number(s.givebackOfPeakPct) || 45, 10, 80),
+      scalperArmOfTpPct: clamp(Number(s.scalperArmOfTpPct) || 60, 10, 95),
       scalperGivebackOfPeakPct: clamp(
-        Number(s.scalperGivebackOfPeakPct) || 30,
+        Number(s.scalperGivebackOfPeakPct) || 40,
         10,
         80
       ),
@@ -4066,6 +4082,35 @@ function applySettingsSnapshot(
         1
       ),
     };
+  }
+  if (saved.profitCaptureLayer && typeof saved.profitCaptureLayer === 'object') {
+    try {
+      const {
+        DEFAULT_PROFIT_CAPTURE_LAYER,
+      } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      const s = saved.profitCaptureLayer as Partial<
+        import('./profitCaptureLayer').ProfitCaptureLayerConfig
+      >;
+      const clamp = (n: number, lo: number, hi: number) =>
+        Math.min(hi, Math.max(lo, n));
+      config.profitCaptureLayer = {
+        ...DEFAULT_PROFIT_CAPTURE_LAYER,
+        ...s,
+        enabled: s.enabled !== false,
+        learningStrength: clamp(
+          Number(s.learningStrength) ||
+            DEFAULT_PROFIT_CAPTURE_LAYER.learningStrength,
+          0,
+          1
+        ),
+        familyOverrides:
+          s.familyOverrides && typeof s.familyOverrides === 'object'
+            ? { ...s.familyOverrides }
+            : {},
+      };
+    } catch {
+      /* fail soft */
+    }
   }
   if (saved.volumeIntelligence && typeof saved.volumeIntelligence === 'object') {
     try {

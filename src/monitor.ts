@@ -698,6 +698,10 @@ export interface TradeSignal {
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
+  /** HMC stamps for Profit Capture Layer (set in passesFilters) */
+  hmcSetup?: string;
+  hmcConfidence?: number;
+  gateDecision?: string;
 }
 
 /**
@@ -3342,6 +3346,9 @@ async function executeSignalBuy(
     scannerPlaybook: signal.scannerPlaybook,
     scannerConfluence: signal.scannerConfluence,
     candleSource: signal.candleSource,
+    hmcSetup: signal.hmcSetup,
+    hmcConfidence: signal.hmcConfidence,
+    gateDecision: signal.gateDecision,
     ...resolveScalpBuyFlag(signal),
     tokenAgeHours: (() => {
       const ev = getMigrationEvent(signal.mint);
@@ -3817,6 +3824,9 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     insiderPct:
       signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
+    hmcSetup: signal.hmcSetup,
+    hmcConfidence: signal.hmcConfidence,
+    gateDecision: signal.gateDecision,
     entrySource: signal.entrySource ?? 'migration',
     ...scalpFlag,
     tokenAgeHours: (() => {
@@ -4616,6 +4626,10 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     top10HoldPct?: number | null;
     insiderPct?: number | null;
     convictionScore?: number;
+    hmcSetup?: string;
+    hmcConfidence?: number;
+    gateDecision?: string;
+    entryQualityScore?: number;
     tokenAgeHours?: number | null;
     scalpMode?: boolean;
     shortTermStrategyId?: ShortTermStrategyId;
@@ -4654,6 +4668,9 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
     insiderPct:
       signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
     convictionScore: signal.convictionScore,
+    hmcSetup: signal.hmcSetup,
+    hmcConfidence: signal.hmcConfidence,
+    gateDecision: signal.gateDecision,
     entrySource:
       signal.entrySource ??
       (signal.isMigration || signal.nearMigration ? 'migration' : 'wallet'),
@@ -5201,6 +5218,9 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       insiderPct:
         signal.antiRug?.insiderPct ?? signal.sniper?.insiderPct ?? null,
       convictionScore: signal.convictionScore,
+      hmcSetup: signal.hmcSetup,
+      hmcConfidence: signal.hmcConfidence,
+      gateDecision: signal.gateDecision,
       ...scalpFlag,
       tokenAgeHours: (() => {
         const ev = getMigrationEvent(mint);
@@ -6043,6 +6063,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           symbol: signal.symbol,
           profileHint,
         });
+        signal.gateDecision = gk.decision;
         if (gk.decision === 'block') {
           const reason = gk.plainLanguage;
           logGatekeeperBlock(signal, gk);
@@ -6118,6 +6139,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             blocked: clf.blocked,
             softEligibility: classifierSoftEligibility,
           };
+          signal.hmcSetup = clf.setup;
+          signal.hmcConfidence = clf.confidence;
           recordClassifierDecision({
             result: clf,
             mint: signal.mint,

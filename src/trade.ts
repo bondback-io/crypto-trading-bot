@@ -214,6 +214,11 @@ export interface BuyOptions {
   insiderPct?: number | null;
   /** Entry conviction 0–100 for exit discipline */
   convictionScore?: number;
+  /** HMC / Profit Capture Layer stamps at open */
+  hmcSetup?: string;
+  hmcConfidence?: number;
+  gateDecision?: string;
+  entryQualityScore?: number;
   /** Seed Quick Scalper timed TP/SL/timer on open */
   scalpMode?: boolean;
   /** Which short-term strategy seeded the position */
@@ -833,6 +838,10 @@ export async function executeBuy(
         entryMarketCapUsd,
         sourceEntryMcUsd,
         convictionScore: meta?.convictionScore,
+        hmcSetup: meta?.hmcSetup,
+        hmcConfidence: meta?.hmcConfidence,
+        gateDecision: meta?.gateDecision,
+        entryQualityScore: meta?.entryQualityScore,
         scalpMode: meta?.scalpMode === true,
         shortTermStrategyId: meta?.shortTermStrategyId,
         tradeProfileId: meta?.tradeProfileId,
@@ -971,6 +980,10 @@ export async function executeBuy(
         entryMarketCapUsd,
         sourceEntryMcUsd,
         convictionScore: meta?.convictionScore,
+        hmcSetup: meta?.hmcSetup,
+        hmcConfidence: meta?.hmcConfidence,
+        gateDecision: meta?.gateDecision,
+        entryQualityScore: meta?.entryQualityScore,
         scalpMode: meta?.scalpMode === true,
         shortTermStrategyId: meta?.shortTermStrategyId,
         tradeProfileId: meta?.tradeProfileId,

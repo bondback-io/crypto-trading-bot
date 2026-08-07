@@ -3625,6 +3625,53 @@ export function createServer(): express.Application {
     }
   });
 
+  app.get('/api/profit-capture-layer', (_req: Request, res: Response) => {
+    try {
+      const { getProfitCaptureLayerConfig } =
+        require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      res.json({ ok: true, profitCaptureLayer: getProfitCaptureLayerConfig() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/profit-capture-layer', (req: Request, res: Response) => {
+    try {
+      const {
+        setProfitCaptureLayerConfig,
+        getProfitCaptureLayerConfig,
+      } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const familyOverrides =
+        body.familyOverrides && typeof body.familyOverrides === 'object'
+          ? (body.familyOverrides as Record<string, unknown>)
+          : undefined;
+      setProfitCaptureLayerConfig({
+        enabled:
+          typeof body.enabled === 'boolean' ? body.enabled : undefined,
+        learningStrength:
+          body.learningStrength != null
+            ? Number(body.learningStrength)
+            : undefined,
+        familyOverrides: familyOverrides as
+          | import('./profitCaptureLayer').ProfitCaptureLayerConfig['familyOverrides']
+          | undefined,
+      });
+      res.json({
+        ok: true,
+        profitCaptureLayer: getProfitCaptureLayerConfig(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get('/api/fast-profile-recovery', (_req: Request, res: Response) => {
     try {
       const { getFastProfileRecoveryPublic } =

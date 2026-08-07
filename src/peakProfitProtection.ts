@@ -23,10 +23,10 @@ export interface PeakProfitProtectionConfig {
 
 export const DEFAULT_PEAK_PROFIT_PROTECTION: PeakProfitProtectionConfig = {
   enabled: true,
-  armOfTpPct: 50,
-  givebackOfPeakPct: 33,
-  scalperArmOfTpPct: 40,
-  scalperGivebackOfPeakPct: 30,
+  armOfTpPct: 65,
+  givebackOfPeakPct: 45,
+  scalperArmOfTpPct: 60,
+  scalperGivebackOfPeakPct: 40,
   stalePeakTightenSec: 45,
   staleGivebackTightenMult: 0.75,
 };
@@ -142,27 +142,36 @@ export interface ResolvedPeakProtect {
   stalePeakTightenSec: number;
   staleGivebackTightenMult: number;
   fastProfile: boolean;
+  /** Min seconds open before PPP may arm (PCL). */
+  minOpenSec: number;
+  /** Do not PPP full-exit below this unrealized % once armed (hard SL still wins). */
+  minProfitFloorPct: number;
 }
 
 /**
  * Resolve effective Peak Profit Protection params for a profile.
  * Profile exitPolicy overrides win over global scalper/non-scalper defaults.
+ * Recovery Stage overrides remain authoritative when active.
  */
 export function resolvePeakProtectParams(input: {
   profileId?: string | null;
   takeProfitPct: number;
   policyArmOfTpPct?: number | null;
   policyGivebackOfPeakPct?: number | null;
+  /** PCL: bump arm later for high entry quality */
+  entryQualityScore?: number | null;
 }): ResolvedPeakProtect {
   const cfg = getPeakProfitProtectionConfig();
   const fast = isPeakProtectFastProfile(input.profileId);
   let policyArm = input.policyArmOfTpPct;
   let policyGiveback = input.policyGivebackOfPeakPct;
+  let recoveryActive = false;
   try {
     const { getRecoveryConstraints } =
       require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
     const rc = getRecoveryConstraints(input.profileId);
     if (rc.active) {
+      recoveryActive = true;
       policyArm = rc.peakProtectArmOfTpPct;
       policyGiveback = rc.peakProtectGivebackOfPeakPct;
     }
@@ -174,28 +183,63 @@ export function resolvePeakProtectParams(input: {
       require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
     const dc = getDipBuyerRecoveryConstraints(input.profileId);
     if (dc.active) {
+      recoveryActive = true;
       policyArm = dc.peakProtectArmOfTpPct;
       policyGiveback = dc.peakProtectGivebackOfPeakPct;
     }
   } catch {
     /* optional */
   }
+
+  let pclMinOpen = 0;
+  let pclMinFloor = 0;
+  let pclArmFallback: number | null = null;
+  let pclGiveFallback: number | null = null;
+  try {
+    const {
+      isProfitCaptureLayerEnabled,
+      resolvePclPppDefaults,
+      qualityPppArmBonusPts,
+    } = require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+    if (isProfitCaptureLayerEnabled()) {
+      const pcl = resolvePclPppDefaults(input.profileId);
+      pclMinOpen = pcl.minOpenSec;
+      pclMinFloor = pcl.minProfitFloorPct;
+      pclArmFallback = pcl.armOfTpPct;
+      pclGiveFallback = pcl.givebackOfPeakPct;
+      if (!recoveryActive) {
+        const bonus = qualityPppArmBonusPts(input.entryQualityScore);
+        if (bonus > 0 && policyArm != null && Number(policyArm) > 0) {
+          policyArm = clamp(Number(policyArm) + bonus, 10, 95);
+        } else if (bonus > 0) {
+          pclArmFallback = clamp(pclArmFallback + bonus, 10, 95);
+        }
+      }
+    }
+  } catch {
+    /* fail soft */
+  }
+
   const armOfTp =
     policyArm != null &&
     Number.isFinite(Number(policyArm)) &&
     Number(policyArm) > 0
       ? clamp(Number(policyArm), 10, 95)
-      : fast
-        ? cfg.scalperArmOfTpPct
-        : cfg.armOfTpPct;
+      : pclArmFallback != null
+        ? pclArmFallback
+        : fast
+          ? cfg.scalperArmOfTpPct
+          : cfg.armOfTpPct;
   const giveback =
     policyGiveback != null &&
     Number.isFinite(Number(policyGiveback)) &&
     Number(policyGiveback) > 0
       ? clamp(Number(policyGiveback), 10, 80)
-      : fast
-        ? cfg.scalperGivebackOfPeakPct
-        : cfg.givebackOfPeakPct;
+      : pclGiveFallback != null
+        ? pclGiveFallback
+        : fast
+          ? cfg.scalperGivebackOfPeakPct
+          : cfg.givebackOfPeakPct;
   const tp = Math.max(0, Number(input.takeProfitPct) || 0);
   return {
     enabled: cfg.enabled && tp > 0,
@@ -205,6 +249,8 @@ export function resolvePeakProtectParams(input: {
     stalePeakTightenSec: cfg.stalePeakTightenSec,
     staleGivebackTightenMult: cfg.staleGivebackTightenMult,
     fastProfile: fast,
+    minOpenSec: recoveryActive ? 0 : pclMinOpen,
+    minProfitFloorPct: recoveryActive ? 0 : pclMinFloor,
   };
 }
 
@@ -222,6 +268,15 @@ export interface PeakProtectEvalInput {
   nowMs?: number;
   /** Optional Volume Intelligence giveback multiplier (1 = no change). */
   volumeExitTightenMult?: number | null;
+  /** Position open time — for PCL minOpenSec before arm. */
+  openedAt?: number | null;
+  /** Defer arming while profit permission window is active. */
+  deferArm?: boolean;
+  /** After first PCL partial — tighten giveback on runner. */
+  pclPartialTaken?: boolean;
+  entryQualityScore?: number | null;
+  /** Override min profit floor (absolute unrealized %). */
+  minProfitFloorPct?: number | null;
 }
 
 export interface PeakProtectEvalResult {
@@ -245,6 +300,7 @@ export function evaluatePeakProfitProtection(
     takeProfitPct: input.takeProfitPct,
     policyArmOfTpPct: input.policyArmOfTpPct,
     policyGivebackOfPeakPct: input.policyGivebackOfPeakPct,
+    entryQualityScore: input.entryQualityScore,
   });
   const peak = Math.max(0, Number(input.peakUnrealizedPct) || 0);
   const pnl = Number(input.pnlPct) || 0;
@@ -259,13 +315,23 @@ export function evaluatePeakProfitProtection(
   };
   if (!resolved.enabled || resolved.armAtPct <= 0) return empty;
 
+  const now = input.nowMs ?? Date.now();
+  if (input.deferArm) {
+    return { ...empty, armed: false };
+  }
+  if (resolved.minOpenSec > 0 && input.openedAt != null) {
+    const openSec = (now - Number(input.openedAt)) / 1000;
+    if (openSec < resolved.minOpenSec) {
+      return { ...empty, armed: false };
+    }
+  }
+
   const armed = peak >= resolved.armAtPct;
   if (!armed) {
     return { ...empty, armed: false };
   }
 
   let effGive = resolved.givebackOfPeakPct;
-  const now = input.nowMs ?? Date.now();
   const armedAt = Number(input.peakProtectArmedAt) || 0;
   const lastPeak =
     Number(input.peakProtectLastPeakAt) || armedAt || now;
@@ -287,6 +353,19 @@ export function evaluatePeakProfitProtection(
     effGive = clamp(effGive * volTighten, 8, 80);
   }
 
+  // After first partial: stronger PPP on runner (giveback ×0.85)
+  if (input.pclPartialTaken) {
+    try {
+      const { PCL_POST_PARTIAL_GIVEBACK_MULT, isProfitCaptureLayerEnabled } =
+        require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+      if (isProfitCaptureLayerEnabled()) {
+        effGive = clamp(effGive * PCL_POST_PARTIAL_GIVEBACK_MULT, 8, 80);
+      }
+    } catch {
+      /* fail soft */
+    }
+  }
+
   if (peak <= 0) {
     return {
       ...empty,
@@ -295,8 +374,26 @@ export function evaluatePeakProfitProtection(
     };
   }
 
+  const floor =
+    input.minProfitFloorPct != null &&
+    Number.isFinite(Number(input.minProfitFloorPct))
+      ? Math.max(0, Number(input.minProfitFloorPct))
+      : resolved.minProfitFloorPct;
+
   const givebackPctOfPeak = ((peak - pnl) / peak) * 100;
   if (givebackPctOfPeak >= effGive) {
+    // PCL min profit floor — do not full-exit below floor (hard SL still wins)
+    if (floor > 0 && pnl < floor) {
+      return {
+        armed: true,
+        armAtPct: resolved.armAtPct,
+        givebackOfPeakPct: resolved.givebackOfPeakPct,
+        effectiveGivebackOfPeakPct: effGive,
+        shouldExit: false,
+        reason: '',
+        resolved,
+      };
+    }
     const reason = `Peak protection exit from +${peak.toFixed(1)}% peak, giveback limit hit (mark +${pnl.toFixed(1)}%, giveback ${givebackPctOfPeak.toFixed(0)}% of peak ≥ ${effGive.toFixed(0)}%)`;
     return {
       armed: true,
