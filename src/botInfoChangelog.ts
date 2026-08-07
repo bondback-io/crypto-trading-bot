@@ -42,6 +42,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.215',
+    title: 'Trade Craft Progress script fix',
+    sections: ['coaches', 'overview'],
+    items: [
+      'Fixed Trade Craft Progress trait button onclick string escapes so the dashboard inline script parses again (was a SyntaxError from bad quote escaping).',
+      'selectTradeCraftTrait handlers emit correctly escaped quotes inside the template-literal HTML builder.',
+    ],
+  },
+  {
     version: '1.2.214',
     title: 'Dashboard stall / backup storm fix',
     sections: ['backup', 'scanners', 'overview'],

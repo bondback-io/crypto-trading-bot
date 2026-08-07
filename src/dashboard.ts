@@ -15068,9 +15068,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               active +
               '" data-tc-trait="' +
               escHtml(t.id) +
-              '" onclick="selectTradeCraftTrait(\'' +
+              '" onclick="selectTradeCraftTrait(\\'' +
               escHtml(t.id) +
-              '\')">' +
+              '\\')">' +
               escHtml(t.label) +
               '</button>'
             );
