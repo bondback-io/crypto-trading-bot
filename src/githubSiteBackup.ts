@@ -99,6 +99,9 @@ let forceAutoImportOnce = false;
 let forceAutoImportReason: string | null = null;
 let criticalUploadTimer: ReturnType<typeof setTimeout> | null = null;
 let criticalUploadQueuedReason: string | null = null;
+/** Min gap between critical-save uploads — prevents HMC/FPR save storms from stalling the event loop. */
+const CRITICAL_UPLOAD_MIN_GAP_MS = 60_000;
+let lastCriticalUploadStartedAt = 0;
 
 function envToken(): string {
   return String(process.env.GITHUB_BACKUP_TOKEN || '').trim();
@@ -607,11 +610,16 @@ export function consumeForceGithubAutoImportOnce(): {
 
 /**
  * Best-effort queue a GitHub backup upload after a critical settings save.
- * Debounced; failures log only (never throw to callers).
+ * Debounced + min gap; failures log only (never throw to callers).
  */
 export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
   criticalUploadQueuedReason = String(reason || 'critical-save').slice(0, 120);
   if (criticalUploadTimer) return;
+  const since = Date.now() - lastCriticalUploadStartedAt;
+  const delay = Math.max(
+    4_000,
+    CRITICAL_UPLOAD_MIN_GAP_MS - Math.max(0, since)
+  );
   criticalUploadTimer = setTimeout(() => {
     criticalUploadTimer = null;
     const r = criticalUploadQueuedReason || 'critical-save';
@@ -625,6 +633,7 @@ export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
           );
           return;
         }
+        lastCriticalUploadStartedAt = Date.now();
         await uploadSiteBackupToGithub({ reason: `critical:${r}` });
       } catch (err) {
         console.warn(
@@ -633,7 +642,7 @@ export function queueGithubBackupUploadAfterCriticalSave(reason: string): void {
         );
       }
     })();
-  }, 4_000);
+  }, delay);
 }
 
 /**

@@ -1390,9 +1390,15 @@ export function startMarketScanner(): void {
   setTimeout(() => {
     void runScannerPollOnce();
   }, 12_000);
+  // Wake timer only — runScannerPollOnce enforces ≥~22s adaptive spacing.
+  // Keep wake ≤ pollInterval so we do not busy-wake every 5s under load.
+  const wakeMs = Math.max(
+    8_000,
+    Math.min(30_000, Math.floor((Number(cfg.pollIntervalMs) || 22_000) / 2))
+  );
   pollTimer = setInterval(() => {
     void runScannerPollOnce();
-  }, 5_000);
+  }, wakeMs);
 }
 
 export function stopMarketScanner(): void {

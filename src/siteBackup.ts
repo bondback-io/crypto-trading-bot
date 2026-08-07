@@ -235,6 +235,10 @@ export function saveSiteBackup(backup: SiteBackup): {
   return { stampedPath, latestPath, filename };
 }
 
+/** Avoid re-parsing multi‑MB latest backup on every meta poll. */
+let latestMetaCache: { mtimeMs: number; path: string; meta: SiteBackupMeta } | null =
+  null;
+
 export function getLatestSiteBackupMeta(): SiteBackupMeta {
   const latestPath = path.join(BACKUPS_DIR(), LATEST_NAME);
   const empty: SiteBackupMeta = {
@@ -247,10 +251,21 @@ export function getLatestSiteBackupMeta(): SiteBackupMeta {
     path: null,
   };
   try {
-    if (!fs.existsSync(latestPath)) return empty;
+    if (!fs.existsSync(latestPath)) {
+      latestMetaCache = null;
+      return empty;
+    }
+    const mtimeMs = fs.statSync(latestPath).mtimeMs;
+    if (
+      latestMetaCache &&
+      latestMetaCache.path === latestPath &&
+      latestMetaCache.mtimeMs === mtimeMs
+    ) {
+      return latestMetaCache.meta;
+    }
     const raw = readJsonFile<SiteBackup>(latestPath);
     if (!raw || raw.kind !== SITE_BACKUP_KIND) return empty;
-    return {
+    const meta: SiteBackupMeta = {
       exists: true,
       exportedAt: raw.exportedAt || null,
       exportedAtMs: raw.exportedAtMs ?? null,
@@ -259,6 +274,8 @@ export function getLatestSiteBackupMeta(): SiteBackupMeta {
       appVersion: raw.appVersion || null,
       path: latestPath,
     };
+    latestMetaCache = { mtimeMs, path: latestPath, meta };
+    return meta;
   } catch {
     return empty;
   }
@@ -448,14 +465,30 @@ export function resolveBundledRepoSiteBackupPath(): string | null {
   return null;
 }
 
+/** Repo bundled backup is multi‑MB — cache by mtime for reconcile / pre-upload. */
+let bundledRepoBackupCache: {
+  path: string;
+  mtimeMs: number;
+  backup: SiteBackup;
+} | null = null;
+
 export function loadBundledRepoSiteBackup(): SiteBackup | null {
   const filePath = resolveBundledRepoSiteBackupPath();
   if (!filePath) return null;
   try {
+    const mtimeMs = fs.statSync(filePath).mtimeMs;
+    if (
+      bundledRepoBackupCache &&
+      bundledRepoBackupCache.path === filePath &&
+      bundledRepoBackupCache.mtimeMs === mtimeMs
+    ) {
+      return bundledRepoBackupCache.backup;
+    }
     const raw = JSON.parse(
       fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '')
     ) as unknown;
     if (!isValidSiteBackup(raw)) return null;
+    bundledRepoBackupCache = { path: filePath, mtimeMs, backup: raw };
     return raw;
   } catch (err) {
     console.warn(

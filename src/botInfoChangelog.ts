@@ -42,6 +42,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.214',
+    title: 'Dashboard stall / backup storm fix',
+    sections: ['backup', 'scanners', 'overview'],
+    items: [
+      'Critical GitHub backup uploads enforce a 60s min gap so HMC/FPR save storms stop starving the event loop.',
+      'Site-backup latest/bundled JSON meta loads cache by mtime to avoid re-parsing multi-MB files on every poll.',
+      'Market scanner wake interval follows pollIntervalMs (half, clamped 8-30s) instead of a fixed 5s busy-wake.',
+    ],
+  },
+  {
     version: '1.2.213',
     title: 'Profit-protection learning robustness',
     sections: ['coaches', 'risk', 'learning', 'overview'],
