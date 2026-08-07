@@ -571,6 +571,9 @@ export function evaluateAdaptiveProfileExit(input: {
   pclPartialTaken?: boolean;
   entryStyle?: string | null;
   lateChaseAtEntry?: boolean;
+  /** Influencer Mirror position stamps — exit preference vs PPP */
+  mint?: string | null;
+  mirrorWalletId?: string | null;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const tier = input.qualityTier || 'medium';
@@ -644,6 +647,38 @@ export function evaluateAdaptiveProfileExit(input: {
     const { evaluatePeakProfitProtection, getPeakProfitProtectionConfig } =
       require('./peakProfitProtection') as typeof import('./peakProfitProtection');
     if (getPeakProfitProtectionConfig().enabled) {
+      let volTighten = input.volumeExitTightenMult;
+      let deferPppFull = false;
+      if (input.mirrorWalletId) {
+        try {
+          const {
+            isMirrorSellPreferred,
+            mirroredPoorSignsAllowEarlierPpp,
+          } = require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+          const poor = mirroredPoorSignsAllowEarlierPpp({
+            peakUnrealizedPct: peakUnrealized,
+            pnlPct: pnl,
+            volumeDecayState: input.volumeDecayState,
+            taStructureBroken: input.taStructureBroken === true,
+          });
+          if (
+            input.mint &&
+            isMirrorSellPreferred(String(input.mint)) &&
+            !poor
+          ) {
+            // Prefer influencer_mirror_sell — briefly defer soft PPP full-exit
+            deferPppFull = true;
+          } else if (poor) {
+            const base =
+              volTighten != null && Number.isFinite(Number(volTighten))
+                ? Number(volTighten)
+                : 1;
+            volTighten = Math.min(base, 0.82);
+          }
+        } catch {
+          /* optional */
+        }
+      }
       const ppp = evaluatePeakProfitProtection({
         peakUnrealizedPct: peakUnrealized,
         pnlPct: pnl,
@@ -658,13 +693,13 @@ export function evaluateAdaptiveProfileExit(input: {
         peakProtectArmedAt: input.peakProtectArmedAt,
         peakProtectLastPeakAt: input.peakProtectLastPeakAt,
         nowMs: now,
-        volumeExitTightenMult: input.volumeExitTightenMult,
+        volumeExitTightenMult: volTighten,
         openedAt: input.openedAt,
         deferArm: permActive,
         pclPartialTaken: input.pclPartialTaken === true,
         entryQualityScore: input.entryQualityScore,
       });
-      if (ppp.shouldExit && ppp.reason) {
+      if (ppp.shouldExit && ppp.reason && !deferPppFull) {
         return { type: 'full', reason: ppp.reason };
       }
     } else if (

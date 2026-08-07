@@ -3637,6 +3637,8 @@ export class PaperTrader {
           pclPartialTaken: position.pclPartialTaken === true,
           entryStyle: position.entryStyle,
           lateChaseAtEntry: position.lateChaseAtEntry,
+          mint: position.mint,
+          mirrorWalletId: position.mirrorWalletId,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -4477,7 +4479,24 @@ export class PaperTrader {
       // still fail-soft on poisoned marks that circulating MC does not confirm)
       {
         const rulesEarly = getStrategyRiskRules(position.strategyKind);
-        const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
+        let hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
+        // Mirrored positions: soft SL overlay (tighter). Hard floor still absolute.
+        if (position.mirrorWalletId) {
+          try {
+            const { applyMirroredSoftSlOverlay } =
+              require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+            const soft = applyMirroredSoftSlOverlay(position.stopLossPct);
+            if (soft != null) {
+              const softNeg = soft > 0 ? -Math.abs(soft) : soft;
+              const hardNeg =
+                hardSlRaw > 0 ? -Math.abs(hardSlRaw) : Number(hardSlRaw);
+              // Exit at the earlier trigger (algebraically larger among negatives)
+              hardSlRaw = Math.max(softNeg, hardNeg);
+            }
+          } catch {
+            /* optional */
+          }
+        }
         const hardSl = hardSlRaw > 0 ? -Math.abs(hardSlRaw) : hardSlRaw;
         if (markPnlPctAsync <= hardSl) {
           const ageMs = Math.max(
@@ -4684,6 +4703,8 @@ export class PaperTrader {
             pclPartialTaken: position.pclPartialTaken === true,
             entryStyle: position.entryStyle,
             lateChaseAtEntry: position.lateChaseAtEntry,
+            mint: position.mint,
+            mirrorWalletId: position.mirrorWalletId,
             volumeDecayState: (position.volumeDecayState as
               | 'expanding'
               | 'stable'

@@ -2438,6 +2438,10 @@ export const config: BotConfig = {
     useJito: true,
     gatekeeperOptional: true,
     sellUnrelated: false,
+    defaultTags: ['influencer', 'top_pnl'],
+    defaultSizeMult: 1,
+    defaultFollowSells: true,
+    defaultCopyEnabled: true,
   },
 
   hierarchicalCoordination: {
@@ -3204,6 +3208,10 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         useJito: true,
         gatekeeperOptional: true,
         sellUnrelated: false,
+        defaultTags: ['influencer', 'top_pnl'],
+        defaultSizeMult: 1,
+        defaultFollowSells: true,
+        defaultCopyEnabled: true,
       }
     ) as PersistedBotSettings['influencerMirror'],
     hierarchicalCoordination: cloneJson(
@@ -5964,6 +5972,7 @@ export function upsertSmartWallet(wallet: SmartWallet): {
   ];
   Object.assign(existing, {
     name: wallet.name || existing.name,
+    displayName: wallet.displayName ?? existing.displayName,
     winRate: wallet.winRate ?? existing.winRate,
     notes: wallet.notes ?? existing.notes,
     tradesLast7d: wallet.tradesLast7d ?? existing.tradesLast7d,
@@ -5984,6 +5993,11 @@ export function upsertSmartWallet(wallet: SmartWallet): {
     qualityScore: wallet.qualityScore ?? existing.qualityScore,
     qualityStatus: wallet.qualityStatus ?? existing.qualityStatus,
     copyWeight: wallet.copyWeight ?? existing.copyWeight,
+    copyEnabled: wallet.copyEnabled ?? existing.copyEnabled,
+    followSells: wallet.followSells ?? existing.followSells,
+    sizeMult: wallet.sizeMult ?? existing.sizeMult,
+    pnl30dUsd: wallet.pnl30dUsd ?? existing.pnl30dUsd,
+    volume30dUsd: wallet.volume30dUsd ?? existing.volume30dUsd,
   });
   persistWallets();
   return { added: false, updated: true };

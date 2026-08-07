@@ -584,7 +584,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>The monitor loop polls tracked wallets, scores quality, detects convergence / smart-money flow, then runs the same filter → profile → size path as scanner entries.</p>
         <ul>
           <li><strong>Smart Wallets</strong> — discover via Kolscan, GMGN, Birdeye, Dex, Axiom, Photon, BullX, Nansen, or paste manually.</li>
-          <li><strong>Influencer Mirror</strong> (default OFF) — tagged influencer / top_pnl / whale / smart wallets with copyEnabled use a fast Smart Money Mirror buy path (optional copy-sells on matching positions only). Requires <code>smart_money_copy</code> + <code>smart_money_mirror</code>. Anti-rug / hard SL absolute. CSV + GMGN fail-soft import on the Smart Wallets tab.</li>
+          <li><strong>Influencer Mirror</strong> (default OFF) — Add Wallet (GMGN enrich) + Import top 15 (30d PnL, GMGN primary) + Jupiter influencers (fail-soft). Soft Gatekeeper on copy buys; mirror-sell preferred vs PPP; Watch-tab Smart Mirror Watchlist (top 10 × 5 tokens, cross-hold +N, Add token). Copy size = profile risk sizing × wallet sizeMult — never influencer notional. Requires <code>smart_money_copy</code> + <code>smart_money_mirror</code>. Anti-rug / hard honeypot absolute.</li>
           <li><strong>Live trading wallets</strong> — main/burner slots; private keys stay on the server (env), never in backups.</li>
           <li>Pause in the header stops the monitor without shutting down the process.</li>
         </ul>

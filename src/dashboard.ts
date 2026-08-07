@@ -7511,9 +7511,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <button class="btn btn-secondary" onclick="exportInfluencerCsv()" title="Download CSV">Export CSV</button>
           <button class="btn btn-secondary" onclick="importInfluencerCsv()" title="Paste CSV into box below first">Import CSV</button>
           <button class="btn btn-primary" onclick="importInfluencerGmgn()" title="GMGN top wallets → tag influencer/top_pnl (fail soft)">GMGN import</button>
+          <button class="btn btn-primary" onclick="importInfluencerTop15()" title="Import top 15 by 30d PnL (GMGN primary)">Import top 15 (30d PnL)</button>
+          <button class="btn btn-secondary" onclick="importInfluencerJupiter()" title="Jupiter influencers — best-effort fail-soft">Jupiter influencers</button>
           <span class="mint" id="im-status"></span>
         </div>
         <div class="mint text-sm mb-2" id="im-prereq">Requires smart_money_copy + smart_money_mirror · default OFF</div>
+        <div class="filters-row mb-2 items-end">
+          <input type="text" id="im-add-address" class="search-q" placeholder="Solana address" title="Wallet address to add" />
+          <input type="text" id="im-add-name" class="ctl-md" style="width:9rem" placeholder="Display name" title="Optional display name override" />
+          <button type="button" class="btn btn-primary" onclick="addInfluencerWallet()" title="Add wallet with family tags + GMGN enrich">Add Wallet</button>
+        </div>
+        <div class="filters-row mb-2">
+          <label class="ctl ctl-sm" title="Default tags for Add Wallet (comma/pipe separated)">
+            <span>Default tags</span>
+            <input type="text" id="im-default-tags" value="influencer,top_pnl" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+          <label class="ctl ctl-sm" title="Default size multiplier for new wallets">
+            <span>Default size×</span>
+            <input type="number" id="im-default-size" value="1" min="0.25" max="2" step="0.05" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+          <label class="ctl-check" title="Default follow sells on new wallets">
+            <input type="checkbox" id="im-default-follow" checked onchange="saveInfluencerMirrorConfig()" /> followSells
+          </label>
+          <label class="ctl-check" title="Default copy enabled on new wallets">
+            <input type="checkbox" id="im-default-copy" checked onchange="saveInfluencerMirrorConfig()" /> copyEnabled
+          </label>
+          <label class="ctl-check" title="Soft Gatekeeper: activity floors advisory; anti-rug / honeypot still absolute">
+            <input type="checkbox" id="im-soft-gk" checked onchange="saveInfluencerMirrorConfig()" /> Soft Gatekeeper
+          </label>
+          <label class="ctl ctl-sm" title="Min liquidity USD for mirror buys">
+            <span>Min liq $</span>
+            <input type="number" id="im-min-liq" value="8000" min="0" step="500" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+          <label class="ctl ctl-sm" title="Min 5m volume USD for mirror buys">
+            <span>Min m5 vol $</span>
+            <input type="number" id="im-min-m5" value="800" min="0" step="50" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+        </div>
         <div class="filters-row mb-2">
           <label class="ctl ctl-sm" title="Max concurrent mirrored positions">
             <span>Max concurrent</span>
@@ -7961,6 +7995,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="mig-sniper-funnel" class="mint text-[11px] text-slate-400 mb-1">MS funnel: —</div>
           <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
         </div>
+
+        <div id="smart-mirror-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+          <div class="setup-watch-head">
+            <div class="setup-watch-title-block">
+              <span class="setup-watch-kicker">Influencer Mirror</span>
+              <span class="setup-watch-title">Smart Mirror Watchlist</span>
+              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 5 tokens (holding / sold / partial) · MC / holders · your hold badge · +N cross-hold · Add token copies via profile size.</p>
+            </div>
+            <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist()" title="Refresh holdings snapshot">Refresh</button>
+            <span id="smart-mirror-watch-count" class="setup-watch-count mint">—</span>
+          </div>
+          <div id="smart-mirror-watch-list" class="setup-watch-list text-slate-400">Load Watchlist — enable Influencer Mirror + import wallets</div>
+        </div>
+
         <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
@@ -13019,6 +13067,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (_) {}
       if (typeof refreshEntrySkipDiag === 'function') {
         refreshEntrySkipDiag().catch(function () {});
+      }
+      if (typeof refreshSmartMirrorWatchlist === 'function') {
+        refreshSmartMirrorWatchlist().catch(function () {});
       }
     }
     window.refreshSetupWatches = refreshSetupWatches;
@@ -18564,6 +18615,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const r = String(reason || '').replace(/^partial:\\s*/i, '').trim();
       if (!r) return { key: 'other', label: 'Unknown' };
       const low = r.toLowerCase();
+      if (/influencer_mirror_sell/i.test(low) || /influencer\\s*mirror\\s*sell/i.test(low)) {
+        return { key: 'manual', label: 'Influencer Mirror Sell' };
+      }
       if (/manual\\s*force\\s*sell|force\\s*sell|^manual$/i.test(r)) {
         return { key: 'manual', label: 'Manual' };
       }
@@ -20025,6 +20079,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
       }
 
+      if (p.mirrorWalletId || p.mirrorWalletName) {
+        const imName =
+          String(p.mirrorWalletName || '').trim() ||
+          String(p.mirrorWalletId || '').slice(0, 8);
+        lines.push({
+          label: 'Influencer Mirror',
+          text: 'Influencer Mirror · ' + imName,
+        });
+      }
+
       if (p.entryMarketCapUsd != null && Number(p.entryMarketCapUsd) > 0) {
         let mcText = 'Entered at ' + fmtUsdShort(p.entryMarketCapUsd) + ' MC';
         if (
@@ -20242,6 +20306,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const r = String(rawReason || '').trim();
       const low = r.toLowerCase();
       const key = (style && style.key) || 'other';
+      if (/influencer_mirror_sell/i.test(low)) {
+        return 'Copied the influencer wallet sell on this mirrored position (Influencer Mirror · follow-sells). Competing soft PPP exits are deferred briefly so this path can win.';
+      }
       if (key === 'manual' || /manual\\s*force\\s*sell|force\\s*sell/i.test(r)) {
         return 'You manually forced a sell from the dashboard.';
       }
@@ -26178,6 +26245,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (md) md.value = cfg.maxCopyDelayMs ?? 15000;
         const ps = document.getElementById('im-partial-sell');
         if (ps) ps.value = cfg.partialSellPct != null ? cfg.partialSellPct : '';
+        const sg = document.getElementById('im-soft-gk');
+        if (sg) sg.checked = cfg.gatekeeperOptional !== false;
+        const ml = document.getElementById('im-min-liq');
+        if (ml) ml.value = cfg.minLiquidityUsd ?? 8000;
+        const mm = document.getElementById('im-min-m5');
+        if (mm) mm.value = cfg.minVolumeM5Usd ?? 800;
+        const dt = document.getElementById('im-default-tags');
+        if (dt) dt.value = (cfg.defaultTags || ['influencer', 'top_pnl']).join(',');
+        const ds = document.getElementById('im-default-size');
+        if (ds) ds.value = cfg.defaultSizeMult ?? 1;
+        const df = document.getElementById('im-default-follow');
+        if (df) df.checked = cfg.defaultFollowSells !== false;
+        const dc = document.getElementById('im-default-copy');
+        if (dc) dc.checked = cfg.defaultCopyEnabled !== false;
         if (prereq) {
           const p = data.prereqs || {};
           prereq.textContent = p.ok
@@ -26188,7 +26269,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const wallets = data.wallets || [];
         if (tbody) {
           if (!wallets.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">No influencer / top_pnl / whale / smart tagged wallets — CSV or GMGN import</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">No influencer / top_pnl / whale / smart tagged wallets — Add Wallet, CSV, or import</td></tr>';
           } else {
             tbody.innerHTML = wallets.map((w) => {
               const tags = (w.tags || []).join(', ');
@@ -26222,13 +26303,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const status = document.getElementById('im-status');
       try {
         const partialRaw = document.getElementById('im-partial-sell')?.value;
+        const tagsRaw = document.getElementById('im-default-tags')?.value || '';
         const body = {
           enabled: document.getElementById('im-enabled')?.checked === true,
           copySells: document.getElementById('im-copy-sells')?.checked !== false,
           useJito: document.getElementById('im-use-jito')?.checked !== false,
+          gatekeeperOptional: document.getElementById('im-soft-gk')?.checked !== false,
           maxConcurrentMirrored: Number(document.getElementById('im-max-concurrent')?.value) || 3,
           maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 15000,
+          minLiquidityUsd: Number(document.getElementById('im-min-liq')?.value) || 8000,
+          minVolumeM5Usd: Number(document.getElementById('im-min-m5')?.value) || 800,
           partialSellPct: partialRaw === '' || partialRaw == null ? undefined : Number(partialRaw),
+          defaultTags: String(tagsRaw)
+            .split(/[|,]+/)
+            .map(function (t) { return t.trim(); })
+            .filter(Boolean),
+          defaultSizeMult: Number(document.getElementById('im-default-size')?.value) || 1,
+          defaultFollowSells: document.getElementById('im-default-follow')?.checked !== false,
+          defaultCopyEnabled: document.getElementById('im-default-copy')?.checked !== false,
         };
         await fetchJSON('/api/influencer-mirror/config', {
           method: 'POST',
@@ -26241,6 +26333,42 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (status) status.textContent = err.message || String(err);
       }
     }
+
+    async function addInfluencerWallet() {
+      const status = document.getElementById('im-status');
+      const address = String(document.getElementById('im-add-address')?.value || '').trim();
+      const displayName = String(document.getElementById('im-add-name')?.value || '').trim();
+      if (!address) {
+        if (status) status.textContent = 'Address required';
+        return;
+      }
+      if (status) status.textContent = 'Adding wallet…';
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/wallet/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address,
+            displayName: displayName || undefined,
+          }),
+        });
+        if (status) {
+          status.textContent =
+            (data.added ? 'Added ' : 'Updated ') +
+            (data.wallet?.displayName || address.slice(0, 8)) +
+            (data.enrichError ? ' · enrich: ' + data.enrichError : '');
+        }
+        const addrEl = document.getElementById('im-add-address');
+        const nameEl = document.getElementById('im-add-name');
+        if (addrEl) addrEl.value = '';
+        if (nameEl) nameEl.value = '';
+        await loadInfluencerMirror();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+    window.addInfluencerWallet = addInfluencerWallet;
 
     async function patchInfluencerWallet(address, patch) {
       const status = document.getElementById('im-status');
@@ -26307,6 +26435,185 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (status) status.textContent = err.message || String(err);
       }
     }
+
+    async function importInfluencerTop15() {
+      const status = document.getElementById('im-status');
+      if (status) status.textContent = 'Import top 15 (30d)…';
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/import-top', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 15, period: '30d', source: 'gmgn' }),
+        });
+        if (status) {
+          status.textContent =
+            'Top15 +' + (data.imported || 0) + ' ~' + (data.updated || 0) +
+            (data.error ? ' · ' + data.error : '') +
+            (data.source ? ' (' + data.source + ')' : '');
+        }
+        await loadInfluencerMirror();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+    window.importInfluencerTop15 = importInfluencerTop15;
+
+    async function importInfluencerJupiter() {
+      const status = document.getElementById('im-status');
+      if (status) status.textContent = 'Jupiter influencers…';
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/import-top', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 15, period: '30d', source: 'jupiter' }),
+        });
+        if (status) {
+          status.textContent =
+            'Jupiter +' + (data.imported || 0) + ' ~' + (data.updated || 0) +
+            (data.error ? ' · ' + data.error : '') +
+            (data.source ? ' (' + data.source + ')' : '');
+        }
+        await loadInfluencerMirror();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+    window.importInfluencerJupiter = importInfluencerJupiter;
+
+    async function refreshSmartMirrorWatchlist() {
+      const list = document.getElementById('smart-mirror-watch-list');
+      const count = document.getElementById('smart-mirror-watch-count');
+      const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      if (list) list.textContent = 'Loading…';
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/watchlist');
+        const influencers = data.influencers || [];
+        if (count) count.textContent = String(influencers.length);
+        if (!influencers.length) {
+          if (list) {
+            list.innerHTML =
+              '<div class="setup-watch-empty">No influencer wallets yet — Add Wallet or Import top 15 on Smart Wallets</div>';
+          }
+          return;
+        }
+        if (list) {
+          list.innerHTML = influencers
+            .map(function (inf) {
+              const pnl =
+                inf.pnl30dUsd != null
+                  ? '$' + Number(inf.pnl30dUsd).toFixed(0)
+                  : '—';
+              const wr =
+                inf.winRate != null ? Number(inf.winRate).toFixed(0) + '%' : '—';
+              const addr = String(inf.address || '').replace(/'/g, '');
+              const toks = inf.tokens || [];
+              const tokHtml = toks.length
+                ? toks
+                    .map(function (t) {
+                      const mint = String(t.mint || '').replace(/'/g, '');
+                      const st = String(t.status || 'holding');
+                      const mc =
+                        t.marketCapUsd != null
+                          ? fmtUsdShort(t.marketCapUsd)
+                          : '—';
+                      const holders =
+                        t.holders != null ? String(t.holders) : '—';
+                      const you = t.youHold
+                        ? '<span class="badge" style="font-size:10px;background:#134e4a;color:#5eead4">you hold</span>'
+                        : '';
+                      const cross =
+                        t.crossHoldCount > 0
+                          ? '<span class="mint" title="Other influencers also holding">+' +
+                            t.crossHoldCount +
+                            '</span>'
+                          : '';
+                      const addBtn =
+                        t.canAdd && !t.youHold
+                          ? '<button type="button" class="btn btn-secondary text-xs" ' +
+                            'onclick="smartMirrorAddToken(\\'' +
+                            addr +
+                            '\\',\\'' +
+                            mint +
+                            '\\',\\'' +
+                            String(t.symbol || '').replace(/'/g, '') +
+                            '\\',\\'' +
+                            String(t.name || '').replace(/'/g, '') +
+                            '\\')" title="Mirror buy at profile size">Add token</button>'
+                          : '';
+                      return (
+                        '<div class="setup-watch-row">' +
+                        '<div class="setup-watch-main">' +
+                        '<span class="setup-watch-sym">' +
+                        esc(t.symbol || mint.slice(0, 6)) +
+                        '</span> ' +
+                        '<span class="setup-watch-status">' +
+                        esc(st) +
+                        '</span> ' +
+                        you +
+                        ' ' +
+                        cross +
+                        '<div class="setup-watch-meta">MC ' +
+                        esc(mc) +
+                        ' · holders ' +
+                        esc(holders) +
+                        '</div>' +
+                        '</div>' +
+                        addBtn +
+                        '</div>'
+                      );
+                    })
+                    .join('')
+                : '<div class="setup-watch-empty">No recent tokens</div>';
+              return (
+                '<div class="mb-3" style="border-bottom:1px solid #1e293b;padding-bottom:0.5rem">' +
+                '<div class="flex flex-wrap gap-2 items-baseline mb-1">' +
+                '<strong class="text-slate-200">' +
+                esc(inf.name) +
+                '</strong>' +
+                '<span class="mint">30d ' +
+                esc(pnl) +
+                '</span>' +
+                '<span class="mint">win ' +
+                esc(wr) +
+                '</span>' +
+                '</div>' +
+                tokHtml +
+                '</div>'
+              );
+            })
+            .join('');
+        }
+      } catch (err) {
+        if (list) list.textContent = err.message || String(err);
+        if (count) count.textContent = '—';
+      }
+    }
+    window.refreshSmartMirrorWatchlist = refreshSmartMirrorWatchlist;
+
+    async function smartMirrorAddToken(walletAddress, mint, symbol, name) {
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/watchlist/buy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletAddress: walletAddress,
+            mint: mint,
+            symbol: symbol,
+            name: name,
+          }),
+        });
+        if (!data.ok) {
+          alert(data.error || 'Mirror buy skipped');
+        }
+        await refreshSmartMirrorWatchlist();
+        refresh();
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    }
+    window.smartMirrorAddToken = smartMirrorAddToken;
 
     async function bulkImportWallets() {
       const text = document.getElementById('bulk-import-text').value;

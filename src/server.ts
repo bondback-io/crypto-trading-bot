@@ -1136,6 +1136,8 @@ export function createServer(): express.Application {
       realizedPnlSol: p.realizedPnlSol,
       maxRunupPct: p.maxRunupPct,
       maxDrawdownPct: p.maxDrawdownPct,
+      mirrorWalletId: p.mirrorWalletId,
+      mirrorWalletName: p.mirrorWalletName,
     };
   }
 
@@ -7822,6 +7824,147 @@ export function createServer(): express.Application {
       });
     }
   });
+
+  app.post('/api/influencer-mirror/wallet/add', async (req: Request, res: Response) => {
+    try {
+      const {
+        addInfluencerWallet,
+        listInfluencerMirrorWallets,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      const body = (req.body || {}) as Record<string, unknown>;
+      const address = String(body.address || '').trim();
+      if (!address) {
+        res.status(400).json({ ok: false, error: 'address required' });
+        return;
+      }
+      const tags = Array.isArray(body.tags)
+        ? (body.tags as unknown[]).map((t) => String(t))
+        : typeof body.tags === 'string'
+          ? String(body.tags)
+              .split(/[|,]+/)
+              .map((t) => t.trim())
+              .filter(Boolean)
+          : undefined;
+      const result = await addInfluencerWallet({
+        address,
+        displayName: body.displayName != null ? String(body.displayName) : undefined,
+        name: body.name != null ? String(body.name) : undefined,
+        tags,
+        sizeMult:
+          body.sizeMult != null && Number.isFinite(Number(body.sizeMult))
+            ? Number(body.sizeMult)
+            : undefined,
+        followSells:
+          typeof body.followSells === 'boolean' ? body.followSells : undefined,
+        copyEnabled:
+          typeof body.copyEnabled === 'boolean' ? body.copyEnabled : undefined,
+        enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+      });
+      if (!result.ok) {
+        res.status(400).json(result);
+        return;
+      }
+      const monitoring = syncWalletsToMonitoring(
+        [address],
+        'influencer-mirror-add'
+      );
+      res.json({
+        ...result,
+        monitoring,
+        wallets: listInfluencerMirrorWallets(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/influencer-mirror/import-top', async (req: Request, res: Response) => {
+    try {
+      const {
+        importInfluencerTop,
+        listInfluencerMirrorWallets,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      const body = (req.body || {}) as Record<string, unknown>;
+      const sourceRaw = String(body.source || 'gmgn').toLowerCase();
+      const source =
+        sourceRaw === 'jupiter' || sourceRaw === 'auto' ? sourceRaw : 'gmgn';
+      const result = await importInfluencerTop({
+        limit:
+          body.limit != null && Number.isFinite(Number(body.limit))
+            ? Number(body.limit)
+            : 15,
+        period: body.period === '7d' ? '7d' : '30d',
+        source,
+        minWinRate:
+          body.minWinRate != null && Number.isFinite(Number(body.minWinRate))
+            ? Number(body.minWinRate)
+            : undefined,
+      });
+      const toActivate = listInfluencerMirrorWallets()
+        .filter((w) => w.enabled && w.copyEnabled !== false)
+        .map((w) => w.address)
+        .slice(0, 40);
+      const monitoring = syncWalletsToMonitoring(
+        toActivate,
+        `influencer-mirror-import-${source}`
+      );
+      res.json({
+        ok: true,
+        ...result,
+        monitoring,
+        wallets: listInfluencerMirrorWallets(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/influencer-mirror/watchlist', async (_req: Request, res: Response) => {
+    try {
+      const { buildSmartMirrorWatchlist } =
+        require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+      const data = await buildSmartMirrorWatchlist({
+        topN: 10,
+        tokensPerWallet: 5,
+      });
+      res.json({ ok: true, ...data });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        influencers: [],
+      });
+    }
+  });
+
+  app.post(
+    '/api/influencer-mirror/watchlist/buy',
+    async (req: Request, res: Response) => {
+      try {
+        const { mirrorBuyFromWatchlist } =
+          require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+        const body = (req.body || {}) as Record<string, unknown>;
+        const result = await mirrorBuyFromWatchlist({
+          walletAddress: String(body.walletAddress || body.address || ''),
+          mint: String(body.mint || ''),
+          symbol: body.symbol != null ? String(body.symbol) : undefined,
+          name: body.name != null ? String(body.name) : undefined,
+        });
+        res.status(result.ok ? 200 : 400).json(result);
+      } catch (err) {
+        res.status(500).json({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  );
 
   // --- Dashboard (tabbed Tailwind UI) ---
 

@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.225',
+    title: 'Influencer Smart Mirror enhancements',
+    sections: ['copy', 'scanners', 'risk', 'coaches', 'overview'],
+    items: [
+      'Add Wallet + defaults strip (Soft Gatekeeper, sizeMult, tags, followSells); Import top 15 (30d PnL, GMGN primary) + Jupiter influencers fail-soft.',
+      'Soft Gatekeeper on mirror buys (activity advisory; anti-rug absolute); mirror-sell preferred vs PPP with poor-signs earlier harvest; soft SL overlay on mirrored positions.',
+      'Watch-tab Smart Mirror Watchlist: top 10 influencers × 5 tokens, holding/sold/partial, MC/holders, your-hold badge, +N cross-hold, Add token → profile-sized mirror buy.',
+      'More Info: Influencer Mirror · {name}; explain influencer_mirror_sell.',
+    ],
+  },
+  {
     version: '1.2.224',
     title: 'Dip watch minors unstarved + Minors/Majors tabs',
     sections: ['scanners', 'overview', 'microbots'],

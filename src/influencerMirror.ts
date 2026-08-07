@@ -22,12 +22,20 @@ export interface InfluencerMirrorConfig {
   minVolumeM5Usd: number;
   copySells: boolean;
   useJito: boolean;
-  /** Soft Gatekeeper for mirror path; hard safety (anti-rug / SL) still absolute */
+  /**
+   * Soft Gatekeeper for mirror path (default ON).
+   * Soft activity floors are advisory; hard safety (anti-rug / honeypot) still absolute.
+   */
   gatekeeperOptional: boolean;
   /** Optional partial sell % of initial (1–99); omit / 100 = full exit */
   partialSellPct?: number;
   /** Never sell positions that don't match the influencer source wallet */
   sellUnrelated: false;
+  /** Defaults applied when Add Wallet / import creates tagged wallets */
+  defaultTags: string[];
+  defaultSizeMult: number;
+  defaultFollowSells: boolean;
+  defaultCopyEnabled: boolean;
 }
 
 export const DEFAULT_INFLUENCER_MIRROR: InfluencerMirrorConfig = {
@@ -40,6 +48,10 @@ export const DEFAULT_INFLUENCER_MIRROR: InfluencerMirrorConfig = {
   useJito: true,
   gatekeeperOptional: true,
   sellUnrelated: false,
+  defaultTags: ['influencer', 'top_pnl'],
+  defaultSizeMult: 1,
+  defaultFollowSells: true,
+  defaultCopyEnabled: true,
 };
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -50,6 +62,16 @@ export function clampSizeMult(n: unknown): number {
   const v = Number(n);
   if (!Number.isFinite(v)) return 1;
   return clamp(v, 0.25, 2);
+}
+
+function normalizeDefaultTags(raw: unknown): string[] {
+  const base = Array.isArray(raw)
+    ? normalizeWalletTags(raw as string[])
+    : [...DEFAULT_INFLUENCER_MIRROR.defaultTags];
+  if (!base.some((t) => (INFLUENCER_FAMILY_TAGS as readonly string[]).includes(t))) {
+    base.push('influencer');
+  }
+  return base;
 }
 
 export function normalizeInfluencerMirrorConfig(
@@ -87,6 +109,12 @@ export function normalizeInfluencerMirrorConfig(
         ? Math.round(partial)
         : undefined,
     sellUnrelated: false,
+    defaultTags: normalizeDefaultTags(r.defaultTags),
+    defaultSizeMult: clampSizeMult(
+      r.defaultSizeMult ?? DEFAULT_INFLUENCER_MIRROR.defaultSizeMult
+    ),
+    defaultFollowSells: r.defaultFollowSells !== false,
+    defaultCopyEnabled: r.defaultCopyEnabled !== false,
   };
 }
 
@@ -462,6 +490,281 @@ export async function importInfluencerFromGmgn(opts?: {
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * Add / upsert a single influencer wallet with family tags + GMGN enrich (fail soft).
+ */
+export async function addInfluencerWallet(input: {
+  address: string;
+  displayName?: string;
+  name?: string;
+  tags?: string[];
+  sizeMult?: number;
+  followSells?: boolean;
+  copyEnabled?: boolean;
+  enabled?: boolean;
+}): Promise<{
+  ok: boolean;
+  added?: boolean;
+  updated?: boolean;
+  wallet?: SmartWallet;
+  error?: string;
+  enrichError?: string;
+}> {
+  const { upsertSmartWallet } =
+    require('./config') as typeof import('./config');
+  const { isValidSolanaAddress } =
+    require('./walletStore') as typeof import('./walletStore');
+  const address = String(input.address || '').trim();
+  if (!isValidSolanaAddress(address)) {
+    return { ok: false, error: 'Invalid Solana address' };
+  }
+  const im = getInfluencerMirrorConfig();
+  let tags = normalizeWalletTags(
+    input.tags?.length ? input.tags : im.defaultTags
+  );
+  if (!tags.some((t) => (INFLUENCER_FAMILY_TAGS as readonly string[]).includes(t))) {
+    tags = [...tags, 'influencer'];
+  }
+  const existing = config.smartWallets.find((w) => w.address === address);
+  const displayName =
+    String(input.displayName || input.name || existing?.displayName || existing?.name || '')
+      .trim() || address.slice(0, 8);
+
+  let enrich: {
+    name?: string;
+    pnl30dUsd?: number;
+    winRate?: number;
+    lastActive?: number;
+    tradesLast7d?: number;
+    tradesLast30d?: number;
+  } = {};
+  let enrichError: string | undefined;
+  try {
+    const { getWalletActivity } = require('./gmgn') as typeof import('./gmgn');
+    const act = await getWalletActivity(address);
+    if (act && !act.error) {
+      enrich = {
+        name: displayName,
+        pnl30dUsd:
+          act.pnl30dUsd != null && Number.isFinite(act.pnl30dUsd)
+            ? Number(act.pnl30dUsd)
+            : undefined,
+        winRate:
+          act.winRate != null && Number.isFinite(act.winRate)
+            ? Number(act.winRate)
+            : undefined,
+        lastActive: act.lastTradeTime ?? undefined,
+        tradesLast7d: act.tradeCount7d ?? undefined,
+        tradesLast30d: act.tradeCount30d ?? undefined,
+      };
+    } else if (act?.error) {
+      enrichError = act.error;
+    }
+  } catch (err) {
+    enrichError = err instanceof Error ? err.message : String(err);
+  }
+
+  const name =
+    String(input.name || enrich.name || displayName).trim() || address.slice(0, 8);
+  const result = upsertSmartWallet({
+    name,
+    displayName,
+    address,
+    enabled: input.enabled ?? existing?.enabled ?? true,
+    copyEnabled:
+      input.copyEnabled ?? existing?.copyEnabled ?? im.defaultCopyEnabled,
+    followSells:
+      input.followSells ?? existing?.followSells ?? im.defaultFollowSells,
+    sizeMult: clampSizeMult(
+      input.sizeMult ?? existing?.sizeMult ?? im.defaultSizeMult
+    ),
+    tags,
+    category: 'kol',
+    source: existing?.source ?? 'manual',
+    discoveredAt: existing?.discoveredAt ?? Date.now(),
+    pnl30dUsd: enrich.pnl30dUsd ?? existing?.pnl30dUsd,
+    winRate: enrich.winRate ?? existing?.winRate,
+    lastActive: enrich.lastActive ?? existing?.lastActive,
+    tradesLast7d: enrich.tradesLast7d ?? existing?.tradesLast7d,
+    tradesLast30d: enrich.tradesLast30d ?? existing?.tradesLast30d,
+  });
+  const w = config.smartWallets.find((x) => x.address === address);
+  if (w) {
+    w.displayName = displayName || w.displayName || w.name;
+    w.copyEnabled =
+      input.copyEnabled ?? w.copyEnabled ?? im.defaultCopyEnabled;
+    w.followSells =
+      input.followSells ?? w.followSells ?? im.defaultFollowSells;
+    w.sizeMult = clampSizeMult(
+      input.sizeMult ?? w.sizeMult ?? im.defaultSizeMult
+    );
+    w.tags = tags;
+    if (enrich.pnl30dUsd != null) w.pnl30dUsd = enrich.pnl30dUsd;
+    if (enrich.winRate != null) w.winRate = enrich.winRate;
+    if (enrich.lastActive != null) w.lastActive = enrich.lastActive;
+    applyInfluencerWalletDefaults(w);
+    persistWallets();
+  }
+  return {
+    ok: true,
+    added: result.added,
+    updated: result.updated,
+    wallet: w,
+    enrichError,
+  };
+}
+
+/** Import from Jupiter influencers (fail soft) into influencer-tagged wallets. */
+export async function importInfluencerFromJupiter(opts?: {
+  limit?: number;
+}): Promise<{
+  imported: number;
+  updated: number;
+  error?: string;
+  source?: string;
+}> {
+  try {
+    const { fetchJupiterInfluencers } =
+      require('./jupiterInfluencers') as typeof import('./jupiterInfluencers');
+    const { upsertSmartWallet } =
+      require('./config') as typeof import('./config');
+    const limit = Math.min(Math.max(opts?.limit ?? 15, 1), 30);
+    const result = await fetchJupiterInfluencers({ limit });
+    if (!result.wallets.length) {
+      return {
+        imported: 0,
+        updated: 0,
+        error: result.error || 'Jupiter returned no influencers',
+        source: result.source,
+      };
+    }
+    const im = getInfluencerMirrorConfig();
+    let imported = 0;
+    let updated = 0;
+    for (const row of result.wallets.slice(0, limit)) {
+      const existing = config.smartWallets.find((w) => w.address === row.address);
+      const tags = new Set<string>(['influencer', 'smart']);
+      if (row.pnl30dUsd != null) tags.add('top_pnl');
+      const r = upsertSmartWallet({
+        name: row.name || row.address.slice(0, 8),
+        displayName: row.name || row.address.slice(0, 8),
+        address: row.address,
+        enabled: existing?.enabled ?? true,
+        copyEnabled: existing?.copyEnabled ?? im.defaultCopyEnabled,
+        followSells: existing?.followSells ?? im.defaultFollowSells,
+        sizeMult: existing?.sizeMult ?? im.defaultSizeMult,
+        tags: [...tags],
+        category: 'kol',
+        source: 'jupiter' as SmartWallet['source'],
+        discoveredAt: existing?.discoveredAt ?? Date.now(),
+        winRate: row.winRate ?? existing?.winRate,
+        pnl30dUsd: row.pnl30dUsd ?? existing?.pnl30dUsd,
+        volume30dUsd: row.volume30dUsd ?? existing?.volume30dUsd,
+        lastActive: row.lastActive ?? existing?.lastActive,
+      });
+      const w = config.smartWallets.find((x) => x.address === row.address);
+      if (w) {
+        w.displayName = row.name || w.displayName || w.name;
+        w.copyEnabled = w.copyEnabled ?? im.defaultCopyEnabled;
+        w.followSells = w.followSells ?? im.defaultFollowSells;
+        w.sizeMult = clampSizeMult(w.sizeMult ?? im.defaultSizeMult);
+        if (row.pnl30dUsd != null) w.pnl30dUsd = row.pnl30dUsd;
+        if (row.winRate != null) w.winRate = row.winRate;
+        if (row.volume30dUsd != null) w.volume30dUsd = row.volume30dUsd;
+        applyInfluencerWalletDefaults(w);
+      }
+      if (r.added) imported++;
+      else if (r.updated) updated++;
+    }
+    if (imported + updated > 0) persistWallets();
+    return {
+      imported,
+      updated,
+      error: result.error,
+      source: result.source,
+    };
+  } catch (err) {
+    return {
+      imported: 0,
+      updated: 0,
+      error: err instanceof Error ? err.message : String(err),
+      source: 'none',
+    };
+  }
+}
+
+/**
+ * Top-N import: GMGN primary (30d PnL), Jupiter best-effort fail-soft.
+ * `auto` = GMGN then Jupiter (Jupiter never blocks GMGN success).
+ */
+export async function importInfluencerTop(opts?: {
+  limit?: number;
+  period?: '7d' | '30d';
+  source?: 'gmgn' | 'jupiter' | 'auto';
+  minWinRate?: number;
+}): Promise<{
+  imported: number;
+  updated: number;
+  error?: string;
+  source?: string;
+  gmgn?: { imported: number; updated: number; error?: string; source?: string };
+  jupiter?: { imported: number; updated: number; error?: string; source?: string };
+}> {
+  const limit = Math.min(Math.max(opts?.limit ?? 15, 5), 30);
+  const period = opts?.period === '7d' ? '7d' : '30d';
+  const source = opts?.source === 'jupiter' || opts?.source === 'auto' ? opts.source : 'gmgn';
+  const minWinRate = opts?.minWinRate ?? 30;
+
+  if (source === 'jupiter') {
+    const j = await importInfluencerFromJupiter({ limit });
+    return {
+      imported: j.imported,
+      updated: j.updated,
+      error: j.error,
+      source: j.source || 'jupiter',
+      jupiter: j,
+    };
+  }
+
+  const gmgn = await importInfluencerFromGmgn({ limit, period, minWinRate });
+  // Prefer sorting by 30d PnL after import (already from GMGN orderby when available)
+  const wallets = listInfluencerMirrorWallets()
+    .slice()
+    .sort((a, b) => (Number(b.pnl30dUsd) || 0) - (Number(a.pnl30dUsd) || 0));
+  void wallets;
+
+  if (source === 'gmgn') {
+    return {
+      imported: gmgn.imported,
+      updated: gmgn.updated,
+      error: gmgn.error,
+      source: gmgn.source || 'gmgn',
+      gmgn,
+    };
+  }
+
+  // auto: always try Jupiter fail-soft; never undo GMGN
+  const jup = await importInfluencerFromJupiter({ limit });
+  const errors = [gmgn.error, jup.error].filter(Boolean);
+  return {
+    imported: gmgn.imported + jup.imported,
+    updated: gmgn.updated + jup.updated,
+    error: errors.length ? errors.join(' · ') : undefined,
+    source: `gmgn:${gmgn.source || 'gmgn'}+jupiter:${jup.source || 'none'}`,
+    gmgn,
+    jupiter: jup,
+  };
+}
+
+/** Top influencers by 30d PnL for Watchlist UI */
+export function listTopInfluencerWallets(limit = 10): SmartWallet[] {
+  return listInfluencerMirrorWallets()
+    .filter((w) => w.enabled !== false)
+    .slice()
+    .sort((a, b) => (Number(b.pnl30dUsd) || 0) - (Number(a.pnl30dUsd) || 0))
+    .slice(0, Math.min(Math.max(limit, 1), 20));
 }
 
 /** Prerequisites for live mirror path */

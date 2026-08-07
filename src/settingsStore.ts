@@ -265,6 +265,10 @@ export interface PersistedBotSettings {
     gatekeeperOptional?: boolean;
     partialSellPct?: number;
     sellUnrelated?: false;
+    defaultTags?: string[];
+    defaultSizeMult?: number;
+    defaultFollowSells?: boolean;
+    defaultCopyEnabled?: boolean;
   };
   /** HMC Gatekeeper + Setup Classifier (Phases 1–2) */
   hierarchicalCoordination?: {

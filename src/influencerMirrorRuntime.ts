@@ -264,51 +264,56 @@ export async function tryInfluencerMirrorBuy(
   buyOpts.mirrorWalletId = buy.wallet.address;
   buyOpts.mirrorWalletName = name;
 
-  if (!im.gatekeeperOptional) {
-    try {
-      const { evaluateGatekeeper, isGatekeeperActive } =
-        require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
-      if (isGatekeeperActive()) {
-        const gk = evaluateGatekeeper({
-          mint: buy.mint,
-          symbol: buy.symbol,
-          profileHint: 'smart_money_mirror',
-          metrics: metrics
-            ? {
-                liquidityUsd: metrics.liquidityUsd,
-                volumeM5Usd: metrics.volumeM5Usd,
-                volumeH1Usd: metrics.volumeH1Usd,
-                marketCapUsd: metrics.marketCapUsd,
-                priceChangeH1Pct: metrics.priceChangeH1Pct,
-                priceChange24hPct: metrics.priceChange24hPct,
-              }
-            : null,
-          antiRug: antiRug
-            ? {
-                ok: antiRug.ok,
-                riskLevel: antiRug.riskLevel,
-                riskScore: antiRug.riskScore,
-                honeypot: antiRug.honeypot,
-                skipReasons: antiRug.skipReasons,
-                flags: antiRug.flags,
-              }
-            : null,
-        });
-        if (gk.decision === 'block') {
-          return {
-            handled: true,
-            taken: false,
-            skipReason: gk.plainLanguage,
-          };
-        }
+  // Soft GK (default): always evaluate when HMC on; soft activity advisory.
+  // Hard safety still blocks. gatekeeperOptional=false → full soft enforce.
+  try {
+    const { evaluateGatekeeper, isGatekeeperActive } =
+      require('./hierarchicalCoordination') as typeof import('./hierarchicalCoordination');
+    if (isGatekeeperActive()) {
+      const gk = evaluateGatekeeper({
+        mint: buy.mint,
+        symbol: buy.symbol,
+        profileHint: 'smart_money_mirror',
+        influencerMirrorSoftPass: im.gatekeeperOptional === true,
+        metrics: metrics
+          ? {
+              liquidityUsd: metrics.liquidityUsd,
+              volumeM5Usd: metrics.volumeM5Usd,
+              volumeH1Usd: metrics.volumeH1Usd,
+              marketCapUsd: metrics.marketCapUsd,
+              priceChangeH1Pct: metrics.priceChangeH1Pct,
+              priceChange24hPct: metrics.priceChange24hPct,
+            }
+          : null,
+        antiRug: antiRug
+          ? {
+              ok: antiRug.ok,
+              riskLevel: antiRug.riskLevel,
+              riskScore: antiRug.riskScore,
+              honeypot: antiRug.honeypot,
+              skipReasons: antiRug.skipReasons,
+              flags: antiRug.flags,
+            }
+          : null,
+      });
+      if (gk.decision === 'block') {
+        return {
+          handled: true,
+          taken: false,
+          skipReason: gk.plainLanguage,
+        };
       }
-    } catch {
-      /* fail open soft */
     }
+  } catch {
+    /* fail open soft */
   }
 
   const result = await executeBuy(buy.mint, buy.symbol, buyOpts);
   if (result.success) {
+    noteInfluencerTokenEvent(buy.wallet.address, buy.mint, 'buy', {
+      symbol: buy.symbol,
+      name: buy.name,
+    });
     console.log(
       `[influencer-mirror] Mirrored buy ${label} from ${name} ` +
         `via ${buyOpts.tradeProfileId} (${sizing.sizeSol.toFixed(3)} SOL)`
@@ -372,6 +377,9 @@ export async function tryInfluencerMirrorSell(
 
   void im.sellUnrelated;
 
+  // Prefer mirror sell over soft PPP — defer competing PPP briefly
+  markMirrorSellPreferred(sell.mint);
+
   let soldAny = false;
   for (const pos of open) {
     const reason = 'influencer_mirror_sell';
@@ -386,6 +394,10 @@ export async function tryInfluencerMirrorSell(
           sellPctOfInitial: im.partialSellPct,
         });
         soldAny = true;
+        noteInfluencerTokenEvent(sell.wallet.address, sell.mint, 'partial', {
+          symbol: sell.symbol,
+          name: sell.name,
+        });
         console.log(
           `[influencer-mirror] Partial ${im.partialSellPct}% sell ${label} ` +
             `(mirrored ${name})`
@@ -400,6 +412,10 @@ export async function tryInfluencerMirrorSell(
       const r = await paperTrader.forceSellPosition(pos.id, reason);
       if (r.ok) {
         soldAny = true;
+        noteInfluencerTokenEvent(sell.wallet.address, sell.mint, 'sell', {
+          symbol: sell.symbol,
+          name: sell.name,
+        });
         console.log(
           `[influencer-mirror] Full exit ${label} (mirrored ${name})`
         );
@@ -412,4 +428,364 @@ export async function tryInfluencerMirrorSell(
   }
 
   return { handled: true, sold: soldAny };
+}
+
+// ── Exit preference + soft SL overlay ─────────────────────────────────────
+
+/** mint → prefer mirror-sell until this ms (defer soft PPP full-exit) */
+const mirrorSellPreferredUntil = new Map<string, number>();
+const MIRROR_SELL_DEFER_MS = 12_000;
+
+export function markMirrorSellPreferred(mint: string, ms = MIRROR_SELL_DEFER_MS): void {
+  const m = String(mint || '').trim();
+  if (!m) return;
+  mirrorSellPreferredUntil.set(m, Date.now() + Math.max(2_000, ms));
+}
+
+export function isMirrorSellPreferred(mint: string): boolean {
+  const m = String(mint || '').trim();
+  if (!m) return false;
+  const until = mirrorSellPreferredUntil.get(m);
+  if (until == null) return false;
+  if (Date.now() > until) {
+    mirrorSellPreferredUntil.delete(m);
+    return false;
+  }
+  return true;
+}
+
+/** Soft SL multiplier for mirrored positions (tighter; hard floor unchanged). */
+export const MIRROR_SOFT_SL_MULT = 0.9;
+
+export function applyMirroredSoftSlOverlay(
+  stopLossPct: number | null | undefined
+): number | null {
+  if (stopLossPct == null || !Number.isFinite(Number(stopLossPct))) return null;
+  const raw = Number(stopLossPct);
+  const abs = Math.abs(raw);
+  if (!(abs > 0)) return raw;
+  // Tighter = smaller abs magnitude (exit sooner on losses)
+  const tightened = Math.max(4, abs * MIRROR_SOFT_SL_MULT);
+  return raw > 0 ? tightened : -tightened;
+}
+
+/**
+ * Poor signs → allow PPP/soft harvest earlier on mirrored positions.
+ * (rising giveback, dead volume, structure break)
+ */
+export function mirroredPoorSignsAllowEarlierPpp(input: {
+  peakUnrealizedPct?: number | null;
+  pnlPct?: number | null;
+  volumeDecayState?: string | null;
+  taStructureBroken?: boolean;
+}): boolean {
+  const peak = Math.max(0, Number(input.peakUnrealizedPct) || 0);
+  const pnl = Number(input.pnlPct) || 0;
+  const givebackPctOfPeak = peak > 0 ? ((peak - pnl) / peak) * 100 : 0;
+  if (givebackPctOfPeak >= 28 && peak >= 6) return true;
+  if (
+    input.volumeDecayState === 'collapsed' ||
+    input.volumeDecayState === 'decaying'
+  ) {
+    return peak >= 4;
+  }
+  if (input.taStructureBroken === true && peak >= 5) return true;
+  return false;
+}
+
+// ── Watchlist holdings cache ───────────────────────────────────────────────
+
+const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const HOLDINGS_CACHE_TTL_MS = 90_000;
+
+export interface InfluencerTokenSnap {
+  mint: string;
+  symbol?: string;
+  name?: string;
+  status: 'holding' | 'sold' | 'partial';
+  amountUi?: number;
+  marketCapUsd?: number | null;
+  holders?: number | null;
+  updatedAt: number;
+}
+
+interface WalletHoldingsCache {
+  fetchedAt: number;
+  tokens: InfluencerTokenSnap[];
+}
+
+const holdingsCache = new Map<string, WalletHoldingsCache>();
+/** wallet:mint → last known event */
+const tokenEvents = new Map<
+  string,
+  { kind: 'buy' | 'sell' | 'partial'; at: number; symbol?: string; name?: string }
+>();
+
+export function noteInfluencerTokenEvent(
+  wallet: string,
+  mint: string,
+  kind: 'buy' | 'sell' | 'partial',
+  meta?: { symbol?: string; name?: string }
+): void {
+  const w = String(wallet || '').trim();
+  const m = String(mint || '').trim();
+  if (!w || !m) return;
+  tokenEvents.set(`${w}:${m}`, {
+    kind,
+    at: Date.now(),
+    symbol: meta?.symbol,
+    name: meta?.name,
+  });
+  // Invalidate holdings cache so next watchlist refresh merges events
+  holdingsCache.delete(w);
+}
+
+async function fetchWalletTokenMints(
+  address: string
+): Promise<InfluencerTokenSnap[]> {
+  try {
+    const { PublicKey } = require('@solana/web3.js') as typeof import('@solana/web3.js');
+    const { getConnection, runWithRpcRole } =
+      require('./connection') as typeof import('./connection');
+    const owner = new PublicKey(address);
+    const programId = new PublicKey(TOKEN_PROGRAM_ID);
+    const resp = await runWithRpcRole('utility', async () => {
+      const conn = getConnection();
+      return conn.getParsedTokenAccountsByOwner(owner, { programId });
+    });
+    const out: InfluencerTokenSnap[] = [];
+    const now = Date.now();
+    for (const row of resp?.value || []) {
+      try {
+        const info = row.account.data.parsed?.info;
+        const mint = String(info?.mint || '').trim();
+        const amount = Number(info?.tokenAmount?.uiAmount ?? 0);
+        if (!mint || !(amount > 0)) continue;
+        // Skip obvious dust / wrapped SOL noise handled elsewhere
+        out.push({
+          mint,
+          status: 'holding',
+          amountUi: amount,
+          updatedAt: now,
+        });
+      } catch {
+        /* skip row */
+      }
+    }
+    // Prefer largest balances first
+    out.sort((a, b) => (b.amountUi || 0) - (a.amountUi || 0));
+    return out.slice(0, 12);
+  } catch (err) {
+    console.warn(
+      '[influencer-mirror] holdings RPC failed:',
+      err instanceof Error ? err.message : err
+    );
+    return [];
+  }
+}
+
+async function getWalletHoldingsCached(
+  address: string
+): Promise<InfluencerTokenSnap[]> {
+  const hit = holdingsCache.get(address);
+  if (hit && Date.now() - hit.fetchedAt < HOLDINGS_CACHE_TTL_MS) {
+    return hit.tokens;
+  }
+  const tokens = await fetchWalletTokenMints(address);
+  // Merge recent sell/partial events for status
+  const holdingMints = new Set(tokens.map((t) => t.mint));
+  for (const [key, ev] of tokenEvents) {
+    if (!key.startsWith(address + ':')) continue;
+    const mint = key.slice(address.length + 1);
+    if (ev.kind === 'sell' && !holdingMints.has(mint)) {
+      tokens.push({
+        mint,
+        symbol: ev.symbol,
+        name: ev.name,
+        status: 'sold',
+        updatedAt: ev.at,
+      });
+    } else if (ev.kind === 'partial' && holdingMints.has(mint)) {
+      const row = tokens.find((t) => t.mint === mint);
+      if (row) row.status = 'partial';
+    } else if (ev.kind === 'buy' && holdingMints.has(mint)) {
+      const row = tokens.find((t) => t.mint === mint);
+      if (row) {
+        row.symbol = row.symbol || ev.symbol;
+        row.name = row.name || ev.name;
+      }
+    }
+  }
+  tokens.sort((a, b) => {
+    const rank = (s: string) =>
+      s === 'holding' ? 0 : s === 'partial' ? 1 : 2;
+    const d = rank(a.status) - rank(b.status);
+    if (d !== 0) return d;
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
+  const sliced = tokens.slice(0, 8);
+  holdingsCache.set(address, { fetchedAt: Date.now(), tokens: sliced });
+  return sliced;
+}
+
+export interface SmartMirrorWatchlistToken {
+  mint: string;
+  symbol: string;
+  name: string;
+  status: 'holding' | 'sold' | 'partial';
+  marketCapUsd: number | null;
+  holders: number | null;
+  youHold: boolean;
+  crossHoldCount: number;
+  canAdd: boolean;
+}
+
+export interface SmartMirrorWatchlistInfluencer {
+  address: string;
+  name: string;
+  pnl30dUsd: number | null;
+  winRate: number | null;
+  tokens: SmartMirrorWatchlistToken[];
+}
+
+export async function buildSmartMirrorWatchlist(opts?: {
+  topN?: number;
+  tokensPerWallet?: number;
+}): Promise<{
+  influencers: SmartMirrorWatchlistInfluencer[];
+  fetchedAt: number;
+  error?: string;
+}> {
+  const {
+    listTopInfluencerWallets,
+    walletDisplayName,
+  } = require('./influencerMirror') as typeof import('./influencerMirror');
+  const topN = Math.min(Math.max(opts?.topN ?? 10, 1), 15);
+  const per = Math.min(Math.max(opts?.tokensPerWallet ?? 5, 1), 8);
+  const wallets = listTopInfluencerWallets(topN);
+  const openMints = new Set(
+    paperTrader.getOpenPositions().map((p) => p.mint)
+  );
+
+  // Fetch holdings sequentially with light concurrency to limit RPC
+  const holdingsByWallet = new Map<string, InfluencerTokenSnap[]>();
+  for (const w of wallets) {
+    holdingsByWallet.set(w.address, await getWalletHoldingsCached(w.address));
+  }
+
+  // Cross-hold map
+  const mintHolders = new Map<string, Set<string>>();
+  for (const [addr, toks] of holdingsByWallet) {
+    for (const t of toks) {
+      if (t.status === 'sold') continue;
+      if (!mintHolders.has(t.mint)) mintHolders.set(t.mint, new Set());
+      mintHolders.get(t.mint)!.add(addr);
+    }
+  }
+
+  // Enrich top mints with metrics (best-effort, capped)
+  const uniqueMints = [...mintHolders.keys()].slice(0, 40);
+  const metricsMap = new Map<
+    string,
+    { marketCapUsd: number | null; holders: number | null }
+  >();
+  try {
+    const { fetchTokenMetrics, summarizeTokenMetrics } =
+      require('./tokenMetrics') as typeof import('./tokenMetrics');
+    let n = 0;
+    for (const mint of uniqueMints) {
+      if (n >= 20) break;
+      n++;
+      try {
+        const raw = await fetchTokenMetrics(mint);
+        const s = summarizeTokenMetrics(raw);
+        metricsMap.set(mint, {
+          marketCapUsd: s.marketCapUsd ?? null,
+          holders: s.holderCountEstimate ?? null,
+        });
+      } catch {
+        /* skip */
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
+  const influencers: SmartMirrorWatchlistInfluencer[] = wallets.map((w) => {
+    const toks = (holdingsByWallet.get(w.address) || []).slice(0, per);
+    return {
+      address: w.address,
+      name: walletDisplayName(w),
+      pnl30dUsd:
+        w.pnl30dUsd != null && Number.isFinite(Number(w.pnl30dUsd))
+          ? Number(w.pnl30dUsd)
+          : null,
+      winRate:
+        w.winRate != null && Number.isFinite(Number(w.winRate))
+          ? Number(w.winRate)
+          : null,
+      tokens: toks.map((t) => {
+        const meta = metricsMap.get(t.mint);
+        const youHold = openMints.has(t.mint);
+        const cross = Math.max(
+          0,
+          (mintHolders.get(t.mint)?.size || 0) - 1
+        );
+        return {
+          mint: t.mint,
+          symbol: t.symbol || t.mint.slice(0, 6),
+          name: t.name || t.symbol || t.mint.slice(0, 8),
+          status: t.status,
+          marketCapUsd: meta?.marketCapUsd ?? null,
+          holders: meta?.holders ?? null,
+          youHold,
+          crossHoldCount: cross,
+          canAdd: !youHold && t.status !== 'sold',
+        };
+      }),
+    };
+  });
+
+  return { influencers, fetchedAt: Date.now() };
+}
+
+/**
+ * Manual Add-token from Watchlist → same profile-sized mirror buy path.
+ */
+export async function mirrorBuyFromWatchlist(input: {
+  walletAddress: string;
+  mint: string;
+  symbol?: string;
+  name?: string;
+}): Promise<{ ok: boolean; taken?: boolean; error?: string }> {
+  const wallet = config.smartWallets.find(
+    (w) => w.address === String(input.walletAddress || '').trim()
+  );
+  if (!wallet || !isInfluencerMirrorWallet(wallet)) {
+    return { ok: false, error: 'Influencer wallet not found / not eligible' };
+  }
+  if (!isInfluencerMirrorEnabled()) {
+    return { ok: false, error: 'Influencer Mirror master is OFF' };
+  }
+  const mint = String(input.mint || '').trim();
+  if (!mint) return { ok: false, error: 'mint required' };
+  const r = await tryInfluencerMirrorBuy({
+    wallet,
+    mint,
+    symbol: String(input.symbol || mint.slice(0, 6)),
+    name: String(input.name || input.symbol || mint.slice(0, 8)),
+    signature: `watchlist-add-${mint}-${Date.now()}`,
+    timestamp: Date.now(),
+    detectedAt: Date.now(),
+    isPumpFun: false,
+    isMigration: false,
+  });
+  if (!r.handled) {
+    return { ok: false, error: 'Mirror path inactive' };
+  }
+  return {
+    ok: r.taken === true,
+    taken: r.taken,
+    error: r.taken ? undefined : r.skipReason || 'not taken',
+  };
 }

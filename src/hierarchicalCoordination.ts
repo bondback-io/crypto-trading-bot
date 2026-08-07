@@ -106,6 +106,11 @@ export interface GatekeeperInput {
    * → normal Gatekeeper (fail soft when stamp missing).
    */
   majorsDipWatch?: boolean;
+  /**
+   * Influencer Smart Mirror copy path. Soft activity floors stay advisory;
+   * hard safety / anti-rug / honeypot still block (same pattern as majorsDipWatch).
+   */
+  influencerMirrorSoftPass?: boolean;
 }
 
 export type SetupClass =
@@ -764,6 +769,7 @@ function cacheKey(input: GatekeeperInput, cfg: HierarchicalCoordinationConfig): 
     input.hasOpenPosition ? '1' : '0',
     input.exhausted ? '1' : '0',
     input.majorsDipWatch ? 'mdw1' : 'mdw0',
+    input.influencerMirrorSoftPass ? 'imsp1' : 'imsp0',
   ].join('|');
 }
 
@@ -1058,13 +1064,15 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
   } else if (softCodes.length) {
     // Strictness Low: soft activity findings stay advisory even if
     // softBlocksEnforced is checked — hard safety already handled above.
-    // Majors Dip-watch: high-MC handoffs soft-pass activity floors only
+    // Majors Dip-watch / Influencer Mirror: soft-pass activity floors only
     // (anti-rug / honeypot / high-risk already hard-blocked above).
     const majorsDipSoftPass = input.majorsDipWatch === true;
+    const influencerMirrorSoftPass = input.influencerMirrorSoftPass === true;
+    const activitySoftPass = majorsDipSoftPass || influencerMirrorSoftPass;
     const enforceSoft =
       cfg.softBlocksEnforced &&
       cfg.gatekeeperStrictness !== 'low' &&
-      !majorsDipSoftPass;
+      !activitySoftPass;
 
     // Medium quality path: thin M5 alone is advisory when H1 ≥ floor.
     let softForEnforce = softCodes;
@@ -1088,16 +1096,23 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
       };
     } else {
       const plain = plainFromCodes('allow', softCodes, true);
+      let plainOut = plain;
+      if (influencerMirrorSoftPass) {
+        plainOut = plain.replace(
+          'Gatekeeper ALLOW (advisory):',
+          'Gatekeeper ALLOW (influencer mirror soft):'
+        );
+      } else if (majorsDipSoftPass) {
+        plainOut = plain.replace(
+          'Gatekeeper ALLOW (advisory):',
+          'Gatekeeper ALLOW (majors dip-watch):'
+        );
+      }
       result = {
         decision: 'allow',
         severity: 'soft',
         reasonCodes: softCodes,
-        plainLanguage: majorsDipSoftPass
-          ? plain.replace(
-              'Gatekeeper ALLOW (advisory):',
-              'Gatekeeper ALLOW (majors dip-watch):'
-            )
-          : plain,
+        plainLanguage: plainOut,
         advisory: true,
       };
     }

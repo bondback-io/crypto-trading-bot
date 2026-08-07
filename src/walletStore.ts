@@ -56,7 +56,8 @@ export interface SmartWallet {
     | 'nansen'
     | 'kolscan'
     | 'axiom'
-    | 'photon';
+    | 'photon'
+    | 'jupiter';
   /** When first discovered / imported */
   discoveredAt?: number;
   /** When activity was last checked */
