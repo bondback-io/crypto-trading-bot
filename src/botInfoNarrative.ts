@@ -83,7 +83,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       <article class="botinfo-card" id="botinfo-sec-lifecycle" data-botinfo-section="lifecycle">
         <h3><span class="botinfo-sec-num">01</span> Trading Bot Lifecycle</h3>
         <p>Follow one micro-bot from <strong>waiting for a signal</strong> to <strong>closing and learning</strong>. This is the shared path for Market Scanner and Copy entries (enrich → Gatekeeper → Classifier → lane fight → filters → TA → buy → manage → learn).</p>
-        <img class="botinfo-hero-img" src="/botinfo/trading-lifecycle-hero.png" width="920" height="518" alt="Isometric trading bot lifecycle: a token travels through signal, enrich, gatekeeper, classifier, lane fight, coaches, filters, TA, buy, protect, and learn checkpoints" loading="lazy" decoding="async" />
+        <img class="botinfo-hero-img" src="/botinfo/trading-lifecycle-hero.jpg" width="920" height="518" alt="Isometric trading bot lifecycle: a token travels through signal, enrich, gatekeeper, classifier, lane fight, coaches, filters, TA, buy, protect, and learn checkpoints" loading="lazy" decoding="async" />
         ${slots.lifecycleSvg}
         <div class="botinfo-callout"><strong>Running story:</strong> Token <em>$RIVER</em> pops onto the Live Feed. <strong>Trend Rider</strong> is enabled and waiting. We walk $RIVER through every checkpoint — like a shopper going from “spotted on the shelf” to “receipt in the bag,” with coaches whispering along the way.</div>
 

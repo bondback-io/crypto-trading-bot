@@ -42,6 +42,14 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.211',
+    title: 'Lifecycle hero asset slimmed',
+    sections: ['lifecycle'],
+    items: [
+      'Trading Bot Lifecycle hero switched to compressed JPEG (~110KB) for faster Bot Info loads.',
+    ],
+  },
+  {
     version: '1.2.210',
     title: 'Trading Bot Lifecycle guide',
     sections: ['lifecycle', 'overview', 'coaches'],
