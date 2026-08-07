@@ -113,6 +113,7 @@ function updatePeakProtectArmState(
           nowMs,
         })
       ) {
+        position.pclPppArmDeferred = true;
         const polDefer = (position.profileExitPolicy || {}) as {
           peakProtectArmOfTpPct?: number;
           peakProtectGivebackOfPeakPct?: number;
@@ -208,12 +209,20 @@ function stampProfitCaptureLayerAtOpen(
       entryQualityScore: q,
     });
     position.pclPartialTaken = false;
+    position.pclScratchBlockedCount = 0;
+    position.pclPppArmDeferred = false;
   } catch (err) {
     console.warn(
       '[pcl] stamp at open failed (fail soft):',
       err instanceof Error ? err.message : err
     );
   }
+}
+
+/** Count a PCL tiny-green scratch block on the open position (fail soft). */
+function notePclScratchBlocked(position: Position): void {
+  const n = Number(position.pclScratchBlockedCount) || 0;
+  position.pclScratchBlockedCount = n + 1;
 }
 
 /** Hard ceiling on realized exit multiple vs entry (last-resort balance guard). */
@@ -372,6 +381,10 @@ export interface Position {
   gateDecision?: 'allow' | 'block' | string;
   pclPartialTaken?: boolean;
   pclRunnerFraction?: number;
+  /** Times PCL blocked a tiny-green soft scratch while open */
+  pclScratchBlockedCount?: number;
+  /** PPP arm deferred at least once during permission */
+  pclPppArmDeferred?: boolean;
   /** Quality tier derived from conviction at entry (drives dynamic TP) */
   qualityTier?: 'low' | 'medium' | 'high';
   /** Self-learn param version stamped at open */
@@ -911,6 +924,66 @@ function maybeRecordLearningEpisode(
         Number.isFinite(Number(position.pclRunnerFraction))
           ? Number(position.pclRunnerFraction)
           : undefined,
+      mfeCaptureRatio: (() => {
+        const mfe = Math.max(0, Number(metrics.maxRunupPct) || 0);
+        const exitU = Number.isFinite(metrics.exitUnrealizedPct)
+          ? Number(metrics.exitUnrealizedPct)
+          : pnlPct;
+        if (!(mfe > 0.5)) return undefined;
+        return Math.round(Math.max(0, Math.min(1.5, exitU / mfe)) * 1000) / 1000;
+      })(),
+      profitPermissionUntilMs:
+        position.profitPermissionUntilMs != null &&
+        Number.isFinite(Number(position.profitPermissionUntilMs))
+          ? Number(position.profitPermissionUntilMs)
+          : undefined,
+      profitPermissionSec: (() => {
+        const until = Number(position.profitPermissionUntilMs) || 0;
+        const opened = Number(position.openedAt) || 0;
+        if (!(until > 0 && opened > 0)) return undefined;
+        return Math.max(0, Math.round((until - opened) / 1000));
+      })(),
+      exitedDuringPermission: (() => {
+        const until = Number(position.profitPermissionUntilMs) || 0;
+        const closed = Number(position.closedAt) || Date.now();
+        return until > 0 && closed <= until ? true : undefined;
+      })(),
+      pclScratchBlockedCount:
+        position.pclScratchBlockedCount != null &&
+        Number(position.pclScratchBlockedCount) > 0
+          ? Math.round(Number(position.pclScratchBlockedCount))
+          : undefined,
+      pclPppArmDeferred:
+        position.pclPppArmDeferred === true ? true : undefined,
+      pclFamily: (() => {
+        try {
+          const { resolvePclProfileFamily } =
+            require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+          return resolvePclProfileFamily(profileId);
+        } catch {
+          return undefined;
+        }
+      })(),
+      pclLearningDelta: (() => {
+        try {
+          const { computePclLearningRewardDelta } =
+            require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+          const d = computePclLearningRewardDelta({
+            pnlPct,
+            maxRunupPct: metrics.maxRunupPct,
+            exitUnrealizedPct: metrics.exitUnrealizedPct,
+            holdSec,
+            entryQualityScore: timingQ.entryQualityScore,
+            pclPartialTaken: position.pclPartialTaken === true,
+            exitReason: position.reason,
+          });
+          return Number.isFinite(d) && d !== 0
+            ? Math.round(d * 1000) / 1000
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
       hmcSetup: position.hmcSetup,
       hmcConfidence:
         position.hmcConfidence != null &&
@@ -3563,6 +3636,7 @@ export class PaperTrader {
                 nowMs,
               })
             ) {
+              notePclScratchBlocked(position);
               return null;
             }
           } catch {
@@ -4144,6 +4218,7 @@ export class PaperTrader {
             entryQualityScore: position.entryQualityScore,
           })
         ) {
+          notePclScratchBlocked(position);
           skipDeadScratch = true;
         }
       } catch {
@@ -4548,6 +4623,7 @@ export class PaperTrader {
                   entryQualityScore: position.entryQualityScore,
                 })
               ) {
+                notePclScratchBlocked(position);
                 continue;
               }
             } catch {

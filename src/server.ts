@@ -3793,6 +3793,23 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Trade Craft Progress — harvest/PCL + hold/TA/exit skill scores (read-only). */
+  app.get('/api/trade-craft-performance', (req: Request, res: Response) => {
+    try {
+      const { buildTradeCraftPerformance } =
+        require('./tradeCraftPerformance') as typeof import('./tradeCraftPerformance');
+      const profileId = String(req.query.profileId || 'all');
+      const window = Math.max(20, Math.min(100, Number(req.query.window) || 50));
+      const craft = buildTradeCraftPerformance(profileId, window);
+      res.json({ ok: true, craft });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
     try {
       const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =

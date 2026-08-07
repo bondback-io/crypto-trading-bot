@@ -3653,6 +3653,62 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .lsd-spark span.pos { background: #34d399; }
     .lsd-spark span.neg { background: #f87171; }
+    /* Trade Craft Progress */
+    .tc-hero {
+      display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start;
+      margin: 0.55rem 0 0.75rem; padding: 0.75rem 0.85rem; border-radius: 12px;
+      background: linear-gradient(135deg, #064e3b33 0%, #0f172a 55%, #1e293b88 100%);
+      border: 1px solid #065f4644;
+    }
+    .tc-score-num {
+      font-size: 2rem; font-weight: 800; color: #34d399; line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .tc-score-label { font-size: 0.68rem; color: #94a3b8; margin-top: 0.2rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .tc-blurb { font-size: 0.78rem; color: #cbd5e1; line-height: 1.45; max-width: 40rem; margin: 0; }
+    .tc-tabs {
+      display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0.65rem;
+    }
+    .tc-tab {
+      border: 1px solid #334155; background: #0f172a; color: #94a3b8;
+      font-size: 0.68rem; font-weight: 600; padding: 0.35rem 0.65rem; border-radius: 999px; cursor: pointer;
+    }
+    .tc-tab:hover { border-color: #64748b; color: #e2e8f0; }
+    .tc-tab.active { background: #064e3b; border-color: #059669; color: #a7f3d0; }
+    .tc-trait-bars { display: grid; gap: 0.35rem; margin: 0 0 0.75rem; }
+    .tc-trait-row {
+      display: grid; grid-template-columns: 7.5rem 1fr auto; gap: 0.45rem; align-items: center;
+      font-size: 0.7rem; color: #94a3b8;
+    }
+    .tc-trait-row .nm { color: #cbd5e1; font-weight: 600; }
+    .tc-trait-row .sc { font-variant-numeric: tabular-nums; color: #e2e8f0; min-width: 2.4rem; text-align: right; }
+    .tc-kpis {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+      gap: 0.45rem; margin: 0.55rem 0 0.75rem;
+    }
+    .tc-kpi {
+      padding: 0.55rem 0.6rem; border-radius: 10px; background: #0f172a; border: 1px solid #334155;
+    }
+    .tc-kpi .k { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+    .tc-kpi .v { font-size: 0.95rem; font-weight: 700; color: #a7f3d0; margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+    .tc-table-wrap { overflow-x: auto; margin-top: 0.55rem; }
+    .tc-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+    .tc-table th, .tc-table td {
+      text-align: left; padding: 0.4rem 0.45rem; border-bottom: 1px solid #1e293b; color: #94a3b8;
+    }
+    .tc-table th { color: #64748b; font-weight: 600; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .tc-table td.num { font-variant-numeric: tabular-nums; color: #e2e8f0; }
+    .tc-film details { margin-top: 0.65rem; }
+    .tc-film summary {
+      cursor: pointer; font-size: 0.75rem; font-weight: 600; color: #94a3b8;
+      list-style: none;
+    }
+    .tc-film summary::-webkit-details-marker { display: none; }
+    .tc-exit-mix { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.45rem 0; }
+    .tc-exit-chip {
+      font-size: 0.65rem; color: #cbd5e1; background: #0f172a; border: 1px solid #334155;
+      border-radius: 999px; padding: 0.22rem 0.5rem;
+    }
     .tp-perf-chip {
       display: inline-flex;
       align-items: center;
@@ -9566,6 +9622,69 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div id="spt-breakdown" class="text-xs text-slate-400 mt-2"></div>
       </div>
 
+      <div class="card" id="trade-craft-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Trade Craft Progress <span class="tip" tabindex="0" data-tip="Harvest/PCL, hold time, profit-taking, exit efficiency, TA craft, and decision-stack scores from durable learning episodes. Early→late half shows if skills are improving. Visualisation only — does not change strategy."></span></div>
+            <p class="text-xs text-slate-400 mb-0" id="tc-summary">Loading…</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="ctl ctl-fit" title="Bot or Combined">
+              <span>Bot</span>
+              <select id="tc-profile" onchange="loadTradeCraftPerformance()" class="ctl" style="min-width:9.5rem">
+                <option value="all" selected>Combined</option>
+              </select>
+            </label>
+            <label class="ctl ctl-fit">
+              <span>Window</span>
+              <select id="tc-window" onchange="loadTradeCraftPerformance()">
+                <option value="20">Last 20</option>
+                <option value="50" selected>Last 50</option>
+                <option value="100">Last 100</option>
+              </select>
+            </label>
+            <label class="ctl ctl-fit">
+              <span>Chart</span>
+              <select id="tc-view" onchange="renderTradeCraftChart()">
+                <option value="craft" selected>Craft score</option>
+                <option value="capture">Capture %</option>
+                <option value="giveback">Giveback %</option>
+                <option value="scratch">Scratchy %</option>
+                <option value="pnl">Cumulative PnL</option>
+                <option value="hold">Hold (sec)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="tc-hero">
+          <div>
+            <div class="tc-score-num" id="tc-score-num">—</div>
+            <div class="tc-score-label" id="tc-score-label">Craft score</div>
+          </div>
+          <div class="flex flex-col gap-1" style="min-width:0;flex:1">
+            <div class="flex flex-wrap gap-2 text-xs items-center">
+              <span id="tc-badge" class="fpr-badge fpr-s2">—</span>
+              <span id="tc-delta" class="mint">Early→late —</span>
+              <span id="tc-n" class="mint">n=—</span>
+              <span id="tc-pcl-chip" class="lsd-chip">PCL —</span>
+            </div>
+            <p class="tc-blurb" id="tc-blurb">Loading trade craft…</p>
+          </div>
+        </div>
+        <div class="tc-tabs" id="tc-tabs" role="tablist" aria-label="Trade craft traits"></div>
+        <div class="tc-trait-bars" id="tc-trait-bars"></div>
+        <div class="tc-kpis" id="tc-kpis"></div>
+        <div class="chart-wrap" style="height:190px"><canvas id="chart-trade-craft"></canvas></div>
+        <div id="tc-exit-mix" class="tc-exit-mix"></div>
+        <div id="tc-bots-wrap" class="tc-table-wrap hidden"></div>
+        <div class="tc-film">
+          <details id="tc-film-details">
+            <summary>Trade film — entry → exit (last closes in window)</summary>
+            <div class="tc-table-wrap" id="tc-film-table"></div>
+          </details>
+        </div>
+      </div>
+
       <div class="card" id="learning-system-diagnostics-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
@@ -13765,6 +13884,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { loadFastProfileRecovery(); } catch (_) {}
           try { loadDipBuyerRecovery(); } catch (_) {}
           try { loadScalperPerformanceTrend(); } catch (_) {}
+          try { loadTradeCraftPerformance(); } catch (_) {}
         }
       } catch (_) {}
       renderAutoScoringUi(tp);
@@ -14871,6 +14991,478 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadScalperPerformanceTrend = loadScalperPerformanceTrend;
     window.populateSptProfileSelect = populateSptProfileSelect;
+
+    let __tradeCraftPayload = null;
+    let __tcActiveTrait = 'harvest';
+    let chartTradeCraft = null;
+
+    function populateTcProfileSelect() {
+      const sel = document.getElementById('tc-profile');
+      if (!sel) return;
+      const prev = sel.value || 'all';
+      const tp = window.__tradeProfilesStatus;
+      let list = (tp && Array.isArray(tp.profiles) ? tp.profiles : [])
+        .filter(function (p) {
+          return p && p.id && p.id !== 'default';
+        })
+        .slice()
+        .sort(function (a, b) {
+          if (a.id === 'zion') return -1;
+          if (b.id === 'zion') return 1;
+          return String(a.name || a.id).localeCompare(String(b.name || b.id));
+        });
+      if (!list.length) {
+        list = [
+          { id: 'scalper', name: 'Scalper' },
+          { id: 'trend_rider', name: 'Trend Rider' },
+          { id: 'dip_buyer', name: 'Dip Buyer' },
+          { id: 'high_win_rate', name: 'High Win Rate' },
+          { id: 'steady_compounder', name: 'Steady Compounder' },
+          { id: 'smart_money_mirror', name: 'Smart Money Mirror' },
+          { id: 'momentum_burst', name: 'Momentum Burst' },
+          { id: 'migration_sniper', name: 'Migration Sniper' },
+          { id: 'reversal_scalper', name: 'Reversal Scalper' },
+          { id: 'zion', name: 'Zion' },
+        ];
+      }
+      sel.innerHTML =
+        '<option value="all">Combined</option>' +
+        list
+          .map(function (p) {
+            return (
+              '<option value="' +
+              escHtml(p.id) +
+              '">' +
+              escHtml(p.name || p.id) +
+              '</option>'
+            );
+          })
+          .join('');
+      const ids = ['all'].concat(
+        list.map(function (p) {
+          return p.id;
+        })
+      );
+      sel.value = ids.indexOf(prev) >= 0 ? prev : 'all';
+    }
+
+    function tcFmt(v, suffix) {
+      if (v == null || v === '' || (typeof v === 'number' && !isFinite(v))) return '—';
+      if (typeof v === 'number') {
+        const n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
+        return n + (suffix || '');
+      }
+      return String(v) + (suffix || '');
+    }
+
+    function renderTradeCraftTraits(c) {
+      const bars = document.getElementById('tc-trait-bars');
+      const tabs = document.getElementById('tc-tabs');
+      const traits = (c && c.traits) || [];
+      if (tabs) {
+        tabs.innerHTML = traits
+          .map(function (t) {
+            const active = t.id === __tcActiveTrait ? ' active' : '';
+            return (
+              '<button type="button" class="tc-tab' +
+              active +
+              '" data-tc-trait="' +
+              escHtml(t.id) +
+              '" onclick="selectTradeCraftTrait(\'' +
+              escHtml(t.id) +
+              '\')">' +
+              escHtml(t.label) +
+              '</button>'
+            );
+          })
+          .join('');
+      }
+      if (bars) {
+        bars.innerHTML = traits
+          .map(function (t) {
+            const sc = t.score != null ? Number(t.score) : 0;
+            const delta =
+              t.delta != null
+                ? (t.delta >= 0 ? '+' : '') + tcFmt(t.delta)
+                : '—';
+            return (
+              '<div class="tc-trait-row">' +
+              '<span class="nm">' +
+              escHtml(t.label) +
+              '</span>' +
+              '<div class="lsd-bar-track"><div class="lsd-bar-fill" style="width:' +
+              Math.max(0, Math.min(100, sc)) +
+              '%"></div></div>' +
+              '<span class="sc">' +
+              (t.score != null ? tcFmt(t.score) : '—') +
+              ' <span class="mint">(' +
+              delta +
+              ')</span></span>' +
+              '</div>'
+            );
+          })
+          .join('');
+      }
+    }
+
+    function renderTradeCraftKpis(c) {
+      const box = document.getElementById('tc-kpis');
+      const mix = document.getElementById('tc-exit-mix');
+      if (!box) return;
+      const trait = ((c && c.traits) || []).find(function (t) {
+        return t.id === __tcActiveTrait;
+      });
+      const kpis = (trait && trait.kpis) || {};
+      const labels = {
+        capturePct: 'Capture %',
+        givebackPct: 'Giveback %',
+        scratchPct: 'Scratchy %',
+        partialPct: 'Partial %',
+        avgTimingReward: 'Timing reward',
+        avgWinHoldSec: 'Win hold s',
+        avgHoldSec: 'Avg hold s',
+        medianHoldSec: 'Median hold s',
+        avgLossHoldSec: 'Loss hold s',
+        prematurePct: 'Premature %',
+        avgWinPct: 'Avg win %',
+        avgExitQuality: 'Exit quality',
+        leftOnTablePct: 'Left on table %',
+        pppBeatRate: 'PPP beat %',
+        avgPnlPct: 'Avg PnL %',
+        winRatePct: 'Win rate %',
+        sumPnlPct: 'Sum PnL %',
+        hardSlPct: 'Hard SL %',
+        softScaredPct: 'Soft/scared %',
+        quickSlPct: 'Quick SL %',
+        cfWiderWouldSurvivePct: 'CF wider SL %',
+        sampleWithTa: 'TA samples',
+        avgConfluence: 'Confluence',
+        toolPassPct: 'Tool pass %',
+        nearSupportWinPct: 'S/R win %',
+        nearResistanceN: 'Near resist n',
+        taHeldIntoProfitPct: 'Held→profit %',
+        taExitBeatHoldPct: 'TA exit beat %',
+        volumeDecayRegretPct: 'Vol regret %',
+        avgEntryQuality: 'Entry Q',
+        avgConviction: 'Conviction',
+        avgLaneScore: 'Lane score',
+        avgHmcConfidence: 'HMC conf',
+        highQualityWinPct: 'HQ win %',
+        avgCfPeakGapPct: 'CF peak gap',
+        note: 'Note',
+      };
+      const keys = Object.keys(kpis).filter(function (k) {
+        return k !== 'note' || kpis[k];
+      });
+      box.innerHTML = keys.length
+        ? keys
+            .map(function (k) {
+              const v = kpis[k];
+              const suf =
+                String(k).indexOf('Pct') >= 0 || String(k).indexOf('pct') >= 0
+                  ? ''
+                  : '';
+              return (
+                '<div class="tc-kpi"><div class="k">' +
+                escHtml(labels[k] || k) +
+                '</div><div class="v">' +
+                escHtml(tcFmt(v, suf)) +
+                '</div></div>'
+              );
+            })
+            .join('')
+        : '<p class="mint text-xs mb-0">No KPIs for this trait yet.</p>';
+      if (mix) {
+        if (__tcActiveTrait === 'exits' && c && c.exitMix && c.exitMix.length) {
+          mix.innerHTML = c.exitMix
+            .map(function (b) {
+              return (
+                '<span class="tc-exit-chip">' +
+                escHtml(b.key) +
+                ' · ' +
+                b.pct +
+                '%</span>'
+              );
+            })
+            .join('');
+        } else if (trait && trait.plainLanguage) {
+          mix.innerHTML =
+            '<span class="mint text-xs">' +
+            escHtml(trait.plainLanguage) +
+            '</span>';
+        } else {
+          mix.innerHTML = '';
+        }
+      }
+    }
+
+    function renderTradeCraftBots(c) {
+      const wrap = document.getElementById('tc-bots-wrap');
+      if (!wrap) return;
+      if (!(c && c.profileId === 'all' && c.bots && c.bots.length)) {
+        wrap.classList.add('hidden');
+        wrap.innerHTML = '';
+        return;
+      }
+      wrap.classList.remove('hidden');
+      wrap.innerHTML =
+        '<table class="tc-table"><thead><tr>' +
+        '<th>Bot</th><th>n</th><th>Craft</th><th>Harvest</th><th>Hold</th><th>Profit</th><th>Exits</th><th>TA</th><th>Decide</th><th>Trend</th><th>Capture</th><th>Scratch</th>' +
+        '</tr></thead><tbody>' +
+        c.bots
+          .map(function (b) {
+            return (
+              '<tr>' +
+              '<td>' +
+              escHtml(b.name) +
+              '</td>' +
+              '<td class="num">' +
+              b.n +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.craftScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.harvestScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.holdScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.profitTakingScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.exitsScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.taScore) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.decisionsScore) +
+              '</td>' +
+              '<td>' +
+              escHtml(String(b.trend || '—')) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.capturePct, '%') +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(b.scratchPct, '%') +
+              '</td>' +
+              '</tr>'
+            );
+          })
+          .join('') +
+        '</tbody></table>';
+    }
+
+    function renderTradeCraftFilm(c) {
+      const box = document.getElementById('tc-film-table');
+      if (!box) return;
+      const rows = (c && c.film) || [];
+      if (!rows.length) {
+        box.innerHTML = '<p class="mint text-xs">No film rows in this window.</p>';
+        return;
+      }
+      box.innerHTML =
+        '<table class="tc-table"><thead><tr>' +
+        '<th>Token</th><th>Bot</th><th>PnL</th><th>Hold</th><th>MFE</th><th>Capture</th><th>Giveback</th><th>Exit</th><th>Entry</th><th>TA / vol</th>' +
+        '</tr></thead><tbody>' +
+        rows
+          .map(function (r) {
+            const entryBits = [];
+            if (r.entryQualityScore != null) entryBits.push('Q' + tcFmt(r.entryQualityScore));
+            if (r.convictionScore != null) entryBits.push('conv ' + tcFmt(r.convictionScore));
+            if (r.hmcSetup) entryBits.push(String(r.hmcSetup));
+            if (r.nearSupportAtEntry) entryBits.push('near S');
+            if (r.nearResistanceAtEntry) entryBits.push('near R');
+            const taBits = [];
+            if (r.taModeAtOpen) taBits.push(String(r.taModeAtOpen));
+            if (r.taConfluenceAtEntry != null) taBits.push('conf ' + tcFmt(r.taConfluenceAtEntry));
+            if (r.volumeStateAtEntry) taBits.push('in ' + r.volumeStateAtEntry);
+            if (r.volumeStateAtExit) taBits.push('out ' + r.volumeStateAtExit);
+            if (r.pclPartialTaken) taBits.push('PCL partial');
+            if (r.peakProtectArmed) taBits.push('PPP armed');
+            return (
+              '<tr>' +
+              '<td>' +
+              escHtml(r.symbol) +
+              '</td>' +
+              '<td>' +
+              escHtml(r.profileId) +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(r.pnlPct, '%') +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(r.holdSec, 's') +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(r.maxRunupPct, '%') +
+              '</td>' +
+              '<td class="num">' +
+              (r.mfeCaptureRatio != null
+                ? tcFmt(r.mfeCaptureRatio * 100, '%')
+                : '—') +
+              '</td>' +
+              '<td class="num">' +
+              tcFmt(r.givebackFromPeakPct, '%') +
+              '</td>' +
+              '<td>' +
+              escHtml(String(r.exitKey || r.exitReason || '').slice(0, 42)) +
+              '</td>' +
+              '<td>' +
+              escHtml(entryBits.join(' · ') || '—') +
+              '</td>' +
+              '<td>' +
+              escHtml(taBits.join(' · ') || '—') +
+              '</td>' +
+              '</tr>'
+            );
+          })
+          .join('') +
+        '</tbody></table>';
+    }
+
+    function selectTradeCraftTrait(id) {
+      __tcActiveTrait = id || 'harvest';
+      const c = __tradeCraftPayload;
+      renderTradeCraftTraits(c);
+      renderTradeCraftKpis(c);
+    }
+    window.selectTradeCraftTrait = selectTradeCraftTrait;
+
+    function renderTradeCraftChart() {
+      const canvas = document.getElementById('chart-trade-craft');
+      if (!canvas || typeof Chart === 'undefined') return;
+      const c = __tradeCraftPayload;
+      const series = c && c.chart;
+      if (!series || !series.tradeIndex || !series.tradeIndex.length) {
+        if (chartTradeCraft) {
+          chartTradeCraft.destroy();
+          chartTradeCraft = null;
+        }
+        return;
+      }
+      const view = ((document.getElementById('tc-view') || {}).value) || 'craft';
+      const map = {
+        craft: { data: series.rollingCraftScore, label: 'Craft score', color: '#34d399' },
+        capture: { data: series.rollingCapturePct, label: 'Capture %', color: '#2dd4bf' },
+        giveback: { data: series.rollingGivebackPct, label: 'Giveback %', color: '#fbbf24' },
+        scratch: { data: series.rollingScratchPct, label: 'Scratchy %', color: '#f87171' },
+        pnl: { data: series.cumulativePnlPct, label: 'Cumulative PnL %', color: '#60a5fa' },
+        hold: { data: series.rollingHoldSec, label: 'Hold (sec)', color: '#a78bfa' },
+      };
+      const m = map[view] || map.craft;
+      if (chartTradeCraft) {
+        chartTradeCraft.data.labels = series.tradeIndex;
+        chartTradeCraft.data.datasets[0].data = m.data;
+        chartTradeCraft.data.datasets[0].label = m.label;
+        chartTradeCraft.data.datasets[0].borderColor = m.color;
+        chartTradeCraft.data.datasets[0].backgroundColor = m.color + '33';
+        chartTradeCraft.update('none');
+        return;
+      }
+      chartTradeCraft = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: series.tradeIndex,
+          datasets: [
+            {
+              label: m.label,
+              data: m.data,
+              borderColor: m.color,
+              backgroundColor: m.color + '33',
+              tension: 0.25,
+              pointRadius: 2,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 8, color: '#64748b' }, grid: { color: '#1e293b' } },
+            y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+          },
+        },
+      });
+    }
+    window.renderTradeCraftChart = renderTradeCraftChart;
+
+    async function loadTradeCraftPerformance() {
+      try {
+        populateTcProfileSelect();
+        const profile =
+          ((document.getElementById('tc-profile') || {}).value) || 'all';
+        const win =
+          Number((document.getElementById('tc-window') || {}).value) || 50;
+        const data = await fetchJSON(
+          '/api/trade-craft-performance?profileId=' +
+            encodeURIComponent(profile) +
+            '&window=' +
+            win
+        );
+        __tradeCraftPayload = data.craft || null;
+        const c = __tradeCraftPayload;
+        const sum = document.getElementById('tc-summary');
+        const num = document.getElementById('tc-score-num');
+        const badge = document.getElementById('tc-badge');
+        const delta = document.getElementById('tc-delta');
+        const nEl = document.getElementById('tc-n');
+        const pcl = document.getElementById('tc-pcl-chip');
+        const blurb = document.getElementById('tc-blurb');
+        if (sum) {
+          sum.textContent =
+            (c && c.plainLanguage) || 'No trade craft data yet';
+        }
+        if (num) {
+          num.textContent =
+            c && c.craftScore != null ? String(c.craftScore) : '—';
+        }
+        if (badge && c) {
+          badge.textContent = String(c.trend || 'stable').toUpperCase();
+          badge.className =
+            'fpr-badge ' +
+            (c.trend === 'improving'
+              ? 'fpr-s4'
+              : c.trend === 'declining'
+                ? 'fpr-s0'
+                : 'fpr-s2');
+        }
+        if (delta && c) {
+          delta.textContent =
+            'Early→late ' +
+            (c.craftDelta != null
+              ? (c.craftDelta >= 0 ? '+' : '') + c.craftDelta
+              : '—');
+        }
+        if (nEl && c) nEl.textContent = 'n=' + (c.n || 0);
+        if (pcl && c) {
+          pcl.textContent = c.pclEnabled ? 'PCL ON' : 'PCL OFF';
+          pcl.className =
+            'lsd-chip ' + (c.pclEnabled ? 'lsd-chip-active' : 'lsd-chip-paused');
+        }
+        if (blurb && c) blurb.textContent = c.plainLanguage || '';
+        if (!((c && c.traits) || []).some(function (t) { return t.id === __tcActiveTrait; })) {
+          __tcActiveTrait = 'harvest';
+        }
+        renderTradeCraftTraits(c);
+        renderTradeCraftKpis(c);
+        renderTradeCraftBots(c);
+        renderTradeCraftFilm(c);
+        renderTradeCraftChart();
+      } catch (err) {
+        const sum = document.getElementById('tc-summary');
+        if (sum) {
+          sum.textContent =
+            'Trade craft unavailable: ' + (err.message || String(err));
+        }
+      }
+    }
+    window.loadTradeCraftPerformance = loadTradeCraftPerformance;
 
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');
@@ -17001,6 +17593,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { loadFastProfileRecovery(); } catch (_) {}
         try { loadDipBuyerRecovery(); } catch (_) {}
         try { loadScalperPerformanceTrend(); } catch (_) {}
+        try { loadTradeCraftPerformance(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {

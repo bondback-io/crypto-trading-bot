@@ -42,6 +42,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.212',
+    title: 'Trade Craft Progress',
+    sections: ['coaches', 'risk', 'learning', 'overview'],
+    items: [
+      'Bot Performance: Trade Craft Progress card — harvest/PCL, hold, profit-taking, exits, TA craft, decision stack scores per bot + Combined.',
+      'Rolling 20/50/100 windows with early→late deltas, Chart.js curves, Combined ranking table, and entry→exit trade film.',
+      'Episodes stamp PCL process fields (permission exit, scratch blocks, deferred PPP arm, MFE capture ratio, learning delta) for future film.',
+    ],
+  },
+  {
     version: '1.2.211',
     title: 'Lifecycle hero asset slimmed',
     sections: ['lifecycle'],

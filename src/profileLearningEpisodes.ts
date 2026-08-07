@@ -127,6 +127,22 @@ export interface ProfileLearningEpisode {
   /** Profit Capture Layer — first partial banked */
   pclPartialTaken?: boolean;
   pclRunnerFraction?: number;
+  /** Explicit exit/MFE capture ratio (0–1.2+), stamped at close */
+  mfeCaptureRatio?: number;
+  /** Permission window end (ms) at open */
+  profitPermissionUntilMs?: number;
+  /** Permission window length (sec) */
+  profitPermissionSec?: number;
+  /** Closed while permission window still active */
+  exitedDuringPermission?: boolean;
+  /** Times PCL blocked a tiny-green soft scratch */
+  pclScratchBlockedCount?: number;
+  /** PPP arm was deferred at least once due to permission */
+  pclPppArmDeferred?: boolean;
+  /** PCL family at open */
+  pclFamily?: 'fast' | 'dip_trend' | 'quality' | 'default';
+  /** Timing-reward delta from computePclLearningRewardDelta */
+  pclLearningDelta?: number;
   hmcSetup?: string;
   hmcConfidence?: number;
   gateDecision?: string;

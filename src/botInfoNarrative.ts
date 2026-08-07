@@ -277,7 +277,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <div class="botinfo-flow-step"><span class="k">4. PPP</span><span class="v">Protect peak</span></div>
         </div>
         <div class="botinfo-callout"><strong>Live example:</strong> Scalper catches a hot mint. For ~35s PCL says “don’t scratch +1.5% yet.” Price runs; PCL banks ~half near the early partial, leaves a runner, then Peak Protect watches the peak. Hard SL still cuts a real dump immediately.</div>
-        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → <em>Profit Capture Layer</em> card (directly under Peak Protect). Open-trade rows show permission / partial / PPP lines. Zion comments when PCL is active. Learning strength + family permission seconds are on that same card.</p>
+        <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → <em>Profit Capture Layer</em> card (directly under Peak Protect). Open-trade rows show permission / partial / PPP lines. Zion comments when PCL is active. Learning strength + family permission seconds are on that same card. <strong>Progress:</strong> Bot Performance → <em>Trade Craft Progress</em> (Harvest tab + Combined).</p>
 
         <div class="botinfo-actions">
           ${btn('settings', 'Open Settings')}
@@ -340,7 +340,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Full coach stack</strong> — how episodes, self-learn, ML, Profile TA, Profile RL, MARL, accelerators, Peak Protect, and PCL fit together (priority, defaults, activation checklist) lives in the next chapter: <em>Coaches &amp; Stack</em>.</li>
         </ul>
         <div class="botinfo-callout"><strong>Live example:</strong> Two closes both finish +2%. One scratched immediately; one banked a partial then trailed the runner. With PCL reshape ON, the second episode “looks smarter” to learning — the first gets a tiny-scratch penalty — so future upgrades favor harvest habits, not panic taps.</div>
-        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Learning strength on the <em>Profit Capture Layer</em> card · Back Up → learning journal · Bot Performance → Learning Progress.</p>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Learning strength on the <em>Profit Capture Layer</em> card · Back Up → learning journal · Bot Performance → Learning Progress + <em>Trade Craft Progress</em>.</p>
         <div class="botinfo-actions">
           ${btn('microbots', 'Open learning controls')}
           ${btn('backup', 'Open learning journal')}
@@ -430,7 +430,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li>Additive with Peak Protect (detail + family timings under <em>Risk</em>). Hard SL / anti-rug always win.</li>
         </ul>
         <div class="botinfo-callout"><strong>Live example:</strong> Entry coaches picked the lane; PCL is the “don’t leave money on the table / don’t scratch too early” coach once you’re in. See Risk for the full harvest flow.</div>
-        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Peak Protect + Profit Capture Layer cards · Risk chapter in this manual · open-position PCL/PPP lines.</p>
+        <p class="botinfo-where"><strong>Where to find:</strong> Micro Bots → Peak Protect + Profit Capture Layer cards · Risk chapter in this manual · open-position PCL/PPP lines · Bot Performance → <em>Trade Craft Progress</em>.</p>
 
         <p class="mint" style="margin:0.55rem 0 0.45rem"><strong>Close path (final exit → learn)</strong></p>
         <div class="botinfo-flow" aria-label="Learning close path">
