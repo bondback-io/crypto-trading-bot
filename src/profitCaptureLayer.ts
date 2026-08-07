@@ -221,7 +221,8 @@ export function computeEntryQualityScore(input: {
 
 export function resolvePermissionWindowSec(
   profileId: string | null | undefined,
-  entryQualityScore?: number | null
+  entryQualityScore?: number | null,
+  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
 ): number {
   const family = resolvePclProfileFamily(profileId);
   const cfg = getProfitCaptureLayerConfig();
@@ -248,6 +249,16 @@ export function resolvePermissionWindowSec(
   if (q != null && q >= 70) {
     sec = Math.round(sec * 1.4);
   }
+  // High-q valid style → stretch further; marginal / late_chase → shorter
+  const late = opts?.lateChaseAtEntry === true;
+  const style = String(opts?.entryStyle || '');
+  const validStyle =
+    style.length > 0 && style !== 'late_chase' && style !== 'unknown';
+  if (!late && validStyle && q != null && q >= 70) {
+    sec = Math.round(sec * 1.2);
+  } else if (late || style === 'late_chase' || (q != null && q < 40)) {
+    sec = Math.round(sec * 0.7);
+  }
   return clamp(Math.round(sec), 5, 600);
 }
 
@@ -255,10 +266,16 @@ export function computeProfitPermissionUntilMs(input: {
   openedAt: number;
   profileId?: string | null;
   entryQualityScore?: number | null;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
 }): number {
   const sec = resolvePermissionWindowSec(
     input.profileId,
-    input.entryQualityScore
+    input.entryQualityScore,
+    {
+      entryStyle: input.entryStyle,
+      lateChaseAtEntry: input.lateChaseAtEntry,
+    }
   );
   return Number(input.openedAt) + sec * 1000;
 }
@@ -421,14 +438,27 @@ export function permissionFadeThresholdMult(input: {
   return 1;
 }
 
-/** High quality → later PPP arm (+5–10 pts of TP%). */
-export function qualityPppArmBonusPts(entryQualityScore?: number | null): number {
+/** High quality → later PPP arm (+5–10 pts of TP%). Valid style stretches further. */
+export function qualityPppArmBonusPts(
+  entryQualityScore?: number | null,
+  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
+): number {
   const q =
     entryQualityScore != null && Number.isFinite(Number(entryQualityScore))
       ? Number(entryQualityScore)
       : null;
   if (q == null) return 0;
+  const late = opts?.lateChaseAtEntry === true;
+  const style = String(opts?.entryStyle || '');
+  const validStyle =
+    style.length > 0 &&
+    style !== 'late_chase' &&
+    style !== 'unknown' &&
+    !late;
+  if (late || (q < 45 && !validStyle)) return 0;
+  if (q >= 80 && validStyle) return 12;
   if (q >= 80) return 10;
+  if (q >= 70 && validStyle) return 8;
   if (q >= 70) return 5;
   return 0;
 }
@@ -539,6 +569,9 @@ export function computePclLearningRewardDelta(input: {
   pclPartialTaken?: boolean;
   exitReason?: string;
   exitKey?: string;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
+  learningTags?: string[] | null;
 }): number {
   try {
     const cfg = getProfitCaptureLayerConfig();
@@ -559,22 +592,34 @@ export function computePclLearningRewardDelta(input: {
       Number.isFinite(Number(input.entryQualityScore))
         ? Number(input.entryQualityScore)
         : null;
+    const late = input.lateChaseAtEntry === true;
+    const style = String(input.entryStyle || '');
+    const validStyle =
+      style.length > 0 &&
+      style !== 'late_chase' &&
+      style !== 'unknown' &&
+      !late;
 
     let delta = 0;
     // Boost: MFE capture
-    if (capture >= 0.55 && mfe >= 8) delta += 4 * capture;
+    if (capture >= 0.55 && mfe >= 8) {
+      delta += 4 * capture;
+      if (validStyle) delta += 1.5;
+    }
     // Boost: partial reached
     if (
       input.pclPartialTaken ||
       /partial\s*tp\s*\(pcl\)|early partial|partial:/i.test(reason)
     ) {
       delta += 3;
+      if (validStyle) delta += 1;
     }
     // Boost: runner continuation (exit after partial with positive remainder)
     if (input.pclPartialTaken && pnl > 1) delta += 2.5;
     // Penalize: tiny scratch + high MFE
     if (pnl > 0 && pnl < PCL_TINY_GREEN_SCRATCH_PCT && mfe >= 12) {
       delta -= 5;
+      if (validStyle && q != null && q >= 70) delta -= 2;
     }
     // Penalize: early exits on high quality
     const hold = Math.max(0, Number(input.holdSec) || 0);
@@ -589,6 +634,7 @@ export function computePclLearningRewardDelta(input: {
         /stall|fade|dead/i.test(reason))
     ) {
       delta -= 4;
+      if (validStyle) delta -= 1.5;
     }
     // Penalize: defensive exits before first profit stage
     if (
@@ -602,6 +648,15 @@ export function computePclLearningRewardDelta(input: {
         key === 'fade')
     ) {
       delta -= 2.5;
+    }
+    // Late-chase outcome tags for analytics / soft learn
+    if (
+      late ||
+      (Array.isArray(input.learningTags) &&
+        input.learningTags.includes('late_chase_fail'))
+    ) {
+      if (pnl <= 0 || (hold < 45 && pnl < 4)) delta -= 3;
+      else if (pnl > 5) delta += 0.5; // survived late chase — mild credit
     }
 
     return Number((delta * strength).toFixed(3));

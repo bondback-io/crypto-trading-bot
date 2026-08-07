@@ -282,6 +282,46 @@ export function buildZionAnalystBrief(opts?: {
     /* optional */
   }
 
+  // --- Entry-style DNA / late-chase mix ---
+  try {
+    const { TRADE_PROFILE_CATALOG } =
+      require('./tradeProfiles') as typeof import('./tradeProfiles');
+    const { getProfileLearningEpisodes } =
+      require('./profileLearningEpisodes') as typeof import('./profileLearningEpisodes');
+    const all: Array<{
+      entryStyle?: string;
+      lateChaseAtEntry?: boolean;
+      learningTags?: string[];
+    }> = [];
+    for (const cat of TRADE_PROFILE_CATALOG) {
+      all.push(...(getProfileLearningEpisodes(cat.id, 20) || []));
+    }
+    if (all.length >= 8) {
+      const lateN = all.filter(
+        (e) =>
+          e.lateChaseAtEntry === true ||
+          e.entryStyle === 'late_chase' ||
+          (Array.isArray(e.learningTags) &&
+            e.learningTags.includes('late_chase_fail'))
+      ).length;
+      const latePct = (lateN / all.length) * 100;
+      contextLines.push(
+        `Analyst entry-style: late-chase ${latePct.toFixed(0)}% of recent stamps (n=${all.length})`
+      );
+      if (latePct >= 25) {
+        explain.push(
+          `Late-chase entries are elevated (~${latePct.toFixed(0)}%) — quality/Mirror/Trend DNA should hard-zero those; check Scalper/MB soft penalties if WR suffers.`
+        );
+      } else if (latePct >= 12) {
+        explain.push(
+          `Entry-style mix shows some late-chase (~${latePct.toFixed(0)}%) — watch Helping/Hurting style buckets on Bot Performance.`
+        );
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
   // --- ML mode advice (advisory only — never CR that applies mlMode) ---
   for (const p of diagProfiles) {
     if (!p.botEnabled) continue;

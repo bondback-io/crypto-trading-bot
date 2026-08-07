@@ -187,6 +187,14 @@ function segmentBuckets(
     else if (e.exitReason) add('exit', String(e.exitReason).slice(0, 40), e);
     if (e.entrySource) add('source', String(e.entrySource), e);
     if (e.scannerPlaybook) add('playbook', String(e.scannerPlaybook), e);
+    if (e.entryStyle) add('entryStyle', String(e.entryStyle), e);
+    if (e.lateChaseAtEntry === true) add('late_chase', 'late_chase', e);
+    else if (
+      Array.isArray(e.learningTags) &&
+      e.learningTags.includes('late_chase_fail')
+    ) {
+      add('late_chase', 'late_chase_fail', e);
+    }
   }
   const buckets: ConditionBucket[] = [];
   for (const [k, list] of maps) {

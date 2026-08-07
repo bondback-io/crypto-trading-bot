@@ -197,7 +197,7 @@ function buildTradeProfileMatchContext(
   const migEv = getMigrationEvent(signal.mint);
   const migrationAgeMs =
     migEv?.detectedAt != null ? Date.now() - migEv.detectedAt : null;
-  return {
+  const ctx: TradeProfileMatchContext = {
     isMigration: signal.isMigration,
     nearMigration: signal.nearMigration,
     earlyBuy: signal.earlyBuy,
@@ -237,6 +237,30 @@ function buildTradeProfileMatchContext(
       : null,
     nearKeyFib: signal.nearKeyFib === true,
     nearSupport: signal.nearSupport === true,
+    nearMultiTfSupport: signal.nearMultiTfSupport === true,
+    nearMultiTfResistance: signal.nearMultiTfResistance === true,
+    srConfluenceScore:
+      signal.srConfluenceScore != null &&
+      Number.isFinite(Number(signal.srConfluenceScore))
+        ? Number(signal.srConfluenceScore)
+        : null,
+    supportTfHits: Array.isArray(signal.supportTfHits)
+      ? signal.supportTfHits
+      : null,
+    supportPriceSol:
+      signal.supportPriceSol != null &&
+      Number.isFinite(Number(signal.supportPriceSol))
+        ? Number(signal.supportPriceSol)
+        : null,
+    resistancePriceSol:
+      signal.resistancePriceSol != null &&
+      Number.isFinite(Number(signal.resistancePriceSol))
+        ? Number(signal.resistancePriceSol)
+        : null,
+    priceSol:
+      signal.priceSol != null && Number.isFinite(Number(signal.priceSol))
+        ? Number(signal.priceSol)
+        : null,
     chartPatternIds: signal.chartPatternIds ?? null,
     chartPatternSummary: signal.chartPatternSummary ?? null,
     chartPatternHits: signal.chartPatternHits ?? null,
@@ -261,6 +285,71 @@ function buildTradeProfileMatchContext(
       return n > 0 ? sum / n : null;
     })(),
   };
+  // Stamp entry-style DNA once for lane fight + buy meta
+  try {
+    const { resolveDetectedEntryStyle } =
+      require('./supportReclaim') as typeof import('./supportReclaim');
+    const det = resolveDetectedEntryStyle(ctx);
+    ctx.detectedEntryStyle = det.detectedEntryStyle;
+    ctx.lateChase = det.lateChase;
+  } catch {
+    /* fail soft */
+  }
+  return ctx;
+}
+
+/** Stamp entry-style DNA onto buy meta (fail soft). */
+function stampEntryStyleOnBuyOpts(
+  buyOpts: NonNullable<Parameters<typeof executeBuy>[2]>,
+  signal: TradeSignal,
+  ctx?: TradeProfileMatchContext | null
+): void {
+  try {
+    let style = ctx?.detectedEntryStyle ?? null;
+    let late = ctx?.lateChase;
+    if (style == null || late == null) {
+      const { resolveDetectedEntryStyle } =
+        require('./supportReclaim') as typeof import('./supportReclaim');
+      const det = resolveDetectedEntryStyle({
+        nearSupport: signal.nearSupport,
+        nearKeyFib: signal.nearKeyFib,
+        nearMultiTfSupport: signal.nearMultiTfSupport,
+        supportPriceSol: signal.supportPriceSol,
+        srConfluenceScore: signal.srConfluenceScore,
+        dropFromPeakPct: signal.dropFromPeakPct,
+        localPullbackPct: signal.localPullbackPct,
+        priceChangeH1Pct: signal.metrics?.priceChangeH1Pct,
+        isMigration: signal.isMigration,
+        migrationFresh: isRecentlyMigrated(signal.mint),
+        nearMigration: signal.nearMigration,
+        shortTermStrategyId: buyOpts.shortTermStrategyId,
+        preferProfileId:
+          buyOpts.tradeProfileId || signal.candidateTradeProfileId,
+        smartMoneyScore: signal.birdeye?.smartMoneyScore,
+        walletCount: Array.isArray(signal.wallets)
+          ? signal.wallets.length
+          : null,
+        entrySource: signal.entrySource,
+        volumeM5Usd: signal.metrics?.volumeM5Usd,
+        priceSol: signal.priceSol,
+      });
+      if (style == null) style = det.detectedEntryStyle;
+      if (late == null) late = det.lateChase;
+    }
+    const lateChase = late === true;
+    (buyOpts as { entryStyle?: string }).entryStyle = lateChase
+      ? style === 'late_chase'
+        ? 'late_chase'
+        : String(style || 'late_chase')
+      : String(style || 'unknown');
+    if (lateChase && style && style !== 'late_chase') {
+      (buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary =
+        'late_chase';
+    }
+    (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry = lateChase;
+  } catch {
+    /* fail soft */
+  }
 }
 
 /**
@@ -3491,6 +3580,7 @@ async function executeSignalBuy(
   Object.assign(buyOpts, stampFromAssignment(profileAssignment));
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
+  stampEntryStyleOnBuyOpts(buyOpts, signal);
   const erScan = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, erScan);
 
@@ -3913,6 +4003,15 @@ async function handleMigrationPriorityEvent(event: MigrationEvent): Promise<void
     Object.assign(buyOpts, stampFromAssignment(profileAssignment));
     buyOpts.tradeProfileScore = profileAssignment.score;
     buyOpts.tradeProfileReason = profileAssignment.reason;
+    stampEntryStyleOnBuyOpts(
+      buyOpts,
+      signal,
+      buildTradeProfileMatchContext(signal, {
+        scalpMode: buyOpts.scalpMode,
+        shortTermStrategyId: buyOpts.shortTermStrategyId,
+        strategyKind: 'migration',
+      })
+    );
     applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
     const sized = applyTradeProfileSizing(
       buyOpts.solAmount ?? sizing.sizeSol,
@@ -4875,6 +4974,7 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   Object.assign(buyOpts, stampFromAssignment(profileAssignment));
   buyOpts.tradeProfileScore = profileAssignment.score;
   buyOpts.tradeProfileReason = profileAssignment.reason;
+  stampEntryStyleOnBuyOpts(buyOpts, signal);
   const er = profileAssignment.exitRules;
   applyProfileExitRulesToBuyOpts(buyOpts, er);
   const sized = applyTradeProfileSizing(buyOpts.solAmount ?? sizing.sizeSol, er);
@@ -5306,6 +5406,7 @@ async function tryExecuteReBuy(mint: string): Promise<boolean> {
       Object.assign(buyOpts, stampFromAssignment(profileAssignment));
       buyOpts.tradeProfileScore = profileAssignment.score;
       buyOpts.tradeProfileReason = profileAssignment.reason;
+      stampEntryStyleOnBuyOpts(buyOpts, signal);
       applyProfileExitRulesToBuyOpts(buyOpts, profileAssignment.exitRules);
       const sized = applyTradeProfileSizing(
         buyOpts.solAmount ?? sizing.sizeSol,

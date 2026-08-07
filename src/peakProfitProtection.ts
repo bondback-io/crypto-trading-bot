@@ -160,6 +160,8 @@ export function resolvePeakProtectParams(input: {
   policyGivebackOfPeakPct?: number | null;
   /** PCL: bump arm later for high entry quality */
   entryQualityScore?: number | null;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
 }): ResolvedPeakProtect {
   const cfg = getPeakProfitProtectionConfig();
   const fast = isPeakProtectFastProfile(input.profileId);
@@ -208,7 +210,10 @@ export function resolvePeakProtectParams(input: {
       pclArmFallback = pcl.armOfTpPct;
       pclGiveFallback = pcl.givebackOfPeakPct;
       if (!recoveryActive) {
-        const bonus = qualityPppArmBonusPts(input.entryQualityScore);
+        const bonus = qualityPppArmBonusPts(input.entryQualityScore, {
+          entryStyle: input.entryStyle,
+          lateChaseAtEntry: input.lateChaseAtEntry,
+        });
         if (bonus > 0 && policyArm != null && Number(policyArm) > 0) {
           policyArm = clamp(Number(policyArm) + bonus, 10, 95);
         } else if (bonus > 0) {
@@ -275,6 +280,8 @@ export interface PeakProtectEvalInput {
   /** After first PCL partial — tighten giveback on runner. */
   pclPartialTaken?: boolean;
   entryQualityScore?: number | null;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
   /** Override min profit floor (absolute unrealized %). */
   minProfitFloorPct?: number | null;
 }
@@ -301,6 +308,8 @@ export function evaluatePeakProfitProtection(
     policyArmOfTpPct: input.policyArmOfTpPct,
     policyGivebackOfPeakPct: input.policyGivebackOfPeakPct,
     entryQualityScore: input.entryQualityScore,
+    entryStyle: input.entryStyle,
+    lateChaseAtEntry: input.lateChaseAtEntry,
   });
   const peak = Math.max(0, Number(input.peakUnrealizedPct) || 0);
   const pnl = Number(input.pnlPct) || 0;

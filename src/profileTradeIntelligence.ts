@@ -234,18 +234,34 @@ export function resolveExitPolicy(
   const base =
     DEFAULT_EXIT_POLICIES[String(profileId || 'default')] ||
     DEFAULT_EXIT_POLICIES.default;
+  let earlyPartialTpPct = base.earlyPartialTpPct;
+  let earlyPartialFraction = base.earlyPartialFraction;
+  // Wire PCL family / Self-Learn early-partial defaults when exitPolicy omits them
+  try {
+    const { resolvePclPartialDefaults, isProfitCaptureLayerEnabled } =
+      require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
+    if (isProfitCaptureLayerEnabled()) {
+      const pcl = resolvePclPartialDefaults(profileId);
+      earlyPartialTpPct = pcl.earlyPartialTpPct;
+      earlyPartialFraction = pcl.earlyPartialFraction;
+    }
+  } catch {
+    /* fail soft */
+  }
   const ep = rules?.exitPolicy;
-  if (!ep || typeof ep !== 'object') return { ...base };
+  if (!ep || typeof ep !== 'object') {
+    return { ...base, earlyPartialTpPct, earlyPartialFraction };
+  }
   return {
     earlyPartialTpPct:
       ep.earlyPartialTpPct != null && Number.isFinite(Number(ep.earlyPartialTpPct))
         ? Math.max(0, Number(ep.earlyPartialTpPct))
-        : base.earlyPartialTpPct,
+        : earlyPartialTpPct,
     earlyPartialFraction:
       ep.earlyPartialFraction != null &&
       Number.isFinite(Number(ep.earlyPartialFraction))
         ? Math.min(0.9, Math.max(0, Number(ep.earlyPartialFraction)))
-        : base.earlyPartialFraction,
+        : earlyPartialFraction,
     trailTightenFactor:
       ep.trailTightenFactor != null &&
       Number.isFinite(Number(ep.trailTightenFactor))
@@ -456,13 +472,22 @@ export interface AdaptiveExitAction {
 /**
  * Apply quality-tier multipliers so low-conviction trades extract profit fast
  * and high-conviction trades trail wider for larger runners.
+ * Valid entry styles stretch high-tier further; late_chase tightens.
  */
 function applyQualityTierMultipliers(
   pol: ProfileExitPolicy,
-  tier: 'low' | 'medium' | 'high'
+  tier: 'low' | 'medium' | 'high',
+  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
 ): ProfileExitPolicy {
-  if (tier === 'medium') return pol;
-  if (tier === 'low') {
+  const late = opts?.lateChaseAtEntry === true;
+  const style = String(opts?.entryStyle || '');
+  const validStyle =
+    style.length > 0 &&
+    style !== 'late_chase' &&
+    style !== 'unknown' &&
+    !late;
+  if (tier === 'medium' && !late) return pol;
+  if (tier === 'low' || late) {
     pol.profitGivebackPts = Math.max(4, Math.round(pol.profitGivebackPts * 0.6));
     pol.earlyPartialTpPct = pol.earlyPartialTpPct > 0
       ? Math.max(4, Math.round(pol.earlyPartialTpPct * 0.7))
@@ -477,6 +502,20 @@ function applyQualityTierMultipliers(
   // high
   pol.profitGivebackPts = Math.min(60, Math.round(pol.profitGivebackPts * 1.25));
   pol.extendHoldIfTaOk = true;
+  if (validStyle) {
+    // Delay early partial + more runner room
+    if (pol.earlyPartialTpPct > 0) {
+      pol.earlyPartialTpPct = Math.round(pol.earlyPartialTpPct * 1.15);
+    }
+    pol.earlyPartialFraction = Math.max(
+      0.2,
+      Math.min(0.55, pol.earlyPartialFraction * 0.85)
+    );
+    pol.profitGivebackPts = Math.min(
+      60,
+      Math.round(pol.profitGivebackPts * 1.1)
+    );
+  }
   return pol;
 }
 
@@ -530,10 +569,15 @@ export function evaluateAdaptiveProfileExit(input: {
   profitPermissionUntilMs?: number | null;
   entryQualityScore?: number | null;
   pclPartialTaken?: boolean;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
 }): AdaptiveExitAction {
   const now = input.nowMs ?? Date.now();
   const tier = input.qualityTier || 'medium';
-  const pol = applyQualityTierMultipliers({ ...input.policy }, tier);
+  const pol = applyQualityTierMultipliers({ ...input.policy }, tier, {
+    entryStyle: input.entryStyle,
+    lateChaseAtEntry: input.lateChaseAtEntry,
+  });
   const pnl = input.pnlPct;
   const peakUnrealized =
     input.peakUnrealizedPct != null && Number.isFinite(input.peakUnrealizedPct)

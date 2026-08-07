@@ -379,6 +379,16 @@ export interface TradeProfileMatchRules {
   jupiterCategory?: 'toptraded' | 'toptrending' | 'toporganicscore';
   /** Jupiter interval / volume window paired with jupiterCategory */
   jupiterInterval?: '5m' | '1h' | '6h' | '24h';
+  /**
+   * Entry-style DNA — primary / allowed / forbidden tags for lane scoring.
+   * Detected once per fight via resolveDetectedEntryStyle; applied in scoreProfile
+   * before HMC soft ×0.85 and MARL.
+   */
+  primaryEntryStyle?: string;
+  allowedEntryStyles?: string[];
+  forbiddenEntryStyles?: string[];
+  /** When true, late_chase hard-zeros this profile */
+  hardLateChase?: boolean;
 }
 
 /** Persisted user edits on top of official catalog defaults */
@@ -548,6 +558,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 32,
       minWalletCount: 1,
       requireCluster: false,
+      primaryEntryStyle: 'scalp_reclaim_burst',
+      allowedEntryStyles: [
+        'level_momentum_expansion',
+        'reversal_reclaim',
+      ],
+      forbiddenEntryStyles: ['support_dip_reclaim', 'late_chase'],
+      hardLateChase: false,
     },
     exitRules: {
       forceScalp: true,
@@ -616,6 +633,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minKolWallets: 3,
       jupiterCategory: 'toporganicscore',
       jupiterInterval: '1h',
+      primaryEntryStyle: 'support_dip_reclaim',
+      allowedEntryStyles: [
+        'quality_structure_reclaim',
+        'reversal_reclaim',
+      ],
+      forbiddenEntryStyles: ['level_momentum_expansion', 'late_chase'],
+      hardLateChase: true,
     },
     exitRules: {
       shortTermStrategyId: 'post_run_dip',
@@ -694,6 +718,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minKolWallets: 3,
       jupiterCategory: 'toporganicscore',
       jupiterInterval: '6h',
+      primaryEntryStyle: 'trend_pullback_continuation',
+      allowedEntryStyles: [
+        'quality_structure_reclaim',
+        'support_dip_reclaim',
+      ],
+      forbiddenEntryStyles: ['scalp_reclaim_burst', 'late_chase'],
+      hardLateChase: true,
     },
     exitRules: {
       forceScalp: false,
@@ -751,6 +782,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       maxMigrationAgeSec: 120,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
       maxMarketCapUsd: 175_000,
+      primaryEntryStyle: 'migration_hold_reclaim',
+      allowedEntryStyles: [
+        'level_momentum_expansion',
+        'scalp_reclaim_burst',
+      ],
+      forbiddenEntryStyles: ['late_chase', 'support_dip_reclaim'],
+      hardLateChase: false,
     },
     exitRules: {
       takeProfitPctMin: 10,
@@ -846,6 +884,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minKolWallets: 4,
       jupiterCategory: 'toporganicscore',
       jupiterInterval: '6h',
+      primaryEntryStyle: 'quality_structure_reclaim',
+      allowedEntryStyles: [
+        'trend_pullback_continuation',
+        'support_dip_reclaim',
+      ],
+      forbiddenEntryStyles: ['late_chase', 'scalp_reclaim_burst'],
+      hardLateChase: true,
     },
     exitRules: {
       takeProfitPctMin: 40,
@@ -915,6 +960,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 35,
       minWalletCount: 1,
       requireCluster: false,
+      primaryEntryStyle: 'level_momentum_expansion',
+      allowedEntryStyles: [
+        'scalp_reclaim_burst',
+        'migration_hold_reclaim',
+      ],
+      forbiddenEntryStyles: ['support_dip_reclaim'],
+      hardLateChase: false,
     },
     exitRules: {
       forceScalp: true,
@@ -985,6 +1037,13 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minKolWallets: 3,
       jupiterCategory: 'toptrending',
       jupiterInterval: '6h',
+      primaryEntryStyle: 'quality_structure_reclaim',
+      allowedEntryStyles: [
+        'trend_pullback_continuation',
+        'support_dip_reclaim',
+      ],
+      forbiddenEntryStyles: ['late_chase', 'scalp_reclaim_burst'],
+      hardLateChase: true,
     },
     exitRules: {
       forceScalp: false,
@@ -1037,6 +1096,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 40,
       minWalletCount: 1,
       requireCluster: false,
+      primaryEntryStyle: 'reversal_reclaim',
+      allowedEntryStyles: ['scalp_reclaim_burst', 'support_dip_reclaim'],
+      forbiddenEntryStyles: ['trend_pullback_continuation', 'late_chase'],
+      hardLateChase: false,
     },
     exitRules: {
       forceScalp: true,
@@ -1094,6 +1157,14 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferSmartMoney: true,
       minWalletQuality: 50,
       minConviction: 48,
+      primaryEntryStyle: 'smart_money_confirm',
+      allowedEntryStyles: [
+        'quality_structure_reclaim',
+        'trend_pullback_continuation',
+        'support_dip_reclaim',
+      ],
+      forbiddenEntryStyles: ['late_chase'],
+      hardLateChase: true,
     },
     exitRules: {
       forceScalp: false,
@@ -1267,6 +1338,19 @@ export interface TradeProfileMatchContext {
   priceChangeH1Pct?: number | null;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
+  /** Multi-TF S/R confluence (from scanner / enrich) */
+  nearMultiTfSupport?: boolean;
+  nearMultiTfResistance?: boolean;
+  srConfluenceScore?: number | null;
+  supportTfHits?: string[] | null;
+  supportPriceSol?: number | null;
+  resistancePriceSol?: number | null;
+  fib05PriceSol?: number | null;
+  fib618PriceSol?: number | null;
+  priceSol?: number | null;
+  /** Detected once per fight — entry-style DNA */
+  detectedEntryStyle?: string | null;
+  lateChase?: boolean;
   /** Active chart pattern ids from chartPatterns detector */
   chartPatternIds?: string[] | null;
   chartPatternSummary?: string | null;
@@ -2700,6 +2784,20 @@ export function evaluateTradeProfileLanes(
     softEligibility?: boolean;
   }
 ): TradeProfileLaneResult[] {
+  // Detect entry-style DNA once per fight (before scoreProfile / HMC soft / MARL)
+  try {
+    if (ctx.detectedEntryStyle == null || ctx.lateChase == null) {
+      const { resolveDetectedEntryStyle } =
+        require('./supportReclaim') as typeof import('./supportReclaim');
+      const det = resolveDetectedEntryStyle(ctx);
+      if (ctx.detectedEntryStyle == null) {
+        ctx.detectedEntryStyle = det.detectedEntryStyle;
+      }
+      if (ctx.lateChase == null) ctx.lateChase = det.lateChase;
+    }
+  } catch {
+    /* fail soft */
+  }
   const state = ensureState();
   if (!state.enabled) {
     return [];
@@ -2910,6 +3008,77 @@ function scoreProfile(
   const minWalletQuality = lmMatch.minWalletQuality;
   let score = 0;
   const bits: string[] = [];
+
+  // Entry-style DNA eligibility (before HMC soft ×0.85 / MARL)
+  try {
+    const { scoreEntryStyleDna, resolveDetectedEntryStyle } =
+      require('./supportReclaim') as typeof import('./supportReclaim');
+    if (ctx.detectedEntryStyle == null || ctx.lateChase == null) {
+      const det = resolveDetectedEntryStyle(ctx);
+      if (ctx.detectedEntryStyle == null) {
+        ctx.detectedEntryStyle = det.detectedEntryStyle;
+      }
+      if (ctx.lateChase == null) ctx.lateChase = det.lateChase;
+    }
+    const dna = scoreEntryStyleDna({
+      profileId: def.id,
+      detectedEntryStyle: ctx.detectedEntryStyle,
+      lateChase: ctx.lateChase === true,
+    });
+    // Catalog match DNA overrides when present
+    const style = String(ctx.detectedEntryStyle || 'unknown');
+    const late = ctx.lateChase === true || style === 'late_chase';
+    if (m.hardLateChase === true && late) {
+      return { score: 0, reason: 'late_chase forbidden' };
+    }
+    if (
+      Array.isArray(m.forbiddenEntryStyles) &&
+      (m.forbiddenEntryStyles.includes(style) ||
+        (late && m.forbiddenEntryStyles.includes('late_chase')))
+    ) {
+      const hard =
+        m.hardLateChase === true ||
+        def.id === 'high_win_rate' ||
+        def.id === 'steady_compounder' ||
+        def.id === 'trend_rider' ||
+        def.id === 'smart_money_mirror' ||
+        def.id === 'dip_buyer';
+      if (hard || style === 'late_chase') {
+        return {
+          score: 0,
+          reason: late ? 'late_chase forbidden' : `forbidden style ${style}`,
+        };
+      }
+      score -= 35;
+      bits.push(late ? 'late_chase penalty' : `forbidden style ${style}`);
+    } else if (dna.hardZero) {
+      return { score: 0, reason: dna.bits.join(', ') || 'style DNA zero' };
+    } else {
+      score += dna.scoreDelta;
+      if (dna.bits.length) bits.push(...dna.bits);
+    }
+    if (m.primaryEntryStyle && style === m.primaryEntryStyle) {
+      score += 4; // catalog primary nudge on top of DNA table
+      if (!bits.some((b) => b.startsWith('primary'))) {
+        bits.push(`primary ${style}`);
+      }
+    } else if (
+      Array.isArray(m.allowedEntryStyles) &&
+      m.allowedEntryStyles.length &&
+      style !== 'unknown' &&
+      style !== m.primaryEntryStyle &&
+      !m.allowedEntryStyles.includes(style) &&
+      !(
+        Array.isArray(m.forbiddenEntryStyles) &&
+        m.forbiddenEntryStyles.includes(style)
+      )
+    ) {
+      score -= 8;
+      bits.push(`off-style ${style}`);
+    }
+  } catch {
+    /* fail soft — DNA optional */
+  }
 
   const conv =
     ctx.convictionScore != null && Number.isFinite(ctx.convictionScore)

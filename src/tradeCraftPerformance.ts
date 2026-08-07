@@ -78,6 +78,8 @@ export interface TradeFilmRow {
   convictionScore?: number;
   tradeProfileScore?: number;
   entrySource?: string;
+  entryStyle?: string;
+  lateChaseAtEntry?: boolean;
   profileTaPlainLanguage?: string;
 }
 
@@ -520,6 +522,32 @@ function scoreDecisions(eps: ProfileLearningEpisode[]): {
   if (hmc != null) score += (hmc - 0.5) * 15;
   if (highQWr != null) score += (highQWr - 0.45) * 20;
   if (cfGap != null) score -= clamp(cfGap * 0.4, 0, 15);
+  const lateN = eps.filter(
+    (e) =>
+      e.lateChaseAtEntry === true ||
+      e.entryStyle === 'late_chase' ||
+      (Array.isArray(e.learningTags) &&
+        e.learningTags.includes('late_chase_fail'))
+  ).length;
+  const latePct = eps.length ? lateN / eps.length : 0;
+  const byStyle = new Map<string, ProfileLearningEpisode[]>();
+  for (const e of eps) {
+    const s = String(e.entryStyle || (e.lateChaseAtEntry ? 'late_chase' : 'unknown'));
+    const arr = byStyle.get(s) || [];
+    arr.push(e);
+    byStyle.set(s, arr);
+  }
+  let bestStyleWr: number | null = null;
+  let bestStyle: string | null = null;
+  for (const [s, list] of byStyle) {
+    if (list.length < 3) continue;
+    const wr = list.filter(isWin).length / list.length;
+    if (bestStyleWr == null || wr > bestStyleWr) {
+      bestStyleWr = wr;
+      bestStyle = s;
+    }
+  }
+  score -= latePct * 18;
   return {
     score: clamp(Math.round(score * 10) / 10, 0, 100),
     kpis: {
@@ -530,6 +558,10 @@ function scoreDecisions(eps: ProfileLearningEpisode[]): {
       highQualityWinPct:
         highQWr != null ? Math.round(highQWr * 1000) / 10 : null,
       avgCfPeakGapPct: cfGap != null ? Math.round(cfGap * 10) / 10 : null,
+      lateChasePct: Math.round(latePct * 1000) / 10,
+      bestEntryStyle: bestStyle,
+      bestEntryStyleWinPct:
+        bestStyleWr != null ? Math.round(bestStyleWr * 1000) / 10 : null,
     },
   };
 }
@@ -841,6 +873,8 @@ function toFilm(ep: ProfileLearningEpisode): TradeFilmRow {
     convictionScore: ep.convictionScore,
     tradeProfileScore: ep.tradeProfileScore,
     entrySource: ep.entrySource,
+    entryStyle: ep.entryStyle,
+    lateChaseAtEntry: ep.lateChaseAtEntry === true,
     profileTaPlainLanguage: ep.profileTaPlainLanguage,
   };
 }

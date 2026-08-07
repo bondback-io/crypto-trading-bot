@@ -124,6 +124,8 @@ function updatePeakProtectArmState(
           policyArmOfTpPct: polDefer.peakProtectArmOfTpPct,
           policyGivebackOfPeakPct: polDefer.peakProtectGivebackOfPeakPct,
           entryQualityScore: position.entryQualityScore,
+          entryStyle: position.entryStyle,
+          lateChaseAtEntry: position.lateChaseAtEntry,
         });
         position.peakProtectArmAtPct = resolvedDefer.armAtPct;
         return;
@@ -142,6 +144,8 @@ function updatePeakProtectArmState(
       policyArmOfTpPct: pol.peakProtectArmOfTpPct,
       policyGivebackOfPeakPct: pol.peakProtectGivebackOfPeakPct,
       entryQualityScore: position.entryQualityScore,
+      entryStyle: position.entryStyle,
+      lateChaseAtEntry: position.lateChaseAtEntry,
     });
     position.peakProtectArmAtPct = resolved.armAtPct;
     if (resolved.minOpenSec > 0) {
@@ -177,6 +181,8 @@ function stampProfitCaptureLayerAtOpen(
     hmcConfidence?: number;
     gateDecision?: string;
     entryQualityScore?: number;
+    entryStyle?: string;
+    lateChaseAtEntry?: boolean;
   }
 ): void {
   try {
@@ -191,6 +197,8 @@ function stampProfitCaptureLayerAtOpen(
       position.hmcConfidence = Number(meta.hmcConfidence);
     }
     if (meta?.gateDecision) position.gateDecision = String(meta.gateDecision);
+    if (meta?.entryStyle) position.entryStyle = String(meta.entryStyle);
+    if (meta?.lateChaseAtEntry === true) position.lateChaseAtEntry = true;
     const q =
       meta?.entryQualityScore != null &&
       Number.isFinite(Number(meta.entryQualityScore))
@@ -207,6 +215,8 @@ function stampProfitCaptureLayerAtOpen(
       openedAt: position.openedAt,
       profileId: position.tradeProfileId,
       entryQualityScore: q,
+      entryStyle: position.entryStyle,
+      lateChaseAtEntry: position.lateChaseAtEntry === true,
     });
     position.pclPartialTaken = false;
     position.pclScratchBlockedCount = 0;
@@ -437,6 +447,10 @@ export interface Position {
   chartPatternIds?: string[];
   /** How the entry was discovered */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
+  /** Entry-style DNA (reclaim / late chase / SM confirm / …) */
+  entryStyle?: string;
+  entryStyleSecondary?: string;
+  lateChaseAtEntry?: boolean;
   /** Scanner playbook stamp */
   scannerPlaybook?: string;
   scannerConfluence?: number;
@@ -743,6 +757,8 @@ function maybeRecordLearningEpisode(
       entryQualityScoreAtOpen: position.entryQualityScore,
       pclPartialTaken: position.pclPartialTaken === true,
       exitReason: position.reason,
+      entryStyle: position.entryStyle,
+      lateChaseAtEntry: position.lateChaseAtEntry === true,
     });
     console.log(
       `[learning-episode] ${position.symbol || position.mint.slice(0, 8)} ` +
@@ -789,6 +805,9 @@ function maybeRecordLearningEpisode(
         takeProfitPct: effectivePositionTakeProfitPct(position),
         policyArmOfTpPct: pol.peakProtectArmOfTpPct,
         policyGivebackOfPeakPct: pol.peakProtectGivebackOfPeakPct,
+        entryQualityScore: position.entryQualityScore,
+        entryStyle: position.entryStyle,
+        lateChaseAtEntry: position.lateChaseAtEntry,
       });
       if (peakProtectArmAtPct == null && resolved.armAtPct > 0) {
         peakProtectArmAtPct = resolved.armAtPct;
@@ -830,6 +849,22 @@ function maybeRecordLearningEpisode(
       tradeProfileReason: position.tradeProfileReason,
       paramVersion,
       entrySource: position.entrySource,
+      entryStyle: position.entryStyle,
+      entryStyleSecondary: position.entryStyleSecondary,
+      lateChaseAtEntry: position.lateChaseAtEntry === true,
+      learningTags: (() => {
+        const tags: string[] = [];
+        if (
+          position.lateChaseAtEntry === true &&
+          holdSec > 0 &&
+          holdSec < 45 &&
+          pnlPct > 0 &&
+          pnlPct < 4
+        ) {
+          tags.push('late_chase_fail');
+        }
+        return tags.length ? tags : undefined;
+      })(),
       scannerPlaybook: position.scannerPlaybook,
       qualityTier: position.qualityTier,
       failureCategory: computeFailureCategory(position),
@@ -1049,6 +1084,8 @@ function maybeRecordLearningEpisode(
             entryQualityScore: timingQ.entryQualityScore,
             pclPartialTaken: position.pclPartialTaken === true,
             exitReason: position.reason,
+            entryStyle: position.entryStyle,
+            lateChaseAtEntry: position.lateChaseAtEntry === true,
           });
           return Number.isFinite(d) && d !== 0
             ? Math.round(d * 1000) / 1000
@@ -1972,6 +2009,9 @@ export class PaperTrader {
     profileAggressiveDeadMarket?: boolean;
     profileTurboMode?: boolean;
     entrySource?: Position['entrySource'];
+    entryStyle?: string;
+    entryStyleSecondary?: string;
+    lateChaseAtEntry?: boolean;
     scannerPlaybook?: string;
     scannerConfluence?: number;
     candleSource?: 'real' | 'synthetic';
@@ -2077,6 +2117,9 @@ export class PaperTrader {
       tradeProfileReason: input.tradeProfileReason,
       profileTurboMode: input.profileTurboMode === true,
       entrySource: input.entrySource,
+      entryStyle: input.entryStyle,
+      entryStyleSecondary: input.entryStyleSecondary,
+      lateChaseAtEntry: input.lateChaseAtEntry === true,
       scannerPlaybook: input.scannerPlaybook,
       scannerConfluence: input.scannerConfluence,
       candleSource: input.candleSource,
@@ -2154,6 +2197,8 @@ export class PaperTrader {
       hmcConfidence: input.hmcConfidence,
       gateDecision: input.gateDecision,
       entryQualityScore: input.entryQualityScore,
+      entryStyle: input.entryStyle,
+      lateChaseAtEntry: input.lateChaseAtEntry,
     });
 
     if (position.shortTermStrategyId === 'migration_event') {
@@ -2485,6 +2530,9 @@ export class PaperTrader {
       profileAggressiveDeadMarket?: boolean;
       profileTurboMode?: boolean;
       entrySource?: Position['entrySource'];
+      entryStyle?: string;
+      entryStyleSecondary?: string;
+      lateChaseAtEntry?: boolean;
       scannerPlaybook?: string;
       scannerConfluence?: number;
       candleSource?: 'real' | 'synthetic';
@@ -2676,6 +2724,9 @@ export class PaperTrader {
       tradeProfileReason: meta?.tradeProfileReason,
       profileTurboMode: meta?.profileTurboMode === true,
       entrySource: meta?.entrySource,
+      entryStyle: meta?.entryStyle,
+      entryStyleSecondary: meta?.entryStyleSecondary,
+      lateChaseAtEntry: meta?.lateChaseAtEntry === true,
       scannerPlaybook: meta?.scannerPlaybook,
       scannerConfluence: meta?.scannerConfluence,
       candleSource: meta?.candleSource,
@@ -2753,6 +2804,8 @@ export class PaperTrader {
       hmcConfidence: meta?.hmcConfidence,
       gateDecision: meta?.gateDecision,
       entryQualityScore: meta?.entryQualityScore,
+      entryStyle: meta?.entryStyle,
+      lateChaseAtEntry: meta?.lateChaseAtEntry,
     });
 
     if (position.shortTermStrategyId === 'migration_event') {
@@ -3497,6 +3550,8 @@ export class PaperTrader {
           profitPermissionUntilMs: position.profitPermissionUntilMs,
           entryQualityScore: position.entryQualityScore,
           pclPartialTaken: position.pclPartialTaken === true,
+          entryStyle: position.entryStyle,
+          lateChaseAtEntry: position.lateChaseAtEntry,
         });
         if (
           adapt.type === 'tighten_trail' &&
@@ -4509,6 +4564,8 @@ export class PaperTrader {
             profitPermissionUntilMs: position.profitPermissionUntilMs,
             entryQualityScore: position.entryQualityScore,
             pclPartialTaken: position.pclPartialTaken === true,
+            entryStyle: position.entryStyle,
+            lateChaseAtEntry: position.lateChaseAtEntry,
             volumeDecayState: (position.volumeDecayState as
               | 'expanding'
               | 'stable'

@@ -22,6 +22,7 @@ import {
   type SrTimeframe,
 } from './technicalLevels';
 import { isMintOnActiveDipWatch } from './dipSetupWatch';
+import { detectSupportReclaim } from './supportReclaim';
 
 export type ScalperWatchStatus =
   | 'watching'
@@ -547,14 +548,31 @@ export async function tickScalperSetupWatches(opts?: {
     }
 
     if (w.status === 'armed') {
+      // Shared reclaim detector (Scalper-family ~1.2%); fail soft if S/R missing
       let reclaim = false;
-      if (
-        w.supportPriceSol != null &&
-        w.supportPriceSol > 0 &&
-        px != null &&
-        px >= w.supportPriceSol * (1 + TRIGGER_RECLAIM_PCT / 100)
-      ) {
-        reclaim = true;
+      try {
+        const det = detectSupportReclaim({
+          priceSol: px,
+          supportPriceSol: w.supportPriceSol,
+          mtfSupportPriceSol: w.supportPriceSol,
+          nearSupport: w.nearSupport,
+          nearMultiTfSupport: w.nearMultiTfSupport,
+          reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
+          momentumStyle: w.preferredProfileId === 'momentum_burst',
+        });
+        reclaim = det.reclaimed === true;
+        if (det.nearLevel) {
+          w.nearSupport = true;
+        }
+      } catch {
+        if (
+          w.supportPriceSol != null &&
+          w.supportPriceSol > 0 &&
+          px != null &&
+          px >= w.supportPriceSol * (1 + TRIGGER_RECLAIM_PCT / 100)
+        ) {
+          reclaim = true;
+        }
       }
       const holdOk = nearConfluence && w.nearSupport !== false;
       const trigger = reclaim || holdOk;

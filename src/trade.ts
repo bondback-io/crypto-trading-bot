@@ -254,6 +254,10 @@ export interface BuyOptions {
   turboSlippageBps?: number;
   /** wallet | scanner | migration | hybrid | zion */
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid' | 'zion';
+  /** Entry-style DNA tag (support reclaim / late chase / etc.) */
+  entryStyle?: string;
+  entryStyleSecondary?: string;
+  lateChaseAtEntry?: boolean;
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
@@ -867,6 +871,9 @@ export async function executeBuy(
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
         profileTurboMode: turboOn,
         entrySource: meta?.entrySource,
+        entryStyle: meta?.entryStyle,
+        entryStyleSecondary: meta?.entryStyleSecondary,
+        lateChaseAtEntry: meta?.lateChaseAtEntry === true,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
@@ -1014,6 +1021,9 @@ export async function executeBuy(
         profileAggressiveDeadMarket: meta?.profileAggressiveDeadMarket,
         profileTurboMode: turboOn,
         entrySource: meta?.entrySource,
+        entryStyle: meta?.entryStyle,
+        entryStyleSecondary: meta?.entryStyleSecondary,
+        lateChaseAtEntry: meta?.lateChaseAtEntry === true,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,

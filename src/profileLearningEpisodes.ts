@@ -38,6 +38,12 @@ export interface ProfileLearningEpisode {
   /** Self-learn version active when the trade opened */
   paramVersion: number;
   entrySource?: string;
+  /** Entry-style DNA stamp */
+  entryStyle?: string;
+  entryStyleSecondary?: string;
+  lateChaseAtEntry?: boolean;
+  /** Learning tags e.g. late_chase_fail */
+  learningTags?: string[];
   scannerPlaybook?: string;
   qualityTier?: 'low' | 'medium' | 'high';
   failureCategory?: string;
@@ -311,6 +317,9 @@ export function computeEpisodeTimingQuality(input: {
   pclPartialTaken?: boolean;
   exitReason?: string;
   exitKey?: string;
+  entryStyle?: string | null;
+  lateChaseAtEntry?: boolean;
+  learningTags?: string[] | null;
 }): {
   entryQualityScore: number;
   exitQualityScore: number;
@@ -380,6 +389,9 @@ export function computeEpisodeTimingQuality(input: {
       pclPartialTaken: input.pclPartialTaken === true,
       exitReason: input.exitReason,
       exitKey: input.exitKey,
+      entryStyle: input.entryStyle,
+      lateChaseAtEntry: input.lateChaseAtEntry === true,
+      learningTags: input.learningTags,
     });
   } catch {
     /* fail soft */

@@ -15,6 +15,7 @@ import {
   isSmartBotProfilesEnabled,
   resolveTradeProfileDefinition,
 } from './tradeProfiles';
+import { detectSupportReclaim } from './supportReclaim';
 
 export type DipWatchStatus =
   | 'watching'
@@ -436,15 +437,33 @@ export async function tickDipSetupWatches(opts?: {
     }
 
     if (w.status === 'armed') {
-      // Trigger: bounce reclaim or still near Fib/S with drop in band
+      // Shared reclaim detector (Dip ~1.5%); fail soft if S/R missing
       let reclaim = false;
-      if (
-        w.supportPriceSol != null &&
-        w.supportPriceSol > 0 &&
-        px != null &&
-        px >= w.supportPriceSol * (1 + TRIGGER_RECLAIM_PCT / 100)
-      ) {
-        reclaim = true;
+      try {
+        const det = detectSupportReclaim({
+          priceSol: px,
+          supportPriceSol: w.supportPriceSol,
+          fib05PriceSol: w.fib05PriceSol,
+          fib618PriceSol: w.fib618PriceSol,
+          nearSupport: w.nearSupport,
+          nearKeyFib: w.nearKeyFib,
+          reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
+        });
+        reclaim = det.reclaimed === true;
+        if (det.nearLevel) {
+          w.nearSupport = w.nearSupport || det.levelKind === 'support';
+          w.nearKeyFib = w.nearKeyFib || det.levelKind === 'fib';
+        }
+      } catch {
+        /* fail soft — fall back to legacy level math */
+        if (
+          w.supportPriceSol != null &&
+          w.supportPriceSol > 0 &&
+          px != null &&
+          px >= w.supportPriceSol * (1 + TRIGGER_RECLAIM_PCT / 100)
+        ) {
+          reclaim = true;
+        }
       }
       const trigger =
         reclaim ||

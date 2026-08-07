@@ -15278,6 +15278,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         avgHmcConfidence: 'HMC conf',
         highQualityWinPct: 'HQ win %',
         avgCfPeakGapPct: 'CF peak gap',
+        lateChasePct: 'Late-chase %',
+        bestEntryStyle: 'Best entry style',
+        bestEntryStyleWinPct: 'Best style WR %',
         note: 'Note',
       };
       const keys = Object.keys(kpis).filter(function (k) {
@@ -15401,6 +15404,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           .map(function (r) {
             const entryBits = [];
             if (r.entryQualityScore != null) entryBits.push('Q' + tcFmt(r.entryQualityScore));
+            if (r.entryStyle) entryBits.push(String(r.entryStyle).replace(/_/g, ' '));
+            if (r.lateChaseAtEntry) entryBits.push('late chase');
             if (r.convictionScore != null) entryBits.push('conv ' + tcFmt(r.convictionScore));
             if (r.hmcSetup) entryBits.push(String(r.hmcSetup));
             if (r.nearSupportAtEntry) entryBits.push('near S');
@@ -19424,6 +19429,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
      * Copy (sky), Migration (purple). Used on positions, closed trades,
      * activity feeds, and backtest rows.
      */
+    function fmtEntryStyleBadge(p) {
+      if (!p) return '';
+      const style = p.entryStyle ? String(p.entryStyle) : '';
+      const late = p.lateChaseAtEntry === true || style === 'late_chase';
+      if (!style && !late) return '';
+      const label = late
+        ? 'Late chase'
+        : style
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, function (c) { return c.toUpperCase(); })
+            .slice(0, 18);
+      const bg = late ? '#b45309' : '#475569';
+      const title = late
+        ? 'Late-chase entry (extended from support/Fib)'
+        : 'Entry style: ' + style;
+      return (
+        '<span class="badge entry-style-badge" style="background:' +
+        bg +
+        ';color:#fff;margin-left:0.25rem" title="' +
+        title.replace(/"/g, '&quot;') +
+        '">' +
+        label +
+        '</span>'
+      );
+    }
+
     function fmtEntrySourceBadge(p, opts) {
       opts = opts || {};
       if (!p) return '';
@@ -19450,7 +19481,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       if (isMigration || entrySrc === 'migration') {
         return (
-          '<span class="badge entry-src-badge" style="background:#7c3aed;color:#fff" title="Migration entry">Migration</span>'
+          '<span class="badge entry-src-badge" style="background:#7c3aed;color:#fff" title="Migration entry">Migration</span>' +
+          fmtEntryStyleBadge(p)
         );
       }
       if (isScanner) {
@@ -19459,10 +19491,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (isHybrid ? ' + smart wallets' : ' (TA)') +
           '">' +
           (isHybrid ? 'Scanner+' : 'Scanner') +
-          '</span>'
+          '</span>' +
+          fmtEntryStyleBadge(p)
         );
       }
-      if (opts.omitCopy) return '';
+      if (opts.omitCopy) return fmtEntryStyleBadge(p);
       // Wallet copy — sky badge (shown next to wallet name in cells)
       if (
         entrySrc === 'wallet' ||
@@ -19471,10 +19504,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         opts.forceCopy
       ) {
         return (
-          '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="Smart-wallet copy trade">Copy</span>'
+          '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="Smart-wallet copy trade">Copy</span>' +
+          fmtEntryStyleBadge(p)
         );
       }
-      return '';
+      return fmtEntryStyleBadge(p);
     }
 
     /**

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.218',
+    title: 'Entry-style DNA + late-chase + PCL align',
+    sections: ['risk', 'tradecraft', 'microbots', 'learning', 'scanners'],
+    items: [
+      'Per-profile entry-style DNA (primary/allowed/forbidden) scored before HMC soft/MARL; late-chase hard-zeros quality/Mirror/Trend/Dip.',
+      'Shared support-reclaim detector unifies Dip (~1.5%) and Scalper Mode B (~1.2%) watch triggers; opens stamp entryStyle + lateChaseAtEntry.',
+      'High-q valid styles stretch PCL permission / later PPP arm; Trade Craft + Zion show late-chase mix; badges beside entry source.',
+    ],
+  },
+  {
     version: '1.2.217',
     title: 'Multi-TF S/R + Scalper Mode B watch',
     sections: ['risk', 'tradecraft', 'microbots', 'scanners', 'learning'],
