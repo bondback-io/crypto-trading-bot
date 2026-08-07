@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.226',
+    title: 'Smart Wallets sub-tabs cleanup',
+    sections: ['copy', 'overview', 'knobs'],
+    items: [
+      'Smart Wallets is now five priority sub-tabs: Discover → Nansen.ai → Tracked → Live Trading → Influencer Mirror.',
+      'Removed unused Wallet Search, Top Smart Wallets (GMGN quick), Monitor & Discovery standalone card, and Scalper Wallets duplicate table; discovery status lives on Discover.',
+    ],
+  },
+  {
     version: '1.2.225',
     title: 'Influencer Smart Mirror enhancements',
     sections: ['copy', 'scanners', 'risk', 'coaches', 'overview'],

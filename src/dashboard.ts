@@ -6433,19 +6433,50 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    #wallets-table, #search-wallets-table, #discover-wallets-table, #nansen-wallets-table { min-width: 48rem; }
+    #wallets-table, #discover-wallets-table, #nansen-wallets-table, #im-wallets-table { min-width: 48rem; }
     #discover-wallets-table th, #discover-wallets-table td,
     #nansen-wallets-table th, #nansen-wallets-table td,
     #wallets-table th, #wallets-table td,
-    #search-wallets-table th, #search-wallets-table td {
+    #im-wallets-table th, #im-wallets-table td {
       padding-left: 0.4rem;
       padding-right: 0.4rem;
       white-space: nowrap;
       font-size: 0.8rem;
     }
-    #discover-wallets-table th, #wallets-table th, #search-wallets-table th, #nansen-wallets-table th {
+    #discover-wallets-table th, #wallets-table th, #nansen-wallets-table th, #im-wallets-table th {
       font-size: 0.72rem;
       letter-spacing: 0.01em;
+    }
+    .wallets-subtabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.35rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      margin-bottom: 0.15rem;
+      padding-bottom: 0.1rem;
+    }
+    .wallets-subtabs .closed-filter-btn {
+      flex: 0 0 auto;
+      min-height: 2.25rem;
+      padding: 0.4rem 0.75rem;
+      white-space: nowrap;
+    }
+    .wallets-sub-panel {
+      display: none;
+      min-width: 0;
+    }
+    .wallets-sub-panel.is-active {
+      display: block;
+    }
+    @media (max-width: 479px) {
+      .wallets-subtabs .closed-filter-btn {
+        flex: 1 1 auto;
+        justify-content: center;
+        font-size: 12px;
+        padding: 0.4rem 0.55rem;
+      }
     }
     .btn-label-full { display: none; }
     .btn-label-short { display: inline; }
@@ -6831,7 +6862,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="sr-only">Settings</span>
         </button>
         <div id="settings-dropdown" class="settings-dropdown" role="menu" aria-label="Settings">
-          <button type="button" role="menuitem" data-settings-tab="wallets" onclick="showTab('wallets')" title="Discover, search, and manage smart wallets you copy">
+          <button type="button" role="menuitem" data-settings-tab="wallets" onclick="showTab('wallets')" title="Discover, Nansen, tracked, live trading, and Influencer Mirror wallets">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
             Smart Wallets
           </button>
@@ -7236,69 +7267,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </section>
 
     <!-- ========== TAB: Smart Wallets ========== -->
-    <section data-tab-panel="wallets" class="hidden space-y-4">
-      <div class="card">
-        <div class="flex flex-wrap gap-2 items-center justify-between mb-2">
-          <div class="section-title !mb-0">Monitor &amp; Discovery <span class="tip" tabindex="0" data-tip="Force Refresh re-enables tracked wallets and restarts the poll loop. Discovery status shows API health for GMGN/Kolscan/Birdeye."></span></div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <button class="btn btn-primary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and re-subscribe the poll loop">Force Refresh Monitoring</button>
-            <button class="btn btn-secondary" onclick="refreshDiscoveryStatus()" title="Poll discovery health without starting a full search">Refresh status</button>
-            <span class="mint" id="discovery-status">—</span>
+    <section data-tab-panel="wallets" data-wallets-active="discover" class="hidden space-y-4">
+      <div class="card !pb-2">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title !text-sm !mb-0">Smart Wallets <span class="tip" tabindex="0" data-tip="Discover candidates, pull Nansen Smart Money, manage tracked copy wallets, live trading slots, and Influencer Mirror."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Priority order — Discover first, Influencer Mirror last.</p>
           </div>
+        </div>
+        <div class="wallets-subtabs closed-filter" role="tablist" aria-label="Smart Wallets sections">
+          <button type="button" role="tab" class="closed-filter-btn is-active" id="wallets-tab-discover" data-wallets-subtab="discover" aria-selected="true" aria-controls="wallets-panel-discover" onclick="setWalletsSubTab('discover')">Discover</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="wallets-tab-nansen" data-wallets-subtab="nansen" aria-selected="false" aria-controls="wallets-panel-nansen" onclick="setWalletsSubTab('nansen')">Nansen.ai</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="wallets-tab-tracked" data-wallets-subtab="tracked" aria-selected="false" aria-controls="wallets-panel-tracked" onclick="setWalletsSubTab('tracked')">Tracked</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="wallets-tab-live" data-wallets-subtab="live" aria-selected="false" aria-controls="wallets-panel-live" onclick="setWalletsSubTab('live')">Live Trading</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="wallets-tab-influencer" data-wallets-subtab="influencer" aria-selected="false" aria-controls="wallets-panel-influencer" onclick="setWalletsSubTab('influencer')">Influencer Mirror</button>
+        </div>
+      </div>
+
+      <div class="wallets-sub-panel is-active space-y-4" id="wallets-panel-discover" data-wallets-sub-panel="discover" role="tabpanel" aria-labelledby="wallets-tab-discover">
+      <div class="card">
+        <div class="section-title">Discover Smart Wallets <span class="tip" tabindex="0" data-tip="Pull candidate wallets from Kolscan, GMGN, Birdeye, DexScreener, or curated lists. Use All sources when GMGN is blocked."></span></div>
+        <div class="flex flex-wrap gap-2 items-center mb-2">
+          <button class="btn btn-secondary" onclick="refreshDiscoveryStatus()" title="Poll discovery health without starting a full search">Refresh status</button>
+          <span class="mint" id="discovery-status">—</span>
         </div>
         <div class="mint text-sm mb-2" id="discovery-sources-status">Sources — checking…</div>
         <div class="mint text-amber-300 text-sm mb-1 hidden" id="discovery-setup-hint" style="display:none;color:#fbbf24"></div>
         <div class="mint text-amber-300 text-sm mb-2 hidden" id="birdeye-setup-hint" style="display:none;color:#fbbf24"></div>
         <div class="mint text-xs mb-2" id="birdeye-key-status">—</div>
-        <div class="filters-row">
+        <div class="filters-row mb-3">
           <label class="ctl ctl-md">
             <span>Auto-refresh (min) <span class="tip" tabindex="0" data-tip="How often to refresh top smart wallets in the background. 0 = disabled."></span></span>
             <input type="number" id="disc-auto-min" value="15" min="0" max="120" />
           </label>
           <button class="btn btn-secondary" onclick="saveDiscoveryConfig()" title="Save the auto-refresh interval">Save interval</button>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Wallet Search <span class="tip" tabindex="0" data-tip="Filter the smart-wallet pool by win rate, trade frequency, recent activity, Pump.fun focus, and sniper risk."></span></div>
-        <div class="filters-row mb-3">
-          <input type="search" id="wallet-search-q" placeholder='Search e.g. "active scalpers"' class="search-q" title="Free-text intent: scalpers, pump, active, or wallet name fragments" />
-          <label class="ctl ctl-sm">
-            <span>Win% ≥ <span class="tip" tabindex="0" data-tip="Minimum historical win rate required."></span></span>
-            <input type="number" id="search-min-win" value="45" min="0" max="100" />
-          </label>
-          <label class="ctl ctl-sm">
-            <span>Trades 7d ≥ <span class="tip" tabindex="0" data-tip="Minimum trades in the last 7 days — higher = more active scalpers."></span></span>
-            <input type="number" id="search-min-trades" value="20" min="0" />
-          </label>
-          <label class="ctl ctl-sm">
-            <span>Activity ≤ days <span class="tip" tabindex="0" data-tip="Only wallets that traded within this many days."></span></span>
-            <input type="number" id="search-max-days" value="7" min="1" max="30" />
-          </label>
-          <label class="ctl ctl-sm">
-            <span>Max sniper <span class="tip" tabindex="0" data-tip="Exclude wallets tagged as heavy snipers above this score (0–100)."></span></span>
-            <input type="number" id="search-max-sniper" value="50" min="0" max="100" />
-          </label>
-          <label class="ctl-check" title="Prefer wallets with Pump.fun / migration history"><input type="checkbox" id="search-pump-focus" /> Pump.fun</label>
-          <label class="ctl-check" title="Only high-frequency traders (scalpers)"><input type="checkbox" id="search-scalper-only" /> Scalpers only</label>
-          <button class="btn btn-primary" onclick="searchWallets()" title="Run search with the filters above">Search</button>
-          <button class="btn btn-secondary" onclick="suggestScalpers()" title="One-click: active wallets with high 7d trade count and solid win rate">Suggest scalpers</button>
-          <span class="mint self-center" id="search-status"></span>
-        </div>
-        <div class="overflow-x-auto">
-          <table id="search-wallets-table">
-            <thead><tr><th>Name</th><th>Address</th><th title="Time since last known trade">Last</th><th title="Win rate %">Win%</th><th title="Trades in last 7 days">7d</th><th title="Trades in last 30 days">30d</th><th title="Pump.fun trades when reported (never estimated)">Pump</th><th></th></tr></thead>
-            <tbody><tr><td colspan="8" class="text-slate-500">Search or suggest scalpers</td></tr></tbody>
-          </table>
-        </div>
-        <div id="scalper-suggestions" class="mt-3 hidden">
-          <div class="mint mb-2">Auto-suggest: consistent scalpers <span class="tip" tabindex="0" data-tip="Quick-add chips for wallets that look like consistent high-frequency scalpers."></span></div>
-          <div id="scalper-chips" class="flex flex-wrap gap-2"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Discover Smart Wallets <span class="tip" tabindex="0" data-tip="Pull candidate wallets from Kolscan, GMGN, Birdeye, DexScreener, or curated lists. Use All sources when GMGN is blocked."></span></div>
         <div class="filters-row mb-3">
           <label class="ctl ctl-lg">
             <span>Source <span class="tip" tabindex="0" data-tip="All = merge every source. Kolscan works without API keys. Birdeye needs BIRDEYE_API_KEY."></span></span>
@@ -7397,7 +7400,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
       </div>
+      </div>
 
+      <div class="wallets-sub-panel space-y-4" id="wallets-panel-nansen" data-wallets-sub-panel="nansen" role="tabpanel" aria-labelledby="wallets-tab-nansen">
       <div class="card">
         <div class="flex flex-wrap gap-2 items-center justify-between mb-2">
           <div class="section-title !mb-0">Nansen.ai Smart Money <span class="tip" tabindex="0" data-tip="Fetch labeled Smart Money wallets on Solana via Nansen (Smart Trader / 30D / 90D / Fund). Each Discover costs ~5 credits. Export to CSV/JSON so you can re-import without spending credits while testing."></span></div>
@@ -7474,27 +7479,80 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </table>
         </div>
       </div>
-
-      <div class="card">
-        <div class="section-title">Top Smart Wallets (GMGN quick) <span class="tip" tabindex="0" data-tip="Shortcut to GMGN top PnL wallets. Falls back to curated/Kolscan if GMGN is blocked."></span></div>
-        <div class="flex flex-wrap gap-2 items-center mb-3">
-          <select id="top-period" title="Rank by 7-day or 30-day PnL">
-            <option value="7d">7D PnL</option>
-            <option value="30d">30D PnL</option>
-          </select>
-          <button class="btn btn-primary" onclick="loadTopWallets()" title="Fetch top wallets for the selected period">Load Top</button>
-          <button class="btn btn-secondary" onclick="importAllTop()" title="Import all new wallets from the loaded list">Import All New</button>
-          <span class="mint" id="top-status"></span>
-          <span class="mint" id="gmgn-key-status"></span>
-        </div>
-        <div class="overflow-x-auto">
-          <table id="top-wallets-table">
-            <thead><tr><th>Name</th><th>Address</th><th>Win%</th><th>PnL</th><th>7d</th><th>30d</th><th></th></tr></thead>
-            <tbody><tr><td colspan="7" class="text-slate-500">Click Load Top Wallets</td></tr></tbody>
-          </table>
-        </div>
       </div>
 
+      <div class="wallets-sub-panel space-y-4" id="wallets-panel-tracked" data-wallets-sub-panel="tracked" role="tabpanel" aria-labelledby="wallets-tab-tracked">
+      <div class="card">
+        <div class="flex flex-wrap gap-2 items-center mb-3">
+          <div class="section-title !mb-0 flex-1 min-w-[10rem]">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
+          <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
+          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
+          <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
+          <button class="btn btn-secondary" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
+          <button class="btn btn-danger" onclick="resetWalletTracker()" title="Remove ALL tracked smart wallets from the Watch list. Boot does not auto-import favourites — use Import Favourites when you want a list again."><span class="btn-label-short">Reset</span><span class="btn-label-full">Reset Wallet Tracker</span></button>
+          <span class="mint" id="gmgn-status"></span>
+        </div>
+        <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
+        <div id="watching-list" class="mint text-xs mb-3 max-h-24 overflow-y-auto" style="color:#94a3b8"></div>
+        <div class="overflow-x-auto">
+          <table id="wallets-table">
+            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="Quality score 0–100">Q</th><th title="7d / 30d / Pump.fun trades">7d / 30d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <form class="filters-row mt-3" id="add-wallet-form" title="Add a single wallet by name + Solana address">
+          <input type="text" name="name" placeholder="Wallet name" required class="ctl-md" style="width:9rem" />
+          <input type="text" name="address" placeholder="Solana address" required class="search-q" />
+          <select name="category" class="ctl-md" title="Category used for grouping and strategy hints">
+            <option value="smart">smart</option>
+            <option value="scalper">scalper</option>
+            <option value="sniper">sniper</option>
+            <option value="kol">kol</option>
+          </select>
+          <button type="submit" class="btn btn-primary" title="Save this wallet to the tracked list">Add Wallet</button>
+        </form>
+        <div class="mt-3">
+          <div class="mint mb-1">Bulk import (addresses or Name:Address, one per line) <span class="tip" tabindex="0" data-tip="Import many wallets at once. Optional category applies to all lines."></span></div>
+          <textarea id="bulk-import-text" rows="3" placeholder="CyaE1Vxv...&#10;Theo:Bi4rd5FH..."></textarea>
+          <div class="filters-row mt-2">
+            <select id="bulk-import-cat" class="ctl-md" title="Force category for all imported lines, or auto-detect">
+              <option value="">auto category</option>
+              <option value="scalper">scalper</option>
+              <option value="smart">smart</option>
+              <option value="sniper">sniper</option>
+              <option value="kol">kol</option>
+            </select>
+            <button type="button" class="btn btn-secondary" onclick="bulkImportWallets()" title="Parse and import all valid addresses">Bulk import</button>
+            <span class="mint self-center" id="bulk-import-status"></span>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <div class="wallets-sub-panel space-y-4" id="wallets-panel-live" data-wallets-sub-panel="live" role="tabpanel" aria-labelledby="wallets-tab-live">
+      <div class="card">
+        <div class="section-title">Live Trading Wallets <span class="tip" tabindex="0" data-tip="Slots that hold real keys via env vars (main/burner). Private keys never leave the server."></span></div>
+        <p class="mint mb-2">Keys stay in env vars — never sent to the browser.</p>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <button class="btn btn-secondary" onclick="loadTradingWallets()" title="Reload trading wallet slots and balances">Refresh</button>
+          <span class="mint" id="live-wallet-status"></span>
+        </div>
+        <div class="overflow-x-auto">
+          <table id="trading-wallets-table">
+            <thead><tr><th>Name</th><th title="main = primary, burner = disposable">Role</th><th title="Environment variable that stores the secret key">Env</th><th>Pubkey</th><th>Balance</th><th>Key</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <form class="filters-row mt-3" id="add-trading-wallet-form" title="Register a new trading slot that reads its key from an env var">
+          <input type="text" name="name" placeholder="Name" required style="width:8rem" />
+          <input type="text" name="envVar" placeholder="ENV_VAR" required style="width:10rem" title="Name of the env var containing the base58 secret key" />
+          <select name="role" class="ctl-md"><option value="main">main</option><option value="burner">burner</option></select>
+          <button type="submit" class="btn btn-primary" title="Add this trading wallet slot">Add Slot</button>
+        </form>
+      </div>
+      </div>
+
+      <div class="wallets-sub-panel space-y-4" id="wallets-panel-influencer" data-wallets-sub-panel="influencer" role="tabpanel" aria-labelledby="wallets-tab-influencer">
       <div class="card">
         <div class="flex flex-wrap gap-2 items-center mb-3">
           <div class="section-title !mb-0 flex-1 min-w-[10rem]">Influencer Mirror <span class="tip" tabindex="0" data-tip="Additive fast copy of influencer / top-PnL tagged wallets via Smart Money Mirror. Default OFF — Favourites unchanged. Requires smart_money_copy + smart_money_mirror ON. Anti-rug / hard SL always absolute."></span></div>
@@ -7581,81 +7639,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </table>
         </div>
       </div>
-
-      <div class="card">
-        <div class="flex flex-wrap gap-2 items-center mb-3">
-          <div class="section-title !mb-0 flex-1 min-w-[10rem]">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
-          <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
-          <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
-          <button class="btn btn-warning" onclick="pruneInactive()" title="Remove wallets with no activity for more than 14 days"><span class="btn-label-short">Prune</span><span class="btn-label-full">Prune Inactive (&gt;14d)</span></button>
-          <button class="btn btn-secondary" onclick="pruneLowQuality()" title="Unwatch/down-weight wallets below quality threshold (confirm to hard-remove)"><span class="btn-label-short">Quality</span><span class="btn-label-full">Prune Low Quality</span></button>
-          <button class="btn btn-danger" onclick="resetWalletTracker()" title="Remove ALL tracked smart wallets from the Watch list. Boot does not auto-import favourites — use Import Favourites when you want a list again."><span class="btn-label-short">Reset</span><span class="btn-label-full">Reset Wallet Tracker</span></button>
-          <span class="mint" id="gmgn-status"></span>
-        </div>
-        <div class="mint text-sm mb-2" id="watching-status">Watching — wallets</div>
-        <div id="watching-list" class="mint text-xs mb-3 max-h-24 overflow-y-auto" style="color:#94a3b8"></div>
-        <div class="overflow-x-auto">
-          <table id="wallets-table">
-            <thead><tr><th>Name</th><th title="smart / scalper / sniper / kol">Cat</th><th>Address</th><th title="Absolute last trade time + relative label">Last Active</th><th>Win%</th><th title="Quality score 0–100">Q</th><th title="7d / 30d / Pump.fun trades">7d / 30d / Pump</th><th>Status</th><th>Watch</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div class="mt-4">
-          <div class="section-title">Scalper Wallets <span class="tip" tabindex="0" data-tip="Tracked wallets tagged as scalpers (high trade frequency)."></span></div>
-          <div class="overflow-x-auto">
-            <table id="scalper-wallets-table">
-              <thead><tr><th>Name</th><th>Address</th><th>Last Active</th><th>Win%</th><th>7d / 30d</th><th>Status</th><th></th></tr></thead>
-              <tbody><tr><td colspan="7" class="text-slate-500">No scalpers tracked yet</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <form class="filters-row mt-3" id="add-wallet-form" title="Add a single wallet by name + Solana address">
-          <input type="text" name="name" placeholder="Wallet name" required class="ctl-md" style="width:9rem" />
-          <input type="text" name="address" placeholder="Solana address" required class="search-q" />
-          <select name="category" class="ctl-md" title="Category used for grouping and strategy hints">
-            <option value="smart">smart</option>
-            <option value="scalper">scalper</option>
-            <option value="sniper">sniper</option>
-            <option value="kol">kol</option>
-          </select>
-          <button type="submit" class="btn btn-primary" title="Save this wallet to the tracked list">Add Wallet</button>
-        </form>
-        <div class="mt-3">
-          <div class="mint mb-1">Bulk import (addresses or Name:Address, one per line) <span class="tip" tabindex="0" data-tip="Import many wallets at once. Optional category applies to all lines."></span></div>
-          <textarea id="bulk-import-text" rows="3" placeholder="CyaE1Vxv...&#10;Theo:Bi4rd5FH..."></textarea>
-          <div class="filters-row mt-2">
-            <select id="bulk-import-cat" class="ctl-md" title="Force category for all imported lines, or auto-detect">
-              <option value="">auto category</option>
-              <option value="scalper">scalper</option>
-              <option value="smart">smart</option>
-              <option value="sniper">sniper</option>
-              <option value="kol">kol</option>
-            </select>
-            <button type="button" class="btn btn-secondary" onclick="bulkImportWallets()" title="Parse and import all valid addresses">Bulk import</button>
-            <span class="mint self-center" id="bulk-import-status"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Live Trading Wallets <span class="tip" tabindex="0" data-tip="Slots that hold real keys via env vars (main/burner). Private keys never leave the server."></span></div>
-        <p class="mint mb-2">Keys stay in env vars — never sent to the browser.</p>
-        <div class="flex flex-wrap gap-2 mb-3">
-          <button class="btn btn-secondary" onclick="loadTradingWallets()" title="Reload trading wallet slots and balances">Refresh</button>
-          <span class="mint" id="live-wallet-status"></span>
-        </div>
-        <div class="overflow-x-auto">
-          <table id="trading-wallets-table">
-            <thead><tr><th>Name</th><th title="main = primary, burner = disposable">Role</th><th title="Environment variable that stores the secret key">Env</th><th>Pubkey</th><th>Balance</th><th>Key</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <form class="filters-row mt-3" id="add-trading-wallet-form" title="Register a new trading slot that reads its key from an env var">
-          <input type="text" name="name" placeholder="Name" required style="width:8rem" />
-          <input type="text" name="envVar" placeholder="ENV_VAR" required style="width:10rem" title="Name of the env var containing the base58 secret key" />
-          <select name="role" class="ctl-md"><option value="main">main</option><option value="burner">burner</option></select>
-          <button type="submit" class="btn btn-primary" title="Add this trading wallet slot">Add Slot</button>
-        </form>
       </div>
     </section>
 
@@ -16933,6 +16916,57 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.setMbRoutingTab = setMbRoutingTab;
 
+    function setWalletsSubTab(tab, opts) {
+      const allowed = ['discover', 'nansen', 'tracked', 'live', 'influencer'];
+      const next = allowed.indexOf(tab) >= 0 ? tab : 'discover';
+      const shouldLoad = !opts || opts.load !== false;
+      try {
+        localStorage.setItem('walletsSubTab', next);
+      } catch (_) {}
+      document.querySelectorAll('[data-wallets-subtab]').forEach(function (btn) {
+        const on = btn.getAttribute('data-wallets-subtab') === next;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-wallets-sub-panel]').forEach(function (panel) {
+        const on = panel.getAttribute('data-wallets-sub-panel') === next;
+        panel.classList.toggle('is-active', on);
+      });
+      const root = document.querySelector('[data-tab-panel="wallets"]');
+      if (root) root.setAttribute('data-wallets-active', next);
+      if (!shouldLoad) return;
+      try {
+        if (next === 'discover') refreshDiscoveryStatus();
+        else if (next === 'nansen') {
+          refreshDiscoveryStatus();
+          if (typeof loadNansenCached === 'function' && !(window._nansenWallets || []).length) {
+            loadNansenCached().catch(function () {});
+          }
+        } else if (next === 'live') loadTradingWallets();
+        else if (next === 'influencer') loadInfluencerMirror();
+      } catch (_) {}
+    }
+    window.setWalletsSubTab = setWalletsSubTab;
+
+    (function initWalletsSubTab() {
+      try {
+        const stored = localStorage.getItem('walletsSubTab');
+        if (
+          stored === 'discover' ||
+          stored === 'nansen' ||
+          stored === 'tracked' ||
+          stored === 'live' ||
+          stored === 'influencer'
+        ) {
+          setWalletsSubTab(stored, { load: false });
+        } else {
+          setWalletsSubTab('discover', { load: false });
+        }
+      } catch (_) {
+        setWalletsSubTab('discover', { load: false });
+      }
+    })();
+
     (function initMbRoutingTab() {
       try {
         const stored = localStorage.getItem('mbRoutingTab');
@@ -17980,7 +18014,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
       if (name === 'wallets') {
-        try { loadInfluencerMirror(); } catch (_) {}
+        try {
+          const stored = localStorage.getItem('walletsSubTab');
+          const tab =
+            stored === 'discover' ||
+            stored === 'nansen' ||
+            stored === 'tracked' ||
+            stored === 'live' ||
+            stored === 'influencer'
+              ? stored
+              : 'discover';
+          setWalletsSubTab(tab);
+        } catch (_) {
+          try { setWalletsSubTab('discover'); } catch (__) {}
+        }
       }
       if ((name === 'overview' || name === 'backtester') && window._chartsNeedResize) {
         window._chartsNeedResize = false;
@@ -18234,10 +18281,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const gstat = document.getElementById('gmgn-status');
       if (gstat) {
         gstat.textContent = gmgn.hasApiKey ? 'GMGN key OK' : 'No API key (public/curated fallback)';
-      }
-      const keyEl = document.getElementById('gmgn-key-status');
-      if (keyEl) {
-        keyEl.textContent = gmgn.hasApiKey ? 'API key ✓' : 'No API key (public/curated)';
       }
     }
 
@@ -23973,39 +24016,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
 
       const wtbody = document.querySelector('#wallets-table tbody');
-      const scalpers = wallets.filter(w =>
-        w.category === 'scalper' ||
-        (w.tags && w.tags.some(t => /scalp/i.test(t))) ||
-        (w.tradesLast7d != null && w.tradesLast7d >= 20)
-      );
-      const renderWalletRow = (w, cols) => \`
+      const renderWalletRow = (w) => \`
           <tr>
             <td>\${w.name}\${w.notes ? '<div class="mint">' + w.notes + '</div>' : ''}</td>
-            \${cols > 7 ? '<td class="mint">' + (w.category || 'smart') + '</td>' : ''}
+            <td class="mint">\${w.category || 'smart'}</td>
             <td>\${fmtWalletAddr(w.address)}</td>
             <td title="\${(w.lastActiveDisplay || '').replace(/"/g, '&quot;')}">\${fmtLastTraded(w.lastTradedAt || w.lastActive, w.daysSinceTrade, w.activityLabel)}</td>
             <td>\${w.winRate != null ? w.winRate.toFixed(0) + '%' : '—'}</td>
-            \${cols > 7 ? '<td title="' + (w.qualityStatus || '') + '">' + (w.qualityScore != null ? w.qualityScore : '—') + '</td>' : ''}
-            <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'} / \${w.tradesLast30d != null ? w.tradesLast30d : '—'}\${cols > 7 ? ' / ' + (w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—') : ''}</td>
+            <td title="\${w.qualityStatus || ''}">\${w.qualityScore != null ? w.qualityScore : '—'}</td>
+            <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'} / \${w.tradesLast30d != null ? w.tradesLast30d : '—'} / \${w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—'}</td>
             <td>\${w.enabled === false ? '⏸ Disabled' : (w.isActive ? '✅ ' + (w.activityLabel || 'Active') : '⛔ ' + (w.activityLabel || 'Inactive'))}\${w.qualityStatus ? '<div class="mint">' + w.qualityStatus + '</div>' : ''}</td>
-            \${cols >= 9 ? '<td class="mint">' + (w.watching ? '👁 Yes' : '—') + '</td>' : ''}
+            <td class="mint">\${w.watching ? '👁 Yes' : '—'}</td>
             <td>
               <button class="secondary" onclick="toggleWallet('\${w.address}', \${!w.enabled})">\${w.enabled ? 'Disable' : 'Enable'}</button>
               <button class="danger" onclick="removeWallet('\${w.address}')">Remove</button>
             </td>
           </tr>\`;
       wtbody.innerHTML = wallets.length === 0
-        ? '<tr><td colspan="10" style="color:var(--muted)">No wallets — search above or add one below</td></tr>'
-        : wallets.slice(0, 200).map(w => renderWalletRow(w, 10)).join('') +
+        ? '<tr><td colspan="10" style="color:var(--muted)">No wallets — Discover / Import Favourites or add one below</td></tr>'
+        : wallets.slice(0, 200).map(w => renderWalletRow(w)).join('') +
           (wallets.length > 200
             ? '<tr><td colspan="10" class="mint">Showing 200 of ' + wallets.length + ' wallets</td></tr>'
             : '');
-      const stbody = document.querySelector('#scalper-wallets-table tbody');
-      if (stbody) {
-        stbody.innerHTML = scalpers.length === 0
-          ? '<tr><td colspan="7" style="color:var(--muted)">No scalpers tracked yet</td></tr>'
-          : scalpers.slice(0, 100).map(w => renderWalletRow(w, 7)).join('');
-      }
       if (status.gmgn) updateDiscoveryUi(status.gmgn);
       else if (cfg && cfg.gmgn) updateDiscoveryUi(cfg.gmgn);
 
@@ -25057,22 +25089,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           });
         }
         window._discoveredWallets = rows;
-        window._topWallets = rows.map(w => ({
-          name: w.name,
-          address: w.address,
-          winRate: w.winRate,
-          lastActiveAt: w.lastActiveAt,
-          tradesLast7d: w.tradesLast7d,
-          tradesLast30d: w.tradesLast30d,
-          pumpFunTradeCount: w.pumpFunTradeCount != null
-            ? w.pumpFunTradeCount
-            : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : undefined),
-          tags: w.tags,
-          notes: w.notes,
-          alreadyTracked: w.alreadyTracked,
-          realizedPnlUsd: w.realizedPnlUsd,
-          source: w.source,
-        }));
         status.textContent =
           (data.message || data.source) +
           (data.cached ? ' (cache)' : '') +
@@ -25152,22 +25168,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           });
           const rows = filterHighFrequencyWallets(fallback.wallets || []);
           window._discoveredWallets = rows;
-          window._topWallets = rows.map(w => ({
-            name: w.name,
-            address: w.address,
-            winRate: w.winRate,
-            lastActiveAt: w.lastActiveAt,
-            tradesLast7d: w.tradesLast7d,
-            tradesLast30d: w.tradesLast30d,
-            pumpFunTradeCount: w.pumpFunTradeCount != null
-              ? w.pumpFunTradeCount
-              : (w.metrics && w.metrics.pumpFunTrades != null ? w.metrics.pumpFunTrades : undefined),
-            tags: w.tags,
-            notes: w.notes,
-            alreadyTracked: w.alreadyTracked,
-            realizedPnlUsd: w.realizedPnlUsd,
-            source: w.source,
-          }));
           status.textContent =
             'Live sources failed (' + (err.message || err) + ') — curated · ' + rows.length + ' wallets';
           if (empty) empty.classList.add('hidden');
@@ -25261,8 +25261,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function findDiscovered(address) {
-      return (window._discoveredWallets || []).find(w => w.address === address)
-        || (window._topWallets || []).find(w => w.address === address);
+      return (window._discoveredWallets || []).find(w => w.address === address);
     }
 
     async function addDiscoveredWallet(address) {
@@ -25386,235 +25385,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         refresh();
       } catch (err) {
         if (status) status.textContent = 'Favourites import failed: ' + (err.message || err);
-      }
-    }
-
-    async function loadTopWallets() {
-      const period = document.getElementById('top-period').value;
-      const status = document.getElementById('top-status');
-      const keyEl = document.getElementById('gmgn-key-status');
-      status.textContent = 'Loading (GMGN → curated fallback if needed)…';
-      try {
-        const data = await fetchJSON(
-          '/gmgn/top-wallets?period=' + period + '&minWinRate=45&limit=20',
-          { timeoutMs: 25000 }
-        );
-        if (keyEl && data.gmgn) {
-          keyEl.textContent = data.gmgn.hasApiKey ? 'API key ✓' : 'No API key (public/curated)';
-          updateDiscoveryUi(data.gmgn);
-        }
-        const n = (data.wallets || []).length;
-        status.textContent =
-          (data.source || '—') +
-          (data.cached ? ' (cache)' : '') +
-          ' · ' + (data.period || period) +
-          ' · ' + n + ' wallets' +
-          (data.error ? ' · ' + data.error : '');
-        window._topWallets = data.wallets || [];
-        const tbody = document.querySelector('#top-wallets-table tbody');
-        tbody.innerHTML = n === 0
-          ? '<tr><td colspan="7" style="color:var(--muted)">No candidates</td></tr>'
-          : (data.wallets || []).map(w => \`
-            <tr>
-              <td>\${w.name}\${w.source === 'curated' ? ' <span class="mint">curated</span>' : ''}</td>
-              <td>\${fmtWalletAddr(w.address)}</td>
-              <td>\${w.winRate}%</td>
-              <td>\${fmtPnl(w.realizedPnlUsd ?? w.realizedPnl7d ?? w.realizedPnl30d)}</td>
-              <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'}</td>
-              <td>\${w.tradesLast30d != null ? w.tradesLast30d : '—'}</td>
-              <td>\${w.alreadyTracked
-                ? '<span class="mint">Tracked</span>'
-                : \`<button onclick="addTopWallet('\${w.name.replace(/'/g, "\\\\'")}','\${w.address}')">Add to tracked</button>\`
-              }</td>
-            </tr>\`).join('');
-      } catch (err) {
-        status.textContent = err.message;
-      }
-    }
-
-    function renderSearchResults(data) {
-      const status = document.getElementById('search-status');
-      if (data.gmgn) updateDiscoveryUi(data.gmgn);
-      const rows = filterHighFrequencyWallets(data.candidates || []);
-      const sug = filterHighFrequencyWallets(data.suggestedScalpers || []);
-      window._searchCandidates = rows;
-      window._suggestedScalpers = sug;
-      status.textContent = data.message || (data.source + ' · ' + rows.length);
-      const tbody = document.querySelector('#search-wallets-table tbody');
-      tbody.innerHTML = rows.length === 0
-        ? '<tr><td colspan="8" style="color:var(--muted)">No matches</td></tr>'
-        : rows.map(w => \`
-          <tr>
-            <td>\${w.name}</td>
-            <td>\${fmtWalletAddr(w.address)}</td>
-            <td>\${w.activityLabel || '—'}</td>
-            <td>\${w.winRate}%</td>
-            <td>\${w.tradesLast7d != null ? w.tradesLast7d : '—'}</td>
-            <td>\${w.tradesLast30d != null ? w.tradesLast30d : '—'}</td>
-            <td>\${w.pumpFunTradeCount != null ? w.pumpFunTradeCount : '—'}</td>
-            <td>\${w.alreadyTracked
-              ? \`<button class="danger" onclick="removeSearchWallet('\${w.address}')">Remove</button>\`
-              : \`<button onclick="addSearchWallet('\${w.address}')">Add</button>\`
-            }</td>
-          </tr>\`).join('');
-
-      const box = document.getElementById('scalper-suggestions');
-      const chips = document.getElementById('scalper-chips');
-      if (sug.length) {
-        box.classList.remove('hidden');
-        chips.innerHTML = sug.map(w => \`
-          <button class="secondary" title="\${w.address}" onclick="addSearchWallet('\${w.address}', true)">
-            \${w.name} · \${w.winRate}% · \${w.tradesLast7d != null ? w.tradesLast7d + ' tx/7d' : '—'}
-            \${w.alreadyTracked ? '✓' : '+'}
-          </button>\`).join('');
-      } else {
-        box.classList.add('hidden');
-      }
-    }
-
-    async function searchWallets() {
-      const status = document.getElementById('search-status');
-      status.textContent = 'Searching…';
-      const q = document.getElementById('wallet-search-q').value.trim();
-      const minWin = Number(document.getElementById('search-min-win').value) || 45;
-      const minTrades = Number(document.getElementById('search-min-trades').value) || 20;
-      const maxDays = Number(document.getElementById('search-max-days').value) || 7;
-      const maxSniper = Number(document.getElementById('search-max-sniper').value);
-      const pump = document.getElementById('search-pump-focus').checked;
-      const scalperOnly = document.getElementById('search-scalper-only').checked;
-      try {
-        const params = new URLSearchParams({
-          query: q,
-          minWinRate: String(minWin),
-          minTrades7d: String(minTrades),
-          maxDaysInactive: String(maxDays),
-          activityDays: String(maxDays),
-          pumpFunFocus: pump ? 'true' : 'false',
-          scalperOnly: scalperOnly ? 'true' : 'false',
-          period: '7d',
-          limit: '20',
-        });
-        if (Number.isFinite(maxSniper)) params.set('maxSniperScore', String(maxSniper));
-        const data = await fetchJSON('/search-wallets?' + params.toString());
-        renderSearchResults(data);
-      } catch (err) {
-        status.textContent = err.message;
-      }
-    }
-
-    async function suggestScalpers() {
-      document.getElementById('wallet-search-q').value = 'consistent scalpers';
-      document.getElementById('search-min-win').value = '45';
-      document.getElementById('search-min-trades').value = '20';
-      document.getElementById('search-max-days').value = '7';
-      document.getElementById('search-pump-focus').checked = false;
-      document.getElementById('search-scalper-only').checked = true;
-      const status = document.getElementById('search-status');
-      status.textContent = 'Loading scalper suggestions…';
-      try {
-        const data = await fetchJSON('/search-wallets/suggest?limit=10');
-        renderSearchResults(data);
-      } catch (err) {
-        status.textContent = err.message;
-      }
-    }
-
-    function findSearchCandidate(address) {
-      const lists = [
-        window._searchCandidates || [],
-        window._suggestedScalpers || [],
-        window._topWallets || [],
-      ];
-      for (const list of lists) {
-        const hit = list.find(w => w.address === address);
-        if (hit) return hit;
-      }
-      return null;
-    }
-
-    async function addSearchWallet(address, fromChip) {
-      const w = findSearchCandidate(address);
-      if (!w && !fromChip) {
-        alert('Candidate not found');
-        return;
-      }
-      const payload = w ? {
-        name: w.name,
-        address: w.address,
-        winRate: w.winRate,
-        lastActive: w.lastTradeTime || w.lastActiveAt,
-        lastTradeTime: w.lastTradeTime || w.lastActiveAt,
-        tradesLast7d: w.tradesLast7d,
-        pumpFunTradeCount: w.pumpFunTradeCount,
-        notes: w.notes || (w.tags || []).join(', '),
-        tags: w.tags,
-        category: (w.tags || []).some(t => /scalp/i.test(t)) || (w.tradesLast7d || 0) >= 20
-          ? 'scalper'
-          : 'smart',
-        source: 'gmgn',
-      } : { name: address.slice(0, 8), address };
-      try {
-        await fetchJSON('/wallets/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        document.getElementById('search-status').textContent = 'Added ' + (w ? w.name : address.slice(0, 8));
-        if (w) w.alreadyTracked = true;
-        await searchWallets();
-        refresh();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-
-    async function removeSearchWallet(address) {
-      if (!confirm('Remove this wallet from tracked list?')) return;
-      try {
-        await fetchJSON('/wallets/remove', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ address }),
-        });
-        document.getElementById('search-status').textContent = 'Removed';
-        await searchWallets();
-        refresh();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-
-    async function addTopWallet(name, address) {
-      try {
-        await fetchJSON('/gmgn/top-wallets/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, address }),
-        });
-        document.getElementById('top-status').textContent = 'Added ' + name;
-        await loadTopWallets();
-        refresh();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-
-    async function importAllTop() {
-      const period = document.getElementById('top-period').value;
-      if (!confirm('Import all new top wallets for ' + period + '?')) return;
-      const status = document.getElementById('top-status');
-      status.textContent = 'Importing…';
-      try {
-        const data = await fetchJSON('/api/gmgn/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ minWinRate: 45, period }),
-        });
-        status.textContent = 'Added ' + data.added.length + ' (' + data.source + ')';
-        await loadTopWallets();
-        refresh();
-      } catch (err) {
-        status.textContent = err.message;
       }
     }
 
@@ -33426,10 +33196,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         e.target.reset();
         await loadTradingWallets();
       } catch (err) { alert(err.message); }
-    });
-
-    document.getElementById('wallet-search-q').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); searchWallets(); }
     });
 
     const discoverSourceEl = document.getElementById('discover-source');
