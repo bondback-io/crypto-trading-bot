@@ -219,6 +219,52 @@ export const BOT_INFO_CSS = `
       background: #0f172a; border: 1px solid #1e293b; overflow-x: auto;
     }
     .botinfo-svg-wrap svg { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto; }
+    .botinfo-svg-wrap.botinfo-lifecycle-iso svg { max-width: 920px; }
+    .botinfo-hero-img {
+      display: block; width: 100%; max-width: 920px; height: auto; margin: 0.35rem 0 0.85rem;
+      border-radius: 12px; border: 1px solid #334155; background: #0f172a;
+      box-shadow: 0 12px 28px -18px rgba(0,0,0,0.75), 0 0 0 1px rgba(6,78,59,0.25);
+    }
+    .botinfo-lifecycle-stages {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+      gap: 0.65rem; margin: 0.75rem 0 0.85rem;
+      perspective: 900px;
+    }
+    .botinfo-lifecycle-stage {
+      position: relative;
+      padding: 0.75rem 0.8rem 0.85rem;
+      border-radius: 12px;
+      background: linear-gradient(165deg, #1e293b 0%, #0f172a 70%);
+      border: 1px solid #334155;
+      border-top-color: #05966966;
+      box-shadow: 0 10px 18px -14px rgba(0,0,0,0.85), inset 0 1px 0 rgba(148,163,184,0.08);
+      transform: rotateX(2deg) translateZ(0);
+      transition: transform .18s ease, border-color .18s ease;
+    }
+    .botinfo-lifecycle-stage:hover {
+      transform: rotateX(0deg) translateY(-2px);
+      border-color: #05966988;
+    }
+    .botinfo-lifecycle-stage .bi-ico {
+      width: 2.1rem; height: 2.1rem; margin-bottom: 0.45rem;
+      border-radius: 8px; background: #064e3b44; border: 1px solid #065f4644;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .botinfo-lifecycle-stage .bi-ico svg { width: 1.25rem; height: 1.25rem; display: block; }
+    .botinfo-lifecycle-stage .bi-step {
+      font-size: 0.62rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+      color: #34d399; margin-bottom: 0.2rem;
+    }
+    .botinfo-lifecycle-stage .bi-title {
+      font-size: 0.84rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.3rem; line-height: 1.3;
+    }
+    .botinfo-lifecycle-stage .bi-body {
+      margin: 0; font-size: 0.74rem; color: #94a3b8; line-height: 1.45;
+    }
+    .botinfo-lifecycle-stage .bi-ex {
+      margin: 0.45rem 0 0; font-size: 0.72rem; color: #a7f3d0; line-height: 1.4;
+      padding-top: 0.4rem; border-top: 1px dashed #334155;
+    }
     @media (max-width: 640px) {
       .botinfo-modes { grid-template-columns: 1fr; }
       .botinfo-durability { grid-template-columns: 1fr; }
@@ -227,11 +273,14 @@ export const BOT_INFO_CSS = `
       .botinfo-matrix .hide-sm { display: none; }
       .botinfo-card { padding: 0.85rem 0.8rem; scroll-margin-top: 3.5rem; }
       .botinfo-hero h2 { font-size: 1.05rem; }
+      .botinfo-lifecycle-stages { grid-template-columns: 1fr; }
+      .botinfo-lifecycle-stage { transform: none; }
     }
 `;
 
 /** Fixed chapter chips — add a shell in botInfoNarrative when adding a chapter. */
 const SECTIONS: { id: string; label: string }[] = [
+  { id: 'lifecycle', label: 'Lifecycle' },
   { id: 'overview', label: 'Overview' },
   { id: 'modes', label: 'Modes' },
   { id: 'risk', label: 'Risk & Modules' },
@@ -428,6 +477,74 @@ function overviewSvg(): string {
       </div>`;
 }
 
+/** Isometric-style lifecycle map: signal → learn (depth via stacked rhombus platforms). */
+function lifecycleIsoSvg(): string {
+  const stages: { label: string; sub: string }[] = [
+    { label: 'Signal', sub: 'Scanner · Copy' },
+    { label: 'Enrich', sub: 'MC · vol · dip' },
+    { label: 'Gatekeeper', sub: 'HMC door' },
+    { label: 'Classifier', sub: 'Setup map' },
+    { label: 'Lane fight', sub: 'Profiles' },
+    { label: 'MARL · RL', sub: 'Soft coaches' },
+    { label: 'Filters', sub: 'Anti-rug' },
+    { label: 'TA', sub: 'Playbook' },
+    { label: 'Buy', sub: 'PPP · PCL' },
+    { label: 'Manage', sub: 'Soft harvest' },
+    { label: 'Exit', sub: 'Hard SL first' },
+    { label: 'Learn', sub: 'Film · ML' },
+  ];
+  const tile = (i: number, label: string, sub: string): string => {
+    const col = i % 6;
+    const row = Math.floor(i / 6);
+    const cx = 70 + col * 145;
+    const cy = 58 + row * 118;
+    const top = `${cx},${cy - 18} ${cx + 52},${cy} ${cx},${cy + 18} ${cx - 52},${cy}`;
+    const faceL = `${cx - 52},${cy} ${cx},${cy + 18} ${cx},${cy + 38} ${cx - 52},${cy + 20}`;
+    const faceR = `${cx + 52},${cy} ${cx},${cy + 18} ${cx},${cy + 38} ${cx + 52},${cy + 20}`;
+    const n = String(i + 1).padStart(2, '0');
+    return `
+      <g>
+        <polygon points="${faceL}" fill="#0b1220" stroke="#1e293b"/>
+        <polygon points="${faceR}" fill="#111827" stroke="#1e293b"/>
+        <polygon points="${top}" fill="#1e293b" stroke="#059669"/>
+        <text x="${cx}" y="${cy - 2}" text-anchor="middle" fill="#34d399" font-size="10" font-family="system-ui,sans-serif" font-weight="800">${n}</text>
+        <text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="#e2e8f0" font-size="11" font-family="system-ui,sans-serif" font-weight="700">${esc(label)}</text>
+        <text x="${cx}" y="${cy + 52}" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="system-ui,sans-serif">${esc(sub)}</text>
+      </g>`;
+  };
+  const tiles = stages.map((s, i) => tile(i, s.label, s.sub)).join('');
+  const arrows = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
+    .map((i) => {
+      const col = i % 6;
+      const row = Math.floor(i / 6);
+      const x1 = 70 + col * 145 + 56;
+      const y1 = 58 + row * 118;
+      const x2 = x1 + 30;
+      return `<path d="M${x1} ${y1} L${x2} ${y1}" stroke="#475569" stroke-width="2" marker-end="url(#lcArrow)"/>`;
+    })
+    .join('');
+  return `<div class="botinfo-svg-wrap botinfo-lifecycle-iso" role="img" aria-label="Trading bot lifecycle from signal to learn">
+        <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="lcBg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#064e3b"/>
+              <stop offset="55%" stop-color="#0f172a"/>
+              <stop offset="100%" stop-color="#020617"/>
+            </linearGradient>
+            <marker id="lcArrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+            </marker>
+          </defs>
+          <rect width="900" height="250" rx="14" fill="url(#lcBg)"/>
+          <text x="24" y="28" fill="#a7f3d0" font-size="13" font-family="system-ui,sans-serif" font-weight="700">Trading Bot Lifecycle — signal to learn</text>
+          ${tiles}
+          ${arrows}
+          <path d="M70 118 V140" stroke="#475569" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="86" y="136" fill="#64748b" font-size="9" font-family="system-ui,sans-serif">continues →</text>
+        </svg>
+      </div>`;
+}
+
 /**
  * Cog-menu row: Bot Info vX.Y.Z (placed at bottom of settings dropdown).
  */
@@ -456,6 +573,7 @@ export function buildBotInfoPanelHtml(
     learningMatrix: learningMatrix(snap),
     durabilityCards: durabilityCards(),
     overviewSvg: overviewSvg(),
+    lifecycleSvg: lifecycleIsoSvg(),
     pipelineFlow: pipelineFlow(),
     whatsNew: whatsNewBlock(),
     openBtn,

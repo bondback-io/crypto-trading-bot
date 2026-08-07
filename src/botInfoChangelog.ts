@@ -7,6 +7,7 @@
  */
 
 export const BOT_INFO_SECTION_IDS = [
+  'lifecycle',
   'overview',
   'modes',
   'risk',
@@ -40,6 +41,16 @@ export interface BotInfoChangelogEntry {
  * Newest first. Keep ~10–14 recent patches; older history can be trimmed.
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
+  {
+    version: '1.2.210',
+    title: 'Trading Bot Lifecycle guide',
+    sections: ['lifecycle', 'overview', 'coaches'],
+    items: [
+      'New first Bot Info chapter: Trading Bot Lifecycle — signal → enrich → HMC → lanes → MARL/RL → filters → TA → buy → PPP/PCL → learn.',
+      'Hybrid visuals: hero PNG + isometric SVG map + stage cards with one continuous $RIVER story and Where to find paths.',
+      'Zion documented as a side door; self-learn/ML clarified as post-close coaches (not mid-pipeline vetoes).',
+    ],
+  },
   {
     version: '1.2.209',
     title: 'Bot Info major-feature guides',

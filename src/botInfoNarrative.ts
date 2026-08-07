@@ -19,6 +19,7 @@ export interface BotInfoSlots {
   learningMatrix: string;
   durabilityCards: string;
   overviewSvg: string;
+  lifecycleSvg: string;
   pipelineFlow: string;
   whatsNew?: string;
   openBtn: (tab: string, label: string) => string;
@@ -32,6 +33,43 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function stageIco(kind: string): string {
+  const common =
+    'fill="none" stroke="#34d399" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
+  const paths: Record<string, string> = {
+    wait: `<circle cx="12" cy="12" r="7" ${common}/><path d="M12 8v4l2.5 1.5" ${common}/>`,
+    signal: `<path d="M4 12a8 8 0 0 1 16 0" ${common}/><path d="M7 12a5 5 0 0 1 10 0" ${common}/><circle cx="12" cy="12" r="1.5" fill="#34d399"/>`,
+    enrich: `<circle cx="11" cy="11" r="6" ${common}/><path d="M16 16l4 4" ${common}/>`,
+    gate: `<path d="M6 20V8l6-3 6 3v12" ${common}/><path d="M12 11v5" ${common}/>`,
+    classy: `<path d="M5 7h6v6H5zM13 11h6v6h-6z" ${common}/>`,
+    lanes: `<path d="M5 6h14M5 12h14M5 18h10" ${common}/>`,
+    coach: `<path d="M12 4l7 4v5c0 4-3 7-7 8-4-1-7-4-7-8V8l7-4z" ${common}/>`,
+    filter: `<path d="M5 6h14l-5 6v5l-4 2v-7L5 6z" ${common}/>`,
+    chart: `<path d="M5 19V5M5 19h14" ${common}/><path d="M8 14l3-3 3 2 4-5" ${common}/>`,
+    buy: `<circle cx="12" cy="12" r="7" ${common}/><path d="M12 8v8M9 11h6" ${common}/>`,
+    manage: `<path d="M12 4l7 3v5c0 4-3.2 7.2-7 8-3.8-.8-7-4-7-8V7l7-3z" ${common}/>`,
+    exit: `<path d="M6 12h10M12 8l4 4-4 4" ${common}/><path d="M5 5v14" ${common}/>`,
+    learn: `<path d="M5 7c3-2 5-2 7 0s4 2 7 0v10c-3 2-5 2-7 0s-4-2-7 0V7z" ${common}/>`,
+  };
+  return `<div class="bi-ico" aria-hidden="true"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">${paths[kind] || paths.signal}</svg></div>`;
+}
+
+function lifecycleStage(
+  num: string,
+  title: string,
+  body: string,
+  example: string,
+  ico: string
+): string {
+  return `<div class="botinfo-lifecycle-stage">
+          ${stageIco(ico)}
+          <div class="bi-step">Step ${esc(num)}</div>
+          <div class="bi-title">${title}</div>
+          <p class="bi-body">${body}</p>
+          <p class="bi-ex"><strong>$RIVER:</strong> ${example}</p>
+        </div>`;
+}
+
 /** Section articles only (hero + chips stay in dashboardBotInfo). */
 export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
   const { snapshot: snap, openBtn: btn } = slots;
@@ -42,9 +80,129 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
   const mlModes = snap.mlLearnModes.map((m) => `<code>${esc(m)}</code>`).join(' · ');
 
   return `
+      <article class="botinfo-card" id="botinfo-sec-lifecycle" data-botinfo-section="lifecycle">
+        <h3><span class="botinfo-sec-num">01</span> Trading Bot Lifecycle</h3>
+        <p>Follow one micro-bot from <strong>waiting for a signal</strong> to <strong>closing and learning</strong>. This is the shared path for Market Scanner and Copy entries (enrich → Gatekeeper → Classifier → lane fight → filters → TA → buy → manage → learn).</p>
+        <img class="botinfo-hero-img" src="/botinfo/trading-lifecycle-hero.png" width="920" height="518" alt="Isometric trading bot lifecycle: a token travels through signal, enrich, gatekeeper, classifier, lane fight, coaches, filters, TA, buy, protect, and learn checkpoints" loading="lazy" decoding="async" />
+        ${slots.lifecycleSvg}
+        <div class="botinfo-callout"><strong>Running story:</strong> Token <em>$RIVER</em> pops onto the Live Feed. <strong>Trend Rider</strong> is enabled and waiting. We walk $RIVER through every checkpoint — like a shopper going from “spotted on the shelf” to “receipt in the bag,” with coaches whispering along the way.</div>
+
+        <div class="botinfo-lifecycle-stages">
+          ${lifecycleStage(
+            '01',
+            'Waiting — profiles ON',
+            'Enabled micro-bots sit ready. Smart Bot Profiles must be ON for the full lane fight + coach ranking. Nothing happens until a signal arrives.',
+            'Trend Rider is ON. Scalper and Steady Compounder are also watching, but Trend Rider fits mature continuation best.',
+            'wait'
+          )}
+          ${lifecycleStage(
+            '02',
+            'Signal — scanner or copy',
+            'A candidate appears from the Market Scanner (Live Feed) or a tracked smart-wallet buy. Early kills can stop here (scanner/copy OFF, risk halt, denied mint, pump.fun-only gate).',
+            'Scanner flags $RIVER with rising volume and a clean-enough MC band. The signal enters the shared filter path.',
+            'signal'
+          )}
+          ${lifecycleStage(
+            '03',
+            'Enrich — look up the basics',
+            'Best-effort fill-in before coaches and lanes: market cap, holders, volume, dip/pullback, Fib/support snapshot, confirmation, KOL count. Soft / informational — not a hard veto.',
+            'Enrich stamps $RIVER as mid-MC with a mild pullback into support — useful context for Trend Rider scoring.',
+            'enrich'
+          )}
+          ${lifecycleStage(
+            '04',
+            'HMC Gatekeeper — bouncer at the door',
+            'Allow/block before lanes fight. Hard safety (honeypot / known high risk) never fails open. Soft activity/liquidity issues may block or only advise, depending on strictness.',
+            'Door check: not a honeypot, liquidity OK. Gatekeeper allows $RIVER through with a short plain-language note in the lane fight / Agent Decision Log.',
+            'gate'
+          )}
+          ${lifecycleStage(
+            '05',
+            'HMC Classifier — which specialists may fight',
+            'Labels the setup (dip, momentum, migration, slow quality, …) and maps preferred lanes. Soft eligibility deprioritizes non-preferred bots; hard eligibility (soft OFF) can exclude them.',
+            'Setup reads as trend/continuation. Trend Rider preferred; Scalper soft-deprioritized so it does not steal the mint as easily.',
+            'classy'
+          )}
+          ${lifecycleStage(
+            '06',
+            'Lane fight — profiles compete',
+            `${nProfiles} trade profiles score the mint against their floors and style. Hard floors can fail a lane; scores rank who may try first.`,
+            'Trend Rider tops the passer list. Migration Sniper never matched. Steady Compounder is second.',
+            'lanes'
+          )}
+          ${lifecycleStage(
+            '07',
+            'MARL — team coach nudge',
+            'Shared team coach softly bumps lane ranking and later size confidence. Never writes TP/SL. Default often OFF until you enable it on Micro Bots.',
+            'MARL gives Trend Rider a small score lift because the team has been under-using quality continuation lately.',
+            'coach'
+          )}
+          ${lifecycleStage(
+            '08',
+            'Profile RL — personal coach nudge',
+            'Each bot’s soft personal coach: setup-worth, size confidence, TA sensitivity. Soft only. Default often OFF until enabled.',
+            'Trend Rider’s RL is mildly confident on this pullback-into-trend shape → tiny size/score nudge.',
+            'coach'
+          )}
+          ${lifecycleStage(
+            '09',
+            'Cascade filters + anti-rug',
+            'Winner walks the safety checklist: wallet quality, timing, max positions, daily loss, conviction, and full anti-rug metrics. First passer that clears modules wins. (Full anti-rug runs here — after lane fight.)',
+            '$RIVER clears holder/liquidity floors and anti-rug. Trend Rider keeps the mint.',
+            'filter'
+          )}
+          ${lifecycleStage(
+            '10',
+            'TA playbook — chart confirmation',
+            'Per-lane Off/Soft/Hard confluence (HA, Fib/S-R, RSI/EMA/VWAP, patterns…). Soft nudges size/conviction; Hard can skip the buy.',
+            'Trend Rider Soft playbook likes the support bounce. Buy continues with a TA stamp on the decision.',
+            'chart'
+          )}
+          ${lifecycleStage(
+            '11',
+            'Buy — stamp exits + PPP / PCL',
+            'Order goes through Jupiter (Live) or virtual fill (Paper / Live Sim). Open stamps hard TP/SL from the profile, Peak Protect params, and Profit Capture Layer permission window by family.',
+            'Trend Rider opens $RIVER with its TP/SL, a ~90s quality-family PCL permission window, and Peak Protect arm settings ready.',
+            'buy'
+          )}
+          ${lifecycleStage(
+            '12',
+            'Manage — soft harvest while open',
+            'While open: Peak Protect arms on peak profit; PCL can defer early scratch and allow meaningful partials + runner. Hard stop-loss is never softened.',
+            '$RIVER runs +12%. PPP arms. PCL lets a partial bank some green, then trails a runner instead of scratching at +2%.',
+            'manage'
+          )}
+          ${lifecycleStage(
+            '13',
+            'Exit — hard SL first, then soft exits',
+            'Hard SL always wins. Soft exits (Peak Protect giveback, PCL partials, TA exit hints, profit strategy) harvest or cut without replacing the hard floor.',
+            'Price gives back from the peak → Peak Protect full-exits the runner. Hard SL never triggered.',
+            'exit'
+          )}
+          ${lifecycleStage(
+            '14',
+            'Learn — film after the close',
+            'Final close → episode (“game film”). Then Profile RL update, self-learn / ML proposals (shadow or auto), and MARL team reward. Self-learn and ML are <em>not</em> mid-pipeline vetoes — they reshape future knobs.',
+            'Trend Rider stores the $RIVER episode. Self-learn may later nudge trail/hold slightly; ML stays in shadow until enough samples.',
+            'learn'
+          )}
+        </div>
+
+        <div class="botinfo-callout"><strong>Zion side door:</strong> KOL offers (manual Place Trade or Platinum/Gold auto-send) go straight to buy with a Zion / target profile. They <em>bypass</em> the shared enrich → HMC → cascade stack — a separate entrance, not this hallway.</div>
+        <div class="botinfo-callout"><strong>Remember:</strong> MARL, Profile RL, Accelerators, and Self-learn Mode <code>shadow</code> can look “idle” until enabled or until enough closed episodes exist. Safety and hard TP/SL always outrank soft coaches.</div>
+
+        <p class="botinfo-where"><strong>Where to find:</strong> Live Feed (signals) · Micro Bots → HMC Gatekeeper / Classifier, MARL, Profile RL, Peak Protect, Profit Capture Layer · Overview → lane fight log · Bot Performance → Agent Decision Log · Back Up → learning journal.</p>
+        <div class="botinfo-actions">
+          ${btn('scanner', 'Open Live Feed')}
+          ${btn('microbots', 'Open Micro Bots')}
+          ${btn('overview', 'Open Overview')}
+          ${btn('botperf', 'Open Bot Performance')}
+        </div>
+      </article>
+
       <article class="botinfo-card" id="botinfo-sec-overview" data-botinfo-section="overview">
-        <h3><span class="botinfo-sec-num">01</span> How the pieces connect</h3>
-        <p>This bot combines <strong>copy trading</strong> (tracked smart wallets), <strong>market scanners</strong> (Dex/GMGN/Birdeye + Pump.fun), and <strong>${nProfiles} micro-bot trade profiles</strong> that compete for each entry. Risk recipes and <strong>${nModules} strategy modules</strong> set global floors; profiles refine entry/exit style.</p>
+        <h3><span class="botinfo-sec-num">02</span> How the pieces connect</h3>
+        <p>This bot combines <strong>copy trading</strong> (tracked smart wallets), <strong>market scanners</strong> (Dex/GMGN/Birdeye + Pump.fun), and <strong>${nProfiles} micro-bot trade profiles</strong> that compete for each entry. Risk recipes and <strong>${nModules} strategy modules</strong> set global floors; profiles refine entry/exit style. For the full start-to-finish story with pictures, open the <em>Lifecycle</em> chip above.</p>
         ${slots.overviewSvg}
         ${slots.pipelineFlow}
         ${slots.whatsNew || ''}
@@ -63,7 +221,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-modes" data-botinfo-section="modes">
-        <h3><span class="botinfo-sec-num">02</span> Trading modes</h3>
+        <h3><span class="botinfo-sec-num">03</span> Trading modes</h3>
         <p>Mode is set from the header (${snap.modes.map((m) => esc(m.label)).join(' / ')}). It changes whether fills are virtual or real — not which wallets or scanners you follow.</p>
         ${slots.modesStrip}
         <ul>
@@ -78,7 +236,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-risk" data-botinfo-section="risk">
-        <h3><span class="botinfo-sec-num">03</span> Risk On / Off &amp; strategy modules</h3>
+        <h3><span class="botinfo-sec-num">04</span> Risk On / Off &amp; strategy modules</h3>
         <p><strong>Risk On</strong> applies lean hard floors (liquidity, MC, holders, etc.) plus Copy/Scanner baseline. <strong>Risk Off</strong> is an ops soak: high entry volume, floors relaxed so you can collect signals — enable quality modules manually.</p>
         <ul>
           <li><strong>Settings tab</strong> — Risk toggle, ${nPresets} named strategy presets, module master ON/OFF by group (${snap.moduleGroups.map((g) => esc(g.label.toLowerCase())).join(' / ')}).</li>
@@ -129,7 +287,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-microbots" data-botinfo-section="microbots">
-        <h3><span class="botinfo-sec-num">04</span> Micro Bots (trade profiles)</h3>
+        <h3><span class="botinfo-sec-num">05</span> Micro Bots (trade profiles)</h3>
         <p>When <strong>Smart Bot Profiles</strong> / multi-profile is enabled, eligible profiles score each signal; the winner stamps the trade (lane fight). Disabled profiles never enter. Default is the legacy global fallback. Catalog currently has <strong>${nProfiles}</strong> profiles.</p>
         ${slots.profilesGrid}
         <ul>
@@ -150,7 +308,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-learning" data-botinfo-section="learning">
-        <h3><span class="botinfo-sec-num">05</span> Self-learning &amp; ML</h3>
+        <h3><span class="botinfo-sec-num">06</span> Self-learning &amp; ML</h3>
         <p>Closed trades become <strong>episodes</strong> (game film). Heuristic learning proposes small knob upgrades from patterns (TP/SL, conviction, min token age raise-only, etc.). Optional tabular ML ranks or leads those proposals. Neither invents new strategies — they nudge existing knobs inside clamps.</p>
         <div class="botinfo-callout"><strong>Analogy:</strong> like a sports coach reviewing game film and suggesting a slightly tighter defense — not inventing a new sport. Heuristic Mode = head coach. ML = assistant. <code>shadow</code> = advice only; <code>hybrid</code> = both vote; <code>lead</code> = assistant calls first.</div>
         ${slots.learningMatrix}
@@ -190,7 +348,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-coaches" data-botinfo-section="coaches">
-        <h3><span class="botinfo-sec-num">06</span> Coaches &amp; learning stack</h3>
+        <h3><span class="botinfo-sec-num">07</span> Coaches &amp; learning stack</h3>
         <p>Every micro-bot can grow from closed trades with a layered coach stack. Layers are <strong>additive</strong>: safety wins first, stamped TP/SL stay hard, then soft coaches nudge ranking, size, TA, and learning signals. They are designed to support each other — not rewrite each other’s cores.</p>
         <div class="botinfo-callout"><strong>Isolation:</strong> each profile keeps its own episodes, self-learn overrides, ML model, TA playbook weights, and Profile RL agent. <strong>MARL</strong> is the shared team coach (per-profile preference weights in one team state) — not a clone of any bot’s private memory.</div>
 
@@ -317,7 +475,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-scanners" data-botinfo-section="scanners">
-        <h3><span class="botinfo-sec-num">07</span> Market scanners &amp; Pump.fun</h3>
+        <h3><span class="botinfo-sec-num">08</span> Market scanners &amp; Pump.fun</h3>
         <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
@@ -330,7 +488,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-execution" data-botinfo-section="execution">
-        <h3><span class="botinfo-sec-num">08</span> Jupiter, RPC &amp; MEV</h3>
+        <h3><span class="botinfo-sec-num">09</span> Jupiter, RPC &amp; MEV</h3>
         <p>Live buys/sells go through <strong>Jupiter</strong> swaps. Jupiter Tokens API also feeds organic score / trending for the scanner. Dual-lane RPC prefers free <strong>Helius</strong> (primary) + <strong>Alchemy</strong> (secondary / Zion) with automatic failover to <code>RPC_URL</code>, public Solana, then <code>RPC_SECONDARY</code>.</p>
         <ul>
           <li><strong>MEV / Jito</strong> — tip bundles and sandwich abort (live only; module <code>mev_protection</code>).</li>
@@ -341,7 +499,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-zion" data-botinfo-section="zion">
-        <h3><span class="botinfo-sec-num">09</span> Zion (KOL Token Scanner)</h3>
+        <h3><span class="botinfo-sec-num">10</span> Zion (KOL Token Scanner)</h3>
         <p>Zion is an isolated micro-bot: it watches KOL wallets and builds <strong>manual trade offers</strong> by default. Optional auto-send routes can execute top tiers into specialist profiles without changing Zion’s knobs.</p>
         <ul>
           <li>Knobs: min KOL wallets, MC band, size / TP / SL / trail defaults, auto-offer, Auto-send Platinum to HWR, Auto-send Gold to Smart Money.</li>
@@ -356,7 +514,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-copy" data-botinfo-section="copy">
-        <h3><span class="botinfo-sec-num">10</span> Copy trading &amp; smart wallets</h3>
+        <h3><span class="botinfo-sec-num">11</span> Copy trading &amp; smart wallets</h3>
         <p>The monitor loop polls tracked wallets, scores quality, detects convergence / smart-money flow, then runs the same filter → profile → size path as scanner entries.</p>
         <ul>
           <li><strong>Smart Wallets</strong> — discover via Kolscan, GMGN, Birdeye, Dex, Axiom, Photon, BullX, Nansen, or paste manually.</li>
@@ -367,7 +525,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backtester" data-botinfo-section="backtester">
-        <h3><span class="botinfo-sec-num">11</span> Backtester</h3>
+        <h3><span class="botinfo-sec-num">12</span> Backtester</h3>
         <p>Replay historical launches with Live-Sim-style decisions and exits. Paper-only — no live capital. Compare KPIs to recent Live Sim runs; breakdowns by Risk On/Off and profile.</p>
         <ul>
           <li><strong>Smart Advisor</strong> — shadow proposals from BT results; does not auto-apply to live.</li>
@@ -378,7 +536,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-alerts" data-botinfo-section="alerts">
-        <h3><span class="botinfo-sec-num">12</span> Email &amp; notifications</h3>
+        <h3><span class="botinfo-sec-num">13</span> Email &amp; notifications</h3>
         <p>In-app bell feed plus optional email (Resend or SMTP via env). Events can still log when mail is not configured.</p>
         <ul>
           <li>Low equity, insufficient funds, profitable close, Zion offer / placed.</li>
@@ -392,7 +550,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-backup" data-botinfo-section="backup">
-        <h3><span class="botinfo-sec-num">13</span> Backup &amp; persistence</h3>
+        <h3><span class="botinfo-sec-num">14</span> Backup &amp; persistence</h3>
         <p>Settings, wallets, paper balance, profile knobs, learning episodes, and notifications save as JSON under <code>DATA_DIR</code>. Auto-saves on config changes, imports, top-ups, and backtests.</p>
         ${slots.durabilityCards}
         <ul>
@@ -406,7 +564,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       </article>
 
       <article class="botinfo-card" id="botinfo-sec-knobs" data-botinfo-section="knobs">
-        <h3><span class="botinfo-sec-num">14</span> High-impact knobs</h3>
+        <h3><span class="botinfo-sec-num">15</span> High-impact knobs</h3>
         <p>Start here before fine-tuning individual micro-bots. Most controls have <code>?</code> tips on the live screens.</p>
         <ul>
           <li><strong>Mode + Risk On/Off</strong> — posture for the whole bot.</li>

@@ -226,6 +226,14 @@ export function createServer(): express.Application {
       maxAge: '1y',
     })
   );
+  // Bot Info lifecycle hero + future chapter images (repo-served for cloud deploys).
+  app.use(
+    '/botinfo',
+    express.static(path.join(process.cwd(), 'public', 'botinfo'), {
+      immutable: true,
+      maxAge: '7d',
+    })
+  );
 
   const bootedAt = Date.now();
 
