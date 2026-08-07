@@ -4811,6 +4811,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       max-width: 36rem;
       line-height: 1.35;
     }
+    .setup-watch-tabs {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.45rem;
+    }
+    .setup-watch-tabs .closed-filter-btn {
+      font-size: 11px;
+      padding: 0.2rem 0.65rem;
+    }
+    .setup-watch-tabs .setup-watch-tab-count {
+      opacity: 0.75;
+      font-weight: 600;
+      margin-left: 0.15rem;
+    }
     .setup-watch-count {
       font-size: 11px;
       font-weight: 600;
@@ -7911,16 +7926,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. High-MC majors (≥$100M circ) use longer TTL + <span class="setup-watch-badge is-majors">majors</span> badge. Unwatch cools out for 15 minutes.</p>
-              <div class="setup-watch-filter-row mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show majors-sourced dip watches">
-                  <input type="checkbox" id="dip-watch-show-majors" checked />
-                  Majors
-                </label>
-                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show memecoin / standard (non-majors) dip watches">
-                  <input type="checkbox" id="dip-watch-show-normal" checked />
-                  Normal
-                </label>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. Separate caps: minors ≤16 · majors ≤12 (high-MC ≥$100M, longer TTL). Unwatch cools 15m.</p>
+              <div class="setup-watch-tabs" role="tablist" aria-label="Dip watch source">
+                <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
+                <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-majors" data-dip-watch-tab="majors" aria-selected="false" title="High-MC majors dip watches">Majors <span class="setup-watch-tab-count" id="dip-watch-tab-majors-count">0</span></button>
               </div>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
@@ -12793,47 +12802,67 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       if (dipCount || dipList) {
         const dw = data.dipWatch || { active: 0, entries: [] };
-        const showMajorsEl = document.getElementById('dip-watch-show-majors');
-        const showNormalEl = document.getElementById('dip-watch-show-normal');
-        const showMajors = !showMajorsEl || showMajorsEl.checked;
-        const showNormal = !showNormalEl || showNormalEl.checked;
-        function dipWatchSourceVisible(source) {
-          const isMajors = String(source || '') === 'majors';
-          return isMajors ? showMajors : showNormal;
-        }
+        const tab =
+          typeof window._dipWatchTab === 'string' && window._dipWatchTab === 'majors'
+            ? 'majors'
+            : 'minors';
+        const allActive = (dw.entries || []).filter(function (e) {
+          return e.status === 'watching' || e.status === 'armed';
+        });
+        const majorsN =
+          typeof dw.activeMajors === 'number'
+            ? dw.activeMajors
+            : allActive.filter(function (e) {
+                return String(e.source || '') === 'majors';
+              }).length;
+        const minorsN =
+          typeof dw.activeMinors === 'number'
+            ? dw.activeMinors
+            : allActive.filter(function (e) {
+                return String(e.source || '') !== 'majors';
+              }).length;
+        const minorsCountEl = document.getElementById('dip-watch-tab-minors-count');
+        const majorsCountEl = document.getElementById('dip-watch-tab-majors-count');
+        if (minorsCountEl) minorsCountEl.textContent = String(minorsN);
+        if (majorsCountEl) majorsCountEl.textContent = String(majorsN);
         if (dipList) {
-          const rows = (dw.entries || [])
+          const rows = allActive
             .filter(function (e) {
-              if (e.status !== 'watching' && e.status !== 'armed') return false;
-              return dipWatchSourceVisible(e.source);
+              const isMajors = String(e.source || '') === 'majors';
+              return tab === 'majors' ? isMajors : !isMajors;
             })
             .slice(0, 16);
-          const terminal = (dw.recentTerminal || []).slice(0, 2);
+          const terminal = (dw.recentTerminal || []).filter(function (e) {
+            const isMajors = String(e.source || '') === 'majors';
+            return tab === 'majors' ? isMajors : !isMajors;
+          }).slice(0, 2);
           const htmlParts = [];
-          if (!showMajors && !showNormal) {
-            htmlParts.push(
-              '<div class="setup-watch-empty">Tick Majors and/or Normal to show dip setups</div>'
-            );
-          } else if (rows.length) {
+          if (rows.length) {
             rows.forEach(function (e) {
               htmlParts.push(watchRowHtml('dip', e));
             });
           } else {
-            let emptyMsg = 'No active dip setups';
-            if (showMajors && !showNormal) emptyMsg = 'No active majors dip setups';
-            else if (!showMajors && showNormal) emptyMsg = 'No active normal dip setups';
             htmlParts.push(
-              '<div class="setup-watch-empty">' + emptyMsg + '</div>'
+              '<div class="setup-watch-empty">' +
+                (tab === 'majors'
+                  ? 'No active majors dip setups'
+                  : 'No active minors dip setups') +
+                '</div>'
             );
           }
-          if (showMajors || showNormal) {
-            terminal.forEach(function (e) {
-              if (!dipWatchSourceVisible(e.source)) return;
-              htmlParts.push(watchRowHtml('dip', e));
-            });
-          }
+          terminal.forEach(function (e) {
+            htmlParts.push(watchRowHtml('dip', e));
+          });
           dipList.innerHTML = htmlParts.join('');
-          if (dipCount) dipCount.textContent = rows.length + ' active';
+          if (dipCount) {
+            dipCount.textContent =
+              rows.length +
+              ' ' +
+              (tab === 'majors' ? 'majors' : 'minors') +
+              ' · ' +
+              (dw.active || majorsN + minorsN) +
+              ' total';
+          }
         } else if (dipCount) {
           dipCount.textContent = (dw.active || 0) + ' active';
         }
@@ -12925,44 +12954,68 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
-    (function bindDipWatchSourceFilters() {
-      const KEY_MAJORS = 'dipWatchShowMajors';
-      const KEY_NORMAL = 'dipWatchShowNormal';
-      const majorsEl = document.getElementById('dip-watch-show-majors');
-      const normalEl = document.getElementById('dip-watch-show-normal');
-      if (!majorsEl || !normalEl) return;
-      if (majorsEl.dataset.bound === '1') return;
-      majorsEl.dataset.bound = '1';
-      normalEl.dataset.bound = '1';
-      try {
-        const storedMajors = localStorage.getItem(KEY_MAJORS);
-        const storedNormal = localStorage.getItem(KEY_NORMAL);
-        // Migrate legacy single "majors only" flag if present
-        const legacyOnly = localStorage.getItem('dipWatchMajorsOnly');
-        if (storedMajors != null) majorsEl.checked = storedMajors !== '0';
-        else if (legacyOnly === '1') majorsEl.checked = true;
-        if (storedNormal != null) normalEl.checked = storedNormal !== '0';
-        else if (legacyOnly === '1') normalEl.checked = false;
-      } catch (_) {}
-      function persistAndRefresh() {
+    (function bindDipWatchSourceTabs() {
+      const KEY_TAB = 'dipWatchTab';
+      const minorsBtn = document.getElementById('dip-watch-tab-minors');
+      const majorsBtn = document.getElementById('dip-watch-tab-majors');
+      if (!minorsBtn || !majorsBtn) return;
+      if (minorsBtn.dataset.bound === '1') return;
+      minorsBtn.dataset.bound = '1';
+      majorsBtn.dataset.bound = '1';
+      function applyTab(tab) {
+        const t = tab === 'majors' ? 'majors' : 'minors';
+        window._dipWatchTab = t;
+        minorsBtn.classList.toggle('is-active', t === 'minors');
+        majorsBtn.classList.toggle('is-active', t === 'majors');
+        minorsBtn.setAttribute('aria-selected', t === 'minors' ? 'true' : 'false');
+        majorsBtn.setAttribute('aria-selected', t === 'majors' ? 'true' : 'false');
         try {
-          localStorage.setItem(KEY_MAJORS, majorsEl.checked ? '1' : '0');
-          localStorage.setItem(KEY_NORMAL, normalEl.checked ? '1' : '0');
+          localStorage.setItem(KEY_TAB, t);
         } catch (_) {}
         if (typeof window.refreshSetupWatches === 'function') {
           window.refreshSetupWatches();
-        } else if (typeof renderSetupWatchLists === 'function' && window._lastSetupWatches) {
+        } else if (
+          typeof renderSetupWatchLists === 'function' &&
+          window._lastSetupWatches
+        ) {
           renderSetupWatchLists(window._lastSetupWatches);
         }
       }
-      majorsEl.addEventListener('change', persistAndRefresh);
-      normalEl.addEventListener('change', persistAndRefresh);
+      try {
+        let stored = localStorage.getItem(KEY_TAB);
+        // Migrate legacy checkbox / majors-only prefs → tab
+        if (stored !== 'majors' && stored !== 'minors') {
+          const legacyOnly = localStorage.getItem('dipWatchMajorsOnly');
+          const legacyMajors = localStorage.getItem('dipWatchShowMajors');
+          const legacyNormal = localStorage.getItem('dipWatchShowNormal');
+          if (
+            legacyOnly === '1' ||
+            (legacyMajors === '1' && legacyNormal === '0')
+          ) {
+            stored = 'majors';
+          } else {
+            stored = 'minors';
+          }
+        }
+        applyTab(stored || 'minors');
+      } catch (_) {
+        applyTab('minors');
+      }
+      minorsBtn.addEventListener('click', function () {
+        applyTab('minors');
+      });
+      majorsBtn.addEventListener('click', function () {
+        applyTab('majors');
+      });
     })();
 
     async function refreshSetupWatches() {
       try {
         const data = await fetchJSON('/api/setup-watches');
-        if (data) renderSetupWatchLists(data);
+        if (data) {
+          window._lastSetupWatches = data;
+          renderSetupWatchLists(data);
+        }
       } catch (_) {}
       if (typeof refreshEntrySkipDiag === 'function') {
         refreshEntrySkipDiag().catch(function () {});

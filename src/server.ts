@@ -4533,7 +4533,7 @@ export function createServer(): express.Application {
       const { getScalperSetupWatchStatus } =
         require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
       res.json({
-        dipWatch: getDipSetupWatchStatus(16),
+        dipWatch: getDipSetupWatchStatus(28),
         gradWatch: getMigrationGradWatchStatus(16),
         scalperWatch: getScalperSetupWatchStatus(16),
         migSniperFunnel: getMigrationSniperFunnel(),

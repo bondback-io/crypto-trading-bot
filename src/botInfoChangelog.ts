@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.224',
+    title: 'Dip watch minors unstarved + Minors/Majors tabs',
+    sections: ['scanners', 'overview', 'microbots'],
+    items: [
+      'Dip watchlist: separate caps (minors ≤16, majors ≤12) so high-MC majors no longer crowd out scanner/memecoin watches; status API interleaves both buckets.',
+      'Dip Buyer strip: Minors / Majors tabs (default Minors, localStorage) replace dual checkboxes; per-tab counts; rename Normal → Minors.',
+    ],
+  },
+  {
     version: '1.2.223',
     title: 'Watchlist rename + Dip Majors/Normal filters',
     sections: ['scanners', 'overview', 'microbots'],

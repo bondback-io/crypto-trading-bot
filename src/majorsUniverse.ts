@@ -36,7 +36,8 @@ export const MAJORS_MIN_MC_USD = 100_000_000;
 /** Min liquidity — mid of ~$50k–$100k band */
 export const MAJORS_MIN_LIQ_USD = 75_000;
 const FETCH_LIMIT = 80;
-const CYCLE_CAP = 18;
+/** Align with dipSetupWatch MAX_MAJORS_WATCHES so we do not churn 18→12 every pass */
+const CYCLE_CAP = 12;
 const REFRESH_MS = 5 * 60_000;
 
 let cache: { at: number; list: MajorsCandidate[] } | null = null;

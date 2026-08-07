@@ -2091,7 +2091,7 @@ export function getTradeProfilesStatus(): {
       try {
         const { getDipSetupWatchStatus } =
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-        return getDipSetupWatchStatus(16);
+        return getDipSetupWatchStatus(28);
       } catch {
         return {
           active: 0,

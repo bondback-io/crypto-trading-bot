@@ -58,7 +58,13 @@ export interface DipWatchEntry {
   targetDipEntries?: DipTargetEntry[];
 }
 
-const MAX_WATCHES = 24;
+/**
+ * Separate caps so majors (liberal admit + 10h TTL + frequent refresh)
+ * cannot starve memecoin / scanner minors. Shared pool previously was 24
+ * with majors CYCLE_CAP 18 + API slice-by-updatedAt → UI showed majors only.
+ */
+const MAX_MAJORS_WATCHES = 12;
+const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors wait longer for Fib/S setups (8–12h band → 10h) */
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
@@ -73,6 +79,51 @@ const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
+
+function isMajorsSource(source: string | undefined): boolean {
+  return String(source || '').toLowerCase() === 'majors';
+}
+
+function isActiveWatch(w: DipWatchEntry): boolean {
+  return w.status === 'watching' || w.status === 'armed';
+}
+
+function activeWatches(bucket: 'majors' | 'minors'): DipWatchEntry[] {
+  return [...watches.values()]
+    .filter((w) => {
+      if (!isActiveWatch(w)) return false;
+      const maj = isMajorsSource(w.source);
+      return bucket === 'majors' ? maj : !maj;
+    })
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** Evict oldest within a bucket until at/under cap. */
+function enforceBucketCap(bucket: 'majors' | 'minors', max: number): void {
+  const active = activeWatches(bucket);
+  while (active.length > max) {
+    const oldest = active.shift();
+    if (!oldest) break;
+    watches.delete(oldest.mint);
+    lastMcRefreshAt.delete(oldest.mint);
+  }
+}
+
+/**
+ * True if a new admit for this bucket is allowed. When at cap, drop the
+ * oldest same-bucket watch so fresh candidates can rotate in.
+ */
+function reserveAdmitSlot(isMajors: boolean): boolean {
+  const bucket = isMajors ? 'majors' : 'minors';
+  const max = isMajors ? MAX_MAJORS_WATCHES : MAX_MINORS_WATCHES;
+  const active = activeWatches(bucket);
+  if (active.length < max) return true;
+  const oldest = active[0];
+  if (!oldest) return true;
+  watches.delete(oldest.mint);
+  lastMcRefreshAt.delete(oldest.mint);
+  return true;
+}
 
 function isManualUnwatchCooldown(mint: string): boolean {
   const until = unwatchCooldownUntil.get(mint) ?? 0;
@@ -167,16 +218,9 @@ function pruneTerminal(): void {
       }
     }
   }
-  // Cap active watches
-  const active = [...watches.values()]
-    .filter((w) => w.status === 'watching' || w.status === 'armed')
-    .sort((a, b) => a.createdAt - b.createdAt);
-  while (active.length > MAX_WATCHES) {
-    const oldest = active.shift();
-    if (!oldest) break;
-    watches.delete(oldest.mint);
-    lastMcRefreshAt.delete(oldest.mint);
-  }
+  // Cap per bucket — never let majors eviction steal minor slots (or vice versa)
+  enforceBucketCap('majors', MAX_MAJORS_WATCHES);
+  enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
 async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> {
@@ -238,16 +282,27 @@ export function considerDipWatchSetup(input: {
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
-  const isMajors = String(input.source || '').toLowerCase() === 'majors';
+  const isMajors = isMajorsSource(input.source);
 
   pruneTerminal();
   const existing = watches.get(input.mint);
-  if (
-    existing &&
-    (existing.status === 'watching' || existing.status === 'armed')
-  ) {
-    // Already admitted — refresh metrics even if MC dipped under admit floor
-    existing.updatedAt = Date.now();
+  if (existing && isActiveWatch(existing)) {
+    // Already admitted — refresh metrics even if MC dipped under admit floor.
+    // Do NOT bump updatedAt on bare majors re-offer — that starved the status
+    // slice (sorted by updatedAt) of minors. Bump only when TA/metrics move.
+    const dropChanged =
+      input.dropFromPeakPct != null &&
+      input.dropFromPeakPct !== existing.dropFromPeakPct;
+    const taChanged =
+      (input.nearKeyFib != null && input.nearKeyFib !== existing.nearKeyFib) ||
+      (input.nearSupport != null &&
+        input.nearSupport !== existing.nearSupport) ||
+      (input.supportPriceSol != null &&
+        input.supportPriceSol !== existing.supportPriceSol) ||
+      (input.fib05PriceSol != null &&
+        input.fib05PriceSol !== existing.fib05PriceSol) ||
+      (input.fib618PriceSol != null &&
+        input.fib618PriceSol !== existing.fib618PriceSol);
     existing.dropFromPeakPct = input.dropFromPeakPct ?? existing.dropFromPeakPct;
     existing.nearKeyFib = input.nearKeyFib ?? existing.nearKeyFib;
     existing.nearSupport = input.nearSupport ?? existing.nearSupport;
@@ -268,6 +323,9 @@ export function considerDipWatchSetup(input: {
       if (remain < MAJORS_TTL_MS / 2) {
         existing.expiresAt = Date.now() + MAJORS_TTL_MS;
       }
+    }
+    if (dropChanged || taChanged || !isMajors) {
+      existing.updatedAt = Date.now();
     }
     existing.targetDipEntries = buildTargetDipEntries(existing);
     return existing;
@@ -300,6 +358,8 @@ export function considerDipWatchSetup(input: {
   if (!isMajors && !dropStarted && !nearTa) return null;
   if (drop != null && drop > maxDrop) return null;
 
+  reserveAdmitSlot(isMajors);
+
   const now = Date.now();
   const armed = nearTa && dropStarted;
   const entry: DipWatchEntry = {
@@ -322,7 +382,7 @@ export function considerDipWatchSetup(input: {
     fib05PriceSol: input.fib05PriceSol ?? null,
     fib618PriceSol: input.fib618PriceSol ?? null,
     kolCount: input.kolCount,
-    source: isMajors ? 'majors' : input.source,
+    source: isMajors ? 'majors' : input.source || 'scanner',
     majorsBand: isMajors ? input.majorsBand : undefined,
     lastReason: armed
       ? 'near Fib/S'
@@ -549,19 +609,36 @@ export function unwatchDipSetup(mint: string): {
   return { ok: true, cooldownMs: UNWATCH_COOLDOWN_MS };
 }
 
-export function getDipSetupWatchStatus(limit = 20): {
+export function getDipSetupWatchStatus(limit = 32): {
   active: number;
+  activeMajors: number;
+  activeMinors: number;
   entries: DipWatchEntry[];
   recentTerminal: DipWatchEntry[];
 } {
   pruneTerminal();
   const now = Date.now();
-  const all = [...watches.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-  for (const e of all) {
+  const majorsActive = activeWatches('majors').sort(
+    (a, b) => b.updatedAt - a.updatedAt
+  );
+  const minorsActive = activeWatches('minors').sort(
+    (a, b) => b.updatedAt - a.updatedAt
+  );
+  // Interleave so a single limit never returns majors-only when minors exist
+  const interleaved: DipWatchEntry[] = [];
+  const maxMaj = Math.min(majorsActive.length, MAX_MAJORS_WATCHES);
+  const maxMin = Math.min(minorsActive.length, MAX_MINORS_WATCHES);
+  let i = 0;
+  let j = 0;
+  while (interleaved.length < limit && (i < maxMaj || j < maxMin)) {
+    if (j < maxMin) interleaved.push(minorsActive[j++]);
+    if (interleaved.length >= limit) break;
+    if (i < maxMaj) interleaved.push(majorsActive[i++]);
+  }
+  for (const e of interleaved) {
     e.targetDipEntries = buildTargetDipEntries(e);
   }
-  const entries = all.slice(0, limit);
-  const recentTerminal = all
+  const terminalPool = [...watches.values()]
     .filter(
       (e) =>
         (e.status === 'triggered' ||
@@ -569,13 +646,16 @@ export function getDipSetupWatchStatus(limit = 20): {
           e.status === 'invalidated') &&
         now - e.updatedAt <= TERMINAL_UI_MS
     )
-    .slice(0, 4);
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const e of terminalPool) {
+    e.targetDipEntries = buildTargetDipEntries(e);
+  }
   return {
-    active: entries.filter(
-      (e) => e.status === 'watching' || e.status === 'armed'
-    ).length,
-    entries,
-    recentTerminal,
+    active: majorsActive.length + minorsActive.length,
+    activeMajors: majorsActive.length,
+    activeMinors: minorsActive.length,
+    entries: interleaved,
+    recentTerminal: terminalPool.slice(0, 4),
   };
 }
 
