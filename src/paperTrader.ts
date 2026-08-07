@@ -1553,7 +1553,10 @@ export class PaperTrader {
       sawOpen = true;
       const markMcForReconcile =
         candidateMc != null &&
-        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc)
+        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc, {
+          priceRatio:
+            pos.entryPriceSol > 0 ? priceSol / pos.entryPriceSol : null,
+        })
           ? candidateMc
           : null;
       const reconciled = reconcileMarkPriceSol({
@@ -1585,7 +1588,10 @@ export class PaperTrader {
       mark = reconciled.priceSol;
       if (
         candidateMc != null &&
-        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc)
+        isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, candidateMc, {
+          priceRatio:
+            pos.entryPriceSol > 0 ? mark / pos.entryPriceSol : null,
+        })
       ) {
         acceptedMc = candidateMc;
       } else if (candidateMc != null) {
@@ -1641,7 +1647,19 @@ export class PaperTrader {
     }
     for (const pos of this.positions.values()) {
       if (pos.mint !== mint || pos.status === 'closed') continue;
-      if (!isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, marketCapUsd)) {
+      const markPx = this.priceCache.get(mint);
+      const priceRatio =
+        markPx != null &&
+        Number.isFinite(markPx) &&
+        markPx > 0 &&
+        pos.entryPriceSol > 0
+          ? markPx / pos.entryPriceSol
+          : null;
+      if (
+        !isSaneMarkMarketCapUsd(pos.entryMarketCapUsd, marketCapUsd, {
+          priceRatio,
+        })
+      ) {
         console.warn(
           `[paper] Rejected absurd mark MC $${Math.round(marketCapUsd).toLocaleString()} ` +
             `for ${mint.slice(0, 8)}… (vs entry MC $${Math.round(pos.entryMarketCapUsd ?? 0).toLocaleString()})`
@@ -1930,9 +1948,19 @@ export class PaperTrader {
 
     let liveMarketCapUsd: number | null =
       this.marketCapCache.get(position.mint) ?? null;
+    const markPx = this.priceCache.get(position.mint);
+    const priceRatio =
+      markPx != null &&
+      Number.isFinite(markPx) &&
+      markPx > 0 &&
+      position.entryPriceSol > 0
+        ? markPx / position.entryPriceSol
+        : null;
     if (
       liveMarketCapUsd != null &&
-      !isSaneMarkMarketCapUsd(position.entryMarketCapUsd, liveMarketCapUsd)
+      !isSaneMarkMarketCapUsd(position.entryMarketCapUsd, liveMarketCapUsd, {
+        priceRatio,
+      })
     ) {
       liveMarketCapUsd = null;
     }

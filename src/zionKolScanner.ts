@@ -276,13 +276,32 @@ async function fetchDexMetrics(mint: string): Promise<{
     const base = sol.baseToken as { symbol?: string; name?: string } | undefined;
     const vol = sol.volume as { h1?: number } | undefined;
     const liq = sol.liquidity as { usd?: number } | undefined;
-    const mc = Number(sol.marketCap ?? sol.fdv ?? NaN);
-    const created = Number(sol.pairCreatedAt ?? NaN);
     const jup = lookupCachedJupiterToken(mint);
+    const mc = Number(sol.marketCap ?? NaN);
+    const fdv = Number(sol.fdv ?? NaN);
+    let mcUsd: number | undefined;
+    if (Number.isFinite(mc) && mc > 0) {
+      if (
+        Number.isFinite(fdv) &&
+        fdv > 0 &&
+        mc / fdv >= 0.95 &&
+        mc / fdv <= 1.05
+      ) {
+        // Dex mirrored FDV into marketCap — prefer Jupiter circulating mcap
+        const jupMc = Number(jup?.mcap ?? 0);
+        mcUsd = Number.isFinite(jupMc) && jupMc > 0 ? jupMc : undefined;
+      } else {
+        mcUsd = mc;
+      }
+    } else {
+      const jupMc = Number(jup?.mcap ?? 0);
+      mcUsd = Number.isFinite(jupMc) && jupMc > 0 ? jupMc : undefined;
+    }
+    const created = Number(sol.pairCreatedAt ?? NaN);
     return {
       symbol: base?.symbol || jup?.symbol,
       name: base?.name || jup?.name,
-      mcUsd: Number.isFinite(mc) && mc > 0 ? mc : undefined,
+      mcUsd,
       volumeH1Usd:
         vol?.h1 != null && Number.isFinite(Number(vol.h1))
           ? Number(vol.h1)

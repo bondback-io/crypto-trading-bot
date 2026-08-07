@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.219',
+    title: 'Zion mic freeze + QUEST FDV/MC marks',
+    sections: ['zion', 'execution', 'risk', 'scanners'],
+    items: [
+      'Zion mic: restart backoff, start watchdog, and hard fail after repeated errors so recognition loops no longer freeze the dashboard.',
+      'Never promote Dex FDV into circulating MC (QUEST-class MC==FDV); mark reconcile rejects FDV-inflated ratios and skips unsafe MC upscale.',
+      'Decimals/supply-aware mark and metrics paths so bad token decimals cannot inflate Live MC / paper PnL.',
+    ],
+  },
+  {
     version: '1.2.218',
     title: 'Entry-style DNA + late-chase + PCL align',
     sections: ['risk', 'tradecraft', 'microbots', 'learning', 'scanners'],

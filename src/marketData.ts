@@ -50,7 +50,7 @@ export interface LaunchEvent {
   liquidityUsd?: number;
   volumeUsd?: number;
   /**
-   * Circulating market cap USD at lastPriceSol (DexScreener snapshot).
+   * Circulating market cap USD at lastPriceSol (never FDV).
    * Scale with price for entry/exit MC — do not treat as entry MC.
    */
   marketCapUsd?: number;
@@ -113,6 +113,8 @@ let cachedSolUsd: { value: number; at: number } | null = null;
 type LiveTokenSnapshotEarly = {
   priceSol: number | null;
   marketCapUsd: number | null;
+  fdvUsd?: number | null;
+  marketCapIsFdv?: boolean;
   volumeM5Usd: number | null;
   volumeH1Usd: number | null;
   volumeH24Usd: number | null;
@@ -172,12 +174,57 @@ export function estimateRiskScoreHint(
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-/** Prefer circulating marketCap; fall back to FDV only if MC missing */
-function readMarketCapUsd(row: Record<string, unknown>): number | undefined {
-  const mc = Number(row.marketCap ?? row.market_cap ?? 0);
-  if (Number.isFinite(mc) && mc > 0) return mc;
-  const fdv = Number(row.fdv ?? 0);
-  if (Number.isFinite(fdv) && fdv > 0) return fdv;
+/**
+ * Circulating market cap vs FDV from a Dex/Gecko-style row.
+ *
+ * DexScreener often copies FDV into `marketCap` when circulating supply is
+ * unknown (e.g. QUEST: API MC==FDV ~$254M while Jupiter `mcap` ~$10M).
+ * Never promote FDV to marketCapUsd — that poisons MC gates, Live MC, and
+ * any MC-scaled marks. Callers may read `fdvUsd` for FDV-labeled UI only.
+ */
+export function readMarketCapFields(row: Record<string, unknown>): {
+  marketCapUsd?: number;
+  fdvUsd?: number;
+  /** True when provider MC is missing or equals FDV (circ supply unknown) */
+  marketCapIsFdv: boolean;
+} {
+  const mc = Number(row.marketCap ?? row.market_cap ?? row.marketCapUsd ?? 0);
+  const fdv = Number(row.fdv ?? row.fdvUsd ?? row.fdv_usd ?? 0);
+  const hasMc = Number.isFinite(mc) && mc > 0;
+  const hasFdv = Number.isFinite(fdv) && fdv > 0;
+
+  if (hasMc && hasFdv) {
+    const ratio = mc / fdv;
+    // Same figure (within 5%) ⇒ circulating unknown; Dex mirrored FDV into MC
+    if (ratio >= 0.95 && ratio <= 1.05) {
+      return { fdvUsd: fdv, marketCapIsFdv: true };
+    }
+    return { marketCapUsd: mc, fdvUsd: fdv, marketCapIsFdv: false };
+  }
+  if (hasMc) {
+    return { marketCapUsd: mc, marketCapIsFdv: false };
+  }
+  if (hasFdv) {
+    return { fdvUsd: fdv, marketCapIsFdv: true };
+  }
+  return { marketCapIsFdv: false };
+}
+
+/** Circulating MC only — never FDV. */
+export function readMarketCapUsd(row: Record<string, unknown>): number | undefined {
+  return readMarketCapFields(row).marketCapUsd;
+}
+
+/**
+ * Jupiter circulating mcap only. Do not fall back to `fdv` — that is total-supply
+ * valuation and must not drive PnL, TP/SL, or MC gates.
+ */
+export function readJupiterMarketCapUsd(token: {
+  mcap?: number | null;
+  fdv?: number | null;
+}): number | undefined {
+  const mcap = Number(token?.mcap ?? 0);
+  if (Number.isFinite(mcap) && mcap > 0) return mcap;
   return undefined;
 }
 
@@ -326,7 +373,52 @@ export function reconcileMarkPriceSol(
     }
   }
 
-  // Tick spike: sudden jump from last accepted mark without MC confirmation
+  // NOTE: We intentionally do not scale the mark price UP from Dex MC.
+  // Fresh pumps often have MC that disagrees with fill price; MC-scaling
+  // previously invented fake moons when Dex mirrored FDV into marketCap
+  // (e.g. circ MC $10M entry → FDV $250M "mark MC" ⇒ ~25× fake PnL).
+
+  const rawRatio = mark / entry;
+  if (
+    rawRatio > MAX_SANE_MARK_PRICE_RATIO ||
+    rawRatio < 1 / MAX_SANE_MARK_PRICE_RATIO
+  ) {
+    return {
+      priceSol: entry,
+      adjusted: true,
+      rejected: true,
+      reason: `absurd ratio ${rawRatio.toExponential(2)}`,
+    };
+  }
+
+  // Large raw moves need circulating-MC confirmation aligned with price.
+  // Checked on the *incoming* mark (before tick-cap) so a poisoned feed
+  // cannot ratchet HWM via repeated +12% caps up to max-profit / FDV ratio.
+  const LARGE_MOVE_RATIO = 3;
+  if (rawRatio > LARGE_MOVE_RATIO || rawRatio < 1 / LARGE_MOVE_RATIO) {
+    if (!hasMc || mcPnlPct == null) {
+      return {
+        priceSol: entry,
+        adjusted: true,
+        rejected: true,
+        reason: `large move ${rawRatio.toFixed(2)}x without MC confirm`,
+      };
+    }
+    const mcRatio = markMc! / entryMc!;
+    const disagree =
+      mcRatio / rawRatio > 2.5 || rawRatio / mcRatio > 2.5;
+    if (disagree) {
+      return {
+        priceSol: entry,
+        adjusted: true,
+        rejected: true,
+        reason: `price/MC disagree at large move (px ${rawRatio.toFixed(2)}x vs mc ${mcRatio.toFixed(2)}x)`,
+      };
+    }
+  }
+
+  // Tick spike: sudden jump from last accepted mark without MC confirmation.
+  // Only runs after large-move gate so we never walk toward a rejected target.
   const prev = input.prevMarkPriceSol;
   if (
     prev != null &&
@@ -345,23 +437,6 @@ export function reconcileMarkPriceSol(
       adjusted = true;
       reason = `tick pump cap ${tickPct.toFixed(1)}%→${MAX_MARK_TICK_PUMP_PCT}%`;
     }
-  }
-
-  // NOTE: We intentionally do not scale the mark price from Dex MC in the
-  // general path. Fresh pumps often have MC that disagrees with fill price;
-  // MC-scaling previously invented fake −40% marks and instant Scalper stops.
-
-  const outRatio = priceSol / entry;
-  if (
-    outRatio > MAX_SANE_MARK_PRICE_RATIO ||
-    outRatio < 1 / MAX_SANE_MARK_PRICE_RATIO
-  ) {
-    return {
-      priceSol: entry,
-      adjusted: true,
-      rejected: true,
-      reason: `absurd ratio ${outRatio.toExponential(2)}`,
-    };
   }
 
   return {
@@ -598,11 +673,13 @@ export function alignClosedExitMarketCapsToFill<T extends {
 
 /**
  * True when a candidate mark MC is usable vs an open entry (guards FDV bugs).
+ * Rejects jumps that look like circ-MC → FDV swaps (~10–30×) unless caller
+ * opts into a higher ceiling.
  */
 export function isSaneMarkMarketCapUsd(
   entryMarketCapUsd: number | undefined | null,
   markMarketCapUsd: number | undefined | null,
-  opts?: { maxRatio?: number }
+  opts?: { maxRatio?: number; priceRatio?: number | null }
 ): boolean {
   if (
     markMarketCapUsd == null ||
@@ -620,12 +697,26 @@ export function isSaneMarkMarketCapUsd(
   }
   const maxRatio = opts?.maxRatio ?? MAX_SANE_MARK_PRICE_RATIO;
   const ratio = markMarketCapUsd / entryMarketCapUsd;
-  return (
-    Number.isFinite(ratio) &&
-    ratio > 0 &&
-    ratio <= maxRatio &&
-    ratio >= 1 / maxRatio
-  );
+  if (
+    !Number.isFinite(ratio) ||
+    ratio <= 0 ||
+    ratio > maxRatio ||
+    ratio < 1 / maxRatio
+  ) {
+    return false;
+  }
+  // When price barely moved, reject huge MC jumps (classic FDV-as-MC poison)
+  const pxRatio = opts?.priceRatio;
+  if (
+    pxRatio != null &&
+    Number.isFinite(pxRatio) &&
+    pxRatio > 0 &&
+    ratio > 3 &&
+    (ratio / pxRatio > 2.5 || pxRatio / ratio > 2.5)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export type PriceChangePick = {
@@ -1612,7 +1703,12 @@ export async function fetchLivePriceSol(mint: string): Promise<number | null> {
 
 export interface LiveTokenSnapshot {
   priceSol: number | null;
+  /** Circulating market cap USD — never FDV */
   marketCapUsd: number | null;
+  /** Fully diluted valuation when provided (UI / audit only) */
+  fdvUsd?: number | null;
+  /** True when provider only had FDV (MC left null) */
+  marketCapIsFdv?: boolean;
   /** Rolling 5m USD volume from DexScreener best pool */
   volumeM5Usd: number | null;
   /** Rolling 1h USD volume from DexScreener best pool */
@@ -1692,7 +1788,8 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
     priceSol = priceFromUsd;
   }
 
-  const marketCapUsd = readMarketCapUsd(best) ?? null;
+  const mcFields = readMarketCapFields(best);
+  const marketCapUsd = mcFields.marketCapUsd ?? null;
   const volume = best.volume as
     | { m5?: number; h1?: number; h24?: number }
     | undefined;
@@ -1709,6 +1806,9 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
   return {
     priceSol,
     marketCapUsd: marketCapUsd != null && marketCapUsd > 0 ? marketCapUsd : null,
+    fdvUsd:
+      mcFields.fdvUsd != null && mcFields.fdvUsd > 0 ? mcFields.fdvUsd : null,
+    marketCapIsFdv: mcFields.marketCapIsFdv,
     volumeM5Usd: Number.isFinite(volumeM5Usd) ? volumeM5Usd : null,
     volumeH1Usd: Number.isFinite(volumeH1Usd) ? volumeH1Usd : null,
     volumeH24Usd: Number.isFinite(volumeH24Usd) ? volumeH24Usd : null,
@@ -1777,10 +1877,10 @@ async function fetchJupiterTokenMark(
     if (!(usd > 0) || !(solUsd > 0)) return null;
     const priceSol = usd / solUsd;
     if (!(priceSol > 0) || !Number.isFinite(priceSol)) return null;
-    const mcap = Number(tok?.mcap ?? tok?.fdv ?? 0);
+    const mcap = readJupiterMarketCapUsd(tok ?? {});
     return {
       priceSol,
-      marketCapUsd: mcap > 0 ? mcap : null,
+      marketCapUsd: mcap != null && mcap > 0 ? mcap : null,
     };
   } catch {
     return null;
@@ -1791,14 +1891,15 @@ async function fetchJupiterQuoteMark(
   mint: string
 ): Promise<number | null> {
   try {
-    const { getQuote, quoteToPriceSol } =
+    const { getQuote, quoteToPriceSol, resolveTokenDecimals } =
       require('./trade') as typeof import('./trade');
+    const decimals = await resolveTokenDecimals(mint);
     const quote = await Promise.race([
       getQuote(mint, 0.01, undefined, { quiet: true }),
       sleep(8_000).then(() => null),
     ]);
     if (!quote) return null;
-    const px = quoteToPriceSol(quote);
+    const px = quoteToPriceSol(quote, decimals);
     return px > 0 && Number.isFinite(px) ? px : null;
   } catch {
     return null;

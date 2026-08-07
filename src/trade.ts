@@ -6,6 +6,7 @@
 import { createJupiterApiClient, QuoteGetRequest } from '@jup-ag/api';
 import {
   Keypair,
+  PublicKey,
   Transaction,
   VersionedTransaction,
 } from '@solana/web3.js';
@@ -26,6 +27,7 @@ import { getTokenSniperActivity } from './gmgn';
 import { effectiveMaxEntryMarketCapUsd } from './filterEffective';
 import {
   getKeypair,
+  getConnection,
   estimatePriorityFeeMicroLamports,
   sendOptimizedTransaction,
   sendAndConfirmLegacyTx,
@@ -62,8 +64,57 @@ import {
   evaluateAffordability,
   reportFundGateFailure,
 } from './fundGate';
+import {
+  fetchJupiterTokenByMint,
+  lookupCachedJupiterToken,
+} from './jupiterTokens';
 
 const jupiter = createJupiterApiClient();
+
+const mintDecimalsCache = new Map<string, { decimals: number; at: number }>();
+const MINT_DECIMALS_TTL_MS = 60 * 60_000;
+
+/**
+ * Resolve SPL mint decimals (Pump.fun default 6; some grads use 9).
+ * Wrong decimals in quote→price make entry marks off by 10^(d-6) and can
+ * invent multi-thousand-% PnL when marks later use Dex/Jupiter usdPrice.
+ */
+export async function resolveTokenDecimals(mint: string): Promise<number> {
+  const key = String(mint || '').trim();
+  if (!key) return 6;
+  const hit = mintDecimalsCache.get(key);
+  if (hit && Date.now() - hit.at < MINT_DECIMALS_TTL_MS) {
+    return hit.decimals;
+  }
+
+  try {
+    const jup =
+      lookupCachedJupiterToken(key) ?? (await fetchJupiterTokenByMint(key));
+    const d = Number(jup?.decimals);
+    if (Number.isFinite(d) && d >= 0 && d <= 18) {
+      mintDecimalsCache.set(key, { decimals: d, at: Date.now() });
+      return d;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  try {
+    const conn = getConnection();
+    const supply = await conn.getTokenSupply(new PublicKey(key));
+    const d = Number(supply?.value?.decimals);
+    if (Number.isFinite(d) && d >= 0 && d <= 18) {
+      mintDecimalsCache.set(key, { decimals: d, at: Date.now() });
+      return d;
+    }
+  } catch {
+    /* fall through */
+  }
+
+  const fallback = 6;
+  mintDecimalsCache.set(key, { decimals: fallback, at: Date.now() });
+  return fallback;
+}
 
 export interface SwapQuote {
   inputMint: string;
@@ -165,12 +216,36 @@ export async function getSellQuote(
   }
 }
 
-export function quoteToPriceSol(quote: SwapQuote): number {
+export function quoteToPriceSol(
+  quote: SwapQuote,
+  tokenDecimals: number = 6
+): number {
   const inSol = Number(quote.inAmount) / 1e9;
   const outTokens = Number(quote.outAmount);
-  if (outTokens === 0) return 0;
-  const tokenAmount = outTokens / 1e6;
-  return inSol / tokenAmount;
+  if (!(outTokens > 0) || !Number.isFinite(outTokens)) return 0;
+  const decimals =
+    Number.isFinite(tokenDecimals) && tokenDecimals >= 0 && tokenDecimals <= 18
+      ? Math.floor(tokenDecimals)
+      : 6;
+  const tokenAmount = outTokens / 10 ** decimals;
+  if (!(tokenAmount > 0) || !Number.isFinite(tokenAmount)) return 0;
+  const price = inSol / tokenAmount;
+  return Number.isFinite(price) && price > 0 ? price : 0;
+}
+
+/** UI token amount from Jupiter raw outAmount. */
+export function rawAmountToUiTokens(
+  rawAmount: string | number,
+  tokenDecimals: number = 6
+): number {
+  const raw = Number(rawAmount);
+  if (!(raw > 0) || !Number.isFinite(raw)) return 0;
+  const decimals =
+    Number.isFinite(tokenDecimals) && tokenDecimals >= 0 && tokenDecimals <= 18
+      ? Math.floor(tokenDecimals)
+      : 6;
+  const ui = raw / 10 ** decimals;
+  return Number.isFinite(ui) && ui > 0 ? ui : 0;
 }
 
 export interface BuyOptions {
@@ -414,6 +489,25 @@ async function resolveEntryMarketCapUsd(
     /* non-fatal */
   }
 
+  // When Dex only exposes FDV-as-MC (left null), prefer Jupiter circulating mcap
+  let jupMc: number | undefined;
+  if (dexMc == null) {
+    try {
+      const {
+        fetchJupiterTokenByMint,
+        lookupCachedJupiterToken,
+        hasJupiterApiKey,
+      } = require('./jupiterTokens') as typeof import('./jupiterTokens');
+      const tok =
+        lookupCachedJupiterToken(mint) ??
+        (hasJupiterApiKey() ? await fetchJupiterTokenByMint(mint) : null);
+      const m = Number(tok?.mcap ?? 0);
+      if (Number.isFinite(m) && m > 0) jupMc = m;
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   // Dex (chart MC) first when price agrees; curve often overstates vs circulating.
   let resolved: number | undefined;
   if (dexMc != null && dexPriceAgrees) {
@@ -426,7 +520,7 @@ async function resolveEntryMarketCapUsd(
   ) {
     resolved = dexMc;
   } else {
-    resolved = curveMc ?? dexMc;
+    resolved = curveMc ?? dexMc ?? jupMc;
   }
 
   if (provided != null && Number.isFinite(provided) && provided > 0) {
@@ -599,7 +693,8 @@ export async function executeBuy(
   }
 
   const quote = await getQuote(mint, solAmount, slippageBps);
-  let priceSol = quote ? quoteToPriceSol(quote) : null;
+  const tokenDecimals = await resolveTokenDecimals(mint);
+  let priceSol = quote ? quoteToPriceSol(quote, tokenDecimals) : null;
 
   // Paper / Live Simulation: brand-new Pump.fun mints often have no Jupiter route yet —
   // fall back to bonding-curve / Dex price so signals still open virtual positions.
@@ -630,6 +725,27 @@ export async function executeBuy(
           /* non-fatal */
         }
       }
+    }
+  } else {
+    // Cross-check quote vs Dex: catches residual decimal / unit bugs
+    try {
+      const snap = await fetchLiveTokenSnapshot(mint);
+      if (
+        snap?.priceSol != null &&
+        snap.priceSol > 0 &&
+        priceSol > 0
+      ) {
+        const ratio = priceSol / snap.priceSol;
+        if (ratio > 5 || ratio < 0.2) {
+          console.warn(
+            `[trade] Quote price ${priceSol.toExponential(3)} vs Dex ${snap.priceSol.toExponential(3)} ` +
+              `(${ratio.toFixed(2)}×) — preferring Dex mark`
+          );
+          priceSol = snap.priceSol;
+        }
+      }
+    } catch {
+      /* non-fatal */
     }
   }
 
@@ -979,7 +1095,7 @@ export async function executeBuy(
 
     // Track for dynamic trailing / TP-SL (does not touch paper balance)
     const outRaw = quote.outAmount;
-    const amountTokens = Number(outRaw) / 1e6;
+    const amountTokens = rawAmountToUiTokens(outRaw, tokenDecimals);
     let position;
     try {
       position = paperTrader.registerLivePosition({

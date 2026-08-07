@@ -36,7 +36,7 @@ export interface TokenMetrics {
   name?: string;
   /** USD liquidity from DexScreener (best pool) */
   liquidityUsd: number | null;
-  /** Circulating / FDV market cap USD from DexScreener */
+  /** Circulating market cap USD (never FDV — Dex may omit when circ unknown) */
   marketCapUsd: number | null;
   volume24hUsd: number | null;
   /** DexScreener rolling 1h volume (15–60m activity proxy) */
@@ -300,6 +300,15 @@ export async function fetchTokenMetrics(
         if (jupTop != null) {
           merged.top10HoldPct = jupTop;
         }
+        // Prefer Jupiter circulating mcap when Dex omitted MC (FDV-only)
+        const jupMc = Number(jup?.mcap ?? 0);
+        if (
+          (merged.marketCapUsd == null || !(merged.marketCapUsd > 0)) &&
+          Number.isFinite(jupMc) &&
+          jupMc > 0
+        ) {
+          merged.marketCapUsd = jupMc;
+        }
       } catch {
         /* keep on-chain top10 */
       }
@@ -425,12 +434,21 @@ async function fetchDexMetrics(mint: string): Promise<Partial<TokenMetrics>> {
     }
     const mcRaw = Number(best.marketCap ?? NaN);
     const fdvRaw = Number(best.fdv ?? NaN);
-    const marketCapUsd =
-      Number.isFinite(mcRaw) && mcRaw > 0
-        ? mcRaw
-        : Number.isFinite(fdvRaw) && fdvRaw > 0
-          ? fdvRaw
-          : null;
+    let marketCapUsd: number | null = null;
+    if (Number.isFinite(mcRaw) && mcRaw > 0) {
+      // Dex often mirrors FDV into marketCap when circulating is unknown
+      if (
+        Number.isFinite(fdvRaw) &&
+        fdvRaw > 0 &&
+        mcRaw / fdvRaw >= 0.95 &&
+        mcRaw / fdvRaw <= 1.05
+      ) {
+        marketCapUsd = null;
+      } else {
+        marketCapUsd = mcRaw;
+      }
+    }
+    // Never fall back to FDV as circulating MC
 
     return {
       symbol: best.baseToken?.symbol,

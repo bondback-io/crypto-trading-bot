@@ -5979,6 +5979,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-mic-btn:disabled {
       opacity: 0.35; cursor: not-allowed;
     }
+    .zion-mic-btn.is-error {
+      opacity: 1; color: #f87171; border-color: rgba(248, 113, 113, 0.55);
+      background: rgba(248, 113, 113, 0.1);
+    }
     .zion-mic-dot {
       position: absolute; top: 0.28rem; right: 0.28rem;
       width: 0.38rem; height: 0.38rem; border-radius: 999px;
@@ -29696,14 +29700,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionVoiceRec = null;
     let _zionVoiceSilenceTimer = null;
     let _zionVoiceKeepAliveTimer = null;
+    let _zionVoiceRestartTimer = null;
+    let _zionVoiceStartWatchdog = null;
     let _zionVoiceBaseText = '';
     let _zionVoicePausedBusy = false;
     let _zionVoiceMode = 'wake-idle'; // wake-idle | active
     let _zionVoiceActiveSince = 0;
     let _zionVoiceKeepAliveUntil = 0;
+    let _zionVoiceStarting = false;
+    let _zionVoiceFailCount = 0;
+    let _zionVoiceLastError = '';
+    let _zionVoiceGen = 0;
     const ZION_VOICE_SILENCE_MS = 3000;
     const ZION_VOICE_ACTIVE_FLOOR_MS = 5000;
     const ZION_VOICE_KEEPALIVE_MS = 10000;
+    const ZION_VOICE_START_TIMEOUT_MS = 8000;
+    const ZION_VOICE_MAX_FAILS = 3;
+    const ZION_VOICE_RESTART_BASE_MS = 450;
 
     const ZION_VOICE_LEXICON = {
       'take profit': ['take profits', 'take prof it', 'teak profit', 'take profit'],
@@ -29733,6 +29746,67 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function getZionSpeechRecognitionCtor() {
       const w = window;
       return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+    }
+
+    function clearZionVoiceRestartTimer() {
+      if (_zionVoiceRestartTimer) {
+        clearTimeout(_zionVoiceRestartTimer);
+        _zionVoiceRestartTimer = null;
+      }
+    }
+
+    function clearZionVoiceStartWatchdog() {
+      if (_zionVoiceStartWatchdog) {
+        clearTimeout(_zionVoiceStartWatchdog);
+        _zionVoiceStartWatchdog = null;
+      }
+    }
+
+    function paintZionVoiceError(msg) {
+      const text = String(msg || '').trim();
+      _zionVoiceLastError = text;
+      ['zion-agent-mic', 'zion-agent-widget-mic'].forEach(function (id) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (text) {
+          btn.classList.add('is-error');
+          btn.title = text;
+          btn.setAttribute('aria-label', text);
+        } else {
+          btn.classList.remove('is-error');
+        }
+      });
+    }
+
+    function failZionVoiceSoft(msg) {
+      const text = String(msg || 'Voice input unavailable').trim();
+      try { clearZionVoiceRestartTimer(); } catch (_) {}
+      try { clearZionVoiceStartWatchdog(); } catch (_) {}
+      _zionVoiceStarting = false;
+      _zionVoiceFailCount = 0;
+      try {
+        stopZionVoiceRecognition({ skipPersist: false });
+      } catch (_) {
+        _zionVoiceOn = false;
+        _zionVoicePausedBusy = false;
+        _zionVoiceRec = null;
+      }
+      writeZionVoiceMicPref(false);
+      paintZionVoiceError(text);
+      try { syncZionMicUi(); } catch (_) {}
+    }
+
+    function scheduleZionVoiceRestart(delayMs) {
+      if (!_zionVoiceOn || _zionChatBusy || _zionVoicePausedBusy) return;
+      clearZionVoiceRestartTimer();
+      const wait = Math.max(250, Number(delayMs) || ZION_VOICE_RESTART_BASE_MS);
+      const gen = _zionVoiceGen;
+      _zionVoiceRestartTimer = setTimeout(function () {
+        _zionVoiceRestartTimer = null;
+        if (gen !== _zionVoiceGen) return;
+        if (!_zionVoiceOn || _zionChatBusy || _zionVoicePausedBusy || _zionVoiceStarting) return;
+        try { startZionVoiceRecognition(); } catch (_) {}
+      }, wait);
     }
 
     function readZionVoiceMicPref() {
@@ -29937,7 +30011,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         // Soft return to wake-idle — mic stays on, preference preserved
         enterZionVoiceWakeIdle();
         if (!_zionChatBusy && !_zionVoicePausedBusy) {
-          try { startZionVoiceRecognition(); } catch (_) {}
+          scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
         }
       }, ZION_VOICE_KEEPALIVE_MS);
     }
@@ -29953,15 +30027,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function syncZionMicUi() {
       const supported = !!getZionSpeechRecognitionCtor();
+      const secure = typeof window.isSecureContext === 'boolean' ? window.isSecureContext : true;
       ['zion-agent-mic', 'zion-agent-widget-mic'].forEach(function (id) {
         const btn = document.getElementById(id);
         if (!btn) return;
-        if (!supported) {
+        if (!supported || !secure) {
           btn.classList.add('is-unsupported');
           btn.classList.remove('is-on', 'is-listening');
           btn.setAttribute('aria-pressed', 'false');
-          btn.setAttribute('aria-label', 'Voice not supported in this browser');
-          btn.title = 'Voice not supported in this browser';
+          const why = !secure
+            ? 'Voice needs HTTPS (or localhost)'
+            : 'Voice not supported in this browser';
+          btn.setAttribute('aria-label', why);
+          if (!_zionVoiceLastError) btn.title = why;
           btn.disabled = true;
           return;
         }
@@ -29971,13 +30049,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         btn.classList.toggle('is-on', on);
         btn.classList.toggle('is-listening', listening);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        if (!on) {
+        if (_zionVoiceLastError && !on) {
+          btn.classList.add('is-error');
+          btn.setAttribute('aria-label', _zionVoiceLastError);
+          btn.title = _zionVoiceLastError;
+        } else if (!on) {
+          btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Voice input off — click to speak');
           btn.title = 'Voice input (off)';
         } else if (_zionVoiceMode === 'wake-idle') {
+          btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Wake idle — say Zion');
           btn.title = 'Listening for “Zion”…';
         } else {
+          btn.classList.remove('is-error');
           btn.setAttribute('aria-label', 'Listening — click to stop');
           btn.title = 'Listening… (say “Zion” first · 3s silence sends · 10s keep-alive)';
         }
@@ -30003,6 +30088,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function stopZionVoiceRecognition(opts) {
       const keepOn = opts && opts.keepOnFlag === true;
       const persistOff = !(opts && opts.skipPersist === true);
+      _zionVoiceGen += 1;
+      _zionVoiceStarting = false;
+      clearZionVoiceRestartTimer();
+      clearZionVoiceStartWatchdog();
       if (!keepOn) {
         clearZionVoiceSilenceTimer();
         clearZionVoiceKeepAlive();
@@ -30012,6 +30101,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           _zionVoiceRec.onresult = null;
           _zionVoiceRec.onerror = null;
           _zionVoiceRec.onend = null;
+          _zionVoiceRec.onstart = null;
+          _zionVoiceRec.onaudiostart = null;
           _zionVoiceRec.stop();
         } catch (_) {}
         try { _zionVoiceRec.abort(); } catch (_) {}
@@ -30024,6 +30115,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoiceMode = 'wake-idle';
         _zionVoiceActiveSince = 0;
         _zionVoiceKeepAliveUntil = 0;
+        _zionVoiceFailCount = 0;
         if (persistOff) writeZionVoiceMicPref(false);
       }
       syncZionMicUi();
@@ -30124,26 +30216,66 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
 
     function startZionVoiceRecognition() {
+      if (_zionVoiceStarting) return;
       const Ctor = getZionSpeechRecognitionCtor();
       if (!Ctor) {
-        syncZionMicUi();
+        failZionVoiceSoft('Voice not supported in this browser');
         return;
       }
-      stopZionVoiceRecognition({ keepOnFlag: true, skipPersist: true });
+      if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) {
+        failZionVoiceSoft('Voice needs HTTPS (or localhost)');
+        return;
+      }
+      _zionVoiceStarting = true;
+      clearZionVoiceRestartTimer();
+      clearZionVoiceStartWatchdog();
+      const startGen = _zionVoiceGen;
+      try {
+        stopZionVoiceRecognition({ keepOnFlag: true, skipPersist: true });
+      } catch (_) {}
+      // stop bumps gen — keep this start's generation current
+      const myGen = _zionVoiceGen;
+      if (startGen !== myGen && !_zionVoiceOn) {
+        _zionVoiceStarting = false;
+        return;
+      }
       const inp = zionVoiceInputEl();
       if (_zionVoiceMode === 'active') {
         _zionVoiceBaseText = inp ? String(inp.value || '').trim() : '';
       } else {
         _zionVoiceBaseText = '';
       }
-      const rec = new Ctor();
+      let rec;
+      try {
+        rec = new Ctor();
+      } catch (err) {
+        _zionVoiceStarting = false;
+        failZionVoiceSoft('Voice input failed to start');
+        return;
+      }
       _zionVoiceRec = rec;
+      _zionVoiceStarting = true;
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = (navigator.language || 'en-US');
       rec.maxAlternatives = 1;
+
+      function markStarted() {
+        if (myGen !== _zionVoiceGen) return;
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
+        _zionVoiceFailCount = 0;
+        _zionVoiceLastError = '';
+        try { syncZionMicUi(); } catch (_) {}
+      }
+
+      rec.onstart = markStarted;
+      rec.onaudiostart = markStarted;
+
       rec.onresult = function (event) {
+        if (myGen !== _zionVoiceGen) return;
         if (!_zionVoiceOn || _zionChatBusy) return;
+        markStarted();
         let interim = '';
         let finalChunk = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -30181,42 +30313,89 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         inpEl.value = live;
         touchZionVoiceKeepAlive();
       };
+
       rec.onerror = function (ev) {
+        if (myGen !== _zionVoiceGen) return;
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
         const err = String((ev && ev.error) || '');
-        if (err === 'aborted' || err === 'no-speech') return;
-        if (err === 'not-allowed' || err === 'service-not-allowed') {
-          stopZionVoiceRecognition();
-          writeZionVoiceMicPref(false);
-          try {
-            const btn = document.getElementById(
-              _zionVoiceSource === 'widget'
-                ? 'zion-agent-widget-mic'
-                : 'zion-agent-mic'
-            );
-            if (btn) btn.title = 'Microphone permission denied';
-          } catch (_) {}
+        if (err === 'aborted') return;
+        if (err === 'no-speech') {
+          // Normal idle timeout — onend will soft-restart with backoff
           return;
         }
-        if (_zionVoiceOn && !_zionChatBusy) {
-          try { startZionVoiceRecognition(); } catch (_) {}
+        if (err === 'not-allowed' || err === 'service-not-allowed') {
+          failZionVoiceSoft('Microphone permission denied');
+          return;
         }
-      };
-      rec.onend = function () {
-        _zionVoiceRec = null;
+        if (err === 'audio-capture') {
+          failZionVoiceSoft('No microphone available');
+          return;
+        }
+        _zionVoiceFailCount += 1;
+        if (err === 'network' || _zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+          failZionVoiceSoft(
+            err === 'network'
+              ? 'Speech service unavailable (network)'
+              : ('Voice error: ' + (err || 'unknown'))
+          );
+          return;
+        }
+        // Deferred restart only — never sync-recurse from onerror
         if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
-          try { startZionVoiceRecognition(); } catch (_) {}
+          scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount);
         }
       };
+
+      rec.onend = function () {
+        if (myGen !== _zionVoiceGen) return;
+        if (_zionVoiceRec === rec) _zionVoiceRec = null;
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
+        if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
+          scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
+        } else {
+          try { syncZionMicUi(); } catch (_) {}
+        }
+      };
+
+      _zionVoiceStartWatchdog = setTimeout(function () {
+        _zionVoiceStartWatchdog = null;
+        if (myGen !== _zionVoiceGen) return;
+        if (!_zionVoiceOn) return;
+        // Never got onstart/result — permission dialog hung or API dead
+        _zionVoiceFailCount += 1;
+        if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+          failZionVoiceSoft('Microphone timed out — try again');
+          return;
+        }
+        try {
+          if (_zionVoiceRec === rec) {
+            rec.onresult = null;
+            rec.onerror = null;
+            rec.onend = null;
+            rec.onstart = null;
+            try { rec.abort(); } catch (_) {}
+            _zionVoiceRec = null;
+          }
+        } catch (_) {}
+        _zionVoiceStarting = false;
+        scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * 2);
+      }, ZION_VOICE_START_TIMEOUT_MS);
+
       try {
         rec.start();
       } catch (err) {
-        stopZionVoiceRecognition({ skipPersist: true, keepOnFlag: true });
-        // Soft failure — keep preference; try again shortly
-        setTimeout(function () {
-          if (_zionVoiceOn && !_zionChatBusy) {
-            try { startZionVoiceRecognition(); } catch (_) {}
-          }
-        }, 400);
+        clearZionVoiceStartWatchdog();
+        _zionVoiceStarting = false;
+        _zionVoiceRec = null;
+        _zionVoiceFailCount += 1;
+        if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
+          failZionVoiceSoft('Voice input failed to start');
+          return;
+        }
+        // Soft failure — keep preference; try again shortly (async only)
+        scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS * _zionVoiceFailCount);
       }
       syncZionMicUi();
       if (_zionVoiceMode === 'active') focusZionComposer(_zionVoiceSource);
@@ -30224,28 +30403,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function toggleZionVoice(source) {
       const src = source === 'widget' ? 'widget' : 'main';
-      if (!getZionSpeechRecognitionCtor()) {
-        syncZionMicUi();
-        return;
+      try {
+        if (!getZionSpeechRecognitionCtor()) {
+          failZionVoiceSoft('Voice not supported in this browser');
+          return;
+        }
+        if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) {
+          failZionVoiceSoft('Voice needs HTTPS (or localhost)');
+          return;
+        }
+        // Always allow turning OFF even if chat is busy / recognition stuck
+        if (_zionVoiceOn && _zionVoiceSource === src) {
+          _zionVoiceLastError = '';
+          stopZionVoiceRecognition();
+          writeZionVoiceMicPref(false);
+          focusZionComposer(src);
+          return;
+        }
+        if (_zionVoiceOn && _zionVoiceSource !== src) {
+          // Switch source while on
+          _zionVoiceSource = src;
+          try { syncZionMicUi(); } catch (_) {}
+          focusZionComposer(src);
+          return;
+        }
+        if (_zionChatBusy) {
+          // Don't start mic while a reply is in flight — keep chat usable
+          try { clearZionChatBusyUi(); } catch (_) {}
+        }
+        _zionVoiceSource = src;
+        _zionVoiceOn = true;
+        _zionVoicePausedBusy = false;
+        _zionVoiceFailCount = 0;
+        _zionVoiceLastError = '';
+        writeZionVoiceMicPref(true);
+        enterZionVoiceWakeIdle();
+        startZionVoiceRecognition();
+      } catch (err) {
+        failZionVoiceSoft('Voice input failed: ' + ((err && err.message) || 'unknown'));
       }
-      if (_zionChatBusy) return;
-      if (_zionVoiceOn && _zionVoiceSource === src) {
-        stopZionVoiceRecognition();
-        writeZionVoiceMicPref(false);
-        focusZionComposer(src);
-        return;
-      }
-      _zionVoiceSource = src;
-      _zionVoiceOn = true;
-      _zionVoicePausedBusy = false;
-      writeZionVoiceMicPref(true);
-      enterZionVoiceWakeIdle();
-      startZionVoiceRecognition();
     }
 
     function restoreZionVoiceIfPreferred(source) {
       if (!readZionVoiceMicPref()) return;
       if (!getZionSpeechRecognitionCtor()) return;
+      if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) return;
       if (_zionChatBusy) return;
       const src = source === 'widget' ? 'widget' : 'main';
       _zionVoiceSource = src;
@@ -30254,7 +30456,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (_zionVoiceMode !== 'active' || Date.now() > _zionVoiceKeepAliveUntil) {
         enterZionVoiceWakeIdle();
       }
-      if (!_zionVoiceRec) {
+      if (!_zionVoiceRec && !_zionVoiceStarting) {
         try { startZionVoiceRecognition(); } catch (_) {}
       }
       syncZionMicUi();
@@ -30272,7 +30474,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (_zionVoiceOn) stopZionVoiceRecognition({ skipPersist: true, keepOnFlag: true });
       if (typeof loadZionAgent === 'function') loadZionAgent();
       if (_zionVoiceOn && !_zionChatBusy) {
-        try { startZionVoiceRecognition(); } catch (_) {}
+        scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
       }
     }
 
@@ -30280,11 +30482,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (!_zionVoiceOn) return;
       _zionVoicePausedBusy = true;
       clearZionVoiceSilenceTimer();
+      clearZionVoiceRestartTimer();
+      clearZionVoiceStartWatchdog();
+      _zionVoiceStarting = false;
       if (_zionVoiceRec) {
         try {
           _zionVoiceRec.onresult = null;
           _zionVoiceRec.onerror = null;
           _zionVoiceRec.onend = null;
+          _zionVoiceRec.onstart = null;
           _zionVoiceRec.stop();
         } catch (_) {}
         _zionVoiceRec = null;
@@ -30300,7 +30506,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } else {
         enterZionVoiceWakeIdle();
       }
-      startZionVoiceRecognition();
+      scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
     }
 
     // Init mic UI once DOM ready
@@ -30309,6 +30515,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.onZionComposerInput = onZionComposerInput;
     window.refreshZionAgentChat = refreshZionAgentChat;
     window.restoreZionVoiceIfPreferred = restoreZionVoiceIfPreferred;
+    window.failZionVoiceSoft = failZionVoiceSoft;
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
       try {
