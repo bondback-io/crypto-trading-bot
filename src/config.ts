@@ -2112,6 +2112,12 @@ export interface BotConfig {
   volumeIntelligence: import('./volumeIntelligence').VolumeIntelligenceConfig;
 
   /**
+   * Influencer / Top PnL Smart Mirror — tagged watchlist fast copy via SMM.
+   * Default OFF; Favourites/SMM unchanged when disabled.
+   */
+  influencerMirror: import('./influencerMirror').InfluencerMirrorConfig;
+
+  /**
    * Hierarchical Multi-Agent Coordination — Phase 1 Gatekeeper
    * (allow/block before lane fight; classifier reserved).
    */
@@ -2420,6 +2426,18 @@ export const config: BotConfig = {
     exitUrgencyOnBearishDivergence: false,
     learningAdjustEnabled: false,
     profileSoft: {},
+  },
+
+  influencerMirror: {
+    enabled: false,
+    maxConcurrentMirrored: 3,
+    maxCopyDelayMs: 15_000,
+    minLiquidityUsd: 8_000,
+    minVolumeM5Usd: 800,
+    copySells: true,
+    useJito: true,
+    gatekeeperOptional: true,
+    sellUnrelated: false,
   },
 
   hierarchicalCoordination: {
@@ -3175,6 +3193,19 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
         profileSoft: {},
       }
     ) as PersistedBotSettings['volumeIntelligence'],
+    influencerMirror: cloneJson(
+      config.influencerMirror || {
+        enabled: false,
+        maxConcurrentMirrored: 3,
+        maxCopyDelayMs: 15_000,
+        minLiquidityUsd: 8_000,
+        minVolumeM5Usd: 800,
+        copySells: true,
+        useJito: true,
+        gatekeeperOptional: true,
+        sellUnrelated: false,
+      }
+    ) as PersistedBotSettings['influencerMirror'],
     hierarchicalCoordination: cloneJson(
       config.hierarchicalCoordination || {
         enabled: true,
@@ -4156,6 +4187,23 @@ function applySettingsSnapshot(
           /* optional */
         }
       }
+    } catch {
+      /* optional */
+    }
+  }
+  if (saved.influencerMirror && typeof saved.influencerMirror === 'object') {
+    try {
+      const {
+        DEFAULT_INFLUENCER_MIRROR,
+        normalizeInfluencerMirrorConfig,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      const s = saved.influencerMirror as Partial<
+        import('./influencerMirror').InfluencerMirrorConfig
+      >;
+      config.influencerMirror = normalizeInfluencerMirrorConfig({
+        ...DEFAULT_INFLUENCER_MIRROR,
+        ...s,
+      });
     } catch {
       /* optional */
     }

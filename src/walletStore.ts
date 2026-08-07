@@ -38,7 +38,10 @@ export interface SmartWallet {
   tradesLast7d?: number;
   /** Pump.fun related trade count if known */
   pumpFunTradeCount?: number;
-  /** Tags e.g. scalper, pump.fun, kol */
+  /**
+   * Tags e.g. scalper, pump.fun, kol.
+   * Influencer Mirror family: influencer | top_pnl | whale | smart
+   */
   tags?: string[];
   /** Discovery category for dashboard grouping */
   category?: WalletCategory;
@@ -68,6 +71,21 @@ export interface SmartWallet {
   qualityScoredAt?: number;
   /** Average hold time in seconds (GMGN / discovery) */
   avgHoldTimeSec?: number;
+  /** Display alias (Influencer Mirror UI); defaults to name */
+  displayName?: string;
+  /**
+   * Participate in Influencer Mirror copy path when master ON + family tag.
+   * Default true when tagged influencer/top_pnl/whale/smart.
+   */
+  copyEnabled?: boolean;
+  /** Follow influencer sells for mirrored positions only (default true) */
+  followSells?: boolean;
+  /** Size multiplier vs risk size (clamped 0.25–2) */
+  sizeMult?: number;
+  /** Realized PnL USD ~30d (GMGN / enrich) */
+  pnl30dUsd?: number;
+  /** Volume USD ~30d when known */
+  volume30dUsd?: number;
 }
 
 /** Infer category from tags / trade frequency */
@@ -94,10 +112,17 @@ export const defaultSmartWallets: SmartWallet[] = [];
 /** Normalize lastActive ↔ lastTradedAt for persistence */
 export function normalizeWalletRecord(w: WalletRecord): WalletRecord {
   const lastActive = w.lastActive ?? w.lastTradedAt;
+  const displayName = w.displayName || w.name;
+  let sizeMult = w.sizeMult;
+  if (sizeMult != null && Number.isFinite(Number(sizeMult))) {
+    sizeMult = Math.min(2, Math.max(0.25, Number(sizeMult)));
+  }
   return {
     ...w,
     lastActive,
     lastTradedAt: w.lastTradedAt ?? lastActive,
+    displayName,
+    sizeMult,
   };
 }
 

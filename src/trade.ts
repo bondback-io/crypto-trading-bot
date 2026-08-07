@@ -333,6 +333,9 @@ export interface BuyOptions {
   entryStyle?: string;
   entryStyleSecondary?: string;
   lateChaseAtEntry?: boolean;
+  /** Influencer Mirror source wallet stamps */
+  mirrorWalletId?: string;
+  mirrorWalletName?: string;
   scannerPlaybook?: string;
   scannerConfluence?: number;
   candleSource?: 'real' | 'synthetic';
@@ -990,6 +993,8 @@ export async function executeBuy(
         entryStyle: meta?.entryStyle,
         entryStyleSecondary: meta?.entryStyleSecondary,
         lateChaseAtEntry: meta?.lateChaseAtEntry === true,
+        mirrorWalletId: meta?.mirrorWalletId,
+        mirrorWalletName: meta?.mirrorWalletName,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,
@@ -1140,6 +1145,8 @@ export async function executeBuy(
         entryStyle: meta?.entryStyle,
         entryStyleSecondary: meta?.entryStyleSecondary,
         lateChaseAtEntry: meta?.lateChaseAtEntry === true,
+        mirrorWalletId: meta?.mirrorWalletId,
+        mirrorWalletName: meta?.mirrorWalletName,
         scannerPlaybook: meta?.scannerPlaybook,
         scannerConfluence: meta?.scannerConfluence,
         candleSource: meta?.candleSource,

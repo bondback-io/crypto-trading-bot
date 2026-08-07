@@ -7685,6 +7685,144 @@ export function createServer(): express.Application {
     res.json({ wallets: config.smartWallets, monitoring });
   });
 
+  // --- Influencer / Top PnL Smart Mirror ---
+  app.get('/api/influencer-mirror', (_req: Request, res: Response) => {
+    try {
+      const {
+        getInfluencerMirrorConfig,
+        listInfluencerMirrorWallets,
+        influencerMirrorPrereqsOk,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      const { getInfluencerMirrorLearningSummary } =
+        require('./influencerMirrorLearning') as typeof import('./influencerMirrorLearning');
+      res.json({
+        ok: true,
+        config: getInfluencerMirrorConfig(),
+        prereqs: influencerMirrorPrereqsOk(),
+        wallets: listInfluencerMirrorWallets(),
+        learning: getInfluencerMirrorLearningSummary(20),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/influencer-mirror/config', (req: Request, res: Response) => {
+    try {
+      const { patchInfluencerMirrorConfig, getInfluencerMirrorConfig } =
+        require('./influencerMirror') as typeof import('./influencerMirror');
+      const body = (req.body || {}) as Record<string, unknown>;
+      const cfg = patchInfluencerMirrorConfig(body as never);
+      res.json({ ok: true, config: cfg || getInfluencerMirrorConfig() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/influencer-mirror/wallet', (req: Request, res: Response) => {
+    try {
+      const { patchInfluencerWallet, listInfluencerMirrorWallets } =
+        require('./influencerMirror') as typeof import('./influencerMirror');
+      const body = req.body || {};
+      const address = String(body.address || '').trim();
+      if (!address) {
+        res.status(400).json({ ok: false, error: 'address required' });
+        return;
+      }
+      const w = patchInfluencerWallet(address, body);
+      if (!w) {
+        res.status(404).json({ ok: false, error: 'wallet not found' });
+        return;
+      }
+      res.json({ ok: true, wallet: w, wallets: listInfluencerMirrorWallets() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get('/api/influencer-mirror/export.csv', (_req: Request, res: Response) => {
+    try {
+      const { exportInfluencerWalletsCsv } =
+        require('./influencerMirror') as typeof import('./influencerMirror');
+      const csv = exportInfluencerWalletsCsv();
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="influencer-mirror-wallets.csv"'
+      );
+      res.send(csv);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/influencer-mirror/import.csv', (req: Request, res: Response) => {
+    try {
+      const { importInfluencerWalletsCsv, listInfluencerMirrorWallets } =
+        require('./influencerMirror') as typeof import('./influencerMirror');
+      const text = String(req.body?.text ?? req.body?.csv ?? '');
+      const result = importInfluencerWalletsCsv(text);
+      const toActivate = listInfluencerMirrorWallets()
+        .filter((w) => w.enabled && w.copyEnabled !== false)
+        .map((w) => w.address);
+      const monitoring = syncWalletsToMonitoring(
+        toActivate,
+        'influencer-mirror-csv'
+      );
+      res.json({ ok: true, ...result, monitoring, wallets: listInfluencerMirrorWallets() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/influencer-mirror/gmgn-import', async (_req: Request, res: Response) => {
+    try {
+      const {
+        importInfluencerFromGmgn,
+        listInfluencerMirrorWallets,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      const result = await importInfluencerFromGmgn({
+        limit: 40,
+        period: '30d',
+        minWinRate: 35,
+      });
+      const toActivate = listInfluencerMirrorWallets()
+        .filter((w) => w.enabled && w.copyEnabled !== false)
+        .map((w) => w.address)
+        .slice(0, 40);
+      const monitoring = syncWalletsToMonitoring(
+        toActivate,
+        'influencer-mirror-gmgn'
+      );
+      res.json({
+        ok: true,
+        ...result,
+        monitoring,
+        wallets: listInfluencerMirrorWallets(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   // --- Dashboard (tabbed Tailwind UI) ---
 
   let dashboardGzipCache: Buffer | null = null;

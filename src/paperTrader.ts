@@ -311,6 +311,9 @@ export interface Position {
   /** Source wallets that triggered this copy trade */
   sourceWallets?: string[];
   sourceNames?: string[];
+  /** Influencer Mirror source wallet (when stamped) */
+  mirrorWalletId?: string;
+  mirrorWalletName?: string;
   /** Anti-rug snapshot at entry */
   antiRug?: {
     riskScore: number;
@@ -853,6 +856,8 @@ function maybeRecordLearningEpisode(
       entryStyle: position.entryStyle,
       entryStyleSecondary: position.entryStyleSecondary,
       lateChaseAtEntry: position.lateChaseAtEntry === true,
+      mirrorWalletId: position.mirrorWalletId,
+      mirrorWalletName: position.mirrorWalletName,
       learningTags: (() => {
         const tags: string[] = [];
         if (
@@ -1118,6 +1123,19 @@ function maybeRecordLearningEpisode(
       })(),
     });
     if (episodeRow) {
+      try {
+        const { recordInfluencerMirrorOutcome } =
+          require('./influencerMirrorLearning') as typeof import('./influencerMirrorLearning');
+        recordInfluencerMirrorOutcome({
+          mirrorWalletId: position.mirrorWalletId || episodeRow.mirrorWalletId,
+          mirrorWalletName:
+            position.mirrorWalletName || episodeRow.mirrorWalletName,
+          pnlPct,
+          exitReason: position.reason,
+        });
+      } catch {
+        /* optional */
+      }
       try {
         const { onFastRecoveryEpisodeClosed } =
           require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
@@ -2041,6 +2059,8 @@ export class PaperTrader {
     entryStyle?: string;
     entryStyleSecondary?: string;
     lateChaseAtEntry?: boolean;
+    mirrorWalletId?: string;
+    mirrorWalletName?: string;
     scannerPlaybook?: string;
     scannerConfluence?: number;
     candleSource?: 'real' | 'synthetic';
@@ -2149,6 +2169,8 @@ export class PaperTrader {
       entryStyle: input.entryStyle,
       entryStyleSecondary: input.entryStyleSecondary,
       lateChaseAtEntry: input.lateChaseAtEntry === true,
+      mirrorWalletId: input.mirrorWalletId,
+      mirrorWalletName: input.mirrorWalletName,
       scannerPlaybook: input.scannerPlaybook,
       scannerConfluence: input.scannerConfluence,
       candleSource: input.candleSource,
@@ -2562,6 +2584,8 @@ export class PaperTrader {
       entryStyle?: string;
       entryStyleSecondary?: string;
       lateChaseAtEntry?: boolean;
+      mirrorWalletId?: string;
+      mirrorWalletName?: string;
       scannerPlaybook?: string;
       scannerConfluence?: number;
       candleSource?: 'real' | 'synthetic';
@@ -2756,6 +2780,8 @@ export class PaperTrader {
       entryStyle: meta?.entryStyle,
       entryStyleSecondary: meta?.entryStyleSecondary,
       lateChaseAtEntry: meta?.lateChaseAtEntry === true,
+      mirrorWalletId: meta?.mirrorWalletId,
+      mirrorWalletName: meta?.mirrorWalletName,
       scannerPlaybook: meta?.scannerPlaybook,
       scannerConfluence: meta?.scannerConfluence,
       candleSource: meta?.candleSource,

@@ -253,6 +253,19 @@ export interface PersistedBotSettings {
       }
     >;
   };
+  /** Influencer / Top PnL Smart Mirror (default OFF) */
+  influencerMirror?: {
+    enabled?: boolean;
+    maxConcurrentMirrored?: number;
+    maxCopyDelayMs?: number;
+    minLiquidityUsd?: number;
+    minVolumeM5Usd?: number;
+    copySells?: boolean;
+    useJito?: boolean;
+    gatekeeperOptional?: boolean;
+    partialSellPct?: number;
+    sellUnrelated?: false;
+  };
   /** HMC Gatekeeper + Setup Classifier (Phases 1–2) */
   hierarchicalCoordination?: {
     enabled?: boolean;

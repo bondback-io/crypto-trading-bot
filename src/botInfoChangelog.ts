@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.221',
+    title: 'Influencer Mirror + majors GK soft-pass',
+    sections: ['copy', 'coaches', 'risk', 'scanners', 'execution'],
+    items: [
+      'Influencer / Top PnL Smart Mirror (default OFF): tagged watchlist, CSV/GMGN fail-soft, fast SMM buy + optional copy-sell on mirrored positions only; per-wallet learning nudges copyWeight.',
+      'Requires smart_money_copy + smart_money_mirror; Jito/turbo prefer with fallback; max concurrent + delay-window spam guard; anti-rug / hard SL absolute.',
+      'Majors Dip-watch handoffs soft-pass HMC Gatekeeper activity floors (specialtyFeed/majors stamp); hard safety unchanged.',
+    ],
+  },
+  {
     version: '1.2.220',
     title: 'High-MC majors → Dip watch',
     sections: ['scanners', 'microbots', 'zion', 'execution', 'risk'],

@@ -683,6 +683,19 @@ export interface WalletBuyEvent {
   entrySource?: 'wallet' | 'scanner' | 'migration' | 'hybrid';
 }
 
+export interface WalletSellEvent {
+  wallet: string;
+  walletName: string;
+  mint: string;
+  symbol: string;
+  name: string;
+  signature: string;
+  timestamp: number;
+  detectedAt?: number;
+  isPumpFun: boolean;
+  isMigration: boolean;
+}
+
 export interface WalletLastActivity {
   timestamp: number;
   signature?: string;
@@ -2240,6 +2253,20 @@ export function getWalletsForPolling(): SmartWallet[] {
 
   // Recent activity first so monitor polls hot wallets sooner
   const sorted = list.slice().sort((a, b) => {
+    // When Influencer Mirror is ON, prefer copy-enabled influencer-family wallets
+    try {
+      const {
+        isInfluencerMirrorEnabled,
+        isInfluencerMirrorWallet,
+      } = require('./influencerMirror') as typeof import('./influencerMirror');
+      if (isInfluencerMirrorEnabled()) {
+        const aIm = isInfluencerMirrorWallet(a) ? 1 : 0;
+        const bIm = isInfluencerMirrorWallet(b) ? 1 : 0;
+        if (bIm !== aIm) return bIm - aIm;
+      }
+    } catch {
+      /* optional */
+    }
     const aT = a.lastTradedAt ?? a.lastActive ?? 0;
     const bT = b.lastTradedAt ?? b.lastActive ?? 0;
     return bT - aT;
@@ -2774,6 +2801,46 @@ async function pollWalletInner(
         });
         enqueueBuyEvent(buy);
       }
+      try {
+        const {
+          isInfluencerMirrorEnabled,
+          isInfluencerMirrorWallet,
+        } = require('./influencerMirror') as typeof import('./influencerMirror');
+        if (isInfluencerMirrorEnabled() && isInfluencerMirrorWallet(wallet)) {
+          const sells = parseSellsFromTransaction(tx, wallet, sig);
+          for (const sell of sells) {
+            sell.detectedAt = Date.now();
+            walletLastActivity.set(wallet.address, {
+              timestamp: sell.timestamp,
+              signature: sell.signature,
+              symbol: sell.symbol,
+              name: sell.name,
+              type: 'buy', // activity stamp; sell handled below
+            });
+            void (async () => {
+              try {
+                const { tryInfluencerMirrorSell } =
+                  require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+                await tryInfluencerMirrorSell({
+                  wallet,
+                  mint: sell.mint,
+                  symbol: sell.symbol,
+                  name: sell.name,
+                  signature: sell.signature,
+                  timestamp: sell.timestamp,
+                });
+              } catch (err) {
+                console.warn(
+                  `[monitor] Influencer sell handler error:`,
+                  err instanceof Error ? err.message : err
+                );
+              }
+            })();
+          }
+        }
+      } catch {
+        /* influencer mirror optional */
+      }
       lastFullyProcessed = sig;
     }
 
@@ -2844,6 +2911,88 @@ function parseBuysFromTransaction(
       mint,
       symbol,
       name,
+      signature,
+      timestamp: blockTime,
+      isPumpFun,
+      isMigration,
+    });
+  }
+
+  return events;
+}
+
+function parseSellsFromTransaction(
+  tx: ParsedTransactionWithMeta,
+  wallet: SmartWallet,
+  signature: string
+): WalletSellEvent[] {
+  const events: WalletSellEvent[] = [];
+  const blockTime = (tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
+
+  const instructions = tx.transaction.message.instructions;
+  const innerInstructions = tx.meta?.innerInstructions ?? [];
+
+  const allInstructions: (ParsedInstruction | PartiallyDecodedInstruction)[] = [
+    ...instructions,
+    ...innerInstructions.flatMap((inner) => inner.instructions),
+  ];
+
+  const programIds = allInstructions.map((ix) => getProgramId(ix));
+  const onPumpCurve = programIds.includes(config.pumpFunProgramId);
+  const onPumpSwap = programIds.includes(config.pumpSwapProgramId);
+  const isPumpFun = onPumpCurve || onPumpSwap;
+  const isMigration = onPumpSwap;
+
+  const preBalances = tx.meta?.preTokenBalances ?? [];
+  const postBalances = tx.meta?.postTokenBalances ?? [];
+
+  // Decreases on known mints
+  for (const pre of preBalances) {
+    if (pre.owner !== wallet.address) continue;
+    const mint = pre.mint;
+    if (isDeniedCopyMint(mint, config.solMint)) continue;
+
+    const post = postBalances.find(
+      (p) => p.mint === mint && p.owner === wallet.address
+    );
+    const preAmount = pre.uiTokenAmount.uiAmount ?? 0;
+    const postAmount = post?.uiTokenAmount.uiAmount ?? 0;
+    if (postAmount >= preAmount) continue;
+    if (preAmount <= 0) continue;
+
+    const prefix = mintPrefix(mint);
+    events.push({
+      wallet: wallet.address,
+      walletName: wallet.name,
+      mint,
+      symbol: prefix,
+      name: prefix,
+      signature,
+      timestamp: blockTime,
+      isPumpFun,
+      isMigration,
+    });
+  }
+
+  // Also catch full exits where post balance row is missing
+  for (const pre of preBalances) {
+    if (pre.owner !== wallet.address) continue;
+    const mint = pre.mint;
+    if (isDeniedCopyMint(mint, config.solMint)) continue;
+    if (events.some((e) => e.mint === mint)) continue;
+    const post = postBalances.find(
+      (p) => p.mint === mint && p.owner === wallet.address
+    );
+    if (post) continue;
+    const preAmount = pre.uiTokenAmount.uiAmount ?? 0;
+    if (preAmount <= 0) continue;
+    const prefix = mintPrefix(mint);
+    events.push({
+      wallet: wallet.address,
+      walletName: wallet.name,
+      mint,
+      symbol: prefix,
+      name: prefix,
       signature,
       timestamp: blockTime,
       isPumpFun,
@@ -4201,6 +4350,64 @@ async function handleBuyEvent(buy: WalletBuyEvent): Promise<void> {
   buy.detectedAt = buy.detectedAt ?? Date.now();
   await enrichBuyEvent(buy);
   const label = formatTokenLabel(buy.symbol, buy.name, buy.mint);
+
+  // Influencer / Top PnL Smart Mirror fast path (master ON + tagged wallet)
+  try {
+    const {
+      isInfluencerMirrorEnabled,
+      isInfluencerMirrorWallet,
+    } = require('./influencerMirror') as typeof import('./influencerMirror');
+    const sw = config.smartWallets.find((w) => w.address === buy.wallet);
+    if (
+      isInfluencerMirrorEnabled() &&
+      sw &&
+      isInfluencerMirrorWallet(sw)
+    ) {
+      const { tryInfluencerMirrorBuy } =
+        require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+      const result = await tryInfluencerMirrorBuy({
+        wallet: sw,
+        mint: buy.mint,
+        symbol: buy.symbol,
+        name: buy.name,
+        signature: buy.signature,
+        timestamp: buy.timestamp,
+        detectedAt: buy.detectedAt,
+        isPumpFun: buy.isPumpFun,
+        isMigration: buy.isMigration,
+      });
+      if (result.handled) {
+        if (!recentBuys.has(buy.mint)) recentBuys.set(buy.mint, []);
+        const buys = recentBuys.get(buy.mint)!;
+        if (
+          !buys.some(
+            (b) => b.wallet === buy.wallet && b.signature === buy.signature
+          )
+        ) {
+          const feedEvent: WalletBuyEvent = {
+            ...buy,
+            tradeStatus: result.taken ? 'taken' : 'skipped',
+            skipReason: result.skipReason,
+            entrySource: 'wallet',
+            detectedAt: buy.detectedAt,
+          };
+          buys.push(feedEvent);
+          pushActivityFeed(feedEvent);
+        } else {
+          annotateActivityFeed(buy.mint, buy.signature, {
+            tradeStatus: result.taken ? 'taken' : 'skipped',
+            skipReason: result.skipReason,
+          });
+        }
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[monitor] Influencer mirror buy path error:`,
+      err instanceof Error ? err.message : err
+    );
+  }
 
   // Only the migration listener (or explicit grad events) may stamp freshness.
   // PumpSwap venue buys set buy.isMigration for sizing/tags, but must NOT call
@@ -6184,6 +6391,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         } catch {
           hasOpen = false;
         }
+        // Majors Dip-watch handoff: specialtyFeed / reason stamp from
+        // majorsUniverse → dipSetupWatch. Missing stamp → normal Gatekeeper.
+        const gkReasonBits = Array.isArray(signal.scannerReasons)
+          ? signal.scannerReasons.join(' ')
+          : '';
+        const majorsStamp =
+          signal.specialtyFeed === 'majors' ||
+          /(^|\s)majors(?::\S+)?(\s|$)/i.test(gkReasonBits);
+        const dipWatchHandoff =
+          /dip-watch:triggered/i.test(gkReasonBits) ||
+          (signal.candidateTradeProfileId === 'dip_buyer' &&
+            /dip-watch/i.test(gkReasonBits));
+        const majorsDipWatch = majorsStamp && dipWatchHandoff;
         const gk = evaluateGatekeeper({
           mint: signal.mint,
           symbol: signal.symbol,
@@ -6212,6 +6432,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           hasOpenPosition: hasOpen,
           exhausted: false,
           candles: signal.candles || null,
+          majorsDipWatch: majorsDipWatch || undefined,
         });
         lastHmcGate = gk;
         recordGatekeeperDecision({

@@ -42,6 +42,9 @@ export interface ProfileLearningEpisode {
   entryStyle?: string;
   entryStyleSecondary?: string;
   lateChaseAtEntry?: boolean;
+  /** Influencer Mirror source wallet */
+  mirrorWalletId?: string;
+  mirrorWalletName?: string;
   /** Learning tags e.g. late_chase_fail */
   learningTags?: string[];
   scannerPlaybook?: string;

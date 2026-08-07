@@ -7480,6 +7480,59 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       <div class="card">
         <div class="flex flex-wrap gap-2 items-center mb-3">
+          <div class="section-title !mb-0 flex-1 min-w-[10rem]">Influencer Mirror <span class="tip" tabindex="0" data-tip="Additive fast copy of influencer / top-PnL tagged wallets via Smart Money Mirror. Default OFF — Favourites unchanged. Requires smart_money_copy + smart_money_mirror ON. Anti-rug / hard SL always absolute."></span></div>
+          <label class="ctl-check" title="Master enable (default OFF)">
+            <input type="checkbox" id="im-enabled" onchange="saveInfluencerMirrorConfig()" /> Master ON
+          </label>
+          <label class="ctl-check" title="Follow influencer sells on mirrored positions only">
+            <input type="checkbox" id="im-copy-sells" checked onchange="saveInfluencerMirrorConfig()" /> Copy sells
+          </label>
+          <label class="ctl-check" title="Prefer Jito/turbo on mirror path (falls back)">
+            <input type="checkbox" id="im-use-jito" checked onchange="saveInfluencerMirrorConfig()" /> Prefer Jito
+          </label>
+          <button class="btn btn-secondary" onclick="loadInfluencerMirror()" title="Refresh panel">Refresh</button>
+          <button class="btn btn-secondary" onclick="exportInfluencerCsv()" title="Download CSV">Export CSV</button>
+          <button class="btn btn-secondary" onclick="importInfluencerCsv()" title="Paste CSV into box below first">Import CSV</button>
+          <button class="btn btn-primary" onclick="importInfluencerGmgn()" title="GMGN top wallets → tag influencer/top_pnl (fail soft)">GMGN import</button>
+          <span class="mint" id="im-status"></span>
+        </div>
+        <div class="mint text-sm mb-2" id="im-prereq">Requires smart_money_copy + smart_money_mirror · default OFF</div>
+        <div class="filters-row mb-2">
+          <label class="ctl ctl-sm" title="Max concurrent mirrored positions">
+            <span>Max concurrent</span>
+            <input type="number" id="im-max-concurrent" value="3" min="1" max="12" step="1" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+          <label class="ctl ctl-sm" title="Ignore events older / spam within this window (ms)">
+            <span>Max delay ms</span>
+            <input type="number" id="im-max-delay" value="15000" min="1000" max="120000" step="500" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+          <label class="ctl ctl-sm" title="Optional partial sell % (blank = full exit)">
+            <span>Partial sell %</span>
+            <input type="number" id="im-partial-sell" value="" min="1" max="99" step="1" placeholder="full" onchange="saveInfluencerMirrorConfig()" />
+          </label>
+        </div>
+        <textarea id="im-csv-text" rows="2" class="mb-2" placeholder="CSV: address,name,displayName,tags,enabled,copyEnabled,followSells,sizeMult,…"></textarea>
+        <div class="overflow-x-auto">
+          <table id="im-wallets-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Tags</th>
+                <th>Copy</th>
+                <th>Follow sells</th>
+                <th>Size×</th>
+                <th>PnL 30d</th>
+                <th>Win%</th>
+                <th>Watch</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="8" class="text-slate-500">Load panel — no influencer-tagged wallets yet</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="flex flex-wrap gap-2 items-center mb-3">
           <div class="section-title !mb-0 flex-1 min-w-[10rem]">Tracked Smart Wallets <span class="tip" tabindex="0" data-tip="Wallets the bot actually copies. Enable/disable, refresh activity, or prune dead ones."></span></div>
           <button class="btn btn-secondary" onclick="refreshActivity()" title="Update last-active, win rate, and trade counts from GMGN/on-chain"><span class="btn-label-short">Activity</span><span class="btn-label-full">Refresh Activity</span></button>
           <button class="btn btn-secondary" onclick="forceRefreshMonitoring()" title="Re-enable all tracked wallets and kick the monitor poll loop"><span class="btn-label-short">Force Refresh</span><span class="btn-label-full">Force Refresh Monitoring</span></button>
@@ -17781,6 +17834,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
+      if (name === 'wallets') {
+        try { loadInfluencerMirror(); } catch (_) {}
+      }
       if ((name === 'overview' || name === 'backtester') && window._chartsNeedResize) {
         window._chartsNeedResize = false;
         setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
@@ -26007,6 +26063,155 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function setStrictModeIntensity(_intensity) {
       /* Strict Mode removed */
+    }
+
+    async function loadInfluencerMirror() {
+      const status = document.getElementById('im-status');
+      const prereq = document.getElementById('im-prereq');
+      const escIm = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      try {
+        const data = await fetchJSON('/api/influencer-mirror');
+        const cfg = data.config || {};
+        const en = document.getElementById('im-enabled');
+        if (en) en.checked = cfg.enabled === true;
+        const cs = document.getElementById('im-copy-sells');
+        if (cs) cs.checked = cfg.copySells !== false;
+        const uj = document.getElementById('im-use-jito');
+        if (uj) uj.checked = cfg.useJito !== false;
+        const mc = document.getElementById('im-max-concurrent');
+        if (mc) mc.value = cfg.maxConcurrentMirrored ?? 3;
+        const md = document.getElementById('im-max-delay');
+        if (md) md.value = cfg.maxCopyDelayMs ?? 15000;
+        const ps = document.getElementById('im-partial-sell');
+        if (ps) ps.value = cfg.partialSellPct != null ? cfg.partialSellPct : '';
+        if (prereq) {
+          const p = data.prereqs || {};
+          prereq.textContent = p.ok
+            ? 'Prereqs OK · smart_money_copy + smart_money_mirror'
+            : ('Prereqs: ' + (p.reason || 'not ready') + ' · mirror buys will skip');
+        }
+        const tbody = document.querySelector('#im-wallets-table tbody');
+        const wallets = data.wallets || [];
+        if (tbody) {
+          if (!wallets.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-slate-500">No influencer / top_pnl / whale / smart tagged wallets — CSV or GMGN import</td></tr>';
+          } else {
+            tbody.innerHTML = wallets.map((w) => {
+              const tags = (w.tags || []).join(', ');
+              const name = w.displayName || w.name || w.address.slice(0, 8);
+              const size = w.sizeMult != null ? w.sizeMult : 1;
+              const addr = String(w.address || '').replace(/'/g, '');
+              return '<tr>' +
+                '<td title="' + escIm(w.address) + '">' + escIm(name) + '</td>' +
+                '<td class="mint text-xs">' + escIm(tags) + '</td>' +
+                '<td><input type="checkbox" ' + (w.copyEnabled !== false ? 'checked' : '') +
+                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{copyEnabled:this.checked})" /></td>' +
+                '<td><input type="checkbox" ' + (w.followSells !== false ? 'checked' : '') +
+                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{followSells:this.checked})" /></td>' +
+                '<td><input type="number" class="ctl-sm" style="width:4rem" min="0.25" max="2" step="0.05" value="' + size +
+                  '" onchange="patchInfluencerWallet(\'' + addr + '\',{sizeMult:parseFloat(this.value)})" /></td>' +
+                '<td class="mint">' + (w.pnl30dUsd != null ? Number(w.pnl30dUsd).toFixed(0) : '—') + '</td>' +
+                '<td class="mint">' + (w.winRate != null ? Number(w.winRate).toFixed(0) : '—') + '</td>' +
+                '<td><input type="checkbox" ' + (w.enabled !== false ? 'checked' : '') +
+                  ' onchange="patchInfluencerWallet(\'' + addr + '\',{enabled:this.checked})" /></td>' +
+                '</tr>';
+            }).join('');
+          }
+        }
+        if (status) status.textContent = (cfg.enabled ? 'ON' : 'OFF') + ' · ' + wallets.length + ' tagged';
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function saveInfluencerMirrorConfig() {
+      const status = document.getElementById('im-status');
+      try {
+        const partialRaw = document.getElementById('im-partial-sell')?.value;
+        const body = {
+          enabled: document.getElementById('im-enabled')?.checked === true,
+          copySells: document.getElementById('im-copy-sells')?.checked !== false,
+          useJito: document.getElementById('im-use-jito')?.checked !== false,
+          maxConcurrentMirrored: Number(document.getElementById('im-max-concurrent')?.value) || 3,
+          maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 15000,
+          partialSellPct: partialRaw === '' || partialRaw == null ? undefined : Number(partialRaw),
+        };
+        await fetchJSON('/api/influencer-mirror/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (status) status.textContent = 'Saved · ' + (body.enabled ? 'ON' : 'OFF');
+        await loadInfluencerMirror();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function patchInfluencerWallet(address, patch) {
+      const status = document.getElementById('im-status');
+      try {
+        await fetchJSON('/api/influencer-mirror/wallet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address, ...patch }),
+        });
+        await loadInfluencerMirror();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    function exportInfluencerCsv() {
+      window.open('/api/influencer-mirror/export.csv', '_blank');
+    }
+
+    async function importInfluencerCsv() {
+      const status = document.getElementById('im-status');
+      const text = document.getElementById('im-csv-text')?.value || '';
+      if (!text.trim()) {
+        if (status) status.textContent = 'Paste CSV first';
+        return;
+      }
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/import.csv', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (status) {
+          status.textContent =
+            'CSV +' + (data.added || 0) + ' ~' + (data.updated || 0) +
+            ' skip ' + (data.skipped || 0);
+        }
+        document.getElementById('im-csv-text').value = '';
+        await loadInfluencerMirror();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
+    }
+
+    async function importInfluencerGmgn() {
+      const status = document.getElementById('im-status');
+      if (status) status.textContent = 'GMGN import…';
+      try {
+        const data = await fetchJSON('/api/influencer-mirror/gmgn-import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (status) {
+          status.textContent =
+            'GMGN +' + (data.imported || 0) + ' ~' + (data.updated || 0) +
+            (data.error ? ' · ' + data.error : '') +
+            (data.source ? ' (' + data.source + ')' : '');
+        }
+        await loadInfluencerMirror();
+        refresh();
+      } catch (err) {
+        if (status) status.textContent = err.message || String(err);
+      }
     }
 
     async function bulkImportWallets() {

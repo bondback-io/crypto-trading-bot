@@ -100,6 +100,12 @@ export interface GatekeeperInput {
   exhausted?: boolean;
   /** Optional candles for volume intel (reuse if present). */
   candles?: unknown[] | null;
+  /**
+   * Dip setup-watch handoff from majorsUniverse (high-MC). Soft activity
+   * findings stay advisory; hard safety / anti-rug still block. Omit / false
+   * → normal Gatekeeper (fail soft when stamp missing).
+   */
+  majorsDipWatch?: boolean;
 }
 
 export type SetupClass =
@@ -757,6 +763,7 @@ function cacheKey(input: GatekeeperInput, cfg: HierarchicalCoordinationConfig): 
     input.alreadyTraded ? '1' : '0',
     input.hasOpenPosition ? '1' : '0',
     input.exhausted ? '1' : '0',
+    input.majorsDipWatch ? 'mdw1' : 'mdw0',
   ].join('|');
 }
 
@@ -1051,8 +1058,13 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
   } else if (softCodes.length) {
     // Strictness Low: soft activity findings stay advisory even if
     // softBlocksEnforced is checked — hard safety already handled above.
+    // Majors Dip-watch: high-MC handoffs soft-pass activity floors only
+    // (anti-rug / honeypot / high-risk already hard-blocked above).
+    const majorsDipSoftPass = input.majorsDipWatch === true;
     const enforceSoft =
-      cfg.softBlocksEnforced && cfg.gatekeeperStrictness !== 'low';
+      cfg.softBlocksEnforced &&
+      cfg.gatekeeperStrictness !== 'low' &&
+      !majorsDipSoftPass;
 
     // Medium quality path: thin M5 alone is advisory when H1 ≥ floor.
     let softForEnforce = softCodes;
@@ -1075,11 +1087,17 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
         plainLanguage: plainFromCodes('block', softForEnforce, false),
       };
     } else {
+      const plain = plainFromCodes('allow', softCodes, true);
       result = {
         decision: 'allow',
         severity: 'soft',
         reasonCodes: softCodes,
-        plainLanguage: plainFromCodes('allow', softCodes, true),
+        plainLanguage: majorsDipSoftPass
+          ? plain.replace(
+              'Gatekeeper ALLOW (advisory):',
+              'Gatekeeper ALLOW (majors dip-watch):'
+            )
+          : plain,
         advisory: true,
       };
     }

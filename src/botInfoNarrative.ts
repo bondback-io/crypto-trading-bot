@@ -423,7 +423,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>ML advisor</strong> — ranks / blends patch ideas; shadow → hybrid → lead as sample grows. Never invents new strategies.</li>
           <li><strong>Profile TA + weight learning</strong> — per-lane Off/Soft/Hard confluence; learns tool weights / sensitivities only — never TP/SL or Peak Protect cores.</li>
           <li><strong>Profile RL</strong> — personal soft coach (setup-worth, size confidence, TA sensitivity, exit-hint aggressiveness). Shadow / Hybrid / Lead via readiness score (not trade count alone). Default global OFF.</li>
-          <li><strong>HMC Gatekeeper</strong> — Phase 1 hierarchical coordination: allow/block before lane fight (volume, liquidity, safety, low-MC congestion). Hard safety never fails open. Soft blocks optional. Default ON · medium.</li>
+          <li><strong>HMC Gatekeeper</strong> — Phase 1 hierarchical coordination: allow/block before lane fight (volume, liquidity, safety, low-MC congestion). Hard safety never fails open. Soft blocks optional. Default ON · medium. High-MC <em>majors</em> Dip-watch handoffs soft-pass activity floors only (anti-rug / hard SL still absolute).</li>
           <li><strong>HMC Setup Classifier</strong> — Phase 2: setup → eligible specialist lanes (momentum / dip / migration / slow_quality). Soft eligibility ON = preferred lanes score normally, others still compete with a penalty; OFF = hard maps. Default classifier OFF.</li>
           <li><strong>MARL</strong> — team coach: lane ranking, size confidence, low-MC pile-in, lagging support. Soft only; never writes TP/SL. Default OFF.</li>
           <li><strong>Learning Accelerators</strong> — experience replay, counterfactual exit what-ifs, teacher→student soft TA tips. Offline/soft hints only. Master default OFF.</li>
@@ -584,6 +584,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>The monitor loop polls tracked wallets, scores quality, detects convergence / smart-money flow, then runs the same filter → profile → size path as scanner entries.</p>
         <ul>
           <li><strong>Smart Wallets</strong> — discover via Kolscan, GMGN, Birdeye, Dex, Axiom, Photon, BullX, Nansen, or paste manually.</li>
+          <li><strong>Influencer Mirror</strong> (default OFF) — tagged influencer / top_pnl / whale / smart wallets with copyEnabled use a fast Smart Money Mirror buy path (optional copy-sells on matching positions only). Requires <code>smart_money_copy</code> + <code>smart_money_mirror</code>. Anti-rug / hard SL absolute. CSV + GMGN fail-soft import on the Smart Wallets tab.</li>
           <li><strong>Live trading wallets</strong> — main/burner slots; private keys stay on the server (env), never in backups.</li>
           <li>Pause in the header stops the monitor without shutting down the process.</li>
         </ul>
