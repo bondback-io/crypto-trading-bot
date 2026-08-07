@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.223',
+    title: 'Watchlist rename + Dip Majors/Normal filters',
+    sections: ['scanners', 'overview', 'microbots'],
+    items: [
+      'Nav rename: Live Feed -> Watchlist (short label Watch on phones) so the tab matches setup watches.',
+      'Dip setup watchlist: dual Majors / Normal checkboxes (both on by default) replace Majors-only; prefs persist in localStorage with legacy migration.',
+    ],
+  },
+  {
     version: '1.2.222',
     title: 'Dashboard Influencer Mirror JS fix',
     sections: ['copy', 'overview', 'knobs'],

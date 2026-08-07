@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Live Feed / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Bot Performance / Logs / Back Up / Bot Info via settings menu)
+ * Tabbed Tailwind UI (Overview / Trades / Watchlist / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Bot Performance / Logs / Back Up / Bot Info via settings menu)
  */
 
 import {
@@ -6525,12 +6525,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         font-size: 11px;
         gap: 0.15rem;
       }
-      /* Prefer full nav labels on phones (Live Feed, etc.) when equal-width tabs fit */
+      /* Prefer full nav labels on phones when equal-width tabs fit */
       .nav-tabs .btn-label-short { display: none; }
       .nav-tabs .btn-label-full { display: inline; }
-      /* Micro Bots is the longest label — keep short "Bots" so Live Feed can stay full */
+      /* Long labels stay short on phones: Micro Bots → Bots, Watchlist → Watch */
       .nav-tabs .btn.nav-tab-microbots .btn-label-short { display: inline; }
       .nav-tabs .btn.nav-tab-microbots .btn-label-full { display: none; }
+      .nav-tabs .btn.nav-tab-watchlist .btn-label-short { display: inline; }
+      .nav-tabs .btn.nav-tab-watchlist .btn-label-full { display: none; }
       .nav-tabs .btn.nav-tab-zion .btn-label-full::before,
       .nav-tabs .btn.nav-tab-zion .btn-label-short::before,
       .nav-tabs .btn.nav-tab-microbots .btn-label-full::before,
@@ -6887,7 +6889,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
       <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
-      <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Live Feed — market scanner, Pump.fun activity, signals, sizing, and re-entry watches"><span class="btn-label-short">Feed</span><span class="btn-label-full">Live Feed</span></button>
+      <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn nav-tab-watchlist bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Watchlist — dip/scalper/grad watches, market scanner, Pump.fun activity, signals, sizing, and re-entry watches"><span class="btn-label-short">Watch</span><span class="btn-label-full">Watchlist</span></button>
     </nav>
 
     <!-- ========== TAB: Overview ========== -->
@@ -7084,7 +7086,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="activity" class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
         <div class="card">
-          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on Live Feed, or toggle via Settings → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
+          <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates (no wallet required). Configure on Watchlist, or toggle via Settings → Market Scanner (TA). Hybrid when wallets also buy the same mint."></span></div>
           <div id="scanner-status" data-scanner-status class="mint text-xs mb-2">—</div>
           <div id="scanner-feed" data-scanner-feed class="max-h-72 overflow-y-auto text-sm"></div>
         </div>
@@ -7901,7 +7903,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- ========== TAB: Live Feed (scanner) ========== -->
+    <!-- ========== TAB: Watchlist (scanner) ========== -->
     <section data-tab-panel="scanner" class="hidden space-y-4">
       <div class="setup-watches-stack space-y-3">
         <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
@@ -7910,10 +7912,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip setup watchlist</span>
               <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. High-MC majors (≥$100M circ) use longer TTL + <span class="setup-watch-badge is-majors">majors</span> badge. Unwatch cools out for 15 minutes.</p>
-              <div class="setup-watch-filter-row mt-1">
-                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show only majors-sourced dip watches">
-                  <input type="checkbox" id="dip-watch-majors-only" />
-                  Majors only
+              <div class="setup-watch-filter-row mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show majors-sourced dip watches">
+                  <input type="checkbox" id="dip-watch-show-majors" checked />
+                  Majors
+                </label>
+                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show memecoin / standard (non-majors) dip watches">
+                  <input type="checkbox" id="dip-watch-show-normal" checked />
+                  Normal
                 </label>
               </div>
             </div>
@@ -12787,37 +12793,49 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       if (dipCount || dipList) {
         const dw = data.dipWatch || { active: 0, entries: [] };
-        const majorsOnlyEl = document.getElementById('dip-watch-majors-only');
-        const majorsOnly = majorsOnlyEl && majorsOnlyEl.checked;
-        if (dipCount) dipCount.textContent = (dw.active || 0) + ' active';
+        const showMajorsEl = document.getElementById('dip-watch-show-majors');
+        const showNormalEl = document.getElementById('dip-watch-show-normal');
+        const showMajors = !showMajorsEl || showMajorsEl.checked;
+        const showNormal = !showNormalEl || showNormalEl.checked;
+        function dipWatchSourceVisible(source) {
+          const isMajors = String(source || '') === 'majors';
+          return isMajors ? showMajors : showNormal;
+        }
         if (dipList) {
           const rows = (dw.entries || [])
             .filter(function (e) {
               if (e.status !== 'watching' && e.status !== 'armed') return false;
-              if (majorsOnly && String(e.source || '') !== 'majors') return false;
-              return true;
+              return dipWatchSourceVisible(e.source);
             })
             .slice(0, 16);
           const terminal = (dw.recentTerminal || []).slice(0, 2);
           const htmlParts = [];
-          if (rows.length) {
+          if (!showMajors && !showNormal) {
+            htmlParts.push(
+              '<div class="setup-watch-empty">Tick Majors and/or Normal to show dip setups</div>'
+            );
+          } else if (rows.length) {
             rows.forEach(function (e) {
               htmlParts.push(watchRowHtml('dip', e));
             });
           } else {
+            let emptyMsg = 'No active dip setups';
+            if (showMajors && !showNormal) emptyMsg = 'No active majors dip setups';
+            else if (!showMajors && showNormal) emptyMsg = 'No active normal dip setups';
             htmlParts.push(
-              '<div class="setup-watch-empty">' +
-                (majorsOnly
-                  ? 'No active majors dip setups'
-                  : 'No active dip setups') +
-                '</div>'
+              '<div class="setup-watch-empty">' + emptyMsg + '</div>'
             );
           }
-          terminal.forEach(function (e) {
-            if (majorsOnly && String(e.source || '') !== 'majors') return;
-            htmlParts.push(watchRowHtml('dip', e));
-          });
+          if (showMajors || showNormal) {
+            terminal.forEach(function (e) {
+              if (!dipWatchSourceVisible(e.source)) return;
+              htmlParts.push(watchRowHtml('dip', e));
+            });
+          }
           dipList.innerHTML = htmlParts.join('');
+          if (dipCount) dipCount.textContent = rows.length + ' active';
+        } else if (dipCount) {
+          dipCount.textContent = (dw.active || 0) + ' active';
         }
       }
 
@@ -12907,15 +12925,38 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
-    (function bindDipMajorsFilter() {
-      const el = document.getElementById('dip-watch-majors-only');
-      if (!el || el.dataset.bound === '1') return;
-      el.dataset.bound = '1';
-      el.addEventListener('change', function () {
+    (function bindDipWatchSourceFilters() {
+      const KEY_MAJORS = 'dipWatchShowMajors';
+      const KEY_NORMAL = 'dipWatchShowNormal';
+      const majorsEl = document.getElementById('dip-watch-show-majors');
+      const normalEl = document.getElementById('dip-watch-show-normal');
+      if (!majorsEl || !normalEl) return;
+      if (majorsEl.dataset.bound === '1') return;
+      majorsEl.dataset.bound = '1';
+      normalEl.dataset.bound = '1';
+      try {
+        const storedMajors = localStorage.getItem(KEY_MAJORS);
+        const storedNormal = localStorage.getItem(KEY_NORMAL);
+        // Migrate legacy single "majors only" flag if present
+        const legacyOnly = localStorage.getItem('dipWatchMajorsOnly');
+        if (storedMajors != null) majorsEl.checked = storedMajors !== '0';
+        else if (legacyOnly === '1') majorsEl.checked = true;
+        if (storedNormal != null) normalEl.checked = storedNormal !== '0';
+        else if (legacyOnly === '1') normalEl.checked = false;
+      } catch (_) {}
+      function persistAndRefresh() {
+        try {
+          localStorage.setItem(KEY_MAJORS, majorsEl.checked ? '1' : '0');
+          localStorage.setItem(KEY_NORMAL, normalEl.checked ? '1' : '0');
+        } catch (_) {}
         if (typeof window.refreshSetupWatches === 'function') {
           window.refreshSetupWatches();
+        } else if (typeof renderSetupWatchLists === 'function' && window._lastSetupWatches) {
+          renderSetupWatchLists(window._lastSetupWatches);
         }
-      });
+      }
+      majorsEl.addEventListener('change', persistAndRefresh);
+      normalEl.addEventListener('change', persistAndRefresh);
     })();
 
     async function refreshSetupWatches() {
@@ -24083,7 +24124,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           scanSt.textContent = statusText;
         });
         const feedHtml = cands.length === 0
-          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on Live Feed or Settings → Market Scanner (TA).</div>'
+          ? '<div class="mint text-xs">No scanner candidates yet — enable Market Scanner on Watchlist or Settings → Market Scanner (TA).</div>'
           : cands.slice(0, 25).map(function (c) {
               const migBadge = c.migrated
                 ? '<span class="badge" style="background:#7c3aed;color:#fff;margin-right:0.35rem" title="Migration entry">Migration</span>'
@@ -31780,7 +31821,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</ul>'
         );
         if (recs.length) {
-          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Recommended Poll (ms) — edit &amp; save here or in Live Feed / Zion</div>');
+          lines.push('<div style="margin:0.55rem 0 0.2rem;color:#cbd5e1">Recommended Poll (ms) — edit &amp; save here or in Watchlist / Zion</div>');
           lines.push(
             '<div style="display:flex;flex-direction:column;gap:0.55rem;margin-top:0.35rem">' +
               recs
@@ -31828,7 +31869,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '</div>'
           );
           lines.push(
-            '<div class="mt-2" style="color:#64748b">Saves write the same settings as Live Feed (Market Scanner / AlphaScan), Zion Poll, and monitor pollIntervalMs — forms update after save.</div>'
+            '<div class="mt-2" style="color:#64748b">Saves write the same settings as Watchlist (Market Scanner / AlphaScan), Zion Poll, and monitor pollIntervalMs — forms update after save.</div>'
           );
         } else {
           lines.push('<div style="margin-top:0.45rem;color:#4ade80">No Poll (ms) bumps suggested.</div>');
