@@ -2801,7 +2801,7 @@ export const config: BotConfig = {
     minKolWallets: 5,
     minWalletQuality: 40,
     minMcUsd: 50_000,
-    maxMcUsd: 500_000_000,
+    maxMcUsd: 2_000_000_000,
     offerTtlMinutes: 60,
     mintCooldownMinutes: 120,
     useTrackedWalletsAsBoost: true,
@@ -2889,6 +2889,8 @@ const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** One-shot: Zion safeguards MC band + quality/poll defaults. */
 const ZION_SAFEGUARDS_V1 = 'zionSafeguards_v1';
 const ZION_MIN_KOL_V2 = 'zionMinKol_v2';
+/** One-shot: raise Zion max MC to $2B so $1B+ KOL majors are not hard-skipped. */
+const ZION_MAX_MC_2B_V1 = 'zionMaxMc2b_v1';
 const SELF_LEARNING_DEFAULT_ON_V1 = 'selfLearningDefaultOn_v1';
 /** One-shot: restore Market Scanner ON after profile-gate false-OFF / sticky enabled:false. */
 const MARKET_SCANNER_USER_ON_V1 = 'marketScannerUserOn_v1';
@@ -4664,6 +4666,19 @@ export function applyPersistedSettings(opts?: {
     persistUserSettings();
     console.log(
       `[settings] Applied zionMinKol_v2 — Min KOL wallets default ${config.zion.minKolWallets}`
+    );
+  }
+
+  if (!settingsMigrations[ZION_MAX_MC_2B_V1]) {
+    const cur = Number(config.zion?.maxMcUsd);
+    // Raise when still on legacy $500M (or missing). Keep higher custom caps.
+    if (!Number.isFinite(cur) || cur <= 0 || cur <= 500_000_000) {
+      config.zion.maxMcUsd = 2_000_000_000;
+    }
+    settingsMigrations[ZION_MAX_MC_2B_V1] = true;
+    persistUserSettings();
+    console.log(
+      `[settings] Applied zionMaxMc2b_v1 — Zion maxMcUsd → $${Math.round(Number(config.zion.maxMcUsd)).toLocaleString()}`
     );
   }
 

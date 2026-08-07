@@ -52,12 +52,16 @@ export interface DipWatchEntry {
   lastReason?: string;
   kolCount?: number;
   source?: string;
+  /** Soft MC band when source is majors ($100M / $250M / $500M / $1B+) */
+  majorsBand?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
 }
 
 const MAX_WATCHES = 24;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
+/** High-MC majors wait longer for Fib/S setups (8–12h band → 10h) */
+const MAJORS_TTL_MS = 10 * 60 * 60_000;
 const ARM_NEAR_DROP_MIN = 6;
 const TRIGGER_RECLAIM_PCT = 1.5; // reclaim % off trough / bounce
 /** Manual unwatch — bots may re-add only after this cooldown */
@@ -215,6 +219,7 @@ export function considerDipWatchSetup(input: {
   fib618PriceSol?: number | null;
   kolCount?: number;
   source?: string;
+  majorsBand?: string;
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
@@ -233,6 +238,7 @@ export function considerDipWatchSetup(input: {
   const minVol = m.minVolumeH1Usd ?? 8_000;
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
+  const isMajors = String(input.source || '').toLowerCase() === 'majors';
 
   pruneTerminal();
   const existing = watches.get(input.mint);
@@ -254,6 +260,15 @@ export function considerDipWatchSetup(input: {
     existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
     existing.holderCount = input.holderCount ?? existing.holderCount;
     existing.kolCount = input.kolCount ?? existing.kolCount;
+    if (isMajors) {
+      existing.source = 'majors';
+      existing.majorsBand = input.majorsBand ?? existing.majorsBand;
+      // Keep majors TTL from sliding under 4h memecoin default on refresh
+      const remain = existing.expiresAt - Date.now();
+      if (remain < MAJORS_TTL_MS / 2) {
+        existing.expiresAt = Date.now() + MAJORS_TTL_MS;
+      }
+    }
     existing.targetDipEntries = buildTargetDipEntries(existing);
     return existing;
   }
@@ -261,6 +276,7 @@ export function considerDipWatchSetup(input: {
   const mc = input.marketCapUsd;
   if (mc != null && mc > 0 && mc < minMc) return null;
   if (
+    !isMajors &&
     input.holderCount != null &&
     input.holderCount > 0 &&
     input.holderCount < minHolders
@@ -268,6 +284,7 @@ export function considerDipWatchSetup(input: {
     return null;
   }
   if (
+    !isMajors &&
     input.volumeH1Usd != null &&
     input.volumeH1Usd > 0 &&
     input.volumeH1Usd < minVol
@@ -278,20 +295,22 @@ export function considerDipWatchSetup(input: {
   const drop = input.dropFromPeakPct;
   const nearTa = input.nearKeyFib === true || input.nearSupport === true;
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
-  // Need early dip signal OR Fib/S proximity on established token
-  if (!dropStarted && !nearTa) return null;
+  // Majors: admit to watching without force-buy when S/R thin (arm later).
+  // Memecoins: need early dip signal OR Fib/S proximity.
+  if (!isMajors && !dropStarted && !nearTa) return null;
   if (drop != null && drop > maxDrop) return null;
 
   const now = Date.now();
+  const armed = nearTa && dropStarted;
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
     name: input.name || input.symbol || 'Dip watch',
-    status: nearTa && dropStarted ? 'armed' : 'watching',
+    status: armed ? 'armed' : 'watching',
     createdAt: now,
     updatedAt: now,
-    armedAt: nearTa && dropStarted ? now : null,
-    expiresAt: now + DEFAULT_TTL_MS,
+    armedAt: armed ? now : null,
+    expiresAt: now + (isMajors ? MAJORS_TTL_MS : DEFAULT_TTL_MS),
     marketCapUsd: mc,
     volumeH1Usd: input.volumeH1Usd,
     holderCount: input.holderCount,
@@ -303,20 +322,30 @@ export function considerDipWatchSetup(input: {
     fib05PriceSol: input.fib05PriceSol ?? null,
     fib618PriceSol: input.fib618PriceSol ?? null,
     kolCount: input.kolCount,
-    source: input.source,
-    lastReason: nearTa ? 'near Fib/S' : 'watching for setup',
+    source: isMajors ? 'majors' : input.source,
+    majorsBand: isMajors ? input.majorsBand : undefined,
+    lastReason: armed
+      ? 'near Fib/S'
+      : isMajors
+        ? 'majors watch'
+        : 'watching for setup',
   };
   entry.targetDipEntries = buildTargetDipEntries(entry);
   watches.set(input.mint, entry);
   console.log(
-    `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
-      `MC=${mc != null ? `$${Math.round(mc)}` : '?'} drop=${drop != null ? `${drop.toFixed(0)}%` : '?'}`
+    `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol}` +
+      (isMajors ? ` [majors${entry.majorsBand ? `:${entry.majorsBand}` : ''}]` : '') +
+      ` MC=${mc != null ? `$${Math.round(mc)}` : '?'} drop=${drop != null ? `${drop.toFixed(0)}%` : '?'}`
   );
   return entry;
 }
 
 function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
+  const isMajors = String(w.source || '').toLowerCase() === 'majors';
+  // Soft prefer Dip Buyer; Steady/Trend/HWR still compete via lane fight.
+  // Never stamp Scalper — majors stay on quality lanes only.
+  const feed = isMajors ? 'majors' : 'kolscan';
   const launch: LaunchEvent = {
     mint: w.mint,
     symbol: w.symbol,
@@ -331,10 +360,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     volumeUsd: w.volumeH1Usd,
     holderCount: w.holderCount,
     candles: [],
-    source: 'kolscan',
+    source: isMajors ? 'jupiter' : 'kolscan',
     candleSource: 'synthetic',
     preferredProfileId: 'dip_buyer',
-    specialtyFeed: 'kolscan',
+    specialtyFeed: feed,
   };
   return {
     id: `dip-watch-${w.mint.slice(0, 8)}-${now}`,
@@ -343,21 +372,24 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     name: w.name,
     timestamp: now,
     status: 'seen',
-    rankScore: 88,
+    rankScore: isMajors ? 90 : 88,
     reasons: [
       'dip-watch:triggered',
+      ...(isMajors
+        ? [`majors${w.majorsBand ? `:${w.majorsBand}` : ''}`]
+        : []),
       w.nearKeyFib ? 'near Fib' : w.nearSupport ? 'near support' : 'reclaim',
       w.dropFromPeakPct != null
         ? `drop ${w.dropFromPeakPct.toFixed(0)}%`
         : 'setup',
     ],
-    source: 'kolscan',
+    source: isMajors ? 'jupiter' : 'kolscan',
     migrated: true,
     marketCapUsd: w.marketCapUsd,
     volumeH1Usd: w.volumeH1Usd,
     holderCount: w.holderCount,
     preferredProfileId: 'dip_buyer',
-    specialtyFeed: 'kolscan',
+    specialtyFeed: feed,
     kolCount: w.kolCount,
     nearKeyFib: w.nearKeyFib,
     nearSupport: w.nearSupport,
@@ -571,12 +603,14 @@ export function offerDipWatchFromCandidate(c: {
   kolCount?: number;
   specialtyFeed?: string;
   preferredProfileId?: string;
+  majorsBand?: string;
 }): void {
   if (
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&
     c.specialtyFeed !== 'kolscan' &&
-    c.specialtyFeed !== 'jupiter'
+    c.specialtyFeed !== 'jupiter' &&
+    c.specialtyFeed !== 'majors'
   ) {
     // Still allow organic mature tokens from any specialty feed
   }
@@ -584,6 +618,10 @@ export function offerDipWatchFromCandidate(c: {
     c.priceChangeH1Pct != null && c.priceChangeH1Pct < -1
       ? Math.abs(c.priceChangeH1Pct)
       : null;
+  const src =
+    c.specialtyFeed === 'majors'
+      ? 'majors'
+      : c.specialtyFeed || 'scanner';
   considerDipWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
@@ -599,6 +637,7 @@ export function offerDipWatchFromCandidate(c: {
     fib05PriceSol: c.fib05PriceSol ?? null,
     fib618PriceSol: c.fib618PriceSol ?? null,
     kolCount: c.kolCount,
-    source: c.specialtyFeed || 'scanner',
+    source: src,
+    majorsBand: c.majorsBand,
   });
 }

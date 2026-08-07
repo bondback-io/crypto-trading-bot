@@ -78,7 +78,7 @@ export interface ScannerCandidate {
   jupiterCategory?: string;
   /** Soft prefer this Smart Bot profile when specialty feed tagged the mint */
   preferredProfileId?: string;
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan';
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors';
   /** Distinct KOL wallets when from Kolscan specialty feed */
   kolCount?: number;
   /** Graduation watch / near-mig */
@@ -124,6 +124,12 @@ export interface ScannerStatus {
   };
   outcomes?: ReturnType<typeof getScannerOutcomeSummary>;
   jupiter?: ReturnType<typeof getJupiterTokensStatus>;
+  majors?: {
+    count: number;
+    lastPassAt: number | null;
+    lastPassOffered: number;
+    lastError: string | null;
+  };
   skipBuckets?: Array<{ reason: string; count: number }>;
   degenRelaxed?: boolean;
   /** True when Risk Off relaxes TA/volume floors for soak testing */
@@ -270,6 +276,20 @@ export function getScannerSkipBuckets(limit = 8): Array<{ reason: string; count:
 
 export function getScannerStatus(): ScannerStatus {
   const regime = getCachedMarketRegime();
+  let majors: ScannerStatus['majors'];
+  try {
+    const { getMajorsUniverseStatus } =
+      require('./majorsUniverse') as typeof import('./majorsUniverse');
+    const m = getMajorsUniverseStatus();
+    majors = {
+      count: m.count,
+      lastPassAt: m.lastPassAt,
+      lastPassOffered: m.lastPassOffered,
+      lastError: m.lastError,
+    };
+  } catch {
+    majors = undefined;
+  }
   return {
     running,
     lastPollAt,
@@ -287,6 +307,7 @@ export function getScannerStatus(): ScannerStatus {
     },
     outcomes: getScannerOutcomeSummary(),
     jupiter: getJupiterTokensStatus(),
+    majors,
     skipBuckets: getScannerSkipBuckets(8),
     degenRelaxed: false,
     riskOffRelaxed: config.riskLevel === 'off',
@@ -1420,6 +1441,22 @@ export async function runScannerPollOnce(): Promise<number> {
       logger.warn(
         'MarketScanner',
         'Specialty feed pass failed',
+        errorToMeta(err)
+      );
+    }
+    try {
+      const { runMajorsUniversePass } =
+        require('./majorsUniverse') as typeof import('./majorsUniverse');
+      const majors = await runMajorsUniversePass();
+      if (majors > 0) {
+        console.log(
+          `[marketScanner] majors feed offered ${majors} → dip-watch`
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        'MarketScanner',
+        'Majors universe pass failed',
         errorToMeta(err)
       );
     }

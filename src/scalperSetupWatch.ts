@@ -316,6 +316,9 @@ export function considerScalperWatchSetup(input: {
   if (isManualUnwatchCooldown(input.mint)) return null;
   if (isMintOnActiveDipWatch(input.mint)) return null;
 
+  // Never route high-MC majors into Scalper Mode B
+  if (String(input.source || '').toLowerCase() === 'majors') return null;
+
   const mc = input.marketCapUsd;
   // Mutual exclusion with Dip: only admit below dip floor
   if (mc != null && mc > 0 && mc >= DIP_FLOOR_MC) return null;

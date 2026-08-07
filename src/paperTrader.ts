@@ -27,6 +27,7 @@ import {
   reconcileMarkPriceSol,
   resolveExitMarketCaps,
   isSaneMarkMarketCapUsd,
+  isHardStopLossMarkTrusted,
   alignClosedExitMarketCapsToFill,
 } from './marketData';
 import { recordScannerOutcome } from './scannerOutcomes';
@@ -3391,6 +3392,33 @@ export class PaperTrader {
   }
 
   /**
+   * Fail-soft: hard SL only when circulating MC confirms the dump.
+   * Prevents −34% floor / ~−38% paper fills on poisoned Jupiter/Dex marks.
+   */
+  private hardStopLossAllowed(
+    position: Position,
+    markPriceSol: number,
+    hardSlPct: number
+  ): boolean {
+    const markMc = this.marketCapCache.get(position.mint);
+    const trust = isHardStopLossMarkTrusted({
+      entryPriceSol: position.entryPriceSol,
+      markPriceSol,
+      entryMarketCapUsd: position.entryMarketCapUsd,
+      markMarketCapUsd: markMc,
+      hardSlPct,
+    });
+    if (!trust.trusted) {
+      console.warn(
+        `[paper] ${trust.reason || 'hard SL deferred'} ` +
+          `for ${position.symbol || position.mint.slice(0, 8)}`
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Synchronous exit evaluation for paper/backtest — same rules as checkPositions
    * (profit strategy OR legacy tiers/TP/trail). Skips live Jupiter path.
    * Returns one action's event, or null if nothing to do.
@@ -3425,10 +3453,12 @@ export class PaperTrader {
     if (!position || position.status === 'closed') return null;
     if (position.tradeMode === 'live') return null;
 
-    this.setTokenPrice(position.mint, currentPrice);
-    // Use reconciled cache mark (may reject/adjust absurd feeds)
-    const markPrice = this.priceCache.get(position.mint) ?? currentPrice;
-    if (!(markPrice > 0)) return null;
+    this.setTokenPrice(position.mint, currentPrice, {
+      marketCapUsd: this.marketCapCache.get(position.mint),
+    });
+    // Use reconciled cache only — never fall back to a rejected raw feed
+    const markPrice = this.priceCache.get(position.mint);
+    if (markPrice == null || !(markPrice > 0)) return null;
 
     if (position.initialAmountTokens == null) {
       position.initialAmountTokens = position.amountTokens;
@@ -3493,7 +3523,8 @@ export class PaperTrader {
     );
     const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
-    // PCL exit priority: hard SL / disaster first (never softened)
+    // PCL exit priority: hard SL / disaster first (never softened by PCL;
+    // still fail-soft on poisoned marks that circulating MC does not confirm)
     {
       const rulesEarly = getStrategyRiskRules(position.strategyKind);
       const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
@@ -3506,7 +3537,7 @@ export class PaperTrader {
           SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
           ageMs < SWING_HARD_SL_GRACE_MS &&
           markPnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
-        if (!swingGrace) {
+        if (!swingGrace && this.hardStopLossAllowed(position, markPrice, hardSl)) {
           this.simulateSell(
             position.id,
             markPrice,
@@ -3872,6 +3903,18 @@ export class PaperTrader {
                 position.scalpSlPct ?? position.stopLossPct
               )
             : undefined;
+        if (scalpAction.exitKind === 'scalp_sl') {
+          const scalpSlRaw = position.scalpSlPct ?? position.stopLossPct;
+          const scalpSl = scalpSlRaw > 0 ? -Math.abs(scalpSlRaw) : scalpSlRaw;
+          if (!this.hardStopLossAllowed(position, markPrice, scalpSl)) {
+            return {
+              kind: 'none',
+              reason: 'scalp SL deferred (unconfirmed mark)',
+              markPnlPct,
+              stillOpen: true,
+            };
+          }
+        }
         console.log(
           `[scalp] ${tag} strategy=${strat} ${label} — ${scalpAction.reason}`
         );
@@ -3991,6 +4034,23 @@ export class PaperTrader {
         action.type === 'trail_exit' ||
         action.type === 'full'
       ) {
+        if (action.type === 'hard_sl') {
+          const adjSl = adjustedStopLossPct(
+            position.stopLossPct > 0
+              ? -Math.abs(position.stopLossPct)
+              : position.stopLossPct,
+            position.antiRug?.riskScore,
+            position.convictionScore
+          );
+          if (!this.hardStopLossAllowed(position, markPrice, adjSl)) {
+            return {
+              kind: 'none',
+              reason: 'hard SL deferred (unconfirmed mark)',
+              markPnlPct,
+              stillOpen: true,
+            };
+          }
+        }
         const minFill =
           action.type === 'hard_sl'
             ? hardStopMinFillPriceSol(
@@ -4075,7 +4135,7 @@ export class PaperTrader {
         SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
         ageMs < SWING_HARD_SL_GRACE_MS &&
         markPnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
-      if (!swingGrace) {
+      if (!swingGrace && this.hardStopLossAllowed(position, markPrice, hardSl)) {
         const reason = `hard stop-loss ${hardSl}%`;
         this.simulateSell(position.id, markPrice, reason, {
           minFillPriceSol: hardStopMinFillPriceSol(
@@ -4387,7 +4447,8 @@ export class PaperTrader {
 
       const label = formatTokenLabel(position.symbol, position.name, position.mint);
 
-      // PCL exit priority 1: hard SL / disaster first (never softened)
+      // PCL exit priority 1: hard SL / disaster first (never softened by PCL;
+      // still fail-soft on poisoned marks that circulating MC does not confirm)
       {
         const rulesEarly = getStrategyRiskRules(position.strategyKind);
         const hardSlRaw = rulesEarly.hardStopLossPct ?? position.stopLossPct;
@@ -4403,7 +4464,10 @@ export class PaperTrader {
             SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
             ageMs < SWING_HARD_SL_GRACE_MS &&
             markPnlPctAsync > SWING_HARD_SL_GRACE_RUG_PCT;
-          if (!swingGrace) {
+          if (
+            !swingGrace &&
+            this.hardStopLossAllowed(position, currentPrice, hardSl)
+          ) {
             await this.closePositionByRules(
               position,
               currentPrice,
@@ -4867,6 +4931,13 @@ export class PaperTrader {
             'sell',
             `${label}: [${tag}|${strat}] ${scalpAction.reason}`
           );
+          if (scalpAction.exitKind === 'scalp_sl') {
+            const scalpSlRaw = position.scalpSlPct ?? position.stopLossPct;
+            const scalpSl = scalpSlRaw > 0 ? -Math.abs(scalpSlRaw) : scalpSlRaw;
+            if (!this.hardStopLossAllowed(position, currentPrice, scalpSl)) {
+              continue;
+            }
+          }
           await this.closePositionByRules(
             position,
             currentPrice,
@@ -4944,7 +5015,10 @@ export class PaperTrader {
           SWING_HARD_SL_GRACE_PROFILES.has(position.tradeProfileId) &&
           ageMs < SWING_HARD_SL_GRACE_MS &&
           pnlPct > SWING_HARD_SL_GRACE_RUG_PCT;
-        if (!swingGrace) {
+        if (
+          !swingGrace &&
+          this.hardStopLossAllowed(position, currentPrice, hardSl)
+        ) {
           await this.closePositionByRules(
             position,
             currentPrice,
@@ -5108,6 +5182,18 @@ export class PaperTrader {
     }
 
     if (action.type === 'hard_sl' || action.type === 'trail_exit' || action.type === 'full') {
+      if (action.type === 'hard_sl') {
+        const adjSl = adjustedStopLossPct(
+          position.stopLossPct > 0
+            ? -Math.abs(position.stopLossPct)
+            : position.stopLossPct,
+          position.antiRug?.riskScore,
+          position.convictionScore
+        );
+        if (!this.hardStopLossAllowed(position, currentPrice, adjSl)) {
+          return;
+        }
+      }
       console.log(`[profit] 🔴 ${label} — ${action.reason}`);
       const minFill =
         action.type === 'hard_sl'

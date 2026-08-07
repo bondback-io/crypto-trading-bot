@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.220',
+    title: 'High-MC majors → Dip watch',
+    sections: ['scanners', 'microbots', 'zion', 'execution', 'risk'],
+    items: [
+      'Majors feed: Jupiter toptraded/organic (no pump filter), circulating MC ≥$100M + liq floor → Dip support-dip watch with longer TTL and majors badge; never Scalper Mode B.',
+      'On reclaim soft-prefer Dip Buyer; Steady/Trend/HWR still lane-fight. Zion max MC raised to $2B for $1B+ KOL; quality prefer-MC bias toward $50M.',
+      'Hard SL mark-trust: reject FDV-as-MC / unconfirmed dumps so stops do not fire on poisoned marks (ships with majors).',
+    ],
+  },
+  {
     version: '1.2.219',
     title: 'Zion mic freeze + QUEST FDV/MC marks',
     sections: ['zion', 'execution', 'risk', 'scanners'],

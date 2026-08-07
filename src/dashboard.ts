@@ -4896,6 +4896,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       color: #64748b;
       font-size: 10px;
     }
+    .setup-watch-badge {
+      display: inline-block;
+      margin-left: 0.4rem;
+      padding: 0.05rem 0.35rem;
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      border-radius: 0.25rem;
+      vertical-align: middle;
+      color: #bfdbfe;
+      background: rgba(37, 99, 235, 0.28);
+      border: 1px solid rgba(96, 165, 250, 0.45);
+    }
+    .setup-watch-badge.is-majors {
+      color: #fde68a;
+      background: rgba(180, 83, 9, 0.28);
+      border-color: rgba(251, 191, 36, 0.5);
+    }
     .setup-watch-actions {
       display: inline-flex;
       flex-wrap: wrap;
@@ -7838,7 +7856,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer</span>
               <span class="setup-watch-title">Dip setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. Unwatch cools out for 15 minutes.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Live MC refreshes ~15s. Target Dip Entry = approx MC at Fib 0.5 / 0.618 / Support. High-MC majors (≥$100M circ) use longer TTL + <span class="setup-watch-badge is-majors">majors</span> badge. Unwatch cools out for 15 minutes.</p>
+              <div class="setup-watch-filter-row mt-1">
+                <label class="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer" title="Show only majors-sourced dip watches">
+                  <input type="checkbox" id="dip-watch-majors-only" />
+                  Majors only
+                </label>
+              </div>
             </div>
             <span id="dip-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -12676,6 +12700,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           escAttr(kind) +
           '" data-mint="' +
           mintAttr +
+          '" data-watch-source="' +
+          escAttr(String(e.source || '')) +
           '">' +
           '<div class="setup-watch-main">' +
           '<div><span class="setup-watch-sym">' +
@@ -12684,7 +12710,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           statusCls +
           '">' +
           escHtml(status) +
-          '</span></div>' +
+          '</span>' +
+          (kind === 'dip' && String(e.source || '') === 'majors'
+            ? '<span class="setup-watch-badge is-majors" title="High-MC majors feed (circulating MC)">' +
+              (e.majorsBand
+                ? 'majors · ' + escHtml(String(e.majorsBand))
+                : 'majors') +
+              '</span>'
+            : '') +
+          '</div>' +
           '<div class="setup-watch-meta">' +
           fmtWatchPct(kind, e) +
           mc +
@@ -12700,11 +12734,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       if (dipCount || dipList) {
         const dw = data.dipWatch || { active: 0, entries: [] };
+        const majorsOnlyEl = document.getElementById('dip-watch-majors-only');
+        const majorsOnly = majorsOnlyEl && majorsOnlyEl.checked;
         if (dipCount) dipCount.textContent = (dw.active || 0) + ' active';
         if (dipList) {
           const rows = (dw.entries || [])
             .filter(function (e) {
-              return e.status === 'watching' || e.status === 'armed';
+              if (e.status !== 'watching' && e.status !== 'armed') return false;
+              if (majorsOnly && String(e.source || '') !== 'majors') return false;
+              return true;
             })
             .slice(0, 16);
           const terminal = (dw.recentTerminal || []).slice(0, 2);
@@ -12715,10 +12753,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             });
           } else {
             htmlParts.push(
-              '<div class="setup-watch-empty">No active dip setups</div>'
+              '<div class="setup-watch-empty">' +
+                (majorsOnly
+                  ? 'No active majors dip setups'
+                  : 'No active dip setups') +
+                '</div>'
             );
           }
           terminal.forEach(function (e) {
+            if (majorsOnly && String(e.source || '') !== 'majors') return;
             htmlParts.push(watchRowHtml('dip', e));
           });
           dipList.innerHTML = htmlParts.join('');
@@ -12811,6 +12854,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
+    (function bindDipMajorsFilter() {
+      const el = document.getElementById('dip-watch-majors-only');
+      if (!el || el.dataset.bound === '1') return;
+      el.dataset.bound = '1';
+      el.addEventListener('change', function () {
+        if (typeof window.refreshSetupWatches === 'function') {
+          window.refreshSetupWatches();
+        }
+      });
+    })();
 
     async function refreshSetupWatches() {
       try {

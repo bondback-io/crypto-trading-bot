@@ -36,7 +36,7 @@ export const DEFAULT_HWR_QUALITY_FILTER: HighWinRateQualityFilter = {
   enabled: true,
   mode: 'reject',
   minMarketCapUsd: 500_000,
-  preferMarketCapUsd: 1_000_000,
+  preferMarketCapUsd: 50_000_000,
   minLiquidityUsd: 20_000,
   minVolumeH1Usd: 15_000,
   minHolders: 150,

@@ -82,7 +82,7 @@ export interface LaunchEvent {
   holderCount?: number;
   /** Per-profile specialty feed tags (additive; global scanner leaves unset) */
   preferredProfileId?: string;
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan';
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors';
 }
 
 function isValidMint(m: string): boolean {
@@ -263,17 +263,33 @@ export interface ReconcileMarkPriceResult {
   reason?: string;
 }
 
-/** Reject price dumps that Dex MC has not confirmed (flat/up) for this long after open. */
+/**
+ * Legacy early-window constant (smoke / docs). Phantom dump/pump gates now
+ * apply for the full hold — age no longer weakens MC confirmation.
+ */
 export const PHANTOM_DUMP_MC_GATE_MS = 120_000;
 
-/** Same window for early phantom pumps (price green, MC flat). */
+/** Same window label for early phantom pumps (price green, MC flat). */
 export const PHANTOM_PUMP_MC_GATE_MS = PHANTOM_DUMP_MC_GATE_MS;
 
 /** Price PnL must not lead Dex MC PnL by more than this (percentage points). */
 export const PHANTOM_PUMP_GAP_PCT = 8;
 
+/** Symmetric: price dump vs MC (percentage points) before we reject/clamp. */
+export const PHANTOM_DUMP_GAP_PCT = PHANTOM_PUMP_GAP_PCT;
+
 /** Max +% jump from previous accepted mark in one update unless MC confirms. */
 export const MAX_MARK_TICK_PUMP_PCT = 12;
+
+/** Max −% drop from previous accepted mark in one update unless MC confirms. */
+export const MAX_MARK_TICK_DUMP_PCT = 12;
+
+/**
+ * Without a usable circulating mark MC, reject dumps at/steeper than this.
+ * Stops hard-SL (−30/−34%) from firing on Jupiter-quote / decimals poison
+ * when FDV-as-MC was stripped and left markMc null.
+ */
+export const UNCONFIRMED_DUMP_REJECT_PCT = -15;
 
 /**
  * Reconcile a live mark vs entry so paper PnL cannot explode from unit mismatches
@@ -283,12 +299,14 @@ export const MAX_MARK_TICK_PUMP_PCT = 12;
  * but only when the MC ratio itself is within sane bounds. A bogus Dex FDV
  * (e.g. $119B vs $25M entry) must never force a 50× price mark.
  *
- * Early after open: if Dex MC is still near entry (or up) but the price mark shows a
- * steep dump, reject the mark (stops Dip Buyer inventing −17% SL exits while
- * live MC never moved).
+ * Phantom dump (any age): if circulating MC is still near entry (or up) but the
+ * price mark shows a steep dump, reject the mark (stops false hard SL at the
+ * −34% floor / ~−38% after paper slip while charts never moved).
  *
  * Symmetric phantom-pump: if price is strongly green but Dex MC has not confirmed
  * (flat/down), reject or clamp to MC-implied so Full TP cannot fire on junk marks.
+ *
+ * Never scale mark price UP from Dex MC (FDV-as-MC invented fake moons).
  */
 export function reconcileMarkPriceSol(
   input: ReconcileMarkPriceInput
@@ -329,21 +347,26 @@ export function reconcileMarkPriceSol(
   const pxPnlPct = (pxRatio - 1) * 100;
   const mcPnlPct = hasMc ? (markMc! / entryMc! - 1) * 100 : null;
 
-  // Phantom-dump gate: price says −10%+ but Dex MC is still within ~5% of entry (or up)
-  if (
-    ageMs != null &&
-    ageMs < PHANTOM_DUMP_MC_GATE_MS &&
-    hasMc &&
-    mcPnlPct != null
-  ) {
+  // Phantom-dump gate (full hold): price −10%+ but circulating MC still ~flat/up
+  if (hasMc && mcPnlPct != null) {
     if (pxPnlPct <= -10 && mcPnlPct > -5) {
       return {
         priceSol: entry,
         adjusted: true,
         rejected: true,
-        reason: `early mark/MC disagree (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`,
+        reason: `mark/MC disagree dump (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`,
       };
     }
+  }
+
+  // No usable circ MC (often after FDV strip): do not accept hard-SL-depth dumps
+  if (!hasMc && pxPnlPct <= UNCONFIRMED_DUMP_REJECT_PCT) {
+    return {
+      priceSol: entry,
+      adjusted: true,
+      rejected: true,
+      reason: `unconfirmed dump ${pxPnlPct.toFixed(1)}% without circulating MC`,
+    };
   }
 
   // Phantom-pump gate (early): price +10%+ but Dex MC still flat/down (~within +5%)
@@ -373,10 +396,26 @@ export function reconcileMarkPriceSol(
     }
   }
 
-  // NOTE: We intentionally do not scale the mark price UP from Dex MC.
-  // Fresh pumps often have MC that disagrees with fill price; MC-scaling
-  // previously invented fake moons when Dex mirrored FDV into marketCap
-  // (e.g. circ MC $10M entry → FDV $250M "mark MC" ⇒ ~25× fake PnL).
+  // Ongoing dump: price lags MC by ≥ gap → clamp mark up toward MC-implied
+  // (never invent moons above the raw mark; only undo phantom dumps).
+  if (hasMc && mcPnlPct != null && pxPnlPct < mcPnlPct - PHANTOM_DUMP_GAP_PCT) {
+    const mcImplied = entry * (markMc! / entryMc!);
+    if (
+      mcImplied > 0 &&
+      Number.isFinite(mcImplied) &&
+      mcImplied > priceSol &&
+      mcImplied <= entry * 1.05
+    ) {
+      priceSol = mcImplied;
+      adjusted = true;
+      reason = `clamp dump to MC (px ${pxPnlPct.toFixed(1)}% vs mc ${mcPnlPct.toFixed(1)}%)`;
+    }
+  }
+
+  // NOTE: We intentionally do not scale the mark price UP from Dex MC beyond
+  // undoing a phantom dump (cap at ~entry+5%). Fresh pumps often have MC that
+  // disagrees with fill price; MC-scaling previously invented fake moons when
+  // Dex mirrored FDV into marketCap (circ MC $10M → FDV $250M ⇒ ~25× fake PnL).
 
   const rawRatio = mark / entry;
   if (
@@ -439,12 +478,94 @@ export function reconcileMarkPriceSol(
     }
   }
 
+  // Tick dump: sudden drop from last accepted mark without MC confirmation.
+  if (
+    prev != null &&
+    Number.isFinite(prev) &&
+    prev > 0 &&
+    priceSol < prev * (1 - MAX_MARK_TICK_DUMP_PCT / 100)
+  ) {
+    const tickPct = (priceSol / prev - 1) * 100;
+    const mcConfirmsTick =
+      hasMc &&
+      mcPnlPct != null &&
+      Math.abs(mcPnlPct - (priceSol / entry - 1) * 100) <= PHANTOM_DUMP_GAP_PCT;
+    if (!mcConfirmsTick) {
+      const floored = prev * (1 - MAX_MARK_TICK_DUMP_PCT / 100);
+      priceSol = Math.max(priceSol, floored);
+      adjusted = true;
+      reason = `tick dump floor ${tickPct.toFixed(1)}%→${-MAX_MARK_TICK_DUMP_PCT}%`;
+    }
+  }
+
   return {
     priceSol,
     adjusted,
     rejected: false,
     reason,
   };
+}
+
+/**
+ * Hard SL must not fire on poisoned marks (flat circ MC, missing MC after FDV
+ * strip, or price/MC disagree). Real rugs move circulating MC with price.
+ */
+export function isHardStopLossMarkTrusted(input: {
+  entryPriceSol: number;
+  markPriceSol: number;
+  entryMarketCapUsd?: number | null;
+  markMarketCapUsd?: number | null;
+  /** Negative hard-SL threshold, e.g. -34 */
+  hardSlPct: number;
+}): { trusted: boolean; reason?: string } {
+  const entry = input.entryPriceSol;
+  const mark = input.markPriceSol;
+  const hardSl = input.hardSlPct;
+  if (!(entry > 0) || !(mark > 0) || !Number.isFinite(hardSl) || hardSl >= 0) {
+    return { trusted: false, reason: 'bad-inputs' };
+  }
+  const pxPnlPct = ((mark - entry) / entry) * 100;
+  // Not in hard-SL territory — caller should not sell anyway
+  if (pxPnlPct > hardSl) {
+    return { trusted: true };
+  }
+
+  const entryMc = input.entryMarketCapUsd;
+  const markMc = input.markMarketCapUsd;
+  const hasMc =
+    entryMc != null &&
+    Number.isFinite(entryMc) &&
+    entryMc > 0 &&
+    markMc != null &&
+    Number.isFinite(markMc) &&
+    markMc > 0 &&
+    isSaneMarkMarketCapUsd(entryMc, markMc, {
+      priceRatio: mark / entry,
+    });
+
+  if (!hasMc) {
+    return {
+      trusted: false,
+      reason: `hard SL deferred — no circulating MC to confirm px ${pxPnlPct.toFixed(1)}%`,
+    };
+  }
+
+  const mcPnlPct = (markMc! / entryMc! - 1) * 100;
+  // Circulating MC must also be in clear drawdown (not flat while price dumps)
+  if (mcPnlPct > -5) {
+    return {
+      trusted: false,
+      reason: `hard SL deferred — MC ${mcPnlPct.toFixed(1)}% flat vs px ${pxPnlPct.toFixed(1)}%`,
+    };
+  }
+  // MC should not wildly disagree with the price dump (unit / FDV poison)
+  if (mcPnlPct > pxPnlPct + PHANTOM_DUMP_GAP_PCT * 2) {
+    return {
+      trusted: false,
+      reason: `hard SL deferred — MC ${mcPnlPct.toFixed(1)}% vs px ${pxPnlPct.toFixed(1)}%`,
+    };
+  }
+  return { trusted: true };
 }
 
 export interface ResolveExitMarketCapInput {

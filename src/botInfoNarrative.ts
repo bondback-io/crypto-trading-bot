@@ -544,6 +544,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
+          <li><strong>High-MC majors</strong> — additive Jupiter toptraded/organic feed (circulating MC ≥$100M, never FDV) → Dip support-dip watch (longer TTL, <em>majors</em> badge). On reclaim, soft-prefer Dip Buyer; Steady/Trend/HWR still share via lane fight. Never routed into Scalper Mode B. Launch/pump scanner for Scalper-family stays unchanged.</li>
           <li><strong>AlphaScan</strong> — additive Jupiter <code>/recent</code> + curve buckets: <strong>Soon</strong> = still on pump.fun curve → Migration Sniper grad-watch; <strong>Bonded</strong> = true post-grad (graduatedAt or curve-complete + min MC, default $25k) → Scalper / Reversal. Missing-curve alone is not Bonded. Does not replace Jupiter trending.</li>
           <li><strong>Pump.fun</strong> — bonding-curve progress, migration listener, Discover Pump SM for early smart money.</li>
           <li><strong>Regime / session</strong> — scanner can pause in risk-off; UTC Asia/EU/US session filter can block entries.</li>

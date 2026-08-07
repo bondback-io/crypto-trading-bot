@@ -623,7 +623,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 1,
       requireCluster: false,
       minMarketCapUsd: 500_000,
-      preferMarketCapUsd: 1_000_000,
+      preferMarketCapUsd: 50_000_000,
       minHolders: 80,
       minVolumeH1Usd: 8_000,
       minDropFromPeakPct: 8,
@@ -711,7 +711,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minTokenAgeHours: 1.5,
       minMarketCapUsd: 75_000,
-      preferMarketCapUsd: 500_000,
+      preferMarketCapUsd: 50_000_000,
       minHolders: 40,
       minVolumeH1Usd: 4_000,
       kolscanFeedEnabled: true,
@@ -872,7 +872,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       patternMinMarketCapUsd: DEFAULT_HWR_QUALITY_FILTER.minMarketCapUsd,
       qualityFilter: { ...DEFAULT_HWR_QUALITY_FILTER },
       minMarketCapUsd: 500_000,
-      preferMarketCapUsd: 1_000_000,
+      preferMarketCapUsd: 50_000_000,
       minHolders: 150,
       minVolumeH1Usd: 15_000,
       minConviction: 55,
@@ -1028,7 +1028,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minTokenAgeHours: 3,
       minMarketCapUsd: 450_000,
-      preferMarketCapUsd: 1_000_000,
+      preferMarketCapUsd: 50_000_000,
       minHolders: 80,
       minVolumeH1Usd: 4_000,
       minPullbackPct: 2,
@@ -1378,7 +1378,7 @@ export interface TradeProfileMatchContext {
    */
   preferProfileId?: string | null;
   /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | null;
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | null;
   /**
    * HMC Setup Classifier class when available (e.g. 'dip') — used to ease
    * dip_buyer conversion floors on classified dip paths.

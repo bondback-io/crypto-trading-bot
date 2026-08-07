@@ -5,6 +5,7 @@
 import {
   MAX_MARK_TICK_PUMP_PCT,
   PHANTOM_DUMP_MC_GATE_MS,
+  isHardStopLossMarkTrusted,
   reconcileMarkPriceSol,
   resolveExitMarketCaps,
 } from '../src/marketData';
@@ -50,9 +51,9 @@ const r2 = reconcileMarkPriceSol({
   positionAgeMs: PHANTOM_DUMP_MC_GATE_MS + 1_000,
 });
 check(
-  'after 120s gate mark accepted',
-  r2.rejected === false,
-  String(r2.priceSol)
+  'after 120s flat-MC dump still rejected',
+  r2.rejected === true,
+  r2.reason
 );
 
 const rConfirmDump = reconcileMarkPriceSol({
@@ -66,6 +67,20 @@ check(
   'dump + Dex also down accepted',
   rConfirmDump.rejected === false,
   String(rConfirmDump.priceSol)
+);
+
+// No circ MC + hard-SL-depth dump → reject (FDV-stripped markMc path)
+const noMcDump = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 0.62,
+  entryMarketCapUsd: 2.9e6,
+  markMarketCapUsd: null,
+  positionAgeMs: 180_000,
+});
+check(
+  'unconfirmed dump without MC rejected',
+  noMcDump.rejected === true,
+  noMcDump.reason
 );
 
 // TROLL-class: price +37% but Dex MC still ~flat → early phantom pump rejected
@@ -128,6 +143,35 @@ check(
   String(tick.priceSol)
 );
 
+// Confirmed dump with prior mark: MC-aligned clamp / tick floor — must not reject
+const tickDump = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 0.7,
+  entryMarketCapUsd: 37e6,
+  markMarketCapUsd: 30e6,
+  positionAgeMs: PHANTOM_DUMP_MC_GATE_MS + 1_000,
+  prevMarkPriceSol: 1.0,
+});
+check(
+  'confirmed dump accepted (MC also down)',
+  tickDump.rejected === false && tickDump.priceSol > 0.65,
+  String(tickDump.priceSol)
+);
+
+const tickDumpFlatMc = reconcileMarkPriceSol({
+  entryPriceSol: 1,
+  markPriceSol: 0.7,
+  entryMarketCapUsd: 37e6,
+  markMarketCapUsd: 36.5e6,
+  positionAgeMs: 60_000,
+  prevMarkPriceSol: 1.0,
+});
+check(
+  'tick dump with flat MC rejected',
+  tickDumpFlatMc.rejected === true,
+  tickDumpFlatMc.reason
+);
+
 const caps = resolveExitMarketCaps({
   entryMarketCapUsd: 2.9e6,
   entryPriceSol: 1,
@@ -163,6 +207,46 @@ check(
   `display=${fomo.displayUsd} live=${fomo.liveUsd}`
 );
 check('fomodog source is implied', fomo.source === 'implied', fomo.source);
+
+// Hard SL trust: flat MC must not authorize −38% floor fills
+const slTrustBad = isHardStopLossMarkTrusted({
+  entryPriceSol: 1,
+  markPriceSol: 0.6,
+  entryMarketCapUsd: 10e6,
+  markMarketCapUsd: 9.8e6,
+  hardSlPct: -34,
+});
+check(
+  'hard SL deferred when MC flat',
+  slTrustBad.trusted === false,
+  slTrustBad.reason
+);
+
+const slTrustOk = isHardStopLossMarkTrusted({
+  entryPriceSol: 1,
+  markPriceSol: 0.6,
+  entryMarketCapUsd: 10e6,
+  markMarketCapUsd: 6.2e6,
+  hardSlPct: -34,
+});
+check(
+  'hard SL allowed when MC confirms dump',
+  slTrustOk.trusted === true,
+  slTrustOk.reason
+);
+
+const slTrustNoMc = isHardStopLossMarkTrusted({
+  entryPriceSol: 1,
+  markPriceSol: 0.6,
+  entryMarketCapUsd: 10e6,
+  markMarketCapUsd: null,
+  hardSlPct: -34,
+});
+check(
+  'hard SL deferred without mark MC',
+  slTrustNoMc.trusted === false,
+  slTrustNoMc.reason
+);
 
 const base: ProfitPositionView = {
   entryPriceSol: 1,
