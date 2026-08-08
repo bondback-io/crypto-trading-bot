@@ -884,6 +884,96 @@ function localAnalystReply(
     });
   }
 
+  if (
+    /why.*dip|dip\s*buyer\s*quiet|dip\s*(is\s*)?(quiet|idle|silent)|no\s*dip/i.test(
+      q
+    )
+  ) {
+    try {
+      const { getSetupWatchDiagnostics } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const d = getSetupWatchDiagnostics();
+      const reason = d.dipInactiveReason;
+      const map: Record<string, string> = {
+        no_watches: 'No Dip watches are active right now.',
+        armed_no_trigger: 'Dip has armed setups waiting for reclaim trigger.',
+        trigger_blocked: 'Dip triggers were blocked by hard safety (anti-rug / floors).',
+        recovery: 'Dip Buyer Recovery is throttling admits.',
+        marl: 'MARL coordination is downranking Dip.',
+        profile_off: 'Dip Buyer or Market Scanner is off.',
+      };
+      return formatZionReply({
+        greeting: greet,
+        answer: map[reason] || `Dip quiet reason: ${reason}.`,
+        summary:
+          `Armed by profile: ${JSON.stringify(d.armedByProfile || {})}.` +
+          (d.lastBlockReason ? ` Last block: ${d.lastBlockReason}.` : ''),
+        followUp: 'How many Scalper watches are armed?',
+      });
+    } catch {
+      return formatZionReply({
+        greeting: greet,
+        answer: 'Couldn’t read Dip watch diagnostics just now.',
+        followUp: 'Check the Watchlist Mode B strip.',
+      });
+    }
+  }
+
+  if (/how many.*scalper.*armed|scalper.*watches?\s*armed|armed.*scalper/i.test(q)) {
+    try {
+      const { getSetupWatchDiagnostics } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const d = getSetupWatchDiagnostics();
+      const bits = Object.entries(d.armedByProfile || {})
+        .map(([id, n]) => `${id}: ${n}`)
+        .join(', ');
+      const total = Object.values(d.armedByProfile || {}).reduce(
+        (s, n) => s + (Number(n) || 0),
+        0
+      );
+      return formatZionReply({
+        greeting: greet,
+        answer: `Armed setups: ${total}${bits ? ` (${bits})` : ''}.`,
+        summary:
+          d.scalperAttentionShare != null
+            ? `Scalper attention share ~${d.scalperAttentionShare}%.`
+            : 'Attention share not sampled yet.',
+        followUp: 'What % of armed setups opened?',
+      });
+    } catch {
+      return formatZionReply({
+        greeting: greet,
+        answer: 'Armed-watch counts unavailable.',
+      });
+    }
+  }
+
+  if (
+    /%.*(armed|setup).*open|armed.*open(ed)?|trigger\s*success|open\s*rate.*armed/i.test(
+      q
+    )
+  ) {
+    try {
+      const { getSetupWatchDiagnostics } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const d = getSetupWatchDiagnostics();
+      return formatZionReply({
+        greeting: greet,
+        answer:
+          d.triggerSuccessPct != null
+            ? `About ${d.triggerSuccessPct}% of armed triggers opened a trade (recent window).`
+            : 'No armed→open samples yet this session.',
+        summary: `Armed ${d.stats.armed} · triggered ${d.stats.triggered} · opened ${d.stats.opened} · blocked ${d.stats.blockedSafety}.`,
+        followUp: 'Why is Dip Buyer quiet?',
+      });
+    } catch {
+      return formatZionReply({
+        greeting: greet,
+        answer: 'Open-rate diagnostics unavailable.',
+      });
+    }
+  }
+
   if (/scalper|ta setup/.test(q)) {
     const p = findProfile(facts, 'scalper');
     return formatZionReply({

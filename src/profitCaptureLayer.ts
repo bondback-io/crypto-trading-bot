@@ -222,7 +222,11 @@ export function computeEntryQualityScore(input: {
 export function resolvePermissionWindowSec(
   profileId: string | null | undefined,
   entryQualityScore?: number | null,
-  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
+  opts?: {
+    entryStyle?: string | null;
+    lateChaseAtEntry?: boolean;
+    armedWatch?: boolean;
+  }
 ): number {
   const family = resolvePclProfileFamily(profileId);
   const cfg = getProfitCaptureLayerConfig();
@@ -254,7 +258,15 @@ export function resolvePermissionWindowSec(
   const style = String(opts?.entryStyle || '');
   const validStyle =
     style.length > 0 && style !== 'late_chase' && style !== 'unknown';
-  if (!late && validStyle && q != null && q >= 70) {
+  const armed =
+    opts?.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(style);
+  const mediumHigh =
+    (q != null && q >= 55) ||
+    /scalp_reclaim|support_dip_reclaim|reclaim/i.test(style);
+  if (armed || (mediumHigh && !late && validStyle)) {
+    sec = Math.round(sec * 1.5);
+  } else if (!late && validStyle && q != null && q >= 70) {
     sec = Math.round(sec * 1.2);
   } else if (late || style === 'late_chase' || (q != null && q < 40)) {
     sec = Math.round(sec * 0.7);
@@ -268,6 +280,7 @@ export function computeProfitPermissionUntilMs(input: {
   entryQualityScore?: number | null;
   entryStyle?: string | null;
   lateChaseAtEntry?: boolean;
+  armedWatch?: boolean;
 }): number {
   const sec = resolvePermissionWindowSec(
     input.profileId,
@@ -275,6 +288,7 @@ export function computeProfitPermissionUntilMs(input: {
     {
       entryStyle: input.entryStyle,
       lateChaseAtEntry: input.lateChaseAtEntry,
+      armedWatch: input.armedWatch,
     }
   );
   return Number(input.openedAt) + sec * 1000;
@@ -334,7 +348,13 @@ export function resolvePclPppDefaults(
 }
 
 export function resolvePclPartialDefaults(
-  profileId: string | null | undefined
+  profileId: string | null | undefined,
+  opts?: {
+    armedWatch?: boolean;
+    entryStyle?: string | null;
+    entryQualityScore?: number | null;
+    qualityTier?: 'low' | 'medium' | 'high' | null;
+  }
 ): { earlyPartialTpPct: number; earlyPartialFraction: number } {
   const family = resolvePclProfileFamily(profileId);
   // Fast profiles keep per-id nuance in DEFAULT_EXIT_POLICIES; family table is fallback.
@@ -362,6 +382,30 @@ export function resolvePclPartialDefaults(
     base = { earlyPartialTpPct: 15, earlyPartialFraction: 0.3 };
   } else if (id === 'smart_money_mirror') {
     base = { earlyPartialTpPct: 15, earlyPartialFraction: 0.3 };
+  }
+  const style = String(opts?.entryStyle || '');
+  const q =
+    opts?.entryQualityScore != null &&
+    Number.isFinite(Number(opts.entryQualityScore))
+      ? Number(opts.entryQualityScore)
+      : null;
+  const armed =
+    opts?.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(style);
+  const mediumHigh =
+    opts?.qualityTier === 'medium' ||
+    opts?.qualityTier === 'high' ||
+    (q != null && q >= 55) ||
+    /scalp_reclaim|support_dip_reclaim|reclaim/i.test(style);
+  // Armed / medium-high reclaim: earlier bank, keep more runner
+  if (armed || mediumHigh) {
+    base = {
+      earlyPartialTpPct: clamp(base.earlyPartialTpPct, 8, 10),
+      earlyPartialFraction: clamp(base.earlyPartialFraction, 0.4, 0.5),
+    };
+    if (armed) {
+      base = { earlyPartialTpPct: 9, earlyPartialFraction: 0.45 };
+    }
   }
   const cfg = getProfitCaptureLayerConfig();
   const ovKey =
@@ -400,11 +444,20 @@ export function shouldBlockTinyGreenScratch(input: {
   pclPartialTaken?: boolean;
   qualityTier?: 'low' | 'medium' | 'high' | null;
   entryQualityScore?: number | null;
+  maxRunupPct?: number | null;
+  armedWatch?: boolean;
+  entryStyle?: string | null;
   nowMs?: number;
 }): boolean {
   if (!isProfitCaptureLayerEnabled()) return false;
   const pnl = Number(input.pnlPct) || 0;
   if (!(pnl > 0) || pnl >= PCL_TINY_GREEN_SCRATCH_PCT) return false;
+  const mfe = Math.max(0, Number(input.maxRunupPct) || 0);
+  const armed =
+    input.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(String(input.entryStyle || ''));
+  // Armed / high-MFE: never scratch tiny green when MFE ≥ 10%
+  if ((armed || mfe >= 10) && mfe >= 10) return true;
   const perm = isProfitPermissionActive({
     profitPermissionUntilMs: input.profitPermissionUntilMs,
     nowMs: input.nowMs,
@@ -438,16 +491,21 @@ export function permissionFadeThresholdMult(input: {
   return 1;
 }
 
-/** High quality → later PPP arm (+5–10 pts of TP%). Valid style stretches further. */
+/** High quality → later PPP arm (+5–10 pts of TP%). Valid style stretches further.
+ * Armed / medium-high reclaim → arm ~75% of TP. */
 export function qualityPppArmBonusPts(
   entryQualityScore?: number | null,
-  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
+  opts?: {
+    entryStyle?: string | null;
+    lateChaseAtEntry?: boolean;
+    armedWatch?: boolean;
+  }
 ): number {
   const q =
     entryQualityScore != null && Number.isFinite(Number(entryQualityScore))
       ? Number(entryQualityScore)
       : null;
-  if (q == null) return 0;
+  if (q == null && !opts?.armedWatch) return 0;
   const late = opts?.lateChaseAtEntry === true;
   const style = String(opts?.entryStyle || '');
   const validStyle =
@@ -455,11 +513,17 @@ export function qualityPppArmBonusPts(
     style !== 'late_chase' &&
     style !== 'unknown' &&
     !late;
-  if (late || (q < 45 && !validStyle)) return 0;
-  if (q >= 80 && validStyle) return 12;
-  if (q >= 80) return 10;
-  if (q >= 70 && validStyle) return 8;
-  if (q >= 70) return 5;
+  const armed =
+    opts?.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(style);
+  // Target ~75% of TP: base fast=60 → +15; dip/quality=65 → +10
+  if (armed && !late) return 15;
+  if (late || ((q == null || q < 45) && !validStyle)) return 0;
+  if (q != null && q >= 80 && validStyle) return 12;
+  if (q != null && q >= 80) return 10;
+  if (q != null && q >= 70 && validStyle) return 8;
+  if (q != null && q >= 70) return 5;
+  if (q != null && q >= 55 && validStyle) return 10;
   return 0;
 }
 
@@ -606,6 +670,11 @@ export function computePclLearningRewardDelta(input: {
       delta += 4 * capture;
       if (validStyle) delta += 1.5;
     }
+    const armedTag =
+      (Array.isArray(input.learningTags) &&
+        input.learningTags.includes('armed_trigger')) ||
+      /scalp_reclaim_burst|support_dip_reclaim/i.test(style);
+    if (armedTag && capture >= 0.45 && mfe >= 6) delta += 2;
     // Boost: partial reached
     if (
       input.pclPartialTaken ||
@@ -613,6 +682,7 @@ export function computePclLearningRewardDelta(input: {
     ) {
       delta += 3;
       if (validStyle) delta += 1;
+      if (armedTag) delta += 1.5;
     }
     // Boost: runner continuation (exit after partial with positive remainder)
     if (input.pclPartialTaken && pnl > 1) delta += 2.5;

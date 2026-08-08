@@ -68,6 +68,10 @@ export interface ScalperWatchEntry {
   lastReason?: string;
   source?: string;
   targetEntries?: ScalperTargetEntry[];
+  /** Phase A stamps — pass through trigger without rediscovery */
+  entryStyle?: string;
+  qualityScore?: number | null;
+  sizePlanSol?: number | null;
 }
 
 const MAX_WATCHES = 24;
@@ -314,6 +318,45 @@ function pickPreferredProfile(input: {
   return 'momentum_burst';
 }
 
+function stampWatchPlan(w: ScalperWatchEntry): void {
+  const q =
+    w.srConfluenceScore != null && Number.isFinite(Number(w.srConfluenceScore))
+      ? Number(w.srConfluenceScore)
+      : w.nearMultiTfSupport
+        ? 75
+        : w.nearSupport
+          ? 55
+          : 40;
+  w.qualityScore = q;
+  if (
+    w.preferredProfileId === 'scalper' &&
+    (w.nearMultiTfSupport || w.nearSupport)
+  ) {
+    w.entryStyle = 'scalp_reclaim_burst';
+  } else if (w.preferredProfileId === 'reversal_scalper') {
+    w.entryStyle = 'reversal_reclaim';
+  } else if (w.preferredProfileId === 'momentum_burst') {
+    w.entryStyle = 'momentum_continuation';
+  } else {
+    w.entryStyle = w.entryStyle || 'scalp_reclaim_burst';
+  }
+  try {
+    const { calculateDynamicPositionSize } =
+      require('./risk') as typeof import('./risk');
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    const sizing = calculateDynamicPositionSize({
+      equitySol: paperTrader.getEquitySol(),
+      kind: 'normal',
+      openCount: paperTrader.getOpenPositions().length,
+      sizeMultiplier: 1,
+    });
+    w.sizePlanSol = sizing.sizeSol;
+  } catch {
+    w.sizePlanSol = w.sizePlanSol ?? null;
+  }
+}
+
 function pruneTerminal(): void {
   const now = Date.now();
   for (const [mint, w] of watches) {
@@ -529,12 +572,31 @@ export function considerScalperWatchSetup(input: {
     lastReason: nearArmed ? 'near multi-TF support' : 'watching for S/R',
   };
   entry.targetEntries = buildTargetEntries(entry);
+  if (nearArmed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
   console.log(
     `[scalper-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
       `→ ${preferred} MC=${mc != null ? `$${Math.round(mc)}` : '?'} ` +
       `hits=${(input.supportTfHits || []).join(',') || '—'}`
   );
+  if (nearArmed) {
+    try {
+      const { recordSetupWatchEvent } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      recordSetupWatchEvent({
+        kind: 'armed',
+        family: 'scalper',
+        mint: entry.mint,
+        symbol: entry.symbol,
+        profileId: preferred,
+        reason: entry.lastReason,
+        qualityScore: entry.qualityScore,
+        entryStyle: entry.entryStyle,
+      });
+    } catch {
+      /* optional */
+    }
+  }
   return entry;
 }
 
@@ -576,12 +638,15 @@ function buildHandoff(
     rankScore: reclaimPrefer ? 92 : 86,
     reasons: [
       'scalper-watch:triggered',
+      'armedWatch',
       w.nearMultiTfSupport
         ? 'mtf-S conf'
         : w.nearSupport
           ? 'near support'
           : 'reclaim',
-      reclaimPrefer ? 'scalp_reclaim_burst' : `profile:${w.preferredProfileId}`,
+      reclaimPrefer
+        ? 'scalp_reclaim_burst'
+        : w.entryStyle || `profile:${w.preferredProfileId}`,
       `profile:${w.preferredProfileId}`,
       w.supportTfHits?.length
         ? `hits:${w.supportTfHits.join('+')}`
@@ -599,13 +664,17 @@ function buildHandoff(
     nearResistance: w.nearMultiTfResistance,
     nearMultiTfSupport: w.nearMultiTfSupport,
     nearMultiTfResistance: w.nearMultiTfResistance,
-    srConfluenceScore: w.srConfluenceScore,
+    srConfluenceScore: w.srConfluenceScore ?? w.qualityScore ?? undefined,
     supportTfHits: w.supportTfHits,
     resistanceTfHits: w.resistanceTfHits,
     supportPriceSol: w.supportPriceSol ?? null,
     resistancePriceSol: w.resistancePriceSol ?? null,
     lastPriceSol: w.lastPriceSol ?? null,
     candleSource: 'synthetic',
+    armedWatch: true,
+    entryStyleHint: w.entryStyle,
+    qualityScoreHint: w.qualityScore ?? undefined,
+    sizePlanSol: w.sizePlanSol ?? undefined,
     launch,
   };
 }
@@ -637,6 +706,22 @@ export async function tickScalperSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'TTL expired';
       console.log(`[scalper-watch] EXPIRED ${w.symbol}`);
+      try {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        recordSetupWatchEvent({
+          kind: 'watch_expired',
+          family: 'scalper',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: w.preferredProfileId,
+          reason: 'TTL expired',
+          qualityScore: w.qualityScore,
+          entryStyle: w.entryStyle,
+        });
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -690,9 +775,23 @@ export async function tickScalperSetupWatches(opts?: {
         preferredProfileId: w.preferredProfileId,
         honorExplicitPrefer: false,
       });
-      console.log(
-        `[scalper-watch] ARMED ${w.symbol} → ${w.preferredProfileId}`
-      );
+      stampWatchPlan(w);
+      try {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        recordSetupWatchEvent({
+          kind: 'armed',
+          family: 'scalper',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: w.preferredProfileId,
+          reason: w.lastReason,
+          qualityScore: w.qualityScore,
+          entryStyle: w.entryStyle,
+        });
+      } catch {
+        /* optional */
+      }
     }
 
     if (w.status === 'armed') {
@@ -727,6 +826,20 @@ export async function tickScalperSetupWatches(opts?: {
       if (!trigger) continue;
       if (isScannerMintOnCooldown(w.mint)) {
         w.lastReason = 'cooldown';
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'trigger_blocked_cooldown',
+            family: 'scalper',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: w.preferredProfileId,
+            reason: 'scanner mint cooldown',
+          });
+        } catch {
+          /* optional */
+        }
         continue;
       }
 
@@ -743,16 +856,45 @@ export async function tickScalperSetupWatches(opts?: {
           honorExplicitPrefer: false,
         });
       }
-
-      w.status = 'triggered';
-      w.updatedAt = now;
+      stampWatchPlan(w);
       w.lastReason = reclaim ? 'reclaim trigger' : 'confluence hold';
       const c = buildHandoff(w);
       if (handOffScannerCandidate(c)) {
+        w.status = 'triggered';
+        w.updatedAt = now;
         handed += 1;
-        console.log(
-          `[scalper-watch] TRIGGERED ${w.symbol} → ${w.preferredProfileId} (${w.lastReason})`
-        );
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'triggered',
+            family: 'scalper',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: w.preferredProfileId,
+            reason: w.lastReason,
+            qualityScore: w.qualityScore,
+            entryStyle: w.entryStyle,
+          });
+        } catch {
+          /* optional */
+        }
+      } else {
+        w.updatedAt = now;
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'handoff_failed',
+            family: 'scalper',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: w.preferredProfileId,
+            reason: 'handOffScannerCandidate false',
+          });
+        } catch {
+          /* optional */
+        }
       }
     }
   }

@@ -42,6 +42,9 @@ export interface ProfileLearningEpisode {
   entryStyle?: string;
   entryStyleSecondary?: string;
   lateChaseAtEntry?: boolean;
+  /** armed_trigger | discretionary */
+  entryPath?: 'armed_trigger' | 'discretionary' | string;
+  armedWatch?: boolean;
   /** Influencer Mirror source wallet */
   mirrorWalletId?: string;
   mirrorWalletName?: string;

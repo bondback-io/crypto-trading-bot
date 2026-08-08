@@ -111,6 +111,11 @@ export interface GatekeeperInput {
    * hard safety / anti-rug / honeypot still block (same pattern as majorsDipWatch).
    */
   influencerMirrorSoftPass?: boolean;
+  /**
+   * Pre-vetted setup-watch handoff (scalper / dip / grad :triggered).
+   * Soft activity floors stay advisory; hard safety still final.
+   */
+  setupWatchSoftPass?: boolean;
 }
 
 export type SetupClass =
@@ -770,6 +775,7 @@ function cacheKey(input: GatekeeperInput, cfg: HierarchicalCoordinationConfig): 
     input.exhausted ? '1' : '0',
     input.majorsDipWatch ? 'mdw1' : 'mdw0',
     input.influencerMirrorSoftPass ? 'imsp1' : 'imsp0',
+    input.setupWatchSoftPass ? 'swsp1' : 'swsp0',
   ].join('|');
 }
 
@@ -1068,7 +1074,9 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
     // (anti-rug / honeypot / high-risk already hard-blocked above).
     const majorsDipSoftPass = input.majorsDipWatch === true;
     const influencerMirrorSoftPass = input.influencerMirrorSoftPass === true;
-    const activitySoftPass = majorsDipSoftPass || influencerMirrorSoftPass;
+    const setupWatchSoftPass = input.setupWatchSoftPass === true;
+    const activitySoftPass =
+      majorsDipSoftPass || influencerMirrorSoftPass || setupWatchSoftPass;
     const enforceSoft =
       cfg.softBlocksEnforced &&
       cfg.gatekeeperStrictness !== 'low' &&
@@ -1101,6 +1109,11 @@ export function evaluateGatekeeper(input: GatekeeperInput): GatekeeperResult {
         plainOut = plain.replace(
           'Gatekeeper ALLOW (advisory):',
           'Gatekeeper ALLOW (influencer mirror soft):'
+        );
+      } else if (setupWatchSoftPass) {
+        plainOut = plain.replace(
+          'Gatekeeper ALLOW (advisory):',
+          'Gatekeeper ALLOW (setup-watch soft):'
         );
       } else if (majorsDipSoftPass) {
         plainOut = plain.replace(

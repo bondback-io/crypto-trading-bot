@@ -186,7 +186,8 @@ export const DEFAULT_FAST_PROFILE_RECOVERY: FastProfileRecoveryConfig = {
   stage0: {
     maxConcurrent: 1,
     sizeMultiplier: 0.65,
-    minMsBetweenEntries: 120_000,
+    /** Stage 0/1: slower cadence so Scalper cannot monopolize attention */
+    minMsBetweenEntries: 180_000,
     peakProtectArmOfTpPct: 45,
     peakProtectGivebackOfPeakPct: 30,
     minVolumeM5Usd: 1200,
@@ -558,7 +559,8 @@ export function getRecoveryConstraints(
   }
 
   // Taper: frequency → size → concurrency → exit strictness
-  const cooldownMult = stage === 0 ? 1 : stage === 1 ? 0.75 : stage <= 2 ? 0.75 : 0.55;
+  // Stage 0/1: keep maxConcurrent=1 and slower cadence (attention room for Dip/Trend)
+  const cooldownMult = stage === 0 ? 1.25 : stage === 1 ? 1 : stage <= 2 ? 0.75 : 0.55;
   const sizeMult =
     stage === 0
       ? s0.sizeMultiplier

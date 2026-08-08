@@ -36,6 +36,33 @@ export function computeEpisodeQualityWeight(episode: ProfileLearningEpisode): nu
   if (maxRunup >= 12 && giveback >= 4 && giveback <= 35) w += 0.1;
   if (maxRunup >= 20 && pnlPct > 0 && giveback <= 15) w += 0.08;
 
+  // Up-weight armed reclaim / Mode B harvest film
+  const style = String(episode.entryStyle || '');
+  const armed =
+    episode.armedWatch === true ||
+    episode.entryPath === 'armed_trigger' ||
+    episode.scalperWatchTriggered === true ||
+    /scalp_reclaim_burst|support_dip_reclaim/i.test(style);
+  if (armed) w += 0.18;
+  else if (/scalp_reclaim|support_dip_reclaim|reclaim/i.test(style)) w += 0.1;
+
+  // Down-weight Scalper scratch spam (low MFE non-armed)
+  const pid = String(episode.profileId || '');
+  const scalperFamily =
+    pid === 'scalper' ||
+    pid === 'momentum_burst' ||
+    pid === 'reversal_scalper';
+  if (
+    scalperFamily &&
+    !armed &&
+    maxRunup < 6 &&
+    holdSec < 90 &&
+    pnlPct > 0 &&
+    pnlPct < 4
+  ) {
+    w -= 0.04; // −3% to −5% band
+  }
+
   // Non-trivial hold
   if (holdSec >= 45 && holdSec <= 7200) w += 0.06;
   else if (holdSec < 8) w -= 0.12;

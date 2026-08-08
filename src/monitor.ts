@@ -337,16 +337,36 @@ function stampEntryStyleOnBuyOpts(
       if (late == null) late = det.lateChase;
     }
     const lateChase = late === true;
-    (buyOpts as { entryStyle?: string }).entryStyle = lateChase
-      ? style === 'late_chase'
-        ? 'late_chase'
-        : String(style || 'late_chase')
-      : String(style || 'unknown');
+    // Prefer armed-watch entryStyle stamp over rediscovery
+    const hint = signal.entryStyleHint || (signal as { entryStyleHint?: string }).entryStyleHint;
+    const armed =
+      signal.armedWatch === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+            String(r)
+          )
+        ));
+    if (armed && hint && !lateChase) {
+      (buyOpts as { entryStyle?: string }).entryStyle = String(hint);
+    } else {
+      (buyOpts as { entryStyle?: string }).entryStyle = lateChase
+        ? style === 'late_chase'
+          ? 'late_chase'
+          : String(style || 'late_chase')
+        : String(style || 'unknown');
+    }
     if (lateChase && style && style !== 'late_chase') {
       (buyOpts as { entryStyleSecondary?: string }).entryStyleSecondary =
         'late_chase';
     }
     (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry = lateChase;
+    if (armed) {
+      (buyOpts as { armedWatch?: boolean }).armedWatch = true;
+      (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+    } else {
+      (buyOpts as { entryPath?: string }).entryPath = 'discretionary';
+    }
   } catch {
     /* fail soft */
   }
@@ -808,6 +828,11 @@ export interface TradeSignal {
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
+  /** Armed setup-watch handoff (Mode B / Dip / Grad) */
+  armedWatch?: boolean;
+  entryStyleHint?: string;
+  qualityScoreHint?: number;
+  sizePlanSol?: number;
   /** HMC stamps for Profit Capture Layer (set in passesFilters) */
   hmcSetup?: string;
   hmcConfidence?: number;
@@ -884,6 +909,30 @@ function applyProfileTaPlaybookGate(
     ) {
       (buyOpts as { scalperWatchTriggered?: boolean }).scalperWatchTriggered =
         true;
+    }
+    if (
+      signal.armedWatch === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+            String(r)
+          )
+        ))
+    ) {
+      (buyOpts as { armedWatch?: boolean }).armedWatch = true;
+      (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+    }
+    if (signal.entryStyleHint) {
+      (buyOpts as { entryStyleHint?: string }).entryStyleHint =
+        signal.entryStyleHint;
+    }
+    if (
+      signal.qualityScoreHint != null &&
+      Number.isFinite(signal.qualityScoreHint)
+    ) {
+      (buyOpts as { qualityScoreHint?: number }).qualityScoreHint = Number(
+        signal.qualityScoreHint
+      );
     }
     // Also stamp multi-TF fields directly from signal when gate was soft/off
     if (signal.nearMultiTfSupport === true) {
@@ -3372,6 +3421,21 @@ async function handleScannerCandidate(
       scannerReasons: Array.isArray(candidate.reasons)
         ? candidate.reasons.map(String)
         : undefined,
+      armedWatch:
+        candidate.armedWatch === true ||
+        (Array.isArray(candidate.reasons) &&
+          candidate.reasons.some((r) =>
+            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+              String(r)
+            )
+          )) ||
+        undefined,
+      entryStyleHint: candidate.entryStyleHint,
+      qualityScoreHint: candidate.qualityScoreHint,
+      sizePlanSol:
+        candidate.sizePlanSol != null && Number.isFinite(candidate.sizePlanSol)
+          ? Number(candidate.sizePlanSol)
+          : undefined,
       kolCount:
         candidate.kolCount != null && Number.isFinite(candidate.kolCount)
           ? candidate.kolCount
@@ -3969,6 +4033,40 @@ async function executeSignalBuy(
   if (result.success) {
     markLaneFightCascadeResult(signal.mint, true);
     recordTradeExecuted();
+    try {
+      const armed =
+        buyOpts.armedWatch === true ||
+        signal.armedWatch === true ||
+        (Array.isArray(signal.scannerReasons) &&
+          signal.scannerReasons.some((r) =>
+            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+              String(r)
+            )
+          ));
+      if (armed) {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        const bits = (signal.scannerReasons || []).join(' ');
+        const family = /scalper-watch/i.test(bits)
+          ? 'scalper'
+          : /grad-watch/i.test(bits)
+            ? 'grad'
+            : 'dip';
+        recordSetupWatchEvent({
+          kind: 'trigger_opened',
+          family,
+          mint: signal.mint,
+          symbol: signal.symbol,
+          profileId: String(profileAssignment.profileId || ''),
+          reason: 'executeBuy ok',
+          entryStyle: buyOpts.entryStyle,
+          qualityScore:
+            signal.qualityScoreHint ?? buyOpts.qualityScoreHint ?? null,
+        });
+      }
+    } catch {
+      /* optional */
+    }
     try {
       const { noteDipBuyerRecoveryEntry } =
         require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
@@ -6507,6 +6605,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           (signal.candidateTradeProfileId === 'dip_buyer' &&
             /dip-watch/i.test(gkReasonBits));
         const majorsDipWatch = majorsStamp && dipWatchHandoff;
+        const setupWatchSoftPass =
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+            gkReasonBits
+          );
         const gk = evaluateGatekeeper({
           mint: signal.mint,
           symbol: signal.symbol,
@@ -6536,6 +6638,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           exhausted: false,
           candles: signal.candles || null,
           majorsDipWatch: majorsDipWatch || undefined,
+          setupWatchSoftPass: setupWatchSoftPass || undefined,
         });
         lastHmcGate = gk;
         recordGatekeeperDecision({
@@ -6549,6 +6652,27 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           const reason = gk.plainLanguage;
           logGatekeeperBlock(signal, gk);
           recordRejectedSignal(signal, reason);
+          if (setupWatchSoftPass) {
+            try {
+              const { recordSetupWatchEvent } =
+                require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+              const family = /scalper-watch/i.test(gkReasonBits)
+                ? 'scalper'
+                : /grad-watch/i.test(gkReasonBits)
+                  ? 'grad'
+                  : 'dip';
+              recordSetupWatchEvent({
+                kind: 'trigger_blocked_safety',
+                family,
+                mint: signal.mint,
+                symbol: signal.symbol,
+                profileId: profileHint,
+                reason: `${gk.severity}: ${reason}`,
+              });
+            } catch {
+              /* optional */
+            }
+          }
           console.log(
             `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
               `reason=${reason}`
@@ -6629,17 +6753,39 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             profileHint,
           });
           if (clf.blocked) {
-            const reason = clf.plainLanguage;
-            logClassifierBlock(signal, lastHmcClassifier, lastHmcGate);
-            recordRejectedSignal(signal, reason);
-            console.log(
-              `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-                `reason=${reason}`
-            );
-            return false;
+            const reasonBitsClf = Array.isArray(signal.scannerReasons)
+              ? signal.scannerReasons.join(' ')
+              : '';
+            const setupWatchHandoffClf =
+              /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+                reasonBitsClf
+              );
+            // Pre-vetted armed watches: classifier hard-block becomes soft advisory
+            if (setupWatchHandoffClf) {
+              console.log(
+                `[monitor] setup-watch classifier soft-pass ${signal.symbol}: ${clf.plainLanguage}`
+              );
+              classifierEligibleIds = clf.eligibleProfileIds;
+              classifierPreferredIds =
+                clf.preferredProfileIds?.length
+                  ? clf.preferredProfileIds
+                  : signal.candidateTradeProfileId
+                    ? [signal.candidateTradeProfileId]
+                    : clf.preferredProfileIds;
+            } else {
+              const reason = clf.plainLanguage;
+              logClassifierBlock(signal, lastHmcClassifier, lastHmcGate);
+              recordRejectedSignal(signal, reason);
+              console.log(
+                `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+                  `reason=${reason}`
+              );
+              return false;
+            }
+          } else {
+            classifierEligibleIds = clf.eligibleProfileIds;
+            classifierPreferredIds = clf.preferredProfileIds;
           }
-          classifierEligibleIds = clf.eligibleProfileIds;
-          classifierPreferredIds = clf.preferredProfileIds;
         }
       } catch (err) {
         console.warn(
@@ -6655,18 +6801,46 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     if (lastHmcClassifier?.setup) {
       ctx.hmcSetup = lastHmcClassifier.setup;
     }
+    const reasonBitsLane = (signal.scannerReasons || []).join(' ');
+    const setupWatchPrefer =
+      /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+        reasonBitsLane
+      ) && signal.candidateTradeProfileId;
     const softLaneMode =
-      classifierSoftEligibility &&
-      classifierPreferredIds != null &&
-      classifierPreferredIds.length > 0;
+      (classifierSoftEligibility &&
+        classifierPreferredIds != null &&
+        classifierPreferredIds.length > 0) ||
+      Boolean(setupWatchPrefer);
+    const preferIds = setupWatchPrefer
+      ? [
+          signal.candidateTradeProfileId!,
+          ...(classifierPreferredIds || []).filter(
+            (id) => id !== signal.candidateTradeProfileId
+          ),
+        ]
+      : classifierPreferredIds;
     const lanes = evaluateTradeProfileLanes(ctx, {
       silent: false,
-      eligibleProfileIds: softLaneMode ? null : classifierEligibleIds,
-      preferredProfileIds: softLaneMode ? classifierPreferredIds : null,
+      eligibleProfileIds:
+        softLaneMode && setupWatchPrefer
+          ? null
+          : softLaneMode
+            ? null
+            : classifierEligibleIds,
+      preferredProfileIds: softLaneMode ? preferIds : null,
       softEligibility: softLaneMode,
     });
     logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
     lanePassers = lanes.filter((l) => l.passed && l.assignment);
+    // Armed watch: if preferred profile passed, promote it to top
+    if (setupWatchPrefer && lanePassers.length) {
+      const pref = lanePassers.find(
+        (l) => l.profileId === signal.candidateTradeProfileId
+      );
+      if (pref) {
+        lanePassers = [pref, ...lanePassers.filter((l) => l !== pref)];
+      }
+    }
     if (!lanePassers.length) {
       const failBits = lanes
         .filter((l) => !l.passed)
@@ -6688,6 +6862,37 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `[monitor] Smart Bot lane passers=${lanePassers.map((l) => `${l.name}:${l.score}`).join(', ')} ` +
         `· top=${top.name} (${top.profileId}) · ${signal.symbol}`
     );
+    // Scalper attention share throttle — skip discretionary (armed reclaim bypasses)
+    try {
+      const {
+        shouldThrottleScalperAdmit,
+        getProfileAttentionShare,
+      } = require('./profileAttention') as typeof import('./profileAttention');
+      const att = getProfileAttentionShare();
+      console.log(
+        `[monitor] attentionShare scalper=${(att.shares.scalper * 100).toFixed(0)}% ` +
+          `dip=${(att.shares.dip * 100).toFixed(0)}% trend=${(att.shares.trend * 100).toFixed(0)}% ` +
+          `mig=${(att.shares.migration * 100).toFixed(0)}%` +
+          (att.scalperWinRatePct != null
+            ? ` · scalperWR=${att.scalperWinRatePct.toFixed(0)}%`
+            : '')
+      );
+      const th = shouldThrottleScalperAdmit({
+        profileId: top.profileId,
+        armedWatch: signal.armedWatch === true,
+        scannerReasons: signal.scannerReasons,
+      });
+      if (th.throttle) {
+        recordRejectedSignal(signal, th.reason || 'Scalper attention throttle');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=attention: ${th.reason}`
+        );
+        return false;
+      }
+    } catch {
+      /* optional */
+    }
   }
 
   const runModuleFilters = async (): Promise<boolean> => {

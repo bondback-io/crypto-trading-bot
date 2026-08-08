@@ -7981,6 +7981,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
               <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for small-MC Mode B (≤$180k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim (not every ≤$180k name) so MB/Reversal can share the strip. Late chase away from support is tightened; not Dip Buyer Fib dips. Mutual exclusion with Dip. Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
               <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Scalper prioritizes support reclaim (Stage 0–1 reclaim-only). Mutual exclusion with Dip. Unwatch cools 15m.</p>
+              <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
           </div>
@@ -12922,6 +12923,34 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
       if (scalperCount || scalperList) {
         const sw = data.scalperWatch || { active: 0, entries: [] };
+        const diag = data.diagnostics || null;
+        const diagEl = document.getElementById('setup-watch-diag-strip');
+        if (diagEl && diag) {
+          const armedN = Object.values(diag.armedByProfile || {}).reduce(function (s, n) {
+            return s + (Number(n) || 0);
+          }, 0);
+          const openPct =
+            diag.triggerSuccessPct != null ? diag.triggerSuccessPct + '%' : '—';
+          const att =
+            diag.scalperAttentionShare != null
+              ? ' · Scalper share ' + diag.scalperAttentionShare + '%'
+              : '';
+          const block = diag.lastBlockReason
+            ? ' · last block: ' + String(diag.lastBlockReason).slice(0, 48)
+            : '';
+          const dipQuiet =
+            (data.dipWatch && data.dipWatch.active === 0)
+              ? ' · Dip: ' + (diag.dipInactiveReason || 'no_watches')
+              : '';
+          diagEl.textContent =
+            'Armed ' +
+            armedN +
+            ' · open rate ' +
+            openPct +
+            att +
+            block +
+            dipQuiet;
+        }
         if (scalperCount) scalperCount.textContent = (sw.active || 0) + ' active';
         if (scalperList) {
           const rows = (sw.entries || [])
@@ -12936,8 +12965,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               htmlParts.push(watchRowHtml('scalper', e));
             });
           } else {
+            let emptyMsg = 'No active scalper-family setups';
+            if (diag) {
+              const familyOff =
+                diag.dipInactiveReason === 'profile_off' && (sw.active || 0) === 0;
+              const bits = [];
+              if (familyOff) bits.push('family-off / profile gated');
+              else if ((sw.active || 0) === 0) bits.push('no-offer');
+              if (diag.lastBlockReason) bits.push('block: ' + String(diag.lastBlockReason).slice(0, 40));
+              if (bits.length) emptyMsg += ' · ' + bits.join(' · ');
+            }
             htmlParts.push(
-              '<div class="setup-watch-empty">No active scalper-family setups</div>'
+              '<div class="setup-watch-empty">' + emptyMsg + '</div>'
             );
           }
           terminal.forEach(function (e) {

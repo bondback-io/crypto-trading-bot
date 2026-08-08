@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.233',
+    title: 'Armed-watch soft-pass + Scalper attention + PCL harvest',
+    sections: ['microbots', 'scanners', 'tradecraft', 'learning', 'zion', 'overview'],
+    items: [
+      'Armed setup watches (Scalper Mode B / Dip / Grad) soft-pass Gatekeeper advisories; hard safety still final. Trigger→open stamps entryPath + armedWatch through buy/PCL.',
+      'Scalper attention share capped ~35% when WR <45% or Fast Recovery stage ≤1; armed reclaim bypasses the cap. MARL expectancy downrank + Stage 0/1 cadence retune.',
+      'PCL/PPP harvest for armed/medium-high reclaim: early partial ~8–10% @ 0.40–0.50, PPP arm ~75% of TP, permission ×1.5, no tiny scratch when MFE ≥10%.',
+      'Learning up-weights armed reclaim episodes and down-weights Scalper scratch spam; Zion answers Dip quiet / armed counts / open rate. Watchlist diagnostics strip + /api/setup-watch-diagnostics.',
+    ],
+  },
+  {
     version: '1.2.232',
     title: 'Smart Mirror copies + fight log + watchlist UX',
     sections: ['copy', 'scanners', 'overview', 'microbots'],

@@ -93,6 +93,11 @@ export interface ScannerCandidate {
   resistanceTfHits?: SrTimeframe[];
   nearMultiTfSupport?: boolean;
   nearMultiTfResistance?: boolean;
+  /** Armed setup-watch handoff stamps (Mode B / Dip / Grad) */
+  armedWatch?: boolean;
+  entryStyleHint?: string;
+  qualityScoreHint?: number;
+  sizePlanSol?: number;
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
   supportPriceSol?: number | null;
   resistancePriceSol?: number | null;

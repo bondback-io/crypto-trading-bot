@@ -162,6 +162,7 @@ export function resolvePeakProtectParams(input: {
   entryQualityScore?: number | null;
   entryStyle?: string | null;
   lateChaseAtEntry?: boolean;
+  armedWatch?: boolean;
 }): ResolvedPeakProtect {
   const cfg = getPeakProfitProtectionConfig();
   const fast = isPeakProtectFastProfile(input.profileId);
@@ -213,6 +214,7 @@ export function resolvePeakProtectParams(input: {
         const bonus = qualityPppArmBonusPts(input.entryQualityScore, {
           entryStyle: input.entryStyle,
           lateChaseAtEntry: input.lateChaseAtEntry,
+          armedWatch: input.armedWatch === true,
         });
         if (bonus > 0 && policyArm != null && Number(policyArm) > 0) {
           policyArm = clamp(Number(policyArm) + bonus, 10, 95);
@@ -282,6 +284,7 @@ export interface PeakProtectEvalInput {
   entryQualityScore?: number | null;
   entryStyle?: string | null;
   lateChaseAtEntry?: boolean;
+  armedWatch?: boolean;
   /** Override min profit floor (absolute unrealized %). */
   minProfitFloorPct?: number | null;
 }

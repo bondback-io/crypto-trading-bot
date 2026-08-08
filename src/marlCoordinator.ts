@@ -181,6 +181,17 @@ export function marlLaneScoreDelta(profileId: string): {
   } catch {
     /* optional */
   }
+  try {
+    const { scalperExpectancyMarlDelta } =
+      require('./profileAttention') as typeof import('./profileAttention');
+    const exp = scalperExpectancyMarlDelta(profileId);
+    if (exp !== 0) {
+      delta = Math.max(-SCORE_CAP, Math.min(SCORE_CAP, delta + exp));
+      noteExtra += ` · scalperExp ${exp}`;
+    }
+  } catch {
+    /* optional */
+  }
   // Soft harvest context (avg capture / giveback) — ranking only, no PPP writes
   try {
     const harvest = softHarvestRankingNudge(profileId);

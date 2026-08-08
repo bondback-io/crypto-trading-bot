@@ -127,6 +127,7 @@ function updatePeakProtectArmState(
           entryQualityScore: position.entryQualityScore,
           entryStyle: position.entryStyle,
           lateChaseAtEntry: position.lateChaseAtEntry,
+          armedWatch: position.armedWatch === true,
         });
         position.peakProtectArmAtPct = resolvedDefer.armAtPct;
         return;
@@ -147,6 +148,7 @@ function updatePeakProtectArmState(
       entryQualityScore: position.entryQualityScore,
       entryStyle: position.entryStyle,
       lateChaseAtEntry: position.lateChaseAtEntry,
+      armedWatch: position.armedWatch === true,
     });
     position.peakProtectArmAtPct = resolved.armAtPct;
     if (resolved.minOpenSec > 0) {
@@ -184,6 +186,7 @@ function stampProfitCaptureLayerAtOpen(
     entryQualityScore?: number;
     entryStyle?: string;
     lateChaseAtEntry?: boolean;
+    armedWatch?: boolean;
   }
 ): void {
   try {
@@ -200,6 +203,7 @@ function stampProfitCaptureLayerAtOpen(
     if (meta?.gateDecision) position.gateDecision = String(meta.gateDecision);
     if (meta?.entryStyle) position.entryStyle = String(meta.entryStyle);
     if (meta?.lateChaseAtEntry === true) position.lateChaseAtEntry = true;
+    if (meta?.armedWatch === true) position.armedWatch = true;
     const q =
       meta?.entryQualityScore != null &&
       Number.isFinite(Number(meta.entryQualityScore))
@@ -218,6 +222,7 @@ function stampProfitCaptureLayerAtOpen(
       entryQualityScore: q,
       entryStyle: position.entryStyle,
       lateChaseAtEntry: position.lateChaseAtEntry === true,
+      armedWatch: position.armedWatch === true,
     });
     position.pclPartialTaken = false;
     position.pclScratchBlockedCount = 0;
@@ -427,6 +432,9 @@ export interface Position {
   supportTfHits?: string[];
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
+  /** Armed setup-watch handoff */
+  armedWatch?: boolean;
+  entryPath?: 'armed_trigger' | 'discretionary' | string;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -812,6 +820,7 @@ function maybeRecordLearningEpisode(
         entryQualityScore: position.entryQualityScore,
         entryStyle: position.entryStyle,
         lateChaseAtEntry: position.lateChaseAtEntry,
+        armedWatch: position.armedWatch === true,
       });
       if (peakProtectArmAtPct == null && resolved.armAtPct > 0) {
         peakProtectArmAtPct = resolved.armAtPct;
@@ -856,6 +865,14 @@ function maybeRecordLearningEpisode(
       entryStyle: position.entryStyle,
       entryStyleSecondary: position.entryStyleSecondary,
       lateChaseAtEntry: position.lateChaseAtEntry === true,
+      entryPath:
+        position.entryPath ||
+        (position.armedWatch === true || position.scalperWatchTriggered === true
+          ? 'armed_trigger'
+          : 'discretionary'),
+      armedWatch:
+        position.armedWatch === true ||
+        position.scalperWatchTriggered === true,
       mirrorWalletId: position.mirrorWalletId,
       mirrorWalletName: position.mirrorWalletName,
       learningTags: (() => {
@@ -868,6 +885,13 @@ function maybeRecordLearningEpisode(
           pnlPct < 4
         ) {
           tags.push('late_chase_fail');
+        }
+        if (
+          position.armedWatch === true ||
+          position.scalperWatchTriggered === true ||
+          position.entryPath === 'armed_trigger'
+        ) {
+          tags.push('armed_trigger');
         }
         return tags.length ? tags : undefined;
       })(),
@@ -2080,6 +2104,8 @@ export class PaperTrader {
     supportTfHits?: string[];
     srConfluenceScore?: number;
     scalperWatchTriggered?: boolean;
+    armedWatch?: boolean;
+    entryPath?: string;
     whaleStateAtEntry?: string;
     profileTaPlainLanguage?: string;
     zigzagStructureAtEntry?: string;
@@ -2188,6 +2214,10 @@ export class PaperTrader {
       supportTfHits: input.supportTfHits,
       srConfluenceScore: input.srConfluenceScore,
       scalperWatchTriggered: input.scalperWatchTriggered,
+      armedWatch: input.armedWatch === true,
+      entryPath:
+        input.entryPath ||
+        (input.armedWatch === true ? 'armed_trigger' : 'discretionary'),
       whaleStateAtEntry: input.whaleStateAtEntry,
       profileTaPlainLanguage: input.profileTaPlainLanguage,
       zigzagStructureAtEntry: input.zigzagStructureAtEntry,
@@ -2250,6 +2280,7 @@ export class PaperTrader {
       entryQualityScore: input.entryQualityScore,
       entryStyle: input.entryStyle,
       lateChaseAtEntry: input.lateChaseAtEntry,
+      armedWatch: input.armedWatch === true || position.armedWatch === true,
     });
 
     if (position.shortTermStrategyId === 'migration_event') {
@@ -2605,6 +2636,8 @@ export class PaperTrader {
       supportTfHits?: string[];
       srConfluenceScore?: number;
       scalperWatchTriggered?: boolean;
+      armedWatch?: boolean;
+      entryPath?: string;
       whaleStateAtEntry?: string;
       profileTaPlainLanguage?: string;
       zigzagStructureAtEntry?: string;
@@ -2799,6 +2832,10 @@ export class PaperTrader {
       supportTfHits: meta?.supportTfHits,
       srConfluenceScore: meta?.srConfluenceScore,
       scalperWatchTriggered: meta?.scalperWatchTriggered,
+      armedWatch: meta?.armedWatch === true,
+      entryPath:
+        meta?.entryPath ||
+        (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
       whaleStateAtEntry: meta?.whaleStateAtEntry,
       profileTaPlainLanguage: meta?.profileTaPlainLanguage,
       zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
@@ -2861,6 +2898,7 @@ export class PaperTrader {
       entryQualityScore: meta?.entryQualityScore,
       entryStyle: meta?.entryStyle,
       lateChaseAtEntry: meta?.lateChaseAtEntry,
+      armedWatch: meta?.armedWatch === true || position.armedWatch === true,
     });
 
     if (position.shortTermStrategyId === 'migration_event') {
@@ -3637,6 +3675,7 @@ export class PaperTrader {
           pclPartialTaken: position.pclPartialTaken === true,
           entryStyle: position.entryStyle,
           lateChaseAtEntry: position.lateChaseAtEntry,
+          armedWatch: position.armedWatch === true,
           mint: position.mint,
           mirrorWalletId: position.mirrorWalletId,
         });
@@ -3914,6 +3953,9 @@ export class PaperTrader {
                 pclPartialTaken: position.pclPartialTaken,
                 qualityTier: position.qualityTier,
                 entryQualityScore: position.entryQualityScore,
+                maxRunupPct: position.highWaterMarkSol != null && position.entryPriceSol > 0 ? ((Number(position.highWaterMarkSol) - Number(position.entryPriceSol)) / Number(position.entryPriceSol)) * 100 : null,
+                armedWatch: position.armedWatch === true,
+                entryStyle: position.entryStyle,
                 nowMs,
               })
             ) {
@@ -4547,6 +4589,15 @@ export class PaperTrader {
             pclPartialTaken: position.pclPartialTaken,
             qualityTier: position.qualityTier,
             entryQualityScore: position.entryQualityScore,
+            maxRunupPct:
+              position.highWaterMarkSol != null && position.entryPriceSol > 0
+                ? ((Number(position.highWaterMarkSol) -
+                    Number(position.entryPriceSol)) /
+                    Number(position.entryPriceSol)) *
+                  100
+                : null,
+            armedWatch: position.armedWatch === true,
+            entryStyle: position.entryStyle,
           })
         ) {
           notePclScratchBlocked(position);
@@ -4703,6 +4754,7 @@ export class PaperTrader {
             pclPartialTaken: position.pclPartialTaken === true,
             entryStyle: position.entryStyle,
             lateChaseAtEntry: position.lateChaseAtEntry,
+            armedWatch: position.armedWatch === true,
             mint: position.mint,
             mirrorWalletId: position.mirrorWalletId,
             volumeDecayState: (position.volumeDecayState as
@@ -4962,6 +5014,16 @@ export class PaperTrader {
                   pclPartialTaken: position.pclPartialTaken,
                   qualityTier: position.qualityTier,
                   entryQualityScore: position.entryQualityScore,
+                  maxRunupPct:
+                    position.highWaterMarkSol != null &&
+                    position.entryPriceSol > 0
+                      ? ((Number(position.highWaterMarkSol) -
+                          Number(position.entryPriceSol)) /
+                          Number(position.entryPriceSol)) *
+                        100
+                      : null,
+                  armedWatch: position.armedWatch === true,
+                  entryStyle: position.entryStyle,
                 })
               ) {
                 notePclScratchBlocked(position);

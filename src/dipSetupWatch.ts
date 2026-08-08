@@ -56,6 +56,10 @@ export interface DipWatchEntry {
   majorsBand?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
+  /** Phase A stamps — pass through trigger without rediscovery */
+  entryStyle?: string;
+  qualityScore?: number | null;
+  sizePlanSol?: number | null;
 }
 
 /**
@@ -136,6 +140,36 @@ function isManualUnwatchCooldown(mint: string): boolean {
 
 function dipMatch() {
   return resolveTradeProfileDefinition('dip_buyer').match;
+}
+
+function stampWatchPlan(w: DipWatchEntry): void {
+  const q =
+    w.nearKeyFib && w.nearSupport
+      ? 80
+      : w.nearKeyFib
+        ? 72
+        : w.nearSupport
+          ? 65
+          : w.dropFromPeakPct != null && w.dropFromPeakPct >= 12
+            ? 55
+            : 45;
+  w.qualityScore = q;
+  w.entryStyle = 'support_dip_reclaim';
+  try {
+    const { calculateDynamicPositionSize } =
+      require('./risk') as typeof import('./risk');
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    const sizing = calculateDynamicPositionSize({
+      equitySol: paperTrader.getEquitySol(),
+      kind: 'normal',
+      openCount: paperTrader.getOpenPositions().length,
+      sizeMultiplier: 1,
+    });
+    w.sizePlanSol = sizing.sizeSol;
+  } catch {
+    w.sizePlanSol = w.sizePlanSol ?? null;
+  }
 }
 
 /** MC at a price level assuming constant supply: MC_now * (P_level / P_now). */
@@ -391,12 +425,31 @@ export function considerDipWatchSetup(input: {
         : 'watching for setup',
   };
   entry.targetDipEntries = buildTargetDipEntries(entry);
+  if (armed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
   console.log(
     `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol}` +
       (isMajors ? ` [majors${entry.majorsBand ? `:${entry.majorsBand}` : ''}]` : '') +
       ` MC=${mc != null ? `$${Math.round(mc)}` : '?'} drop=${drop != null ? `${drop.toFixed(0)}%` : '?'}`
   );
+  if (armed) {
+    try {
+      const { recordSetupWatchEvent } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      recordSetupWatchEvent({
+        kind: 'armed',
+        family: 'dip',
+        mint: entry.mint,
+        symbol: entry.symbol,
+        profileId: 'dip_buyer',
+        reason: entry.lastReason,
+        qualityScore: entry.qualityScore,
+        entryStyle: entry.entryStyle,
+      });
+    } catch {
+      /* optional */
+    }
+  }
   return entry;
 }
 
@@ -435,10 +488,12 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     rankScore: isMajors ? 90 : 88,
     reasons: [
       'dip-watch:triggered',
+      'armedWatch',
       ...(isMajors
         ? [`majors${w.majorsBand ? `:${w.majorsBand}` : ''}`]
         : []),
       w.nearKeyFib ? 'near Fib' : w.nearSupport ? 'near support' : 'reclaim',
+      w.entryStyle || 'support_dip_reclaim',
       w.dropFromPeakPct != null
         ? `drop ${w.dropFromPeakPct.toFixed(0)}%`
         : 'setup',
@@ -454,6 +509,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     nearKeyFib: w.nearKeyFib,
     nearSupport: w.nearSupport,
     candleSource: 'synthetic',
+    armedWatch: true,
+    entryStyleHint: w.entryStyle || 'support_dip_reclaim',
+    qualityScoreHint: w.qualityScore ?? undefined,
+    sizePlanSol: w.sizePlanSol ?? undefined,
     launch,
   };
 }
@@ -481,6 +540,22 @@ export async function tickDipSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'TTL expired';
       console.log(`[dip-watch] EXPIRED ${w.symbol}`);
+      try {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        recordSetupWatchEvent({
+          kind: 'watch_expired',
+          family: 'dip',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: 'dip_buyer',
+          reason: 'TTL expired',
+          qualityScore: w.qualityScore,
+          entryStyle: w.entryStyle,
+        });
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -525,7 +600,24 @@ export async function tickDipSetupWatches(opts?: {
       w.armedAt = now;
       w.updatedAt = now;
       w.lastReason = 'armed near Fib/S';
+      stampWatchPlan(w);
       console.log(`[dip-watch] ARMED ${w.symbol}`);
+      try {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        recordSetupWatchEvent({
+          kind: 'armed',
+          family: 'dip',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: 'dip_buyer',
+          reason: w.lastReason,
+          qualityScore: w.qualityScore,
+          entryStyle: w.entryStyle,
+        });
+      } catch {
+        /* optional */
+      }
     }
 
     if (w.status === 'armed') {
@@ -565,18 +657,65 @@ export async function tickDipSetupWatches(opts?: {
       if (!trigger) continue;
       if (isScannerMintOnCooldown(w.mint)) {
         w.lastReason = 'cooldown';
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'trigger_blocked_cooldown',
+            family: 'dip',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: 'dip_buyer',
+            reason: 'scanner mint cooldown',
+          });
+        } catch {
+          /* optional */
+        }
         continue;
       }
 
-      w.status = 'triggered';
-      w.updatedAt = now;
+      stampWatchPlan(w);
       w.lastReason = reclaim ? 'reclaim trigger' : 'setup trigger';
       const c = buildHandoff(w);
       if (handOffScannerCandidate(c)) {
+        w.status = 'triggered';
+        w.updatedAt = now;
         handed += 1;
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → dip_buyer (${w.lastReason})`
         );
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'triggered',
+            family: 'dip',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: 'dip_buyer',
+            reason: w.lastReason,
+            qualityScore: w.qualityScore,
+            entryStyle: w.entryStyle,
+          });
+        } catch {
+          /* optional */
+        }
+      } else {
+        w.updatedAt = now;
+        try {
+          const { recordSetupWatchEvent } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          recordSetupWatchEvent({
+            kind: 'handoff_failed',
+            family: 'dip',
+            mint: w.mint,
+            symbol: w.symbol,
+            profileId: 'dip_buyer',
+            reason: 'handOffScannerCandidate false',
+          });
+        } catch {
+          /* optional */
+        }
       }
     }
   }

@@ -477,7 +477,11 @@ export interface AdaptiveExitAction {
 function applyQualityTierMultipliers(
   pol: ProfileExitPolicy,
   tier: 'low' | 'medium' | 'high',
-  opts?: { entryStyle?: string | null; lateChaseAtEntry?: boolean }
+  opts?: {
+    entryStyle?: string | null;
+    lateChaseAtEntry?: boolean;
+    armedWatch?: boolean;
+  }
 ): ProfileExitPolicy {
   const late = opts?.lateChaseAtEntry === true;
   const style = String(opts?.entryStyle || '');
@@ -486,7 +490,24 @@ function applyQualityTierMultipliers(
     style !== 'late_chase' &&
     style !== 'unknown' &&
     !late;
-  if (tier === 'medium' && !late) return pol;
+  const armed =
+    opts?.armedWatch === true ||
+    /scalp_reclaim|support_dip_reclaim/i.test(style);
+  // Armed / medium-high reclaim harvest retune
+  if (armed && !late) {
+    pol.earlyPartialTpPct = 9;
+    pol.earlyPartialFraction = 0.45;
+    pol.peakProtectArmOfTpPct = Math.max(pol.peakProtectArmOfTpPct || 0, 75);
+    return pol;
+  }
+  if (tier === 'medium' && !late) {
+    if (validStyle && /reclaim/i.test(style)) {
+      pol.earlyPartialTpPct = clampNum(pol.earlyPartialTpPct, 8, 10);
+      pol.earlyPartialFraction = clampNum(pol.earlyPartialFraction, 0.4, 0.5);
+      pol.peakProtectArmOfTpPct = Math.max(pol.peakProtectArmOfTpPct || 0, 75);
+    }
+    return pol;
+  }
   if (tier === 'low' || late) {
     pol.profitGivebackPts = Math.max(4, Math.round(pol.profitGivebackPts * 0.6));
     pol.earlyPartialTpPct = pol.earlyPartialTpPct > 0
@@ -503,20 +524,20 @@ function applyQualityTierMultipliers(
   pol.profitGivebackPts = Math.min(60, Math.round(pol.profitGivebackPts * 1.25));
   pol.extendHoldIfTaOk = true;
   if (validStyle) {
-    // Delay early partial + more runner room
-    if (pol.earlyPartialTpPct > 0) {
-      pol.earlyPartialTpPct = Math.round(pol.earlyPartialTpPct * 1.15);
-    }
-    pol.earlyPartialFraction = Math.max(
-      0.2,
-      Math.min(0.55, pol.earlyPartialFraction * 0.85)
-    );
+    pol.earlyPartialTpPct = 9;
+    pol.earlyPartialFraction = clampNum(0.45, 0.4, 0.5);
+    pol.peakProtectArmOfTpPct = Math.max(pol.peakProtectArmOfTpPct || 0, 75);
     pol.profitGivebackPts = Math.min(
       60,
       Math.round(pol.profitGivebackPts * 1.1)
     );
   }
   return pol;
+}
+
+function clampNum(n: number, lo: number, hi: number): number {
+  if (!(n > 0)) return lo;
+  return Math.min(hi, Math.max(lo, n));
 }
 
 /**
@@ -571,6 +592,7 @@ export function evaluateAdaptiveProfileExit(input: {
   pclPartialTaken?: boolean;
   entryStyle?: string | null;
   lateChaseAtEntry?: boolean;
+  armedWatch?: boolean;
   /** Influencer Mirror position stamps — exit preference vs PPP */
   mint?: string | null;
   mirrorWalletId?: string | null;
@@ -580,6 +602,7 @@ export function evaluateAdaptiveProfileExit(input: {
   const pol = applyQualityTierMultipliers({ ...input.policy }, tier, {
     entryStyle: input.entryStyle,
     lateChaseAtEntry: input.lateChaseAtEntry,
+    armedWatch: input.armedWatch === true,
   });
   const pnl = input.pnlPct;
   const peakUnrealized =
@@ -818,6 +841,9 @@ export function evaluateAdaptiveProfileExit(input: {
             pclPartialTaken: input.pclPartialTaken,
             qualityTier: input.qualityTier,
             entryQualityScore: input.entryQualityScore,
+            maxRunupPct: peakUnrealized,
+            armedWatch: input.armedWatch === true,
+            entryStyle: input.entryStyle,
             nowMs: now,
           })
         ) {

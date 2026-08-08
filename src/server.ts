@@ -4534,11 +4534,20 @@ export function createServer(): express.Application {
         require('./migrationGradWatch') as typeof import('./migrationGradWatch');
       const { getScalperSetupWatchStatus } =
         require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      let diagnostics: unknown = null;
+      try {
+        const { getSetupWatchDiagnostics } =
+          require('./profileAttention') as typeof import('./profileAttention');
+        diagnostics = getSetupWatchDiagnostics();
+      } catch {
+        diagnostics = null;
+      }
       res.json({
         dipWatch: getDipSetupWatchStatus(28),
         gradWatch: getMigrationGradWatchStatus(16),
         scalperWatch: getScalperSetupWatchStatus(16),
         migSniperFunnel: getMigrationSniperFunnel(),
+        diagnostics,
       });
     } catch (err) {
       res.status(500).json({
@@ -4548,6 +4557,21 @@ export function createServer(): express.Application {
         gradWatch: { active: 0, entries: [] },
         scalperWatch: { active: 0, entries: [] },
         migSniperFunnel: null,
+        diagnostics: null,
+      });
+    }
+  });
+
+  /** Armed-watch / Scalper attention diagnostics (Mode B). */
+  app.get('/api/setup-watch-diagnostics', (_req: Request, res: Response) => {
+    try {
+      const { getSetupWatchDiagnostics } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      res.json({ ok: true, ...getSetupWatchDiagnostics() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   });

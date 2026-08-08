@@ -333,6 +333,12 @@ export interface BuyOptions {
   entryStyle?: string;
   entryStyleSecondary?: string;
   lateChaseAtEntry?: boolean;
+  /** Armed setup-watch handoff */
+  armedWatch?: boolean;
+  /** armed_trigger | discretionary */
+  entryPath?: 'armed_trigger' | 'discretionary' | string;
+  entryStyleHint?: string;
+  qualityScoreHint?: number;
   /** Influencer Mirror source wallet stamps */
   mirrorWalletId?: string;
   mirrorWalletName?: string;
@@ -1012,6 +1018,10 @@ export async function executeBuy(
         supportTfHits: meta?.supportTfHits,
         srConfluenceScore: meta?.srConfluenceScore,
         scalperWatchTriggered: meta?.scalperWatchTriggered,
+        armedWatch: meta?.armedWatch === true,
+        entryPath:
+          meta?.entryPath ||
+          (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
@@ -1166,6 +1176,10 @@ export async function executeBuy(
         supportTfHits: meta?.supportTfHits,
         srConfluenceScore: meta?.srConfluenceScore,
         scalperWatchTriggered: meta?.scalperWatchTriggered,
+        armedWatch: meta?.armedWatch === true,
+        entryPath:
+          meta?.entryPath ||
+          (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
