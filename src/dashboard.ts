@@ -7979,7 +7979,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
-              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps <$150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
+              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps under $150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
               <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$800k. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
@@ -26494,14 +26494,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         });
         if (!data.ok) {
           const err = String(data.error || 'Mirror buy skipped');
-          alert(
-            err +
-              (/\banti-rug\b/i.test(err)
-                ? '\n\nHard safety block — Soft Gatekeeper cannot override.'
-                : /market cap|MC|8,?000|\$8k/i.test(err)
-                  ? '\n\nHard min market-cap floor is $8,000.'
-                  : '\n\nHoldings on this list are not auto-copied — only Add token / fresh soft-watch buys enter.')
-          );
+          var hint = '';
+          if (/anti-rug/i.test(err)) {
+            hint =
+              '\\n\\nHard safety block — Soft Gatekeeper cannot override.';
+          } else if (/market cap|MC|8000|8k/i.test(err)) {
+            hint = '\\n\\nHard min market-cap floor is $8,000.';
+          } else {
+            hint =
+              '\\n\\nHoldings on this list are not auto-copied — only Add token / fresh soft-watch buys enter.';
+          }
+          alert(err + hint);
         }
         await refreshSmartMirrorWatchlist(true);
         if (typeof loadLaneDecisions === 'function') {

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.235',
+    title: 'Dashboard JS stall fix (Smart Mirror alert escapes)',
+    sections: ['overview', 'scanners', 'copy', 'knobs'],
+    items: [
+      'Fix dashboard freeze: Smart Mirror Add-token alert used \\n / \\b inside the HTML template literal, which broke the main script parse.',
+      'Mode B tip: remove raw <$150k in data-tip (HTML treated it as a tag).',
+    ],
+  },
+  {
     version: '1.2.234',
     title: 'Mode B cooldown bypass + Scalper mid-band + playbook floors',
     sections: ['microbots', 'scanners', 'copy', 'overview', 'knobs'],
