@@ -319,13 +319,15 @@ function latencyStressGraceMs(state: EndpointState | undefined): number {
   return LATENCY_STRESS_GRACE_MS;
 }
 
+/**
+ * True 429 / provider rate-limit signals only.
+ * Do NOT treat connect timeouts / generic "fetch failed" as rate limits —
+ * that applied a 60s probe blackout and, combined with stressed-gate skip of
+ * non-active endpoints, left preferred lanes sticky-DOWN for hours while
+ * the hosts were fine.
+ */
 function isRpcRateLimitMessage(error: string): boolean {
-  return (
-    /429|rate.?limit|-32429|too many requests/i.test(error) ||
-    /connect.?timeout|UND_ERR_CONNECT_TIMEOUT|ETIMEDOUT|fetch failed/i.test(
-      error
-    )
-  );
+  return /429|rate.?limit|-32429|too many requests/i.test(error);
 }
 
 function isEndpointRateLimited(state: EndpointState | undefined): boolean {
@@ -1058,10 +1060,8 @@ function recordSuccess(index: number, latencyMs: number): void {
   state.unhealthySince = null;
   state.lastCheckedAt = Date.now();
   state.lastError = undefined;
-  // Clear cooldowns after a real success.
-  if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
-    state.rateLimitedUntil = 0;
-  }
+  // Clear cooldowns after a real success (including mid-cooldown recovery).
+  state.rateLimitedUntil = 0;
   if (state.hardFailUntil) {
     const wasQ = state.hardFailUntil > 0;
     if (wasQ) {
@@ -1209,10 +1209,14 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   if (!state) return false;
 
   // Don't probe a rate-limited endpoint — burns CU and re-triggers 429 storms.
+  // Once the cooldown elapses, fall through so preferred lanes can recover.
   if (isEndpointRateLimited(state)) {
     state.healthy = false;
     state.lastCheckedAt = Date.now();
     return false;
+  }
+  if (state.rateLimitedUntil && Date.now() >= state.rateLimitedUntil) {
+    state.rateLimitedUntil = 0;
   }
   // Hard-fail cooldown — skip aggressive retries on dead QuickNode/fallbacks.
   if (isEndpointHardFailed(state)) {
@@ -1221,10 +1225,13 @@ async function probeEndpoint(index: number, timeoutMs = 8_000): Promise<boolean>
   }
 
   const gate = getRpcGateSnapshot();
+  // Unhealthy / recovering preferred needs a full budget — a 4s stress cap
+  // false-fails public RPCs and keeps "preferred DOWN" forever.
+  const recovering = !state.healthy || state.unhealthySince != null;
   const effectiveTimeout =
-    gate.stressed || gate.backlog > 0
-      ? Math.min(timeoutMs, 4_000)
-      : timeoutMs;
+    recovering || !(gate.stressed || gate.backlog > 0)
+      ? timeoutMs
+      : Math.min(timeoutMs, 4_000);
 
   return runWithRpcFeature('health_probe', async () => {
     const start = Date.now();
@@ -1876,6 +1883,32 @@ export async function testConnection(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Force-probe preferred (+ active) endpoints so sticky-DOWN lanes can recover
+ * without waiting for the next health interval. Used by POST /api/rpc/probe.
+ */
+export async function probeRpcRecovery(): Promise<ReturnType<typeof getRpcStats>> {
+  ensureEndpoints();
+  startRpcHealthMonitor();
+  const order: number[] = [];
+  const push = (i: number) => {
+    if (i >= 0 && i < endpoints.length && !order.includes(i)) order.push(i);
+  };
+  push(preferredPrimary);
+  push(preferredSecondary);
+  push(preferredUtility);
+  push(preferredQuicknode);
+  push(activePrimary);
+  push(activeSecondary);
+  push(activeUtility);
+  for (const i of order) {
+    await probeEndpoint(i, 8_000);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  await maybeSwitchEndpoints();
+  return getRpcStats();
+}
+
 /** Periodic health probes + auto-switch */
 export function startRpcHealthMonitor(): void {
   if (started) return;
@@ -1975,15 +2008,21 @@ export function startRpcHealthMonitor(): void {
     void (async () => {
       healthCycle += 1;
       const gateSnap = getRpcGateSnapshot();
-      // During overload, probe only active lanes — avoid probe storms.
+      // During overload, skip inactive fallbacks — but ALWAYS keep probing
+      // preferred lane endpoints so a failed-over preferred can recover.
+      // (Previously preferred stayed sticky-DOWN for hours while stressed.)
       for (let i = 0; i < endpoints.length; i++) {
         if (!shouldProbeIndex(i, healthCycle)) continue;
-        if (
-          gateSnap.stressed &&
-          i !== activePrimary &&
-          i !== activeSecondary &&
-          i !== activeUtility
-        ) {
+        const isActive =
+          i === activePrimary ||
+          i === activeSecondary ||
+          i === activeUtility;
+        const isPreferred =
+          i === preferredPrimary ||
+          i === preferredSecondary ||
+          i === preferredUtility ||
+          i === preferredQuicknode;
+        if (gateSnap.stressed && !isActive && !isPreferred) {
           continue;
         }
         await probeEndpoint(i);

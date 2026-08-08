@@ -20,7 +20,6 @@ import { fetchLiveTokenSnapshot } from './marketData';
 import { markAsMigrated, getMigrationEvent } from './migrationListener';
 import {
   handOffScannerCandidate,
-  isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
 import {
@@ -440,13 +439,8 @@ function tryPostGradHandoff(w: GradWatchEntry, now: number): boolean {
     console.log(`[grad-watch] EXPIRED ${w.symbol} — ${w.lastReason}`);
     return false;
   }
-  if (isScannerMintOnCooldown(w.mint)) {
-    w.lastReason = 'post-grad cooldown — retrying';
-    w.updatedAt = now;
-    return false;
-  }
   const c = buildHandoff(w, { postGrad: true });
-  if (handOffScannerCandidate(c)) {
+  if (handOffScannerCandidate(c, { bypassCooldown: true })) {
     w.status = 'triggered';
     w.updatedAt = now;
     w.lastReason = `post-grad handoff ${Math.round(ageMs / 1000)}s`;
@@ -565,16 +559,11 @@ export async function tickMigrationGradWatches(): Promise<number> {
       funnel.armed += 1;
     }
 
-    if (isScannerMintOnCooldown(w.mint)) {
-      w.lastReason = 'cooldown';
-      continue;
-    }
-
     w.status = 'triggered';
     w.updatedAt = now;
     w.lastReason = `fire ${progress.toFixed(1)}%`;
     const c = buildHandoff(w);
-    if (handOffScannerCandidate(c)) {
+    if (handOffScannerCandidate(c, { bypassCooldown: true })) {
       handed += 1;
       funnel.triggered += 1;
       console.log(

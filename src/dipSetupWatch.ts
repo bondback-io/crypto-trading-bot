@@ -7,7 +7,6 @@ import type { LaunchEvent } from './marketData';
 import { fetchLiveTokenSnapshot } from './marketData';
 import {
   handOffScannerCandidate,
-  isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
 import { isStrategyEnabledGlobal } from './strategies';
@@ -655,29 +654,11 @@ export async function tickDipSetupWatches(opts?: {
         (dropOk && (w.kolCount ?? 0) >= (m.minKolWallets ?? 3));
 
       if (!trigger) continue;
-      if (isScannerMintOnCooldown(w.mint)) {
-        w.lastReason = 'cooldown';
-        try {
-          const { recordSetupWatchEvent } =
-            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
-          recordSetupWatchEvent({
-            kind: 'trigger_blocked_cooldown',
-            family: 'dip',
-            mint: w.mint,
-            symbol: w.symbol,
-            profileId: 'dip_buyer',
-            reason: 'scanner mint cooldown',
-          });
-        } catch {
-          /* optional */
-        }
-        continue;
-      }
 
       stampWatchPlan(w);
       w.lastReason = reclaim ? 'reclaim trigger' : 'setup trigger';
       const c = buildHandoff(w);
-      if (handOffScannerCandidate(c)) {
+      if (handOffScannerCandidate(c, { bypassCooldown: true })) {
         w.status = 'triggered';
         w.updatedAt = now;
         handed += 1;

@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.234',
+    title: 'Mode B cooldown bypass + Scalper mid-band + playbook floors',
+    sections: ['microbots', 'scanners', 'copy', 'overview', 'knobs'],
+    items: [
+      'Armed Mode B / Dip / Grad triggers bypass scanner mint cooldown on handoff; soft skips use short CD while a mint is on an active armed watch. Active watch count uses the full map.',
+      'Scalper Mode B mid-band $150k–$800k support reclaim (quick TP); microcaps <$150k stamp Migration / Reversal. Dip Fib overlap resolved by active dip watch — not a hard $500k cut.',
+      'TA playbooks + Micro Bot match defaults retuned per lane (MC / holders / max top-10%). Smart Mirror watchlist shows skip hints (anti-rug / MC<$8k); delay UI default 45s; bags still not auto-copied.',
+    ],
+  },
+  {
     version: '1.2.233',
     title: 'Armed-watch soft-pass + Scalper attention + PCL harvest',
     sections: ['microbots', 'scanners', 'tradecraft', 'learning', 'zion', 'overview'],

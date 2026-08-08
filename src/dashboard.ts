@@ -7634,7 +7634,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
           <label class="ctl ctl-sm" title="Ignore events older / spam within this window (ms)">
             <span>Max delay ms</span>
-            <input type="number" id="im-max-delay" value="15000" min="1000" max="120000" step="500" onchange="saveInfluencerMirrorConfig()" />
+            <input type="number" id="im-max-delay" value="45000" min="1000" max="120000" step="500" onchange="saveInfluencerMirrorConfig()" />
           </label>
           <label class="ctl ctl-sm" title="Optional partial sell % (blank = full exit)">
             <span>Partial sell %</span>
@@ -7979,8 +7979,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
-              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for small-MC Mode B (≤$180k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim (not every ≤$180k name) so MB/Reversal can share the strip. Late chase away from support is tightened; not Dip Buyer Fib dips. Mutual exclusion with Dip. Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
-              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Scalper prioritizes support reclaim (Stage 0–1 reclaim-only). Mutual exclusion with Dip. Unwatch cools 15m.</p>
+              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for mid-MC Mode B ($150k–$800k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Microcaps <$150k stamp Migration / Reversal. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim. Late chase away from support is tightened. Mutual exclusion with Dip by active dip watch (Fib dips). Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
+              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+) in $150k–$800k. Else watch → arm near S → trigger on reclaim/hold. Microcaps &lt;$150k → Migration / Reversal. Mutual exclusion with Dip watch. Unwatch cools 15m.</p>
               <p id="setup-watch-diag-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Armed — · open rate —</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
@@ -8006,7 +8006,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Influencer Mirror</span>
               <span class="setup-watch-title">Smart Mirror Watchlist</span>
-              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens · Copy CA / Jupiter · MC / holders · peach Copied badge when mirrored · +N cross-hold · Add token · auto-refresh on Watchlist load / ~60s.</p>
+              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens · holdings are a snapshot (not auto-copied) · fresh soft-watch buys / Add token enter the path · Copy CA / Jupiter · peach Copied badge · skip reasons when blocked (anti-rug / MC&lt;$8k) · auto-refresh on Watchlist load / ~60s.</p>
             </div>
             <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist(true)" title="Refresh holdings snapshot">Refresh</button>
             <span id="smart-mirror-watch-count" class="setup-watch-count mint">—</span>
@@ -8052,7 +8052,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <label class="switch"><input type="checkbox" id="ms-enabled" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper lane / small-MC ≤$180k, and Trend Rider / Steady Compounder Jupiter|KOL specialty). Learning Mode does not turn this off. Improves entry quality for generic scanner. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
+          <span>Require TA setup <span class="tip" tabindex="0" data-tip="Scanner-only entries must show Fib/support/pattern/indicator setup before queue (except Scalper mid-band $150k–$800k support reclaim / Mode B, and Trend Rider / Steady Compounder Jupiter|KOL specialty). Learning Mode does not turn this off. Improves entry quality for generic scanner. TA from Birdeye/GeckoTerminal candles when Prefer real candles is on."></span></span>
           <label class="switch"><input type="checkbox" id="ms-require-ta" checked /><span class="slider"></span></label>
         </div>
         <div class="toggle-row">
@@ -26148,7 +26148,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           useJito: document.getElementById('im-use-jito')?.checked !== false,
           gatekeeperOptional: document.getElementById('im-soft-gk')?.checked !== false,
           maxConcurrentMirrored: Number(document.getElementById('im-max-concurrent')?.value) || 3,
-          maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 15000,
+          maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 45000,
           minLiquidityUsd: Number(document.getElementById('im-min-liq')?.value) || 8000,
           minVolumeM5Usd: Number(document.getElementById('im-min-m5')?.value) || 800,
           partialSellPct: partialRaw === '' || partialRaw == null ? undefined : Number(partialRaw),
@@ -26434,6 +26434,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                         esc(mc) +
                         ' · holders ' +
                         esc(holders) +
+                        (t.lastSkipReason
+                          ? ' · <span style="color:#f87171" title="Last mirror skip">block: ' +
+                            esc(String(t.lastSkipReason).slice(0, 48)) +
+                            '</span>'
+                          : '') +
                         '</div>' +
                         '</div>' +
                         addBtn +
@@ -26488,7 +26493,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           }),
         });
         if (!data.ok) {
-          alert(data.error || 'Mirror buy skipped');
+          const err = String(data.error || 'Mirror buy skipped');
+          alert(
+            err +
+              (/\banti-rug\b/i.test(err)
+                ? '\n\nHard safety block — Soft Gatekeeper cannot override.'
+                : /market cap|MC|8,?000|\$8k/i.test(err)
+                  ? '\n\nHard min market-cap floor is $8,000.'
+                  : '\n\nHoldings on this list are not auto-copied — only Add token / fresh soft-watch buys enter.')
+          );
         }
         await refreshSmartMirrorWatchlist(true);
         if (typeof loadLaneDecisions === 'function') {

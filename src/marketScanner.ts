@@ -1118,12 +1118,13 @@ export async function selectScannerCandidates(
 
     if (ranked.veto?.startsWith('bearish:')) return null;
     if (score < minRank) return null;
-    // Mode B: small-MC scalper-family immediate only at multi-TF support confluence.
+    // Mode B: mid-band Scalper (150k–800k) immediate only at multi-TF support confluence.
     // Non-confluent names with S/R targets go to scalperSetupWatch instead.
     const scalperMcEligible =
       event.marketCapUsd != null &&
       event.marketCapUsd > 0 &&
-      event.marketCapUsd <= 180_000;
+      event.marketCapUsd >= 150_000 &&
+      event.marketCapUsd <= 800_000;
     const hasSrTargets =
       (ranked.supportPriceSol != null && ranked.supportPriceSol > 0) ||
       (ranked.supportTfHits != null && ranked.supportTfHits.length > 0);
@@ -1304,7 +1305,21 @@ export function markScannerCooldown(
   opts?: { ms?: number }
 ): void {
   const cfg = scannerCfg();
-  const base = opts?.ms ?? cfg.cooldownMs ?? 45 * 60_000;
+  let base = opts?.ms ?? cfg.cooldownMs ?? 45 * 60_000;
+  // Soft skips on mints with an active armed setup watch: short CD so reclaim handoff is not self-sabotaged
+  if (opts?.ms == null && !taken) {
+    try {
+      const { isMintOnActiveScalperWatch } =
+        require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      const { isMintOnActiveDipWatch } =
+        require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      if (isMintOnActiveScalperWatch(mint) || isMintOnActiveDipWatch(mint)) {
+        base = 15_000;
+      }
+    } catch {
+      /* optional */
+    }
+  }
   const wait = opts?.ms != null ? opts.ms : taken ? base * 2 : base;
   cooldowns.set(mint, Date.now() + Math.max(0, wait));
   seenThisSession.add(mint);
@@ -1316,16 +1331,27 @@ export function isScannerMintOnCooldown(mint: string): boolean {
   return cd > Date.now();
 }
 
+/** Clear scanner cooldown for a mint (armed setup-watch handoff). */
+export function clearScannerMintCooldown(mint: string): void {
+  if (!mint) return;
+  cooldowns.delete(mint);
+}
+
 /**
  * Hand a pre-built candidate to the monitor handler (global or specialty feed).
- * Respects cooldown; does not re-run enrich/rank.
+ * Respects cooldown unless `bypassCooldown` (pre-vetted armed setup-watch triggers).
  */
 export function handOffScannerCandidate(
-  c: ScannerCandidate & { launch: LaunchEvent }
+  c: ScannerCandidate & { launch: LaunchEvent },
+  opts?: { bypassCooldown?: boolean }
 ): boolean {
   if (!handler) return false;
   if (!c?.mint) return false;
-  if (isScannerMintOnCooldown(c.mint)) return false;
+  if (opts?.bypassCooldown) {
+    clearScannerMintCooldown(c.mint);
+  } else if (isScannerMintOnCooldown(c.mint)) {
+    return false;
+  }
   pushFeed({ ...c });
   c.status = 'queued';
   annotateScannerCandidate(c.mint, { status: 'queued' });

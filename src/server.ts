@@ -44,6 +44,7 @@ import {
   getLiveBalanceSol,
   getRpcStats,
   startRpcHealthMonitor,
+  probeRpcRecovery,
   getTradingWalletsStatus,
   clearKeypairCache,
   getWalletPublicKey,
@@ -921,6 +922,19 @@ export function createServer(): express.Application {
         ...getRpcStats(),
         jito: getJitoStatus(),
         mev: getMevStatus(),
+      });
+    }
+  });
+
+  /** Force-probe preferred/active RPCs so sticky-DOWN lanes can recover now. */
+  app.post('/api/rpc/probe', async (_req: Request, res: Response) => {
+    try {
+      const rpc = await probeRpcRecovery();
+      res.json({ ...rpc, jito: getJitoStatus(), mev: getMevStatus() });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   });

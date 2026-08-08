@@ -150,6 +150,16 @@ function reportMirrorBuyFight(
       sizeSol,
       taken: true,
     });
+  } else if (skipReason && skipReason !== 'duplicate sig') {
+    noteRecentMirrorCopy({
+      walletAddress: buy.wallet.address,
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      at: Date.now(),
+      taken: false,
+      skipReason,
+    });
   }
 }
 
@@ -885,6 +895,12 @@ export async function buildSmartMirrorWatchlist(opts?: {
           (c) => c.walletAddress === w.address && c.mint === t.mint
         );
         const copied = Boolean(openCopy || recent);
+        const lastSkip = listRecentMirrorCopies(40).find(
+          (c) =>
+            c.mint === t.mint &&
+            c.taken === false &&
+            Boolean(c.skipReason)
+        );
         const copiedAt = openCopy?.at ?? recent?.at ?? null;
         const copiedSizeSol =
           openCopy?.sizeSol ??
@@ -893,6 +909,14 @@ export async function buildSmartMirrorWatchlist(opts?: {
           0,
           (mintHolders.get(t.mint)?.size || 0) - 1
         );
+        const mcKnown =
+          meta?.marketCapUsd != null && Number(meta.marketCapUsd) > 0
+            ? Number(meta.marketCapUsd)
+            : null;
+        let hintSkip: string | null = lastSkip?.skipReason || null;
+        if (!hintSkip && mcKnown != null && mcKnown < 8_000) {
+          hintSkip = `MC $${Math.round(mcKnown).toLocaleString()} < $8k floor`;
+        }
         return {
           mint: t.mint,
           symbol: t.symbol || t.mint.slice(0, 6),
@@ -906,6 +930,7 @@ export async function buildSmartMirrorWatchlist(opts?: {
           copiedSizeSol,
           crossHoldCount: cross,
           canAdd: !youHold && !copied && t.status !== 'sold',
+          lastSkipReason: copied ? null : hintSkip,
         };
       }),
     };

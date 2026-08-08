@@ -535,15 +535,16 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '⚡',
     color: TRADE_PROFILE_COLORS.scalper,
     description:
-      'Fast in-and-out trades on small MC tokens with tight risk.',
+      'Support-reclaim scalps on mid-MC tokens with tight risk and quick harvest.',
     recommendedRisk: 'High / Medium',
     style: 'Quick Scalp',
     rulesSummary: [
       'TP 18–30% · SL 7–12%',
       'Max hold 1–3.5 minutes · trail after +12%',
       'Smaller position size (~65%)',
-      'Focus: small MC (≤$180k) + volume spike',
-      'Prioritizes support reclaim / multi-TF S (Mode B)',
+      'Focus: mid MC ($150k–$800k) · multi-TF support reclaim',
+      'Mode B: watch → arm near S → trigger on reclaim/hold',
+      'Microcaps <$150k leave to Migration / Reversal',
       'Aggressive dead-market exit · early stall cut',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
@@ -553,8 +554,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       preferScalp: true,
       preferSmallMc: true,
       preferVolumeSpike: true,
-      maxMarketCapUsd: 180_000,
-      minVolumeM5Usd: 600,
+      minMarketCapUsd: 150_000,
+      maxMarketCapUsd: 800_000,
+      minHolders: 40,
+      maxTop10HoldPct: 48,
+      minVolumeM5Usd: 800,
       minConviction: 32,
       minWalletQuality: 32,
       minWalletCount: 1,
@@ -563,8 +567,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       allowedEntryStyles: [
         'level_momentum_expansion',
         'reversal_reclaim',
+        'support_dip_reclaim',
       ],
-      forbiddenEntryStyles: ['support_dip_reclaim', 'late_chase'],
+      forbiddenEntryStyles: ['late_chase'],
       hardLateChase: false,
     },
     exitRules: {
@@ -602,8 +607,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'TP 35–60% (partial + runner via trail)',
       'SL 12–18%',
       'Key levels: Fib 0.5 & 0.618 or clear support',
-      'Established tokens: MC ≥$500k (prefer ≥$1M) · holders + volume',
+      'Established tokens: MC ≥$500k (prefer ≥$2M) · holders ≥100 · top10 ≤38%',
       'Dip ≥8% from peak (max ~45%) · watchlist → trigger on Fib/S',
+      'Overlap $500–800k with Scalper resolved by Fib dip watch vs support reclaim',
       'Size: normal / slightly larger on high conviction',
     ],
     priority: 85,
@@ -624,8 +630,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletCount: 1,
       requireCluster: false,
       minMarketCapUsd: 500_000,
-      preferMarketCapUsd: 50_000_000,
-      minHolders: 80,
+      preferMarketCapUsd: 2_000_000,
+      minHolders: 100,
+      maxTop10HoldPct: 38,
       minVolumeH1Usd: 8_000,
       minDropFromPeakPct: 8,
       maxDropFromPeakPct: 45,
@@ -689,7 +696,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Targets 8–18% · tighter risk (~7–10% SL)',
       'Patterns: pullback / bull flag / trend continuation',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥1.5h · holders ≥40 · 1h vol ≥$4k',
+      'Lane floors: age ≥1.5h · holders ≥50 · top10 ≤40% · 1h vol ≥$4k',
       'Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA (global scanner still gated)',
     ],
     priority: 76,
@@ -713,7 +720,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minTokenAgeHours: 1.5,
       minMarketCapUsd: 75_000,
       preferMarketCapUsd: 50_000_000,
-      minHolders: 40,
+      minHolders: 50,
+      maxTop10HoldPct: 40,
       minVolumeH1Usd: 4_000,
       kolscanFeedEnabled: true,
       minKolWallets: 3,
@@ -759,7 +767,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
       'Soft quality: holders / buy pressure / volume (not chart patterns)',
       'Fallback: ultra-fresh post-grad ≤120s if curve window missed',
-      'MC cap ~$175k — not mature DEX tokens',
+      'MC cap ~$150k — microcap event lane (not mid-band Scalper)',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 92,
@@ -782,7 +790,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       gradWatchPct: 80,
       maxMigrationAgeSec: 120,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
-      maxMarketCapUsd: 175_000,
+      maxMarketCapUsd: 150_000,
+      minHolders: 20,
+      maxTop10HoldPct: 55,
       primaryEntryStyle: 'migration_hold_reclaim',
       allowedEntryStyles: [
         'level_momentum_expansion',
@@ -875,6 +885,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minMarketCapUsd: 500_000,
       preferMarketCapUsd: 50_000_000,
       minHolders: 150,
+      maxTop10HoldPct: 32,
       minVolumeH1Usd: 15_000,
       minConviction: 55,
       requireCluster: true,
@@ -944,6 +955,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     rulesSummary: [
       'TP 28–45% · SL 10–14%',
       'Entry: M5 vol ≥ $8k + buy pressure / bull flag · conviction ≥ 48',
+      'MC band ≤$400k — volume expansion (not Scalper support-only reclaim)',
       'Max hold ~2.5–7 min · trail after +10%',
       'Exit on fade / stall / trail — timer is backstop',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
@@ -956,6 +968,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       primaryPatternIds: ['bull_flag'],
       patternSensitivity: 'high',
       patternMinConfidence: 48,
+      maxMarketCapUsd: 400_000,
+      minHolders: 30,
+      maxTop10HoldPct: 45,
       minVolumeM5Usd: 8_000,
       minConviction: 48,
       minWalletQuality: 35,
@@ -1029,8 +1044,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minTokenAgeHours: 3,
       minMarketCapUsd: 450_000,
-      preferMarketCapUsd: 50_000_000,
+      preferMarketCapUsd: 1_000_000,
       minHolders: 80,
+      maxTop10HoldPct: 35,
       minVolumeH1Usd: 4_000,
       minPullbackPct: 2,
       maxPullbackPct: 20,
@@ -1074,24 +1090,28 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     icon: '↺',
     color: TRADE_PROFILE_COLORS.reversal_scalper,
     description:
-      'Quick mean-reversion on sharp wicks and over-extensions.',
+      'Microcap mean-reversion on sharp wicks and over-extensions (<$150k MC).',
     recommendedRisk: 'High',
     style: 'Mean Reversion',
     rulesSummary: [
       'TP 15–25% · SL 6–10%',
-      'Entry: wick / over-extension (≥12% from peak)',
+      'Entry: wick / over-extension (≥12% from peak) · MC ≤$150k',
       'Max hold 1–2.5 minutes · trail after +10%',
       'Fast mean-reversion · early stall cut',
+      'Owns microcaps with Migration Sniper — not mid-band Scalper',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
     priority: 83,
-    /** Paused by default — timer exits dominated (~70s) with weak WR (re-enable after retune). */
-    defaultEnabled: false,
+    /** Microcap specialist — Fast recovery still throttles Stage 0–1. */
+    defaultEnabled: true,
     match: {
       preferReversal: true,
       primaryPatternIds: ['falling_wedge'],
       patternSensitivity: 'high',
       patternMinConfidence: 52,
+      maxMarketCapUsd: 150_000,
+      minHolders: 25,
+      maxTop10HoldPct: 50,
       minDropFromPeakPct: 14,
       minConviction: 42,
       minWalletQuality: 40,
@@ -3317,7 +3337,7 @@ function scoreProfile(
   }
 
   if (m.preferScalp) {
-    // Hard gate: Scalper is for small-MC only when preferSmallMc is set
+    // Hard gate: Scalper mid-band when preferSmallMc + max/min MC set
     if (m.preferSmallMc && m.maxMarketCapUsd != null) {
       if (mc == null || mc <= 0 || mc > m.maxMarketCapUsd) {
         return {
@@ -3326,6 +3346,17 @@ function scoreProfile(
             mc == null
               ? 'need MC for scalper'
               : `MC $${Math.round(mc)} above scalper max $${m.maxMarketCapUsd}`,
+        };
+      }
+      if (
+        m.minMarketCapUsd != null &&
+        Number.isFinite(m.minMarketCapUsd) &&
+        m.minMarketCapUsd > 0 &&
+        mc < m.minMarketCapUsd
+      ) {
+        return {
+          score: 0,
+          reason: `MC $${Math.round(mc)} below scalper min $${m.minMarketCapUsd}`,
         };
       }
     }
@@ -5039,7 +5070,36 @@ export function hydrateTradeProfilesFromSettings(
     base.learningModeOptIn = prev.learningModeOptIn;
   }
   base.profiles.default = true;
+  migrateScalperMidbandCatalogDefaults(base);
   writeTradeProfilesState(base);
+}
+
+/**
+ * One-shot: bump catalog-default Scalper/Migration/Reversal floors when user
+ * overrides still equal the pre-midband catalog values (do not clobber customs).
+ */
+function migrateScalperMidbandCatalogDefaults(
+  state: TradeProfileRuntimeState
+): void {
+  const ov = state.overrides || (state.overrides = {});
+  const scalper = (ov.scalper ||= {});
+  const sMatch = (scalper.match ||= {});
+  if (sMatch.maxMarketCapUsd === 180_000) {
+    sMatch.maxMarketCapUsd = 800_000;
+  }
+  if (sMatch.minMarketCapUsd == null && sMatch.maxMarketCapUsd === 800_000) {
+    sMatch.minMarketCapUsd = 150_000;
+  }
+  const mig = (ov.migration_sniper ||= {});
+  const mMatch = (mig.match ||= {});
+  if (mMatch.maxMarketCapUsd === 175_000) {
+    mMatch.maxMarketCapUsd = 150_000;
+  }
+  const rev = (ov.reversal_scalper ||= {});
+  const rMatch = (rev.match ||= {});
+  if (rMatch.maxMarketCapUsd == null) {
+    rMatch.maxMarketCapUsd = 150_000;
+  }
 }
 
 export function serializeTradeProfilesForPersist(): TradeProfileRuntimeState {

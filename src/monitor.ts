@@ -3288,7 +3288,7 @@ async function handleScannerCandidate(
       reasonBits.includes('grad-watch:triggered') ||
       reasonBits.includes('dip-watch:triggered') ||
       reasonBits.includes('scalper-watch:triggered');
-    // Mode B: small-MC immediate only when already at multi-TF support confluence.
+    // Mode B: mid-band Scalper immediate only when already at multi-TF support confluence.
     const nearMultiTfSupport =
       (candidate as { nearMultiTfSupport?: boolean }).nearMultiTfSupport ===
         true || reasonBits.includes('scalper-mtf-support');
@@ -3298,8 +3298,8 @@ async function handleScannerCandidate(
         reasonBits.includes('scalper-mc-eligible') ||
         reasonBits.includes('scalper-mtf-support') ||
         (candidate.marketCapUsd != null &&
-          candidate.marketCapUsd > 0 &&
-          candidate.marketCapUsd <= 180_000));
+          candidate.marketCapUsd >= 150_000 &&
+          candidate.marketCapUsd <= 800_000));
     // Playbook / confluence only hard-gate when Require TA setup is ON
     // (Risk Off always skips these so scanner-only can still open).
     if (!hybrid && requireTa && !setupWatchHandoff && !scalperMcEligible) {

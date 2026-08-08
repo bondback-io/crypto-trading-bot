@@ -9,7 +9,6 @@ import type { LaunchEvent } from './marketData';
 import { fetchLiveTokenSnapshot, fetchMultiTfOhlcv } from './marketData';
 import {
   handOffScannerCandidate,
-  isScannerMintOnCooldown,
   type ScannerCandidate,
 } from './marketScanner';
 import { isStrategyEnabledGlobal } from './strategies';
@@ -80,9 +79,11 @@ const TRIGGER_RECLAIM_PCT = 1.2;
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
 const TERMINAL_UI_MS = 60_000;
-/** Stay below dip_buyer floor so we never fight Dip for the same mint. */
-const DIP_FLOOR_MC = 500_000;
-const SCALPER_MC_MAX = 180_000;
+/** Dip mutual exclusion is by active dip watch — Scalper owns mid-band up to 800k. */
+const SCALPER_MC_MIN = 150_000;
+const SCALPER_MC_MAX = 800_000;
+/** Below this → Migration / Reversal own microcaps (not Scalper). */
+const SCALPER_MICROCAP_BELOW = 150_000;
 
 const watches = new Map<string, ScalperWatchEntry>();
 const lastMcRefreshAt = new Map<string, number>();
@@ -274,18 +275,25 @@ function pickPreferredProfile(input: {
       pref === 'momentum_burst' ||
       pref === 'reversal_scalper')
   ) {
-    // Re-route mid-air MB stamps toward Scalper only at true reclaim.
-    if (
-      pref !== 'scalper' &&
-      atReclaim &&
-      !isReversalDominant(input) &&
-      !isMomentumBurstDominant(input)
-    ) {
-      return 'scalper';
-    }
-    // Drop sticky Scalper prefer mid-air while Stage 0–1 recovering.
-    if (!(pref === 'scalper' && strictRec && !atReclaim)) {
-      return pref as ScalperFamilyProfileId;
+    const mcEarly = input.marketCapUsd ?? 0;
+    // Never keep sticky Scalper prefer on microcaps
+    if (pref === 'scalper' && mcEarly > 0 && mcEarly < SCALPER_MICROCAP_BELOW) {
+      /* fall through to microcap / playbook routing */
+    } else {
+      // Re-route mid-air MB stamps toward Scalper only at true reclaim in mid-band
+      if (
+        pref !== 'scalper' &&
+        atReclaim &&
+        mcEarly >= SCALPER_MC_MIN &&
+        !isReversalDominant(input) &&
+        !isMomentumBurstDominant(input)
+      ) {
+        return 'scalper';
+      }
+      // Drop sticky Scalper prefer mid-air while Stage 0–1 recovering.
+      if (!(pref === 'scalper' && strictRec && !atReclaim)) {
+        return pref as ScalperFamilyProfileId;
+      }
     }
   }
 
@@ -307,12 +315,32 @@ function pickPreferredProfile(input: {
     return 'momentum_burst';
   }
 
-  // True support reclaim → Scalper. MC-band alone → Scalper only when not Stage 0–1.
+  // True support reclaim in Scalper mid-band → Scalper.
+  // Microcap (<150k) → Reversal (or MB); never stamp Scalper from MC alone.
   const mc = input.marketCapUsd ?? 0;
-  if (atReclaim) {
+  if (mc > 0 && mc < SCALPER_MICROCAP_BELOW) {
+    if (isReversalDominant(input)) {
+      try {
+        if (
+          (require('./config') as typeof import('./config')).config.tradeProfiles
+            ?.profiles?.reversal_scalper !== false
+        ) {
+          return 'reversal_scalper';
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return 'momentum_burst';
+  }
+  if (atReclaim && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX) {
     return 'scalper';
   }
-  if (!strictRec && mc > 0 && mc <= SCALPER_MC_MAX) {
+  if (
+    !strictRec &&
+    mc >= SCALPER_MC_MIN &&
+    mc <= SCALPER_MC_MAX
+  ) {
     return 'scalper';
   }
   return 'momentum_burst';
@@ -473,10 +501,12 @@ export function considerScalperWatchSetup(input: {
   if (String(input.source || '').toLowerCase() === 'majors') return null;
 
   const mc = input.marketCapUsd;
-  // Mutual exclusion with Dip: only admit below dip floor
-  if (mc != null && mc > 0 && mc >= DIP_FLOOR_MC) return null;
+  // Above Scalper mid-band ceiling — leave to Dip / quality lanes
+  if (mc != null && mc > 0 && mc > SCALPER_MC_MAX) return null;
 
-  const scalperBand = mc != null && mc > 0 && mc <= SCALPER_MC_MAX;
+  const midBand =
+    mc != null && mc > 0 && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX;
+  const microcap = mc != null && mc > 0 && mc < SCALPER_MICROCAP_BELOW;
   const chg = input.priceChangeH1Pct ?? input.priceChangePct ?? 0;
   const mbOrReversal =
     chg >= 10 ||
@@ -484,12 +514,13 @@ export function considerScalperWatchSetup(input: {
     /momentum|burst|reversal|dip_reclaim|break/i.test(
       String(input.playbook || '')
     );
-  if (!scalperBand && !mbOrReversal) return null;
-
   const hasTargets =
     (input.supportPriceSol != null && input.supportPriceSol > 0) ||
     (Array.isArray(input.supportTfHits) && input.supportTfHits.length > 0);
-  if (!hasTargets) return null;
+  // Mid-band support reclaim Mode B, or microcap/motion for Reversal/MB
+  if (!midBand && !mbOrReversal && !microcap) return null;
+  if (midBand && !hasTargets) return null;
+  if (microcap && !mbOrReversal && !hasTargets) return null;
 
   pruneTerminal();
   const existing = watches.get(input.mint);
@@ -731,11 +762,11 @@ export async function tickScalperSetupWatches(opts?: {
     if (px != null) w.lastPriceSol = px;
     w.targetEntries = buildTargetEntries(w);
 
-    // Invalidate: graduated past dip floor or far above scalper band without MB signal
-    if (w.marketCapUsd != null && w.marketCapUsd >= DIP_FLOOR_MC) {
+    // Invalidate: graduated past Scalper mid-band ceiling
+    if (w.marketCapUsd != null && w.marketCapUsd > SCALPER_MC_MAX) {
       w.status = 'invalidated';
       w.updatedAt = now;
-      w.lastReason = 'MC ≥ dip floor';
+      w.lastReason = 'MC > Scalper mid-band';
       console.log(`[scalper-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
       continue;
     }
@@ -824,25 +855,8 @@ export async function tickScalperSetupWatches(opts?: {
       const holdOk = nearConfluence && w.nearSupport !== false;
       const trigger = reclaim || holdOk;
       if (!trigger) continue;
-      if (isScannerMintOnCooldown(w.mint)) {
-        w.lastReason = 'cooldown';
-        try {
-          const { recordSetupWatchEvent } =
-            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
-          recordSetupWatchEvent({
-            kind: 'trigger_blocked_cooldown',
-            family: 'scalper',
-            mint: w.mint,
-            symbol: w.symbol,
-            profileId: w.preferredProfileId,
-            reason: 'scanner mint cooldown',
-          });
-        } catch {
-          /* optional */
-        }
-        continue;
-      }
 
+      // Pre-vetted armed reclaim — bypass scanner mint cooldown (anti-spam is for discretionary offers)
       // Reclaim / hold at support → prefer Scalper handoff
       if (reclaim || holdOk) {
         w.preferredProfileId = pickPreferredProfile({
@@ -859,7 +873,7 @@ export async function tickScalperSetupWatches(opts?: {
       stampWatchPlan(w);
       w.lastReason = reclaim ? 'reclaim trigger' : 'confluence hold';
       const c = buildHandoff(w);
-      if (handOffScannerCandidate(c)) {
+      if (handOffScannerCandidate(c, { bypassCooldown: true })) {
         w.status = 'triggered';
         w.updatedAt = now;
         handed += 1;
@@ -946,7 +960,7 @@ export function getScalperSetupWatchStatus(limit = 20): {
     )
     .slice(0, 4);
   return {
-    active: entries.filter(
+    active: all.filter(
       (e) => e.status === 'watching' || e.status === 'armed'
     ).length,
     entries,
