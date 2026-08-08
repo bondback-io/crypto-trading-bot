@@ -1,7 +1,7 @@
 /**
  * Profile attention share — throttle Scalper monopoly when underperforming.
  * Armed setup-watch triggers bypass the share cap.
- * Admission Baseline v235 uses 1.2.235-era 35%/window 40; governed keeps 30%/20.
+ * Admission Baseline v235 uses 1.2.235-era 35%/window 40; governed Entry Skill 28%/20.
  */
 
 import { paperTrader } from './paperTrader';
@@ -10,7 +10,7 @@ const ATTENTION_WINDOW_GOVERNED = 20;
 const ATTENTION_WINDOW_V235 = 40;
 const SCALPER_WR_LOOKBACK = 20;
 const WEAK_WR_PCT = 45;
-const SCALPER_SHARE_CAP_GOVERNED = 0.3;
+const SCALPER_SHARE_CAP_GOVERNED = 0.28;
 const SCALPER_SHARE_CAP_V235 = 0.35;
 
 function isV235Baseline(): boolean {
@@ -19,7 +19,7 @@ function isV235Baseline(): boolean {
       require('./expectancyLift') as typeof import('./expectancyLift');
     return isAdmissionBaselineV235();
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -244,12 +244,34 @@ export function scalperExpectancyMarlDelta(profileId: string): number {
   return 0;
 }
 
+function dipMarlConstrained(): boolean {
+  try {
+    const { getMarlConfig } =
+      require('./marlCoordinator') as typeof import('./marlCoordinator');
+    const { getOrCreateAgent, getMarlDecisions } =
+      require('./marlStore') as typeof import('./marlStore');
+    const cfg = getMarlConfig();
+    if (!cfg.enabled) return false;
+    const agent = getOrCreateAgent('dip_buyer');
+    if (agent.weight < -0.15) return true;
+    const recent = getMarlDecisions(24).filter(
+      (d) =>
+        d.profileId === 'dip_buyer' &&
+        /skip|size_down|downrank/i.test(`${d.kind} ${d.detail}`)
+    );
+    return recent.length >= 2;
+  } catch {
+    return false;
+  }
+}
+
 export function describeDipInactiveReason():
   | 'no_watches'
   | 'armed_no_trigger'
   | 'trigger_blocked'
   | 'recovery'
   | 'marl'
+  | 'suppressed_by_scalper_attention'
   | 'profile_off' {
   try {
     const { isStrategyEnabledGlobal } =
@@ -270,6 +292,7 @@ export function describeDipInactiveReason():
     } catch {
       /* optional */
     }
+    if (dipMarlConstrained()) return 'marl';
     try {
       const { listSetupWatchEvents } =
         require('./setupWatchEvents') as typeof import('./setupWatchEvents');
@@ -280,11 +303,126 @@ export function describeDipInactiveReason():
     } catch {
       /* optional */
     }
+    try {
+      const att = getProfileAttentionShare();
+      const cap = scalperShareCap();
+      if (
+        att.total >= 8 &&
+        att.shares.scalper >= cap &&
+        (armed.length > 0 || watching.length > 0)
+      ) {
+        return 'suppressed_by_scalper_attention';
+      }
+    } catch {
+      /* optional */
+    }
     if (armed.length && !watching.length) return 'armed_no_trigger';
     if (armed.length || watching.length) return 'armed_no_trigger';
     return 'no_watches';
   } catch {
     return 'no_watches';
+  }
+}
+
+export type TrendInactiveReason =
+  | 'no_arms'
+  | 'no_trigger'
+  | 'expired'
+  | 'blocked'
+  | 'recovery'
+  | 'marl'
+  | 'profile_off'
+  | 'few_trades';
+
+/** Funnel-style quiet reason for Trend / Steady. */
+export function describeTrendInactiveReason(
+  profileId: string = 'trend_rider'
+): TrendInactiveReason {
+  const pid = String(profileId || 'trend_rider');
+  try {
+    const { isStrategyEnabledGlobal } =
+      require('./strategies') as typeof import('./strategies');
+    const { config } = require('./config') as typeof import('./config');
+    if (!isStrategyEnabledGlobal('ta_market_scanner')) return 'profile_off';
+    if (config.tradeProfiles?.profiles?.[pid] === false) return 'profile_off';
+    try {
+      const { isFastProfileRecovering } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      if (isFastProfileRecovering?.(pid)) return 'recovery';
+    } catch {
+      /* optional */
+    }
+    try {
+      const { getMarlConfig } =
+        require('./marlCoordinator') as typeof import('./marlCoordinator');
+      const { getOrCreateAgent, getMarlDecisions } =
+        require('./marlStore') as typeof import('./marlStore');
+      const cfg = getMarlConfig();
+      if (cfg.enabled) {
+        const agent = getOrCreateAgent(pid);
+        if (agent.weight < -0.15) return 'marl';
+        const recent = getMarlDecisions(24).filter(
+          (d) =>
+            d.profileId === pid &&
+            /skip|size_down|downrank/i.test(`${d.kind} ${d.detail}`)
+        );
+        if (recent.length >= 2) return 'marl';
+      }
+    } catch {
+      /* optional */
+    }
+    try {
+      const { listSetupWatchEvents } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      const recent = listSetupWatchEvents(50).filter(
+        (e) => e.profileId === pid
+      );
+      if (
+        recent.some(
+          (e) =>
+            e.kind === 'trigger_blocked_safety' ||
+            e.kind === 'trigger_blocked_cooldown' ||
+            e.kind === 'handoff_failed'
+        )
+      ) {
+        return 'blocked';
+      }
+      if (recent.some((e) => e.kind === 'watch_expired')) {
+        return 'expired';
+      }
+      if (recent.some((e) => e.kind === 'armed')) return 'no_trigger';
+    } catch {
+      /* optional */
+    }
+    let armed = 0;
+    try {
+      const { getScalperSetupWatchStatus } =
+        require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      const sw = getScalperSetupWatchStatus(24);
+      for (const e of sw.entries || []) {
+        if (e.status !== 'armed') continue;
+        if (String(e.preferredProfileId || '') === pid) armed += 1;
+      }
+    } catch {
+      /* optional */
+    }
+    if (armed > 0) return 'no_trigger';
+    try {
+      const closed = paperTrader.getClosedPositions?.() ?? [];
+      const n = closed
+        .filter(
+          (t) =>
+            String((t as { tradeProfileId?: string }).tradeProfileId || '') ===
+            pid
+        )
+        .slice(-20).length;
+      if (n < 2) return 'few_trades';
+    } catch {
+      /* optional */
+    }
+    return 'no_arms';
+  } catch {
+    return 'no_arms';
   }
 }
 
@@ -304,6 +442,7 @@ export function getSetupWatchDiagnostics(): {
     | 'trigger_blocked'
     | 'recovery'
     | 'marl'
+    | 'suppressed_by_scalper_attention'
     | 'profile_off';
   stats: ReturnType<typeof import('./setupWatchEvents').setupWatchEventStats>;
   lastBlockReason: string | null;

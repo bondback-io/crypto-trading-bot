@@ -9789,15 +9789,15 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" id="expectancy-lift-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Expectancy-first mix targets, family governors, and armed funnel. Soft/reversible governors except late-chase share ceiling (≤5%). Does not override hard safety. Admission Baseline v235 = observe-only (1.2.235 throughput); governed = full throttles."></span></div>
+            <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Entry Skill + Selectivity: armed-first mix, family skill memory, late-chase ceiling (≤5%). Soft/reversible governors except late-chase. Does not override hard safety. On = governed Entry Skill; Baseline v235 = kill-switch (1.2.235 throughput)."></span></div>
             <p class="text-xs text-slate-400 mb-0" id="el-summary">Loading…</p>
           </div>
           <div class="flex flex-wrap gap-2 items-end">
-            <label class="ctl ctl-fit" title="v235 = observe-only expectancy (restore admit throughput). Governed = full late-chase / disc-mix / governor / permission / concurrent throttles.">
-              <span>Admission Baseline</span>
+            <label class="ctl ctl-fit" title="On = Entry Skill (governed armed-first selectivity). Baseline v235 = kill-switch (observe-only admit / 1.2.235 throughput).">
+              <span>Entry Skill</span>
               <select id="el-admission-baseline" onchange="saveAdmissionBaseline()">
-                <option value="v235" selected>v235 (observe-only)</option>
-                <option value="governed">governed (full throttles)</option>
+                <option value="governed" selected>On</option>
+                <option value="v235">Baseline v235</option>
               </select>
             </label>
             <label class="ctl ctl-fit">
@@ -9820,7 +9820,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs">
-          <span class="lsd-chip" id="el-chip-baseline" title="Admission Baseline mode">Baseline —</span>
+          <span class="lsd-chip" id="el-chip-baseline" title="Entry Skill / Baseline mode">Entry Skill —</span>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-mix-chips" aria-label="Expectancy mix chips">
           <span class="lsd-chip" id="el-chip-armed">Armed —</span>
@@ -9849,18 +9849,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </table>
         </div>
         <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
-          <table class="tp-overview-table" id="el-family-table" style="min-width:36rem">
+          <table class="tp-overview-table" id="el-family-table" style="min-width:42rem">
             <thead>
               <tr>
                 <th>Family</th>
                 <th>Gov</th>
                 <th>n</th>
-                <th>negW</th>
+                <th>WR</th>
                 <th>E%</th>
+                <th>Avg W</th>
+                <th>Avg L</th>
+                <th>MFE cap</th>
+                <th>negW</th>
                 <th>Note</th>
               </tr>
             </thead>
-            <tbody id="el-family-tbody"><tr><td colspan="6" class="mint text-xs">—</td></tr></tbody>
+            <tbody id="el-family-tbody"><tr><td colspan="10" class="mint text-xs">—</td></tr></tbody>
           </table>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-funnel">
@@ -16136,7 +16140,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       } catch (err) {
         try {
           alert(
-            'Failed to save Admission Baseline: ' +
+            'Failed to save Entry Skill: ' +
               ((err && err.message) || String(err))
           );
         } catch (_) {}
@@ -16157,7 +16161,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const teaser = document.getElementById('el-teaser-line');
         if (teaser) {
           teaser.textContent =
-            'Expectancy Lift: ' + ((data && data.plainLanguage) || '—');
+            'Entry Skill: ' + ((data && data.plainLanguage) || '—');
         }
         const baseSel = document.getElementById('el-admission-baseline');
         const baseMode =
@@ -16165,14 +16169,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (baseSel) baseSel.value = baseMode;
         const baseChip = document.getElementById('el-chip-baseline');
         if (baseChip) {
-          const active = data && data.baselineActive === true;
-          baseChip.textContent = active
-            ? 'Baseline v235 (observe-only)'
-            : 'Baseline governed (full throttles)';
-          baseChip.className = elChipClass(active, !active);
-          baseChip.title = active
-            ? 'Expectancy metrics on; admit throttles off (1.2.235 throughput)'
-            : 'Full expectancy admit throttles active';
+          const entryOn =
+            data &&
+            (data.entrySkillActive === true || data.baselineActive !== true);
+          baseChip.textContent = entryOn
+            ? 'Entry Skill On'
+            : 'Baseline v235 (kill-switch)';
+          baseChip.className = elChipClass(entryOn, !entryOn);
+          baseChip.title = entryOn
+            ? 'Armed-first Entry Skill admit path active'
+            : 'Expectancy metrics on; admit throttles off (1.2.235 throughput)';
         }
         const mix = (data && data.mix) || {};
         const targets = (data && data.targets) || {};
@@ -16329,10 +16335,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (m.tradeCount || 0) +
                     '</td>' +
                     '<td>' +
-                    (f.negWindows != null ? f.negWindows : 0) +
+                    elFmtPct(m.winRate) +
                     '</td>' +
                     '<td>' +
                     elFmtNum(m.expectancyPct, 2) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtNum(m.avgWinPct, 1) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtNum(m.avgLossPct, 1) +
+                    '</td>' +
+                    '<td>' +
+                    (m.mfeCapturePct != null
+                      ? elFmtNum(m.mfeCapturePct, 0) + '%'
+                      : '—') +
+                    '</td>' +
+                    '<td>' +
+                    (f.negWindows != null ? f.negWindows : 0) +
                     '</td>' +
                     '<td class="text-xs">' +
                     String(f.note || '—') +
@@ -16341,7 +16361,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   );
                 })
                 .join('')
-            : '<tr><td colspan="6" class="mint text-xs">—</td></tr>';
+            : '<tr><td colspan="10" class="mint text-xs">—</td></tr>';
         }
         const funnel = document.getElementById('el-funnel');
         if (funnel && data && data.funnel) {

@@ -1,7 +1,8 @@
 /**
- * Expectancy Lift Layer — expectancy-first governors, mix targets, permission score.
+ * Expectancy Lift / Entry Skill — expectancy-first governors, mix targets, permission.
  * Additive / soft-reversible except late_chase share ceiling (hard 5%).
  * Fail soft everywhere — never block hard safety.
+ * Admission Baseline v235 = kill-switch (observe-only admit); governed = Entry Skill on.
  */
 
 import fs from 'fs';
@@ -59,7 +60,8 @@ const LATE_CHASE_MAX_SHARE = 0.05;
 const ARMED_SHARE_TARGET = 0.7;
 const DISC_SHARE_CAP = 0.3;
 const DISC_SHARE_CAP_RELIEF = 0.45;
-const SCALPER_SHARE_TARGET = 0.3;
+/** Governed Entry Skill Scalper attention share target (~25–30%). */
+const SCALPER_SHARE_TARGET = 0.28;
 const LOSS_STREAK_N = 8;
 const LOSS_STREAK_K = 5;
 const PERM_FLOOR_DISC = 35;
@@ -69,6 +71,14 @@ const SIZE_MULT_HI = 1.15;
 const SCRATCH_PNL_PCT = 0.25;
 const SCRATCH_PNL_SOL = 0.001;
 const DISC_MIX_SIZE_PENALTY = 0.85;
+
+/** Quality profiles: hard-skip late_chase primary under Entry Skill. */
+const QUALITY_LATE_CHASE_PROFILES = new Set([
+  'dip_buyer',
+  'trend_rider',
+  'steady_compounder',
+  'smart_money_mirror',
+]);
 
 const FILE = () => dataFile('expectancy-lift.json');
 
@@ -208,6 +218,48 @@ export interface ExpectancyLiftStatus {
   admissionBaseline: AdmissionBaseline;
   /** True when v235 observe-only throughput mode is active. */
   baselineActive: boolean;
+  /** True when Entry Skill (governed) admit path is active. */
+  entrySkillActive: boolean;
+  /** Per-family skill memory (WR / E / avg W/L / MFE / n + governor). */
+  familySkillMemory: FamilySkillMemoryRow[];
+}
+
+export interface FamilySkillMemoryRow {
+  family: ExpectancyFamily;
+  winRate: number | null;
+  expectancyPct: number | null;
+  avgWinPct: number | null;
+  avgLossPct: number | null;
+  mfeCapturePct: number | null;
+  n: number;
+  state: FamilyGovernorState;
+}
+
+export interface EntrySelectivityCtx {
+  profileId: string;
+  profileName?: string;
+  tradeProfileScore?: number | null;
+  armedWatch?: boolean;
+  entryStyle?: string | null;
+  lateChase?: boolean;
+  extensionFromLevelPct?: number | null;
+  setupWatchFamily?: string | null;
+  mint?: string | null;
+  triggerConfirm?: boolean;
+  detectedEntryStyle?: string | null;
+  entryPath?: string | null;
+}
+
+export interface EntrySelectivityResult {
+  admit: boolean;
+  reasons: string[];
+  permission: number;
+  sizeMult: number;
+  family: ExpectancyFamily;
+  chips: string[];
+  governorState: FamilyGovernorState;
+  softPassNative?: boolean;
+  governorInfluenced: boolean;
 }
 
 export function normalizeAdmissionBaseline(raw: unknown): AdmissionBaseline {
@@ -221,7 +273,7 @@ export function getAdmissionBaseline(): AdmissionBaseline {
       (config as { admissionBaseline?: unknown }).admissionBaseline
     );
   } catch {
-    return 'v235';
+    return 'governed';
   }
 }
 
@@ -249,10 +301,18 @@ export function setAdmissionBaseline(
   const normalized = normalizeAdmissionBaseline(next);
   const prev = getAdmissionBaseline();
   try {
-    const { config, persistUserSettings } =
-      require('./config') as typeof import('./config');
+    const {
+      config,
+      persistUserSettings,
+      noteAdmissionBaselineOperatorChoice,
+    } = require('./config') as typeof import('./config');
     (config as { admissionBaseline: AdmissionBaseline }).admissionBaseline =
       normalized;
+    try {
+      noteAdmissionBaselineOperatorChoice();
+    } catch {
+      /* soft */
+    }
     persistUserSettings();
   } catch {
     /* soft */
@@ -1181,6 +1241,7 @@ export function shouldLimitLateChaseShare(input: {
   entryStyle?: string | null;
   armedWatch?: boolean;
   extensionFromLevelPct?: number | null;
+  profileId?: string | null;
 }): { limit: boolean; reason?: string } {
   // Armed reclaim does not hard-skip and does not count toward ceiling
   if (
@@ -1197,6 +1258,16 @@ export function shouldLimitLateChaseShare(input: {
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
   if (!isLate) return { limit: false };
+  // Entry Skill: quality profiles hard-skip late_chase primary even below sample floor
+  if (
+    !isAdmissionBaselineV235() &&
+    QUALITY_LATE_CHASE_PROFILES.has(String(input.profileId || ''))
+  ) {
+    return {
+      limit: true,
+      reason: `Entry Skill: quality profile hard-skip late_chase (${input.profileId})`,
+    };
+  }
   const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
   if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
     return {
@@ -1261,7 +1332,7 @@ function stuckArmedReliefActive(): boolean {
   return openCount < 15 && (poorArmed || armedOpenRate == null);
 }
 
-/** Armed dominance ~70/30 — hard soft-skip only fast discretionary when disc high. */
+/** Armed dominance ~70/30 — Entry Skill hard-skips all disc when live arms + disc >30%. */
 export function shouldLimitDiscretionaryMix(input: {
   armedWatch?: boolean;
   profileId?: string | null;
@@ -1270,11 +1341,21 @@ export function shouldLimitDiscretionaryMix(input: {
   const mix = getRecentMixShares(50);
   if (mix.total < 10) return { limit: false };
   const liveArmed = countLiveArmedWatches();
-  const relief =
-    liveArmed === 0 || stuckArmedReliefActive();
+  const stuck = stuckArmedReliefActive();
+  const pid = String(input.profileId || '');
+
+  // True 70/30: live armed + disc over cap → hard-skip ALL discretionary
+  if (liveArmed > 0 && !stuck && mix.discShare > DISC_SHARE_CAP) {
+    return {
+      limit: true,
+      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(DISC_SHARE_CAP * 100).toFixed(0)}% with ${liveArmed} live armed — skip all disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
+    };
+  }
+
+  // Stuck-armed relief or no live arms: 45% cap, fast profiles only
+  const relief = liveArmed === 0 || stuck;
   const cap = relief ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
   if (mix.discShare < cap) return { limit: false };
-  const pid = String(input.profileId || '');
   if (!FAST_DISC_PROFILES.has(pid)) {
     // Non-fast: size penalty only (see expectancyLiftSizePenaltyForDiscMix)
     return { limit: false };
@@ -1516,6 +1597,203 @@ export function syncOneSetupLocksFromWatches(): void {
   } catch {
     /* soft */
   }
+  try {
+    const { getMigrationGradWatchStatus } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    const gw = getMigrationGradWatchStatus(40);
+    for (const e of gw.entries || []) {
+      if (e.status !== 'armed' && e.status !== 'watching') continue;
+      mintOneSetupProfileLock(e.mint, 'migration_sniper');
+    }
+  } catch {
+    /* soft */
+  }
+}
+
+/**
+ * Entry Skill admit facade — baseline gating + late-chase / disc-mix / governor /
+ * one-setup / permission. v235 admits always (observe-only) but still stamps scores.
+ */
+export function evaluateEntrySelectivity(
+  ctx: EntrySelectivityCtx
+): EntrySelectivityResult {
+  const baselineV235 = isAdmissionBaselineV235();
+  const armedWatch = ctx.armedWatch === true;
+  const entryStyle = String(ctx.entryStyle || '');
+  const lateChase = ctx.lateChase === true || entryStyle === 'late_chase';
+  const entryPath =
+    ctx.entryPath || (armedWatch ? 'armed_trigger' : 'discretionary');
+  const reasons: string[] = [];
+  const chips: string[] = [];
+
+  const family = admitFamilyForGovernor({
+    entryStyle,
+    lateChase,
+    profileId: ctx.profileId,
+    armedWatch,
+    entryPath,
+    setupWatchFamily: ctx.setupWatchFamily,
+  });
+  const passerLate = family === 'late_chase';
+
+  if (!baselineV235) {
+    const lateLim = shouldLimitLateChaseShare({
+      lateChase: passerLate,
+      family,
+      entryStyle: passerLate ? 'late_chase' : entryStyle,
+      armedWatch,
+      extensionFromLevelPct: ctx.extensionFromLevelPct,
+      profileId: ctx.profileId,
+    });
+    if (lateLim.limit) {
+      reasons.push(lateLim.reason || 'Late-chase share ceiling');
+      chips.push('late_chase');
+      return {
+        admit: false,
+        reasons,
+        permission: 0,
+        sizeMult: 1,
+        family,
+        chips,
+        governorState: getFamilyGovernorState(family),
+        governorInfluenced: true,
+      };
+    }
+  }
+
+  const gov = shouldSkipFamilyGovernor({
+    family,
+    entryStyle: passerLate ? 'late_chase' : entryStyle,
+    lateChase: passerLate,
+    armedWatch,
+    profileId: ctx.profileId,
+    entryPath,
+    setupWatchFamily: ctx.setupWatchFamily,
+  });
+  if (!baselineV235 && gov.softPassNative) {
+    chips.push('gov_soft_pass');
+    reasons.push(
+      gov.reason || `governor:restricted soft-pass native ${ctx.profileId}`
+    );
+  }
+  if (!baselineV235 && gov.skip) {
+    reasons.push(gov.reason || 'Family governor restrict');
+    chips.push('governor');
+    return {
+      admit: false,
+      reasons,
+      permission: 0,
+      sizeMult: 1,
+      family: gov.family || family,
+      chips,
+      governorState: gov.state,
+      governorInfluenced: true,
+    };
+  }
+
+  if (!baselineV235) {
+    const discMix = shouldLimitDiscretionaryMix({
+      armedWatch,
+      profileId: ctx.profileId,
+    });
+    if (discMix.limit) {
+      reasons.push(discMix.reason || 'Armed mix 70/30');
+      chips.push('disc_mix');
+      return {
+        admit: false,
+        reasons,
+        permission: 0,
+        sizeMult: 1,
+        family: gov.family || family,
+        chips,
+        governorState: gov.state,
+        governorInfluenced: true,
+      };
+    }
+    const lock = shouldBlockOtherProfileDiscretionary({
+      mint: ctx.mint,
+      profileId: ctx.profileId,
+      armedWatch,
+    });
+    if (lock.block) {
+      reasons.push(lock.reason || 'One-setup-one-profile');
+      chips.push('one_setup');
+      return {
+        admit: false,
+        reasons,
+        permission: 0,
+        sizeMult: 1,
+        family: gov.family || family,
+        chips,
+        governorState: gov.state,
+        governorInfluenced: true,
+      };
+    }
+  }
+
+  const effectiveFamily = gov.family || family;
+  let dnaMatch: boolean | null = null;
+  if (ctx.detectedEntryStyle != null) {
+    dnaMatch =
+      classifyTradeFamily({
+        entryStyle: ctx.detectedEntryStyle,
+        profileId: ctx.profileId,
+        armedWatch,
+      }) === effectiveFamily ||
+      String(ctx.detectedEntryStyle) === entryStyle;
+  }
+  const permission = computeTradePermissionScore({
+    armedWatch,
+    triggerConfirm: ctx.triggerConfirm === true,
+    family: effectiveFamily,
+    entryStyle,
+    lateChase,
+    extensionFromLevelPct: ctx.extensionFromLevelPct,
+    dnaMatch,
+    profileId: ctx.profileId,
+    tradeProfileScore: ctx.tradeProfileScore,
+  });
+
+  if (!baselineV235) {
+    const softPerm = shouldSoftSkipPermissionScore(permission, armedWatch);
+    if (softPerm.skip) {
+      reasons.push(softPerm.reason || 'Permission score');
+      chips.push('permission');
+      return {
+        admit: false,
+        reasons,
+        permission,
+        sizeMult: 1,
+        family: effectiveFamily,
+        chips,
+        governorState: gov.state,
+        governorInfluenced: true,
+      };
+    }
+  }
+
+  const sz = expectancySizeMultiplier({
+    profileId: ctx.profileId,
+    family: effectiveFamily,
+    armedWatch,
+  });
+  if (baselineV235) chips.push('baseline_v235');
+  else chips.push('entry_skill');
+  if (armedWatch) chips.push('armed');
+  if (ctx.triggerConfirm === true) chips.push('trigger_confirm');
+
+  return {
+    admit: true,
+    reasons,
+    permission,
+    sizeMult: sz.mult,
+    family: effectiveFamily,
+    chips,
+    governorState: gov.state,
+    softPassNative: gov.softPassNative,
+    governorInfluenced:
+      !baselineV235 && (gov.state !== 'neutral' || permission < 55),
+  };
 }
 
 function quietReasonForProfile(profileId: string): string | null {
@@ -1523,6 +1801,7 @@ function quietReasonForProfile(profileId: string): string | null {
     const {
       getSetupWatchDiagnostics,
       describeDipInactiveReason,
+      describeTrendInactiveReason,
     } = require('./profileAttention') as typeof import('./profileAttention');
     if (profileId === 'dip_buyer') {
       const r = describeDipInactiveReason();
@@ -1532,6 +1811,20 @@ function quietReasonForProfile(profileId: string): string | null {
       if (r === 'recovery') return 'Recovery throttle';
       if (r === 'profile_off') return 'Profile off';
       if (r === 'marl') return 'MARL downrank';
+      if (r === 'suppressed_by_scalper_attention') {
+        return 'Suppressed by Scalper attention';
+      }
+    }
+    if (profileId === 'trend_rider' || profileId === 'steady_compounder') {
+      const r = describeTrendInactiveReason(profileId);
+      if (r === 'profile_off') return 'Profile off';
+      if (r === 'recovery') return 'Recovery throttle';
+      if (r === 'marl') return 'MARL downrank';
+      if (r === 'blocked') return 'Triggers blocked';
+      if (r === 'expired') return 'Watches expired';
+      if (r === 'no_trigger') return 'Armed — no trigger';
+      if (r === 'no_arms') return 'No armed setups';
+      if (r === 'few_trades') return 'Quiet — few recent trades';
     }
     const d = getSetupWatchDiagnostics();
     const armed = d.armedByProfile?.[profileId] || 0;
@@ -1755,7 +2048,9 @@ export function getExpectancyLiftStatus(
 
   const liveArmed = countLiveArmedWatches();
   const effectiveCap =
-    liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+    liveArmed === 0 || stuckArmedReliefActive()
+      ? DISC_SHARE_CAP_RELIEF
+      : DISC_SHARE_CAP;
   const discShare = mix.discretionaryShare;
   const discMixActive =
     discShare != null &&
@@ -1763,6 +2058,7 @@ export function getExpectancyLiftStatus(
     discShare >= effectiveCap;
   const admissionBaseline = getAdmissionBaseline();
   const baselineActive = admissionBaseline === 'v235';
+  const entrySkillActive = !baselineActive;
   let scalperShareMax = SCALPER_SHARE_TARGET;
   try {
     const { getScalperAttentionShareCap } =
@@ -1772,8 +2068,19 @@ export function getExpectancyLiftStatus(
     scalperShareMax = baselineActive ? 0.35 : SCALPER_SHARE_TARGET;
   }
   const plainExtra = baselineActive
-    ? ' · Admission Baseline v235 (expectancy observe-only).'
-    : ' · Admission Baseline governed (full throttles).';
+    ? ' · Baseline v235 kill-switch (Entry Skill admit throttles off).'
+    : ' · Entry Skill On (armed-first selectivity).';
+
+  const familySkillMemory: FamilySkillMemoryRow[] = families.map((f) => ({
+    family: f.family,
+    winRate: f.metrics.winRate,
+    expectancyPct: f.metrics.expectancyPct,
+    avgWinPct: f.metrics.avgWinPct,
+    avgLossPct: f.metrics.avgLossPct,
+    mfeCapturePct: f.metrics.mfeCapturePct,
+    n: f.metrics.tradeCount,
+    state: f.state,
+  }));
 
   return {
     ok: true,
@@ -1799,6 +2106,8 @@ export function getExpectancyLiftStatus(
     },
     admissionBaseline,
     baselineActive,
+    entrySkillActive,
+    familySkillMemory,
   };
 }
 
@@ -1809,6 +2118,11 @@ export function formatExpectancyLiftZionLines(
     const st = getExpectancyLiftStatus(window);
     const lines: string[] = [];
     lines.push(st.plainLanguage);
+    lines.push(
+      st.entrySkillActive
+        ? 'Entry Skill is On — prefer armed confirmed setups over discretionary chase.'
+        : 'Baseline v235 kill-switch is On — Entry Skill admit throttles are off (1.2.235 throughput).'
+    );
     const restricted = st.families.filter((f) => f.state === 'restricted');
     const down = st.families.filter((f) => f.state === 'down_ranked');
     if (restricted.length) {
@@ -1819,6 +2133,15 @@ export function formatExpectancyLiftZionLines(
     if (down.length) {
       lines.push(
         `Down-ranked: ${down.map((f) => f.family).join(', ')}.`
+      );
+    }
+    const skilled = (st.familySkillMemory || [])
+      .filter((f) => f.n >= 5 && f.expectancyPct != null)
+      .sort((a, b) => (b.expectancyPct ?? -999) - (a.expectancyPct ?? -999));
+    if (skilled[0]) {
+      const f = skilled[0];
+      lines.push(
+        `Top family skill: ${f.family} E=${(f.expectancyPct ?? 0).toFixed(2)}% WR=${f.winRate != null ? (f.winRate * 100).toFixed(0) + '%' : '—'} (n=${f.n}, ${f.state}).`
       );
     }
     const top = st.profiles.find((p) => (p.metrics.tradeCount || 0) >= 5);
@@ -1837,7 +2160,7 @@ export function formatExpectancyLiftZionLines(
     }
     return lines;
   } catch {
-    return ['Expectancy Lift diagnostics unavailable.'];
+    return ['Entry Skill / Expectancy Lift diagnostics unavailable.'];
   }
 }
 

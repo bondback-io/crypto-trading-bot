@@ -4863,6 +4863,10 @@ export function applyTradeProfileExitRules(
     profileExitPolicy?: import('./profileTradeIntelligence').ProfileExitPolicy;
     selfLearnVersion?: number;
     haExitEnabledAtOpen?: boolean;
+    armedWatch?: boolean;
+    entryStyle?: string;
+    entryQualityScore?: number | null;
+    qualityTier?: 'low' | 'medium' | 'high' | null;
   },
   rules: TradeProfileExitRules,
   seedShortTerm?: (
@@ -4884,7 +4888,12 @@ export function applyTradeProfileExitRules(
   try {
     const { resolveExitPolicy } =
       require('./profileTradeIntelligence') as typeof import('./profileTradeIntelligence');
-    const policy = resolveExitPolicy(position.tradeProfileId, rules);
+    const policy = resolveExitPolicy(position.tradeProfileId, rules, {
+      armedWatch: position.armedWatch === true,
+      entryStyle: position.entryStyle,
+      entryQualityScore: position.entryQualityScore,
+      qualityTier: position.qualityTier,
+    });
     position.profileExitPolicy = policy;
     position.haExitEnabledAtOpen = policy.heikinAshiExitEnabled === true;
     if (policy.aggressiveDeadMarket && position.deadVolumeMinHoldMinutes == null) {

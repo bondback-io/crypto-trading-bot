@@ -196,7 +196,7 @@ export interface PersistedBotSettings {
       weatherNudgesEnabled?: boolean;
     };
   };
-  /** Admission Baseline — v235 observe-only expectancy; governed = full throttles */
+  /** Admission Baseline / Entry Skill — governed On; v235 = kill-switch */
   admissionBaseline?: 'v235' | 'governed';
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {

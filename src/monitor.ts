@@ -7204,25 +7204,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `[monitor] Smart Bot lane passers=${lanePassers.map((l) => `${l.name}:${l.score}`).join(', ')} ` +
         `· top=${lanePassers[0]!.name} (${lanePassers[0]!.profileId}) · ${signal.symbol}`
     );
-    // Expectancy Lift Layer — evaluate per passer so a restricted top does not
-    // kill the whole fight (late-chase share ceiling stays hard for late admits).
-    // Admission Baseline v235: observe-only (metrics/status still run; no admit skips).
+    // Entry Skill / Expectancy Lift — per-passer facade (v235 = observe-only admits).
     try {
       const {
-        shouldSkipFamilyGovernor,
-        shouldLimitLateChaseShare,
-        shouldLimitDiscretionaryMix,
-        shouldBlockOtherProfileDiscretionary,
-        computeTradePermissionScore,
-        shouldSoftSkipPermissionScore,
-        classifyTradeFamily,
-        admitFamilyForGovernor,
+        evaluateEntrySelectivity,
         mintOneSetupProfileLock,
         syncOneSetupLocksFromWatches,
-        isAdmissionBaselineV235,
       } = require('./expectancyLift') as typeof import('./expectancyLift');
       syncOneSetupLocksFromWatches();
-      const baselineV235 = isAdmissionBaselineV235();
       const armedWatch =
         signal.armedWatch === true ||
         /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
@@ -7236,128 +7225,45 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
         (ctx as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
         null;
+      const triggerConfirm =
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+          reasonBitsLane
+        );
       const govFails: string[] = [];
       const admitted: typeof lanePassers = [];
       for (const passer of lanePassers) {
-        const family = admitFamilyForGovernor({
-          entryStyle,
-          lateChase,
+        const sel = evaluateEntrySelectivity({
           profileId: passer.profileId,
+          profileName: passer.name,
+          tradeProfileScore: passer.score,
           armedWatch,
-          entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
-          setupWatchFamily: signal.setupWatchFamily,
-        });
-        const passerLate = family === 'late_chase';
-        if (!baselineV235) {
-          const lateLim = shouldLimitLateChaseShare({
-            lateChase: passerLate,
-            family,
-            entryStyle: passerLate ? 'late_chase' : entryStyle,
-            armedWatch,
-            extensionFromLevelPct: ext,
-          });
-          if (lateLim.limit) {
-            govFails.push(
-              `${passer.name}: ${lateLim.reason || 'Late-chase share ceiling'}`
-            );
-            console.log(
-              `[monitor] expectancy skip passer=${passer.name}: ${lateLim.reason}`
-            );
-            continue;
-          }
-        }
-        const gov = shouldSkipFamilyGovernor({
-          family,
-          entryStyle: passerLate ? 'late_chase' : entryStyle,
-          lateChase: passerLate,
-          armedWatch,
-          profileId: passer.profileId,
-          entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
-          setupWatchFamily: signal.setupWatchFamily,
-        });
-        if (!baselineV235 && gov.softPassNative) {
-          console.log(
-            `[monitor] ${gov.reason || `governor:restricted soft-pass native ${passer.profileId}`}`
-          );
-        }
-        if (!baselineV235 && gov.skip) {
-          govFails.push(
-            `${passer.name}: ${gov.reason || 'Family governor restrict'}`
-          );
-          console.log(
-            `[monitor] expectancy skip passer=${passer.name}: ${gov.reason}`
-          );
-          continue;
-        }
-        if (!baselineV235) {
-          const discMix = shouldLimitDiscretionaryMix({
-            armedWatch,
-            profileId: passer.profileId,
-          });
-          if (discMix.limit) {
-            govFails.push(
-              `${passer.name}: ${discMix.reason || 'Armed mix 70/30'}`
-            );
-            console.log(
-              `[monitor] expectancy skip passer=${passer.name}: ${discMix.reason}`
-            );
-            continue;
-          }
-          const lock = shouldBlockOtherProfileDiscretionary({
-            mint: signal.mint,
-            profileId: passer.profileId,
-            armedWatch,
-          });
-          if (lock.block) {
-            govFails.push(
-              `${passer.name}: ${lock.reason || 'One-setup-one-profile'}`
-            );
-            console.log(
-              `[monitor] expectancy skip passer=${passer.name}: ${lock.reason}`
-            );
-            continue;
-          }
-        }
-        const perm = computeTradePermissionScore({
-          armedWatch,
-          triggerConfirm:
-            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
-              reasonBitsLane
-            ),
-          family: gov.family || family,
           entryStyle,
           lateChase,
           extensionFromLevelPct: ext,
-          dnaMatch:
-            ctx.detectedEntryStyle != null
-              ? classifyTradeFamily({
-                  entryStyle: ctx.detectedEntryStyle,
-                  profileId: passer.profileId,
-                  armedWatch,
-                }) === (gov.family || family) ||
-                String(ctx.detectedEntryStyle) === entryStyle
-              : null,
-          profileId: passer.profileId,
-          tradeProfileScore: passer.score,
+          setupWatchFamily: signal.setupWatchFamily,
+          mint: signal.mint,
+          triggerConfirm,
+          detectedEntryStyle: ctx.detectedEntryStyle,
+          entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
         });
-        if (!baselineV235) {
-          const softPerm = shouldSoftSkipPermissionScore(perm, armedWatch);
-          if (softPerm.skip) {
-            govFails.push(
-              `${passer.name}: ${softPerm.reason || 'Permission score'}`
-            );
-            console.log(
-              `[monitor] expectancy skip passer=${passer.name}: ${softPerm.reason}`
-            );
-            continue;
-          }
+        if (sel.softPassNative && sel.reasons[0]) {
+          console.log(`[monitor] ${sel.reasons[0]}`);
         }
-        // First admitted passer stamps permission / one-setup lock for cascade
+        if (!sel.admit) {
+          const why = sel.reasons[0] || 'Entry Skill blocked';
+          govFails.push(`${passer.name}: ${why}`);
+          console.log(
+            `[monitor] expectancy skip passer=${passer.name}: ${why}`
+          );
+          continue;
+        }
         if (!admitted.length) {
           (signal as { tradePermissionScore?: number }).tradePermissionScore =
-            perm;
+            sel.permission;
           (signal as { governorInfluenced?: boolean }).governorInfluenced =
-            !baselineV235 && (gov.state !== 'neutral' || perm < 55);
+            sel.governorInfluenced;
+          (signal as { entrySkillChips?: string[] }).entrySkillChips =
+            sel.chips;
           if (armedWatch && signal.mint) {
             mintOneSetupProfileLock(
               signal.mint,
@@ -7371,7 +7277,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       }
       if (!admitted.length) {
         const why =
-          govFails[0] || 'Expectancy governor blocked all lane passers';
+          govFails[0] || 'Entry Skill blocked all lane passers';
         recordRejectedSignal(signal, why);
         markLaneFightCascadeResult(signal.mint, false, why);
         console.log(

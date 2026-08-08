@@ -229,7 +229,13 @@ export const DEFAULT_EXIT_POLICIES: Record<string, ProfileExitPolicy> = {
 
 export function resolveExitPolicy(
   profileId: string | null | undefined,
-  rules?: TradeProfileExitRules | null
+  rules?: TradeProfileExitRules | null,
+  opts?: {
+    armedWatch?: boolean;
+    entryStyle?: string | null;
+    entryQualityScore?: number | null;
+    qualityTier?: 'low' | 'medium' | 'high' | null;
+  }
 ): ProfileExitPolicy {
   const base =
     DEFAULT_EXIT_POLICIES[String(profileId || 'default')] ||
@@ -241,7 +247,12 @@ export function resolveExitPolicy(
     const { resolvePclPartialDefaults, isProfitCaptureLayerEnabled } =
       require('./profitCaptureLayer') as typeof import('./profitCaptureLayer');
     if (isProfitCaptureLayerEnabled()) {
-      const pcl = resolvePclPartialDefaults(profileId);
+      const pcl = resolvePclPartialDefaults(profileId, {
+        armedWatch: opts?.armedWatch === true,
+        entryStyle: opts?.entryStyle,
+        entryQualityScore: opts?.entryQualityScore,
+        qualityTier: opts?.qualityTier,
+      });
       earlyPartialTpPct = pcl.earlyPartialTpPct;
       earlyPartialFraction = pcl.earlyPartialFraction;
     }

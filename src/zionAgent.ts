@@ -868,7 +868,44 @@ function localAnalystReply(
     });
   }
 
-  if (/trend\s*rider|quiet|why.*(no|few)\s*trades/.test(q)) {
+  if (/trend\s*rider|why.*trend|trend\s*(is\s*)?(quiet|idle|silent)|no\s*trend/i.test(q)) {
+    const p = findProfile(facts, 'trend_rider');
+    const state = p
+      ? p.enabled
+        ? 'Trend Rider is ON.'
+        : 'Trend Rider is OFF.'
+      : 'Trend Rider isn’t clear in the profile list.';
+    let funnel = '';
+    try {
+      const { describeTrendInactiveReason } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const reason = describeTrendInactiveReason('trend_rider');
+      const map: Record<string, string> = {
+        no_arms: 'No armed Trend setups right now.',
+        no_trigger: 'Trend has arms waiting for a trigger.',
+        expired: 'Recent Trend watches expired before open.',
+        blocked: 'Trend triggers were blocked (safety / cooldown / handoff).',
+        recovery: 'Recovery is throttling Trend admits.',
+        marl: 'MARL coordination is downranking Trend.',
+        profile_off: 'Trend Rider or Market Scanner is off.',
+        few_trades: 'Few recent Trend closes — quiet sample.',
+      };
+      funnel = map[reason] || `Trend quiet reason: ${reason}.`;
+    } catch {
+      funnel =
+        'Quiet spells were often Pump.fun-only blocking Jupiter specialty.';
+    }
+    return formatZionReply({
+      greeting: greet,
+      answer: state,
+      summary:
+        funnel +
+        ' Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/volume floors still apply. Entry Skill prefers armed confirms.',
+      followUp: 'Check Pump.fun-only / Require TA, or Trend closes?',
+    });
+  }
+
+  if (/quiet|why.*(no|few)\s*trades/.test(q)) {
     const p = findProfile(facts, 'trend_rider');
     const state = p
       ? p.enabled
@@ -879,7 +916,7 @@ function localAnalystReply(
       greeting: greet,
       answer: state,
       summary:
-        'Quiet spells were often Pump.fun-only blocking Jupiter specialty. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/volume floors still apply.',
+        'Quiet spells were often Pump.fun-only blocking Jupiter specialty. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/volume floors still apply. Entry Skill prefers armed confirms over discretionary chase.',
       followUp: 'Check Pump.fun-only / Require TA, or Trend closes?',
     });
   }
@@ -900,6 +937,8 @@ function localAnalystReply(
         trigger_blocked: 'Dip triggers were blocked by hard safety (anti-rug / floors).',
         recovery: 'Dip Buyer Recovery is throttling admits.',
         marl: 'MARL coordination is downranking Dip.',
+        suppressed_by_scalper_attention:
+          'Dip is quiet because Scalper attention share is capping discretionary room.',
         profile_off: 'Dip Buyer or Market Scanner is off.',
       };
       return formatZionReply({

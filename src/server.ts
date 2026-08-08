@@ -3857,10 +3857,12 @@ export function createServer(): express.Application {
       const { getAdmissionBaseline, isAdmissionBaselineV235 } =
         require('./expectancyLift') as typeof import('./expectancyLift');
       const admissionBaseline = getAdmissionBaseline();
+      const baselineActive = isAdmissionBaselineV235();
       res.json({
         ok: true,
         admissionBaseline,
-        baselineActive: isAdmissionBaselineV235(),
+        baselineActive,
+        entrySkillActive: !baselineActive,
       });
     } catch (err) {
       res.status(500).json({
@@ -3887,10 +3889,12 @@ export function createServer(): express.Application {
         return;
       }
       setAdmissionBaseline(raw);
+      const baselineActive = isAdmissionBaselineV235();
       res.json({
         ok: true,
         admissionBaseline: getAdmissionBaseline(),
-        baselineActive: isAdmissionBaselineV235(),
+        baselineActive,
+        entrySkillActive: !baselineActive,
         config: getConfigSnapshot(),
       });
     } catch (err) {

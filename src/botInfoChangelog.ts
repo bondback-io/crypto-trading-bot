@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.242',
+    title: 'Entry Skill + Selectivity (default On)',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'Entry Skill is the new default (admissionBaseline=governed): armed-first 70/30, late-chase quality hard-skip, Scalper 28%/window 20 + concurrent≥1, family skill memory on status. Kill-switch: Baseline v235 restores 1.2.235 observe-only admit throughput.',
+      'evaluateEntrySelectivity facade in expectancyLift; monitor admit cascade uses one call. One-shot entrySkillDefaultV242 migrates leftover 1.2.241 v235 defaults unless operator already toggled.',
+      'Grad watch touch→reclaim / touch-and-fail (v235 skips reject); one-setup locks sync for migration grad; PCL resolveExitPolicy passes armedWatch for earlier armed partials.',
+      'Dashboard Entry Skill control (On / Baseline v235); family table WR/avg W/L/MFE; Dip quiet suppressed_by_scalper_attention + MARL; Trend funnel quiet + Zion plain language. If opens collapse → flip Baseline v235.',
+    ],
+  },
+  {
     version: '1.2.241',
     title: 'Admission Baseline (restore 1.2.235 throughput)',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs'],

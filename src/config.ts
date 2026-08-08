@@ -2103,8 +2103,8 @@ export interface BotConfig {
     };
   };
   /**
-   * Admission Baseline — v235 restores 1.2.235-era admit throughput
-   * (expectancy observe-only); governed keeps full 1.2.240 throttles.
+   * Admission Baseline / Entry Skill — governed = Entry Skill On (default);
+   * v235 = kill-switch (1.2.235-era observe-only admit throughput).
    */
   admissionBaseline: 'v235' | 'governed';
 
@@ -2394,7 +2394,7 @@ export const config: BotConfig = {
     },
   },
 
-  admissionBaseline: 'v235',
+  admissionBaseline: 'governed',
 
   peakProfitProtection: {
     enabled: true,
@@ -2914,6 +2914,10 @@ const TRADING_MODE_LIVE_SIM_DEFAULT_V2 = 'tradingMode_liveSimDefault_v2';
 const HARD_VOLUME_LIQ_FLOORS_V1144 = 'hardVolumeLiquidityFloors_v1144';
 /** One-shot: Smart Bot Profiles ON by default (micro-bots). */
 const SMART_BOT_DEFAULT_ON_V1 = 'smartBotDefaultOn_v1';
+/** One-shot: Entry Skill default On (governed) — migrate leftover 1.2.241 v235 default. */
+const ENTRY_SKILL_DEFAULT_V242 = 'entrySkillDefaultV242';
+/** Operator explicitly chose Admission Baseline via UI/API — never auto-migrate again. */
+const ADMISSION_BASELINE_OPERATOR_SET = 'admissionBaselineOperatorSet';
 /** One-shot: Zion micro-bot ON by default (KOL scanner + offers). */
 const ZION_DEFAULT_ON_V1 = 'zionDefaultOn_v1';
 /** One-shot: Zion safeguards MC band + quality/poll defaults. */
@@ -2976,6 +2980,11 @@ export function hasSettingsMigration(id: string): boolean {
 export function completeSettingsMigration(id: string): void {
   settingsMigrations[id] = true;
   persistUserSettings();
+}
+
+/** Mark that the operator explicitly toggled Admission Baseline / Entry Skill. */
+export function noteAdmissionBaselineOperatorChoice(): void {
+  settingsMigrations[ADMISSION_BASELINE_OPERATOR_SET] = true;
 }
 
 /** Drop older strategyModulesDefault@* stamps when applying a newer baked default. */
@@ -4121,8 +4130,8 @@ function applySettingsSnapshot(
   if (saved.admissionBaseline === 'governed' || saved.admissionBaseline === 'v235') {
     config.admissionBaseline = saved.admissionBaseline;
   } else if (saved.admissionBaseline == null) {
-    // Ship default: restore 1.2.235-era admit throughput
-    config.admissionBaseline = 'v235';
+    // Ship default: Entry Skill On (governed)
+    config.admissionBaseline = 'governed';
   }
   if (saved.peakProfitProtection && typeof saved.peakProfitProtection === 'object') {
     const s = saved.peakProfitProtection;
@@ -4646,6 +4655,20 @@ export function applyPersistedSettings(opts?: {
       '[settings] strategy toggles seed skipped:',
       err instanceof Error ? err.message : err
     );
+  }
+
+  if (!settingsMigrations[ENTRY_SKILL_DEFAULT_V242]) {
+    if (
+      config.admissionBaseline === 'v235' &&
+      settingsMigrations[ADMISSION_BASELINE_OPERATOR_SET] !== true
+    ) {
+      config.admissionBaseline = 'governed';
+      console.log(
+        '[settings] Applied entrySkillDefaultV242 — Entry Skill On (governed); v235 remains kill-switch'
+      );
+    }
+    settingsMigrations[ENTRY_SKILL_DEFAULT_V242] = true;
+    persistUserSettings();
   }
 
   if (!settingsMigrations[SMART_BOT_DEFAULT_ON_V1]) {

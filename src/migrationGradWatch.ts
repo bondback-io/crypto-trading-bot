@@ -55,12 +55,16 @@ export interface GradWatchEntry {
   belowLowMcSinceMs?: number | null;
   /** First time we observed curve complete (post-grad retry window) */
   completeSeenAtMs?: number | null;
+  /** Touched fire band — used for touch→hold/reclaim confirm */
+  touchedFireBand?: boolean;
 }
 
 const MAX_WATCHES = 32;
 const DEFAULT_TTL_MS = 60 * 60_000; // 60 min
 const FAST_POLL_MS = 1_500;
 const REGRESS_INVALIDATE_PCT = 8; // hard dump from peak watched progress
+/** Curve % points below fireMin after touch = touch-and-fail (Mode B parity) */
+const FIRE_TOUCH_FAIL_PCT = 1.2;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 /** Soft MC death — only after continuous time under this floor */
@@ -569,6 +573,31 @@ export async function tickMigrationGradWatches(): Promise<number> {
 
     // Fire: ≥ fireMin while still on curve (no upper-band miss before complete)
     const inFire = progress >= fMin;
+    if (inFire) {
+      w.touchedFireBand = true;
+    }
+
+    // Touch-and-fail: was in fire band, now dumped below without reclaim/hold
+    // Admission Baseline v235: skip reject (keep fire-band confirm)
+    let skipTouchFail = false;
+    try {
+      const { isAdmissionBaselineV235 } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      skipTouchFail = isAdmissionBaselineV235();
+    } catch {
+      skipTouchFail = false;
+    }
+    if (
+      !skipTouchFail &&
+      w.touchedFireBand === true &&
+      !inFire &&
+      progress < fMin - FIRE_TOUCH_FAIL_PCT
+    ) {
+      w.lastReason = 'touch-and-fail reject';
+      w.updatedAt = now;
+      continue;
+    }
+
     if (!inFire) {
       w.updatedAt = now;
       continue;
@@ -587,9 +616,16 @@ export async function tickMigrationGradWatches(): Promise<number> {
       funnel.armed += 1;
     }
 
+    // Prefer reclaim/hold after fire touch (touchedFireBand + still inFire)
+    const reclaimHold = w.touchedFireBand === true && inFire;
+    if (!reclaimHold) {
+      w.updatedAt = now;
+      continue;
+    }
+
     w.status = 'triggered';
     w.updatedAt = now;
-    w.lastReason = `fire ${progress.toFixed(1)}%`;
+    w.lastReason = `fire reclaim ${progress.toFixed(1)}%`;
     const c = buildHandoff(w);
     if (handOffScannerCandidate(c, { bypassCooldown: true })) {
       handed += 1;
