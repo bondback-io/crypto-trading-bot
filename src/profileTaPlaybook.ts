@@ -305,7 +305,7 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       preferFibConfluence: false,
     },
     whaleMode: 'off',
-    learningEnabled: false,
+    learningEnabled: true,
   }),
   migration_sniper: basePlaybook('migration_sniper', {
     taMode: 'soft',

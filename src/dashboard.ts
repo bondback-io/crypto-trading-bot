@@ -7958,8 +7958,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
-              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for small-MC Mode B (≤$180k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. Late chase away from support is tightened; not Dip Buyer Fib dips. Mutual exclusion with Dip."></span></span>
-              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Scalper prioritizes support reclaim. Mutual exclusion with Dip. Unwatch cools 15m.</p>
+              <span class="setup-watch-title">Multi-TF S/R setup watch (Mode B) <span class="tip" tabindex="0" data-tip="Scalper prioritizes support reclaim / near multi-TF support for small-MC Mode B (≤$180k). Soft-prefers Scalper when armed or reclaiming at S unless reversal wick or MB volume-expansion dominate. While Scalper Fast Recovery is Stage 0–1, prefer stamps only on true support reclaim (not every ≤$180k name) so MB/Reversal can share the strip. Late chase away from support is tightened; not Dip Buyer Fib dips. Mutual exclusion with Dip. Profile TA Playbooks do not gate watchlist pickup — Soft/Hard score entries on buy."></span></span>
+              <p class="setup-watch-sub mb-0">Immediate only at multi-TF support confluence (≥2 TFs incl. 15m+). Else watch → arm near S → trigger on reclaim/hold. Scalper prioritizes support reclaim (Stage 0–1 reclaim-only). Mutual exclusion with Dip. Unwatch cools 15m.</p>
             </div>
             <span id="scalper-watch-count" class="setup-watch-count mint">—</span>
           </div>

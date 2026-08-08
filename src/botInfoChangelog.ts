@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.231',
+    title: 'Fast-profile Mode B divert + TA playbook align',
+    sections: ['microbots', 'scanners', 'overview', 'knobs'],
+    items: [
+      'While Scalper Fast Recovery is Stage 0–1, Mode B preferredProfileId stamps Scalper only on true support reclaim (not every ≤$180k name) so Momentum Burst / Reversal can share the strip; recovery still throttles admits, not watchlist admission.',
+      'Fast Profile TA playbooks realigned to catalog (Scalper Soft + learning on, MB Soft, Reversal Hard, Migration Soft); one-shot clears drifted overlays. Playbooks do not gate Mode B pickup — Soft/Hard score entries on buy.',
+    ],
+  },
+  {
     version: '1.2.230',
     title: 'Smart Mirror Watchlist top-3 + MC/holders',
     sections: ['copy', 'scanners', 'overview'],

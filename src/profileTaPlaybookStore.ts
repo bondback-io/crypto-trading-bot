@@ -27,6 +27,14 @@ import {
 } from './profileTaPlaybook';
 
 export const PROFILE_TA_PLAYBOOKS_VERSION = 1 as const;
+/** One-shot: clear drifted fast-profile overlays so catalog Soft/Hard + learning apply. */
+const FAST_PROFILE_ALIGN_VERSION = 231;
+const FAST_PROFILE_ALIGN_IDS = [
+  'scalper',
+  'momentum_burst',
+  'reversal_scalper',
+  'migration_sniper',
+] as const;
 const MAX_LEARNED_HISTORY = 20;
 
 export interface ProfileTaLearnedHistoryEntry {
@@ -45,6 +53,8 @@ export interface ProfileTaPlaybooksFile {
   playbooks: Record<string, Partial<ProfileTaPlaybook>>;
   /** Reversible learned-weight ring per profile */
   learnedHistory?: Record<string, ProfileTaLearnedHistoryEntry[]>;
+  /** Cleared fast-profile overlays at this align version */
+  fastAlignVersion?: number;
 }
 
 const FILE = () => dataFile(PERSIST_FILES.profileTaPlaybooks);
@@ -58,7 +68,22 @@ function emptyFile(): ProfileTaPlaybooksFile {
     updatedAt: 0,
     playbooks: {},
     learnedHistory: {},
+    fastAlignVersion: FAST_PROFILE_ALIGN_VERSION,
   };
+}
+
+/** Drop persisted overrides for the four fast lanes once (1.2.231 catalog). */
+function maybeAlignFastProfilePlaybooks(file: ProfileTaPlaybooksFile): void {
+  if ((file.fastAlignVersion ?? 0) >= FAST_PROFILE_ALIGN_VERSION) return;
+  for (const id of FAST_PROFILE_ALIGN_IDS) {
+    delete file.playbooks[id];
+  }
+  file.fastAlignVersion = FAST_PROFILE_ALIGN_VERSION;
+  persist(file);
+  logger.info(
+    'ProfileTaPlaybooks',
+    `Aligned fast-profile playbooks to catalog (v${FAST_PROFILE_ALIGN_VERSION})`
+  );
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -84,7 +109,9 @@ function loadFile(): ProfileTaPlaybooksFile {
       learnedHistory: isPlainObject(raw.learnedHistory)
         ? (raw.learnedHistory as ProfileTaPlaybooksFile['learnedHistory'])
         : {},
+      fastAlignVersion: Number(raw.fastAlignVersion) || 0,
     };
+    maybeAlignFastProfilePlaybooks(cache);
     return cache;
   } catch (err) {
     logger.warn('ProfileTaPlaybooks', 'load failed', errorToMeta(err));

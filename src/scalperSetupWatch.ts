@@ -231,6 +231,20 @@ function atSupportReclaimSetup(input: {
   );
 }
 
+/** Stage 0–1: do not stamp Scalper from MC-band alone — reclaim only. */
+function scalperStrictRecovery(): boolean {
+  try {
+    const {
+      isFastProfileRecovering,
+      getProfileRecoveryStage,
+    } = require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+    if (!isFastProfileRecovering('scalper')) return false;
+    return getProfileRecoveryStage('scalper') <= 1;
+  } catch {
+    return false;
+  }
+}
+
 function pickPreferredProfile(input: {
   marketCapUsd?: number;
   volumeM5Usd?: number;
@@ -247,22 +261,28 @@ function pickPreferredProfile(input: {
   honorExplicitPrefer?: boolean;
 }): ScalperFamilyProfileId {
   const pref = String(input.preferredProfileId || '');
+  const atReclaim = atSupportReclaimSetup(input);
+  const strictRec = scalperStrictRecovery();
+
   if (
     input.honorExplicitPrefer !== false &&
     (pref === 'scalper' ||
       pref === 'momentum_burst' ||
       pref === 'reversal_scalper')
   ) {
-    // Still re-route mid-air MB stamps toward Scalper when armed at support.
+    // Re-route mid-air MB stamps toward Scalper only at true reclaim.
     if (
       pref !== 'scalper' &&
-      atSupportReclaimSetup(input) &&
+      atReclaim &&
       !isReversalDominant(input) &&
       !isMomentumBurstDominant(input)
     ) {
       return 'scalper';
     }
-    return pref as ScalperFamilyProfileId;
+    // Drop sticky Scalper prefer mid-air while Stage 0–1 recovering.
+    if (!(pref === 'scalper' && strictRec && !atReclaim)) {
+      return pref as ScalperFamilyProfileId;
+    }
   }
 
   if (isReversalDominant(input)) {
@@ -283,12 +303,12 @@ function pickPreferredProfile(input: {
     return 'momentum_burst';
   }
 
-  // Default Mode B bias: small-MC at / near support → Scalper reclaim.
+  // True support reclaim → Scalper. MC-band alone → Scalper only when not Stage 0–1.
   const mc = input.marketCapUsd ?? 0;
-  if (
-    atSupportReclaimSetup(input) ||
-    (mc > 0 && mc <= SCALPER_MC_MAX)
-  ) {
+  if (atReclaim) {
+    return 'scalper';
+  }
+  if (!strictRec && mc > 0 && mc <= SCALPER_MC_MAX) {
     return 'scalper';
   }
   return 'momentum_burst';
