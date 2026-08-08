@@ -7931,7 +7931,7 @@ export function createServer(): express.Application {
         require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
       const data = await buildSmartMirrorWatchlist({
         topN: 10,
-        tokensPerWallet: 5,
+        tokensPerWallet: 3,
       });
       res.json({ ok: true, ...data });
     } catch (err) {

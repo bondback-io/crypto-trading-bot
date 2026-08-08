@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.230',
+    title: 'Smart Mirror Watchlist top-3 + MC/holders',
+    sections: ['copy', 'scanners', 'overview'],
+    items: [
+      'Smart Mirror Watchlist shows latest 3 tokens per influencer (was 5); UI copy and Bot Info match.',
+      'MC / holders enrichment now prioritizes displayed mints, uses a light Dex/Jupiter/GMGN path (no slow on-chain holder walk), and runs in parallel with a reserved time budget so metrics are no longer starved by holdings RPC.',
+    ],
+  },
+  {
     version: '1.2.229',
     title: 'Scalper Mode B support-reclaim priority',
     sections: ['microbots', 'scanners', 'overview'],

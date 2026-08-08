@@ -661,13 +661,16 @@ export async function buildSmartMirrorWatchlist(opts?: {
     walletDisplayName,
   } = require('./influencerMirror') as typeof import('./influencerMirror');
   const topN = Math.min(Math.max(opts?.topN ?? 10, 1), 15);
-  const per = Math.min(Math.max(opts?.tokensPerWallet ?? 5, 1), 8);
+  const per = Math.min(Math.max(opts?.tokensPerWallet ?? 3, 1), 8);
   const wallets = listTopInfluencerWallets(topN);
   const openMints = new Set(
     paperTrader.getOpenPositions().map((p) => p.mint)
   );
   // Stay under dashboard client timeout (60s) even when utility RPC is slow.
-  const deadline = Date.now() + 45_000;
+  // Reserve the last ~17s for MC/holders enrichment (was often starved).
+  const started = Date.now();
+  const holdingsDeadline = started + 28_000;
+  const deadline = started + 45_000;
 
   // Fetch holdings with light concurrency (was fully sequential → easy 20s+ client abort)
   const holdingsByWallet = new Map<string, InfluencerTokenSnap[]>();
@@ -677,7 +680,7 @@ export async function buildSmartMirrorWatchlist(opts?: {
     while (cursor < wallets.length) {
       const i = cursor++;
       const w = wallets[i]!;
-      if (Date.now() > deadline) {
+      if (Date.now() > holdingsDeadline) {
         holdingsByWallet.set(w.address, []);
         continue;
       }
@@ -690,7 +693,7 @@ export async function buildSmartMirrorWatchlist(opts?: {
     )
   );
 
-  // Cross-hold map
+  // Cross-hold map (non-sold across full holdings snap)
   const mintHolders = new Map<string, Set<string>>();
   for (const [addr, toks] of holdingsByWallet) {
     for (const t of toks) {
@@ -700,8 +703,21 @@ export async function buildSmartMirrorWatchlist(opts?: {
     }
   }
 
-  // Enrich top mints with metrics (best-effort, capped + deadline)
-  const uniqueMints = [...mintHolders.keys()].slice(0, 40);
+  // Displayed tokens first (top N per influencer) — enrich these, not a random Map slice
+  const displayByWallet = new Map<string, InfluencerTokenSnap[]>();
+  const displayMints: string[] = [];
+  const seenMint = new Set<string>();
+  for (const w of wallets) {
+    const toks = (holdingsByWallet.get(w.address) || []).slice(0, per);
+    displayByWallet.set(w.address, toks);
+    for (const t of toks) {
+      if (seenMint.has(t.mint)) continue;
+      seenMint.add(t.mint);
+      displayMints.push(t.mint);
+    }
+  }
+
+  // Light metrics (Dex/Jupiter/GMGN) in parallel — full on-chain walk was too slow
   const metricsMap = new Map<
     string,
     { marketCapUsd: number | null; holders: number | null }
@@ -709,27 +725,41 @@ export async function buildSmartMirrorWatchlist(opts?: {
   try {
     const { fetchTokenMetrics, summarizeTokenMetrics } =
       require('./tokenMetrics') as typeof import('./tokenMetrics');
-    let n = 0;
-    for (const mint of uniqueMints) {
-      if (n >= 20 || Date.now() > deadline) break;
-      n++;
-      try {
-        const raw = await fetchTokenMetrics(mint);
-        const s = summarizeTokenMetrics(raw);
-        metricsMap.set(mint, {
-          marketCapUsd: s.marketCapUsd ?? null,
-          holders: s.holderCountEstimate ?? null,
-        });
-      } catch {
-        /* skip */
+    const metricsConcurrency = 5;
+    let mCursor = 0;
+    async function metricsWorker(): Promise<void> {
+      while (mCursor < displayMints.length) {
+        if (Date.now() > deadline) return;
+        const mi = mCursor++;
+        const mint = displayMints[mi]!;
+        try {
+          const raw = await fetchTokenMetrics(mint, { light: true });
+          const s = summarizeTokenMetrics(raw);
+          metricsMap.set(mint, {
+            marketCapUsd: s.marketCapUsd ?? null,
+            holders: s.holderCountEstimate ?? null,
+          });
+        } catch {
+          /* skip */
+        }
       }
+    }
+    if (displayMints.length > 0) {
+      await Promise.all(
+        Array.from(
+          {
+            length: Math.min(metricsConcurrency, displayMints.length),
+          },
+          () => metricsWorker()
+        )
+      );
     }
   } catch {
     /* optional */
   }
 
   const influencers: SmartMirrorWatchlistInfluencer[] = wallets.map((w) => {
-    const toks = (holdingsByWallet.get(w.address) || []).slice(0, per);
+    const toks = displayByWallet.get(w.address) || [];
     return {
       address: w.address,
       name: walletDisplayName(w),

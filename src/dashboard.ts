@@ -7984,7 +7984,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Influencer Mirror</span>
               <span class="setup-watch-title">Smart Mirror Watchlist</span>
-              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 5 tokens (holding / sold / partial) · MC / holders · your hold badge · +N cross-hold · Add token copies via profile size.</p>
+              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens (holding / sold / partial) · MC / holders · your hold badge · +N cross-hold · Add token copies via profile size.</p>
             </div>
             <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist()" title="Refresh holdings snapshot">Refresh</button>
             <span id="smart-mirror-watch-count" class="setup-watch-count mint">—</span>

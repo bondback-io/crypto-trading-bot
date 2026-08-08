@@ -91,8 +91,12 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<TokenMetrics>>();
+/** Dex/Jupiter/GMGN-only results for UI panels — never used as full-metrics cache. */
+const lightCache = new Map<string, CacheEntry>();
+const lightInflight = new Map<string, Promise<TokenMetrics>>();
 
 const DEFAULT_TTL_MS = 90_000;
+const LIGHT_TTL_MS = 60_000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function cacheTtlMs(): number {
@@ -199,17 +203,147 @@ export async function resolveTop10HoldPctForEntry(
 }
 
 export function clearTokenMetricsCache(mint?: string): void {
-  if (mint) cache.delete(mint);
-  else cache.clear();
+  if (mint) {
+    cache.delete(mint);
+    lightCache.delete(mint);
+  } else {
+    cache.clear();
+    lightCache.clear();
+  }
+}
+
+function applyJupiterEnrichment(
+  merged: TokenMetrics,
+  jup: Awaited<ReturnType<typeof fetchJupiterTokenByMint>>
+): void {
+  if (!jup) return;
+  const jupTop = jupiterTopHoldersPercentage(jup);
+  if (jupTop != null) {
+    merged.top10HoldPct = jupTop;
+  }
+  const jupMc = Number(jup.mcap ?? 0);
+  if (
+    (merged.marketCapUsd == null || !(merged.marketCapUsd > 0)) &&
+    Number.isFinite(jupMc) &&
+    jupMc > 0
+  ) {
+    merged.marketCapUsd = jupMc;
+  }
+  const jupHolders = Number(jup.holderCount ?? NaN);
+  if (
+    (merged.holderCountEstimate == null || !(merged.holderCountEstimate > 0)) &&
+    Number.isFinite(jupHolders) &&
+    jupHolders > 0
+  ) {
+    merged.holderCountEstimate = jupHolders;
+  }
+}
+
+/**
+ * Fast MC / holders path for dashboard panels (no largest-account RPC walk).
+ * Reuses full cache when present; otherwise Dex + Jupiter + optional GMGN.
+ */
+async function fetchTokenMetricsLight(mint: string): Promise<TokenMetrics> {
+  const pending = lightInflight.get(mint);
+  if (pending) return pending;
+
+  const job = (async () => {
+    const base = emptyMetrics(mint);
+    try {
+      const cachedJup = lookupCachedJupiterToken(mint);
+      const [dex, jup] = await Promise.all([
+        fetchDexMetrics(mint),
+        cachedJup
+          ? Promise.resolve(cachedJup)
+          : fetchJupiterTokenByMint(mint).catch(() => null),
+      ]);
+      const stale = getCachedTokenMetrics(mint, { allowStale: true });
+      const dexEmpty =
+        dex.marketCapUsd == null &&
+        dex.liquidityUsd == null &&
+        dex.volume24hUsd == null;
+
+      const merged: TokenMetrics = {
+        ...base,
+        symbol: dex.symbol ?? jup?.symbol ?? stale?.symbol,
+        name: dex.name ?? jup?.name ?? stale?.name,
+        liquidityUsd:
+          dex.liquidityUsd ??
+          (Number(jup?.liquidity) > 0 ? Number(jup?.liquidity) : null) ??
+          (dexEmpty ? stale?.liquidityUsd ?? null : null),
+        marketCapUsd:
+          dex.marketCapUsd ??
+          (dexEmpty ? stale?.marketCapUsd ?? null : null),
+        volume24hUsd:
+          dex.volume24hUsd ??
+          (dexEmpty ? stale?.volume24hUsd ?? null : null),
+        volumeH1Usd:
+          dex.volumeH1Usd ?? (dexEmpty ? stale?.volumeH1Usd ?? null : null),
+        volumeM5Usd:
+          dex.volumeM5Usd ?? (dexEmpty ? stale?.volumeM5Usd ?? null : null),
+        recentBuyVolumeUsd:
+          dex.recentBuyVolumeUsd ??
+          (dexEmpty ? stale?.recentBuyVolumeUsd ?? null : null),
+        buysH1: dex.buysH1 ?? (dexEmpty ? stale?.buysH1 ?? null : null),
+        sellsH1: dex.sellsH1 ?? (dexEmpty ? stale?.sellsH1 ?? null : null),
+        txnsH1: dex.txnsH1 ?? (dexEmpty ? stale?.txnsH1 ?? null : null),
+        priceChangeH1Pct:
+          dex.priceChangeH1Pct ??
+          (dexEmpty ? stale?.priceChangeH1Pct ?? null : null),
+        priceChange24hPct:
+          dex.priceChange24hPct ??
+          (dexEmpty ? stale?.priceChange24hPct ?? null : null),
+        priceUsd:
+          dex.priceUsd ?? (dexEmpty ? stale?.priceUsd ?? null : null),
+        pairCreatedAtMs:
+          dex.pairCreatedAtMs ??
+          (dexEmpty ? stale?.pairCreatedAtMs ?? null : null),
+        holderCountEstimate: stale?.holderCountEstimate ?? null,
+        source: 'partial',
+        fetchedAt: Date.now(),
+      };
+      applyJupiterEnrichment(merged, jup);
+
+      if (config.gmgn?.apiKey || process.env.GMGN_API_KEY) {
+        const gmgn = await fetchGmgnTokenHints(mint).catch(() => null);
+        if (gmgn?.holderCount != null) {
+          merged.holderCountEstimate = gmgn.holderCount;
+        }
+        if (gmgn?.liquidityUsd != null && (merged.liquidityUsd ?? 0) <= 0) {
+          merged.liquidityUsd = gmgn.liquidityUsd;
+        }
+      }
+
+      lightCache.set(mint, {
+        data: merged,
+        expiresAt: Date.now() + LIGHT_TTL_MS,
+      });
+      return merged;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const fail = emptyMetrics(mint, message);
+      lightCache.set(mint, {
+        data: fail,
+        expiresAt: Date.now() + Math.min(LIGHT_TTL_MS, 20_000),
+      });
+      return fail;
+    } finally {
+      lightInflight.delete(mint);
+    }
+  })();
+
+  lightInflight.set(mint, job);
+  return job;
 }
 
 /**
  * Fetch liquidity, holders, and dev/authority activity for a mint.
  * Results are cached to respect RPC / DexScreener rate limits.
+ * Pass `{ light: true }` for dashboard panels (skip slow on-chain holder walk).
  */
 export async function fetchTokenMetrics(
   mint: string,
-  options: { force?: boolean } = {}
+  options: { force?: boolean; light?: boolean } = {}
 ): Promise<TokenMetrics> {
   if (!isValidMint(mint)) {
     return emptyMetrics(mint, 'Invalid mint');
@@ -219,8 +353,16 @@ export async function fetchTokenMetrics(
     const cached = getCachedTokenMetrics(mint);
     if (cached) return cached;
 
+    if (options.light) {
+      const lc = lightCache.get(mint);
+      if (lc && lc.expiresAt > Date.now()) return lc.data;
+      return fetchTokenMetricsLight(mint);
+    }
+
     const pending = inflight.get(mint);
     if (pending) return pending;
+  } else if (options.light) {
+    return fetchTokenMetricsLight(mint);
   }
 
   const job = (async () => {
@@ -291,24 +433,12 @@ export async function fetchTokenMetrics(
         }
       }
 
-      // Prefer Jupiter Terminal Top-10 (pool excluded) over on-chain sum
+      // Prefer Jupiter Terminal Top-10 / mcap / holderCount when Dex/RPC omit
       try {
         const jup =
           lookupCachedJupiterToken(mint) ??
           (await fetchJupiterTokenByMint(mint));
-        const jupTop = jupiterTopHoldersPercentage(jup);
-        if (jupTop != null) {
-          merged.top10HoldPct = jupTop;
-        }
-        // Prefer Jupiter circulating mcap when Dex omitted MC (FDV-only)
-        const jupMc = Number(jup?.mcap ?? 0);
-        if (
-          (merged.marketCapUsd == null || !(merged.marketCapUsd > 0)) &&
-          Number.isFinite(jupMc) &&
-          jupMc > 0
-        ) {
-          merged.marketCapUsd = jupMc;
-        }
+        applyJupiterEnrichment(merged, jup);
       } catch {
         /* keep on-chain top10 */
       }
