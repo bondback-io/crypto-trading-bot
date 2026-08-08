@@ -715,6 +715,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
     setupWatchFamily: 'dip',
+    supportPriceSol: w.supportPriceSol ?? null,
+    fib05PriceSol: w.fib05PriceSol ?? null,
+    fib618PriceSol: w.fib618PriceSol ?? null,
+    lastPriceSol: w.lastPriceSol ?? null,
     launch,
   };
 }

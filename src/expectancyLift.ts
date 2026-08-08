@@ -84,6 +84,8 @@ interface ExpectancyLiftPersist {
   updatedAt: number;
   /** One-shot sticky restrict cleanup after poll-inflation bug (v1.2.238). */
   repairedV238?: boolean;
+  /** One-shot: sticky migration_hold_reclaim restricted → down_ranked (v1.2.240). */
+  repairedV239?: boolean;
 }
 
 const FAST_DISC_PROFILES = new Set([
@@ -372,9 +374,16 @@ function filterGovernorWindowTrades(
   return trades.filter((t) => {
     if (!isFinitePnl(t.pnlPct, t.pnlSol)) return false;
     if (isScratchPnl(t.pnlPct, t.pnlSol)) return false;
-    if (family === 'migration_hold_reclaim' && t.hasEntryMcField === true) {
-      if (!(t.entryMarketCapUsd != null && t.entryMarketCapUsd > 0)) {
-        return false;
+    // Migration family metrics: migration_sniper (+ armed grad) only —
+    // exclude scalper/trend/dip DNA spillover that was mis-stamped.
+    if (family === 'migration_hold_reclaim') {
+      const pid = String(t.profileId || '');
+      const isMigProfile = pid === 'migration_sniper' || pid === 'migration';
+      if (!isMigProfile) return false;
+      if (t.hasEntryMcField === true) {
+        if (!(t.entryMarketCapUsd != null && t.entryMarketCapUsd > 0)) {
+          return false;
+        }
       }
     }
     return true;
@@ -607,6 +616,7 @@ function emptyPersist(): ExpectancyLiftPersist {
     governors: {},
     updatedAt: 0,
     repairedV238: true,
+    repairedV239: true,
   };
 }
 
@@ -621,6 +631,20 @@ function applyPollInflationRepair(p: ExpectancyLiftPersist): boolean {
     row.updatedAt = now;
   }
   p.repairedV238 = true;
+  return true;
+}
+
+/** One-shot: sticky migration_hold_reclaim restricted → down_ranked (v1.2.240). */
+function applyMigrationHoldReclaimRepair(p: ExpectancyLiftPersist): boolean {
+  if (p.repairedV239 === true) return false;
+  const now = Date.now();
+  const row = p.governors?.migration_hold_reclaim;
+  if (row && row.state === 'restricted') {
+    row.state = 'down_ranked';
+    row.tempRestrictUntilMs = undefined;
+    row.updatedAt = now;
+  }
+  p.repairedV239 = true;
   return true;
 }
 
@@ -643,8 +667,12 @@ function loadPersist(): ExpectancyLiftPersist {
           : {},
       updatedAt: Number(raw?.updatedAt) || 0,
       repairedV238: raw?.repairedV238 === true,
+      repairedV239: raw?.repairedV239 === true,
     };
-    if (applyPollInflationRepair(persistCache)) {
+    let repaired = false;
+    if (applyPollInflationRepair(persistCache)) repaired = true;
+    if (applyMigrationHoldReclaimRepair(persistCache)) repaired = true;
+    if (repaired) {
       try {
         persistCache.updatedAt = Date.now();
         atomicWriteJson(FILE(), persistCache);
@@ -793,12 +821,14 @@ function updateGovernorForFamily(
       note = `Awaiting new closes · negWindows=${negWindows}`;
     } else if (state === 'promoted') note = 'Positive expectancy — promoted';
     else if (state === 'restricted')
-      note = `Negative expectancy (2+ windows) / streak breaker · negWindows=${negWindows}`;
+      note = `Negative expectancy (2+ windows) / streak breaker · negWindows=${negWindows} · restricted (soft for native profile)`;
     else if (state === 'down_ranked')
       note = `Negative expectancy — down-ranked · negWindows=${negWindows}`;
     else note = 'Neutral expectancy';
   } else if (lossStreakBreaker(govTrades)) {
     note = `Loss streak ${LOSS_STREAK_K}/${LOSS_STREAK_N} — temp restrict`;
+  } else if (state === 'restricted') {
+    note = 'restricted (soft for native profile)';
   }
 
   return {
@@ -831,7 +861,116 @@ export function getFamilyGovernorState(
   }
 }
 
-/** Soft-skip when family is restricted (late_chase always respects share ceiling). */
+/**
+ * Family used for governor admit/skip. Prefer profile-native DNA so scanner
+ * DNA (e.g. migration_hold_reclaim on a Scalper/Dip winner) cannot alone force
+ * a restricted migration family onto non-mig profiles. Armed grad / armed MS
+ * still admit as migration_hold_reclaim.
+ */
+export function admitFamilyForGovernor(input: {
+  profileId?: string | null;
+  entryStyle?: string | null;
+  armedWatch?: boolean;
+  setupWatchFamily?: string | null;
+  lateChase?: boolean;
+  entryPath?: string | null;
+}): ExpectancyFamily {
+  const styleRaw = String(input.entryStyle || '')
+    .trim()
+    .toLowerCase();
+  // Primary late_chase stamp only — lateChase flag alone does not override a
+  // reclaim / profile-native admit (flag may be secondary metadata).
+  if (styleRaw === 'late_chase' || /^late.?chase$/.test(styleRaw)) {
+    return 'late_chase';
+  }
+
+  const armed =
+    input.armedWatch === true ||
+    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  const setupFam = String(input.setupWatchFamily || '')
+    .trim()
+    .toLowerCase();
+  const pid = String(input.profileId || '');
+
+  // Armed grad / armed migration_sniper → migration family
+  if (
+    armed &&
+    (setupFam === 'grad' ||
+      pid === 'migration_sniper' ||
+      pid === 'migration')
+  ) {
+    return 'migration_hold_reclaim';
+  }
+
+  // Armed Dip → support_dip_reclaim (not late_chase rediscovery)
+  if (
+    armed &&
+    (setupFam === 'dip' || pid === 'dip_buyer')
+  ) {
+    return 'support_dip_reclaim';
+  }
+
+  // Profile-native family for governor — ignore scanner DNA mig stamp on
+  // non-migration winners (spillover that polluted migration metrics).
+  try {
+    const { PROFILE_ENTRY_STYLE_DNA } =
+      require('./supportReclaim') as typeof import('./supportReclaim');
+    const dna = PROFILE_ENTRY_STYLE_DNA[pid];
+    const styleFam = normalizeExpectancyFamily(input.entryStyle);
+    if (
+      dna?.primary &&
+      styleFam === 'migration_hold_reclaim' &&
+      dna.primary !== 'migration_hold_reclaim' &&
+      !dna.allowed.includes('migration_hold_reclaim')
+    ) {
+      return normalizeExpectancyFamily(dna.primary);
+    }
+    if (
+      dna?.primary &&
+      (!input.entryStyle || styleFam === 'discretionary_other')
+    ) {
+      return normalizeExpectancyFamily(dna.primary);
+    }
+  } catch {
+    /* soft */
+  }
+
+  return classifyTradeFamily({
+    entryStyle: input.entryStyle,
+    // Do not let lateChase flag alone force late_chase when style is reclaim
+    lateChaseAtEntry: false,
+    profileId: input.profileId,
+    armedWatch: input.armedWatch,
+    entryPath: input.entryPath,
+    setupWatchFamily: input.setupWatchFamily,
+  });
+}
+
+function profileMatchesFamilyNative(
+  profileId: string | null | undefined,
+  family: ExpectancyFamily
+): boolean {
+  const pid = String(profileId || '');
+  if (!pid) return false;
+  try {
+    const { PROFILE_ENTRY_STYLE_DNA } =
+      require('./supportReclaim') as typeof import('./supportReclaim');
+    const dna = PROFILE_ENTRY_STYLE_DNA[pid];
+    if (!dna) return false;
+    if (String(dna.primary) === family) return true;
+    if (
+      Array.isArray(dna.allowed) &&
+      dna.allowed.some((s) => String(s) === family)
+    ) {
+      return true;
+    }
+  } catch {
+    /* soft */
+  }
+  return false;
+}
+
+/** Soft-skip when family is restricted (late_chase always hard-skips when restricted). */
 export function shouldSkipFamilyGovernor(input: {
   family?: string | null;
   entryStyle?: string | null;
@@ -840,38 +979,63 @@ export function shouldSkipFamilyGovernor(input: {
   profileId?: string | null;
   entryPath?: string | null;
   setupWatchFamily?: string | null;
-}): { skip: boolean; reason?: string; state: FamilyGovernorState } {
-  const family =
-    input.profileId != null ||
-    input.armedWatch != null ||
-    input.entryPath != null ||
-    input.setupWatchFamily != null
-      ? classifyTradeFamily({
-          entryStyle: input.lateChase ? 'late_chase' : input.entryStyle,
-          lateChaseAtEntry: input.lateChase === true,
-          profileId: input.profileId,
-          armedWatch: input.armedWatch,
-          entryPath: input.entryPath,
-          setupWatchFamily: input.setupWatchFamily,
-        })
-      : normalizeExpectancyFamily(
-          input.family ||
-            (input.lateChase ? 'late_chase' : input.entryStyle) ||
-            'discretionary_other'
-        );
-  const state = getFamilyGovernorState(family);
+}): {
+  skip: boolean;
+  reason?: string;
+  state: FamilyGovernorState;
+  softPassNative?: boolean;
+  family?: ExpectancyFamily;
+} {
+  const family = admitFamilyForGovernor({
+    profileId: input.profileId,
+    entryStyle: input.lateChase ? 'late_chase' : input.entryStyle,
+    lateChase: input.lateChase === true,
+    armedWatch: input.armedWatch,
+    entryPath: input.entryPath,
+    setupWatchFamily: input.setupWatchFamily,
+  });
+  // Honor explicit family override only when admit path had no profile context
+  const effective =
+    input.family &&
+    input.profileId == null &&
+    input.armedWatch == null &&
+    input.setupWatchFamily == null
+      ? normalizeExpectancyFamily(input.family)
+      : family;
+  const state = getFamilyGovernorState(effective);
   if (state === 'restricted') {
-    // Armed reclaim may still pass soft restrict except late_chase
-    if (input.armedWatch === true && family !== 'late_chase') {
-      return { skip: false, state };
+    // Hard-skip late_chase when restricted
+    if (effective === 'late_chase') {
+      return {
+        skip: true,
+        reason: `Expectancy governor: late_chase restricted`,
+        state,
+        family: effective,
+      };
     }
+    // Armed reclaim may still pass soft restrict except late_chase
+    if (input.armedWatch === true) {
+      return { skip: false, state, family: effective };
+    }
+    // Native-style soft-pass: primary/allowed DNA — down-rank via permission/size only
+    if (profileMatchesFamilyNative(input.profileId, effective)) {
+      return {
+        skip: false,
+        state,
+        softPassNative: true,
+        reason: `governor:restricted soft-pass native ${input.profileId}`,
+        family: effective,
+      };
+    }
+    // Hard-skip only off-style / forbidden mismatch
     return {
       skip: true,
-      reason: `Expectancy governor: ${family} restricted`,
+      reason: `Expectancy governor: ${effective} restricted`,
       state,
+      family: effective,
     };
   }
-  return { skip: false, state };
+  return { skip: false, state, family: effective };
 }
 
 /** Armed reclaim near level — not true late chase for ceiling / hard-skip. */
@@ -952,10 +1116,10 @@ export function shouldLimitLateChaseShare(input: {
       'late_chase';
   if (!isLate) return { limit: false };
   const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
-  if (mix.total >= 20 && mix.lateChaseShare >= LATE_CHASE_MAX_SHARE) {
+  if (mix.total >= 20 && mix.lateChaseShare > LATE_CHASE_MAX_SHARE) {
     return {
       limit: true,
-      reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% ≥ ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
+      reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% > ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
     };
   }
   return { limit: false };

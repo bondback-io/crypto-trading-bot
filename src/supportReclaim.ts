@@ -336,6 +336,9 @@ export function resolveDetectedEntryStyle(ctx: {
   priceSol?: number | null;
   fib05PriceSol?: number | null;
   fib618PriceSol?: number | null;
+  armedWatch?: boolean;
+  setupWatchFamily?: string | null;
+  entryStyleHint?: string | null;
 }): { detectedEntryStyle: EntryStyleTag; lateChase: boolean } {
   const drop =
     ctx.dropFromPeakPct != null && Number.isFinite(Number(ctx.dropFromPeakPct))
@@ -397,12 +400,20 @@ export function resolveDetectedEntryStyle(ctx: {
     sid === 'momentum_burst' ||
     (chgH1 != null && chgH1 >= 18 && !nearLevel);
 
+  // Narrow mig DNA: fresh-mig / armed grad / explicit MS prefer only —
+  // not every nearMigration / isMigration loosely (avoids governor spillover).
+  const armedGrad =
+    ctx.armedWatch === true &&
+    String(ctx.setupWatchFamily || '').toLowerCase() === 'grad';
+  const hintMig =
+    String(ctx.entryStyleHint || '').toLowerCase() === 'migration_hold_reclaim';
   if (
-    ctx.isMigration ||
-    ctx.migrationFresh ||
-    ctx.nearMigration ||
+    ctx.migrationFresh === true ||
+    armedGrad ||
+    (ctx.armedWatch === true && hintMig) ||
     sid === 'migration_event' ||
-    prefer === 'migration_sniper'
+    prefer === 'migration_sniper' ||
+    ctx.preferMigration === true
   ) {
     style = 'migration_hold_reclaim';
     if (lateChase && !hasLevel) lateChase = true;
@@ -480,6 +491,9 @@ export function scoreEntryStyleDna(input: {
   profileId: string;
   detectedEntryStyle?: EntryStyleTag | string | null;
   lateChase?: boolean;
+  armedWatch?: boolean;
+  setupWatchFamily?: string | null;
+  dipWatchTriggered?: boolean;
 }): {
   hardZero: boolean;
   scoreDelta: number;
@@ -491,8 +505,18 @@ export function scoreEntryStyleDna(input: {
   const style = String(input.detectedEntryStyle || 'unknown') as EntryStyleTag;
   const late = input.lateChase === true || style === 'late_chase';
   const bits: string[] = [];
+  const armedDip =
+    String(input.profileId || '') === 'dip_buyer' &&
+    (input.armedWatch === true ||
+      input.dipWatchTriggered === true ||
+      String(input.setupWatchFamily || '').toLowerCase() === 'dip');
 
   if (late && (dna.hardLateChase || dna.forbidden.includes('late_chase'))) {
+    // Armed Dip: soft penalty only — do not hardZero late_chase
+    if (armedDip && dna.hardLateChase) {
+      bits.push('late_chase soft (armed dip)');
+      return { hardZero: false, scoreDelta: -22, bits };
+    }
     if (dna.hardLateChase) {
       return { hardZero: true, scoreDelta: 0, bits: ['late_chase forbidden'] };
     }

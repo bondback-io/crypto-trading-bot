@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.240',
+    title: 'Unblock lane winners (governor soft-pass)',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview'],
+    items: [
+      'Family governor: native-style soft-pass when restricted (permission/size down-rank); hard-skip late_chase + off-style only. admitFamily prefers profile DNA over scanner mig stamp.',
+      'migration_hold_reclaim DNA narrowed (fresh-mig / armed grad / MS prefer); governor metrics count migration_sniper only; one-shot repairedV239 sticky restrict → down_ranked.',
+      'Per-passer expectancy/attention: restricted top no longer kills the whole fight; cascade annotate on early expectancy skips. Late-chase ceiling uses >5% (exact 5% allowed).',
+      'Dip handoff passes Fib/S/lastPrice; armed Dip DNA late_chase soft penalty (no hardZero); stamp prefers entryStyleHint over rediscovered late_chase.',
+    ],
+  },
+  {
     version: '1.2.239',
     title: 'Dip watch fire + Smart Mirror status',
     sections: ['microbots', 'scanners', 'copy', 'tradecraft', 'overview'],

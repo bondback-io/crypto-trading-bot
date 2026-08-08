@@ -1409,6 +1409,10 @@ export interface TradeProfileMatchContext {
   armedWatch?: boolean;
   /** scalper | dip | grad when from a setup watch */
   setupWatchFamily?: string | null;
+  /** Dip watch fired this handoff */
+  dipWatchTriggered?: boolean;
+  /** Preferred entry style from armed watch / scanner */
+  entryStyleHint?: string | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -3052,18 +3056,40 @@ function scoreProfile(
       }
       if (ctx.lateChase == null) ctx.lateChase = det.lateChase;
     }
+    const armedDipLane =
+      def.id === 'dip_buyer' &&
+      (ctx.armedWatch === true ||
+        ctx.dipWatchTriggered === true ||
+        String(ctx.setupWatchFamily || '').toLowerCase() === 'dip');
+    // Armed Dip: prefer support_dip_reclaim stamp over rediscovered late_chase
+    if (
+      armedDipLane &&
+      (ctx.lateChase === true ||
+        String(ctx.detectedEntryStyle || '') === 'late_chase') &&
+      (String(ctx.entryStyleHint || '').toLowerCase() === 'support_dip_reclaim' ||
+        String(ctx.setupWatchFamily || '').toLowerCase() === 'dip')
+    ) {
+      ctx.detectedEntryStyle = 'support_dip_reclaim';
+      ctx.lateChase = false;
+    }
     const dna = scoreEntryStyleDna({
       profileId: def.id,
       detectedEntryStyle: ctx.detectedEntryStyle,
       lateChase: ctx.lateChase === true,
+      armedWatch: ctx.armedWatch === true,
+      setupWatchFamily: ctx.setupWatchFamily,
+      dipWatchTriggered: ctx.dipWatchTriggered === true,
     });
     // Catalog match DNA overrides when present
     const style = String(ctx.detectedEntryStyle || 'unknown');
     const late = ctx.lateChase === true || style === 'late_chase';
-    if (m.hardLateChase === true && late) {
+    if (m.hardLateChase === true && late && !armedDipLane) {
       return { score: 0, reason: 'late_chase forbidden' };
     }
-    if (
+    if (m.hardLateChase === true && late && armedDipLane) {
+      score -= 22;
+      bits.push('late_chase soft (armed dip)');
+    } else if (
       Array.isArray(m.forbiddenEntryStyles) &&
       (m.forbiddenEntryStyles.includes(style) ||
         (late && m.forbiddenEntryStyles.includes('late_chase')))
@@ -3074,15 +3100,21 @@ function scoreProfile(
         def.id === 'steady_compounder' ||
         def.id === 'trend_rider' ||
         def.id === 'smart_money_mirror' ||
-        def.id === 'dip_buyer';
-      if (hard || style === 'late_chase') {
+        (def.id === 'dip_buyer' && !armedDipLane);
+      if ((hard || style === 'late_chase') && !(armedDipLane && late)) {
         return {
           score: 0,
           reason: late ? 'late_chase forbidden' : `forbidden style ${style}`,
         };
       }
-      score -= 35;
-      bits.push(late ? 'late_chase penalty' : `forbidden style ${style}`);
+      score -= armedDipLane && late ? 22 : 35;
+      bits.push(
+        armedDipLane && late
+          ? 'late_chase soft (armed dip)'
+          : late
+            ? 'late_chase penalty'
+            : `forbidden style ${style}`
+      );
     } else if (dna.hardZero) {
       return { score: 0, reason: dna.bits.join(', ') || 'style DNA zero' };
     } else {
