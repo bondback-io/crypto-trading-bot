@@ -9036,6 +9036,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div style="min-width:0;flex:1">
             <div class="section-title !text-sm mb-1">Micro Bot Performance</div>
             <p class="text-xs text-slate-400 mb-0">Rankings, streaks, profit factor, and Learning Mode participate — full table lives under the cog menu.</p>
+            <p class="text-xs mint mb-0 mt-1" id="el-teaser-line">Expectancy Lift: —</p>
           </div>
           <button type="button" class="btn btn-secondary text-xs" onclick="showTab('botperf')" title="Open Micro Bot Performance (cog menu)">Open Performance</button>
         </div>
@@ -9782,6 +9783,76 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-scalper-trend"></canvas></div>
         <div id="spt-breakdown" class="text-xs text-slate-400 mt-2"></div>
+      </div>
+
+      <div class="card" id="expectancy-lift-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Expectancy-first mix targets, family governors, and armed funnel. Soft/reversible governors except late-chase share ceiling (≤5%). Does not override hard safety."></span></div>
+            <p class="text-xs text-slate-400 mb-0" id="el-summary">Loading…</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-end">
+            <label class="ctl ctl-fit">
+              <span>Window</span>
+              <select id="el-window" onchange="loadExpectancyLift()">
+                <option value="20">Last 20</option>
+                <option value="50" selected>Last 50</option>
+                <option value="100">Last 100</option>
+              </select>
+            </label>
+            <label class="ctl ctl-fit">
+              <span>Chart</span>
+              <select id="el-view" onchange="renderExpectancyLiftChart()">
+                <option value="exp" selected>Expectancy %</option>
+                <option value="wr">Win rate</option>
+                <option value="pnl">Cumulative PnL</option>
+              </select>
+            </label>
+            <button type="button" class="btn btn-sm" onclick="loadExpectancyLift()">Refresh</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-mix-chips" aria-label="Expectancy mix chips">
+          <span class="lsd-chip" id="el-chip-armed">Armed —</span>
+          <span class="lsd-chip" id="el-chip-late">Late-chase —</span>
+          <span class="lsd-chip" id="el-chip-scalper">Scalper —</span>
+          <span class="lsd-chip" id="el-chip-partial">1st partial —</span>
+          <span class="lsd-chip" id="el-chip-mfe">MFE cap —</span>
+        </div>
+        <div id="el-quiet-chips" class="flex flex-wrap gap-2 mb-2 text-xs"></div>
+        <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
+          <table class="tp-overview-table" id="el-profile-table" style="min-width:36rem">
+            <thead>
+              <tr>
+                <th>Profile</th>
+                <th>n</th>
+                <th>WR</th>
+                <th>E%</th>
+                <th>PF</th>
+                <th>MFE cap</th>
+                <th>Armed</th>
+              </tr>
+            </thead>
+            <tbody id="el-profile-tbody"><tr><td colspan="7" class="mint text-xs">—</td></tr></tbody>
+          </table>
+        </div>
+        <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
+          <table class="tp-overview-table" id="el-family-table" style="min-width:32rem">
+            <thead>
+              <tr>
+                <th>Family</th>
+                <th>Gov</th>
+                <th>n</th>
+                <th>E%</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody id="el-family-tbody"><tr><td colspan="5" class="mint text-xs">—</td></tr></tbody>
+          </table>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-funnel">
+          <span class="mint">Funnel —</span>
+        </div>
+        <div class="chart-wrap" style="height:180px"><canvas id="chart-expectancy-lift"></canvas></div>
       </div>
 
       <div class="card" id="trade-craft-card">
@@ -15943,6 +16014,273 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.loadTradeCraftPerformance = loadTradeCraftPerformance;
 
+    let __expectancyLiftPayload = null;
+    let chartExpectancyLift = null;
+
+    function elFmtPct(v, digits) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      return (Number(v) * 100).toFixed(digits != null ? digits : 0) + '%';
+    }
+    function elFmtNum(v, digits) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      return Number(v).toFixed(digits != null ? digits : 2);
+    }
+    function elChipClass(ok, warn) {
+      if (ok) return 'lsd-chip lsd-chip-active';
+      if (warn) return 'lsd-chip';
+      return 'lsd-chip lsd-chip-paused';
+    }
+    function elGovClass(state) {
+      if (state === 'promoted') return 'fpr-badge fpr-s4';
+      if (state === 'restricted') return 'fpr-badge fpr-s0';
+      if (state === 'down_ranked') return 'fpr-badge fpr-s1';
+      return 'fpr-badge fpr-s2';
+    }
+
+    function renderExpectancyLiftChart() {
+      const canvas = document.getElementById('chart-expectancy-lift');
+      if (!canvas || typeof Chart === 'undefined') return;
+      const st = __expectancyLiftPayload;
+      const series = st && st.chart;
+      if (!series || !series.tradeIndex || !series.tradeIndex.length) {
+        if (chartExpectancyLift) {
+          chartExpectancyLift.destroy();
+          chartExpectancyLift = null;
+        }
+        return;
+      }
+      const view = ((document.getElementById('el-view') || {}).value) || 'exp';
+      let label = 'Rolling expectancy %';
+      let data = series.rollingExpectancyPct;
+      if (view === 'wr') {
+        label = 'Rolling win rate %';
+        data = series.rollingWinRatePct;
+      } else if (view === 'pnl') {
+        label = 'Cumulative PnL %';
+        data = series.cumulativePnlPct;
+      }
+      const color = '#38bdf8';
+      if (chartExpectancyLift) {
+        chartExpectancyLift.data.labels = series.tradeIndex;
+        chartExpectancyLift.data.datasets[0].data = data;
+        chartExpectancyLift.data.datasets[0].label = label;
+        chartExpectancyLift.update('none');
+        return;
+      }
+      chartExpectancyLift = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: series.tradeIndex,
+          datasets: [
+            {
+              label: label,
+              data: data,
+              borderColor: color,
+              backgroundColor: color + '33',
+              tension: 0.25,
+              pointRadius: 2,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { maxTicksLimit: 8, color: '#94a3b8' }, grid: { color: '#1e293b' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#1e293b' } },
+          },
+        },
+      });
+    }
+    window.renderExpectancyLiftChart = renderExpectancyLiftChart;
+
+    async function loadExpectancyLift() {
+      try {
+        const win =
+          Number((document.getElementById('el-window') || {}).value) || 50;
+        const data = await fetchJSON(
+          '/api/expectancy-lift?window=' + encodeURIComponent(String(win))
+        );
+        __expectancyLiftPayload = data;
+        const sum = document.getElementById('el-summary');
+        if (sum) sum.textContent = (data && data.plainLanguage) || 'No expectancy data yet';
+        const teaser = document.getElementById('el-teaser-line');
+        if (teaser) {
+          teaser.textContent =
+            'Expectancy Lift: ' + ((data && data.plainLanguage) || '—');
+        }
+        const mix = (data && data.mix) || {};
+        const targets = (data && data.targets) || {};
+        const armedEl = document.getElementById('el-chip-armed');
+        const lateEl = document.getElementById('el-chip-late');
+        const scalEl = document.getElementById('el-chip-scalper');
+        const partEl = document.getElementById('el-chip-partial');
+        const mfeEl = document.getElementById('el-chip-mfe');
+        const armedOk = mix.armedShare != null && mix.armedShare >= (targets.armedShare || 0.7);
+        const armedWarn = mix.armedShare != null && mix.armedShare >= 0.5;
+        if (armedEl) {
+          armedEl.textContent = 'Armed ' + elFmtPct(mix.armedShare);
+          armedEl.className = elChipClass(armedOk, armedWarn);
+          armedEl.title = 'Target ≥70% armed';
+        }
+        const lateOk =
+          mix.lateChaseShare != null &&
+          mix.lateChaseShare <= (targets.lateChaseShareMax || 0.05);
+        const lateWarn =
+          mix.lateChaseShare != null && mix.lateChaseShare <= 0.08;
+        if (lateEl) {
+          lateEl.textContent = 'Late-chase ' + elFmtPct(mix.lateChaseShare, 1);
+          lateEl.className = elChipClass(lateOk, lateWarn && !lateOk);
+          lateEl.title = 'Ceiling ≤5%';
+        }
+        const scOk =
+          mix.scalperAttentionShare != null &&
+          mix.scalperAttentionShare <= (targets.scalperShareMax || 0.3);
+        const scWarn =
+          mix.scalperAttentionShare != null &&
+          mix.scalperAttentionShare <= 0.4;
+        if (scalEl) {
+          scalEl.textContent =
+            'Scalper ' + elFmtPct(mix.scalperAttentionShare);
+          scalEl.className = elChipClass(scOk, scWarn);
+          scalEl.title = 'Target ≤30% attention';
+        }
+        if (partEl) {
+          partEl.textContent =
+            '1st partial ' + elFmtPct(mix.firstPartialRate);
+          partEl.className = 'lsd-chip';
+        }
+        if (mfeEl) {
+          mfeEl.textContent =
+            'MFE cap ' +
+            (mix.avgMfeCapture != null
+              ? elFmtNum(mix.avgMfeCapture, 0) + '%'
+              : '—');
+          mfeEl.className = 'lsd-chip';
+        }
+        const quietHost = document.getElementById('el-quiet-chips');
+        if (quietHost) {
+          const chips = (data && data.quietChips) || [];
+          quietHost.innerHTML = chips.length
+            ? chips
+                .map(function (c) {
+                  return (
+                    '<span class="lsd-chip" title="' +
+                    String(c.reason || '').replace(/"/g, '&quot;') +
+                    '">Quiet ' +
+                    String(c.label || c.profileId) +
+                    '</span>'
+                  );
+                })
+                .join('')
+            : '';
+        }
+        const ptb = document.getElementById('el-profile-tbody');
+        if (ptb) {
+          const rows = (data && data.profiles) || [];
+          ptb.innerHTML = rows.length
+            ? rows
+                .map(function (r) {
+                  const m = r.metrics || {};
+                  return (
+                    '<tr>' +
+                    '<td>' +
+                    String(r.name || r.profileId) +
+                    (r.quiet ? ' <span class="mint">quiet</span>' : '') +
+                    '</td>' +
+                    '<td>' +
+                    (m.tradeCount || 0) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtPct(m.winRate) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtNum(m.expectancyPct, 2) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtNum(m.profitFactor, 2) +
+                    '</td>' +
+                    '<td>' +
+                    (m.mfeCapturePct != null
+                      ? elFmtNum(m.mfeCapturePct, 0) + '%'
+                      : '—') +
+                    '</td>' +
+                    '<td>' +
+                    elFmtPct(r.armedShare) +
+                    '</td>' +
+                    '</tr>'
+                  );
+                })
+                .join('')
+            : '<tr><td colspan="7" class="mint text-xs">—</td></tr>';
+        }
+        const ftb = document.getElementById('el-family-tbody');
+        if (ftb) {
+          const fams = (data && data.families) || [];
+          ftb.innerHTML = fams.length
+            ? fams
+                .map(function (f) {
+                  const m = f.metrics || {};
+                  return (
+                    '<tr>' +
+                    '<td>' +
+                    String(f.family) +
+                    '</td>' +
+                    '<td><span class="' +
+                    elGovClass(f.state) +
+                    '">' +
+                    String(f.state || 'neutral') +
+                    '</span></td>' +
+                    '<td>' +
+                    (m.tradeCount || 0) +
+                    '</td>' +
+                    '<td>' +
+                    elFmtNum(m.expectancyPct, 2) +
+                    '</td>' +
+                    '<td class="text-xs">' +
+                    String(f.note || '—') +
+                    '</td>' +
+                    '</tr>'
+                  );
+                })
+                .join('')
+            : '<tr><td colspan="5" class="mint text-xs">—</td></tr>';
+        }
+        const funnel = document.getElementById('el-funnel');
+        if (funnel && data && data.funnel) {
+          const f = data.funnel;
+          funnel.innerHTML =
+            '<span class="mint">Funnel offered ' +
+            (f.offered || 0) +
+            ' · armed ' +
+            (f.armed || 0) +
+            ' · triggered ' +
+            (f.triggered || 0) +
+            ' · opened ' +
+            (f.opened || 0) +
+            ' · blocked ' +
+            (f.blocked || 0) +
+            (f.openRatePct != null
+              ? ' · open ' + f.openRatePct + '%'
+              : '') +
+            (f.armToTriggerMs != null
+              ? ' · arm→trig ' + Math.round(f.armToTriggerMs / 1000) + 's'
+              : '') +
+            '</span>';
+        }
+        renderExpectancyLiftChart();
+      } catch (err) {
+        const sum = document.getElementById('el-summary');
+        if (sum) {
+          sum.textContent =
+            'Expectancy Lift unavailable: ' + (err.message || String(err));
+        }
+      }
+    }
+    window.loadExpectancyLift = loadExpectancyLift;
+
     function renderScalperTrendChart() {
       const canvas = document.getElementById('chart-scalper-trend');
       if (!canvas || typeof Chart === 'undefined') return;
@@ -18139,6 +18477,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         try { loadFastProfileRecovery(); } catch (_) {}
         try { loadDipBuyerRecovery(); } catch (_) {}
         try { loadScalperPerformanceTrend(); } catch (_) {}
+        try { loadExpectancyLift(); } catch (_) {}
         try { loadTradeCraftPerformance(); } catch (_) {}
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
@@ -19889,6 +20228,57 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    /** Expectancy Lift trade badges: armed|disc, family, partial, trail, governor. */
+    function fmtExpectancyLiftBadges(p) {
+      if (!p) return '';
+      var bits = '';
+      var armed =
+        p.armedWatch === true ||
+        p.entryPath === 'armed_trigger' ||
+        p.scalperWatchTriggered === true;
+      var pathLabel = armed
+        ? 'armed'
+        : p.entryPath === 'discretionary' || p.entryPath
+          ? 'discretionary'
+          : '';
+      if (pathLabel) {
+        bits +=
+          '<span class="badge" style="background:' +
+          (armed ? '#0f766e' : '#475569') +
+          ';color:#fff;margin-left:0.25rem" title="Entry path">' +
+          pathLabel +
+          '</span>';
+      }
+      var style = String(p.entryStyle || '');
+      if (style === 'momentum_continuation') style = 'level_momentum_expansion';
+      if (style && style !== 'unknown') {
+        var shortFam = style.replace(/_/g, ' ').slice(0, 18);
+        bits +=
+          '<span class="badge" style="background:#334155;color:#e2e8f0;margin-left:0.25rem" title="Family: ' +
+          style.replace(/"/g, '&quot;') +
+          '">' +
+          shortFam +
+          '</span>';
+      }
+      if (p.pclPartialTaken === true || p.partialTaken === true) {
+        bits +=
+          '<span class="badge" style="background:#0369a1;color:#fff;margin-left:0.25rem" title="First partial taken">partial</span>';
+      }
+      if (
+        p.peakProtectArmed === true ||
+        p.trailActive === true ||
+        p.trailingActive === true
+      ) {
+        bits +=
+          '<span class="badge" style="background:#7c3aed;color:#fff;margin-left:0.25rem" title="Trail / peak protect active">trail</span>';
+      }
+      if (p.governorInfluenced === true) {
+        bits +=
+          '<span class="badge" style="background:#b45309;color:#fff;margin-left:0.25rem" title="Expectancy governor influenced admit">gov</span>';
+      }
+      return bits;
+    }
+
     function fmtEntrySourceBadge(p, opts) {
       opts = opts || {};
       if (!p) return '';
@@ -19913,12 +20303,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         entrySrc === 'migration' ||
         (!isScanner && /migration/i.test(String(p.source || '')) && opts.allowMigrationGuess);
       const watchBadge = fmtSetupWatchBadge(p);
+      const elBadges = fmtExpectancyLiftBadges(p);
 
       if (isMigration || entrySrc === 'migration') {
         return (
           '<span class="badge entry-src-badge" style="background:#7c3aed;color:#fff" title="Migration entry">Migration</span>' +
           watchBadge +
-          fmtEntryStyleBadge(p)
+          fmtEntryStyleBadge(p) +
+          elBadges
         );
       }
       if (isScanner) {
@@ -19929,10 +20321,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           (isHybrid ? 'Scanner+' : 'Scanner') +
           '</span>' +
           watchBadge +
-          fmtEntryStyleBadge(p)
+          fmtEntryStyleBadge(p) +
+          elBadges
         );
       }
-      if (opts.omitCopy) return watchBadge + fmtEntryStyleBadge(p);
+      if (opts.omitCopy) return watchBadge + fmtEntryStyleBadge(p) + elBadges;
       // Wallet copy — sky badge (shown next to wallet name in cells)
       if (
         entrySrc === 'wallet' ||
@@ -19943,10 +20336,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         return (
           '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="Smart-wallet copy trade">Copy</span>' +
           watchBadge +
-          fmtEntryStyleBadge(p)
+          fmtEntryStyleBadge(p) +
+          elBadges
         );
       }
-      return watchBadge + fmtEntryStyleBadge(p);
+      return watchBadge + fmtEntryStyleBadge(p) + elBadges;
     }
 
     /**

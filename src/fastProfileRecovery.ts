@@ -1291,7 +1291,16 @@ export function effectiveTaModeForRecovery(
 }
 
 export function shouldBlockProfileLead(profileId: string): boolean {
-  return getRecoveryConstraints(profileId).blockLead;
+  if (getRecoveryConstraints(profileId).blockLead) return true;
+  // Expectancy Lift synergy — poor expectancy also blocks lead
+  try {
+    const { shouldBlockLeadForPoorExpectancy } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    if (shouldBlockLeadForPoorExpectancy(profileId)) return true;
+  } catch {
+    /* fail soft */
+  }
+  return false;
 }
 
 export function shouldBlockLearningModeForProfile(

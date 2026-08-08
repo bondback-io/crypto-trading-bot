@@ -288,11 +288,28 @@ function buildTradeProfileMatchContext(
   };
   // Stamp entry-style DNA once for lane fight + buy meta
   try {
-    const { resolveDetectedEntryStyle } =
+    const { resolveDetectedEntryStyle, detectSupportReclaim } =
       require('./supportReclaim') as typeof import('./supportReclaim');
     const det = resolveDetectedEntryStyle(ctx);
     ctx.detectedEntryStyle = det.detectedEntryStyle;
     ctx.lateChase = det.lateChase;
+    try {
+      const reclaim = detectSupportReclaim({
+        priceSol: ctx.priceSol,
+        supportPriceSol: ctx.supportPriceSol,
+        nearSupport: ctx.nearSupport,
+        nearKeyFib: ctx.nearKeyFib,
+        nearMultiTfSupport: ctx.nearMultiTfSupport,
+        mtfSupportPriceSol:
+          ctx.nearMultiTfSupport === true ? ctx.supportPriceSol : null,
+      });
+      (ctx as { extensionFromLevelPct?: number }).extensionFromLevelPct =
+        reclaim.extensionFromLevelPct;
+      (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct =
+        reclaim.extensionFromLevelPct;
+    } catch {
+      /* soft */
+    }
   } catch {
     /* fail soft */
   }
@@ -381,6 +398,22 @@ function stampEntryStyleOnBuyOpts(
       }
     } else {
       (buyOpts as { entryPath?: string }).entryPath = 'discretionary';
+    }
+    // Expectancy Lift stamps (permission score / governor influence)
+    const sigPerm = (signal as { tradePermissionScore?: number })
+      .tradePermissionScore;
+    if (sigPerm != null && Number.isFinite(sigPerm)) {
+      (buyOpts as { tradePermissionScore?: number }).tradePermissionScore =
+        Number(sigPerm);
+    }
+    if ((signal as { governorInfluenced?: boolean }).governorInfluenced === true) {
+      (buyOpts as { governorInfluenced?: boolean }).governorInfluenced = true;
+    }
+    // Normalize MB alias onto buy meta
+    const es = String((buyOpts as { entryStyle?: string }).entryStyle || '');
+    if (es === 'momentum_continuation') {
+      (buyOpts as { entryStyle?: string }).entryStyle =
+        'level_momentum_expansion';
     }
   } catch {
     /* fail soft */
@@ -3937,6 +3970,21 @@ async function executeSignalBuy(
         `Profile RL size ×${rlSz.mult.toFixed(2)} for ${profileAssignment.name || profileAssignment.profileId}`
       );
     }
+    try {
+      const { expectancySizeMultiplier } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const expSz = expectancySizeMultiplier({
+        profileId: profileAssignment.profileId,
+        family: String(buyOpts.entryStyle || ''),
+        armedWatch: buyOpts.armedWatch === true || signal.armedWatch === true,
+      });
+      if (expSz.mult !== 1) {
+        solAmt *= expSz.mult;
+        sizeExtra += ` · ${expSz.note}`;
+      }
+    } catch {
+      /* optional */
+    }
     if (low.action === 'size_down' && low.sizeMult < 1) {
       solAmt *= low.sizeMult;
       sizeExtra += ` · ${low.reason}`;
@@ -6923,10 +6971,129 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       `[monitor] Smart Bot lane passers=${lanePassers.map((l) => `${l.name}:${l.score}`).join(', ')} ` +
         `· top=${top.name} (${top.profileId}) · ${signal.symbol}`
     );
+    // Expectancy Lift Layer — soft governors (late_chase share is hard ceiling)
+    try {
+      const {
+        shouldSkipFamilyGovernor,
+        shouldLimitLateChaseShare,
+        shouldLimitDiscretionaryMix,
+        shouldBlockOtherProfileDiscretionary,
+        computeTradePermissionScore,
+        shouldSoftSkipPermissionScore,
+        normalizeExpectancyFamily,
+        mintOneSetupProfileLock,
+        syncOneSetupLocksFromWatches,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      syncOneSetupLocksFromWatches();
+      const armedWatch =
+        signal.armedWatch === true ||
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+          reasonBitsLane
+        );
+      const entryStyle = String(
+        signal.entryStyleHint || ctx.detectedEntryStyle || ''
+      );
+      const lateChase = ctx.lateChase === true || entryStyle === 'late_chase';
+      const family = normalizeExpectancyFamily(
+        lateChase ? 'late_chase' : entryStyle
+      );
+      if (armedWatch && signal.mint) {
+        mintOneSetupProfileLock(
+          signal.mint,
+          String(top.profileId || signal.candidateTradeProfileId || 'scalper')
+        );
+      }
+      const lateLim = shouldLimitLateChaseShare({
+        lateChase,
+        family,
+        entryStyle,
+      });
+      if (lateLim.limit) {
+        recordRejectedSignal(signal, lateLim.reason || 'Late-chase share ceiling');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=expectancy: ${lateLim.reason}`
+        );
+        return false;
+      }
+      const gov = shouldSkipFamilyGovernor({
+        family,
+        entryStyle,
+        lateChase,
+        armedWatch,
+      });
+      if (gov.skip) {
+        recordRejectedSignal(signal, gov.reason || 'Family governor restrict');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=expectancy: ${gov.reason}`
+        );
+        return false;
+      }
+      const discMix = shouldLimitDiscretionaryMix({ armedWatch });
+      if (discMix.limit) {
+        recordRejectedSignal(signal, discMix.reason || 'Armed mix 70/30');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=expectancy: ${discMix.reason}`
+        );
+        return false;
+      }
+      const lock = shouldBlockOtherProfileDiscretionary({
+        mint: signal.mint,
+        profileId: top.profileId,
+        armedWatch,
+      });
+      if (lock.block) {
+        recordRejectedSignal(signal, lock.reason || 'One-setup-one-profile');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=expectancy: ${lock.reason}`
+        );
+        return false;
+      }
+      const ext =
+        (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
+        (ctx as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
+        null;
+      const perm = computeTradePermissionScore({
+        armedWatch,
+        triggerConfirm:
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+            reasonBitsLane
+          ),
+        family,
+        entryStyle,
+        lateChase,
+        extensionFromLevelPct: ext,
+        dnaMatch:
+          ctx.detectedEntryStyle != null
+            ? normalizeExpectancyFamily(ctx.detectedEntryStyle) === family ||
+              String(ctx.detectedEntryStyle) === entryStyle
+            : null,
+        profileId: top.profileId,
+        tradeProfileScore: top.score,
+      });
+      (signal as { tradePermissionScore?: number }).tradePermissionScore = perm;
+      (signal as { governorInfluenced?: boolean }).governorInfluenced =
+        gov.state !== 'neutral' || perm < 55;
+      const softPerm = shouldSoftSkipPermissionScore(perm, armedWatch);
+      if (softPerm.skip) {
+        recordRejectedSignal(signal, softPerm.reason || 'Permission score');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=expectancy: ${softPerm.reason}`
+        );
+        return false;
+      }
+    } catch {
+      /* optional — fail soft */
+    }
     // Scalper attention share throttle — skip discretionary (armed reclaim bypasses)
     try {
       const {
         shouldThrottleScalperAdmit,
+        shouldLimitScalperConcurrent,
         getProfileAttentionShare,
       } = require('./profileAttention') as typeof import('./profileAttention');
       const att = getProfileAttentionShare();
@@ -6938,6 +7105,19 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             ? ` · scalperWR=${att.scalperWinRatePct.toFixed(0)}%`
             : '')
       );
+      const conc = shouldLimitScalperConcurrent({
+        profileId: top.profileId,
+        armedWatch: signal.armedWatch === true,
+        scannerReasons: signal.scannerReasons,
+      });
+      if (conc.limit) {
+        recordRejectedSignal(signal, conc.reason || 'Scalper concurrent cap');
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=attention: ${conc.reason}`
+        );
+        return false;
+      }
       const th = shouldThrottleScalperAdmit({
         profileId: top.profileId,
         armedWatch: signal.armedWatch === true,

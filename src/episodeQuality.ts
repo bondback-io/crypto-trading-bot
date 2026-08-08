@@ -46,6 +46,20 @@ export function computeEpisodeQualityWeight(episode: ProfileLearningEpisode): nu
   if (armed) w += 0.18;
   else if (/scalp_reclaim|support_dip_reclaim|reclaim/i.test(style)) w += 0.1;
 
+  // Expectancy Lift: weight expectancy outcomes, first-partial success, MFE capture
+  const mfeCap =
+    episode.mfeCaptureRatio != null && Number.isFinite(Number(episode.mfeCaptureRatio))
+      ? Number(episode.mfeCaptureRatio)
+      : maxRunup > 0.5
+        ? clamp(pnlPct / maxRunup, 0, 1.5)
+        : null;
+  if (mfeCap != null && mfeCap >= 0.55 && pnlPct > 0) w += 0.1;
+  else if (mfeCap != null && mfeCap < 0.25 && maxRunup >= 10) w -= 0.06;
+  if (episode.pclPartialTaken === true && pnlPct > 0) w += 0.08;
+  else if (episode.pclPartialTaken === true && pnlPct <= 0) w -= 0.04;
+  if (pnlPct > 0 && maxRunup >= 8) w += 0.05; // positive expectancy film
+  if (pnlPct < -4 && maxRunup < 3) w -= 0.05;
+
   // Down-weight Scalper scratch spam (low MFE non-armed)
   const pid = String(episode.profileId || '');
   const scalperFamily =
@@ -60,7 +74,7 @@ export function computeEpisodeQualityWeight(episode: ProfileLearningEpisode): nu
     pnlPct > 0 &&
     pnlPct < 4
   ) {
-    w -= 0.04; // −3% to −5% band
+    w -= 0.08; // scratch down (keep armed up above)
   }
 
   // Non-trivial hold

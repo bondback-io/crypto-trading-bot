@@ -406,7 +406,7 @@ function stampWatchPlan(w: ScalperWatchEntry): void {
   } else if (w.preferredProfileId === 'reversal_scalper') {
     w.entryStyle = 'reversal_reclaim';
   } else if (w.preferredProfileId === 'momentum_burst') {
-    w.entryStyle = 'momentum_continuation';
+    w.entryStyle = 'level_momentum_expansion';
   } else {
     w.entryStyle = w.entryStyle || 'scalp_reclaim_burst';
   }
@@ -895,9 +895,15 @@ export async function tickScalperSetupWatches(opts?: {
     }
 
     if (w.status === 'armed') {
-      // Shared reclaim detector (Scalper-family ~1.2%); fail soft if S/R missing
+      // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
       let reclaim = false;
+      let undercut = false;
+      let nearLevel = false;
+      let extensionFromLevelPct: number | null = null;
+      let volumeHint = false;
       try {
+        const volM5 = Number(w.volumeM5Usd);
+        volumeHint = Number.isFinite(volM5) && volM5 > 0;
         const det = detectSupportReclaim({
           priceSol: px,
           supportPriceSol: w.supportPriceSol,
@@ -906,10 +912,28 @@ export async function tickScalperSetupWatches(opts?: {
           nearMultiTfSupport: w.nearMultiTfSupport,
           reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
           momentumStyle: w.preferredProfileId === 'momentum_burst',
+          volumeConfirm: volumeHint,
         });
         reclaim = det.reclaimed === true;
+        undercut = det.undercut === true;
+        nearLevel = det.nearLevel === true;
+        extensionFromLevelPct = det.extensionFromLevelPct;
         if (det.nearLevel) {
           w.nearSupport = true;
+        }
+        // Track touch/undercut so a failed bounce without reclaim does not fire
+        if (undercut || nearLevel) {
+          (w as { touchedLevel?: boolean }).touchedLevel = true;
+        }
+        // Touch-and-fail: was near/undercut, now extended away without reclaim
+        if (
+          (w as { touchedLevel?: boolean }).touchedLevel &&
+          !reclaim &&
+          extensionFromLevelPct != null &&
+          extensionFromLevelPct < -TRIGGER_RECLAIM_PCT
+        ) {
+          w.lastReason = 'touch-and-fail reject';
+          continue;
         }
       } catch {
         if (
@@ -921,8 +945,13 @@ export async function tickScalperSetupWatches(opts?: {
           reclaim = true;
         }
       }
-      const holdOk = nearConfluence && w.nearSupport !== false;
-      const trigger = reclaim || holdOk;
+      // Prefer reclaim after touch/undercut; confluence hold only if still at level
+      const holdOk =
+        nearConfluence &&
+        w.nearSupport !== false &&
+        (undercut || nearLevel) &&
+        !((w as { touchedLevel?: boolean }).touchedLevel && !reclaim && extensionFromLevelPct != null && extensionFromLevelPct > 6);
+      const trigger = reclaim || (holdOk && (undercut || nearLevel));
       if (!trigger) continue;
 
       // Pre-vetted armed reclaim — bypass scanner mint cooldown (anti-spam is for discretionary offers)

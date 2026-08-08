@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.237',
+    title: 'Expectancy Lift Layer',
+    sections: ['microbots', 'tradecraft', 'learning', 'zion', 'scanners', 'overview'],
+    items: [
+      'Expectancy Lift card on Bot Performance: mix chips (armed 70% / late-chase ≤5% / Scalper ≤30%), profile expectancy table, family governor board, armed funnel, Chart.js.',
+      'Soft family governors (promoted/neutral/down-ranked/restricted) + trade permission score; hard late-chase share ceiling; armed/disc 70/30 mix; one-setup-one-profile lock.',
+      'Stronger Mode B / Dip reclaim confirm (touch→reclaim; reject touch-and-fail); MB stamp level_momentum_expansion; PCL partial retune; episode quality weights expectancy + MFE capture.',
+      'Scalper attention window 20 + 30% share cap; skip discretionary Scalper when ≥1 Scalper open; expectancy-weighted size 0.7–1.15.',
+      'Zion one-liners for expectancy lift; GET /api/expectancy-lift?window=20|50|100.',
+    ],
+  },
+  {
     version: '1.2.236',
     title: 'Mode B funnel fix + watch-origin trade badges',
     sections: ['microbots', 'scanners', 'overview', 'tradecraft', 'knobs'],

@@ -621,9 +621,16 @@ export async function tickDipSetupWatches(opts?: {
     }
 
     if (w.status === 'armed') {
-      // Shared reclaim detector (Dip ~1.5%); fail soft if S/R missing
+      // Stronger confirm: touch/undercut → reclaim; reject touch-and-fail
       let reclaim = false;
+      let undercut = false;
+      let nearLevel = false;
+      let extensionFromLevelPct: number | null = null;
       try {
+        const volHintRaw = Number(
+          (w as { volumeM5Usd?: number }).volumeM5Usd ?? w.volumeH1Usd
+        );
+        const volumeHint = Number.isFinite(volHintRaw) && volHintRaw > 0;
         const det = detectSupportReclaim({
           priceSol: px,
           supportPriceSol: w.supportPriceSol,
@@ -632,11 +639,27 @@ export async function tickDipSetupWatches(opts?: {
           nearSupport: w.nearSupport,
           nearKeyFib: w.nearKeyFib,
           reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
+          volumeConfirm: volumeHint,
         });
         reclaim = det.reclaimed === true;
+        undercut = det.undercut === true;
+        nearLevel = det.nearLevel === true;
+        extensionFromLevelPct = det.extensionFromLevelPct;
         if (det.nearLevel) {
           w.nearSupport = w.nearSupport || det.levelKind === 'support';
           w.nearKeyFib = w.nearKeyFib || det.levelKind === 'fib';
+        }
+        if (undercut || nearLevel) {
+          (w as { touchedLevel?: boolean }).touchedLevel = true;
+        }
+        if (
+          (w as { touchedLevel?: boolean }).touchedLevel &&
+          !reclaim &&
+          extensionFromLevelPct != null &&
+          extensionFromLevelPct < -TRIGGER_RECLAIM_PCT
+        ) {
+          w.lastReason = 'touch-and-fail reject';
+          continue;
         }
       } catch {
         /* fail soft — fall back to legacy level math */
@@ -649,10 +672,11 @@ export async function tickDipSetupWatches(opts?: {
           reclaim = true;
         }
       }
+      // Prefer reclaim; legacy drop/KOL path only when still near level (not chase)
+      const nearOk = undercut || nearLevel || nearTa;
       const trigger =
         reclaim ||
-        (nearTa && dropOk) ||
-        (dropOk && (w.kolCount ?? 0) >= (m.minKolWallets ?? 3));
+        (nearOk && dropOk && (nearTa || (w.kolCount ?? 0) >= (m.minKolWallets ?? 3)));
 
       if (!trigger) continue;
 

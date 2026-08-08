@@ -160,6 +160,8 @@ export interface ProfileLearningEpisode {
   pclPartialAtMs?: number;
   /** Additional MFE after partial (maxRunup − partialAt) */
   pclPostPartialMfePct?: number;
+  /** Runner still managed after first partial */
+  postPartialSurvival?: boolean;
   /** Explicit exit/MFE capture ratio (0–1.2+), stamped at close */
   mfeCaptureRatio?: number;
   /** Permission window end (ms) at open */

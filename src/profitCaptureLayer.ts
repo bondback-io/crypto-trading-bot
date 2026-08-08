@@ -83,9 +83,9 @@ export const PCL_PARTIAL_BY_FAMILY: Record<
   Exclude<PclProfileFamily, 'default'>,
   { earlyPartialTpPct: number; earlyPartialFraction: number }
 > = {
-  fast: { earlyPartialTpPct: 13, earlyPartialFraction: 0.55 },
-  dip_trend: { earlyPartialTpPct: 17, earlyPartialFraction: 0.3 },
-  quality: { earlyPartialTpPct: 18, earlyPartialFraction: 0.3 },
+  fast: { earlyPartialTpPct: 15, earlyPartialFraction: 0.55 },
+  dip_trend: { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 },
+  quality: { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 },
 };
 
 /** Tiny green scratch threshold (%). */
@@ -364,24 +364,25 @@ export function resolvePclPartialDefaults(
       ? { earlyPartialTpPct: 15, earlyPartialFraction: 0.35 }
       : { ...PCL_PARTIAL_BY_FAMILY[family] };
   if (id === 'scalper' || id === 'reversal_scalper') {
+    // Scalper family: 12–18% @ 0.50–0.70 (armed reclaim special-cased below)
     base = {
-      earlyPartialTpPct: id === 'reversal_scalper' ? 12 : 13,
-      earlyPartialFraction: 0.55,
+      earlyPartialTpPct: id === 'reversal_scalper' ? 12 : 15,
+      earlyPartialFraction: id === 'reversal_scalper' ? 0.55 : 0.6,
     };
   } else if (id === 'momentum_burst') {
-    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.4 };
+    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
   } else if (id === 'migration_sniper') {
-    base = { earlyPartialTpPct: 16, earlyPartialFraction: 0.4 };
+    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.5 };
   } else if (id === 'trend_rider') {
-    base = { earlyPartialTpPct: 18, earlyPartialFraction: 0.3 };
+    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 };
   } else if (id === 'dip_buyer') {
-    base = { earlyPartialTpPct: 15, earlyPartialFraction: 0.3 };
+    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.4 };
   } else if (id === 'high_win_rate') {
-    base = { earlyPartialTpPct: 20, earlyPartialFraction: 0.3 };
+    base = { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 };
   } else if (id === 'steady_compounder') {
-    base = { earlyPartialTpPct: 15, earlyPartialFraction: 0.3 };
+    base = { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 };
   } else if (id === 'smart_money_mirror') {
-    base = { earlyPartialTpPct: 15, earlyPartialFraction: 0.3 };
+    base = { earlyPartialTpPct: 20, earlyPartialFraction: 0.4 };
   }
   const style = String(opts?.entryStyle || '');
   const q =
@@ -545,6 +546,10 @@ export function applyPclPartialRunnerNudge(
     pclPartialAtMs?: number;
     entryPriceSol?: number;
     highWaterMarkSol?: number;
+    /** Expectancy Lift — runner still managed after first partial */
+    postPartialSurvival?: boolean;
+    /** Peak MFE % observed after partial (low-touch track) */
+    postPartialPeakMfePct?: number;
   },
   opts?: { markPnlPct?: number; nowMs?: number }
 ): void {
@@ -552,16 +557,19 @@ export function applyPclPartialRunnerNudge(
   const already = position.pclPartialTaken === true;
   position.pclPartialTaken = true;
   position.partialSellDone = true;
+  position.postPartialSurvival = true;
   if (!already) {
     const now = opts?.nowMs ?? Date.now();
     position.pclPartialAtMs = now;
     if (opts?.markPnlPct != null && Number.isFinite(opts.markPnlPct)) {
       position.pclPartialAtPct = Number(opts.markPnlPct);
+      position.postPartialPeakMfePct = Number(opts.markPnlPct);
     } else {
       const entry = Number(position.entryPriceSol) || 0;
       const hwm = Number(position.highWaterMarkSol) || entry;
       if (entry > 0 && hwm > 0) {
         position.pclPartialAtPct = ((hwm - entry) / entry) * 100;
+        position.postPartialPeakMfePct = position.pclPartialAtPct;
       }
     }
   }

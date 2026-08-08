@@ -3833,6 +3833,24 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Expectancy Lift Layer — mix targets, family governors, funnel (read-mostly). */
+  app.get('/api/expectancy-lift', (req: Request, res: Response) => {
+    try {
+      const {
+        getExpectancyLiftStatus,
+        parseExpectancyWindow,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      const window = parseExpectancyWindow(req.query.window);
+      const status = getExpectancyLiftStatus(window);
+      res.json({ ...status, ok: true });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
     try {
       const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =

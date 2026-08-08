@@ -403,6 +403,10 @@ export interface Position {
   /** Unrealized % / ms when first PCL partial banked */
   pclPartialAtPct?: number;
   pclPartialAtMs?: number;
+  /** Expectancy Lift — runner still open after first partial */
+  postPartialSurvival?: boolean;
+  /** Peak unrealized % after partial (MFE track) */
+  postPartialPeakMfePct?: number;
   /** Times PCL blocked a tiny-green soft scratch while open */
   pclScratchBlockedCount?: number;
   /** PPP arm deferred at least once during permission */
@@ -1060,10 +1064,18 @@ function maybeRecordLearningEpisode(
       pclPostPartialMfePct: (() => {
         if (position.pclPartialTaken !== true) return undefined;
         const at = Number(position.pclPartialAtPct);
+        const tracked = Number(position.postPartialPeakMfePct);
+        if (Number.isFinite(tracked) && Number.isFinite(at)) {
+          return Math.round(Math.max(0, tracked - at) * 10) / 10;
+        }
         const mfe = Math.max(0, Number(metrics.maxRunupPct) || 0);
         if (!Number.isFinite(at)) return undefined;
         return Math.round(Math.max(0, mfe - at) * 10) / 10;
       })(),
+      postPartialSurvival:
+        position.postPartialSurvival === true || position.pclPartialTaken === true
+          ? true
+          : undefined,
       mfeCaptureRatio: (() => {
         const mfe = Math.max(0, Number(metrics.maxRunupPct) || 0);
         const exitU = Number.isFinite(metrics.exitUnrealizedPct)
@@ -5100,6 +5112,18 @@ export class PaperTrader {
         }
         // After PCL partial: do not skip runner trail / TP management
         if (position.pclPartialTaken) {
+          try {
+            position.postPartialSurvival = true;
+            const entry = Number(position.entryPriceSol) || 0;
+            if (entry > 0 && currentPrice > 0) {
+              const u =
+                ((currentPrice - entry) / entry) * 100;
+              const prev = Number(position.postPartialPeakMfePct) || 0;
+              if (u > prev) position.postPartialPeakMfePct = u;
+            }
+          } catch {
+            /* soft */
+          }
           /* fall through */
         } else {
           continue;

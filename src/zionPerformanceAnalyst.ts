@@ -150,6 +150,17 @@ export function buildZionAnalystBrief(opts?: {
     } catch {
       /* optional */
     }
+    try {
+      const { formatExpectancyLiftZionLines } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const expLines = formatExpectancyLiftZionLines(50);
+      for (const line of expLines.slice(0, 3)) {
+        explain.push(line);
+        contextLines.push(`  expectancy-lift: ${line}`);
+      }
+    } catch {
+      /* optional */
+    }
   } catch {
     observe.push('Learning diagnostics unavailable.');
   }

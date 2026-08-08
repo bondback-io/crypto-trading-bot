@@ -5,10 +5,10 @@
 
 import { paperTrader } from './paperTrader';
 
-const ATTENTION_WINDOW = 40;
+const ATTENTION_WINDOW = 20;
 const SCALPER_WR_LOOKBACK = 20;
 const WEAK_WR_PCT = 45;
-const SCALPER_SHARE_CAP = 0.35;
+const SCALPER_SHARE_CAP = 0.3;
 
 export type AttentionBucket =
   | 'scalper'
@@ -124,6 +124,39 @@ function scalperRecoveringStrict(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Concurrent Scalper open-position cap — skip discretionary scalper admits
+ * when ≥1 open position already stamped tradeProfileId==='scalper'.
+ */
+export function shouldLimitScalperConcurrent(input: {
+  profileId?: string | null;
+  armedWatch?: boolean;
+  scannerReasons?: string[] | null;
+}): { limit: boolean; reason?: string } {
+  const id = String(input.profileId || '');
+  if (id !== 'scalper') return { limit: false };
+  const reasons = (input.scannerReasons || []).join(' ');
+  const armed =
+    input.armedWatch === true ||
+    /scalper-watch:triggered|dip-watch:triggered|armedWatch/i.test(reasons);
+  if (armed) return { limit: false };
+  try {
+    const open = paperTrader.getOpenPositions();
+    const scalperOpen = open.filter(
+      (p) => String(p.tradeProfileId || '') === 'scalper'
+    ).length;
+    if (scalperOpen >= 1) {
+      return {
+        limit: true,
+        reason: `Scalper concurrent open ≥1 — skip discretionary admit`,
+      };
+    }
+  } catch {
+    /* fail soft */
+  }
+  return { limit: false };
 }
 
 /**

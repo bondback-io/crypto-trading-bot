@@ -974,6 +974,29 @@ function localAnalystReply(
     }
   }
 
+  if (
+    /expectancy|expectancy\s*lift|family\s*governor|late.?chase\s*share|armed\s*mix/i.test(
+      q
+    )
+  ) {
+    try {
+      const { formatExpectancyLiftZionLines } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const lines = formatExpectancyLiftZionLines(50);
+      return formatZionReply({
+        greeting: greet,
+        answer: lines[0] || 'Expectancy Lift has no samples yet.',
+        summary: lines.slice(1).join(' ') || undefined,
+        followUp: 'How many Scalper watches are armed?',
+      });
+    } catch {
+      return formatZionReply({
+        greeting: greet,
+        answer: 'Expectancy Lift diagnostics unavailable.',
+      });
+    }
+  }
+
   if (/scalper|ta setup/.test(q)) {
     const p = findProfile(facts, 'scalper');
     return formatZionReply({
