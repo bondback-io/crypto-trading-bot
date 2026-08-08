@@ -436,6 +436,7 @@ export interface Position {
   supportTfHits?: string[];
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
+  dipWatchTriggered?: boolean;
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
   entryPath?: 'armed_trigger' | 'discretionary' | string;
@@ -873,12 +874,18 @@ function maybeRecordLearningEpisode(
       lateChaseAtEntry: position.lateChaseAtEntry === true,
       entryPath:
         position.entryPath ||
-        (position.armedWatch === true || position.scalperWatchTriggered === true
+        (position.armedWatch === true ||
+        position.scalperWatchTriggered === true ||
+        position.dipWatchTriggered === true
           ? 'armed_trigger'
           : 'discretionary'),
       armedWatch:
         position.armedWatch === true ||
-        position.scalperWatchTriggered === true,
+        position.scalperWatchTriggered === true ||
+        position.dipWatchTriggered === true,
+      setupWatchFamily: position.setupWatchFamily,
+      dipWatchTriggered: position.dipWatchTriggered === true,
+      scalperWatchTriggered: position.scalperWatchTriggered === true,
       mirrorWalletId: position.mirrorWalletId,
       mirrorWalletName: position.mirrorWalletName,
       learningTags: (() => {
@@ -895,6 +902,7 @@ function maybeRecordLearningEpisode(
         if (
           position.armedWatch === true ||
           position.scalperWatchTriggered === true ||
+          position.dipWatchTriggered === true ||
           position.entryPath === 'armed_trigger'
         ) {
           tags.push('armed_trigger');
@@ -961,7 +969,6 @@ function maybeRecordLearningEpisode(
       nearMultiTfResistance: position.nearMultiTfResistance,
       supportTfHits: position.supportTfHits,
       srConfluenceScore: position.srConfluenceScore,
-      scalperWatchTriggered: position.scalperWatchTriggered,
       whaleStateAtEntry: position.whaleStateAtEntry,
       profileTaPlainLanguage: position.profileTaPlainLanguage,
       zigzagStructureAtEntry: position.zigzagStructureAtEntry,
@@ -2118,6 +2125,7 @@ export class PaperTrader {
     supportTfHits?: string[];
     srConfluenceScore?: number;
     scalperWatchTriggered?: boolean;
+    dipWatchTriggered?: boolean;
     armedWatch?: boolean;
     entryPath?: string;
     setupWatchFamily?: string;
@@ -2229,6 +2237,7 @@ export class PaperTrader {
       supportTfHits: input.supportTfHits,
       srConfluenceScore: input.srConfluenceScore,
       scalperWatchTriggered: input.scalperWatchTriggered,
+      dipWatchTriggered: input.dipWatchTriggered === true,
       armedWatch: input.armedWatch === true,
       entryPath:
         input.entryPath ||
@@ -2654,6 +2663,7 @@ export class PaperTrader {
       supportTfHits?: string[];
       srConfluenceScore?: number;
       scalperWatchTriggered?: boolean;
+      dipWatchTriggered?: boolean;
       armedWatch?: boolean;
       entryPath?: string;
       setupWatchFamily?: string;
@@ -2851,6 +2861,7 @@ export class PaperTrader {
       supportTfHits: meta?.supportTfHits,
       srConfluenceScore: meta?.srConfluenceScore,
       scalperWatchTriggered: meta?.scalperWatchTriggered,
+      dipWatchTriggered: meta?.dipWatchTriggered === true,
       armedWatch: meta?.armedWatch === true,
       entryPath:
         meta?.entryPath ||

@@ -100,6 +100,8 @@ export interface ScannerCandidate {
   sizePlanSol?: number;
   /** Which setup-watch family triggered this handoff */
   setupWatchFamily?: 'scalper' | 'dip' | 'grad';
+  /** Dip watch trigger stamp (badge fallback when family lost) */
+  dipWatchTriggered?: boolean;
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
   supportPriceSol?: number | null;
   resistancePriceSol?: number | null;

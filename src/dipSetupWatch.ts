@@ -4,7 +4,7 @@
  */
 
 import type { LaunchEvent } from './marketData';
-import { fetchLiveTokenSnapshot } from './marketData';
+import { fetchLiveTokenSnapshot, fetchMultiTfOhlcv } from './marketData';
 import {
   handOffScannerCandidate,
   type ScannerCandidate,
@@ -15,6 +15,7 @@ import {
   resolveTradeProfileDefinition,
 } from './tradeProfiles';
 import { detectSupportReclaim } from './supportReclaim';
+import { analyzeSrConfluenceFromCandles } from './technicalLevels';
 
 export type DipWatchStatus =
   | 'watching'
@@ -59,6 +60,8 @@ export interface DipWatchEntry {
   entryStyle?: string;
   qualityScore?: number | null;
   sizePlanSol?: number | null;
+  /** Live peak price for drop-from-peak refresh */
+  peakPriceSol?: number | null;
 }
 
 /**
@@ -72,7 +75,8 @@ const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors wait longer for Fib/S setups (8–12h band → 10h) */
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
 const ARM_NEAR_DROP_MIN = 6;
-const TRIGGER_RECLAIM_PCT = 1.5; // reclaim % off trough / bounce
+/** Mode B parity — reclaim % off level / bounce */
+const TRIGGER_RECLAIM_PCT = 1.2;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
@@ -82,6 +86,33 @@ const watches = new Map<string, DipWatchEntry>();
 let lastMcRefreshAt = new Map<string, number>();
 /** mint → earliest time bots may re-add after manual unwatch */
 const unwatchCooldownUntil = new Map<string, number>();
+
+/** Rolling Dip admit / fire funnel (session counters). */
+const dipFunnel = {
+  offered: 0,
+  watching: 0,
+  armed: 0,
+  triggered: 0,
+  handoff_failed: 0,
+  no_levels: 0,
+};
+
+function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
+  dipFunnel[key] = (dipFunnel[key] || 0) + n;
+}
+
+export function getDipFunnelCounters(): typeof dipFunnel & {
+  watchingNow: number;
+  armedNow: number;
+} {
+  let watchingNow = 0;
+  let armedNow = 0;
+  for (const w of watches.values()) {
+    if (w.status === 'watching') watchingNow += 1;
+    if (w.status === 'armed') armedNow += 1;
+  }
+  return { ...dipFunnel, watchingNow, armedNow };
+}
 
 function isMajorsSource(source: string | undefined): boolean {
   return String(source || '').toLowerCase() === 'majors';
@@ -256,25 +287,187 @@ function pruneTerminal(): void {
   enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
+/**
+ * Recompute nearKeyFib / nearSupport / level prices from stored Fib/S
+ * (+ optional multi-TF) vs live price. Fail soft.
+ */
+function recomputeProximityFromLevels(w: DipWatchEntry): void {
+  const px = w.lastPriceSol;
+  if (px == null || !Number.isFinite(px) || px <= 0) return;
+  try {
+    const det = detectSupportReclaim({
+      priceSol: px,
+      supportPriceSol: w.supportPriceSol,
+      fib05PriceSol: w.fib05PriceSol,
+      fib618PriceSol: w.fib618PriceSol,
+      nearSupport: w.nearSupport,
+      nearKeyFib: w.nearKeyFib,
+      reclaimTriggerPct: TRIGGER_RECLAIM_PCT,
+      nearBandPct: 3.5,
+      undercutBandPct: 1.5,
+    });
+    if (det.nearLevel || det.undercut) {
+      if (det.levelKind === 'fib') w.nearKeyFib = true;
+      if (det.levelKind === 'support' || det.levelKind === 'mtf') {
+        w.nearSupport = true;
+      }
+      // When level kind ambiguous, mark both if either field was the pick
+      if (det.levelKind === 'fib' || det.levelKind === 'support') {
+        /* already set */
+      }
+    }
+    // Also distance-check each stored level independently (targets may differ)
+    const nearBand = 0.035;
+    const undercut = 0.015;
+    const nearPx = (level: number | null | undefined): boolean => {
+      if (level == null || !Number.isFinite(level) || level <= 0) return false;
+      const d = (px - level) / level;
+      return d >= -undercut && d <= nearBand;
+    };
+    if (nearPx(w.fib05PriceSol) || nearPx(w.fib618PriceSol)) {
+      w.nearKeyFib = true;
+    }
+    if (nearPx(w.supportPriceSol)) {
+      w.nearSupport = true;
+    }
+  } catch {
+    /* keep prior flags */
+  }
+}
+
+function refreshDropFromPeak(w: DipWatchEntry, h1ChangePct?: number | null): void {
+  const px = w.lastPriceSol;
+  if (px != null && Number.isFinite(px) && px > 0) {
+    const prevPeak = w.peakPriceSol;
+    if (prevPeak == null || !Number.isFinite(prevPeak) || px > prevPeak) {
+      w.peakPriceSol = px;
+    }
+    const peak = w.peakPriceSol;
+    if (peak != null && peak > 0 && px < peak) {
+      const fromPeak = ((peak - px) / peak) * 100;
+      if (Number.isFinite(fromPeak) && fromPeak > 0) {
+        w.dropFromPeakPct = fromPeak;
+      }
+    }
+  }
+  // Dex H1 change as soft fill when peak tracking is flat / missing
+  if (
+    h1ChangePct != null &&
+    Number.isFinite(h1ChangePct) &&
+    h1ChangePct < -1
+  ) {
+    const fromH1 = Math.abs(h1ChangePct);
+    if (w.dropFromPeakPct == null || fromH1 > w.dropFromPeakPct) {
+      w.dropFromPeakPct = fromH1;
+    }
+  }
+}
+
 async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> {
   const last = lastMcRefreshAt.get(w.mint) ?? 0;
   if (now - last < MC_REFRESH_MIN_MS) return;
   lastMcRefreshAt.set(w.mint, now);
+  let h1Change: number | null = null;
   try {
     const snap = await fetchLiveTokenSnapshot(w.mint);
-    if (!snap) return;
-    if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
-      w.marketCapUsd = snap.marketCapUsd;
-    }
-    if (snap.volumeH1Usd != null && snap.volumeH1Usd > 0) {
-      w.volumeH1Usd = snap.volumeH1Usd;
-    }
-    if (snap.priceSol != null && snap.priceSol > 0) {
-      w.lastPriceSol = snap.priceSol;
+    if (snap) {
+      if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+        w.marketCapUsd = snap.marketCapUsd;
+      }
+      if (snap.volumeH1Usd != null && snap.volumeH1Usd > 0) {
+        w.volumeH1Usd = snap.volumeH1Usd;
+      }
+      if (snap.priceSol != null && snap.priceSol > 0) {
+        w.lastPriceSol = snap.priceSol;
+      }
+      if (
+        snap.priceChangeH1Pct != null &&
+        Number.isFinite(snap.priceChangeH1Pct)
+      ) {
+        h1Change = Number(snap.priceChangeH1Pct);
+      }
     }
   } catch {
     /* keep last */
   }
+
+  // Multi-TF S/R confluence (Mode B parity) — fail soft
+  try {
+    const multi = await fetchMultiTfOhlcv(w.mint, { solUsd: undefined });
+    if (Object.keys(multi.byTf).length > 0) {
+      const conf = analyzeSrConfluenceFromCandles(w.mint, multi.byTf, {
+        priceSol: w.lastPriceSol,
+      });
+      if (conf.primarySupport != null && conf.primarySupport > 0) {
+        w.supportPriceSol = conf.primarySupport;
+      }
+      if (conf.nearMultiTfSupport || (conf.supportTfHits?.length ?? 0) > 0) {
+        w.nearSupport = true;
+      }
+    }
+  } catch {
+    /* keep last levels */
+  }
+
+  // Technical Fib / support refresh when candles available — fail soft
+  try {
+    const { getTechnicalLevelsForStrategy } =
+      require('./technicalLevels') as typeof import('./technicalLevels');
+    const tech = getTechnicalLevelsForStrategy({
+      mint: w.mint,
+      priceSol: w.lastPriceSol ?? undefined,
+    });
+    if (tech) {
+      if (tech.nearFibZone) w.nearKeyFib = true;
+      if (tech.nearSupportZone) w.nearSupport = true;
+      const supPx = tech.nearestSupport?.mid;
+      if (
+        (w.supportPriceSol == null || w.supportPriceSol <= 0) &&
+        supPx != null &&
+        Number.isFinite(supPx) &&
+        supPx > 0
+      ) {
+        w.supportPriceSol = Number(supPx);
+      }
+      for (const z of tech.fibZones || []) {
+        const ratio = Number(z.ratio);
+        const px = Number(z.price);
+        if (!Number.isFinite(px) || px <= 0) continue;
+        if (Math.abs(ratio - 0.5) < 0.001) w.fib05PriceSol = px;
+        if (Math.abs(ratio - 0.618) < 0.02) w.fib618PriceSol = px;
+      }
+      for (const z of tech.snapshot?.fib?.levels || []) {
+        const ratio = Number(z.ratio);
+        const px = Number(z.price);
+        if (!Number.isFinite(px) || px <= 0) continue;
+        if (
+          (w.fib05PriceSol == null || w.fib05PriceSol <= 0) &&
+          Math.abs(ratio - 0.5) < 0.001
+        ) {
+          w.fib05PriceSol = px;
+        }
+        if (
+          (w.fib618PriceSol == null || w.fib618PriceSol <= 0) &&
+          Math.abs(ratio - 0.618) < 0.02
+        ) {
+          w.fib618PriceSol = px;
+        }
+      }
+    }
+  } catch {
+    /* optional TA */
+  }
+
+  refreshDropFromPeak(w, h1Change);
+  recomputeProximityFromLevels(w);
+
+  const hasLevels =
+    (w.fib05PriceSol != null && w.fib05PriceSol > 0) ||
+    (w.fib618PriceSol != null && w.fib618PriceSol > 0) ||
+    (w.supportPriceSol != null && w.supportPriceSol > 0) ||
+    w.nearKeyFib === true ||
+    w.nearSupport === true;
+  if (!hasLevels) noteDipFunnel('no_levels');
 }
 
 /**
@@ -360,6 +553,7 @@ export function considerDipWatchSetup(input: {
     if (dropChanged || taChanged || !isMajors) {
       existing.updatedAt = Date.now();
     }
+    recomputeProximityFromLevels(existing);
     existing.targetDipEntries = buildTargetDipEntries(existing);
     return existing;
   }
@@ -394,7 +588,8 @@ export function considerDipWatchSetup(input: {
   reserveAdmitSlot(isMajors);
 
   const now = Date.now();
-  const armed = nearTa && dropStarted;
+  // Arm on Fib/S proximity; drop is soft preference (not forever AND-gated)
+  const armed = nearTa;
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -412,13 +607,16 @@ export function considerDipWatchSetup(input: {
     nearSupport: input.nearSupport,
     supportPriceSol: input.supportPriceSol ?? null,
     lastPriceSol: input.lastPriceSol ?? null,
+    peakPriceSol: input.lastPriceSol ?? null,
     fib05PriceSol: input.fib05PriceSol ?? null,
     fib618PriceSol: input.fib618PriceSol ?? null,
     kolCount: input.kolCount,
     source: isMajors ? 'majors' : input.source || 'scanner',
     majorsBand: isMajors ? input.majorsBand : undefined,
     lastReason: armed
-      ? 'near Fib/S'
+      ? dropStarted
+        ? 'near Fib/S + dip'
+        : 'near Fib/S'
       : isMajors
         ? 'majors watch'
         : 'watching for setup',
@@ -426,6 +624,9 @@ export function considerDipWatchSetup(input: {
   entry.targetDipEntries = buildTargetDipEntries(entry);
   if (armed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
+  noteDipFunnel('offered');
+  if (armed) noteDipFunnel('armed');
+  else noteDipFunnel('watching');
   console.log(
     `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol}` +
       (isMajors ? ` [majors${entry.majorsBand ? `:${entry.majorsBand}` : ''}]` : '') +
@@ -509,6 +710,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     nearSupport: w.nearSupport,
     candleSource: 'synthetic',
     armedWatch: true,
+    dipWatchTriggered: true,
     entryStyleHint: w.entryStyle || 'support_dip_reclaim',
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
@@ -595,12 +797,14 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    if (w.status === 'watching' && nearTa && dropOk) {
+    // Arm on Fib/S proximity (near target band); drop is soft preference
+    if (w.status === 'watching' && nearTa) {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
-      w.lastReason = 'armed near Fib/S';
+      w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
       stampWatchPlan(w);
+      noteDipFunnel('armed');
       console.log(`[dip-watch] ARMED ${w.symbol}`);
       try {
         const { recordSetupWatchEvent } =
@@ -687,6 +891,7 @@ export async function tickDipSetupWatches(opts?: {
         w.status = 'triggered';
         w.updatedAt = now;
         handed += 1;
+        noteDipFunnel('triggered');
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → dip_buyer (${w.lastReason})`
         );
@@ -708,6 +913,7 @@ export async function tickDipSetupWatches(opts?: {
         }
       } else {
         w.updatedAt = now;
+        noteDipFunnel('handoff_failed');
         try {
           const { recordSetupWatchEvent } =
             require('./setupWatchEvents') as typeof import('./setupWatchEvents');

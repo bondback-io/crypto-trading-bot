@@ -1405,6 +1405,10 @@ export interface TradeProfileMatchContext {
    * dip_buyer conversion floors on classified dip paths.
    */
   hmcSetup?: string | null;
+  /** Armed setup-watch handoff */
+  armedWatch?: boolean;
+  /** scalper | dip | grad when from a setup watch */
+  setupWatchFamily?: string | null;
 }
 
 const ALL_IDS: TradeProfileId[] = TRADE_PROFILE_CATALOG.map((p) => p.id);
@@ -2607,6 +2611,12 @@ export function evaluateLaneEntryFloors(
     ctx.holderCount != null && Number.isFinite(ctx.holderCount)
       ? Number(ctx.holderCount)
       : null;
+  // Armed Dip lane soft-pass: ease non-safety floors (holders / H1 soft).
+  // Keep hard MC / max MC / top10 / age — global $8k + anti-rug stay final.
+  const armedDipSoft =
+    ctx.armedWatch === true &&
+    (String(ctx.setupWatchFamily || '').toLowerCase() === 'dip' ||
+      def.id === 'dip_buyer');
 
   const eased = dipBuyerEasedFloors(def, ctx);
   const profileMin =
@@ -2652,6 +2662,7 @@ export function evaluateLaneEntryFloors(
   }
 
   if (
+    !armedDipSoft &&
     m.minHolders != null &&
     Number.isFinite(m.minHolders) &&
     m.minHolders > 0

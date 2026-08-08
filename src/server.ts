@@ -7753,6 +7753,7 @@ export function createServer(): express.Application {
         getInfluencerMirrorConfig,
         listInfluencerMirrorWallets,
         influencerMirrorPrereqsOk,
+        getInfluencerMirrorStatusSummary,
       } = require('./influencerMirror') as typeof import('./influencerMirror');
       const { getInfluencerMirrorLearningSummary } =
         require('./influencerMirrorLearning') as typeof import('./influencerMirrorLearning');
@@ -7760,6 +7761,7 @@ export function createServer(): express.Application {
         ok: true,
         config: getInfluencerMirrorConfig(),
         prereqs: influencerMirrorPrereqsOk(),
+        status: getInfluencerMirrorStatusSummary(),
         wallets: listInfluencerMirrorWallets(),
         learning: getInfluencerMirrorLearningSummary(20),
       });

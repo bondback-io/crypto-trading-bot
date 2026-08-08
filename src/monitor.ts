@@ -269,6 +269,28 @@ function buildTradeProfileMatchContext(
     entrySource: signal.entrySource,
     preferProfileId: signal.candidateTradeProfileId ?? null,
     specialtyFeed: signal.specialtyFeed ?? null,
+    armedWatch:
+      signal.armedWatch === true ||
+      signal.dipWatchTriggered === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+            String(r)
+          )
+        )),
+    setupWatchFamily:
+      signal.setupWatchFamily ||
+      (signal.dipWatchTriggered === true
+        ? 'dip'
+        : Array.isArray(signal.scannerReasons)
+          ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
+            ? 'scalper'
+            : /grad-watch/i.test(signal.scannerReasons.join(' '))
+              ? 'grad'
+              : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'dip'
+                : null
+          : null),
     walletQualityAvg: (() => {
       const addrs = Array.isArray(signal.wallets) ? signal.wallets : [];
       if (!addrs.length) return null;
@@ -379,20 +401,32 @@ function stampEntryStyleOnBuyOpts(
         'late_chase';
     }
     (buyOpts as { lateChaseAtEntry?: boolean }).lateChaseAtEntry = lateChase;
+    if (
+      signal.dipWatchTriggered === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /dip-watch:triggered/i.test(String(r))
+        ))
+    ) {
+      (buyOpts as { dipWatchTriggered?: boolean }).dipWatchTriggered = true;
+    }
     if (armed) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
       (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
       const fam =
         signal.setupWatchFamily ||
-        (Array.isArray(signal.scannerReasons)
-          ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
-            ? 'scalper'
-            : /grad-watch/i.test(signal.scannerReasons.join(' '))
-              ? 'grad'
-              : /dip-watch/i.test(signal.scannerReasons.join(' '))
-                ? 'dip'
-                : undefined
-          : undefined);
+        (signal.dipWatchTriggered === true ||
+        (buyOpts as { dipWatchTriggered?: boolean }).dipWatchTriggered === true
+          ? 'dip'
+          : Array.isArray(signal.scannerReasons)
+            ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
+              ? 'scalper'
+              : /grad-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'grad'
+                : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                  ? 'dip'
+                  : undefined
+            : undefined);
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
       }
@@ -965,6 +999,8 @@ export interface TradeSignal {
   sizePlanSol?: number;
   /** scalper | dip | grad when opened from a setup watch */
   setupWatchFamily?: 'scalper' | 'dip' | 'grad';
+  /** Dip watch trigger stamp (badge fallback) */
+  dipWatchTriggered?: boolean;
   /** HMC stamps for Profit Capture Layer (set in passesFilters) */
   hmcSetup?: string;
   hmcConfidence?: number;
@@ -1043,6 +1079,15 @@ function applyProfileTaPlaybookGate(
         true;
     }
     if (
+      signal.dipWatchTriggered === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /dip-watch:triggered/i.test(String(r))
+        ))
+    ) {
+      (buyOpts as { dipWatchTriggered?: boolean }).dipWatchTriggered = true;
+    }
+    if (
       signal.armedWatch === true ||
       (Array.isArray(signal.scannerReasons) &&
         signal.scannerReasons.some((r) =>
@@ -1055,15 +1100,17 @@ function applyProfileTaPlaybookGate(
       (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
       const fam =
         signal.setupWatchFamily ||
-        (Array.isArray(signal.scannerReasons)
-          ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
-            ? 'scalper'
-            : /grad-watch/i.test(signal.scannerReasons.join(' '))
-              ? 'grad'
-              : /dip-watch/i.test(signal.scannerReasons.join(' '))
-                ? 'dip'
-                : undefined
-          : undefined);
+        (signal.dipWatchTriggered === true
+          ? 'dip'
+          : Array.isArray(signal.scannerReasons)
+            ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
+              ? 'scalper'
+              : /grad-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'grad'
+                : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                  ? 'dip'
+                  : undefined
+            : undefined);
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
       }
@@ -3578,15 +3625,23 @@ async function handleScannerCandidate(
         undefined,
       setupWatchFamily:
         candidate.setupWatchFamily ||
-        (Array.isArray(candidate.reasons)
-          ? candidate.reasons.some((r) => /scalper-watch/i.test(String(r)))
-            ? 'scalper'
-            : candidate.reasons.some((r) => /grad-watch/i.test(String(r)))
-              ? 'grad'
-              : candidate.reasons.some((r) => /dip-watch/i.test(String(r)))
-                ? 'dip'
-                : undefined
-          : undefined),
+        (candidate.dipWatchTriggered === true
+          ? 'dip'
+          : Array.isArray(candidate.reasons)
+            ? candidate.reasons.some((r) => /scalper-watch/i.test(String(r)))
+              ? 'scalper'
+              : candidate.reasons.some((r) => /grad-watch/i.test(String(r)))
+                ? 'grad'
+                : candidate.reasons.some((r) => /dip-watch/i.test(String(r)))
+                  ? 'dip'
+                  : undefined
+            : undefined),
+      dipWatchTriggered:
+        candidate.dipWatchTriggered === true ||
+        (Array.isArray(candidate.reasons) &&
+          candidate.reasons.some((r) => /dip-watch:triggered/i.test(String(r))))
+          ? true
+          : undefined,
       entryStyleHint: candidate.entryStyleHint,
       qualityScoreHint: candidate.qualityScoreHint,
       sizePlanSol:
@@ -7002,14 +7057,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
       lanePassers = lanes.filter((l) => l.passed && l.assignment);
       if (!lanePassers.length) {
-        const failBits = lanes
-          .filter((l) => !l.passed)
-          .slice(0, 4)
-          .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
-          .join(' · ');
+        const intended =
+          lanes.find((l) => l.profileId === prefId) ||
+          lanes.find((l) => !l.passed);
         const reason =
-          failBits ||
-          `Armed watch preferred profile failed floors (${prefId})`;
+          intended != null
+            ? `${intended.name}: ${intended.failReason || 'no match'}`
+            : `Armed watch preferred profile failed floors (${prefId})`;
         recordRejectedSignal(signal, reason);
         console.log(
           `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
@@ -7032,14 +7086,21 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
       lanePassers = lanes.filter((l) => l.passed && l.assignment);
       if (!lanePassers.length) {
-        const failBits = lanes
-          .filter((l) => !l.passed)
-          .slice(0, 4)
-          .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
-          .join(' · ');
+        // Prefer top intended / first clear failer — avoid Migration+Dip concat noise
+        const preferId =
+          (preferIds && preferIds[0]) ||
+          signal.candidateTradeProfileId ||
+          null;
+        const intended =
+          (preferId
+            ? lanes.find((l) => l.profileId === preferId)
+            : null) ||
+          lanes.find((l) => !l.passed && l.failReason) ||
+          lanes[0];
         const reason =
-          failBits ||
-          'No trade profile lane passed floors/match';
+          intended != null
+            ? `${intended.name}: ${intended.failReason || 'no match'}`
+            : 'No trade profile lane passed floors/match';
         recordRejectedSignal(signal, reason);
         console.log(
           `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
@@ -7094,6 +7155,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         lateChase,
         family,
         entryStyle,
+        armedWatch,
+        extensionFromLevelPct:
+          (signal as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
+          null,
       });
       if (lateLim.limit) {
         recordRejectedSignal(signal, lateLim.reason || 'Late-chase share ceiling');

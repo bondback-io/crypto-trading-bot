@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.239',
+    title: 'Dip watch fire + Smart Mirror status',
+    sections: ['microbots', 'scanners', 'copy', 'tradecraft', 'overview'],
+    items: [
+      'Dip watch tick: recompute Fib/S proximity + drop from peak/H1; arm on levels (drop soft); reclaim trigger 1.2% Mode B parity; dipWatchTriggered stamp + Dip badge fallback.',
+      'Armed Dip lane soft-pass holders/H1 floors after hard-lock; hard MC $8k / anti-rug stay final. Dip funnel counters in setup-watch diagnostics.',
+      'Smart Mirror: default copy delay 75s; strip shows master ON/OFF, smart_money_copy + smart_money_mirror prereqs, wallet counts, recent skip reasons. No auto-bag mirror.',
+      'Expectancy: late-chase ceiling needs ≥20 closes (fresher last-20); armed reclaim ≤4% not hard-skip; stuck-armed disc relief 45%; clearer single-lane fail text.',
+    ],
+  },
+  {
     version: '1.2.238',
     title: 'Governor bottleneck repair',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview'],

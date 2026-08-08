@@ -2431,7 +2431,7 @@ export const config: BotConfig = {
   influencerMirror: {
     enabled: false,
     maxConcurrentMirrored: 3,
-    maxCopyDelayMs: 45_000,
+    maxCopyDelayMs: 75_000,
     minLiquidityUsd: 8_000,
     minVolumeM5Usd: 800,
     copySells: true,
@@ -3201,7 +3201,7 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
       config.influencerMirror || {
         enabled: false,
         maxConcurrentMirrored: 3,
-        maxCopyDelayMs: 45_000,
+        maxCopyDelayMs: 75_000,
         minLiquidityUsd: 8_000,
         minVolumeM5Usd: 800,
         copySells: true,

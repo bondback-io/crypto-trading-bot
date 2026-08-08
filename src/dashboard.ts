@@ -7634,7 +7634,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </label>
           <label class="ctl ctl-sm" title="Ignore events older / spam within this window (ms)">
             <span>Max delay ms</span>
-            <input type="number" id="im-max-delay" value="45000" min="1000" max="120000" step="500" onchange="saveInfluencerMirrorConfig()" />
+            <input type="number" id="im-max-delay" value="75000" min="1000" max="120000" step="500" onchange="saveInfluencerMirrorConfig()" />
           </label>
           <label class="ctl ctl-sm" title="Optional partial sell % (blank = full exit)">
             <span>Partial sell %</span>
@@ -8007,6 +8007,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               <span class="setup-watch-kicker">Influencer Mirror</span>
               <span class="setup-watch-title">Smart Mirror Watchlist</span>
               <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens · holdings are a snapshot (not auto-copied) · fresh soft-watch buys / Add token enter the path · Copy CA / Jupiter · peach Copied badge · skip reasons when blocked (anti-rug / MC&lt;$8k) · auto-refresh on Watchlist load / ~60s.</p>
+              <p id="smart-mirror-status-strip" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Master — · prereqs —</p>
             </div>
             <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist(true)" title="Refresh holdings snapshot">Refresh</button>
             <span id="smart-mirror-watch-count" class="setup-watch-count mint">—</span>
@@ -13030,6 +13031,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 ? ' · noTgt×' + funnel.rejected_no_targets
                 : '')
             : '';
+          const dipF = diag.dipFunnel || null;
+          const dipFunnelBits = dipF
+            ? ' · Dip funnel off ' +
+              (dipF.offered || 0) +
+              '/arm ' +
+              (dipF.armedNow != null ? dipF.armedNow : dipF.armed || 0) +
+              '/watch ' +
+              (dipF.watchingNow != null ? dipF.watchingNow : dipF.watching || 0) +
+              (dipF.triggered ? '/trig ' + dipF.triggered : '') +
+              (dipF.handoff_failed ? '/hf×' + dipF.handoff_failed : '') +
+              (dipF.no_levels ? '/noLvl×' + dipF.no_levels : '')
+            : '';
           const block = diag.lastBlockReason
             ? ' · last block: ' + String(diag.lastBlockReason).slice(0, 48)
             : '';
@@ -13044,6 +13057,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             openPct +
             att +
             funnelBits +
+            dipFunnelBits +
             block +
             dipQuiet;
         }
@@ -20222,11 +20236,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /** Compact badge for trades opened from armed setup watches. */
     function fmtSetupWatchBadge(p) {
       if (!p) return '';
-      const fam = String(p.setupWatchFamily || '').toLowerCase();
+      let fam = String(p.setupWatchFamily || '').toLowerCase();
+      const reasons = Array.isArray(p.scannerReasons)
+        ? p.scannerReasons.join(' ')
+        : String(p.reason || p.tradeProfileReason || '');
+      const dipFallback =
+        p.dipWatchTriggered === true ||
+        /dip-watch:triggered/i.test(reasons) ||
+        (String(p.entryStyle || '') === 'support_dip_reclaim' &&
+          p.armedWatch === true);
+      if (!fam && dipFallback) fam = 'dip';
+      if (!fam && p.scalperWatchTriggered === true) fam = 'scalper';
       const armed =
         p.armedWatch === true ||
         p.entryPath === 'armed_trigger' ||
         p.scalperWatchTriggered === true ||
+        p.dipWatchTriggered === true ||
+        dipFallback ||
         fam === 'scalper' ||
         fam === 'dip' ||
         fam === 'grad';
@@ -20238,7 +20264,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         label = 'Mode B';
         title = 'Triggered from Scalper Mode B';
         bg = '#0f766e';
-      } else if (fam === 'dip') {
+      } else if (fam === 'dip' || dipFallback) {
         label = 'Dip watch';
         title = 'Triggered from Dip Buyer watch';
         bg = '#0369a1';
@@ -26639,7 +26665,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           useJito: document.getElementById('im-use-jito')?.checked !== false,
           gatekeeperOptional: document.getElementById('im-soft-gk')?.checked !== false,
           maxConcurrentMirrored: Number(document.getElementById('im-max-concurrent')?.value) || 3,
-          maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 45000,
+          maxCopyDelayMs: Number(document.getElementById('im-max-delay')?.value) || 75000,
           minLiquidityUsd: Number(document.getElementById('im-min-liq')?.value) || 8000,
           minVolumeM5Usd: Number(document.getElementById('im-min-m5')?.value) || 800,
           partialSellPct: partialRaw === '' || partialRaw == null ? undefined : Number(partialRaw),
@@ -26813,6 +26839,62 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     let _smWatchLastAt = 0;
     let _smWatchInFlight = false;
+    async function refreshSmartMirrorStatusStrip() {
+      const el = document.getElementById('smart-mirror-status-strip');
+      if (!el) return;
+      try {
+        const data = await fetchJSON('/api/influencer-mirror');
+        const st = data.status || {};
+        const pr = data.prereqs || {};
+        const on = st.enabled === true || (data.config && data.config.enabled === true);
+        const prOk = st.prereqOk === true || pr.ok === true;
+        const copyOk =
+          st.smartMoneyCopy !== false && pr.smartMoneyCopy !== false;
+        const mirOk =
+          st.smartMoneyMirror !== false && pr.smartMoneyMirror !== false;
+        const wallets =
+          st.walletCount != null
+            ? st.walletCount
+            : Array.isArray(data.wallets)
+              ? data.wallets.length
+              : 0;
+        const copyN =
+          st.copyEnabledCount != null ? st.copyEnabledCount : wallets;
+        const delayMs =
+          st.maxCopyDelayMs != null
+            ? st.maxCopyDelayMs
+            : data.config && data.config.maxCopyDelayMs != null
+              ? data.config.maxCopyDelayMs
+              : 75000;
+        const skips = Array.isArray(st.recentSkips) ? st.recentSkips : [];
+        const skipBit = skips.length
+          ? ' · last skip: ' +
+            String(skips[0].symbol || '') +
+            ' ' +
+            String(skips[0].skipReason || '').slice(0, 40)
+          : '';
+        el.textContent =
+          'Master ' +
+          (on ? 'ON' : 'OFF') +
+          ' · smart_money_copy ' +
+          (copyOk ? 'OK' : 'OFF') +
+          ' · smart_money_mirror ' +
+          (mirOk ? 'OK' : 'OFF') +
+          (prOk ? '' : ' · prereq: ' + String(st.prereqReason || pr.reason || 'fail')) +
+          ' · wallets ' +
+          copyN +
+          '/' +
+          wallets +
+          ' · delay ' +
+          Math.round(Number(delayMs) / 1000) +
+          's' +
+          skipBit;
+      } catch (err) {
+        el.textContent =
+          'Master — · status error: ' +
+          (err && err.message ? String(err.message).slice(0, 48) : 'load fail');
+      }
+    }
     async function refreshSmartMirrorWatchlist(force) {
       const list = document.getElementById('smart-mirror-watch-list');
       const count = document.getElementById('smart-mirror-watch-count');
@@ -26823,6 +26905,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       _smWatchInFlight = true;
       if (list && (force || !_smWatchLastAt)) list.textContent = 'Loading…';
       try {
+        refreshSmartMirrorStatusStrip();
         // Holdings + metrics are RPC/HTTP heavy; 60s client timeout (1.2.228).
         const data = await fetchJSON('/api/influencer-mirror/watchlist', {
           timeoutMs: 60000,

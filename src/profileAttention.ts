@@ -268,6 +268,7 @@ export function getSetupWatchDiagnostics(): {
   triggerSuccessPct: number | null;
   scalperOpenRatePct: number | null;
   modeBFunnel: Record<string, number> | null;
+  dipFunnel: Record<string, number> | null;
   blockReasons: Array<{ reason: string; count: number }>;
   scalperAttentionShare: number | null;
   dipInactiveReason:
@@ -369,6 +370,14 @@ export function getSetupWatchDiagnostics(): {
   } catch {
     /* optional */
   }
+  let dipFunnel: Record<string, number> | null = null;
+  try {
+    const { getDipFunnelCounters } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    dipFunnel = getDipFunnelCounters() as unknown as Record<string, number>;
+  } catch {
+    /* optional */
+  }
   return {
     armedByProfile,
     armToTriggerLatencyMs,
@@ -376,6 +385,7 @@ export function getSetupWatchDiagnostics(): {
       denom > 0 ? Math.round((stats.opened / denom) * 1000) / 10 : null,
     scalperOpenRatePct,
     modeBFunnel,
+    dipFunnel,
     blockReasons,
     scalperAttentionShare,
     dipInactiveReason: describeDipInactiveReason(),

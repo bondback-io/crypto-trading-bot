@@ -41,8 +41,8 @@ export interface InfluencerMirrorConfig {
 export const DEFAULT_INFLUENCER_MIRROR: InfluencerMirrorConfig = {
   enabled: false,
   maxConcurrentMirrored: 3,
-  /** Utility soft-watch polls can lag; 45s avoids skipping fresh influencer buys as “late”. */
-  maxCopyDelayMs: 45_000,
+  /** Soft-watch polls can lag; 75s keeps fresh influencer buys inside the copy window. */
+  maxCopyDelayMs: 75_000,
   minLiquidityUsd: 8_000,
   minVolumeM5Usd: 800,
   copySells: true,
@@ -90,8 +90,13 @@ export function normalizeInfluencerMirrorConfig(
     maxCopyDelayMs: clamp(
       (() => {
         const n = Math.round(Number(r.maxCopyDelayMs));
-        // Migrate prior 15s default — soft-watch polls often exceed it.
-        if (!Number.isFinite(n) || n <= 0 || n === 15_000) {
+        // Migrate prior 15s / 45s defaults — soft-watch polls often exceed them.
+        if (
+          !Number.isFinite(n) ||
+          n <= 0 ||
+          n === 15_000 ||
+          n === 45_000
+        ) {
           return DEFAULT_INFLUENCER_MIRROR.maxCopyDelayMs;
         }
         return n;
@@ -779,23 +784,100 @@ export function listTopInfluencerWallets(limit = 10): SmartWallet[] {
 export function influencerMirrorPrereqsOk(): {
   ok: boolean;
   reason?: string;
+  smartMoneyCopy?: boolean;
+  smartMoneyMirror?: boolean;
 } {
+  let smartMoneyCopy = true;
+  let smartMoneyMirror = true;
   try {
     const { isStrategyEnabled } =
       require('./strategies') as typeof import('./strategies');
     if (!isStrategyEnabled('smart_money_copy')) {
-      return { ok: false, reason: 'smart_money_copy OFF' };
+      smartMoneyCopy = false;
+      return {
+        ok: false,
+        reason: 'smart_money_copy OFF',
+        smartMoneyCopy,
+        smartMoneyMirror,
+      };
     }
   } catch {
-    return { ok: false, reason: 'strategies unavailable' };
+    return {
+      ok: false,
+      reason: 'strategies unavailable',
+      smartMoneyCopy: false,
+      smartMoneyMirror,
+    };
   }
   try {
     const profiles = config.tradeProfiles?.profiles || {};
     if (profiles.smart_money_mirror === false) {
-      return { ok: false, reason: 'smart_money_mirror profile OFF' };
+      smartMoneyMirror = false;
+      return {
+        ok: false,
+        reason: 'smart_money_mirror profile OFF',
+        smartMoneyCopy,
+        smartMoneyMirror,
+      };
     }
   } catch {
     /* if tradeProfiles missing, allow — assign will fail soft */
   }
-  return { ok: true };
+  return { ok: true, smartMoneyCopy, smartMoneyMirror };
+}
+
+/** Compact status for dashboard / API — master, prereqs, wallets, recent skips. */
+export function getInfluencerMirrorStatusSummary(): {
+  enabled: boolean;
+  prereqOk: boolean;
+  prereqReason?: string;
+  smartMoneyCopy: boolean;
+  smartMoneyMirror: boolean;
+  walletCount: number;
+  copyEnabledCount: number;
+  maxCopyDelayMs: number;
+  recentSkips: Array<{
+    symbol?: string;
+    skipReason?: string;
+    at: number;
+    walletAddress?: string;
+  }>;
+} {
+  const cfg = getInfluencerMirrorConfig();
+  const prereqs = influencerMirrorPrereqsOk();
+  const wallets = listInfluencerMirrorWallets();
+  let recentSkips: Array<{
+    symbol?: string;
+    skipReason?: string;
+    at: number;
+    walletAddress?: string;
+  }> = [];
+  try {
+    const { listRecentMirrorCopies } =
+      require('./influencerMirrorRuntime') as typeof import('./influencerMirrorRuntime');
+    recentSkips = listRecentMirrorCopies(12)
+      .filter((c) => !c.taken && Boolean(c.skipReason))
+      .slice(0, 6)
+      .map((c) => ({
+        symbol: c.symbol,
+        skipReason: c.skipReason,
+        at: c.at,
+        walletAddress: c.walletAddress,
+      }));
+  } catch {
+    recentSkips = [];
+  }
+  return {
+    enabled: cfg.enabled === true,
+    prereqOk: prereqs.ok === true,
+    prereqReason: prereqs.reason,
+    smartMoneyCopy: prereqs.smartMoneyCopy !== false,
+    smartMoneyMirror: prereqs.smartMoneyMirror !== false,
+    walletCount: wallets.length,
+    copyEnabledCount: wallets.filter(
+      (w) => w.enabled !== false && w.copyEnabled !== false
+    ).length,
+    maxCopyDelayMs: cfg.maxCopyDelayMs,
+    recentSkips,
+  };
 }

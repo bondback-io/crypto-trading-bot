@@ -85,6 +85,8 @@ export interface ProfileLearningEpisode {
   supportTfHits?: string[];
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
+  dipWatchTriggered?: boolean;
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;

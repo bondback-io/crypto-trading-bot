@@ -362,6 +362,7 @@ export interface BuyOptions {
   supportTfHits?: string[];
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
+  dipWatchTriggered?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -1043,6 +1044,7 @@ export async function executeBuy(
         supportTfHits: meta?.supportTfHits,
         srConfluenceScore: meta?.srConfluenceScore,
         scalperWatchTriggered: meta?.scalperWatchTriggered,
+        dipWatchTriggered: meta?.dipWatchTriggered,
         armedWatch: meta?.armedWatch === true,
         entryPath:
           meta?.entryPath ||
@@ -1202,6 +1204,7 @@ export async function executeBuy(
         supportTfHits: meta?.supportTfHits,
         srConfluenceScore: meta?.srConfluenceScore,
         scalperWatchTriggered: meta?.scalperWatchTriggered,
+        dipWatchTriggered: meta?.dipWatchTriggered,
         armedWatch: meta?.armedWatch === true,
         entryPath:
           meta?.entryPath ||

@@ -1838,6 +1838,8 @@ export interface LiveTokenSnapshot {
   volumeH24Usd: number | null;
   /** Buys + sells in the last hour (DexScreener txns.h1) */
   txnsH1: number | null;
+  /** DexScreener 1h price change % when known (negative = drop) */
+  priceChangeH1Pct?: number | null;
 }
 
 export type OpenTradeMarkSource =
@@ -1923,6 +1925,9 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
   const volumeH1Usd = Number(volume?.h1 ?? NaN);
   const volumeH24Usd = Number(volume?.h24 ?? NaN);
   const txnsTotal = buys + sells;
+  const chgH1Raw = Number(
+    (best.priceChange as { h1?: number } | undefined)?.h1 ?? NaN
+  );
 
   return {
     priceSol,
@@ -1934,6 +1939,7 @@ function parseDexSnapshot(data: unknown): LiveTokenSnapshot | null {
     volumeH1Usd: Number.isFinite(volumeH1Usd) ? volumeH1Usd : null,
     volumeH24Usd: Number.isFinite(volumeH24Usd) ? volumeH24Usd : null,
     txnsH1: Number.isFinite(txnsTotal) ? txnsTotal : null,
+    priceChangeH1Pct: Number.isFinite(chgH1Raw) ? chgH1Raw : null,
   };
 }
 

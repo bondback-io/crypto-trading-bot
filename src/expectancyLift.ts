@@ -874,17 +874,52 @@ export function shouldSkipFamilyGovernor(input: {
   return { skip: false, state };
 }
 
-export function getRecentMixShares(limit = 50): {
+/** Armed reclaim near level — not true late chase for ceiling / hard-skip. */
+function isArmedReclaimRelief(input: {
+  armedWatch?: boolean;
+  entryStyle?: string | null;
+  extensionFromLevelPct?: number | null;
+}): boolean {
+  if (input.armedWatch !== true) return false;
+  const style = String(input.entryStyle || '').toLowerCase();
+  if (/reclaim/i.test(style) && !/late.?chase/i.test(style)) return true;
+  const ext =
+    input.extensionFromLevelPct != null &&
+    Number.isFinite(Number(input.extensionFromLevelPct))
+      ? Number(input.extensionFromLevelPct)
+      : null;
+  // Extension ≤4% from level = reclaim / near-level, not chase
+  if (ext != null && ext >= -2 && ext <= 4) return true;
+  return false;
+}
+
+export function getRecentMixShares(
+  limit = 50,
+  opts?: { lateChaseCeilingWindow?: boolean }
+): {
   armedShare: number;
   discShare: number;
   lateChaseShare: number;
   total: number;
 } {
-  const trades = collectExpectancyTrades().slice(-Math.max(8, limit));
+  const window = opts?.lateChaseCeilingWindow
+    ? Math.max(20, Math.min(limit, 20))
+    : Math.max(8, limit);
+  const trades = collectExpectancyTrades().slice(-window);
   const total = trades.length || 1;
   const armed = trades.filter((t) => t.armed).length;
-  const late = trades.filter((t) => t.lateChase || t.family === 'late_chase')
-    .length;
+  // Armed reclaim mis-tags do not inflate the late-chase ceiling share
+  const late = trades.filter((t) => {
+    if (!(t.lateChase || t.family === 'late_chase')) return false;
+    if (
+      t.armed &&
+      /reclaim/i.test(String(t.family || t.entryStyle || '')) &&
+      !/late.?chase/i.test(String(t.entryStyle || ''))
+    ) {
+      return false;
+    }
+    return true;
+  }).length;
   return {
     armedShare: armed / total,
     discShare: (total - armed) / Math.max(1, total),
@@ -893,19 +928,31 @@ export function getRecentMixShares(limit = 50): {
   };
 }
 
-/** Hard late_chase share ceiling (5%). Armed late chase still counts. */
+/** Hard late_chase share ceiling (5%). Require ≥20 closes; fresher last-20 window. */
 export function shouldLimitLateChaseShare(input: {
   lateChase?: boolean;
   family?: string | null;
   entryStyle?: string | null;
+  armedWatch?: boolean;
+  extensionFromLevelPct?: number | null;
 }): { limit: boolean; reason?: string } {
+  // Armed reclaim does not hard-skip and does not count toward ceiling
+  if (
+    isArmedReclaimRelief({
+      armedWatch: input.armedWatch,
+      entryStyle: input.entryStyle,
+      extensionFromLevelPct: input.extensionFromLevelPct,
+    })
+  ) {
+    return { limit: false };
+  }
   const isLate =
     input.lateChase === true ||
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
   if (!isLate) return { limit: false };
-  const mix = getRecentMixShares(50);
-  if (mix.total >= 8 && mix.lateChaseShare >= LATE_CHASE_MAX_SHARE) {
+  const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
+  if (mix.total >= 20 && mix.lateChaseShare >= LATE_CHASE_MAX_SHARE) {
     return {
       limit: true,
       reason: `Late-chase share ${(mix.lateChaseShare * 100).toFixed(0)}% ≥ ${(LATE_CHASE_MAX_SHARE * 100).toFixed(0)}% ceiling`,
@@ -943,6 +990,31 @@ function countLiveArmedWatches(): number {
   return n;
 }
 
+/** True when armed funnel is stuck (poor open-rate) or book is thin. */
+function stuckArmedReliefActive(): boolean {
+  let openCount = 0;
+  try {
+    const { paperTrader } =
+      require('./paperTrader') as typeof import('./paperTrader');
+    openCount = paperTrader.getOpenPositions().length;
+  } catch {
+    openCount = 0;
+  }
+  let armedOpenRate: number | null = null;
+  try {
+    const { setupWatchEventStats } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    const stats = setupWatchEventStats();
+    armedOpenRate = stats.openRate;
+  } catch {
+    armedOpenRate = null;
+  }
+  // Thin book + poor armed conversion → relieve disc cap so flow isn't starved
+  const poorArmed =
+    armedOpenRate != null && armedOpenRate < 0.12;
+  return openCount < 15 && (poorArmed || armedOpenRate == null);
+}
+
 /** Armed dominance ~70/30 — hard soft-skip only fast discretionary when disc high. */
 export function shouldLimitDiscretionaryMix(input: {
   armedWatch?: boolean;
@@ -952,7 +1024,9 @@ export function shouldLimitDiscretionaryMix(input: {
   const mix = getRecentMixShares(50);
   if (mix.total < 10) return { limit: false };
   const liveArmed = countLiveArmedWatches();
-  const cap = liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+  const relief =
+    liveArmed === 0 || stuckArmedReliefActive();
+  const cap = relief ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
   if (mix.discShare < cap) return { limit: false };
   const pid = String(input.profileId || '');
   if (!FAST_DISC_PROFILES.has(pid)) {
@@ -976,7 +1050,8 @@ export function expectancyLiftSizePenaltyForDiscMix(input: {
   try {
     const mix = getRecentMixShares(50);
     const liveArmed = countLiveArmedWatches();
-    const cap = liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+    const relief = liveArmed === 0 || stuckArmedReliefActive();
+    const cap = relief ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
     if (mix.total >= 10 && mix.discShare >= DISC_SHARE_CAP) {
       return {
         mult: DISC_MIX_SIZE_PENALTY,
