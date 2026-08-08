@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.241',
+    title: 'Admission Baseline (restore 1.2.235 throughput)',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs'],
+    items: [
+      'Admission Baseline toggle (default v235): expectancy metrics/UI stay on; admit throttles off for 1.2.235-era open rate. Governed = full 1.2.240 late-chase / disc-mix / governor / permission / concurrent gates.',
+      'v235: Scalper attention 35%/window 40, no concurrent=1; armed hard-lock fail-open to soft lane fight; Mode B/Dip skip touch-and-fail reject (1.2% reclaim kept); expectancy size ×1.0; sticky governors cleared on switch/ship.',
+      'Dashboard Expectancy Lift card: Admission Baseline select + baseline chip; GET/POST /api/config/admission-baseline; status includes admissionBaseline + baselineActive.',
+      'Staged re-enable under governed: (1) soft permission + size only → (2) disc-mix / late-chase ceilings → (3) governor soft-pass then hard restrict → (4) Scalper concurrent=1 + 30%/20 last. ≥20–40 closes per stage.',
+    ],
+  },
+  {
     version: '1.2.240',
     title: 'Unblock lane winners (governor soft-pass)',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview'],

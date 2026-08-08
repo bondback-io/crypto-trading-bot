@@ -926,7 +926,17 @@ export async function tickScalperSetupWatches(opts?: {
           (w as { touchedLevel?: boolean }).touchedLevel = true;
         }
         // Touch-and-fail: was near/undercut, now extended away without reclaim
+        // Admission Baseline v235: skip reject (keep reclaim % confirm)
+        let skipTouchFail = false;
+        try {
+          const { isAdmissionBaselineV235 } =
+            require('./expectancyLift') as typeof import('./expectancyLift');
+          skipTouchFail = isAdmissionBaselineV235();
+        } catch {
+          skipTouchFail = false;
+        }
         if (
+          !skipTouchFail &&
           (w as { touchedLevel?: boolean }).touchedLevel &&
           !reclaim &&
           extensionFromLevelPct != null &&

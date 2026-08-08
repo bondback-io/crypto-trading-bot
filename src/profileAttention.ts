@@ -1,14 +1,39 @@
 /**
  * Profile attention share — throttle Scalper monopoly when underperforming.
  * Armed setup-watch triggers bypass the share cap.
+ * Admission Baseline v235 uses 1.2.235-era 35%/window 40; governed keeps 30%/20.
  */
 
 import { paperTrader } from './paperTrader';
 
-const ATTENTION_WINDOW = 20;
+const ATTENTION_WINDOW_GOVERNED = 20;
+const ATTENTION_WINDOW_V235 = 40;
 const SCALPER_WR_LOOKBACK = 20;
 const WEAK_WR_PCT = 45;
-const SCALPER_SHARE_CAP = 0.3;
+const SCALPER_SHARE_CAP_GOVERNED = 0.3;
+const SCALPER_SHARE_CAP_V235 = 0.35;
+
+function isV235Baseline(): boolean {
+  try {
+    const { isAdmissionBaselineV235 } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    return isAdmissionBaselineV235();
+  } catch {
+    return true;
+  }
+}
+
+function attentionWindow(): number {
+  return isV235Baseline() ? ATTENTION_WINDOW_V235 : ATTENTION_WINDOW_GOVERNED;
+}
+
+function scalperShareCap(): number {
+  return isV235Baseline() ? SCALPER_SHARE_CAP_V235 : SCALPER_SHARE_CAP_GOVERNED;
+}
+
+export function getScalperAttentionShareCap(): number {
+  return scalperShareCap();
+}
 
 export type AttentionBucket =
   | 'scalper'
@@ -32,7 +57,7 @@ function bucketFor(profileId: string | null | undefined): AttentionBucket {
   return 'other';
 }
 
-function recentOpenProfileIds(limit = ATTENTION_WINDOW): string[] {
+function recentOpenProfileIds(limit = attentionWindow()): string[] {
   try {
     const closed = paperTrader.getClosedPositions?.() ?? [];
     const open = paperTrader.getOpenPositions();
@@ -59,7 +84,7 @@ function recentOpenProfileIds(limit = ATTENTION_WINDOW): string[] {
   }
 }
 
-export function getProfileAttentionShare(limit = ATTENTION_WINDOW): {
+export function getProfileAttentionShare(limit = attentionWindow()): {
   total: number;
   shares: Record<AttentionBucket, number>;
   counts: Record<AttentionBucket, number>;
@@ -135,6 +160,7 @@ export function shouldLimitScalperConcurrent(input: {
   armedWatch?: boolean;
   scannerReasons?: string[] | null;
 }): { limit: boolean; reason?: string } {
+  if (isV235Baseline()) return { limit: false };
   const id = String(input.profileId || '');
   if (id !== 'scalper') return { limit: false };
   const reasons = (input.scannerReasons || []).join(' ');
@@ -188,10 +214,11 @@ export function shouldThrottleScalperAdmit(input: {
   const recovering = scalperRecoveringStrict();
   if (!weak && !recovering) return { throttle: false };
 
-  if (att.shares.scalper >= SCALPER_SHARE_CAP && att.total >= 8) {
+  const cap = scalperShareCap();
+  if (att.shares.scalper >= cap && att.total >= 8) {
     return {
       throttle: true,
-      reason: `Scalper attention ${(att.shares.scalper * 100).toFixed(0)}% ≥ ${(SCALPER_SHARE_CAP * 100).toFixed(0)}% cap` +
+      reason: `Scalper attention ${(att.shares.scalper * 100).toFixed(0)}% ≥ ${(cap * 100).toFixed(0)}% cap` +
         (wr != null ? ` · WR ${wr.toFixed(0)}%` : '') +
         (recovering ? ' · recovery stage≤1' : ''),
     };

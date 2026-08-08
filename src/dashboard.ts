@@ -9789,10 +9789,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" id="expectancy-lift-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Expectancy-first mix targets, family governors, and armed funnel. Soft/reversible governors except late-chase share ceiling (≤5%). Does not override hard safety."></span></div>
+            <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Expectancy-first mix targets, family governors, and armed funnel. Soft/reversible governors except late-chase share ceiling (≤5%). Does not override hard safety. Admission Baseline v235 = observe-only (1.2.235 throughput); governed = full throttles."></span></div>
             <p class="text-xs text-slate-400 mb-0" id="el-summary">Loading…</p>
           </div>
           <div class="flex flex-wrap gap-2 items-end">
+            <label class="ctl ctl-fit" title="v235 = observe-only expectancy (restore admit throughput). Governed = full late-chase / disc-mix / governor / permission / concurrent throttles.">
+              <span>Admission Baseline</span>
+              <select id="el-admission-baseline" onchange="saveAdmissionBaseline()">
+                <option value="v235" selected>v235 (observe-only)</option>
+                <option value="governed">governed (full throttles)</option>
+              </select>
+            </label>
             <label class="ctl ctl-fit">
               <span>Window</span>
               <select id="el-window" onchange="loadExpectancyLift()">
@@ -9811,6 +9818,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </label>
             <button type="button" class="btn btn-sm" onclick="loadExpectancyLift()">Refresh</button>
           </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-2 text-xs">
+          <span class="lsd-chip" id="el-chip-baseline" title="Admission Baseline mode">Baseline —</span>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-mix-chips" aria-label="Expectancy mix chips">
           <span class="lsd-chip" id="el-chip-armed">Armed —</span>
@@ -16113,6 +16123,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.renderExpectancyLiftChart = renderExpectancyLiftChart;
 
+    async function saveAdmissionBaseline() {
+      try {
+        const sel = document.getElementById('el-admission-baseline');
+        const val = sel && sel.value === 'governed' ? 'governed' : 'v235';
+        await fetchJSON('/api/config/admission-baseline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ admissionBaseline: val }),
+        });
+        await loadExpectancyLift();
+      } catch (err) {
+        try {
+          alert(
+            'Failed to save Admission Baseline: ' +
+              ((err && err.message) || String(err))
+          );
+        } catch (_) {}
+      }
+    }
+    window.saveAdmissionBaseline = saveAdmissionBaseline;
+
     async function loadExpectancyLift() {
       try {
         const win =
@@ -16127,6 +16158,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (teaser) {
           teaser.textContent =
             'Expectancy Lift: ' + ((data && data.plainLanguage) || '—');
+        }
+        const baseSel = document.getElementById('el-admission-baseline');
+        const baseMode =
+          data && data.admissionBaseline === 'governed' ? 'governed' : 'v235';
+        if (baseSel) baseSel.value = baseMode;
+        const baseChip = document.getElementById('el-chip-baseline');
+        if (baseChip) {
+          const active = data && data.baselineActive === true;
+          baseChip.textContent = active
+            ? 'Baseline v235 (observe-only)'
+            : 'Baseline governed (full throttles)';
+          baseChip.className = elChipClass(active, !active);
+          baseChip.title = active
+            ? 'Expectancy metrics on; admit throttles off (1.2.235 throughput)'
+            : 'Full expectancy admit throttles active';
         }
         const mix = (data && data.mix) || {};
         const targets = (data && data.targets) || {};
@@ -16187,7 +16233,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           scalEl.textContent =
             'Scalper ' + elFmtPct(mix.scalperAttentionShare);
           scalEl.className = elChipClass(scOk, scWarn);
-          scalEl.title = 'Target ≤30% attention';
+          const capPct =
+            targets.scalperShareMax != null
+              ? Math.round(Number(targets.scalperShareMax) * 100)
+              : 30;
+          scalEl.title = 'Target ≤' + capPct + '% attention';
         }
         if (partEl) {
           partEl.textContent =

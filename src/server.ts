@@ -3851,6 +3851,56 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Admission Baseline — v235 observe-only expectancy vs governed throttles. */
+  app.get('/api/config/admission-baseline', (_req: Request, res: Response) => {
+    try {
+      const { getAdmissionBaseline, isAdmissionBaselineV235 } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const admissionBaseline = getAdmissionBaseline();
+      res.json({
+        ok: true,
+        admissionBaseline,
+        baselineActive: isAdmissionBaselineV235(),
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/admission-baseline', (req: Request, res: Response) => {
+    try {
+      const {
+        setAdmissionBaseline,
+        getAdmissionBaseline,
+        isAdmissionBaselineV235,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      const body = (req.body ?? {}) as { admissionBaseline?: unknown };
+      const raw = body.admissionBaseline;
+      if (raw !== 'v235' && raw !== 'governed') {
+        res.status(400).json({
+          ok: false,
+          error: 'admissionBaseline must be "v235" or "governed"',
+        });
+        return;
+      }
+      setAdmissionBaseline(raw);
+      res.json({
+        ok: true,
+        admissionBaseline: getAdmissionBaseline(),
+        baselineActive: isAdmissionBaselineV235(),
+        config: getConfigSnapshot(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
     try {
       const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =

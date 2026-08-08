@@ -15,6 +15,9 @@ import { TRADE_PROFILE_CATALOG } from './tradeProfiles';
 
 export const EXPECTANCY_LIFT_VERSION = 1;
 
+/** v235 = observe-only expectancy (1.2.235 throughput); governed = full throttles. */
+export type AdmissionBaseline = 'v235' | 'governed';
+
 export type ExpectancyWindow = 20 | 50 | 100;
 
 export const EXPECTANCY_WINDOWS = [20, 50, 100] as const;
@@ -86,6 +89,8 @@ interface ExpectancyLiftPersist {
   repairedV238?: boolean;
   /** One-shot: sticky migration_hold_reclaim restricted → down_ranked (v1.2.240). */
   repairedV239?: boolean;
+  /** One-shot: clear sticky governors when Admission Baseline ships as v235. */
+  clearedGovernorsForV235Baseline?: boolean;
 }
 
 const FAST_DISC_PROFILES = new Set([
@@ -199,6 +204,63 @@ export interface ExpectancyLiftStatus {
     liveArmed: number;
     effectiveCap: number;
   };
+  /** Operator Admission Baseline (`v235` | `governed`). */
+  admissionBaseline: AdmissionBaseline;
+  /** True when v235 observe-only throughput mode is active. */
+  baselineActive: boolean;
+}
+
+export function normalizeAdmissionBaseline(raw: unknown): AdmissionBaseline {
+  return raw === 'governed' ? 'governed' : 'v235';
+}
+
+export function getAdmissionBaseline(): AdmissionBaseline {
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    return normalizeAdmissionBaseline(
+      (config as { admissionBaseline?: unknown }).admissionBaseline
+    );
+  } catch {
+    return 'v235';
+  }
+}
+
+export function isAdmissionBaselineV235(): boolean {
+  return getAdmissionBaseline() === 'v235';
+}
+
+/** Reset sticky family governors so restricted state does not confuse the card. */
+export function clearStickyGovernors(): void {
+  const p = loadPersist();
+  p.governors = {};
+  p.updatedAt = Date.now();
+  p.clearedGovernorsForV235Baseline = true;
+  persistCache = p;
+  try {
+    savePersist();
+  } catch {
+    /* soft */
+  }
+}
+
+export function setAdmissionBaseline(
+  next: AdmissionBaseline | string
+): AdmissionBaseline {
+  const normalized = normalizeAdmissionBaseline(next);
+  const prev = getAdmissionBaseline();
+  try {
+    const { config, persistUserSettings } =
+      require('./config') as typeof import('./config');
+    (config as { admissionBaseline: AdmissionBaseline }).admissionBaseline =
+      normalized;
+    persistUserSettings();
+  } catch {
+    /* soft */
+  }
+  if (normalized === 'v235' && prev !== 'v235') {
+    clearStickyGovernors();
+  }
+  return normalized;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -617,7 +679,24 @@ function emptyPersist(): ExpectancyLiftPersist {
     updatedAt: 0,
     repairedV238: true,
     repairedV239: true,
+    clearedGovernorsForV235Baseline: true,
   };
+}
+
+/** One-shot: clear sticky governors when shipping default v235 baseline. */
+function applyV235BaselineGovernorClear(p: ExpectancyLiftPersist): boolean {
+  if (p.clearedGovernorsForV235Baseline === true) return false;
+  try {
+    if (!isAdmissionBaselineV235()) {
+      p.clearedGovernorsForV235Baseline = true;
+      return true;
+    }
+  } catch {
+    /* soft — still clear once */
+  }
+  p.governors = {};
+  p.clearedGovernorsForV235Baseline = true;
+  return true;
 }
 
 /** One-shot: sticky poll-inflation restricts → down_ranked. */
@@ -668,10 +747,13 @@ function loadPersist(): ExpectancyLiftPersist {
       updatedAt: Number(raw?.updatedAt) || 0,
       repairedV238: raw?.repairedV238 === true,
       repairedV239: raw?.repairedV239 === true,
+      clearedGovernorsForV235Baseline:
+        raw?.clearedGovernorsForV235Baseline === true,
     };
     let repaired = false;
     if (applyPollInflationRepair(persistCache)) repaired = true;
     if (applyMigrationHoldReclaimRepair(persistCache)) repaired = true;
+    if (applyV235BaselineGovernorClear(persistCache)) repaired = true;
     if (repaired) {
       try {
         persistCache.updatedAt = Date.now();
@@ -1299,6 +1381,9 @@ export function expectancySizeMultiplier(input: {
   family?: string | null;
   armedWatch?: boolean;
 }): { mult: number; note: string } {
+  if (isAdmissionBaselineV235()) {
+    return { mult: 1, note: 'expectancy size baseline v235' };
+  }
   try {
     const trades = collectExpectancyTrades();
     const pid = String(input.profileId || '');
@@ -1676,6 +1761,19 @@ export function getExpectancyLiftStatus(
     discShare != null &&
     mixTrades.length >= 10 &&
     discShare >= effectiveCap;
+  const admissionBaseline = getAdmissionBaseline();
+  const baselineActive = admissionBaseline === 'v235';
+  let scalperShareMax = SCALPER_SHARE_TARGET;
+  try {
+    const { getScalperAttentionShareCap } =
+      require('./profileAttention') as typeof import('./profileAttention');
+    scalperShareMax = getScalperAttentionShareCap();
+  } catch {
+    scalperShareMax = baselineActive ? 0.35 : SCALPER_SHARE_TARGET;
+  }
+  const plainExtra = baselineActive
+    ? ' · Admission Baseline v235 (expectancy observe-only).'
+    : ' · Admission Baseline governed (full throttles).';
 
   return {
     ok: true,
@@ -1684,7 +1782,7 @@ export function getExpectancyLiftStatus(
     targets: {
       armedShare: ARMED_SHARE_TARGET,
       lateChaseShareMax: LATE_CHASE_MAX_SHARE,
-      scalperShareMax: SCALPER_SHARE_TARGET,
+      scalperShareMax,
       discShareMax: DISC_SHARE_CAP,
     },
     profiles,
@@ -1692,13 +1790,15 @@ export function getExpectancyLiftStatus(
     funnel,
     chart: buildChart(windowTrades),
     quietChips,
-    plainLanguage,
+    plainLanguage: plainLanguage.replace(/\.$/, '') + plainExtra,
     discMixThrottle: {
-      active: discMixActive,
+      active: baselineActive ? false : discMixActive,
       discShare,
       liveArmed,
       effectiveCap,
     },
+    admissionBaseline,
+    baselineActive,
   };
 }
 

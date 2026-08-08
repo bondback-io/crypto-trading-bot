@@ -2102,6 +2102,12 @@ export interface BotConfig {
       weatherNudgesEnabled: boolean;
     };
   };
+  /**
+   * Admission Baseline — v235 restores 1.2.235-era admit throughput
+   * (expectancy observe-only); governed keeps full 1.2.240 throttles.
+   */
+  admissionBaseline: 'v235' | 'governed';
+
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
@@ -2387,6 +2393,8 @@ export const config: BotConfig = {
       weatherNudgesEnabled: true,
     },
   },
+
+  admissionBaseline: 'v235',
 
   peakProfitProtection: {
     enabled: true,
@@ -3154,6 +3162,8 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
           config.zionAgent?.ambientNudges?.weatherNudgesEnabled !== false,
       },
     },
+    admissionBaseline:
+      config.admissionBaseline === 'governed' ? 'governed' : 'v235',
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
         enabled: true,
@@ -4107,6 +4117,12 @@ function applySettingsSnapshot(
     } catch {
       /* */
     }
+  }
+  if (saved.admissionBaseline === 'governed' || saved.admissionBaseline === 'v235') {
+    config.admissionBaseline = saved.admissionBaseline;
+  } else if (saved.admissionBaseline == null) {
+    // Ship default: restore 1.2.235-era admit throughput
+    config.admissionBaseline = 'v235';
   }
   if (saved.peakProfitProtection && typeof saved.peakProfitProtection === 'object') {
     const s = saved.peakProfitProtection;
@@ -6600,5 +6616,7 @@ export function getConfigSnapshot() {
       includeLiveModeEpisodes:
         config.learning?.includeLiveModeEpisodes === true,
     },
+    admissionBaseline:
+      config.admissionBaseline === 'governed' ? 'governed' : 'v235',
   };
 }

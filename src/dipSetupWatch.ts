@@ -860,7 +860,17 @@ export async function tickDipSetupWatches(opts?: {
         if (undercut || nearLevel) {
           (w as { touchedLevel?: boolean }).touchedLevel = true;
         }
+        // Admission Baseline v235: skip touch-and-fail reject (keep reclaim %)
+        let skipTouchFail = false;
+        try {
+          const { isAdmissionBaselineV235 } =
+            require('./expectancyLift') as typeof import('./expectancyLift');
+          skipTouchFail = isAdmissionBaselineV235();
+        } catch {
+          skipTouchFail = false;
+        }
         if (
+          !skipTouchFail &&
           (w as { touchedLevel?: boolean }).touchedLevel &&
           !reclaim &&
           extensionFromLevelPct != null &&
