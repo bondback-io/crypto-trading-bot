@@ -4875,6 +4875,27 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .setup-watch-status.is-armed {
       color: #fbbf24;
     }
+    .setup-watch-status.is-copied {
+      color: #fdba74;
+      font-weight: 700;
+    }
+    .sm-copied-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #78350f 0%, #9a3412 55%, #b45309 100%);
+      color: #ffedd5;
+      border: 1px solid #fdba74;
+      vertical-align: middle;
+    }
+    .setup-watch-row.is-copied {
+      border-left: 3px solid #fdba74;
+      padding-left: 0.35rem;
+      background: rgba(251, 146, 60, 0.06);
+    }
     .setup-watch-status.is-terminal {
       color: #94a3b8;
       font-style: italic;
@@ -7984,9 +8005,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Influencer Mirror</span>
               <span class="setup-watch-title">Smart Mirror Watchlist</span>
-              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens (holding / sold / partial) · MC / holders · your hold badge · +N cross-hold · Add token copies via profile size.</p>
+              <p class="setup-watch-sub mb-0">Top 10 influencers by 30d PnL · latest 3 tokens · Copy CA / Jupiter · MC / holders · peach Copied badge when mirrored · +N cross-hold · Add token · auto-refresh on Watchlist load / ~60s.</p>
             </div>
-            <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist()" title="Refresh holdings snapshot">Refresh</button>
+            <button type="button" class="btn btn-secondary text-xs" onclick="refreshSmartMirrorWatchlist(true)" title="Refresh holdings snapshot">Refresh</button>
             <span id="smart-mirror-watch-count" class="setup-watch-count mint">—</span>
           </div>
           <div id="smart-mirror-watch-list" class="setup-watch-list text-slate-400">Load Watchlist — enable Influencer Mirror + import wallets</div>
@@ -18063,6 +18084,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'scanner') {
         loadMarketScannerConfig();
         if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
+        if (typeof refreshSmartMirrorWatchlist === 'function') {
+          refreshSmartMirrorWatchlist(true).catch(function () {});
+        }
+      }
+      if (name === 'microbots') {
+        loadLaneDecisions().catch(function () {});
       }
       if (name === 'zion') {
         loadZion();
@@ -26254,23 +26281,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.importInfluencerJupiter = importInfluencerJupiter;
 
-    async function refreshSmartMirrorWatchlist() {
+    let _smWatchLastAt = 0;
+    let _smWatchInFlight = false;
+    async function refreshSmartMirrorWatchlist(force) {
       const list = document.getElementById('smart-mirror-watch-list');
       const count = document.getElementById('smart-mirror-watch-count');
       const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-      if (list) list.textContent = 'Loading…';
+      const now = Date.now();
+      if (!force && _smWatchInFlight) return;
+      if (!force && now - _smWatchLastAt < 55_000) return;
+      _smWatchInFlight = true;
+      if (list && (force || !_smWatchLastAt)) list.textContent = 'Loading…';
       try {
-        // Holdings + metrics are sequential RPC/HTTP; default 20s AbortError is too tight
-        // and used to show a misleading "GMGN curated fallback" message (Discover-only).
+        // Holdings + metrics are RPC/HTTP heavy; 60s client timeout (1.2.228).
         const data = await fetchJSON('/api/influencer-mirror/watchlist', {
           timeoutMs: 60000,
         });
+        _smWatchLastAt = Date.now();
         const influencers = data.influencers || [];
         if (count) count.textContent = String(influencers.length);
         if (!influencers.length) {
           if (list) {
             list.innerHTML =
-              '<div class="setup-watch-empty">No influencer wallets yet — Add Wallet or Import top 15 on Smart Wallets</div>';
+              '<div class="setup-watch-empty">No influencer wallets yet — Add Wallet or Import top 15 on Smart Wallets · master toggle ON + smart_money_copy + smart_money_mirror</div>';
           }
           return;
         }
@@ -26290,23 +26323,43 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     .map(function (t) {
                       const mint = String(t.mint || '').replace(/'/g, '');
                       const st = String(t.status || 'holding');
+                      const isCopied = t.copied === true || st === 'copied';
                       const mc =
                         t.marketCapUsd != null
                           ? fmtUsdShort(t.marketCapUsd)
                           : '—';
                       const holders =
                         t.holders != null ? String(t.holders) : '—';
-                      const you = t.youHold
+                      const you = t.youHold && !isCopied
                         ? '<span class="badge" style="font-size:10px;background:#134e4a;color:#5eead4">you hold</span>'
                         : '';
+                      let copiedBadge = '';
+                      if (isCopied) {
+                        const when = t.copiedAt
+                          ? new Date(t.copiedAt).toLocaleTimeString()
+                          : '';
+                        const sz =
+                          t.copiedSizeSol != null &&
+                          isFinite(Number(t.copiedSizeSol))
+                            ? Number(t.copiedSizeSol).toFixed(3) + ' SOL'
+                            : '';
+                        const detail = [when, sz].filter(Boolean).join(' · ');
+                        copiedBadge =
+                          '<span class="sm-copied-badge" title="Mirrored from this influencer' +
+                          (detail ? ' · ' + esc(detail) : '') +
+                          '">Copied' +
+                          (detail ? ' · ' + esc(detail) : '') +
+                          '</span>';
+                      }
                       const cross =
                         t.crossHoldCount > 0
                           ? '<span class="mint" title="Other influencers also holding">+' +
                             t.crossHoldCount +
                             '</span>'
                           : '';
+                      const actions = fmtLaneTokenActions(mint);
                       const addBtn =
-                        t.canAdd && !t.youHold
+                        t.canAdd && !t.youHold && !isCopied
                           ? '<button type="button" class="btn btn-secondary text-xs" ' +
                             'onclick="smartMirrorAddToken(\\'' +
                             addr +
@@ -26319,14 +26372,22 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                             '\\')" title="Mirror buy at profile size">Add token</button>'
                           : '';
                       return (
-                        '<div class="setup-watch-row">' +
+                        '<div class="setup-watch-row' +
+                        (isCopied ? ' is-copied' : '') +
+                        '">' +
                         '<div class="setup-watch-main">' +
                         '<span class="setup-watch-sym">' +
                         esc(t.symbol || mint.slice(0, 6)) +
                         '</span> ' +
-                        '<span class="setup-watch-status">' +
-                        esc(st) +
+                        actions +
+                        ' ' +
+                        '<span class="setup-watch-status' +
+                        (isCopied ? ' is-copied' : '') +
+                        '">' +
+                        esc(isCopied ? 'copied' : st) +
                         '</span> ' +
+                        copiedBadge +
+                        ' ' +
                         you +
                         ' ' +
                         cross +
@@ -26369,6 +26430,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             : raw;
         }
         if (count) count.textContent = '—';
+      } finally {
+        _smWatchInFlight = false;
       }
     }
     window.refreshSmartMirrorWatchlist = refreshSmartMirrorWatchlist;
@@ -26388,7 +26451,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (!data.ok) {
           alert(data.error || 'Mirror buy skipped');
         }
-        await refreshSmartMirrorWatchlist();
+        await refreshSmartMirrorWatchlist(true);
+        if (typeof loadLaneDecisions === 'function') {
+          loadLaneDecisions().catch(function () {});
+        }
         refresh();
       } catch (err) {
         alert(err.message || String(err));

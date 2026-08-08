@@ -90,6 +90,69 @@ function countOpenMirrored(): number {
   }
 }
 
+export interface RecentMirrorCopy {
+  walletAddress: string;
+  mint: string;
+  symbol: string;
+  name: string;
+  at: number;
+  sizeSol?: number;
+  taken: boolean;
+  skipReason?: string;
+}
+
+const recentMirrorCopies: RecentMirrorCopy[] = [];
+const MAX_RECENT_COPIES = 48;
+const RECENT_COPY_TTL_MS = 2 * 60 * 60_000;
+
+function noteRecentMirrorCopy(entry: RecentMirrorCopy): void {
+  recentMirrorCopies.unshift(entry);
+  if (recentMirrorCopies.length > MAX_RECENT_COPIES) {
+    recentMirrorCopies.length = MAX_RECENT_COPIES;
+  }
+}
+
+export function listRecentMirrorCopies(limit = 24): RecentMirrorCopy[] {
+  const now = Date.now();
+  return recentMirrorCopies
+    .filter((c) => now - c.at < RECENT_COPY_TTL_MS)
+    .slice(0, Math.max(1, Math.min(40, limit)));
+}
+
+function reportMirrorBuyFight(
+  buy: MirrorBuyInput,
+  walletName: string,
+  taken: boolean,
+  skipReason?: string,
+  sizeSol?: number
+): void {
+  try {
+    const { logInfluencerMirrorLaneFight } =
+      require('./monitor') as typeof import('./monitor');
+    logInfluencerMirrorLaneFight({
+      mint: buy.mint,
+      symbol: buy.symbol,
+      opened: taken,
+      walletName,
+      skipReason,
+      sizeSol,
+    });
+  } catch {
+    /* optional */
+  }
+  if (taken) {
+    noteRecentMirrorCopy({
+      walletAddress: buy.wallet.address,
+      mint: buy.mint,
+      symbol: buy.symbol,
+      name: buy.name,
+      at: Date.now(),
+      sizeSol,
+      taken: true,
+    });
+  }
+}
+
 /**
  * Fast mirror buy via smart_money_mirror. Returns handled if this path owns the event.
  */
@@ -102,48 +165,52 @@ export async function tryInfluencerMirrorBuy(
   const im = getInfluencerMirrorConfig();
   const name = walletDisplayName(buy.wallet);
   const label = buy.symbol || buy.mint.slice(0, 8);
+  const skip = (reason: string) => {
+    console.log(`[influencer-mirror] Skip buy ${label} — ${reason}`);
+    reportMirrorBuyFight(buy, name, false, reason);
+    return {
+      handled: true as const,
+      taken: false as const,
+      skipReason: reason,
+    };
+  };
 
   console.log(`[monitor] Influencer ${name} bought ${label}`);
 
   const prereq = influencerMirrorPrereqsOk();
-  if (!prereq.ok) {
-    console.log(`[influencer-mirror] Skip buy ${label} — ${prereq.reason}`);
-    return { handled: true, taken: false, skipReason: prereq.reason };
-  }
+  if (!prereq.ok) return skip(prereq.reason || 'prereqs');
 
   if (isDeniedCopyMint(buy.mint, config.solMint)) {
-    return { handled: true, taken: false, skipReason: 'denied mint' };
+    return skip('denied mint');
   }
 
   if (!markSeenSig(buy.signature, buy.wallet.address, buy.mint)) {
+    // Quiet — duplicate polls should not spam fight log
     return { handled: true, taken: false, skipReason: 'duplicate sig' };
   }
 
   if (withinDelayWindow(buy.wallet.address, buy.mint, im.maxCopyDelayMs)) {
-    console.log(
-      `[influencer-mirror] Ignoring spam/duplicate window for ${name}/${label}`
-    );
-    return { handled: true, taken: false, skipReason: 'delay window' };
+    return skip('delay window');
   }
 
   const detected = buy.detectedAt ?? Date.now();
   const ageMs = detected - (buy.timestamp || detected);
-  if (ageMs > im.maxCopyDelayMs) {
-    console.log(
-      `[influencer-mirror] Skip late buy ${label} age=${Math.round(ageMs / 1000)}s`
-    );
-    return { handled: true, taken: false, skipReason: 'late signal' };
+  const isManualWatchlist = String(buy.signature || '').startsWith(
+    'watchlist-add-'
+  );
+  if (!isManualWatchlist && ageMs > im.maxCopyDelayMs) {
+    return skip(`late signal (${Math.round(ageMs / 1000)}s)`);
   }
 
   if (
     paperTrader.hasOpenMint(buy.mint) ||
     countOpenMirrored() >= im.maxConcurrentMirrored
   ) {
-    const reason = paperTrader.hasOpenMint(buy.mint)
-      ? 'already holding'
-      : `max concurrent mirrored (${im.maxConcurrentMirrored})`;
-    console.log(`[influencer-mirror] Skip ${label} — ${reason}`);
-    return { handled: true, taken: false, skipReason: reason };
+    return skip(
+      paperTrader.hasOpenMint(buy.mint)
+        ? 'already holding'
+        : `max concurrent mirrored (${im.maxConcurrentMirrored})`
+    );
   }
 
   let metrics: ReturnType<typeof summarizeTokenMetrics> | undefined;
@@ -161,8 +228,7 @@ export async function tryInfluencerMirrorBuy(
     });
     antiRug = summarizeAntiRug(report);
     if (antiRug && antiRug.ok === false) {
-      console.log(`[influencer-mirror] Skip ${label} — anti-rug fail`);
-      return { handled: true, taken: false, skipReason: 'anti-rug' };
+      return skip('anti-rug');
     }
   } catch {
     /* fail soft */
@@ -171,15 +237,15 @@ export async function tryInfluencerMirrorBuy(
   const liq = metrics?.liquidityUsd;
   const volM5 = metrics?.volumeM5Usd;
   if (liq != null && liq > 0 && liq < im.minLiquidityUsd) {
-    return { handled: true, taken: false, skipReason: 'thin liquidity' };
+    return skip('thin liquidity');
   }
   if (volM5 != null && volM5 > 0 && volM5 < im.minVolumeM5Usd) {
-    return { handled: true, taken: false, skipReason: 'thin volume m5' };
+    return skip('thin volume m5');
   }
 
   const drop = metrics?.priceChangeH1Pct;
   if (drop != null && drop < -22) {
-    return { handled: true, taken: false, skipReason: 'extended dump' };
+    return skip('extended dump');
   }
 
   const walletMult = clampSizeMult(buy.wallet.sizeMult ?? 1);
@@ -238,11 +304,7 @@ export async function tryInfluencerMirrorBuy(
   });
 
   if (assignment.skipped) {
-    return {
-      handled: true,
-      taken: false,
-      skipReason: assignment.skipReason || 'profile skip',
-    };
+    return skip(assignment.skipReason || 'profile skip');
   }
 
   Object.assign(buyOpts, stampFromAssignment(assignment));
@@ -297,11 +359,7 @@ export async function tryInfluencerMirrorBuy(
           : null,
       });
       if (gk.decision === 'block') {
-        return {
-          handled: true,
-          taken: false,
-          skipReason: gk.plainLanguage,
-        };
+        return skip(gk.plainLanguage || 'gatekeeper block');
       }
     }
   } catch {
@@ -318,13 +376,10 @@ export async function tryInfluencerMirrorBuy(
       `[influencer-mirror] Mirrored buy ${label} from ${name} ` +
         `via ${buyOpts.tradeProfileId} (${sizing.sizeSol.toFixed(3)} SOL)`
     );
+    reportMirrorBuyFight(buy, name, true, undefined, sizing.sizeSol);
     return { handled: true, taken: true };
   }
-  return {
-    handled: true,
-    taken: false,
-    skipReason: result.error || 'executeBuy failed',
-  };
+  return skip(result.error || 'executeBuy failed');
 }
 
 /**
@@ -632,10 +687,14 @@ export interface SmartMirrorWatchlistToken {
   mint: string;
   symbol: string;
   name: string;
-  status: 'holding' | 'sold' | 'partial';
+  status: 'holding' | 'sold' | 'partial' | 'copied';
   marketCapUsd: number | null;
   holders: number | null;
   youHold: boolean;
+  /** We mirrored this mint from this influencer (open or recent). */
+  copied: boolean;
+  copiedAt: number | null;
+  copiedSizeSol: number | null;
   crossHoldCount: number;
   canAdd: boolean;
 }
@@ -758,8 +817,55 @@ export async function buildSmartMirrorWatchlist(opts?: {
     /* optional */
   }
 
+  const openByMirror = new Map<
+    string,
+    { mint: string; sizeSol: number | null; at: number }
+  >();
+  try {
+    for (const p of paperTrader.getOpenPositions()) {
+      const mid = String(p.mirrorWalletId || '').trim();
+      if (!mid) continue;
+      const cost =
+        (p as { initialCostSol?: number; costSol?: number }).initialCostSol ??
+        (p as { costSol?: number }).costSol;
+      openByMirror.set(`${mid}:${p.mint}`, {
+        mint: p.mint,
+        sizeSol: cost != null && Number.isFinite(Number(cost)) ? Number(cost) : null,
+        at: Number(p.openedAt) || Date.now(),
+      });
+    }
+  } catch {
+    /* optional */
+  }
+  const recentTaken = listRecentMirrorCopies(40).filter((c) => c.taken);
+
   const influencers: SmartMirrorWatchlistInfluencer[] = wallets.map((w) => {
-    const toks = displayByWallet.get(w.address) || [];
+    const toks = [...(displayByWallet.get(w.address) || [])];
+    const seen = new Set(toks.map((t) => t.mint));
+    // Surface freshly copied mints even if RPC holdings lag
+    for (const c of recentTaken) {
+      if (c.walletAddress !== w.address || seen.has(c.mint)) continue;
+      toks.unshift({
+        mint: c.mint,
+        symbol: c.symbol,
+        name: c.name,
+        status: 'holding',
+        updatedAt: c.at,
+      });
+      seen.add(c.mint);
+    }
+    for (const [key, op] of openByMirror) {
+      if (!key.startsWith(w.address + ':') || seen.has(op.mint)) continue;
+      toks.unshift({
+        mint: op.mint,
+        symbol: op.mint.slice(0, 6),
+        name: op.mint.slice(0, 8),
+        status: 'holding',
+        updatedAt: op.at,
+      });
+      seen.add(op.mint);
+    }
+    const sliced = toks.slice(0, per);
     return {
       address: w.address,
       name: walletDisplayName(w),
@@ -771,9 +877,18 @@ export async function buildSmartMirrorWatchlist(opts?: {
         w.winRate != null && Number.isFinite(Number(w.winRate))
           ? Number(w.winRate)
           : null,
-      tokens: toks.map((t) => {
+      tokens: sliced.map((t) => {
         const meta = metricsMap.get(t.mint);
         const youHold = openMints.has(t.mint);
+        const openCopy = openByMirror.get(`${w.address}:${t.mint}`);
+        const recent = recentTaken.find(
+          (c) => c.walletAddress === w.address && c.mint === t.mint
+        );
+        const copied = Boolean(openCopy || recent);
+        const copiedAt = openCopy?.at ?? recent?.at ?? null;
+        const copiedSizeSol =
+          openCopy?.sizeSol ??
+          (recent?.sizeSol != null ? Number(recent.sizeSol) : null);
         const cross = Math.max(
           0,
           (mintHolders.get(t.mint)?.size || 0) - 1
@@ -782,12 +897,15 @@ export async function buildSmartMirrorWatchlist(opts?: {
           mint: t.mint,
           symbol: t.symbol || t.mint.slice(0, 6),
           name: t.name || t.symbol || t.mint.slice(0, 8),
-          status: t.status,
+          status: copied ? 'copied' : t.status,
           marketCapUsd: meta?.marketCapUsd ?? null,
           holders: meta?.holders ?? null,
           youHold,
+          copied,
+          copiedAt,
+          copiedSizeSol,
           crossHoldCount: cross,
-          canAdd: !youHold && t.status !== 'sold',
+          canAdd: !youHold && !copied && t.status !== 'sold',
         };
       }),
     };

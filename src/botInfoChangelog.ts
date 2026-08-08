@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.232',
+    title: 'Smart Mirror copies + fight log + watchlist UX',
+    sections: ['copy', 'scanners', 'overview', 'microbots'],
+    items: [
+      'Influencer Mirror: pin tagged wallets in soft-watch (even when Favourites cap is 0), migrate copy delay 15s→45s so slow polls are not skipped as late, and log copy/skip rows on the lane fight log (Smart Money Mirror).',
+      'Smart Mirror Watchlist: Copy CA + Jupiter on each of the top 3 tokens, peach/gold Copied badge with time/size when mirrored, force refresh on Watchlist tab + ~60s throttle.',
+    ],
+  },
+  {
     version: '1.2.231',
     title: 'Fast-profile Mode B divert + TA playbook align',
     sections: ['microbots', 'scanners', 'overview', 'knobs'],

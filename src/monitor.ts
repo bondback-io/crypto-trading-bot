@@ -2293,9 +2293,31 @@ export function getWalletsForPolling(): SmartWallet[] {
     weakUtil = false;
   }
 
+  // When Influencer Mirror master is ON, never starve tagged copy wallets —
+  // soft-watch cap=0 or rotation previously dropped them → silent no-trades.
+  let influencerPinned: SmartWallet[] = [];
+  try {
+    const {
+      isInfluencerMirrorEnabled,
+      isInfluencerMirrorWallet,
+    } = require('./influencerMirror') as typeof import('./influencerMirror');
+    if (isInfluencerMirrorEnabled()) {
+      influencerPinned = sorted.filter((w) => isInfluencerMirrorWallet(w));
+    }
+  } catch {
+    influencerPinned = [];
+  }
+
   if (softCap === 0) {
     lastSoftWatchStickyN = 0;
     lastSoftWatchRotateN = 0;
+    if (influencerPinned.length > 0) {
+      const nowPin = Date.now();
+      for (const w of influencerPinned) {
+        softWatchLastCoveredAt.set(w.address, nowPin);
+      }
+      return influencerPinned;
+    }
     return [];
   }
 
@@ -2309,8 +2331,17 @@ export function getWalletsForPolling(): SmartWallet[] {
     const stickyFrac = weakUtil ? 0.25 : 0.35;
     const stickyN = Math.max(1, Math.floor(softCap * stickyFrac));
     const rotateN = Math.max(0, softCap - stickyN);
-    const hot = sorted.slice(0, stickyN);
-    const hotSet = new Set(hot.map((w) => w.address));
+    // Pin influencers first (up to ~40% of cap), then hot sticky, then rotate.
+    const pinN = Math.min(
+      influencerPinned.length,
+      Math.max(1, Math.floor(softCap * 0.4))
+    );
+    const pinned = influencerPinned.slice(0, pinN);
+    const pinSet = new Set(pinned.map((w) => w.address));
+    const hot = sorted
+      .filter((w) => !pinSet.has(w.address))
+      .slice(0, Math.max(0, stickyN));
+    const hotSet = new Set([...pinSet, ...hot.map((w) => w.address)]);
     // Fair coverage: least-recently covered first, then lower activity (spread the pool).
     const cold = sorted
       .filter((w) => !hotSet.has(w.address))
@@ -2326,22 +2357,23 @@ export function getWalletsForPolling(): SmartWallet[] {
         const bT = b.lastTradedAt ?? b.lastActive ?? 0;
         return aT - bT;
       });
+    const slotsLeft = Math.max(0, softCap - pinned.length - hot.length);
+    const rotateTake = Math.min(rotateN, slotsLeft, cold.length);
     const rotated: typeof sorted = [];
-    if (cold.length > 0 && rotateN > 0) {
+    if (cold.length > 0 && rotateTake > 0) {
       const start =
         ((softWatchRotateOffset % cold.length) + cold.length) % cold.length;
-      const take = Math.min(rotateN, cold.length);
-      for (let i = 0; i < take; i++) {
+      for (let i = 0; i < rotateTake; i++) {
         rotated.push(cold[(start + i) % cold.length]!);
       }
-      softWatchRotateOffset = (start + Math.max(take, 1)) % cold.length;
+      softWatchRotateOffset = (start + Math.max(rotateTake, 1)) % cold.length;
     }
-    const capped = hot.concat(rotated);
+    const capped = pinned.concat(hot, rotated).slice(0, softCap);
     const now = Date.now();
     for (const w of capped) {
       softWatchLastCoveredAt.set(w.address, now);
     }
-    lastSoftWatchStickyN = stickyN;
+    lastSoftWatchStickyN = pinned.length + hot.length;
     lastSoftWatchRotateN = rotated.length;
 
     const since = now - 30 * 60_000;
@@ -2359,7 +2391,7 @@ export function getWalletsForPolling(): SmartWallet[] {
     if (now - softWatchCoverageLogAt > 60_000) {
       softWatchCoverageLogAt = now;
       console.log(
-        `[monitor] Soft-watch rotation: cap ${softCap} · sticky ${stickyN} · rotate ${rotated.length} · ` +
+        `[monitor] Soft-watch rotation: cap ${softCap} · pinIM ${pinned.length} · sticky ${hot.length} · rotate ${rotated.length} · ` +
           `pool ${sorted.length} · coverage30m ${coveragePct}%` +
           (weakUtil ? ' · weak Utility (conservative)' : '')
       );
@@ -6247,6 +6279,77 @@ function markLaneFightCascadeResult(
 
 export function getLaneDecisionLog(limit = 50): typeof laneDecisionLog {
   return laneDecisionLog.slice(0, Math.max(1, Math.min(200, limit)));
+}
+
+/**
+ * Influencer Smart Mirror does not run full lane fight — still surface copy /
+ * skip in Overview + Micro Bots lane fight log.
+ */
+export function logInfluencerMirrorLaneFight(input: {
+  mint: string;
+  symbol: string;
+  opened: boolean;
+  walletName: string;
+  skipReason?: string;
+  sizeSol?: number;
+}): void {
+  const mint = String(input.mint || '').trim();
+  if (!mint) return;
+  const symbol = String(input.symbol || mint.slice(0, 6));
+  const name = String(input.walletName || 'influencer').slice(0, 48);
+  const thought = input.opened
+    ? `Influencer Mirror · copied ${name}` +
+      (input.sizeSol != null && Number.isFinite(input.sizeSol)
+        ? ` · ${Number(input.sizeSol).toFixed(3)} SOL`
+        : '')
+    : `Influencer Mirror · skip · ${name}: ${input.skipReason || 'not taken'}`;
+  const entry = {
+    at: Date.now(),
+    mint,
+    symbol,
+    winnerId: input.opened ? ('smart_money_mirror' as string | null) : null,
+    opened: input.opened,
+    cascadeSkipReason: input.opened
+      ? undefined
+      : String(input.skipReason || 'mirror skip').slice(0, 280),
+    marl: {
+      enabled: true,
+      thoughts: [thought.slice(0, 200)],
+    },
+    lanes: [
+      {
+        id: 'smart_money_mirror',
+        name: 'Smart Money Mirror',
+        passed: input.opened,
+        score: input.opened ? 100 : 0,
+        reason: input.opened
+          ? `Influencer Mirror copy · ${name}`
+          : String(input.skipReason || 'skipped').slice(0, 120),
+      },
+    ],
+  };
+  laneDecisionLog.unshift(entry);
+  if (laneDecisionLog.length > LANE_DECISION_LOG_MAX) {
+    laneDecisionLog.length = LANE_DECISION_LOG_MAX;
+  }
+  try {
+    const { recordLaneFightOpen } =
+      require('./laneOutcomes') as typeof import('./laneOutcomes');
+    recordLaneFightOpen({
+      mint: entry.mint,
+      symbol: entry.symbol,
+      winnerId: entry.winnerId,
+      lanes: entry.lanes,
+      marl: entry.marl,
+    });
+  } catch {
+    /* non-fatal */
+  }
+  markLaneFightCascadeResult(
+    mint,
+    input.opened,
+    input.opened ? undefined : input.skipReason
+  );
 }
 
 async function passesFilters(signal: TradeSignal): Promise<boolean> {

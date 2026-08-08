@@ -41,7 +41,8 @@ export interface InfluencerMirrorConfig {
 export const DEFAULT_INFLUENCER_MIRROR: InfluencerMirrorConfig = {
   enabled: false,
   maxConcurrentMirrored: 3,
-  maxCopyDelayMs: 15_000,
+  /** Utility soft-watch polls can lag; 45s avoids skipping fresh influencer buys as “late”. */
+  maxCopyDelayMs: 45_000,
   minLiquidityUsd: 8_000,
   minVolumeM5Usd: 800,
   copySells: true,
@@ -87,7 +88,14 @@ export function normalizeInfluencerMirrorConfig(
       12
     ),
     maxCopyDelayMs: clamp(
-      Math.round(Number(r.maxCopyDelayMs) || DEFAULT_INFLUENCER_MIRROR.maxCopyDelayMs),
+      (() => {
+        const n = Math.round(Number(r.maxCopyDelayMs));
+        // Migrate prior 15s default — soft-watch polls often exceed it.
+        if (!Number.isFinite(n) || n <= 0 || n === 15_000) {
+          return DEFAULT_INFLUENCER_MIRROR.maxCopyDelayMs;
+        }
+        return n;
+      })(),
       1_000,
       120_000
     ),
