@@ -55,6 +55,7 @@ const MIN_SAMPLES = 18;
 const LATE_CHASE_MAX_SHARE = 0.05;
 const ARMED_SHARE_TARGET = 0.7;
 const DISC_SHARE_CAP = 0.3;
+const DISC_SHARE_CAP_RELIEF = 0.45;
 const SCALPER_SHARE_TARGET = 0.3;
 const LOSS_STREAK_N = 8;
 const LOSS_STREAK_K = 5;
@@ -62,6 +63,9 @@ const PERM_FLOOR_DISC = 35;
 const PERM_FLOOR_ARMED = 25;
 const SIZE_MULT_LO = 0.7;
 const SIZE_MULT_HI = 1.15;
+const SCRATCH_PNL_PCT = 0.25;
+const SCRATCH_PNL_SOL = 0.001;
+const DISC_MIX_SIZE_PENALTY = 0.85;
 
 const FILE = () => dataFile('expectancy-lift.json');
 
@@ -69,6 +73,8 @@ interface GovernorPersistRow {
   state: FamilyGovernorState;
   negWindows: number;
   tempRestrictUntilMs?: number;
+  /** Fingerprint of last window that advanced negWindows / temp-restrict. */
+  lastFingerprint?: string;
   updatedAt: number;
 }
 
@@ -76,7 +82,15 @@ interface ExpectancyLiftPersist {
   version: number;
   governors: Record<string, GovernorPersistRow>;
   updatedAt: number;
+  /** One-shot sticky restrict cleanup after poll-inflation bug (v1.2.238). */
+  repairedV238?: boolean;
 }
+
+const FAST_DISC_PROFILES = new Set([
+  'scalper',
+  'momentum_burst',
+  'reversal_scalper',
+]);
 
 let persistCache: ExpectancyLiftPersist | null = null;
 const oneSetupLocks = new Map<string, { profileId: string; untilMs: number }>();
@@ -98,6 +112,9 @@ export interface ExpectancyTradeRow {
   trailActive: boolean;
   entryStyle?: string;
   key: string;
+  /** Present when source episode/closed had an entryMarketCapUsd field. */
+  hasEntryMcField?: boolean;
+  entryMarketCapUsd?: number | null;
 }
 
 export interface ExpectancyMetrics {
@@ -173,6 +190,13 @@ export interface ExpectancyLiftStatus {
   };
   quietChips: Array<{ profileId: string; label: string; reason: string }>;
   plainLanguage: string;
+  /** Discretionary mix throttle state for dashboard chip. */
+  discMixThrottle: {
+    active: boolean;
+    discShare: number | null;
+    liveArmed: number;
+    effectiveCap: number;
+  };
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -199,7 +223,7 @@ function emptyMetrics(): ExpectancyMetrics {
   };
 }
 
-/** Normalize legacy / alias family tags. */
+/** Normalize legacy / alias family tags. Exact migration tag only — no broad /migration/. */
 export function normalizeExpectancyFamily(
   raw: string | null | undefined
 ): ExpectancyFamily {
@@ -215,7 +239,6 @@ export function normalizeExpectancyFamily(
   if (/late.?chase/.test(s)) return 'late_chase';
   if (/scalp.?reclaim/.test(s)) return 'scalp_reclaim_burst';
   if (/reversal.?reclaim/.test(s)) return 'reversal_reclaim';
-  if (/migration/.test(s)) return 'migration_hold_reclaim';
   if (/support.?dip|dip.?reclaim/.test(s)) return 'support_dip_reclaim';
   if (/trend.?pullback|pullback.?cont/.test(s)) {
     return 'trend_pullback_continuation';
@@ -232,6 +255,7 @@ export function classifyTradeFamily(input: {
   profileId?: string | null;
   armedWatch?: boolean;
   entryPath?: string | null;
+  setupWatchFamily?: string | null;
 }): ExpectancyFamily {
   if (
     input.lateChaseAtEntry === true ||
@@ -240,15 +264,50 @@ export function classifyTradeFamily(input: {
   ) {
     return 'late_chase';
   }
+  const rawStyle = String(input.entryStyle || '')
+    .trim()
+    .toLowerCase();
+  // Exact migration hold/reclaim tag only
+  if (rawStyle === 'migration_hold_reclaim') {
+    return 'migration_hold_reclaim';
+  }
   const style = normalizeExpectancyFamily(input.entryStyle);
-  if (style !== 'discretionary_other') return style;
+  if (style !== 'discretionary_other' && style !== 'migration_hold_reclaim') {
+    return style;
+  }
+  if (style === 'migration_hold_reclaim') {
+    return 'migration_hold_reclaim';
+  }
+
+  const armed =
+    input.armedWatch === true ||
+    String(input.entryPath || '').toLowerCase() === 'armed_trigger';
+  const setupFam = String(input.setupWatchFamily || '')
+    .trim()
+    .toLowerCase();
   const pid = String(input.profileId || '');
+
+  // Armed grad / migration profile armed → migration_hold_reclaim
+  if (
+    setupFam === 'grad' &&
+    (armed || String(input.entryPath || '').toLowerCase() === 'armed_trigger')
+  ) {
+    return 'migration_hold_reclaim';
+  }
+  if (
+    (pid === 'migration_sniper' || pid === 'migration') &&
+    armed
+  ) {
+    return 'migration_hold_reclaim';
+  }
+  // migration_sniper without style and not armed → discretionary_other
+  if (pid === 'migration_sniper' || pid === 'migration') {
+    return 'discretionary_other';
+  }
+
   if (pid === 'scalper') return 'scalp_reclaim_burst';
   if (pid === 'reversal_scalper') return 'reversal_reclaim';
   if (pid === 'momentum_burst') return 'level_momentum_expansion';
-  if (pid === 'migration_sniper' || pid === 'migration') {
-    return 'migration_hold_reclaim';
-  }
   if (pid === 'dip_buyer') return 'support_dip_reclaim';
   if (pid === 'trend_rider') return 'trend_pullback_continuation';
   if (pid === 'high_win_rate' || pid === 'steady_compounder') {
@@ -280,14 +339,68 @@ function mfeCaptureFrom(pnlPct: number, maxRunupPct: number): number | null {
   return clamp((Number(pnlPct) || 0) / mfe, -0.5, 1.5) * 100;
 }
 
+function readEntryMcStamp(src: Record<string, unknown> | object): {
+  hasEntryMcField: boolean;
+  entryMarketCapUsd: number | null;
+} {
+  const o = src as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(o, 'entryMarketCapUsd')) {
+    return { hasEntryMcField: false, entryMarketCapUsd: null };
+  }
+  const v = Number(o.entryMarketCapUsd);
+  return {
+    hasEntryMcField: true,
+    entryMarketCapUsd: Number.isFinite(v) && v > 0 ? v : null,
+  };
+}
+
+function isScratchPnl(pnlPct: number, pnlSol: number): boolean {
+  return (
+    Math.abs(pnlPct) < SCRATCH_PNL_PCT && Math.abs(pnlSol) < SCRATCH_PNL_SOL
+  );
+}
+
+function isFinitePnl(pnlPct: number, pnlSol: number): boolean {
+  return Number.isFinite(pnlPct) && Number.isFinite(pnlSol);
+}
+
+/** Trades eligible for family governor metrics / loss streak. */
+function filterGovernorWindowTrades(
+  family: ExpectancyFamily,
+  trades: ExpectancyTradeRow[]
+): ExpectancyTradeRow[] {
+  return trades.filter((t) => {
+    if (!isFinitePnl(t.pnlPct, t.pnlSol)) return false;
+    if (isScratchPnl(t.pnlPct, t.pnlSol)) return false;
+    if (family === 'migration_hold_reclaim' && t.hasEntryMcField === true) {
+      if (!(t.entryMarketCapUsd != null && t.entryMarketCapUsd > 0)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+function windowFingerprint(
+  trades: ExpectancyTradeRow[],
+  exp: number | null
+): string {
+  const last = trades.length ? trades[trades.length - 1]! : null;
+  const lastClosedAt = last ? Math.round(last.closedAt) : 0;
+  const expR =
+    exp != null && Number.isFinite(exp) ? Math.round(exp * 100) / 100 : 0;
+  return `${lastClosedAt}|${trades.length}|${expR}`;
+}
+
 function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
   const profileId = String(e.profileId || '').trim();
   if (!profileId || profileId === 'default') return null;
   if (/^partial:/i.test(String(e.exitReason || ''))) return null;
   const closedAt = Number(e.closedAt);
   if (!Number.isFinite(closedAt) || closedAt <= 0) return null;
-  const pnlPct = Number(e.pnlPct) || 0;
-  const pnlSol = Number(e.pnlSol) || 0;
+  const pnlPct = Number(e.pnlPct);
+  const pnlSol = Number(e.pnlSol);
+  if (!isFinitePnl(pnlPct, pnlSol)) return null;
   const maxRunup = Math.max(0, Number(e.maxRunupPct) || 0);
   const cap =
     e.mfeCaptureRatio != null && Number.isFinite(Number(e.mfeCaptureRatio))
@@ -297,6 +410,10 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
     e.armedWatch === true ||
     e.entryPath === 'armed_trigger' ||
     e.scalperWatchTriggered === true;
+  const mc = readEntryMcStamp(e as unknown as Record<string, unknown>);
+  const setupWatchFamily = String(
+    (e as { setupWatchFamily?: string }).setupWatchFamily || ''
+  );
   return {
     profileId,
     family: classifyTradeFamily({
@@ -306,6 +423,7 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
       profileId,
       armedWatch: armed,
       entryPath: e.entryPath,
+      setupWatchFamily: setupWatchFamily || undefined,
     }),
     closedAt,
     openedAt: Number(e.openedAt) || closedAt,
@@ -333,6 +451,8 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
       closedAt: e.closedAt,
       pnlSol: e.pnlSol,
     }),
+    hasEntryMcField: mc.hasEntryMcField,
+    entryMarketCapUsd: mc.entryMarketCapUsd,
   };
 }
 
@@ -342,8 +462,9 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
   if (!profileId || profileId === 'default') return null;
   const closedAt = Number(t.closedAt);
   if (!Number.isFinite(closedAt) || closedAt <= 0) return null;
-  const pnlPct = Number(t.pnlPct) || 0;
-  const pnlSol = Number(t.pnlSol) || 0;
+  const pnlPct = Number(t.pnlPct);
+  const pnlSol = Number(t.pnlSol);
+  if (!isFinitePnl(pnlPct, pnlSol)) return null;
   const maxRunup = Math.max(
     0,
     Number(t.maxRunupPct ?? t.peakUnrealizedPct) || 0
@@ -353,6 +474,7 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
     t.entryPath === 'armed_trigger' ||
     t.scalperWatchTriggered === true;
   const style = String(t.entryStyle || '');
+  const mc = readEntryMcStamp(t);
   return {
     profileId,
     family: classifyTradeFamily({
@@ -362,6 +484,7 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
       profileId,
       armedWatch: armed,
       entryPath: String(t.entryPath || ''),
+      setupWatchFamily: String(t.setupWatchFamily || '') || undefined,
     }),
     closedAt,
     openedAt: Number(t.openedAt) || closedAt,
@@ -387,6 +510,8 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
       closedAt,
       pnlSol,
     }),
+    hasEntryMcField: mc.hasEntryMcField,
+    entryMarketCapUsd: mc.entryMarketCapUsd,
   };
 }
 
@@ -477,7 +602,26 @@ export function computeExpectancyMetrics(
 }
 
 function emptyPersist(): ExpectancyLiftPersist {
-  return { version: EXPECTANCY_LIFT_VERSION, governors: {}, updatedAt: 0 };
+  return {
+    version: EXPECTANCY_LIFT_VERSION,
+    governors: {},
+    updatedAt: 0,
+    repairedV238: true,
+  };
+}
+
+/** One-shot: sticky poll-inflation restricts → down_ranked. */
+function applyPollInflationRepair(p: ExpectancyLiftPersist): boolean {
+  if (p.repairedV238 === true) return false;
+  const now = Date.now();
+  for (const row of Object.values(p.governors || {})) {
+    if (!row || row.state !== 'restricted') continue;
+    row.state = 'down_ranked';
+    row.tempRestrictUntilMs = undefined;
+    row.updatedAt = now;
+  }
+  p.repairedV238 = true;
+  return true;
 }
 
 function loadPersist(): ExpectancyLiftPersist {
@@ -498,7 +642,16 @@ function loadPersist(): ExpectancyLiftPersist {
           ? raw.governors
           : {},
       updatedAt: Number(raw?.updatedAt) || 0,
+      repairedV238: raw?.repairedV238 === true,
     };
+    if (applyPollInflationRepair(persistCache)) {
+      try {
+        persistCache.updatedAt = Date.now();
+        atomicWriteJson(FILE(), persistCache);
+      } catch {
+        /* soft */
+      }
+    }
   } catch {
     persistCache = emptyPersist();
   }
@@ -517,6 +670,7 @@ function savePersist(): void {
 }
 
 function lossStreakBreaker(trades: ExpectancyTradeRow[]): boolean {
+  if (trades.length < MIN_SAMPLES) return false;
   const last = trades.slice(-LOSS_STREAK_N);
   if (last.length < LOSS_STREAK_N) return false;
   const losses = last.filter((t) => !t.win).length;
@@ -528,8 +682,10 @@ function updateGovernorForFamily(
   windowTrades: ExpectancyTradeRow[],
   altWindowTrades: ExpectancyTradeRow[]
 ): FamilyGovernorRow {
-  const metrics = computeExpectancyMetrics(windowTrades);
-  const metricsAlt = computeExpectancyMetrics(altWindowTrades);
+  const govTrades = filterGovernorWindowTrades(family, windowTrades);
+  const govAlt = filterGovernorWindowTrades(family, altWindowTrades);
+  const metrics = computeExpectancyMetrics(govTrades);
+  const metricsAlt = computeExpectancyMetrics(govAlt);
   const p = loadPersist();
   const prev = p.governors[family] || {
     state: 'neutral' as FamilyGovernorState,
@@ -542,60 +698,86 @@ function updateGovernorForFamily(
   const n = metrics.tradeCount;
   const exp = metrics.expectancyPct;
   const expAlt = metricsAlt.expectancyPct;
+  const fp = windowFingerprint(govTrades, exp);
+  const sameFp =
+    prev.lastFingerprint != null && prev.lastFingerprint === fp;
+  const tempActive =
+    prev.tempRestrictUntilMs != null && prev.tempRestrictUntilMs > now;
 
-  if (prev.tempRestrictUntilMs && prev.tempRestrictUntilMs > now) {
+  if (tempActive) {
+    // Do not refresh TTL on re-poll with same fingerprint
     state = 'restricted';
-  } else if (lossStreakBreaker(windowTrades)) {
+    if (!sameFp) {
+      p.governors[family] = {
+        ...prev,
+        state,
+        lastFingerprint: fp,
+        updatedAt: now,
+      };
+    }
+  } else if (lossStreakBreaker(govTrades) && !sameFp) {
     state = 'restricted';
     p.governors[family] = {
       state,
       negWindows,
       tempRestrictUntilMs: now + 30 * 60_000,
+      lastFingerprint: fp,
       updatedAt: now,
     };
   } else if (n >= MIN_SAMPLES && exp != null) {
-    if (exp < 0) {
-      negWindows = Math.min(4, negWindows + 1);
-      if (
-        negWindows >= 2 &&
-        expAlt != null &&
-        expAlt < 0 &&
-        metricsAlt.tradeCount >= MIN_SAMPLES
-      ) {
-        state = 'restricted';
-      } else {
-        state = 'down_ranked';
-      }
-    } else {
-      // Restore after improved window
-      if (state === 'restricted' || state === 'down_ranked') {
-        if (exp > 0 && (expAlt == null || expAlt >= 0)) {
-          state = exp >= 0.5 ? 'promoted' : 'neutral';
-          negWindows = 0;
-        } else if (exp > 0) {
-          state = 'neutral';
-          negWindows = Math.max(0, negWindows - 1);
+    if (!sameFp) {
+      if (exp < 0) {
+        negWindows = Math.min(4, negWindows + 1);
+        if (
+          negWindows >= 2 &&
+          expAlt != null &&
+          expAlt < 0 &&
+          metricsAlt.tradeCount >= MIN_SAMPLES
+        ) {
+          state = 'restricted';
+        } else {
+          state = 'down_ranked';
         }
-      } else if (exp >= 0.75 && n >= MIN_SAMPLES) {
-        state = 'promoted';
-        negWindows = 0;
       } else {
-        state = 'neutral';
-        negWindows = 0;
+        // Restore after improved window
+        if (state === 'restricted' || state === 'down_ranked') {
+          if (exp > 0 && (expAlt == null || expAlt >= 0)) {
+            state = exp >= 0.5 ? 'promoted' : 'neutral';
+            negWindows = 0;
+          } else if (exp > 0) {
+            state = 'neutral';
+            negWindows = Math.max(0, negWindows - 1);
+          }
+        } else if (exp >= 0.75 && n >= MIN_SAMPLES) {
+          state = 'promoted';
+          negWindows = 0;
+        } else {
+          state = 'neutral';
+          negWindows = 0;
+        }
+      }
+      p.governors[family] = {
+        state,
+        negWindows,
+        tempRestrictUntilMs: undefined,
+        lastFingerprint: fp,
+        updatedAt: now,
+      };
+    } else {
+      // Same window — keep prior governor decision (awaiting new closes)
+      state = prev.state || state;
+      negWindows = prev.negWindows || 0;
+      if (state === 'restricted' && !tempActive) {
+        // Sticky non-temp restrict with same fp stays until new closes
       }
     }
-    p.governors[family] = {
-      state,
-      negWindows,
-      tempRestrictUntilMs: undefined,
-      updatedAt: now,
-    };
   } else {
-    state = prev.state === 'restricted' && prev.tempRestrictUntilMs && prev.tempRestrictUntilMs > now
-      ? 'restricted'
-      : state === 'restricted'
-        ? 'neutral'
-        : state;
+    state =
+      prev.state === 'restricted' && tempActive
+        ? 'restricted'
+        : state === 'restricted' && !tempActive && !prev.lastFingerprint
+          ? 'neutral'
+          : state;
   }
 
   persistCache = p;
@@ -607,11 +789,15 @@ function updateGovernorForFamily(
 
   let note = 'Insufficient samples';
   if (n >= MIN_SAMPLES && exp != null) {
-    if (state === 'promoted') note = 'Positive expectancy — promoted';
-    else if (state === 'restricted') note = 'Negative expectancy (2+ windows) / streak breaker';
-    else if (state === 'down_ranked') note = 'Negative expectancy — down-ranked';
+    if (sameFp && (state === 'restricted' || state === 'down_ranked')) {
+      note = `Awaiting new closes · negWindows=${negWindows}`;
+    } else if (state === 'promoted') note = 'Positive expectancy — promoted';
+    else if (state === 'restricted')
+      note = `Negative expectancy (2+ windows) / streak breaker · negWindows=${negWindows}`;
+    else if (state === 'down_ranked')
+      note = `Negative expectancy — down-ranked · negWindows=${negWindows}`;
     else note = 'Neutral expectancy';
-  } else if (lossStreakBreaker(windowTrades)) {
+  } else if (lossStreakBreaker(govTrades)) {
     note = `Loss streak ${LOSS_STREAK_K}/${LOSS_STREAK_N} — temp restrict`;
   }
 
@@ -651,12 +837,28 @@ export function shouldSkipFamilyGovernor(input: {
   entryStyle?: string | null;
   lateChase?: boolean;
   armedWatch?: boolean;
+  profileId?: string | null;
+  entryPath?: string | null;
+  setupWatchFamily?: string | null;
 }): { skip: boolean; reason?: string; state: FamilyGovernorState } {
-  const family = normalizeExpectancyFamily(
-    input.family ||
-      (input.lateChase ? 'late_chase' : input.entryStyle) ||
-      'discretionary_other'
-  );
+  const family =
+    input.profileId != null ||
+    input.armedWatch != null ||
+    input.entryPath != null ||
+    input.setupWatchFamily != null
+      ? classifyTradeFamily({
+          entryStyle: input.lateChase ? 'late_chase' : input.entryStyle,
+          lateChaseAtEntry: input.lateChase === true,
+          profileId: input.profileId,
+          armedWatch: input.armedWatch,
+          entryPath: input.entryPath,
+          setupWatchFamily: input.setupWatchFamily,
+        })
+      : normalizeExpectancyFamily(
+          input.family ||
+            (input.lateChase ? 'late_chase' : input.entryStyle) ||
+            'discretionary_other'
+        );
   const state = getFamilyGovernorState(family);
   if (state === 'restricted') {
     // Armed reclaim may still pass soft restrict except late_chase
@@ -712,19 +914,79 @@ export function shouldLimitLateChaseShare(input: {
   return { limit: false };
 }
 
-/** Armed dominance ~70/30 — soft-skip discretionary when disc share already high. */
+function countLiveArmedWatches(): number {
+  let n = 0;
+  try {
+    const { getScalperSetupWatchStatus } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    const sw = getScalperSetupWatchStatus(40);
+    n += (sw.entries || []).filter((e) => e.status === 'armed').length;
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getDipSetupWatchStatus } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const dw = getDipSetupWatchStatus(40);
+    n += (dw.entries || []).filter((e) => e.status === 'armed').length;
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getMigrationGradWatchStatus } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    const gw = getMigrationGradWatchStatus(40);
+    n += (gw.entries || []).filter((e) => e.status === 'armed').length;
+  } catch {
+    /* soft */
+  }
+  return n;
+}
+
+/** Armed dominance ~70/30 — hard soft-skip only fast discretionary when disc high. */
 export function shouldLimitDiscretionaryMix(input: {
   armedWatch?: boolean;
+  profileId?: string | null;
 }): { limit: boolean; reason?: string } {
   if (input.armedWatch === true) return { limit: false };
-  const mix = getRecentMixShares(40);
-  if (mix.total >= 10 && mix.discShare >= DISC_SHARE_CAP) {
-    return {
-      limit: true,
-      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(DISC_SHARE_CAP * 100).toFixed(0)}% (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
-    };
+  const mix = getRecentMixShares(50);
+  if (mix.total < 10) return { limit: false };
+  const liveArmed = countLiveArmedWatches();
+  const cap = liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+  if (mix.discShare < cap) return { limit: false };
+  const pid = String(input.profileId || '');
+  if (!FAST_DISC_PROFILES.has(pid)) {
+    // Non-fast: size penalty only (see expectancyLiftSizePenaltyForDiscMix)
+    return { limit: false };
   }
-  return { limit: false };
+  return {
+    limit: true,
+    reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(cap * 100).toFixed(0)}% — skip fast disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
+  };
+}
+
+/** Size penalty for non-fast discretionary when disc share is elevated. */
+export function expectancyLiftSizePenaltyForDiscMix(input: {
+  armedWatch?: boolean;
+  profileId?: string | null;
+}): { mult: number; note: string } {
+  if (input.armedWatch === true) return { mult: 1, note: '' };
+  const pid = String(input.profileId || '');
+  if (FAST_DISC_PROFILES.has(pid)) return { mult: 1, note: '' };
+  try {
+    const mix = getRecentMixShares(50);
+    const liveArmed = countLiveArmedWatches();
+    const cap = liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+    if (mix.total >= 10 && mix.discShare >= DISC_SHARE_CAP) {
+      return {
+        mult: DISC_MIX_SIZE_PENALTY,
+        note: `disc-mix×${DISC_MIX_SIZE_PENALTY.toFixed(2)} (disc ${(mix.discShare * 100).toFixed(0)}%≥${(cap * 100).toFixed(0)}%)`,
+      };
+    }
+  } catch {
+    /* soft */
+  }
+  return { mult: 1, note: '' };
 }
 
 export function computeTradePermissionScore(input: {
@@ -809,6 +1071,16 @@ export function expectancySizeMultiplier(input: {
       .slice(-DEFAULT_EXPECTANCY_WINDOW);
     const m = computeExpectancyMetrics(slice);
     if (m.tradeCount < 8 || m.expectancyPct == null) {
+      const discPen = expectancyLiftSizePenaltyForDiscMix({
+        armedWatch: input.armedWatch,
+        profileId: input.profileId,
+      });
+      if (discPen.mult !== 1) {
+        return {
+          mult: discPen.mult,
+          note: discPen.note || 'disc mix size penalty',
+        };
+      }
       return { mult: 1, note: 'expectancy size n/a' };
     }
     let mult = 1;
@@ -822,10 +1094,17 @@ export function expectancySizeMultiplier(input: {
     if (gov === 'down_ranked') mult = Math.max(SIZE_MULT_LO, mult - 0.08);
     if (gov === 'restricted') mult = Math.max(SIZE_MULT_LO, mult * 0.85);
     if (input.armedWatch === true) mult = Math.min(SIZE_MULT_HI, mult + 0.02);
+    const discPen = expectancyLiftSizePenaltyForDiscMix({
+      armedWatch: input.armedWatch,
+      profileId: input.profileId,
+    });
+    if (discPen.mult !== 1) mult *= discPen.mult;
     mult = clamp(mult, SIZE_MULT_LO, SIZE_MULT_HI);
+    const notes = [`expectancy×${mult.toFixed(2)} (E=${m.expectancyPct.toFixed(2)}%)`];
+    if (discPen.note) notes.push(discPen.note);
     return {
       mult: Math.round(mult * 100) / 100,
-      note: `expectancy×${mult.toFixed(2)} (E=${m.expectancyPct.toFixed(2)}%)`,
+      note: notes.join(' · '),
     };
   } catch {
     return { mult: 1, note: 'expectancy size fail-soft' };
@@ -1150,6 +1429,15 @@ export function getExpectancyLiftStatus(
       : '—';
   const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target 70%) · late-chase ${lateStr} (≤5%).`;
 
+  const liveArmed = countLiveArmedWatches();
+  const effectiveCap =
+    liveArmed === 0 ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+  const discShare = mix.discretionaryShare;
+  const discMixActive =
+    discShare != null &&
+    mixTrades.length >= 10 &&
+    discShare >= effectiveCap;
+
   return {
     ok: true,
     window,
@@ -1166,6 +1454,12 @@ export function getExpectancyLiftStatus(
     chart: buildChart(windowTrades),
     quietChips,
     plainLanguage,
+    discMixThrottle: {
+      active: discMixActive,
+      discShare,
+      liveArmed,
+      effectiveCap,
+    },
   };
 }
 

@@ -537,6 +537,88 @@ async function enrichSignalForLaneFight(signal: TradeSignal): Promise<void> {
     }
   }
 
+  // Always mirror resolved MC into metrics for lane floors
+  if (
+    signal.sourceEntryMcUsd != null &&
+    signal.sourceEntryMcUsd > 0
+  ) {
+    if (!signal.metrics) {
+      signal.metrics = {
+        liquidityUsd: null,
+        marketCapUsd: signal.sourceEntryMcUsd,
+        volume24hUsd: null,
+        volumeH1Usd: null,
+        volumeM5Usd: null,
+        recentBuyVolumeUsd: null,
+        txnsH1: null,
+        buysH1: null,
+        sellsH1: null,
+        buySellRatio: null,
+        priceUsd: null,
+        priceChangeH1Pct: null,
+        priceChange24hPct: null,
+        holderCountEstimate: null,
+        topHolderPct: null,
+        top10HoldPct: null,
+        devHoldPct: null,
+        devActiveRecently: false,
+        mintAuthority: null,
+        source: 'enrich',
+      };
+    } else if (
+      !(signal.metrics.marketCapUsd != null && signal.metrics.marketCapUsd > 0)
+    ) {
+      signal.metrics.marketCapUsd = signal.sourceEntryMcUsd;
+    }
+  }
+
+  // Migration / grad / near-mig: retry resolve once if still unknown
+  const needsMigMcRetry =
+    (signal.isMigration === true ||
+      signal.nearMigration === true ||
+      signal.setupWatchFamily === 'grad' ||
+      /grad-watch|migration/i.test((signal.scannerReasons || []).join(' '))) &&
+    (!(signal.sourceEntryMcUsd != null && signal.sourceEntryMcUsd > 0) ||
+      !(
+        signal.metrics?.marketCapUsd != null && signal.metrics.marketCapUsd > 0
+      ));
+  if (needsMigMcRetry) {
+    try {
+      const mc = await resolveSourceEntryMcUsd(signal.mint);
+      if (mc != null && mc > 0) {
+        signal.sourceEntryMcUsd = mc;
+        if (!signal.metrics) {
+          signal.metrics = {
+            liquidityUsd: null,
+            marketCapUsd: mc,
+            volume24hUsd: null,
+            volumeH1Usd: null,
+            volumeM5Usd: null,
+            recentBuyVolumeUsd: null,
+            txnsH1: null,
+            buysH1: null,
+            sellsH1: null,
+            buySellRatio: null,
+            priceUsd: null,
+            priceChangeH1Pct: null,
+            priceChange24hPct: null,
+            holderCountEstimate: null,
+            topHolderPct: null,
+            top10HoldPct: null,
+            devHoldPct: null,
+            devActiveRecently: false,
+            mintAuthority: null,
+            source: 'enrich',
+          };
+        } else {
+          signal.metrics.marketCapUsd = mc;
+        }
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   // Dip / pullback enrich for Dip Buyer + Compounder lane fight
   const drop = estimateDropFromPeakPct(signal);
   if (drop != null) {
@@ -6980,7 +7062,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         shouldBlockOtherProfileDiscretionary,
         computeTradePermissionScore,
         shouldSoftSkipPermissionScore,
-        normalizeExpectancyFamily,
+        classifyTradeFamily,
         mintOneSetupProfileLock,
         syncOneSetupLocksFromWatches,
       } = require('./expectancyLift') as typeof import('./expectancyLift');
@@ -6994,9 +7076,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         signal.entryStyleHint || ctx.detectedEntryStyle || ''
       );
       const lateChase = ctx.lateChase === true || entryStyle === 'late_chase';
-      const family = normalizeExpectancyFamily(
-        lateChase ? 'late_chase' : entryStyle
-      );
+      const family = classifyTradeFamily({
+        entryStyle,
+        lateChaseAtEntry: lateChase,
+        profileId: top.profileId,
+        armedWatch,
+        entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
+        setupWatchFamily: signal.setupWatchFamily,
+      });
       if (armedWatch && signal.mint) {
         mintOneSetupProfileLock(
           signal.mint,
@@ -7021,6 +7108,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         entryStyle,
         lateChase,
         armedWatch,
+        profileId: top.profileId,
+        entryPath: armedWatch ? 'armed_trigger' : 'discretionary',
+        setupWatchFamily: signal.setupWatchFamily,
       });
       if (gov.skip) {
         recordRejectedSignal(signal, gov.reason || 'Family governor restrict');
@@ -7030,7 +7120,10 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         );
         return false;
       }
-      const discMix = shouldLimitDiscretionaryMix({ armedWatch });
+      const discMix = shouldLimitDiscretionaryMix({
+        armedWatch,
+        profileId: top.profileId,
+      });
       if (discMix.limit) {
         recordRejectedSignal(signal, discMix.reason || 'Armed mix 70/30');
         console.log(
@@ -7068,7 +7161,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         extensionFromLevelPct: ext,
         dnaMatch:
           ctx.detectedEntryStyle != null
-            ? normalizeExpectancyFamily(ctx.detectedEntryStyle) === family ||
+            ? classifyTradeFamily({
+                entryStyle: ctx.detectedEntryStyle,
+                profileId: top.profileId,
+                armedWatch,
+              }) === family ||
               String(ctx.detectedEntryStyle) === entryStyle
             : null,
         profileId: top.profileId,
@@ -7105,9 +7202,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             ? ` · scalperWR=${att.scalperWinRatePct.toFixed(0)}%`
             : '')
       );
+      const armedForAttention =
+        signal.armedWatch === true ||
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+          reasonBitsLane
+        );
       const conc = shouldLimitScalperConcurrent({
         profileId: top.profileId,
-        armedWatch: signal.armedWatch === true,
+        armedWatch: armedForAttention,
         scannerReasons: signal.scannerReasons,
       });
       if (conc.limit) {
@@ -7120,7 +7222,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       }
       const th = shouldThrottleScalperAdmit({
         profileId: top.profileId,
-        armedWatch: signal.armedWatch === true,
+        armedWatch: armedForAttention,
         scannerReasons: signal.scannerReasons,
       });
       if (th.throttle) {

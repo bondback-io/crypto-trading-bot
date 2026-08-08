@@ -544,7 +544,7 @@ async function resolveEntryMarketCapUsd(
   return resolved;
 }
 
-/** Snapshot MC at signal / smart-wallet buy time (curve first, else Dex). */
+/** Snapshot MC at signal / smart-wallet buy time (curve → Dex → Jupiter → stale cache). */
 export async function resolveSourceEntryMcUsd(
   mint: string
 ): Promise<number | undefined> {
@@ -564,6 +564,29 @@ export async function resolveSourceEntryMcUsd(
     const snap = await fetchLiveTokenSnapshot(mint);
     if (snap?.marketCapUsd != null && snap.marketCapUsd > 0) {
       return snap.marketCapUsd;
+    }
+  } catch {
+    /* non-fatal */
+  }
+  // When Dex only exposes FDV-as-MC (left null), prefer Jupiter circulating mcap
+  try {
+    const {
+      fetchJupiterTokenByMint,
+      lookupCachedJupiterToken,
+      hasJupiterApiKey,
+    } = require('./jupiterTokens') as typeof import('./jupiterTokens');
+    const tok =
+      lookupCachedJupiterToken(mint) ??
+      (hasJupiterApiKey() ? await fetchJupiterTokenByMint(mint) : null);
+    const m = Number(tok?.mcap ?? 0);
+    if (Number.isFinite(m) && m > 0) return m;
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    const cached = getCachedTokenMetrics(mint, { allowStale: true });
+    if (cached?.marketCapUsd != null && cached.marketCapUsd > 0) {
+      return cached.marketCapUsd;
     }
   } catch {
     /* non-fatal */

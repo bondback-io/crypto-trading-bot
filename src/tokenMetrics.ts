@@ -273,7 +273,9 @@ async function fetchTokenMetricsLight(mint: string): Promise<TokenMetrics> {
           (dexEmpty ? stale?.liquidityUsd ?? null : null),
         marketCapUsd:
           dex.marketCapUsd ??
-          (dexEmpty ? stale?.marketCapUsd ?? null : null),
+          (stale?.marketCapUsd != null && stale.marketCapUsd > 0
+            ? stale.marketCapUsd
+            : null),
         volume24hUsd:
           dex.volume24hUsd ??
           (dexEmpty ? stale?.volume24hUsd ?? null : null),
@@ -391,7 +393,9 @@ export async function fetchTokenMetrics(
           (dexEmpty ? stale?.liquidityUsd ?? null : null),
         marketCapUsd:
           dex.marketCapUsd ??
-          (dexEmpty ? stale?.marketCapUsd ?? null : null),
+          (stale?.marketCapUsd != null && stale.marketCapUsd > 0
+            ? stale.marketCapUsd
+            : null),
         volume24hUsd:
           dex.volume24hUsd ??
           (dexEmpty ? stale?.volume24hUsd ?? null : null),

@@ -9813,6 +9813,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-mix-chips" aria-label="Expectancy mix chips">
           <span class="lsd-chip" id="el-chip-armed">Armed —</span>
+          <span class="lsd-chip" id="el-chip-disc">Disc —</span>
+          <span class="lsd-chip" id="el-chip-mix-throttle">Mix throttle —</span>
           <span class="lsd-chip" id="el-chip-late">Late-chase —</span>
           <span class="lsd-chip" id="el-chip-scalper">Scalper —</span>
           <span class="lsd-chip" id="el-chip-partial">1st partial —</span>
@@ -9836,17 +9838,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </table>
         </div>
         <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
-          <table class="tp-overview-table" id="el-family-table" style="min-width:32rem">
+          <table class="tp-overview-table" id="el-family-table" style="min-width:36rem">
             <thead>
               <tr>
                 <th>Family</th>
                 <th>Gov</th>
                 <th>n</th>
+                <th>negW</th>
                 <th>E%</th>
                 <th>Note</th>
               </tr>
             </thead>
-            <tbody id="el-family-tbody"><tr><td colspan="5" class="mint text-xs">—</td></tr></tbody>
+            <tbody id="el-family-tbody"><tr><td colspan="6" class="mint text-xs">—</td></tr></tbody>
           </table>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-funnel">
@@ -16114,6 +16117,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const mix = (data && data.mix) || {};
         const targets = (data && data.targets) || {};
         const armedEl = document.getElementById('el-chip-armed');
+        const discEl = document.getElementById('el-chip-disc');
+        const mixThEl = document.getElementById('el-chip-mix-throttle');
         const lateEl = document.getElementById('el-chip-late');
         const scalEl = document.getElementById('el-chip-scalper');
         const partEl = document.getElementById('el-chip-partial');
@@ -16124,6 +16129,29 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           armedEl.textContent = 'Armed ' + elFmtPct(mix.armedShare);
           armedEl.className = elChipClass(armedOk, armedWarn);
           armedEl.title = 'Target ≥70% armed';
+        }
+        const discShare = mix.discretionaryShare;
+        const discOk =
+          discShare != null && discShare <= (targets.discShareMax || 0.3);
+        const discWarn = discShare != null && discShare <= 0.4;
+        if (discEl) {
+          discEl.textContent = 'Disc ' + elFmtPct(discShare);
+          discEl.className = elChipClass(discOk, discWarn && !discOk);
+          discEl.title = 'Target ≤30% discretionary (fast profiles throttled above cap)';
+        }
+        const thr = (data && data.discMixThrottle) || {};
+        if (mixThEl) {
+          const active = thr.active === true;
+          mixThEl.textContent =
+            'Mix throttle ' + (active ? 'active' : 'idle');
+          mixThEl.className = elChipClass(!active, active);
+          mixThEl.title =
+            'Disc ' +
+            elFmtPct(thr.discShare != null ? thr.discShare : discShare) +
+            ' · cap ' +
+            elFmtPct(thr.effectiveCap != null ? thr.effectiveCap : targets.discShareMax || 0.3) +
+            ' · live armed ' +
+            (thr.liveArmed != null ? thr.liveArmed : '—');
         }
         const lateOk =
           mix.lateChaseShare != null &&
@@ -16237,6 +16265,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (m.tradeCount || 0) +
                     '</td>' +
                     '<td>' +
+                    (f.negWindows != null ? f.negWindows : 0) +
+                    '</td>' +
+                    '<td>' +
                     elFmtNum(m.expectancyPct, 2) +
                     '</td>' +
                     '<td class="text-xs">' +
@@ -16246,7 +16277,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   );
                 })
                 .join('')
-            : '<tr><td colspan="5" class="mint text-xs">—</td></tr>';
+            : '<tr><td colspan="6" class="mint text-xs">—</td></tr>';
         }
         const funnel = document.getElementById('el-funnel');
         if (funnel && data && data.funnel) {

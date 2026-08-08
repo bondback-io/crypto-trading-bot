@@ -14,9 +14,9 @@
  * invalidate for MC after continuous < $8k for 5 minutes (curve rules still apply).
  */
 
-import { fetchBondingCurve, summarizeBondingCurve } from './bondingCurve';
+import { fetchBondingCurve, summarizeBondingCurve, estimateBondingCurveMarketCapUsd } from './bondingCurve';
 import type { LaunchEvent } from './marketData';
-import { fetchLiveTokenSnapshot } from './marketData';
+import { fetchLiveTokenSnapshot, getCachedSolUsdPrice } from './marketData';
 import { markAsMigrated, getMigrationEvent } from './migrationListener';
 import {
   handOffScannerCandidate,
@@ -198,15 +198,38 @@ async function refreshWatchMarket(w: GradWatchEntry, now: number): Promise<void>
   lastMcRefreshAt.set(w.mint, now);
   try {
     const snap = await fetchLiveTokenSnapshot(w.mint);
-    if (!snap) return;
-    if (snap.marketCapUsd != null && snap.marketCapUsd > 0) {
+    if (snap?.marketCapUsd != null && snap.marketCapUsd > 0) {
       w.marketCapUsd = snap.marketCapUsd;
     }
-    if (snap.volumeH1Usd != null && snap.volumeH1Usd > 0) {
+    if (snap?.volumeH1Usd != null && snap.volumeH1Usd > 0) {
       w.volumeH1Usd = snap.volumeH1Usd;
     }
   } catch {
     /* keep last */
+  }
+  if (!(w.marketCapUsd != null && w.marketCapUsd > 0)) {
+    try {
+      const curve = await fetchBondingCurve(w.mint);
+      if (curve.source !== 'none' && !curve.complete) {
+        const mc = estimateBondingCurveMarketCapUsd(
+          curve,
+          getCachedSolUsdPrice()
+        );
+        if (mc != null && mc > 0) w.marketCapUsd = mc;
+      }
+    } catch {
+      /* soft */
+    }
+  }
+  if (!(w.marketCapUsd != null && w.marketCapUsd > 0)) {
+    try {
+      const { resolveSourceEntryMcUsd } =
+        require('./trade') as typeof import('./trade');
+      const mc = await resolveSourceEntryMcUsd(w.mint);
+      if (mc != null && mc > 0) w.marketCapUsd = mc;
+    } catch {
+      /* soft */
+    }
   }
 }
 

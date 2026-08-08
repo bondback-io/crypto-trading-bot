@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.238',
+    title: 'Governor bottleneck repair',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview'],
+    items: [
+      'Expectancy governors: window fingerprint stops poll inflation of negWindows; one-shot sticky restrict → down_ranked repair; scratch / non-finite PnL excluded from governor metrics.',
+      'migration_hold_reclaim labeling narrowed (exact tag / armed grad only); migration_sniper disc without style → discretionary_other.',
+      'Migration MC enrich: Jupiter + stale circulating MC in resolveSourceEntryMcUsd; lane enrich writes source+metrics MC; grad watch refresh uses curve/Jupiter.',
+      'Disc mix: hard throttle only fast profiles (scalper/MB/reversal); arm-inventory relief ~45%; non-fast size ×0.85; Disc + mix-throttle chips on Expectancy Lift.',
+    ],
+  },
+  {
     version: '1.2.237',
     title: 'Expectancy Lift Layer',
     sections: ['microbots', 'tradecraft', 'learning', 'zion', 'scanners', 'overview'],
