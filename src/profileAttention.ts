@@ -233,6 +233,8 @@ export function getSetupWatchDiagnostics(): {
   armedByProfile: Record<string, number>;
   armToTriggerLatencyMs: number | null;
   triggerSuccessPct: number | null;
+  scalperOpenRatePct: number | null;
+  modeBFunnel: Record<string, number> | null;
   blockReasons: Array<{ reason: string; count: number }>;
   scalperAttentionShare: number | null;
   dipInactiveReason:
@@ -260,9 +262,11 @@ export function getSetupWatchDiagnostics(): {
     for (const e of sw.entries || []) {
       if (e.status !== 'armed' && e.status !== 'watching') continue;
       const id = String(e.preferredProfileId || 'scalper');
-      armedByProfile[id] = (armedByProfile[id] || 0) + (e.status === 'armed' ? 1 : 0);
+      armedByProfile[id] =
+        (armedByProfile[id] || 0) + (e.status === 'armed' ? 1 : 0);
     }
-    const dipArmed = (dw.entries || []).filter((e) => e.status === 'armed').length;
+    const dipArmed = (dw.entries || []).filter((e) => e.status === 'armed')
+      .length;
     if (dipArmed) armedByProfile.dip_buyer = dipArmed;
   } catch {
     /* optional */
@@ -314,12 +318,31 @@ export function getSetupWatchDiagnostics(): {
     /* optional */
   }
 
-  const denom = stats.triggered + stats.opened + stats.blockedSafety + stats.handoffFailed;
+  const denom =
+    stats.triggered + stats.opened + stats.blockedSafety + stats.handoffFailed;
+  let modeBFunnel: Record<string, number> | null = null;
+  let scalperOpenRatePct: number | null = null;
+  try {
+    const ss = setupWatchEventStats(6 * 60 * 60_000, 'scalper');
+    scalperOpenRatePct =
+      ss.openRate != null ? Math.round(ss.openRate * 1000) / 10 : null;
+  } catch {
+    /* optional */
+  }
+  try {
+    const { getModeBFunnelCounters } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    modeBFunnel = getModeBFunnelCounters() as unknown as Record<string, number>;
+  } catch {
+    /* optional */
+  }
   return {
     armedByProfile,
     armToTriggerLatencyMs,
     triggerSuccessPct:
       denom > 0 ? Math.round((stats.opened / denom) * 1000) / 10 : null,
+    scalperOpenRatePct,
+    modeBFunnel,
     blockReasons,
     scalperAttentionShare,
     dipInactiveReason: describeDipInactiveReason(),

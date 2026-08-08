@@ -12930,11 +12930,32 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             return s + (Number(n) || 0);
           }, 0);
           const openPct =
-            diag.triggerSuccessPct != null ? diag.triggerSuccessPct + '%' : '—';
+            diag.scalperOpenRatePct != null
+              ? diag.scalperOpenRatePct + '%'
+              : diag.triggerSuccessPct != null
+                ? diag.triggerSuccessPct + '%'
+                : '—';
           const att =
             diag.scalperAttentionShare != null
               ? ' · Scalper share ' + diag.scalperAttentionShare + '%'
               : '';
+          const funnel = diag.modeBFunnel || null;
+          const funnelBits = funnel
+            ? ' · funnel off ' +
+              (funnel.offered || 0) +
+              '/arm ' +
+              (funnel.armedNow != null ? funnel.armedNow : funnel.armed || 0) +
+              '/watch ' +
+              (funnel.watchingNow != null
+                ? funnel.watchingNow
+                : funnel.watching || 0) +
+              (funnel.rejected_min_rank
+                ? ' · minRank×' + funnel.rejected_min_rank
+                : '') +
+              (funnel.rejected_no_targets
+                ? ' · noTgt×' + funnel.rejected_no_targets
+                : '')
+            : '';
           const block = diag.lastBlockReason
             ? ' · last block: ' + String(diag.lastBlockReason).slice(0, 48)
             : '';
@@ -12945,9 +12966,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           diagEl.textContent =
             'Armed ' +
             armedN +
-            ' · open rate ' +
+            ' · Mode B open ' +
             openPct +
             att +
+            funnelBits +
             block +
             dipQuiet;
         }
@@ -19827,6 +19849,46 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    /** Compact badge for trades opened from armed setup watches. */
+    function fmtSetupWatchBadge(p) {
+      if (!p) return '';
+      const fam = String(p.setupWatchFamily || '').toLowerCase();
+      const armed =
+        p.armedWatch === true ||
+        p.entryPath === 'armed_trigger' ||
+        p.scalperWatchTriggered === true ||
+        fam === 'scalper' ||
+        fam === 'dip' ||
+        fam === 'grad';
+      if (!armed) return '';
+      let label = 'Watch';
+      let title = 'Triggered from setup watch';
+      let bg = '#64748b';
+      if (fam === 'scalper' || (!fam && p.scalperWatchTriggered === true)) {
+        label = 'Mode B';
+        title = 'Triggered from Scalper Mode B';
+        bg = '#0f766e';
+      } else if (fam === 'dip') {
+        label = 'Dip watch';
+        title = 'Triggered from Dip Buyer watch';
+        bg = '#0369a1';
+      } else if (fam === 'grad') {
+        label = 'Grad watch';
+        title = 'Triggered from Migration graduation watch';
+        bg = '#6d28d9';
+      }
+      if (p.entryStyle) title += ' · ' + String(p.entryStyle);
+      return (
+        '<span class="badge setup-watch-badge" style="background:' +
+        bg +
+        ';color:#fff;margin-left:0.25rem" title="' +
+        title.replace(/"/g, '&quot;') +
+        '">' +
+        label +
+        '</span>'
+      );
+    }
+
     function fmtEntrySourceBadge(p, opts) {
       opts = opts || {};
       if (!p) return '';
@@ -19850,10 +19912,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const isMigration =
         entrySrc === 'migration' ||
         (!isScanner && /migration/i.test(String(p.source || '')) && opts.allowMigrationGuess);
+      const watchBadge = fmtSetupWatchBadge(p);
 
       if (isMigration || entrySrc === 'migration') {
         return (
           '<span class="badge entry-src-badge" style="background:#7c3aed;color:#fff" title="Migration entry">Migration</span>' +
+          watchBadge +
           fmtEntryStyleBadge(p)
         );
       }
@@ -19864,10 +19928,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           '">' +
           (isHybrid ? 'Scanner+' : 'Scanner') +
           '</span>' +
+          watchBadge +
           fmtEntryStyleBadge(p)
         );
       }
-      if (opts.omitCopy) return fmtEntryStyleBadge(p);
+      if (opts.omitCopy) return watchBadge + fmtEntryStyleBadge(p);
       // Wallet copy — sky badge (shown next to wallet name in cells)
       if (
         entrySrc === 'wallet' ||
@@ -19877,10 +19942,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       ) {
         return (
           '<span class="badge entry-src-badge" style="background:#0284c7;color:#fff" title="Smart-wallet copy trade">Copy</span>' +
+          watchBadge +
           fmtEntryStyleBadge(p)
         );
       }
-      return fmtEntryStyleBadge(p);
+      return watchBadge + fmtEntryStyleBadge(p);
     }
 
     /**

@@ -37,6 +37,7 @@ import {
   applyProfileExitRulesToBuyOpts,
   isSmartBotProfilesEnabled,
   getTradeProfilesStatus,
+  getTradeProfileEnabledFlags,
   withStrategyProfileGateAsync,
   applyTradeProfileSizing,
   evaluateTradeProfileLanes,
@@ -364,6 +365,20 @@ function stampEntryStyleOnBuyOpts(
     if (armed) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
       (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+      const fam =
+        signal.setupWatchFamily ||
+        (Array.isArray(signal.scannerReasons)
+          ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
+            ? 'scalper'
+            : /grad-watch/i.test(signal.scannerReasons.join(' '))
+              ? 'grad'
+              : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'dip'
+                : undefined
+          : undefined);
+      if (fam) {
+        (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
+      }
     } else {
       (buyOpts as { entryPath?: string }).entryPath = 'discretionary';
     }
@@ -833,6 +848,8 @@ export interface TradeSignal {
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;
+  /** scalper | dip | grad when opened from a setup watch */
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad';
   /** HMC stamps for Profit Capture Layer (set in passesFilters) */
   hmcSetup?: string;
   hmcConfidence?: number;
@@ -921,6 +938,20 @@ function applyProfileTaPlaybookGate(
     ) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
       (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
+      const fam =
+        signal.setupWatchFamily ||
+        (Array.isArray(signal.scannerReasons)
+          ? /scalper-watch/i.test(signal.scannerReasons.join(' '))
+            ? 'scalper'
+            : /grad-watch/i.test(signal.scannerReasons.join(' '))
+              ? 'grad'
+              : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'dip'
+                : undefined
+          : undefined);
+      if (fam) {
+        (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
+      }
     }
     if (signal.entryStyleHint) {
       (buyOpts as { entryStyleHint?: string }).entryStyleHint =
@@ -3430,6 +3461,17 @@ async function handleScannerCandidate(
             )
           )) ||
         undefined,
+      setupWatchFamily:
+        candidate.setupWatchFamily ||
+        (Array.isArray(candidate.reasons)
+          ? candidate.reasons.some((r) => /scalper-watch/i.test(String(r)))
+            ? 'scalper'
+            : candidate.reasons.some((r) => /grad-watch/i.test(String(r)))
+              ? 'grad'
+              : candidate.reasons.some((r) => /dip-watch/i.test(String(r)))
+                ? 'dip'
+                : undefined
+          : undefined),
       entryStyleHint: candidate.entryStyleHint,
       qualityScoreHint: candidate.qualityScoreHint,
       sizePlanSol:
@@ -6803,59 +6845,78 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     }
     const reasonBitsLane = (signal.scannerReasons || []).join(' ');
     const setupWatchPrefer =
-      /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+      (/scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
         reasonBitsLane
-      ) && signal.candidateTradeProfileId;
-    const softLaneMode =
-      (classifierSoftEligibility &&
-        classifierPreferredIds != null &&
-        classifierPreferredIds.length > 0) ||
-      Boolean(setupWatchPrefer);
-    const preferIds = setupWatchPrefer
-      ? [
-          signal.candidateTradeProfileId!,
-          ...(classifierPreferredIds || []).filter(
-            (id) => id !== signal.candidateTradeProfileId
-          ),
-        ]
-      : classifierPreferredIds;
-    const lanes = evaluateTradeProfileLanes(ctx, {
-      silent: false,
-      eligibleProfileIds:
-        softLaneMode && setupWatchPrefer
-          ? null
-          : softLaneMode
-            ? null
-            : classifierEligibleIds,
-      preferredProfileIds: softLaneMode ? preferIds : null,
-      softEligibility: softLaneMode,
-    });
-    logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
-    lanePassers = lanes.filter((l) => l.passed && l.assignment);
-    // Armed watch: if preferred profile passed, promote it to top
-    if (setupWatchPrefer && lanePassers.length) {
-      const pref = lanePassers.find(
-        (l) => l.profileId === signal.candidateTradeProfileId
-      );
-      if (pref) {
-        lanePassers = [pref, ...lanePassers.filter((l) => l !== pref)];
+      ) ||
+        signal.armedWatch === true) &&
+      signal.candidateTradeProfileId;
+    // Armed watch: hard-lock to stamped preferred profile (no silent reassignment)
+    if (setupWatchPrefer && signal.candidateTradeProfileId) {
+      const prefId = signal.candidateTradeProfileId;
+      const flags = getTradeProfileEnabledFlags();
+      if (flags[prefId] === false) {
+        const reason = `Armed watch preferred profile OFF (${prefId})`;
+        recordRejectedSignal(signal, reason);
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=${reason}`
+        );
+        return false;
       }
-    }
-    if (!lanePassers.length) {
-      const failBits = lanes
-        .filter((l) => !l.passed)
-        .slice(0, 4)
-        .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
-        .join(' · ');
-      const reason =
-        failBits ||
-        'No trade profile lane passed floors/match';
-      recordRejectedSignal(signal, reason);
-      console.log(
-        `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-          `reason=smart-bot lane fight: ${reason}`
-      );
-      return false;
+      const lanes = evaluateTradeProfileLanes(ctx, {
+        silent: false,
+        eligibleProfileIds: [prefId],
+        preferredProfileIds: [prefId],
+        softEligibility: true,
+      });
+      logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
+      lanePassers = lanes.filter((l) => l.passed && l.assignment);
+      if (!lanePassers.length) {
+        const failBits = lanes
+          .filter((l) => !l.passed)
+          .slice(0, 4)
+          .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
+          .join(' · ');
+        const reason =
+          failBits ||
+          `Armed watch preferred profile failed floors (${prefId})`;
+        recordRejectedSignal(signal, reason);
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=smart-bot lane fight: ${reason}`
+        );
+        return false;
+      }
+    } else {
+      const softLaneMode =
+        classifierSoftEligibility &&
+        classifierPreferredIds != null &&
+        classifierPreferredIds.length > 0;
+      const preferIds = classifierPreferredIds;
+      const lanes = evaluateTradeProfileLanes(ctx, {
+        silent: false,
+        eligibleProfileIds: softLaneMode ? null : classifierEligibleIds,
+        preferredProfileIds: softLaneMode ? preferIds : null,
+        softEligibility: softLaneMode,
+      });
+      logLaneFightDecisions(signal, lanes, lastHmcGate, lastHmcClassifier);
+      lanePassers = lanes.filter((l) => l.passed && l.assignment);
+      if (!lanePassers.length) {
+        const failBits = lanes
+          .filter((l) => !l.passed)
+          .slice(0, 4)
+          .map((l) => `${l.name}: ${l.failReason || 'no match'}`)
+          .join(' · ');
+        const reason =
+          failBits ||
+          'No trade profile lane passed floors/match';
+        recordRejectedSignal(signal, reason);
+        console.log(
+          `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
+            `reason=smart-bot lane fight: ${reason}`
+        );
+        return false;
+      }
     }
     const top = lanePassers[0]!;
     console.log(

@@ -89,6 +89,48 @@ const watches = new Map<string, ScalperWatchEntry>();
 const lastMcRefreshAt = new Map<string, number>();
 const unwatchCooldownUntil = new Map<string, number>();
 
+/** Rolling Mode B admit funnel (session counters). */
+const modeBFunnel = {
+  offered: 0,
+  rejected_cooldown: 0,
+  rejected_dip: 0,
+  rejected_majors: 0,
+  rejected_mc: 0,
+  rejected_band: 0,
+  rejected_no_targets: 0,
+  rejected_min_rank: 0,
+  watching: 0,
+  armed: 0,
+};
+
+function noteModeBFunnel(
+  key: keyof typeof modeBFunnel,
+  n = 1
+): void {
+  modeBFunnel[key] = (modeBFunnel[key] || 0) + n;
+}
+
+/** Public funnel counter for scanner / diagnostics. */
+export function noteModeBFunnelReject(
+  key: 'rejected_min_rank' | 'rejected_no_targets',
+  n = 1
+): void {
+  noteModeBFunnel(key, n);
+}
+
+export function getModeBFunnelCounters(): typeof modeBFunnel & {
+  watchingNow: number;
+  armedNow: number;
+} {
+  let watchingNow = 0;
+  let armedNow = 0;
+  for (const w of watches.values()) {
+    if (w.status === 'watching') watchingNow += 1;
+    if (w.status === 'armed') armedNow += 1;
+  }
+  return { ...modeBFunnel, watchingNow, armedNow };
+}
+
 function isManualUnwatchCooldown(mint: string): boolean {
   const until = unwatchCooldownUntil.get(mint) ?? 0;
   if (until <= Date.now()) {
@@ -491,18 +533,31 @@ export function considerScalperWatchSetup(input: {
   chartPatternIds?: string[];
   preferredProfileId?: string;
   source?: string;
+  nearKeyFib?: boolean;
 }): ScalperWatchEntry | null {
   if (!isScalperFamilyEnabled()) return null;
   if (!input.mint) return null;
-  if (isManualUnwatchCooldown(input.mint)) return null;
-  if (isMintOnActiveDipWatch(input.mint)) return null;
+  if (isManualUnwatchCooldown(input.mint)) {
+    noteModeBFunnel('rejected_cooldown');
+    return null;
+  }
+  if (isMintOnActiveDipWatch(input.mint)) {
+    noteModeBFunnel('rejected_dip');
+    return null;
+  }
 
   // Never route high-MC majors into Scalper Mode B
-  if (String(input.source || '').toLowerCase() === 'majors') return null;
+  if (String(input.source || '').toLowerCase() === 'majors') {
+    noteModeBFunnel('rejected_majors');
+    return null;
+  }
 
   const mc = input.marketCapUsd;
   // Above Scalper mid-band ceiling — leave to Dip / quality lanes
-  if (mc != null && mc > 0 && mc > SCALPER_MC_MAX) return null;
+  if (mc != null && mc > 0 && mc > SCALPER_MC_MAX) {
+    noteModeBFunnel('rejected_mc');
+    return null;
+  }
 
   const midBand =
     mc != null && mc > 0 && mc >= SCALPER_MC_MIN && mc <= SCALPER_MC_MAX;
@@ -516,11 +571,22 @@ export function considerScalperWatchSetup(input: {
     );
   const hasTargets =
     (input.supportPriceSol != null && input.supportPriceSol > 0) ||
-    (Array.isArray(input.supportTfHits) && input.supportTfHits.length > 0);
-  // Mid-band support reclaim Mode B, or microcap/motion for Reversal/MB
-  if (!midBand && !mbOrReversal && !microcap) return null;
-  if (midBand && !hasTargets) return null;
-  if (microcap && !mbOrReversal && !hasTargets) return null;
+    (Array.isArray(input.supportTfHits) && input.supportTfHits.length > 0) ||
+    input.nearSupport === true ||
+    input.nearKeyFib === true ||
+    (input.srConfluenceScore != null && Number(input.srConfluenceScore) >= 40);
+  // Mid-band always parks (S/R resolved on tick). Microcap needs motion or levels.
+  if (midBand) {
+    /* admit */
+  } else if (microcap && (mbOrReversal || hasTargets)) {
+    /* admit */
+  } else if (mbOrReversal && hasTargets) {
+    /* admit */
+  } else {
+    if (!hasTargets) noteModeBFunnel('rejected_no_targets');
+    else noteModeBFunnel('rejected_band');
+    return null;
+  }
 
   pruneTerminal();
   const existing = watches.get(input.mint);
@@ -565,6 +631,7 @@ export function considerScalperWatchSetup(input: {
       existing.lastReason = `prefer ${nextPref} at support`;
     }
     existing.targetEntries = buildTargetEntries(existing);
+    noteModeBFunnel('offered');
     return existing;
   }
 
@@ -605,6 +672,7 @@ export function considerScalperWatchSetup(input: {
   entry.targetEntries = buildTargetEntries(entry);
   if (nearArmed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
+  noteModeBFunnel('offered');
   console.log(
     `[scalper-watch] ${entry.status.toUpperCase()} ${entry.symbol} ` +
       `→ ${preferred} MC=${mc != null ? `$${Math.round(mc)}` : '?'} ` +
@@ -706,6 +774,7 @@ function buildHandoff(
     entryStyleHint: w.entryStyle,
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
+    setupWatchFamily: 'scalper',
     launch,
   };
 }
@@ -968,7 +1037,7 @@ export function getScalperSetupWatchStatus(limit = 20): {
   };
 }
 
-/** Offer scanner candidates into the scalper-family watchlist (non-blocking). */
+/** Offer scanner candidates into the scalper-family watchlist. Returns true if parked. */
 export function offerScalperWatchFromCandidate(c: {
   mint: string;
   symbol: string;
@@ -993,8 +1062,8 @@ export function offerScalperWatchFromCandidate(c: {
   chartPatternIds?: string[];
   preferredProfileId?: string;
   specialtyFeed?: string;
-}): void {
-  considerScalperWatchSetup({
+}): boolean {
+  const row = considerScalperWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
     name: c.name,
@@ -1017,5 +1086,7 @@ export function offerScalperWatchFromCandidate(c: {
     chartPatternIds: c.chartPatternIds,
     preferredProfileId: c.preferredProfileId,
     source: c.specialtyFeed || 'scanner',
+    nearKeyFib: c.nearKeyFib,
   });
+  return row != null;
 }

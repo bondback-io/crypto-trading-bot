@@ -61,7 +61,10 @@ export function listSetupWatchEvents(limit = 40): SetupWatchEvent[] {
   return events.slice(0, Math.max(1, Math.min(100, limit)));
 }
 
-export function setupWatchEventStats(windowMs = 6 * 60 * 60_000): {
+export function setupWatchEventStats(
+  windowMs = 6 * 60 * 60_000,
+  family?: 'scalper' | 'dip' | 'grad'
+): {
   armed: number;
   triggered: number;
   opened: number;
@@ -72,7 +75,9 @@ export function setupWatchEventStats(windowMs = 6 * 60 * 60_000): {
   openRate: number | null;
 } {
   const since = Date.now() - windowMs;
-  const slice = events.filter((e) => e.at >= since);
+  const slice = events.filter(
+    (e) => e.at >= since && (family == null || e.family === family)
+  );
   const armed = slice.filter((e) => e.kind === 'armed').length;
   const triggered = slice.filter((e) => e.kind === 'triggered').length;
   const opened = slice.filter((e) => e.kind === 'trigger_opened').length;

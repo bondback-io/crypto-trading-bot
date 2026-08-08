@@ -337,6 +337,8 @@ export interface BuyOptions {
   armedWatch?: boolean;
   /** armed_trigger | discretionary */
   entryPath?: 'armed_trigger' | 'discretionary' | string;
+  /** scalper | dip | grad when opened from a setup watch */
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
   entryStyleHint?: string;
   qualityScoreHint?: number;
   /** Influencer Mirror source wallet stamps */
@@ -1022,6 +1024,7 @@ export async function executeBuy(
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+        setupWatchFamily: meta?.setupWatchFamily,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,
@@ -1180,6 +1183,7 @@ export async function executeBuy(
         entryPath:
           meta?.entryPath ||
           (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+        setupWatchFamily: meta?.setupWatchFamily,
         whaleStateAtEntry: meta?.whaleStateAtEntry,
         profileTaPlainLanguage: meta?.profileTaPlainLanguage,
         zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,

@@ -512,6 +512,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     entryStyleHint: w.entryStyle || 'support_dip_reclaim',
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
+    setupWatchFamily: 'dip',
     launch,
   };
 }

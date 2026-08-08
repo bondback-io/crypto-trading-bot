@@ -395,10 +395,12 @@ function buildHandoff(
     ? [
         'grad-watch:triggered',
         'grad-watch:post-grad',
+        'armedWatch',
         `curve ${progress.toFixed(1)}% complete`,
       ]
     : [
         'grad-watch:triggered',
+        'armedWatch',
         `curve ${progress.toFixed(1)}%`,
         `fire ≥${fireMin()}%`,
       ];
@@ -422,6 +424,9 @@ function buildHandoff(
     nearMigration: !postGrad,
     curveProgressPct: progress,
     candleSource: 'synthetic',
+    armedWatch: true,
+    entryStyleHint: 'migration_hold_reclaim',
+    setupWatchFamily: 'grad',
     launch,
   };
 }

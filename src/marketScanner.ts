@@ -98,6 +98,8 @@ export interface ScannerCandidate {
   entryStyleHint?: string;
   qualityScoreHint?: number;
   sizePlanSol?: number;
+  /** Which setup-watch family triggered this handoff */
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad';
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
   supportPriceSol?: number | null;
   resistancePriceSol?: number | null;
@@ -544,9 +546,9 @@ export function rankLaunchForScanner(event: LaunchEvent): RankLaunchResult {
   if (mc > 0 && mc < 80_000) {
     score += 6;
     reasons.push('early MC');
-  } else if (mc >= 80_000 && mc <= 450_000) {
+  } else if (mc >= 80_000 && mc <= 800_000) {
     score += 8;
-    reasons.push('sweet MC');
+    reasons.push(mc <= 450_000 ? 'sweet MC' : 'mid-band MC');
   }
 
   if (event.migrated) {
@@ -1116,27 +1118,26 @@ export async function selectScannerCandidates(
       }
     }
 
-    if (ranked.veto?.startsWith('bearish:')) return null;
-    if (score < minRank) return null;
-    // Mode B: mid-band Scalper (150k–800k) immediate only at multi-TF support confluence.
-    // Non-confluent names with S/R targets go to scalperSetupWatch instead.
+    // Mode B watch offer BEFORE minRank (mirror grad) — park mid-band even if rank fails
     const scalperMcEligible =
       event.marketCapUsd != null &&
       event.marketCapUsd > 0 &&
       event.marketCapUsd >= 150_000 &&
       event.marketCapUsd <= 800_000;
-    const hasSrTargets =
+    const hasSrHint =
       (ranked.supportPriceSol != null && ranked.supportPriceSol > 0) ||
-      (ranked.supportTfHits != null && ranked.supportTfHits.length > 0);
+      (ranked.supportTfHits != null && ranked.supportTfHits.length > 0) ||
+      ranked.nearSupport === true ||
+      ranked.nearKeyFib === true;
     const scalperConfluentNow =
       scalperMcEligible && ranked.nearMultiTfSupport === true;
 
-    // Offer scalper watch early (even if we drop from immediate queue)
-    if (scalperMcEligible && hasSrTargets && !scalperConfluentNow) {
+    let modeBParked = false;
+    if (scalperMcEligible) {
       try {
         const { offerScalperWatchFromCandidate } =
           require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
-        offerScalperWatchFromCandidate({
+        modeBParked = offerScalperWatchFromCandidate({
           mint: event.mint,
           symbol: event.symbol,
           name: event.name,
@@ -1147,7 +1148,7 @@ export async function selectScannerCandidates(
           priceChangeH1Pct: event.priceChangeH1Pct,
           priceChangePct: event.priceChangePct,
           nearKeyFib: ranked.nearKeyFib,
-          nearSupport: ranked.nearSupport,
+          nearSupport: ranked.nearSupport || hasSrHint,
           nearMultiTfSupport: ranked.nearMultiTfSupport,
           nearMultiTfResistance: ranked.nearMultiTfResistance,
           srConfluenceScore: ranked.srConfluenceScore,
@@ -1164,10 +1165,24 @@ export async function selectScannerCandidates(
       }
     }
 
-    // Mode B: small-MC scalper band without multi-TF support → watch only (no immediate)
-    if (scalperMcEligible && !scalperConfluentNow) {
+    if (ranked.veto?.startsWith('bearish:')) return null;
+    if (score < minRank) {
+      if (scalperMcEligible) {
+        try {
+          const { noteModeBFunnelReject } =
+            require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+          noteModeBFunnelReject('rejected_min_rank');
+        } catch {
+          /* optional */
+        }
+      }
       return null;
     }
+    // Mode B: mid-band without confluence → watch-only only when parked
+    if (scalperMcEligible && !scalperConfluentNow && modeBParked) {
+      return null;
+    }
+    // (legacy offer block removed — offer runs before minRank above)
     if (requireTa && !ranked.taSetup && !scalperConfluentNow) return null;
     if (cfg.requireMtfAligned === true && !ranked.mtfAligned) return null;
     if (

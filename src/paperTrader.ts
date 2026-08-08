@@ -435,6 +435,8 @@ export interface Position {
   /** Armed setup-watch handoff */
   armedWatch?: boolean;
   entryPath?: 'armed_trigger' | 'discretionary' | string;
+  /** scalper | dip | grad when opened from a setup watch */
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad' | string;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -2106,6 +2108,7 @@ export class PaperTrader {
     scalperWatchTriggered?: boolean;
     armedWatch?: boolean;
     entryPath?: string;
+    setupWatchFamily?: string;
     whaleStateAtEntry?: string;
     profileTaPlainLanguage?: string;
     zigzagStructureAtEntry?: string;
@@ -2218,6 +2221,9 @@ export class PaperTrader {
       entryPath:
         input.entryPath ||
         (input.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+      setupWatchFamily: input.setupWatchFamily
+        ? String(input.setupWatchFamily)
+        : undefined,
       whaleStateAtEntry: input.whaleStateAtEntry,
       profileTaPlainLanguage: input.profileTaPlainLanguage,
       zigzagStructureAtEntry: input.zigzagStructureAtEntry,
@@ -2638,6 +2644,7 @@ export class PaperTrader {
       scalperWatchTriggered?: boolean;
       armedWatch?: boolean;
       entryPath?: string;
+      setupWatchFamily?: string;
       whaleStateAtEntry?: string;
       profileTaPlainLanguage?: string;
       zigzagStructureAtEntry?: string;
@@ -2836,6 +2843,9 @@ export class PaperTrader {
       entryPath:
         meta?.entryPath ||
         (meta?.armedWatch === true ? 'armed_trigger' : 'discretionary'),
+      setupWatchFamily: meta?.setupWatchFamily
+        ? String(meta.setupWatchFamily)
+        : undefined,
       whaleStateAtEntry: meta?.whaleStateAtEntry,
       profileTaPlainLanguage: meta?.profileTaPlainLanguage,
       zigzagStructureAtEntry: meta?.zigzagStructureAtEntry,

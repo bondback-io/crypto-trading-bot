@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.236',
+    title: 'Mode B funnel fix + watch-origin trade badges',
+    sections: ['microbots', 'scanners', 'overview', 'tradecraft', 'knobs'],
+    items: [
+      'Mode B: offer before minRank, divert to watch only when parked, and admit mid-band through $800k (not instant-entry only).',
+      'Funnel diagnostics: Mode B open rate plus offered / armed / watch counters for setup-watch health.',
+      'setupWatchFamily stamps + Watch / Mode B / Dip / Grad badges on open and closed trades.',
+      'Hard-lock preferred profile on armed watch handoffs (no silent reassignment; skip if that profile is OFF).',
+      'Grad armedWatch parity with Scalper Mode B / Dip handoffs.',
+    ],
+  },
+  {
     version: '1.2.235',
     title: 'Dashboard JS stall fix (Smart Mirror alert escapes)',
     sections: ['overview', 'scanners', 'copy', 'knobs'],
