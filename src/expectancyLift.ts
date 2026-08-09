@@ -222,6 +222,8 @@ export interface ExpectancyLiftStatus {
   entrySkillActive: boolean;
   /** Per-family skill memory (WR / E / avg W/L / MFE / n + governor). */
   familySkillMemory: FamilySkillMemoryRow[];
+  /** Performance Power Cell charge (visual-only). */
+  performanceCharge: import('./performanceCharge').PerformanceChargeBundle | null;
 }
 
 export interface FamilySkillMemoryRow {
@@ -2082,6 +2084,121 @@ export function getExpectancyLiftStatus(
     state: f.state,
   }));
 
+  let performanceCharge: import('./performanceCharge').PerformanceChargeBundle | null =
+    null;
+  try {
+    const { buildPerformanceChargeBundle } =
+      require('./performanceCharge') as typeof import('./performanceCharge');
+    const half = Math.floor(windowTrades.length / 2);
+    const earlyTrades = half >= 4 ? windowTrades.slice(0, half) : [];
+    const earlyOverall =
+      earlyTrades.length >= 4 ? computeExpectancyMetrics(earlyTrades) : null;
+    const earlyArmed =
+      earlyTrades.length >= 4
+        ? earlyTrades.filter((t) => t.armed).length / earlyTrades.length
+        : null;
+    const earlyLate =
+      earlyTrades.length >= 4
+        ? earlyTrades.filter(
+            (t) => t.lateChase || t.family === 'late_chase'
+          ).length / earlyTrades.length
+        : null;
+
+    let craftScore: number | null = null;
+    try {
+      const { buildTradeCraftPerformance } =
+        require('./tradeCraftPerformance') as typeof import('./tradeCraftPerformance');
+      craftScore = buildTradeCraftPerformance('all', window).craftScore ?? null;
+    } catch {
+      craftScore = null;
+    }
+
+    const attShares: Record<string, number> = {};
+    try {
+      const { getProfileAttentionShare } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const att = getProfileAttentionShare();
+      if (att.total >= 4) {
+        attShares.scalper = att.shares.scalper;
+        attShares.dip_buyer = att.shares.dip;
+        attShares.trend_rider = att.shares.trend;
+        attShares.migration_sniper = att.shares.migration;
+        attShares.momentum_burst = att.shares.scalper;
+        attShares.reversal_scalper = att.shares.scalper;
+      }
+    } catch {
+      /* soft */
+    }
+
+    performanceCharge = buildPerformanceChargeBundle({
+      combined: {
+        winRate: overall.winRate,
+        expectancyPct: overall.expectancyPct,
+        armedShare: mix.armedShare,
+        mfeCapturePct: overall.mfeCapturePct ?? mix.avgMfeCapture,
+        lateChaseShare: mix.lateChaseShare,
+        tradeCount: overall.tradeCount,
+      },
+      priorCombined:
+        earlyOverall != null
+          ? {
+              winRate: earlyOverall.winRate,
+              expectancyPct: earlyOverall.expectancyPct,
+              armedShare: earlyArmed,
+              mfeCapturePct: earlyOverall.mfeCapturePct,
+              lateChaseShare: earlyLate,
+              tradeCount: earlyOverall.tradeCount,
+            }
+          : null,
+      craftScore,
+      combinedAttentionShare: mix.scalperAttentionShare,
+      combinedAttentionCap: scalperShareMax,
+      profiles: profiles.map((p) => {
+        const ptEarly = earlyTrades.filter((t) => t.profileId === p.profileId);
+        const earlyM =
+          ptEarly.length >= 3 ? computeExpectancyMetrics(ptEarly) : null;
+        const profileCap =
+          p.profileId === 'scalper' ||
+          p.profileId === 'momentum_burst' ||
+          p.profileId === 'reversal_scalper'
+            ? scalperShareMax
+            : null;
+        return {
+          profileId: p.profileId,
+          name: p.name,
+          metrics: p.metrics,
+          armedShare: p.armedShare,
+          lateChaseShare: p.lateChaseShare,
+          quiet: p.quiet,
+          quietReason: p.quietReason,
+          attentionShare: attShares[p.profileId] ?? null,
+          attentionCap: profileCap,
+          craftScore: null,
+          prior:
+            earlyM != null
+              ? {
+                  winRate: earlyM.winRate,
+                  expectancyPct: earlyM.expectancyPct,
+                  armedShare:
+                    ptEarly.length > 0
+                      ? ptEarly.filter((t) => t.armed).length / ptEarly.length
+                      : null,
+                  mfeCapturePct: earlyM.mfeCapturePct,
+                  lateChaseShare:
+                    ptEarly.length > 0
+                      ? ptEarly.filter((t) => t.lateChase).length /
+                        ptEarly.length
+                      : null,
+                  tradeCount: earlyM.tradeCount,
+                }
+              : null,
+        };
+      }),
+    });
+  } catch {
+    performanceCharge = null;
+  }
+
   return {
     ok: true,
     window,
@@ -2108,6 +2225,7 @@ export function getExpectancyLiftStatus(
     baselineActive,
     entrySkillActive,
     familySkillMemory,
+    performanceCharge,
   };
 }
 

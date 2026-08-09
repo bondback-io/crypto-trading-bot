@@ -3665,6 +3665,155 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       font-variant-numeric: tabular-nums;
     }
     .tc-score-label { font-size: 0.68rem; color: #94a3b8; margin-top: 0.2rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    /* Performance Power Cell */
+    .ppc-hero {
+      display: flex; flex-wrap: wrap; gap: 1rem; align-items: stretch;
+      margin: 0.35rem 0 0.75rem;
+    }
+    .ppc-hero-main {
+      flex: 1 1 16rem; min-width: 0;
+      display: flex; flex-direction: column; gap: 0.55rem;
+      padding: 0.85rem 0.95rem; border-radius: 12px;
+      background: linear-gradient(145deg, #0b1224 0%, #0f172a 55%, #111827 100%);
+      border: 1px solid #1e293b;
+    }
+    .ppc-hero-meta { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: baseline; }
+    .ppc-pct {
+      font-size: 2rem; font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums; color: var(--ppc-neon, #34d399);
+    }
+    .ppc-status {
+      font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #cbd5e1;
+    }
+    .ppc-delta {
+      font-size: 0.65rem; font-weight: 700; padding: 0.12rem 0.4rem;
+      border-radius: 999px; border: 1px solid #334155; color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+    }
+    .ppc-delta.up { color: #4ade80; border-color: #065f46; background: #064e3b33; }
+    .ppc-delta.down { color: #f87171; border-color: #7f1d1d; background: #450a0a33; }
+    .ppc-delta.flat { color: #94a3b8; }
+    .ppc-blurb { font-size: 0.72rem; color: #94a3b8; line-height: 1.4; margin: 0; }
+    .ppc-cell {
+      --ppc-neon: #34d399;
+      --ppc-fill: 0%;
+      position: relative;
+      width: 100%;
+      height: 3.4rem;
+      border-radius: 0.65rem;
+      background: #020617;
+      border: 1px solid color-mix(in srgb, var(--ppc-neon) 55%, #1e293b);
+      box-shadow: 0 0 0 1px #0f172a, 0 0 18px color-mix(in srgb, var(--ppc-neon) 18%, transparent);
+      overflow: hidden;
+    }
+    .ppc-cell::after {
+      content: '';
+      position: absolute; right: -0.35rem; top: 50%; transform: translateY(-50%);
+      width: 0.4rem; height: 1.15rem; border-radius: 0 3px 3px 0;
+      background: color-mix(in srgb, var(--ppc-neon) 70%, #334155);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--ppc-neon) 35%, transparent);
+    }
+    .ppc-cell.band-critical { --ppc-neon: #f87171; }
+    .ppc-cell.band-weak { --ppc-neon: #fb923c; }
+    .ppc-cell.band-charging { --ppc-neon: #fbbf24; }
+    .ppc-cell.band-strong { --ppc-neon: #34d399; }
+    .ppc-cell.band-max { --ppc-neon: #22d3ee; }
+    .ppc-fill {
+      position: absolute; inset: 0 auto 0 0; width: var(--ppc-fill);
+      background: linear-gradient(90deg,
+        color-mix(in srgb, var(--ppc-neon) 35%, #020617),
+        color-mix(in srgb, var(--ppc-neon) 85%, #fff));
+      box-shadow: inset 0 0 12px color-mix(in srgb, var(--ppc-neon) 35%, transparent),
+        0 0 16px color-mix(in srgb, var(--ppc-neon) 25%, transparent);
+      transition: width 0.45s ease;
+    }
+    .ppc-cell.shimmer .ppc-fill {
+      background-size: 200% 100%;
+      animation: ppc-shimmer 1.8s linear infinite;
+    }
+    @keyframes ppc-shimmer {
+      0% { filter: brightness(1); }
+      50% { filter: brightness(1.25); }
+      100% { filter: brightness(1); }
+    }
+    .ppc-segments {
+      position: absolute; inset: 0; display: flex; pointer-events: none;
+    }
+    .ppc-segments span {
+      flex: 1; border-right: 1px solid #0f172a88;
+    }
+    .ppc-segments span:last-child { border-right: 0; }
+    .ppc-target-tick {
+      position: absolute; top: 0; bottom: 0; width: 2px;
+      background: repeating-linear-gradient(180deg, #e2e8f0 0 3px, transparent 3px 6px);
+      opacity: 0.55; z-index: 2; transform: translateX(-50%);
+      pointer-events: none;
+    }
+    .ppc-particles {
+      position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: hidden;
+    }
+    .ppc-particles i {
+      position: absolute; width: 3px; height: 3px; border-radius: 50%;
+      background: color-mix(in srgb, var(--ppc-neon) 80%, #fff);
+      opacity: 0; bottom: 10%;
+      animation: ppc-float 2.4s ease-in infinite;
+    }
+    .ppc-particles i:nth-child(1) { left: 18%; animation-delay: 0s; }
+    .ppc-particles i:nth-child(2) { left: 34%; animation-delay: 0.35s; }
+    .ppc-particles i:nth-child(3) { left: 52%; animation-delay: 0.7s; }
+    .ppc-particles i:nth-child(4) { left: 68%; animation-delay: 1.05s; }
+    .ppc-particles i:nth-child(5) { left: 82%; animation-delay: 1.4s; }
+    .ppc-particles i:nth-child(6) { left: 44%; animation-delay: 1.75s; }
+    @keyframes ppc-float {
+      0% { transform: translateY(0); opacity: 0; }
+      20% { opacity: 0.85; }
+      100% { transform: translateY(-2.6rem); opacity: 0; }
+    }
+    .ppc-minis {
+      display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.15rem;
+    }
+    .ppc-mini {
+      flex: 1 1 7.5rem; min-width: 7rem; max-width: 11rem;
+      padding: 0.45rem 0.5rem; border-radius: 10px;
+      background: #0f172a; border: 1px solid #1e293b;
+      cursor: default;
+    }
+    .ppc-mini-name {
+      font-size: 0.62rem; font-weight: 700; color: #cbd5e1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ppc-mini-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.35rem; margin-top: 0.2rem;
+    }
+    .ppc-mini-pct {
+      font-size: 0.78rem; font-weight: 800; font-variant-numeric: tabular-nums;
+      color: var(--ppc-neon, #94a3b8);
+    }
+    .ppc-mini-status {
+      font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.03em; color: #64748b;
+    }
+    .ppc-mini .ppc-cell {
+      height: 0.85rem; margin-top: 0.3rem; border-radius: 0.35rem;
+      box-shadow: 0 0 10px color-mix(in srgb, var(--ppc-neon) 12%, transparent);
+    }
+    .ppc-mini .ppc-cell::after {
+      width: 0.22rem; height: 0.45rem; right: -0.2rem;
+    }
+    .ppc-mini.quiet, .ppc-mini.capped { opacity: 0.72; }
+    .ppc-mini.band-critical { --ppc-neon: #f87171; }
+    .ppc-mini.band-weak { --ppc-neon: #fb923c; }
+    .ppc-mini.band-charging { --ppc-neon: #fbbf24; }
+    .ppc-mini.band-strong { --ppc-neon: #34d399; }
+    .ppc-mini.band-max { --ppc-neon: #22d3ee; }
+    .ppc-empty { font-size: 0.72rem; color: #64748b; }
+    @media (prefers-reduced-motion: reduce) {
+      .ppc-cell.shimmer .ppc-fill { animation: none !important; filter: none !important; }
+      .ppc-particles i { animation: none !important; opacity: 0 !important; }
+      .ppc-fill { transition: none !important; }
+    }
     .tc-blurb { font-size: 0.78rem; color: #cbd5e1; line-height: 1.45; max-width: 40rem; margin: 0; }
     .tc-tabs {
       display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.35rem 0 0.65rem;
@@ -9871,6 +10020,23 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="mint">Funnel —</span>
         </div>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-expectancy-lift"></canvas></div>
+      </div>
+
+      <div class="card" id="performance-power-cell-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Performance Power Cell <span class="tip" tabindex="0" data-tip="Visual charge from Expectancy Lift: WR vs 45% (35%), expectancy (20%), armed share vs 70% (20%), MFE capture (15%), late-chase penalty (10%). Craft score fallback when thin. Same Last 20/50/100 window as Expectancy Lift. Visual only — does not change admits."></span></div>
+            <p class="text-xs text-slate-400 mb-0" id="ppc-summary">Loading…</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-end">
+            <span class="mint text-xs" id="ppc-window-label" title="Shares Expectancy Lift window">Window —</span>
+            <button type="button" class="btn btn-sm" onclick="loadExpectancyLift()">Refresh</button>
+          </div>
+        </div>
+        <div class="ppc-hero" id="ppc-hero">
+          <div class="ppc-empty" id="ppc-empty">—</div>
+        </div>
+        <div class="ppc-minis" id="ppc-minis" aria-label="Per-profile power cells"></div>
       </div>
 
       <div class="card" id="trade-craft-card">
@@ -16148,6 +16314,221 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.saveAdmissionBaseline = saveAdmissionBaseline;
 
+    const PPC_PROFILE_ORDER = [
+      'scalper',
+      'reversal_scalper',
+      'momentum_burst',
+      'migration_sniper',
+      'dip_buyer',
+      'trend_rider',
+      'steady_compounder',
+      'high_win_rate',
+      'smart_money_mirror',
+    ];
+
+    function ppcEsc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function ppcTip(c) {
+      if (!c || !c.breakdown) return 'Performance charge';
+      const b = c.breakdown;
+      const bits = [
+        'WR ' + (b.winRatePct != null ? b.winRatePct + '%' : '—') +
+          ' (score ' + (b.wrScore != null ? b.wrScore : '—') + ')',
+        'Expectancy ' +
+          (b.expectancyPct != null
+            ? (b.expectancyPct >= 0 ? '+' : '') + b.expectancyPct + '%'
+            : '—'),
+        'Armed ' +
+          (b.armedSharePct != null ? b.armedSharePct + '%' : '—'),
+        'MFE capture ' +
+          (b.mfeCapturePct != null ? b.mfeCapturePct + '%' : '—'),
+        'Late-chase ' +
+          (b.lateChaseSharePct != null ? b.lateChaseSharePct + '%' : '—'),
+      ];
+      if (b.attentionPenalty > 0) {
+        bits.push('Attention −' + b.attentionPenalty + ' pts');
+      }
+      if (b.usedCraftFallback) bits.push('Craft fallback');
+      if (c.quiet) bits.push('Quiet');
+      if (c.capped) bits.push('Capped');
+      return bits.join(' · ');
+    }
+
+    function ppcCellHtml(c, mini) {
+      const band = (c && c.band) || 'weak';
+      const pct = c && c.chargePct != null ? Number(c.chargePct) : 0;
+      const fill = Math.max(0, Math.min(100, pct));
+      const delta = c && c.deltaPct != null ? Number(c.deltaPct) : null;
+      const particles = !mini && delta != null && delta > 0;
+      const shimmer = !mini && delta != null && delta >= 3;
+      const tickLeft = c && c.targetWrMarker != null ? Number(c.targetWrMarker) : 45;
+      let parts = '';
+      if (particles) {
+        parts =
+          '<span class="ppc-particles" aria-hidden="true">' +
+          '<i></i><i></i><i></i><i></i><i></i><i></i></span>';
+      }
+      return (
+        '<div class="ppc-cell band-' +
+        ppcEsc(band) +
+        (shimmer ? ' shimmer' : '') +
+        '" style="--ppc-fill:' +
+        fill +
+        '%" title="' +
+        ppcEsc(ppcTip(c)) +
+        '">' +
+        '<div class="ppc-fill"></div>' +
+        '<div class="ppc-segments" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>' +
+        '<div class="ppc-target-tick" style="left:' +
+        tickLeft +
+        '%" title="Target WR ' +
+        tickLeft +
+        '%"></div>' +
+        parts +
+        '</div>'
+      );
+    }
+
+    function ppcDeltaChip(delta) {
+      if (delta == null || !isFinite(delta)) {
+        return '<span class="ppc-delta flat">Δ —</span>';
+      }
+      const cls = delta > 0.4 ? 'up' : delta < -0.4 ? 'down' : 'flat';
+      const sign = delta > 0 ? '+' : '';
+      return (
+        '<span class="ppc-delta ' +
+        cls +
+        '">Δ ' +
+        sign +
+        delta.toFixed(1) +
+        '</span>'
+      );
+    }
+
+    function renderPerformancePowerCell(data) {
+      const hero = document.getElementById('ppc-hero');
+      const minis = document.getElementById('ppc-minis');
+      const sum = document.getElementById('ppc-summary');
+      const winLbl = document.getElementById('ppc-window-label');
+      const win =
+        (data && data.window) ||
+        Number((document.getElementById('el-window') || {}).value) ||
+        50;
+      if (winLbl) winLbl.textContent = 'Window Last ' + win;
+      const bundle = data && data.performanceCharge;
+      const combined = bundle && bundle.combined;
+      if (!hero) return;
+      if (!combined || combined.chargePct == null) {
+        hero.innerHTML =
+          '<div class="ppc-empty">No charge yet — need Expectancy Lift samples (or craft fallback).</div>';
+        if (minis) minis.innerHTML = '';
+        if (sum) sum.textContent = 'Waiting for expectancy samples…';
+        return;
+      }
+      const tip = ppcTip(combined);
+      hero.innerHTML =
+        '<div class="ppc-hero-main" title="' +
+        ppcEsc(tip) +
+        '">' +
+        '<div class="ppc-hero-meta">' +
+        '<span class="ppc-pct">' +
+        Number(combined.chargePct).toFixed(1) +
+        '%</span>' +
+        '<span class="ppc-status">' +
+        ppcEsc(combined.statusLabel || '—') +
+        '</span>' +
+        ppcDeltaChip(combined.deltaPct) +
+        '</div>' +
+        ppcCellHtml(combined, false) +
+        '<p class="ppc-blurb">' +
+        ppcEsc(tip) +
+        '</p>' +
+        '</div>';
+      if (sum) {
+        sum.textContent =
+          'Charge ' +
+          Number(combined.chargePct).toFixed(1) +
+          '% · ' +
+          (combined.statusLabel || '—') +
+          ' · last ' +
+          win +
+          (combined.breakdown && combined.breakdown.usedCraftFallback
+            ? ' · craft fallback'
+            : '');
+      }
+      if (!minis) return;
+      const byId = {};
+      ((bundle && bundle.profiles) || []).forEach(function (p) {
+        if (p && p.profileId) byId[p.profileId] = p;
+      });
+      const ordered = [];
+      PPC_PROFILE_ORDER.forEach(function (id) {
+        if (byId[id]) ordered.push(byId[id]);
+      });
+      ((bundle && bundle.profiles) || []).forEach(function (p) {
+        if (
+          p &&
+          p.profileId &&
+          PPC_PROFILE_ORDER.indexOf(p.profileId) < 0 &&
+          ordered.indexOf(p) < 0
+        ) {
+          ordered.push(p);
+        }
+      });
+      const shown = ordered.filter(function (p) {
+        return (
+          p &&
+          (p.quiet ||
+            p.capped ||
+            (p.breakdown &&
+              (p.breakdown.winRatePct != null ||
+                p.breakdown.expectancyPct != null ||
+                p.breakdown.craftFallback != null)) ||
+            (p.chargePct != null && p.chargePct > 0))
+        );
+      });
+      minis.innerHTML = shown.length
+        ? shown
+            .map(function (p) {
+              const cls =
+                'ppc-mini band-' +
+                ppcEsc(p.band || 'weak') +
+                (p.quiet ? ' quiet' : '') +
+                (p.capped ? ' capped' : '');
+              return (
+                '<div class="' +
+                cls +
+                '" title="' +
+                ppcEsc(ppcTip(p)) +
+                '" tabindex="0">' +
+                '<div class="ppc-mini-name">' +
+                ppcEsc(p.name || p.profileId) +
+                '</div>' +
+                '<div class="ppc-mini-row">' +
+                '<span class="ppc-mini-pct">' +
+                (p.chargePct != null
+                  ? Number(p.chargePct).toFixed(0) + '%'
+                  : '—') +
+                '</span>' +
+                '<span class="ppc-mini-status">' +
+                ppcEsc(p.statusLabel || '—') +
+                '</span>' +
+                '</div>' +
+                ppcCellHtml(p, true) +
+                '</div>'
+              );
+            })
+            .join('')
+        : '<div class="ppc-empty">No per-profile charge yet.</div>';
+    }
+    window.renderPerformancePowerCell = renderPerformancePowerCell;
+
     async function loadExpectancyLift() {
       try {
         const win =
@@ -16386,12 +16767,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             '</span>';
         }
         renderExpectancyLiftChart();
+        try {
+          renderPerformancePowerCell(data);
+        } catch (_) {}
       } catch (err) {
         const sum = document.getElementById('el-summary');
         if (sum) {
           sum.textContent =
             'Expectancy Lift unavailable: ' + (err.message || String(err));
         }
+        try {
+          renderPerformancePowerCell(null);
+        } catch (_) {}
       }
     }
     window.loadExpectancyLift = loadExpectancyLift;

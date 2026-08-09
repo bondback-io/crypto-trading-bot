@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.243',
+    title: 'Performance Power Cell (visual)',
+    sections: ['tradecraft', 'overview', 'learning', 'microbots', 'knobs'],
+    items: [
+      'Bot Performance: Performance Power Cell card (combined + per-profile minis) below Expectancy Lift — charge % from WR/expectancy/armed/MFE/late-chase blend; craft fallback when thin; Last 20/50/100 shared with Expectancy Lift.',
+      'Visual-only: neon battery shell, target WR tick, delta chip, particles when improving, prefers-reduced-motion safe. Quiet/capped mini labels + Scalper attention penalty. No admit-path changes.',
+      'Entry Skill remains default On (admissionBaseline=governed); Baseline v235 kill-switch unchanged.',
+    ],
+  },
+  {
     version: '1.2.242',
     title: 'Entry Skill + Selectivity (default On)',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
