@@ -10473,6 +10473,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       document.querySelectorAll('#botinfo-subnav .botinfo-chip').forEach(function (el) {
         el.classList.toggle('active', el.getAttribute('data-botinfo-sec') === secId);
       });
+      const sel = document.getElementById('botinfo-section-select');
+      if (sel && sel.value !== secId) sel.value = secId;
     }
 
     const BOTINFO_SEEN_KEY = 'botinfoChangelogSeenIds';

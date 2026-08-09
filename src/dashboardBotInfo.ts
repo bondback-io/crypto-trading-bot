@@ -33,20 +33,34 @@ export const BOT_INFO_CSS = `
     }
     .botinfo-subnav {
       position: sticky; top: 3rem; z-index: 20;
-      display: flex; gap: 0.35rem; overflow-x: auto; -webkit-overflow-scrolling: touch;
-      padding: 0.5rem 0 0.65rem; margin: 0 0 0.75rem;
-      background: linear-gradient(180deg, var(--bg) 70%, transparent);
-      scrollbar-width: thin;
+      display: flex; flex-direction: column; gap: 0.45rem;
+      padding: 0.45rem 0 0.6rem; margin: 0 0 0.75rem;
+      background: linear-gradient(180deg, var(--bg) 78%, transparent);
     }
-    .botinfo-subnav::-webkit-scrollbar { height: 4px; }
+    .botinfo-subnav-chips {
+      display: flex; flex-wrap: wrap; gap: 0.28rem 0.3rem;
+      align-items: center;
+    }
+    .botinfo-subnav-select-wrap { display: none; width: 100%; }
+    .botinfo-subnav-select {
+      width: 100%; min-height: 2.5rem; appearance: none;
+      border: 1px solid #334155; border-radius: 10px;
+      background: #0f172a url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%3494a3b8' d='M1 1l5 5 5-5'/%3E%3C/svg%3E") no-repeat right 0.85rem center;
+      background-size: 12px 8px;
+      color: #e2e8f0; font-size: 0.9rem; font-weight: 600;
+      padding: 0.55rem 2.25rem 0.55rem 0.85rem;
+    }
+    .botinfo-subnav-select:focus-visible {
+      outline: 2px solid #34d399; outline-offset: 2px;
+    }
     .botinfo-chip {
       position: relative;
       flex: 0 0 auto; border: 1px solid #334155; background: #1e293b; color: #cbd5e1;
-      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.01em;
-      padding: 0.4rem 0.7rem; border-radius: 9999px; cursor: pointer;
+      font-size: 0.64rem; font-weight: 600; letter-spacing: 0.01em;
+      padding: 0.28rem 0.52rem; border-radius: 9999px; cursor: pointer;
       transition: background .15s, border-color .15s, color .15s;
-      min-height: 2rem;
-      display: inline-flex; align-items: center; gap: 0.35rem;
+      min-height: 1.7rem;
+      display: inline-flex; align-items: center; gap: 0.28rem;
     }
     .botinfo-chip:hover { border-color: #64748b; color: #f1f5f9; }
     .botinfo-chip.active {
@@ -216,13 +230,23 @@ export const BOT_INFO_CSS = `
     .botinfo-where strong { color: #7dd3fc; font-weight: 600; }
     .botinfo-svg-wrap {
       margin: 0.65rem 0 0.75rem; padding: 0.5rem; border-radius: 10px;
-      background: #0f172a; border: 1px solid #1e293b; overflow-x: auto;
+      background: #0f172a; border: 1px solid #1e293b; overflow: hidden;
+      width: 100%; box-sizing: border-box;
     }
     .botinfo-svg-wrap svg { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto; }
-    .botinfo-svg-wrap.botinfo-lifecycle-iso svg { max-width: 920px; }
+    .botinfo-lifecycle-visuals {
+      display: flex; flex-direction: column; align-items: stretch;
+      gap: 0.65rem; width: 100%; margin: 0.45rem 0 0.75rem;
+    }
+    .botinfo-lifecycle-visuals .botinfo-svg-wrap {
+      margin: 0; overflow: hidden;
+    }
+    .botinfo-svg-wrap.botinfo-lifecycle-iso svg {
+      max-width: 100%; width: 100%; height: auto;
+    }
     .botinfo-hero-img {
-      display: block; width: 100%; max-width: 920px; max-height: 280px; height: auto;
-      margin: 0.25rem 0 0.55rem; object-fit: cover; object-position: center top;
+      display: block; width: 100%; max-width: 100%; height: auto;
+      margin: 0 auto; object-fit: contain; object-position: center;
       border-radius: 12px; border: 1px solid #334155; background: #0f172a;
       box-shadow: 0 12px 28px -18px rgba(0,0,0,0.75), 0 0 0 1px rgba(6,78,59,0.25);
     }
@@ -301,8 +325,6 @@ export const BOT_INFO_CSS = `
       }
       .botinfo-lifecycle-stage { transform: none; }
       .botinfo-lifecycle-stage:hover { transform: translateY(-1px); }
-      .botinfo-hero-img { max-height: 220px; }
-      .botinfo-svg-wrap.botinfo-lifecycle-iso svg { max-height: 200px; }
     }
     @media (max-width: 640px) {
       .botinfo-modes { grid-template-columns: 1fr; }
@@ -312,10 +334,22 @@ export const BOT_INFO_CSS = `
       .botinfo-matrix .hide-sm { display: none; }
       .botinfo-card { padding: 0.85rem 0.8rem; scroll-margin-top: 6.5rem; }
       .botinfo-hero h2 { font-size: 1.05rem; }
-      .botinfo-subnav { top: 2.75rem; }
+      .botinfo-subnav { top: 2.75rem; gap: 0.35rem; }
+      .botinfo-subnav-select-wrap { display: block; }
+      .botinfo-subnav-chips {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.35rem;
+      }
+      .botinfo-chip {
+        justify-content: center; min-height: 2.35rem;
+        font-size: 0.72rem; padding: 0.45rem 0.55rem;
+        width: 100%; box-sizing: border-box;
+      }
       .botinfo-lifecycle-stages { grid-template-columns: 1fr; }
       .botinfo-lifecycle-stage { transform: none; }
-      .botinfo-hero-img { max-height: 180px; }
+      .botinfo-lifecycle-visuals { gap: 0.5rem; }
+      .botinfo-panel { max-width: 100%; overflow-x: hidden; }
     }
 `;
 
@@ -355,6 +389,19 @@ function chipNav(): string {
       `<span class="botinfo-chip-badge" data-botinfo-badge="${s.id}" aria-hidden="true">0</span>` +
       `</button>`
   ).join('\n          ');
+}
+
+function sectionSelect(): string {
+  const opts = SECTIONS.map(
+    (s, i) =>
+      `<option value="${esc(s.id)}"${i === 0 ? ' selected' : ''}>${esc(s.label)}</option>`
+  ).join('');
+  return `<label class="botinfo-subnav-select-wrap">
+          <span class="sr-only">Jump to Bot Info section</span>
+          <select id="botinfo-section-select" class="botinfo-subnav-select" aria-label="Bot Info sections" onchange="showBotInfoSection(this.value)">
+            ${opts}
+          </select>
+        </label>`;
 }
 
 function whatsNewBlock(): string {
@@ -535,11 +582,17 @@ function lifecycleIsoSvg(): string {
     { label: 'Exit', sub: 'Hard SL first' },
     { label: 'Learn', sub: 'Film · ML' },
   ];
+  const cols = 6;
+  const colPitch = 140;
+  const rowPitch = 118;
+  const gridW = (cols - 1) * colPitch;
+  const startX = Math.round((900 - gridW) / 2);
+  const startY = 62;
   const tile = (i: number, label: string, sub: string): string => {
-    const col = i % 6;
-    const row = Math.floor(i / 6);
-    const cx = 70 + col * 145;
-    const cy = 58 + row * 118;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = startX + col * colPitch;
+    const cy = startY + row * rowPitch;
     const top = `${cx},${cy - 18} ${cx + 52},${cy} ${cx},${cy + 18} ${cx - 52},${cy}`;
     const faceL = `${cx - 52},${cy} ${cx},${cy + 18} ${cx},${cy + 38} ${cx - 52},${cy + 20}`;
     const faceR = `${cx + 52},${cy} ${cx},${cy + 18} ${cx},${cy + 38} ${cx + 52},${cy + 20}`;
@@ -557,16 +610,16 @@ function lifecycleIsoSvg(): string {
   const tiles = stages.map((s, i) => tile(i, s.label, s.sub)).join('');
   const arrows = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
     .map((i) => {
-      const col = i % 6;
-      const row = Math.floor(i / 6);
-      const x1 = 70 + col * 145 + 56;
-      const y1 = 58 + row * 118;
-      const x2 = x1 + 30;
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x1 = startX + col * colPitch + 56;
+      const y1 = startY + row * rowPitch;
+      const x2 = x1 + 28;
       return `<path d="M${x1} ${y1} L${x2} ${y1}" stroke="#475569" stroke-width="2" marker-end="url(#lcArrow)"/>`;
     })
     .join('');
   return `<div class="botinfo-svg-wrap botinfo-lifecycle-iso" role="img" aria-label="Trading bot lifecycle from signal to learn">
-        <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg" style="max-height:220px">
+        <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id="lcBg" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stop-color="#064e3b"/>
@@ -578,11 +631,11 @@ function lifecycleIsoSvg(): string {
             </marker>
           </defs>
           <rect width="900" height="250" rx="14" fill="url(#lcBg)"/>
-          <text x="24" y="28" fill="#a7f3d0" font-size="13" font-family="system-ui,sans-serif" font-weight="700">Trading Bot Lifecycle — signal to learn</text>
+          <text x="450" y="28" text-anchor="middle" fill="#a7f3d0" font-size="13" font-family="system-ui,sans-serif" font-weight="700">Trading Bot Lifecycle — signal to learn</text>
           ${tiles}
           ${arrows}
-          <path d="M70 118 V140" stroke="#475569" stroke-width="2" stroke-dasharray="4 3"/>
-          <text x="86" y="136" fill="#64748b" font-size="9" font-family="system-ui,sans-serif">continues →</text>
+          <path d="M${startX} 122 V142" stroke="#475569" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="${startX + 16}" y="138" fill="#64748b" font-size="9" font-family="system-ui,sans-serif">continues →</text>
         </svg>
       </div>`;
 }
@@ -761,7 +814,10 @@ export function buildBotInfoPanelHtml(
           <span class="botinfo-ver" id="botinfo-panel-ver">${esc(label)}</span>
         </div>
         <nav class="botinfo-subnav" id="botinfo-subnav" aria-label="Bot Info sections">
-          ${chipNav()}
+          ${sectionSelect()}
+          <div class="botinfo-subnav-chips" id="botinfo-subnav-chips">
+            ${chipNav()}
+          </div>
         </nav>
       </div>
 ${articles}

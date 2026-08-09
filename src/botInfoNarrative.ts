@@ -86,8 +86,10 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
       <article class="botinfo-card" id="botinfo-sec-lifecycle" data-botinfo-section="lifecycle">
         <h3><span class="botinfo-sec-num">01</span> Trading Bot Lifecycle</h3>
         <p>Follow one micro-bot from <strong>waiting for a signal</strong> to <strong>closing and learning</strong>. This is the shared path for Market Scanner and Copy entries (enrich → Gatekeeper → Classifier → lane fight → filters → TA → buy → manage → learn).</p>
-        <img class="botinfo-hero-img" src="/botinfo/trading-lifecycle-hero.jpg" width="920" height="518" alt="Isometric trading bot lifecycle: a token travels through signal, enrich, gatekeeper, classifier, lane fight, coaches, filters, TA, buy, protect, and learn checkpoints" loading="lazy" decoding="async" />
-        ${slots.lifecycleSvg}
+        <div class="botinfo-lifecycle-visuals">
+          <img class="botinfo-hero-img" src="/botinfo/trading-lifecycle-hero.jpg" width="920" height="518" alt="Isometric trading bot lifecycle: a token travels through signal, enrich, gatekeeper, classifier, lane fight, coaches, filters, TA, buy, protect, and learn checkpoints" loading="lazy" decoding="async" />
+          ${slots.lifecycleSvg}
+        </div>
         <div class="botinfo-callout"><strong>Running story:</strong> Token <em>$RIVER</em> pops onto the Live Feed. <strong>Trend Rider</strong> is enabled and waiting. We walk $RIVER through every checkpoint — like a shopper going from “spotted on the shelf” to “receipt in the bag,” with coaches whispering along the way.</div>
 
         <div class="botinfo-lifecycle-stages">
@@ -211,9 +213,9 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         ${slots.whatsNew || ''}
         <ul>
           <li><strong>Overview</strong> — equity, open positions, risk badge, active profiles. The <strong>Entries</strong> light shows whether the buy path is clear (green) vs soft limits (amber) or abnormal blockers (red); lane no-match quietness stays green.</li>
-          <li><strong>Live Feed</strong> — scanner universe, Pump activity, sizing / re-entry watches.</li>
-          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). Trend/Compounder/HWR can use Heikin-Ashi exit (green HA → red flip). Coach stack (MARL, Profile RL, TA, accelerators) is documented under <em>Coaches &amp; Stack</em>.</li>
-          <li><strong>Newer stack pieces</strong> — <em>HMC Gatekeeper</em> (door check before lanes) · <em>HMC Setup Classifier</em> (which specialists may fight) · <em>Peak Profit Protection</em> + <em>Profit Capture Layer</em> (soft harvest while open) · Zion <em>Gold → Smart Money Mirror</em> auto-send. Full guides live under Coaches, Risk, and Zion.</li>
+          <li><strong>Live Feed / Watchlist</strong> — scanner universe, Pump activity, setup watches. Watchlist readiness strip (green/amber/red) shows Dip-Steady, Trend, Mode B/Scalper, Migration, Smart Mirror, HWR health (observe-only).</li>
+          <li><strong>Micro Bots</strong> — enable profiles, knobs, self-learning / ML (${nProfiles} in catalog). <em>Performance Power Cell</em> sits at the top (visual charge from WR/expectancy/armed/MFE). Coach stack (MARL, Profile RL, TA, accelerators) is under <em>Coaches &amp; Stack</em>.</li>
+          <li><strong>Newer stack pieces</strong> — <em>Entry Skill</em> + <em>Admission Baseline</em> (armed-first admit / Baseline v235 kill-switch) · <em>HMC Gatekeeper</em> + <em>Setup Classifier</em> · <em>Peak Protect</em> + <em>PCL</em> · Dip/Steady inventory + top10 soft-allow · Zion Gold → Smart Money Mirror. Details under Micro Bots, Risk, Knobs, and What’s New.</li>
           <li><strong>Cog menu</strong> — Smart Wallets, Settings, Config, Backtester, Logs, Back Up, and this manual.</li>
         </ul>
         <div class="botinfo-actions">
@@ -297,16 +299,16 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>When <strong>Smart Bot Profiles</strong> / multi-profile is enabled, eligible profiles score each signal; the winner stamps the trade (lane fight). Disabled profiles never enter. Default is the legacy global fallback. Catalog currently has <strong>${nProfiles}</strong> profiles.</p>
         ${slots.profilesGrid}
         <ul>
-          <li><strong>Watchlists</strong> — Dip setup watch, Scalper-family multi-TF S/R watch (Mode B), and Graduation (migration) watch live on the Live Feed / Micro Bots strip.</li>
-          <li><strong>Migration Sniper / Reversal Scalper</strong> — Reversal may show <em>Paused (perf)</em> after the v1.2.91 review. Migration Sniper is an <strong>event lane</strong> (default ON at conservative size): no TA required.</li>
-          <li><strong>Trend Rider</strong> — mature continuation (age ≥1.5h · MC ≥$75k · holders/vol floors). Quiet wins were often Pump.fun-only blocking Jupiter <code>toporganicscore</code> (non-<code>pump</code> mints), not Learning Mode. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA.</li>
-          <li><strong>Migration Sniper</strong> — watch ~80% → arm on quality → enter from ~90% → hold through migration → exit on first spike + volume (SL ~15%, post-mig max ~4m). Grad-watch funnel tallies show watch/arm/trigger blockers.</li>
-          <li><strong>Turbo Mode</strong> — default ON for Scalper / Migration Sniper / Momentum Burst / Reversal (Exit &amp; sizing). Live: prefer Jito + higher prio/tip + wider buy slip. Paper &amp; Live Sim: same slip + TURBO log/stamp (no real bundles). Safer profiles stay OFF.</li>
-          <li><strong>Min token age (h)</strong> — per-profile hard lane floor: hours since Pump.fun graduation (or Dex pair time if grad unknown). Empty = no gate. High values on Migration Sniper defeat ultra-fresh scalp.</li>
-          <li><strong>Knobs</strong> — per-profile TP/SL/hold/size and match filters; Global TP override can force one TP style across bots.</li>
-          <li>Lane decisions appear on Overview / Micro Bots so you can see why a profile won or skipped.</li>
-          <li><strong>Coaches</strong> — each bot has personal self-learn / ML / TA / Profile RL; MARL is the shared team coach. See <em>Coaches &amp; Stack</em> for how they cooperate and which toggles must be ON.</li>
-          <li><strong>HMC · PCL · Peak Protect</strong> — Gatekeeper + Setup Classifier live under Micro Bots → <em>Learning</em> routing tab; Peak Protect + Profit Capture Layer cards sit just below (same Micro Bots page). Full process + examples under <em>Coaches</em> and <em>Risk</em>.</li>
+          <li><strong>Watchlists &amp; inventory</strong> — Dip (minors) · Steady Medium ($50–200M) · Steady Majors (≥$200M) · Trend Rider setup watch · Mode B (Scalper-family) · Graduation. Caps and mutual-exclude differ by band; medium/majors do not Trend-exclude Dip/Steady the way minors can.</li>
+          <li><strong>Watch readiness</strong> — Watchlist strip (green/amber/red) for Dip-Steady, Trend, Mode B/Scalper, Migration, Smart Mirror, HWR + overall. Observe-only; refreshes while Watchlist is open.</li>
+          <li><strong>Entry Skill</strong> (default On / <code>admissionBaseline=governed</code>) — armed-first mix, late-chase hard-skips on quality, Scalper attention / concurrent gates, armed-or-fallback so discretionary never freezes when arms are empty/stuck. Kill-switch: <em>Baseline v235</em> restores observe-only admit throughput. Armed-mix slider (~80% armed target) soft-caps discretionary when arms are live.</li>
+          <li><strong>Steady / HWR quality</strong> — non-pump specialty pass-through when Steady/HWR are armed (majors|medium|jupiter|kolscan); top10 soft-allow for aged liquid names between hard max and soft ceiling (size ×0.90; age-unknown fallback ×0.85). Fast bots unchanged; anti-rug / honeypot still final.</li>
+          <li><strong>Migration Sniper / Reversal</strong> — Reversal may show <em>Paused (perf)</em>. Migration is an event lane (watch ~80% → arm → fire ~88–90%); no TA required. Grad funnel tallies watch/arm/trigger blockers.</li>
+          <li><strong>Trend Rider</strong> — mature continuation + setup watch (watch→arm→fire). Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA. Quiet tape soft-skips unless M5/H1 upticks (specialty may still enter).</li>
+          <li><strong>Performance Power Cell</strong> — visual charge card at the top of Micro Bots (combined + per-profile minis). Shares Last 20/50/100 with Expectancy Lift; does not change admit logic.</li>
+          <li><strong>Turbo Mode</strong> — default ON for Scalper / Migration / MB / Reversal. Live: Jito + higher tip + wider slip. Paper/Live Sim: slip + TURBO stamp only.</li>
+          <li><strong>Knobs</strong> — per-profile TP/SL/hold/size, min token age, Global TP override. Lane fight + Entry Skill chips explain wins/skips on Overview / Expectancy Lift.</li>
+          <li><strong>Coaches · HMC · PCL · Peak Protect</strong> — Learning tab for Gatekeeper / Classifier / MARL / Profile RL; Peak Protect + PCL cards below. See <em>Coaches &amp; Stack</em> and <em>Risk</em>.</li>
         </ul>
         <div class="botinfo-callout"><strong>Live example:</strong> A thin low-MC mint hits the feed. Gatekeeper may soft-block congestion before any lane scores it. If allowed, Classifier may prefer dip specialists; the winner stamps TP/SL; while open, PCL + Peak Protect harvest without rewriting those hard exits.</div>
         <p class="botinfo-where"><strong>Where to find:</strong> Dashboard → Micro Bots → Profile routing tabs <em>Profiles</em> / <em>Scoring</em> / <em>Learning</em>. Learning tab → HMC Gatekeeper, HMC Setup Classifier, MARL, Profile RL. Scroll for Peak Profit Protection + Profit Capture Layer. Lane fight log on Overview and Micro Bots.</p>
@@ -362,7 +364,7 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
           <li><strong>Seven traits</strong> — Harvest (PCL capture vs scratch), Holding time, Profit-taking, Profit improvement, Exit efficiency, TA craft, Decision stack.</li>
           <li><strong>Combined</strong> pools all micro-bots; pick a profile to isolate one lane. Window 20 / 50 / 100 = how many recent closes feed the score.</li>
           <li><strong>Early → late</strong> splits the window in half. <code>STABLE</code> / <code>IMPROVING</code> / <code>DECLINING</code> comes from craft delta (~±4 points).</li>
-          <li>Craft never invents knobs. Tip: open Bot Performance → <em>Trade Craft Progress</em> for charts + film table.</li>
+          <li>Craft never invents knobs. Tip: open Bot Performance → <em>Trade Craft Progress</em> for charts + film table. Micro Bots → <em>Performance Power Cell</em> is a visual charge twin (same window) — not a second craft engine.</li>
         </ul>
         <div class="botinfo-callout"><strong>Plain language:</strong> Think report card after the game — not a new playbook. Coaches still propose the tweaks; Craft tells you whether harvest and exits are getting cleaner.</div>
 
@@ -544,8 +546,9 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>The <strong>Live Feed</strong> tab is the market universe: autonomous scanner (Dex / GMGN / Birdeye + optional Jupiter trending), optional <strong>AlphaScan</strong> New/Soon/Bonded (default off), Pump.fun smart activity (early curve, near migration, migrations), playbooks, and re-entry watches.</p>
         <ul>
           <li><strong>Market Scanner</strong> — can buy without a wallet copy when TA / filters pass; often hybrid with copy convergence.</li>
-          <li><strong>High-MC majors</strong> — additive Jupiter toptraded/organic feed (circulating MC ≥$100M, never FDV) → Dip support-dip watch (longer TTL, <em>majors</em> badge). On reclaim, soft-prefer Dip Buyer; Steady/Trend/HWR still share via lane fight. Never routed into Scalper Mode B. Launch/pump scanner for Scalper-family stays unchanged.</li>
-          <li><strong>AlphaScan</strong> — additive Jupiter <code>/recent</code> + curve buckets: <strong>Soon</strong> = still on pump.fun curve → Migration Sniper grad-watch; <strong>Bonded</strong> = true post-grad (graduatedAt or curve-complete + min MC, default $25k) → Scalper / Reversal. Missing-curve alone is not Bonded. Does not replace Jupiter trending.</li>
+          <li><strong>High-MC majors / Steady inventory</strong> — Jupiter toptraded/organic (≥$100M circulating MC) → Dip/Steady support watches with Medium vs Majors tabs and separate caps. On reclaim, Soft/Steady share via lane fight; never Scalper Mode B. Funnel counters show mutual-exclude, vol/liq/MC, and no-levels rotate.</li>
+          <li><strong>Watch readiness</strong> — Watchlist status lights for each setup family (observe-only). Prefer armed Fib/S / trend-watch / Mode B / grad paths under Entry Skill; discretionary is the fallback share.</li>
+          <li><strong>AlphaScan</strong> — Jupiter <code>/recent</code> Soon (curve → Migration watch) / Bonded (post-grad → Scalper / Reversal). Missing-curve alone is not Bonded.</li>
           <li><strong>Pump.fun</strong> — bonding-curve progress, migration listener, Discover Pump SM for early smart money.</li>
           <li><strong>Regime / session</strong> — scanner can pause in risk-off; UTC Asia/EU/US session filter can block entries.</li>
           <li>Migrations and setup watches also surface on Overview.</li>
@@ -635,11 +638,12 @@ export function renderBotInfoSectionArticles(slots: BotInfoSlots): string {
         <p>Start here before fine-tuning individual micro-bots. Most controls have <code>?</code> tips on the live screens.</p>
         <ul>
           <li><strong>Mode + Risk On/Off</strong> — posture for the whole bot.</li>
+          <li><strong>Entry Skill / Admission Baseline</strong> — Expectancy Lift: On (governed) vs Baseline v235 kill-switch; armed-mix target % (disc soft-cap). Flip Baseline if opens collapse while soaking.</li>
           <li><strong>Base / Max trade SOL</strong> — hard size caps; risk &amp; conviction multipliers scale within them.</li>
           <li><strong>TP / SL + Profit Strategy</strong> — partial → recover → bag → trail lifecycle.</li>
           <li><strong>Max positions · daily loss · convergence · min conviction / wallet Q</strong>.</li>
-          <li><strong>Hard floors</strong> — min liq / MC / holders / volume; <strong>Min token age</strong> (per micro-bot); pump.fun-only; anti-rug / honeypot / sniper.</li>
-          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>; optional AlphaScan for Soon/Bonded. Learning Mode does not bypass Require TA — Scalper (small-MC) and Trend/Compounder specialty Jupiter|KOL are exempt.</li>
+          <li><strong>Hard floors</strong> — min liq / MC / holders / volume; <strong>Min token age</strong> (per micro-bot); pump.fun-only; anti-rug / honeypot / sniper. Steady/HWR top10 soft-allow is a lane exception for aged liquid names — not a global floor rewrite.</li>
+          <li><strong>Market Scanner enable + Require TA + Jupiter trending</strong>; optional AlphaScan for Soon/Bonded. Learning Mode does not bypass Require TA — Scalper (small-MC) and Trend/Steady specialty Jupiter|KOL (and Steady non-pump quality stamps) are exempt.</li>
           <li><strong>Smart Bot Profiles / Multi-profile / Global TP override</strong> — ${nProfiles} catalog profiles.</li>
           <li><strong>MEV + Jito tip</strong> (Live only).</li>
         </ul>

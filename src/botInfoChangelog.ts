@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.255',
+    title: 'Bot Info tab compact nav · lifecycle layout',
+    sections: ['lifecycle', 'overview', 'microbots', 'scanners', 'knobs', 'tradecraft'],
+    items: [
+      'Bot Info section nav: wrapping denser chips (no desktop horizontal scrollbar); mobile section select + 2-column touch chips.',
+      'Lifecycle hero + flowchart centered full-width (contain, no cramped max-height); SVG tile grid recentered.',
+      'Docs refreshed for Entry Skill / Admission Baseline, Power Cell, Steady non-pump + top10 soft-allow, watch readiness, Dip/Steady inventory, armed-or-fallback (through 1.2.254 themes).',
+    ],
+  },
+  {
     version: '1.2.254',
     title: 'Watchlist readiness · Dip/Steady inventory fill',
     sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],
