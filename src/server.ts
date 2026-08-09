@@ -4724,6 +4724,15 @@ export function createServer(): express.Application {
         trendFunnel: getTrendFunnelCounters(),
         migSniperFunnel: getMigrationSniperFunnel(),
         diagnostics,
+        watchReadiness: (() => {
+          try {
+            const { getWatchSystemsReadiness } =
+              require('./watchSystemsReadiness') as typeof import('./watchSystemsReadiness');
+            return getWatchSystemsReadiness();
+          } catch {
+            return null;
+          }
+        })(),
       });
     } catch (err) {
       res.status(500).json({

@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.250',
+    title: 'Watchlist inventory · Profile RL anti-thrash · status lights',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'One-setup parity: Dip support-breach + unwatch clear locks; throttled mint-held logs; TTL release + lock→opened/expired funnel counters. Remint-while-active TTL design unchanged.',
+      'Profile RL: Shadow→Hybrid EMA≥0; anti-thrash ≥12 trades/6h (Lead ≥20/12h); Hybrid demote needs readiness drop or stability+EMA<0 (not stability alone); rlModeMax + manual auto-lock persist; plain-language blockers on Profile RL card.',
+      'Dip/Steady inventory: medium/majors caps + CYCLE 25; time-gated no-levels rotate (~20m×3≈1h); skip rotate MC≥$500M until TTL; ~40% mid-MC (50m/100m) CYCLE seats. Arm/reclaim/Entry Skill unchanged.',
+      'Watch readiness strip (Watchlist): green/amber/red for Dip-Steady, Trend, ModeB/Scalper, Migration, Smart Mirror, HWR + overall indicator (observe-only).',
+    ],
+  },
+  {
     version: '1.2.249',
     title: 'Armed-first alignment · mix slider',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

@@ -195,6 +195,16 @@ function isMixThrottledDiscProfile(pid: string): boolean {
 
 let persistCache: ExpectancyLiftPersist | null = null;
 const oneSetupLocks = new Map<string, { profileId: string; untilMs: number }>();
+/** Throttle [one-setup] mint held logs (per mint). */
+const oneSetupHeldLogAt = new Map<string, number>();
+const ONE_SETUP_HELD_LOG_MS = 60_000;
+/** Session funnel: lock acquire → open / expire outcomes. */
+const oneSetupLockFunnel = {
+  acquired: 0,
+  released: 0,
+  opened: 0,
+  expired: 0,
+};
 /** Armed hard-lock preferred lane failed floors (governed second-pass block). */
 let blockedSecondPassCount = 0;
 
@@ -1760,6 +1770,7 @@ export function mintOneSetupProfileLock(
   oneSetupLocks.set(m, { profileId: p, untilMs: Date.now() + ttlMs });
   // Log acquire only on NEW mint — remint-while-active must not spam.
   if (isNewMint) {
+    oneSetupLockFunnel.acquired += 1;
     console.log(
       `[one-setup] acquired mint=${m.slice(0, 8)}… profile=${p}`
     );
@@ -1777,10 +1788,31 @@ export function clearOneSetupProfileLock(
   if (!prev) return;
   oneSetupLocks.delete(m);
   const why = reason ? String(reason).slice(0, 120) : undefined;
+  oneSetupLockFunnel.released += 1;
+  const whyLower = (why || '').toLowerCase();
+  if (
+    whyLower.includes('triggered') ||
+    whyLower.includes('opened') ||
+    whyLower === 'trigger'
+  ) {
+    oneSetupLockFunnel.opened += 1;
+  } else if (
+    whyLower.includes('expired') ||
+    whyLower.includes('ttl')
+  ) {
+    oneSetupLockFunnel.expired += 1;
+  }
   if (why) {
     console.log(`[one-setup] released ${m.slice(0, 8)}… · ${why}`);
   }
   recordOneSetupLockEvent('lock_released', m, prev.profileId, why);
+}
+
+/** Observe-only one-setup lock→open/expire funnel (session counters). */
+export function getOneSetupLockFunnel(): typeof oneSetupLockFunnel & {
+  held: number;
+} {
+  return { ...oneSetupLockFunnel, held: countOneSetupLocksHeld() };
 }
 
 export function getOneSetupPreferredProfile(
@@ -1844,6 +1876,14 @@ export function shouldBlockOtherProfileDiscretionary(input: {
     return { block: false, preferred };
   }
   // Other profile discretionary blocked; other-profile armed also blocked (one setup)
+  const now = Date.now();
+  const lastHeld = oneSetupHeldLogAt.get(mint) || 0;
+  if (now - lastHeld >= ONE_SETUP_HELD_LOG_MS) {
+    oneSetupHeldLogAt.set(mint, now);
+    console.log(
+      `[one-setup] mint held mint=${mint.slice(0, 8)}… preferred=${preferred} blocked=${pid}`
+    );
+  }
   return {
     block: true,
     preferred,

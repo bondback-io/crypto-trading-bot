@@ -8146,13 +8146,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     <!-- ========== TAB: Watchlist (scanner) ========== -->
     <section data-tab-panel="scanner" class="hidden space-y-4">
+      <div id="watch-readiness-strip" class="card text-xs text-slate-300" style="padding:0.65rem 0.85rem">
+        <div class="flex flex-wrap items-center gap-2 mb-1.5">
+          <span class="text-sm font-semibold text-slate-200">Watch readiness</span>
+          <span class="signal-light" id="watch-readiness-overall" title="Overall watch-system readiness">
+            <span class="dot dot-quiet" id="watch-readiness-overall-dot"></span>
+            <span id="watch-readiness-overall-label">—</span>
+          </span>
+          <span class="tip" tabindex="0" data-tip="Observe-only: green = enabled + ticking + inventory healthy; amber = thin / cool-down / WIP prereqs; red = profile or scanner off / hard fault. Does not change Entry Skill or open gates."></span>
+        </div>
+        <div id="watch-readiness-systems" class="flex flex-wrap gap-2" style="gap:0.4rem">—</div>
+      </div>
       <div class="setup-watches-stack space-y-3">
         <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
               <span class="setup-watch-title">Dip/Steady setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $50–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤12 · majors ≤12. Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $50–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~1h (skip MC≥$500M). Unwatch cools 15m.</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
                 <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
                 <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-medium" data-dip-watch-tab="medium" aria-selected="false" title="Medium MC $50M–$200M Steady parks">Medium <span class="setup-watch-tab-count" id="dip-watch-tab-medium-count">0</span></button>
@@ -12983,8 +12994,51 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       return bits.slice(0, 8).join(', ');
     }
 
+    function renderWatchReadinessStrip(data) {
+      const wr = (data && data.watchReadiness) || null;
+      const overallDot = document.getElementById('watch-readiness-overall-dot');
+      const overallLab = document.getElementById('watch-readiness-overall-label');
+      const overallWrap = document.getElementById('watch-readiness-overall');
+      const sysEl = document.getElementById('watch-readiness-systems');
+      if (!overallDot || !overallLab || !sysEl) return;
+      const colorToDot = { green: 'dot-live', amber: 'dot-quiet', red: 'dot-off' };
+      const colorToLabel = { green: 'Ready', amber: 'Attention', red: 'Blocked' };
+      const overall = wr && wr.overall ? wr.overall : 'amber';
+      overallDot.className = 'dot ' + (colorToDot[overall] || 'dot-quiet');
+      overallLab.textContent =
+        (colorToLabel[overall] || '—') +
+        (wr && wr.overallDetail ? ' · ' + wr.overallDetail : '');
+      if (overallWrap) {
+        overallWrap.title = (wr && wr.overallDetail) || 'Watch-system readiness';
+      }
+      const systems = (wr && wr.systems) || [];
+      if (!systems.length) {
+        sysEl.textContent = '—';
+        return;
+      }
+      sysEl.innerHTML = systems
+        .map(function (s) {
+          const c = s.color || 'amber';
+          const tip = escHtml(String(s.detail || ''));
+          return (
+            '<span class="signal-light" title="' +
+            tip +
+            '" style="margin:0">' +
+            '<span class="dot ' +
+            (colorToDot[c] || 'dot-quiet') +
+            '"></span>' +
+            '<span>' +
+            escHtml(String(s.label || s.id || '')) +
+            '</span>' +
+            '</span>'
+          );
+        })
+        .join('');
+    }
+
     function renderSetupWatchLists(tp) {
       const data = tp || {};
+      renderWatchReadinessStrip(data);
       const dipCount = document.getElementById('dip-watch-count');
       const dipList = document.getElementById('dip-watch-list');
       const scalperCount = document.getElementById('scalper-watch-count');

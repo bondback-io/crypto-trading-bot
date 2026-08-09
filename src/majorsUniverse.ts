@@ -50,18 +50,26 @@ export const MAJORS_MIN_LIQ_USD = 75_000;
 export const MEDIUM_MAJORS_MIN_VOL_H1_USD = 25_000;
 const FETCH_LIMIT = 100;
 /** Separate caps so majors do not starve medium */
-const CYCLE_CAP_MEDIUM = 12;
-const CYCLE_CAP_MAJORS = 12;
+const CYCLE_CAP_MEDIUM = 25;
+const CYCLE_CAP_MAJORS = 25;
 const REFRESH_MS = 5 * 60_000;
-/** Evict after this many refresh cycles still without Fib/S levels */
+/** Time-gated no-levels: +1 streak every 20m without levels; rotate after 3 (~1h) */
 export const NO_LEVELS_ROTATE_AFTER = 3;
+const NO_LEVELS_STREAK_TICK_MS = 20 * 60_000;
+/** Park mega-caps without Fib/S until watch TTL — do not rotate on no-levels */
+export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
+/** Reserve ~40% of CYCLE seats for mid-MC bands (50m/100m) */
+const MID_BAND_SEAT_FRAC = 0.4;
 
 let cache: { at: number; list: MajorsCandidate[] } | null = null;
 let lastPassAt = 0;
 let lastPassOffered = 0;
 let lastError: string | null = null;
-/** mint → consecutive refreshes without levels (for rotate) */
-const noLevelsStreak = new Map<string, number>();
+/** mint → time-gated no-levels streak (+1 per 20m without levels) */
+const noLevelsStreak = new Map<
+  string,
+  { streak: number; lastTickAt: number }
+>();
 
 export function majorsMcBand(mc: number): MajorsMcBand {
   if (mc >= 1_000_000_000) return '1b+';
@@ -188,9 +196,10 @@ export async function refreshMajorsUniverse(
       if (c) list.push(c);
     }
     list.sort((a, b) => b.marketCapUsd - a.marketCapUsd);
-    const medium = list
-      .filter((c) => c.watchBand === 'medium')
-      .slice(0, CYCLE_CAP_MEDIUM);
+    const medium = pickCycleWithMidSeats(
+      list.filter((c) => c.watchBand === 'medium'),
+      CYCLE_CAP_MEDIUM
+    );
     const majors = list
       .filter((c) => c.watchBand === 'majors')
       .slice(0, CYCLE_CAP_MAJORS);
@@ -274,10 +283,42 @@ export function majorsPreferredProfileId(
   return 'dip_buyer';
 }
 
-/** Track / rotate mints that keep refreshing without Fib/S levels. */
+/**
+ * Fill CYCLE seats with ~40% reserved for mid-MC bands (50m/100m), rest by top MC.
+ * Prevents mega-cap-only lists when mid names exist in the universe.
+ */
+function pickCycleWithMidSeats(
+  candidates: MajorsCandidate[],
+  cap: number
+): MajorsCandidate[] {
+  if (cap <= 0 || !candidates.length) return [];
+  const midReserve = Math.max(1, Math.floor(cap * MID_BAND_SEAT_FRAC));
+  const mid = candidates.filter((c) => c.band === '50m' || c.band === '100m');
+  const rest = candidates.filter((c) => c.band !== '50m' && c.band !== '100m');
+  const picked: MajorsCandidate[] = [];
+  const used = new Set<string>();
+  for (const c of mid) {
+    if (picked.length >= midReserve) break;
+    picked.push(c);
+    used.add(c.mint);
+  }
+  for (const c of [...rest, ...mid]) {
+    if (picked.length >= cap) break;
+    if (used.has(c.mint)) continue;
+    picked.push(c);
+    used.add(c.mint);
+  }
+  return picked;
+}
+
+/**
+ * Time-gated no-levels rotate: +1 streak every 20 min without levels; rotate after 3 (~1h).
+ * MC ≥ $500M: never rotate on no-levels (park until watch TTL).
+ */
 export function noteMajorsLevelsPresence(
   mint: string,
-  hasLevels: boolean
+  hasLevels: boolean,
+  marketCapUsd?: number | null
 ): { rotate: boolean; streak: number } {
   const key = String(mint || '').trim();
   if (!key) return { rotate: false, streak: 0 };
@@ -285,8 +326,24 @@ export function noteMajorsLevelsPresence(
     noLevelsStreak.delete(key);
     return { rotate: false, streak: 0 };
   }
-  const next = (noLevelsStreak.get(key) || 0) + 1;
-  noLevelsStreak.set(key, next);
+  const mc = Number(marketCapUsd);
+  if (Number.isFinite(mc) && mc >= NO_LEVELS_SKIP_ROTATE_MC_USD) {
+    return { rotate: false, streak: noLevelsStreak.get(key)?.streak || 0 };
+  }
+  const now = Date.now();
+  const prev = noLevelsStreak.get(key);
+  if (!prev) {
+    noLevelsStreak.set(key, { streak: 1, lastTickAt: now });
+    return { rotate: false, streak: 1 };
+  }
+  if (now - prev.lastTickAt < NO_LEVELS_STREAK_TICK_MS) {
+    return {
+      rotate: prev.streak >= NO_LEVELS_ROTATE_AFTER,
+      streak: prev.streak,
+    };
+  }
+  const next = prev.streak + 1;
+  noLevelsStreak.set(key, { streak: next, lastTickAt: now });
   return { rotate: next >= NO_LEVELS_ROTATE_AFTER, streak: next };
 }
 

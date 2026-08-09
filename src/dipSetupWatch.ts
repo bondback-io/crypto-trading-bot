@@ -68,11 +68,11 @@ export interface DipWatchEntry {
 
 /**
  * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
- * cannot starve memecoin / scanner minors. Medium ≤12 is its own bucket so
+ * cannot starve memecoin / scanner minors. Medium ≤25 is its own bucket so
  * majors do not starve $50–200M Steady parks.
  */
-const MAX_MAJORS_WATCHES = 12;
-const MAX_MEDIUM_WATCHES = 12;
+const MAX_MAJORS_WATCHES = 25;
+const MAX_MEDIUM_WATCHES = 25;
 const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 /** High-MC majors/medium wait longer for Fib/S setups (8–12h band → 10h) */
@@ -505,7 +505,7 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
     w.nearSupport === true;
   if (!hasLevels) noteDipFunnel('no_levels');
 
-  // Medium/Majors: rotate !hasLevels after N refreshes so CYCLE_CAP isn't stuck
+  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×3 ≈1h); skip MC≥$500M
   if (isQualityBandSource(w.source)) {
     try {
       const {
@@ -515,13 +515,17 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
       if (hasLevels) {
         clearMajorsNoLevelsStreak(w.mint);
       } else {
-        const { rotate, streak } = noteMajorsLevelsPresence(w.mint, false);
+        const { rotate, streak } = noteMajorsLevelsPresence(
+          w.mint,
+          false,
+          w.marketCapUsd
+        );
         if (rotate) {
           w.status = 'expired';
           w.updatedAt = now;
-          w.lastReason = `no levels ×${streak} — rotate`;
+          w.lastReason = `no levels ×${streak} (~20m) — rotate`;
           console.log(
-            `[dip-watch] ROTATE ${w.symbol} [${w.source}] — no Fib/S after ${streak} refreshes`
+            `[dip-watch] ROTATE ${w.symbol} [${w.source}] — no Fib/S after ${streak}×20m ticks`
           );
           try {
             const { clearOneSetupProfileLock } =

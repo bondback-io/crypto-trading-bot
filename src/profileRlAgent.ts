@@ -440,19 +440,29 @@ function hasRecentPerformanceDrop(agent: ProfileRlAgentState): boolean {
   return countRecentRollbacks(agent.profileId) >= 2;
 }
 
-const MODE_DWELL_MIN_TRADES = 6;
-const MODE_DWELL_MIN_MS = 2 * 60 * 60_000;
+/** Anti-thrash: Shadow/Hybrid need ≥12 trades or ≥6h; Lead ≥20 / ≥12h before reverse. */
+const MODE_DWELL_MIN_TRADES = 12;
+const MODE_DWELL_MIN_MS = 6 * 60 * 60_000;
+const LEAD_DWELL_MIN_TRADES = 20;
+const LEAD_DWELL_MIN_MS = 12 * 60 * 60_000;
 const DEMOTE_CONFIRM_NEEDED = 2;
 
+function dwellThresholds(mode: ProfileRlMode): { trades: number; ms: number } {
+  if (mode === 'lead') {
+    return { trades: LEAD_DWELL_MIN_TRADES, ms: LEAD_DWELL_MIN_MS };
+  }
+  return { trades: MODE_DWELL_MIN_TRADES, ms: MODE_DWELL_MIN_MS };
+}
+
 function modeDwellSatisfied(agent: ProfileRlAgentState): boolean {
+  const { trades: minTrades, ms: minMs } = dwellThresholds(agent.mode);
   const tradesInMode = Math.max(0, Number(agent.tradesInMode) || 0);
-  if (tradesInMode >= MODE_DWELL_MIN_TRADES) return true;
+  if (tradesInMode >= minTrades) return true;
   const since = Number(agent.lastModeChangeAt) || 0;
-  if (since > 0 && Date.now() - since >= MODE_DWELL_MIN_MS) return true;
+  if (since > 0 && Date.now() - since >= minMs) return true;
   // First mode ever (never changed) — allow promote/demote after sample floors alone
   if (!since && tradesInMode === 0 && agent.trades > 0) {
-    // Treat accumulated trades as time-in-mode when lastModeChangeAt unset
-    return agent.trades >= MODE_DWELL_MIN_TRADES;
+    return agent.trades >= minTrades;
   }
   return false;
 }
@@ -653,9 +663,10 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
       );
       return;
     }
+    // Confirming demote: readiness drop OR (stability weak AND EMA<0) — not stability alone when readiness high
     const demoteEligible =
       readiness.score < HYBRID_DEMOTE_READINESS ||
-      unstable ||
+      (unstable && agent.rewardEma < 0) ||
       (perfDrop && agent.rewardEma < 0);
     if (demoteEligible) {
       agent.demoteConfirmStreak = (agent.demoteConfirmStreak || 0) + 1;
@@ -673,8 +684,8 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
         'auto_demote',
         perfDrop
           ? `performance drop · confirm×${agent.demoteConfirmStreak}`
-          : unstable
-            ? `instability · confirm×${agent.demoteConfirmStreak}`
+          : unstable && agent.rewardEma < 0
+            ? `instability+EMA<0 · confirm×${agent.demoteConfirmStreak}`
             : `readiness low · confirm×${agent.demoteConfirmStreak}`,
         readiness
       );
@@ -1035,9 +1046,11 @@ export function describeProfileRlModeBlocker(
   const promoteLeadThreshold = HYBRID_TO_LEAD_READINESS + diff.thresholdAdd;
   const dwellOk = modeDwellSatisfied(agent);
   const tradesInMode = Math.max(0, Number(agent.tradesInMode) || 0);
+  const dwellReq = dwellThresholds(agent.mode);
+  const dwellHours = Math.round(dwellReq.ms / (60 * 60_000));
   const dwellHint = dwellOk
     ? ''
-    : ` Need ≥${MODE_DWELL_MIN_TRADES} trades in mode or ≥2h dwell (now ${tradesInMode} trades).`;
+    : ` Need ≥${dwellReq.trades} trades in mode or ≥${dwellHours}h dwell (now ${tradesInMode} trades).`;
 
   const rlMax = resolveRlModeMax(agent.profileId);
   if (rlMax !== 'any' && agent.mode !== 'shadow') {
