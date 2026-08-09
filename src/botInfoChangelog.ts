@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.252',
+    title: 'Soft-allow pool age · age-unknown fallback · MB N/A',
+    sections: ['microbots', 'tradecraft', 'overview', 'knobs'],
+    items: [
+      'Steady/HWR top10 soft-allow: calendar/pool age (tokenAgeHours · pairCreatedAt · launchedAt; never migrationAgeMs) for ≥90d gate; age-unknown quality fallback (1.5× H1 vol, Steady 15k / HWR 30k liq, holders + MC floors) tagged top10_soft_allow_age_unknown_fallback with size ×0.85; aged path stays ×0.90.',
+      'Momentum Burst: early not_applicable when no MB lane signals (preferred/DNA/vol+pressure) — cuts cascade noise like Migration Sniper; floors/scalp mode unchanged.',
+      'Monitor MatchContext: pairCreatedAtMs plumbed for soft-allow age; known-young still deny; Scalper/Migration/late-chase/anti-rug untouched.',
+    ],
+  },
+  {
     version: '1.2.251',
     title: 'Steady/HWR top10 soft-allow · WR classifier unify',
     sections: ['microbots', 'tradecraft', 'overview', 'learning', 'knobs'],

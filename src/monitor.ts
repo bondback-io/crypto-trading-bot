@@ -227,7 +227,29 @@ function buildTradeProfileMatchContext(
     volumeH1Usd: signal.metrics?.volumeH1Usd ?? null,
     volumeM5Usd: signal.metrics?.volumeM5Usd ?? null,
     recentBuyVolumeUsd: signal.metrics?.recentBuyVolumeUsd ?? null,
-    tokenAgeHours: signal.tokenAgeHours ?? null,
+    tokenAgeHours: (() => {
+      if (
+        signal.tokenAgeHours != null &&
+        Number.isFinite(signal.tokenAgeHours)
+      ) {
+        return Number(signal.tokenAgeHours);
+      }
+      const created = Number(
+        (signal.metrics as { pairCreatedAtMs?: number | null } | undefined)
+          ?.pairCreatedAtMs
+      );
+      if (Number.isFinite(created) && created > 0) {
+        return Math.max(0, (Date.now() - created) / 3_600_000);
+      }
+      return null;
+    })(),
+    pairCreatedAtMs: (() => {
+      const created = Number(
+        (signal.metrics as { pairCreatedAtMs?: number | null } | undefined)
+          ?.pairCreatedAtMs
+      );
+      return Number.isFinite(created) && created > 0 ? created : null;
+    })(),
     priceChange24hPct: signal.metrics?.priceChange24hPct ?? null,
     priceChangeH1Pct: signal.metrics?.priceChangeH1Pct ?? null,
     smartMoneyScore: signal.birdeye?.smartMoneyScore ?? null,

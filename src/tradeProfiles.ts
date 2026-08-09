@@ -1361,6 +1361,10 @@ export interface TradeProfileMatchContext {
   volumeM5Usd?: number | null;
   recentBuyVolumeUsd?: number | null;
   tokenAgeHours?: number | null;
+  /** Dex/pair created-at ms when known — soft-allow calendar age (not migration). */
+  pairCreatedAtMs?: number | null;
+  /** Scanner/launch epoch ms when known — soft-allow calendar age fallback. */
+  launchedAt?: number | null;
   priceChange24hPct?: number | null;
   priceChangeH1Pct?: number | null;
   nearKeyFib?: boolean;
@@ -2632,6 +2636,52 @@ export function hasMigrationLaneSignals(
 }
 
 /**
+ * True when fight has Momentum Burst signals so MB floors/score apply.
+ * Random names without signals → silent not_applicable (like Migration).
+ */
+export function hasMomentumLaneSignals(
+  ctx: TradeProfileMatchContext
+): boolean {
+  if (ctx.preferProfileId === 'momentum_burst') return true;
+  if (ctx.shortTermStrategyId === 'momentum_burst') return true;
+  const style = String(
+    ctx.detectedEntryStyle || ctx.entryStyleHint || ''
+  ).toLowerCase();
+  if (
+    style === 'level_momentum_expansion' ||
+    style === 'scalp_reclaim_burst'
+  ) {
+    return true;
+  }
+  // Soft isMomentum shape: M5 vol + buy pressure / bull-flag (MB catalog floor).
+  const minM5 = 8_000;
+  const volM5 =
+    ctx.volumeM5Usd != null && Number.isFinite(ctx.volumeM5Usd)
+      ? Number(ctx.volumeM5Usd)
+      : null;
+  const buyPressureUsd =
+    ctx.recentBuyVolumeUsd != null && Number.isFinite(ctx.recentBuyVolumeUsd)
+      ? Number(ctx.recentBuyVolumeUsd)
+      : null;
+  if (volM5 == null || volM5 < minM5) return false;
+  if (
+    buyPressureUsd != null &&
+    buyPressureUsd >= Math.min(800, minM5 * 0.4)
+  ) {
+    return true;
+  }
+  if (
+    (ctx.chartPatternHits || []).some(
+      (h) => h.id === 'bull_flag' && h.breakout === true
+    )
+  ) {
+    return true;
+  }
+  if ((ctx.chartPatternIds || []).includes('bull_flag')) return true;
+  return false;
+}
+
+/**
  * Hard lane entry floors (per-profile token targeting).
  * Cannot undercut global Risk On Min MC — only raise it via minMarketCapUsd.
  * Anti-rug / honeypot stay global outside this helper.
@@ -2645,21 +2695,67 @@ const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
   steady_compounder: 10_000,
   high_win_rate: 20_000,
 };
+/** Stricter liq floors when age unknown (Steady/HWR fallback path). */
+const TOP10_SOFT_FALLBACK_MIN_LIQ_USD: Partial<Record<string, number>> = {
+  steady_compounder: 15_000,
+  high_win_rate: 30_000,
+};
 const TOP10_SOFT_MIN_AGE_HOURS = 90 * 24;
-/** Size haircut when Steady/HWR top10 soft-allow grants. */
+/** Size haircut when Steady/HWR top10 soft-allow grants via known age. */
 export const TOP10_SOFT_ALLOW_SIZE_MULT = 0.9;
+/** Size haircut when Steady/HWR grants via age-unknown quality fallback. */
+export const TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT = 0.85;
+
+export type Top10SoftAllowGrantTag =
+  | 'top10_soft_allow'
+  | 'top10_soft_allow_age_unknown_fallback';
 
 export type LaneEntryFloorsResult = {
   ok: boolean;
   reason?: string;
   /** Steady/HWR aged-liquid soft pass between hard max and soft ceiling. */
   top10SoftAllow?: boolean;
+  top10SoftAllowTag?: Top10SoftAllowGrantTag;
   sizeMult?: number;
 };
 
 /**
+ * Calendar/pool age for Steady/HWR top10 soft-allow (≥90d gate).
+ * Never uses migrationAgeMs — graduation clock must not gate aged soft-allow.
+ * Returns max of available positive ages; null if none known.
+ */
+export function resolveTokenAgeHoursForSoftAllow(
+  ctx: Pick<
+    TradeProfileMatchContext,
+    'tokenAgeHours' | 'pairCreatedAtMs' | 'launchedAt'
+  >
+): number | null {
+  const ages: number[] = [];
+  if (
+    ctx.tokenAgeHours != null &&
+    Number.isFinite(ctx.tokenAgeHours) &&
+    ctx.tokenAgeHours >= 0
+  ) {
+    ages.push(Number(ctx.tokenAgeHours));
+  }
+  const pairMs =
+    ctx.pairCreatedAtMs != null ? Number(ctx.pairCreatedAtMs) : NaN;
+  if (Number.isFinite(pairMs) && pairMs > 0) {
+    ages.push(Math.max(0, (Date.now() - pairMs) / 3_600_000));
+  }
+  const launched = ctx.launchedAt != null ? Number(ctx.launchedAt) : NaN;
+  if (Number.isFinite(launched) && launched > 0) {
+    const ms = launched < 1e12 ? launched * 1000 : launched;
+    ages.push(Math.max(0, (Date.now() - ms) / 3_600_000));
+  }
+  if (ages.length === 0) return null;
+  return Math.max(...ages);
+}
+
+/**
  * When known top10 exceeds the lane hard max, Steady/HWR may soft-allow if
  * age/volume/liquidity/holders/soft-ceiling all pass. Fast bots never enter.
+ * Age unknown → stricter vol/liq fallback (not a hard age deny).
  */
 export function resolveTop10SoftAllow(
   def: TradeProfileDefinition,
@@ -2668,8 +2764,17 @@ export function resolveTop10SoftAllow(
   maxTop10: number
 ): {
   allow: boolean;
-  rejectKey?: 'age' | 'volume' | 'liquidity' | 'holders' | 'ceiling';
+  rejectKey?:
+    | 'age'
+    | 'volume'
+    | 'liquidity'
+    | 'holders'
+    | 'ceiling'
+    | 'age_unknown_fallback'
+    | 'market_cap';
   detail: string;
+  grantTag?: Top10SoftAllowGrantTag;
+  sizeMult?: number;
 } {
   const softCeil = TOP10_SOFT_CEILING_PCT[def.id];
   if (softCeil == null) {
@@ -2678,23 +2783,34 @@ export function resolveTop10SoftAllow(
       detail: `${def.name} top10 ${top10.toFixed(1)}% > max ${maxTop10}%`,
     };
   }
-  const ageH = resolveTokenAgeHoursForGate(ctx);
-  if (ageH == null || ageH < TOP10_SOFT_MIN_AGE_HOURS) {
+  const ageH = resolveTokenAgeHoursForSoftAllow(ctx);
+  if (ageH != null && ageH < TOP10_SOFT_MIN_AGE_HOURS) {
     return {
       allow: false,
       rejectKey: 'age',
-      detail:
-        ageH == null
-          ? `${def.name} top10 soft-allow deny: age unknown (need ≥${TOP10_SOFT_MIN_AGE_HOURS}h)`
-          : `${def.name} top10 soft-allow deny: age ${ageH.toFixed(1)}h < ${TOP10_SOFT_MIN_AGE_HOURS}h`,
+      detail: `${def.name} top10 soft-allow deny: age ${ageH.toFixed(1)}h < ${TOP10_SOFT_MIN_AGE_HOURS}h`,
     };
   }
-  const minVol =
+  const ageUnknown = ageH == null;
+  const viaAge = ageH != null && ageH >= TOP10_SOFT_MIN_AGE_HOURS;
+
+  if (top10 > softCeil) {
+    return {
+      allow: false,
+      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'ceiling',
+      detail: ageUnknown
+        ? `${def.name} top10 soft-allow deny: age_unknown_fallback ceiling — ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`
+        : `${def.name} top10 soft-allow deny: ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`,
+    };
+  }
+
+  const minVolBase =
     def.match.minVolumeH1Usd != null &&
     Number.isFinite(def.match.minVolumeH1Usd) &&
     def.match.minVolumeH1Usd > 0
       ? Number(def.match.minVolumeH1Usd)
       : 0;
+  const minVol = ageUnknown && minVolBase > 0 ? minVolBase * 1.5 : minVolBase;
   const volH1 =
     ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
       ? Number(ctx.volumeH1Usd)
@@ -2702,14 +2818,17 @@ export function resolveTop10SoftAllow(
   if (minVol > 0 && (volH1 == null || volH1 < minVol)) {
     return {
       allow: false,
-      rejectKey: 'volume',
+      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'volume',
       detail:
         volH1 == null
-          ? `${def.name} top10 soft-allow deny: volumeH1 unknown (need ≥$${Math.round(minVol)})`
-          : `${def.name} top10 soft-allow deny: volumeH1 $${Math.round(volH1)} < $${Math.round(minVol)}`,
+          ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback volume —' : ''} volumeH1 unknown (need ≥$${Math.round(minVol)})`
+          : `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback volume —' : ''} volumeH1 $${Math.round(volH1)} < $${Math.round(minVol)}`,
     };
   }
-  const minLiq = TOP10_SOFT_MIN_LIQ_USD[def.id] ?? 10_000;
+
+  const minLiq = ageUnknown
+    ? TOP10_SOFT_FALLBACK_MIN_LIQ_USD[def.id] ?? 15_000
+    : TOP10_SOFT_MIN_LIQ_USD[def.id] ?? 10_000;
   const liq =
     ctx.liquidityUsd != null && Number.isFinite(ctx.liquidityUsd)
       ? Number(ctx.liquidityUsd)
@@ -2717,13 +2836,14 @@ export function resolveTop10SoftAllow(
   if (liq == null || liq < minLiq) {
     return {
       allow: false,
-      rejectKey: 'liquidity',
+      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'liquidity',
       detail:
         liq == null
-          ? `${def.name} top10 soft-allow deny: liquidity unknown (need ≥$${Math.round(minLiq)})`
-          : `${def.name} top10 soft-allow deny: liquidity $${Math.round(liq)} < $${Math.round(minLiq)}`,
+          ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback liquidity —' : ''} liquidity unknown (need ≥$${Math.round(minLiq)})`
+          : `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback liquidity —' : ''} liquidity $${Math.round(liq)} < $${Math.round(minLiq)}`,
     };
   }
+
   const minHolders =
     def.match.minHolders != null &&
     Number.isFinite(def.match.minHolders) &&
@@ -2737,32 +2857,79 @@ export function resolveTop10SoftAllow(
   if (minHolders > 0 && (holders == null || holders < minHolders)) {
     return {
       allow: false,
-      rejectKey: 'holders',
+      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'holders',
       detail:
         holders == null
-          ? `${def.name} top10 soft-allow deny: holders unknown (need ≥${minHolders})`
-          : `${def.name} top10 soft-allow deny: holders ${holders} < ${minHolders}`,
+          ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback holders —' : ''} holders unknown (need ≥${minHolders})`
+          : `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback holders —' : ''} holders ${holders} < ${minHolders}`,
     };
   }
-  if (top10 > softCeil) {
+
+  // Age-unknown fallback: require profile MC floor when configured.
+  if (ageUnknown) {
+    const minMc =
+      def.match.minMarketCapUsd != null &&
+      Number.isFinite(def.match.minMarketCapUsd) &&
+      def.match.minMarketCapUsd > 0
+        ? Number(def.match.minMarketCapUsd)
+        : 0;
+    const maxMc =
+      def.match.maxMarketCapUsd != null &&
+      Number.isFinite(def.match.maxMarketCapUsd) &&
+      def.match.maxMarketCapUsd > 0
+        ? Number(def.match.maxMarketCapUsd)
+        : 0;
+    const mc =
+      ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
+        ? Number(ctx.marketCapUsd)
+        : null;
+    if (minMc > 0 && (mc == null || mc < minMc)) {
+      return {
+        allow: false,
+        rejectKey: 'age_unknown_fallback',
+        detail:
+          mc == null
+            ? `${def.name} top10 soft-allow deny: age_unknown_fallback market_cap — MC unknown (need ≥$${Math.round(minMc)})`
+            : `${def.name} top10 soft-allow deny: age_unknown_fallback market_cap — MC $${Math.round(mc)} < $${Math.round(minMc)}`,
+      };
+    }
+    if (maxMc > 0 && mc != null && mc > maxMc) {
+      return {
+        allow: false,
+        rejectKey: 'age_unknown_fallback',
+        detail: `${def.name} top10 soft-allow deny: age_unknown_fallback market_cap — MC $${Math.round(mc)} > $${Math.round(maxMc)}`,
+      };
+    }
+  }
+
+  if (viaAge) {
     return {
-      allow: false,
-      rejectKey: 'ceiling',
-      detail: `${def.name} top10 soft-allow deny: ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`,
+      allow: true,
+      grantTag: 'top10_soft_allow',
+      sizeMult: TOP10_SOFT_ALLOW_SIZE_MULT,
+      detail: `${def.name} top10_soft_allow ${top10.toFixed(1)}% via age ${ageH!.toFixed(1)}h (hard max ${maxTop10}% · soft ≤${softCeil}%)`,
     };
   }
+  // ageUnknown
   return {
     allow: true,
-    detail: `${def.name} top10_soft_allow ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}%)`,
+    grantTag: 'top10_soft_allow_age_unknown_fallback',
+    sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
+    detail: `${def.name} top10_soft_allow_age_unknown_fallback ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}% · vol≥1.5× · liq≥$${Math.round(minLiq)})`,
   };
 }
 
 /** Apply Steady/HWR top10 soft-allow size haircut on exit rules when granted. */
 export function applyTop10SoftAllowSizeHaircut(
   exitRules: TradeProfileExitRules,
-  granted: boolean
+  granted: boolean,
+  sizeMult: number = TOP10_SOFT_ALLOW_SIZE_MULT
 ): TradeProfileExitRules {
   if (!granted) return exitRules;
+  const haircut =
+    sizeMult > 0 && Number.isFinite(sizeMult)
+      ? Number(sizeMult)
+      : TOP10_SOFT_ALLOW_SIZE_MULT;
   const base =
     exitRules.sizeMultiplier != null &&
     Number.isFinite(exitRules.sizeMultiplier) &&
@@ -2771,7 +2938,7 @@ export function applyTop10SoftAllowSizeHaircut(
       : 1;
   return {
     ...exitRules,
-    sizeMultiplier: Number((base * TOP10_SOFT_ALLOW_SIZE_MULT).toFixed(4)),
+    sizeMultiplier: Number((base * haircut).toFixed(4)),
   };
 }
 
@@ -2868,15 +3035,26 @@ export function evaluateLaneEntryFloors(
     if (top10 != null && top10 > maxTop10) {
       const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
       if (soft.allow) {
+        const tag = soft.grantTag ?? 'top10_soft_allow';
+        const mult =
+          soft.sizeMult ??
+          (tag === 'top10_soft_allow_age_unknown_fallback'
+            ? TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT
+            : TOP10_SOFT_ALLOW_SIZE_MULT);
+        const via =
+          tag === 'top10_soft_allow_age_unknown_fallback'
+            ? 'via age-unknown fallback'
+            : 'via age';
         console.log(
-          `[trade-profiles] top10_soft_allow GRANT ${ctx.symbol || 'token'} · ${soft.detail}` +
-            ` · size ×${TOP10_SOFT_ALLOW_SIZE_MULT}`
+          `[trade-profiles] top10_soft_allow GRANT ${ctx.symbol || 'token'} · ${via} · ${soft.detail}` +
+            ` · size ×${mult}`
         );
         return {
           ok: true,
-          reason: 'top10_soft_allow',
+          reason: tag,
           top10SoftAllow: true,
-          sizeMult: TOP10_SOFT_ALLOW_SIZE_MULT,
+          top10SoftAllowTag: tag,
+          sizeMult: mult,
         };
       }
       if (TOP10_SOFT_CEILING_PCT[def.id] != null) {
@@ -3086,6 +3264,21 @@ export function evaluateTradeProfileLanes(
       });
       continue;
     }
+    // MB not_applicable without momentum signals (no cascade noise)
+    if (def.id === 'momentum_burst' && !hasMomentumLaneSignals(ctx)) {
+      results.push({
+        profileId: def.id,
+        name: def.name,
+        icon: def.icon,
+        color: def.color,
+        priority: def.priority,
+        score: 0,
+        reason: 'not_applicable',
+        passed: false,
+        failReason: 'not_applicable',
+      });
+      continue;
+    }
     const floors = evaluateLaneEntryFloors(def, ctx);
     if (!floors.ok) {
       results.push({
@@ -3118,8 +3311,11 @@ export function evaluateTradeProfileLanes(
     }
     let laneScore = Math.round(scored.score * 10) / 10;
     let laneReason = scored.reason;
-    if (floors.top10SoftAllow === true && !/top10_soft_allow/i.test(laneReason)) {
-      laneReason = `${laneReason} · top10_soft_allow`;
+    if (floors.top10SoftAllow === true) {
+      const softTag = floors.top10SoftAllowTag ?? 'top10_soft_allow';
+      if (!/top10_soft_allow/i.test(laneReason)) {
+        laneReason = `${laneReason} · ${softTag}`;
+      }
     }
     try {
       const { isLearningModeActive, learningModeFairnessBump } =
@@ -3156,6 +3352,8 @@ export function evaluateTradeProfileLanes(
       reason: laneReason,
       autoScored: false,
       top10SoftAllow: floors.top10SoftAllow === true,
+      top10SoftAllowTag: floors.top10SoftAllowTag,
+      top10SoftAllowSizeMult: floors.sizeMult,
     });
     results.push({
       profileId: def.id,
@@ -4770,6 +4968,8 @@ function buildAssignmentFromDef(
     forced?: boolean;
     topScores?: TradeProfileAssignment['topScores'];
     top10SoftAllow?: boolean;
+    top10SoftAllowTag?: Top10SoftAllowGrantTag;
+    top10SoftAllowSizeMult?: number;
   }
 ): TradeProfileAssignment {
   let exitRules = finalizeExitRulesForWinner(def, ctx);
@@ -4779,12 +4979,23 @@ function buildAssignmentFromDef(
       : opts.reason;
   const floorsHint =
     opts.top10SoftAllow === true
-      ? { top10SoftAllow: true as const }
+      ? {
+          top10SoftAllow: true as const,
+          top10SoftAllowTag: opts.top10SoftAllowTag,
+          sizeMult: opts.top10SoftAllowSizeMult,
+        }
       : evaluateLaneEntryFloors(def, ctx);
   if (floorsHint.top10SoftAllow === true) {
-    exitRules = applyTop10SoftAllowSizeHaircut(exitRules, true);
+    const softTag =
+      floorsHint.top10SoftAllowTag ?? 'top10_soft_allow';
+    const softMult =
+      floorsHint.sizeMult ??
+      (softTag === 'top10_soft_allow_age_unknown_fallback'
+        ? TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT
+        : TOP10_SOFT_ALLOW_SIZE_MULT);
+    exitRules = applyTop10SoftAllowSizeHaircut(exitRules, true, softMult);
     if (!/top10_soft_allow/i.test(reason)) {
-      reason = `${reason} · top10_soft_allow`;
+      reason = `${reason} · ${softTag}`;
     }
   }
   return {
