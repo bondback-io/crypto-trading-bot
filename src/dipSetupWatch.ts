@@ -100,6 +100,12 @@ const dipFunnel = {
   triggered: 0,
   handoff_failed: 0,
   no_levels: 0,
+  /** Admit / rotate deny reasons (Dip/Steady inventory diagnostics) */
+  mutual_exclude: 0,
+  unwatch_cd: 0,
+  no_levels_rotate: 0,
+  vol_liq_mc: 0,
+  at_cap: 0,
 };
 
 function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
@@ -505,7 +511,7 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
     w.nearSupport === true;
   if (!hasLevels) noteDipFunnel('no_levels');
 
-  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×3 ≈1h); skip MC≥$500M
+  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×4 ≈80m); skip MC≥$500M
   if (isQualityBandSource(w.source)) {
     try {
       const {
@@ -521,6 +527,7 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
           w.marketCapUsd
         );
         if (rotate) {
+          noteDipFunnel('no_levels_rotate');
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = `no levels ×${streak} (~20m) — rotate`;
@@ -567,18 +574,27 @@ export function considerDipWatchSetup(input: {
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
-  if (isManualUnwatchCooldown(input.mint)) return null;
+  if (isManualUnwatchCooldown(input.mint)) {
+    noteDipFunnel('unwatch_cd');
+    return null;
+  }
   try {
     const { isMintOnActiveScalperWatch } =
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
-    if (isMintOnActiveScalperWatch(input.mint)) return null;
+    if (isMintOnActiveScalperWatch(input.mint)) {
+      noteDipFunnel('mutual_exclude');
+      return null;
+    }
   } catch {
     /* optional */
   }
   try {
     const { isMintOnActiveTrendWatch } =
       require('./trendSetupWatch') as typeof import('./trendSetupWatch');
-    if (isMintOnActiveTrendWatch(input.mint)) return null;
+    if (isMintOnActiveTrendWatch(input.mint)) {
+      noteDipFunnel('mutual_exclude');
+      return null;
+    }
   } catch {
     /* optional */
   }
@@ -646,13 +662,17 @@ export function considerDipWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
-  if (mc != null && mc > 0 && mc < minMc && !isQuality) return null;
+  if (mc != null && mc > 0 && mc < minMc && !isQuality) {
+    noteDipFunnel('vol_liq_mc');
+    return null;
+  }
   if (
     !isQuality &&
     input.holderCount != null &&
     input.holderCount > 0 &&
     input.holderCount < minHolders
   ) {
+    noteDipFunnel('vol_liq_mc');
     return null;
   }
   if (
@@ -661,6 +681,7 @@ export function considerDipWatchSetup(input: {
     input.volumeH1Usd > 0 &&
     input.volumeH1Usd < minVol
   ) {
+    noteDipFunnel('vol_liq_mc');
     return null;
   }
 
@@ -669,9 +690,19 @@ export function considerDipWatchSetup(input: {
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
   // Medium/Majors: admit to watching without force-buy when S/R thin (arm later).
   // Memecoins: need early dip signal OR Fib/S proximity.
-  if (!isQuality && !dropStarted && !nearTa) return null;
-  if (drop != null && drop > maxDrop) return null;
+  if (!isQuality && !dropStarted && !nearTa) {
+    noteDipFunnel('vol_liq_mc');
+    return null;
+  }
+  if (drop != null && drop > maxDrop) {
+    noteDipFunnel('vol_liq_mc');
+    return null;
+  }
 
+  const activeBefore = activeWatches(bucket).length;
+  if (activeBefore >= bucketCap(bucket)) {
+    noteDipFunnel('at_cap');
+  }
   reserveAdmitSlot(bucket);
 
   const now = Date.now();

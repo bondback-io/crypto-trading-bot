@@ -469,6 +469,10 @@ function stampEntryStyleOnBuyOpts(
     ) {
       (buyOpts as { dipWatchTriggered?: boolean }).dipWatchTriggered = true;
     }
+    if (signal.specialtyFeed) {
+      (buyOpts as { specialtyFeed?: string | null }).specialtyFeed =
+        signal.specialtyFeed;
+    }
     if (armed) {
       (buyOpts as { armedWatch?: boolean }).armedWatch = true;
       (buyOpts as { entryPath?: string }).entryPath = 'armed_trigger';
@@ -1150,6 +1154,10 @@ function applyProfileTaPlaybookGate(
         ))
     ) {
       (buyOpts as { dipWatchTriggered?: boolean }).dipWatchTriggered = true;
+    }
+    if (signal.specialtyFeed) {
+      (buyOpts as { specialtyFeed?: string | null }).specialtyFeed =
+        signal.specialtyFeed;
     }
     if (
       signal.armedWatch === true ||
@@ -3377,12 +3385,24 @@ async function handleScannerCandidate(
     markScannerCooldown(candidate.mint, false);
     return;
   }
+  const candPref =
+    candidate.preferredProfileId ||
+    candidate.launch?.preferredProfileId ||
+    null;
+  const candFeed =
+    candidate.specialtyFeed || candidate.launch?.specialtyFeed || null;
+  const candArmed =
+    candidate.armedWatch === true ||
+    (candidate as { dipWatchTriggered?: boolean }).dipWatchTriggered === true;
   const pumpFunGate = evaluateBuyPumpFunOnlyGate(candidate.mint, {
-    specialtyFeed: candidate.specialtyFeed || candidate.launch?.specialtyFeed,
-    preferredProfileId:
-      candidate.preferredProfileId ||
-      candidate.launch?.preferredProfileId ||
-      null,
+    specialtyFeed: candFeed,
+    preferredProfileId: candPref,
+    candidateTradeProfileId: candPref,
+    tradeProfileId: candPref,
+    armedWatch: candArmed,
+    dipWatchTriggered:
+      (candidate as { dipWatchTriggered?: boolean }).dipWatchTriggered === true,
+    symbol: candidate.symbol,
   });
   if (pumpFunGate) {
     annotateScannerCandidate(candidate.mint, {
@@ -3391,22 +3411,6 @@ async function handleScannerCandidate(
     });
     markScannerCooldown(candidate.mint, false);
     return;
-  }
-  if (
-    !isPumpFunMintSuffix(candidate.mint) &&
-    (candidate.specialtyFeed === 'jupiter' ||
-      candidate.specialtyFeed === 'kolscan' ||
-      candidate.specialtyFeed === 'majors' ||
-      candidate.specialtyFeed === 'medium') &&
-    (candidate.preferredProfileId === 'trend_rider' ||
-      candidate.preferredProfileId === 'steady_compounder' ||
-      candidate.launch?.preferredProfileId === 'trend_rider' ||
-      candidate.launch?.preferredProfileId === 'steady_compounder')
-  ) {
-    console.log(
-      `[monitor] Specialty pump.fun-only bypass · ${candidate.symbol || candidate.mint.slice(0, 8)} ` +
-        `(${candidate.preferredProfileId || candidate.launch?.preferredProfileId}/${candidate.specialtyFeed})`
-    );
   }
 
   // Overview feed early (mirror copy path) — before beginBuy / risk_off / requireTa
@@ -6818,10 +6822,23 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     return false;
   }
 
+  const signalArmedWatch =
+    signal.armedWatch === true ||
+    signal.dipWatchTriggered === true ||
+    (Array.isArray(signal.scannerReasons) &&
+      signal.scannerReasons.some((r) =>
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
+          String(r)
+        )
+      ));
   const pumpFunGate = evaluateBuyPumpFunOnlyGate(signal.mint, {
     specialtyFeed: signal.specialtyFeed,
     candidateTradeProfileId: signal.candidateTradeProfileId,
     preferredProfileId: signal.candidateTradeProfileId,
+    tradeProfileId: signal.candidateTradeProfileId,
+    armedWatch: signalArmedWatch,
+    dipWatchTriggered: signal.dipWatchTriggered === true,
+    symbol: signal.symbol,
   });
   if (pumpFunGate) {
     console.log(
@@ -6829,20 +6846,6 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     );
     recordRejectedSignal(signal, pumpFunGate);
     return false;
-  }
-  if (
-    !isPumpFunMintSuffix(signal.mint) &&
-    (signal.specialtyFeed === 'jupiter' ||
-      signal.specialtyFeed === 'kolscan' ||
-      signal.specialtyFeed === 'majors' ||
-      signal.specialtyFeed === 'medium') &&
-    (signal.candidateTradeProfileId === 'trend_rider' ||
-      signal.candidateTradeProfileId === 'steady_compounder')
-  ) {
-    console.log(
-      `[monitor] Specialty pump.fun-only bypass · ${signal.symbol} ` +
-        `(${signal.candidateTradeProfileId}/${signal.specialtyFeed})`
-    );
   }
 
   // Smart Bot Profiles ON: enrich → gatekeeper → classifier → lane fight → cascade
@@ -7743,10 +7746,26 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           Boolean(signal.earlyBuy || signal.nearMigration) ||
           Boolean(signal.bondingCurve && !signal.isMigration) ||
           Boolean(signal.isMigration);
+        const armedForAntiRug =
+          signal.armedWatch === true ||
+          signal.dipWatchTriggered === true ||
+          (Array.isArray(signal.scannerReasons) &&
+            signal.scannerReasons.some((r) =>
+              /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
+                String(r)
+              )
+            ));
         const report: AntiRugReport = await evaluateAntiRug(signal.mint, {
           earlyEntry,
           isMigrated: Boolean(signal.isMigration),
           organicScore: signal.organicScore,
+          specialtyFeed: signal.specialtyFeed,
+          preferredProfileId: signal.candidateTradeProfileId,
+          candidateTradeProfileId: signal.candidateTradeProfileId,
+          tradeProfileId: signal.candidateTradeProfileId,
+          armedWatch: armedForAntiRug,
+          dipWatchTriggered: signal.dipWatchTriggered === true,
+          symbol: signal.symbol,
         });
         signal.antiRug = summarizeAntiRug(report);
         signal.metrics = report.metricsSummary;
@@ -8038,7 +8057,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       signal.candidateTradeProfileId === 'steady_compounder') &&
     (signal.specialtyFeed === 'jupiter' ||
       signal.specialtyFeed === 'kolscan' ||
-      signal.specialtyFeed === 'majors');
+      signal.specialtyFeed === 'majors' ||
+      signal.specialtyFeed === 'medium');
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&

@@ -139,39 +139,102 @@ export function isMatureSpecialtyPumpFunBypass(opts?: {
   specialtyFeed?: string | null;
   preferredProfileId?: string | null;
   candidateTradeProfileId?: string | null;
+  tradeProfileId?: string | null;
+  armedWatch?: boolean | null;
+  dipWatchTriggered?: boolean | null;
 }): boolean {
   const feed = String(opts?.specialtyFeed || '').toLowerCase();
-  if (
-    feed !== 'jupiter' &&
-    feed !== 'kolscan' &&
-    feed !== 'majors' &&
-    feed !== 'medium'
-  ) {
-    return false;
-  }
   const pid = String(
-    opts?.candidateTradeProfileId || opts?.preferredProfileId || ''
+    opts?.candidateTradeProfileId ||
+      opts?.preferredProfileId ||
+      opts?.tradeProfileId ||
+      ''
   );
-  return pid === 'trend_rider' || pid === 'steady_compounder';
+  const armed =
+    opts?.armedWatch === true || opts?.dipWatchTriggered === true;
+
+  // Steady Compounder: majors|medium|jupiter|kolscan — armed / dip-trigger only
+  if (
+    pid === 'steady_compounder' &&
+    (feed === 'jupiter' ||
+      feed === 'kolscan' ||
+      feed === 'majors' ||
+      feed === 'medium')
+  ) {
+    return armed;
+  }
+
+  // Trend Rider: same specialty feeds (existing park path; no armed gate here)
+  if (
+    pid === 'trend_rider' &&
+    (feed === 'jupiter' ||
+      feed === 'kolscan' ||
+      feed === 'majors' ||
+      feed === 'medium')
+  ) {
+    return true;
+  }
+
+  // High Win-Rate: jupiter|kolscan specialty only (not majors/medium Steady park)
+  if (
+    pid === 'high_win_rate' &&
+    (feed === 'jupiter' || feed === 'kolscan')
+  ) {
+    return true;
+  }
+
+  return false;
 }
+
+export type BuyPumpFunOnlyGateOpts = {
+  specialtyFeed?: string | null;
+  preferredProfileId?: string | null;
+  candidateTradeProfileId?: string | null;
+  tradeProfileId?: string | null;
+  armedWatch?: boolean | null;
+  dipWatchTriggered?: boolean | null;
+  /** Optional symbol for log lines */
+  symbol?: string | null;
+  /** When true, skip console logging (hot paths / tests) */
+  quiet?: boolean;
+};
 
 /**
  * Hard floor when filters.buyPumpFunOnly is ON — rejects non-`pump` suffix mints.
- * Non-bypassable by soft-pass / early path / Degen, except Trend Rider /
- * Steady Compounder Jupiter|KOL|majors|medium specialty handoffs.
+ * Non-bypassable by soft-pass / early path / Degen, except mature specialty
+ * Steady/Trend/HWR handoffs via isMatureSpecialtyPumpFunBypass.
  * Returns skip reason or null.
  */
 export function evaluateBuyPumpFunOnlyGate(
   mint: string,
-  opts?: {
-    specialtyFeed?: string | null;
-    preferredProfileId?: string | null;
-    candidateTradeProfileId?: string | null;
-  }
+  opts?: BuyPumpFunOnlyGateOpts
 ): string | null {
   if (config.filters.buyPumpFunOnly !== true) return null;
   if (isPumpFunMintSuffix(mint)) return null;
-  if (isMatureSpecialtyPumpFunBypass(opts)) return null;
+  if (isMatureSpecialtyPumpFunBypass(opts)) {
+    if (!opts?.quiet) {
+      const pid =
+        opts?.candidateTradeProfileId ||
+        opts?.preferredProfileId ||
+        opts?.tradeProfileId ||
+        '?';
+      const feed = opts?.specialtyFeed || '?';
+      const sym =
+        opts?.symbol ||
+        (mint && mint.length > 8 ? `${mint.slice(0, 8)}…` : mint || '?');
+      console.log(
+        `[pump-fun-gate] allowed_non_pump_quality ${sym} · ${pid}/${feed}` +
+          (opts?.armedWatch === true || opts?.dipWatchTriggered === true
+            ? ' · armed'
+            : '')
+      );
+    }
+    return null;
+  }
+  if (!opts?.quiet) {
+    const short = mint && mint.length > 8 ? `${mint.slice(0, 8)}…` : mint || '?';
+    console.log(`[pump-fun-gate] blocked_not_pump_fun ${short}`);
+  }
   return pumpFunMintSkipReason(mint);
 }
 

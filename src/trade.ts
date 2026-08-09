@@ -22,6 +22,8 @@ import {
   evaluateBuyPumpFunOnlyGate,
   evaluateHolderConcentrationHardFloors,
   evaluateFakeHolderVelocityGate,
+  isMatureSpecialtyPumpFunBypass,
+  isPumpFunMintSuffix,
 } from './deadTokenFilters';
 import { getTokenSniperActivity } from './gmgn';
 import { effectiveMaxEntryMarketCapUsd } from './filterEffective';
@@ -363,6 +365,10 @@ export interface BuyOptions {
   srConfluenceScore?: number;
   scalperWatchTriggered?: boolean;
   dipWatchTriggered?: boolean;
+  /** Specialty feed stamp for pump.fun-only bypass (majors/medium/jupiter/kolscan) */
+  specialtyFeed?: string | null;
+  /** Set when non-pump open allowed via mature specialty bypass */
+  nonPumpQualityAllow?: boolean;
   whaleStateAtEntry?: string;
   profileTaPlainLanguage?: string;
   zigzagStructureAtEntry?: string;
@@ -637,12 +643,35 @@ export async function executeBuy(
 
   // Hard floor: only Pump.fun mints ending in `pump` when toggle is ON.
   // Covers paper + live + migration + re-buy (all executeBuy callers).
-  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint);
+  // Mature specialty Steady/HWR/Trend handoffs pass via meta specialty stamps.
+  const pumpFunGateOpts = {
+    specialtyFeed: meta?.specialtyFeed,
+    preferredProfileId: meta?.tradeProfileId,
+    candidateTradeProfileId: meta?.tradeProfileId,
+    tradeProfileId: meta?.tradeProfileId,
+    armedWatch: meta?.armedWatch === true,
+    dipWatchTriggered: meta?.dipWatchTriggered === true,
+    symbol: symbol || meta?.name || null,
+  };
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint, pumpFunGateOpts);
   if (pumpFunGate) {
     console.log(
       `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${pumpFunGate}`
     );
     return { success: false, mode: config.mode, error: pumpFunGate };
+  }
+  if (
+    meta &&
+    !isPumpFunMintSuffix(mint) &&
+    isMatureSpecialtyPumpFunBypass(pumpFunGateOpts)
+  ) {
+    meta.nonPumpQualityAllow = true;
+    const reason = String(meta.tradeProfileReason || '');
+    if (!/non_pump_quality_allow/i.test(reason)) {
+      meta.tradeProfileReason = reason
+        ? `${reason} · non_pump_quality_allow`
+        : 'non_pump_quality_allow';
+    }
   }
 
   // Hard floor: fake-holder velocity (always on — all profiles + Zion Place Trade).

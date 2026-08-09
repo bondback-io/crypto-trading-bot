@@ -53,8 +53,8 @@ const FETCH_LIMIT = 100;
 const CYCLE_CAP_MEDIUM = 25;
 const CYCLE_CAP_MAJORS = 25;
 const REFRESH_MS = 5 * 60_000;
-/** Time-gated no-levels: +1 streak every 20m without levels; rotate after 3 (~1h) */
-export const NO_LEVELS_ROTATE_AFTER = 3;
+/** Time-gated no-levels: +1 streak every 20m without levels; rotate after 4 (~80m) */
+export const NO_LEVELS_ROTATE_AFTER = 4;
 const NO_LEVELS_STREAK_TICK_MS = 20 * 60_000;
 /** Park mega-caps without Fib/S until watch TTL — do not rotate on no-levels */
 export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
@@ -200,9 +200,9 @@ export async function refreshMajorsUniverse(
       list.filter((c) => c.watchBand === 'medium'),
       CYCLE_CAP_MEDIUM
     );
-    const majors = list
-      .filter((c) => c.watchBand === 'majors')
-      .slice(0, CYCLE_CAP_MAJORS);
+    const majors = sortPreferNearLevels(
+      list.filter((c) => c.watchBand === 'majors')
+    ).slice(0, CYCLE_CAP_MAJORS);
     const capped = [...medium, ...majors].sort(
       (a, b) => b.marketCapUsd - a.marketCapUsd
     );
@@ -283,9 +283,37 @@ export function majorsPreferredProfileId(
   return 'dip_buyer';
 }
 
+/** Soft boost when Fib/S levels already known (prefer near-level parks in CYCLE). */
+function candidateNearKnownLevels(c: MajorsCandidate): boolean {
+  try {
+    const { getTechnicalLevelsForStrategy } =
+      require('./technicalLevels') as typeof import('./technicalLevels');
+    const tech = getTechnicalLevelsForStrategy({
+      mint: c.mint,
+      priceSol: c.lastPriceSol ?? undefined,
+    });
+    if (!tech) return false;
+    return tech.nearFibZone === true || tech.nearSupportZone === true;
+  } catch {
+    return false;
+  }
+}
+
+function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
+  const scored = list.map((c) => ({
+    c,
+    near: candidateNearKnownLevels(c) ? 1 : 0,
+  }));
+  scored.sort((a, b) => {
+    if (b.near !== a.near) return b.near - a.near;
+    return b.c.marketCapUsd - a.c.marketCapUsd;
+  });
+  return scored.map((x) => x.c);
+}
+
 /**
  * Fill CYCLE seats with ~40% reserved for mid-MC bands (50m/100m), rest by top MC.
- * Prevents mega-cap-only lists when mid names exist in the universe.
+ * Prefer candidates already near Fib/S when levels are known; still allow level-less park.
  */
 function pickCycleWithMidSeats(
   candidates: MajorsCandidate[],
@@ -293,8 +321,12 @@ function pickCycleWithMidSeats(
 ): MajorsCandidate[] {
   if (cap <= 0 || !candidates.length) return [];
   const midReserve = Math.max(1, Math.floor(cap * MID_BAND_SEAT_FRAC));
-  const mid = candidates.filter((c) => c.band === '50m' || c.band === '100m');
-  const rest = candidates.filter((c) => c.band !== '50m' && c.band !== '100m');
+  const mid = sortPreferNearLevels(
+    candidates.filter((c) => c.band === '50m' || c.band === '100m')
+  );
+  const rest = sortPreferNearLevels(
+    candidates.filter((c) => c.band !== '50m' && c.band !== '100m')
+  );
   const picked: MajorsCandidate[] = [];
   const used = new Set<string>();
   for (const c of mid) {
@@ -312,7 +344,7 @@ function pickCycleWithMidSeats(
 }
 
 /**
- * Time-gated no-levels rotate: +1 streak every 20 min without levels; rotate after 3 (~1h).
+ * Time-gated no-levels rotate: +1 streak every 20 min without levels; rotate after 4 (~80m).
  * MC ≥ $500M: never rotate on no-levels (park until watch TTL).
  */
 export function noteMajorsLevelsPresence(

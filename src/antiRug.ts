@@ -188,12 +188,32 @@ function emptyChecks(): AntiRugChecks {
 
 function antiRugCacheKey(
   mint: string,
-  opts: { earlyEntry?: boolean; isMigrated?: boolean } = {}
+  opts: {
+    earlyEntry?: boolean;
+    isMigrated?: boolean;
+    specialtyFeed?: string | null;
+    preferredProfileId?: string | null;
+    candidateTradeProfileId?: string | null;
+    tradeProfileId?: string | null;
+    armedWatch?: boolean | null;
+    dipWatchTriggered?: boolean | null;
+  } = {}
 ): string {
-  if (opts.earlyEntry || opts.isMigrated) {
-    return `${mint}|e=${opts.earlyEntry ? 1 : 0}|m=${opts.isMigrated ? 1 : 0}`;
-  }
-  return mint;
+  const parts = [mint];
+  if (opts.earlyEntry) parts.push('e=1');
+  if (opts.isMigrated) parts.push('m=1');
+  const feed = String(opts.specialtyFeed || '').toLowerCase();
+  const pid = String(
+    opts.candidateTradeProfileId ||
+      opts.preferredProfileId ||
+      opts.tradeProfileId ||
+      ''
+  );
+  if (feed) parts.push(`sf=${feed}`);
+  if (pid) parts.push(`pid=${pid}`);
+  if (opts.armedWatch === true) parts.push('aw=1');
+  if (opts.dipWatchTriggered === true) parts.push('dt=1');
+  return parts.length > 1 ? parts.join('|') : mint;
 }
 
 export function getCachedAntiRug(mint: string): AntiRugReport | null {
@@ -293,6 +313,14 @@ export interface AntiRugEvalOptions {
   /** Jupiter txn counts fallback when Dex h1 missing */
   jupiterBuys?: number | null;
   jupiterSells?: number | null;
+  /** Specialty feed stamp (majors/medium/jupiter/kolscan) for pump.fun-only bypass */
+  specialtyFeed?: string | null;
+  preferredProfileId?: string | null;
+  candidateTradeProfileId?: string | null;
+  tradeProfileId?: string | null;
+  armedWatch?: boolean | null;
+  dipWatchTriggered?: boolean | null;
+  symbol?: string | null;
 }
 
 export async function evaluateAntiRug(
@@ -344,6 +372,13 @@ export async function evaluateAntiRug(
         organicScore: options.organicScore,
         jupiterBuys: options.jupiterBuys,
         jupiterSells: options.jupiterSells,
+        specialtyFeed: options.specialtyFeed,
+        preferredProfileId: options.preferredProfileId,
+        candidateTradeProfileId: options.candidateTradeProfileId,
+        tradeProfileId: options.tradeProfileId,
+        armedWatch: options.armedWatch,
+        dipWatchTriggered: options.dipWatchTriggered,
+        symbol: options.symbol,
       });
       cache.set(cacheKey, {
         report: { ...report, fromCache: false },
@@ -394,6 +429,13 @@ async function runAntiRugChecks(
     organicScore?: number | null;
     jupiterBuys?: number | null;
     jupiterSells?: number | null;
+    specialtyFeed?: string | null;
+    preferredProfileId?: string | null;
+    candidateTradeProfileId?: string | null;
+    tradeProfileId?: string | null;
+    armedWatch?: boolean | null;
+    dipWatchTriggered?: boolean | null;
+    symbol?: string | null;
   } = {}
 ): Promise<AntiRugReport> {
   const filters = config.filters;
@@ -434,8 +476,19 @@ async function runAntiRugChecks(
   const skipDevSells = filters.skipIfDevRecentSells !== false;
   const checkHoneypot = filters.checkHoneypot !== false;
 
-  // Hard floor: Pump.fun mint suffix only (non-bypassable when enabled)
-  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint);
+  // Hard floor: Pump.fun mint suffix only (non-bypassable when enabled),
+  // except mature specialty Steady/Trend/HWR handoffs (opts threaded from monitor).
+  const pumpFunGate = evaluateBuyPumpFunOnlyGate(mint, {
+    specialtyFeed: ctx.specialtyFeed,
+    preferredProfileId: ctx.preferredProfileId,
+    candidateTradeProfileId: ctx.candidateTradeProfileId,
+    tradeProfileId: ctx.tradeProfileId,
+    armedWatch: ctx.armedWatch,
+    dipWatchTriggered: ctx.dipWatchTriggered,
+    symbol: ctx.symbol,
+    // Monitor / executeBuy own the operator-facing allow/block logs.
+    quiet: true,
+  });
   if (pumpFunGate) {
     hardSkipReasons.push(pumpFunGate);
     skipReasons.push(pumpFunGate);

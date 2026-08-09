@@ -8163,7 +8163,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
               <span class="setup-watch-title">Dip/Steady setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $50–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~1h (skip MC≥$500M). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $50–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~80m (4×20m; skip MC≥$500M). Unwatch cools 15m.</p>
+              <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
                 <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
                 <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-medium" data-dip-watch-tab="medium" aria-selected="false" title="Medium MC $50M–$200M Steady parks">Medium <span class="setup-watch-tab-count" id="dip-watch-tab-medium-count">0</span></button>
@@ -13368,6 +13369,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : '')
             : '';
           const dipF = diag.dipFunnel || null;
+          const dipDenyBits = dipF
+            ? [
+                dipF.mutual_exclude ? 'mx×' + dipF.mutual_exclude : '',
+                dipF.unwatch_cd ? 'uw×' + dipF.unwatch_cd : '',
+                dipF.no_levels_rotate ? 'nlRot×' + dipF.no_levels_rotate : '',
+                dipF.vol_liq_mc ? 'vlm×' + dipF.vol_liq_mc : '',
+                dipF.at_cap ? 'cap×' + dipF.at_cap : '',
+              ]
+                .filter(Boolean)
+                .join(' ')
+            : '';
           const dipFunnelBits = dipF
             ? ' · Dip funnel off ' +
               (dipF.offered || 0) +
@@ -13377,8 +13389,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               (dipF.watchingNow != null ? dipF.watchingNow : dipF.watching || 0) +
               (dipF.triggered ? '/trig ' + dipF.triggered : '') +
               (dipF.handoff_failed ? '/hf×' + dipF.handoff_failed : '') +
-              (dipF.no_levels ? '/noLvl×' + dipF.no_levels : '')
+              (dipF.no_levels ? '/noLvl×' + dipF.no_levels : '') +
+              (dipDenyBits ? ' · deny ' + dipDenyBits : '')
             : '';
+          const dipFunnelEl = document.getElementById('dip-watch-funnel');
+          if (dipFunnelEl) {
+            if (dipF) {
+              dipFunnelEl.textContent =
+                'Funnel: off ' +
+                (dipF.offered || 0) +
+                ' · arm ' +
+                (dipF.armedNow != null ? dipF.armedNow : dipF.armed || 0) +
+                ' · watch ' +
+                (dipF.watchingNow != null
+                  ? dipF.watchingNow
+                  : dipF.watching || 0) +
+                (dipF.triggered ? ' · trig ' + dipF.triggered : '') +
+                (dipF.handoff_failed ? ' · hf×' + dipF.handoff_failed : '') +
+                (dipDenyBits
+                  ? ' · deny ' + dipDenyBits
+                  : '') +
+                ' (mx=mutual · uw=unwatch_cd · nlRot=no_levels_rotate · vlm=vol/liq/MC · cap=at_cap)';
+            } else {
+              dipFunnelEl.textContent = 'Funnel: —';
+            }
+          }
           const block = diag.lastBlockReason
             ? ' · last block: ' + String(diag.lastBlockReason).slice(0, 48)
             : '';

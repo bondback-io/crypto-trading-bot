@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.253',
+    title: 'Steady non-pump quality opens · Dip/Steady funnel',
+    sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],
+    items: [
+      'Steady/HWR non-pump quality allow: anti-rug + executeBuy honor specialty pass-through (Steady majors|medium|jupiter|kolscan armed/dip-trigger; HWR jupiter|kolscan only). Tag non_pump_quality_allow; buyPumpFunOnly stays hard for unstamped paths; honeypot/critical anti-rug final; Scalper/Migration/late-chase untouched.',
+      'Medium specialty Require-TA exempt parity with majors for Steady/Trend handoffs.',
+      'Dip/Steady watch funnel: top admit/rotate deny reasons (mutual_exclude, unwatch_cd, no_levels_rotate, vol/liq/MC, at_cap); CYCLE prefer near Fib/S; no-levels rotate softened to 4×20m (skip MC≥$500M).',
+    ],
+  },
+  {
     version: '1.2.252',
     title: 'Soft-allow pool age · age-unknown fallback · MB N/A',
     sections: ['microbots', 'tradecraft', 'overview', 'knobs'],
