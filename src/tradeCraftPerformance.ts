@@ -9,6 +9,11 @@ import {
 } from './profileLearningEpisodes';
 import { TRADE_PROFILE_CATALOG } from './tradeProfiles';
 import { isProfitCaptureLayerEnabled } from './profitCaptureLayer';
+import {
+  isLossPnlSol,
+  isWinPnlSol,
+  winRatePctFromWl,
+} from './tradeOutcome';
 
 export type CraftTrendLabel = 'improving' | 'stable' | 'declining';
 
@@ -164,7 +169,19 @@ function median(nums: number[]): number | null {
 }
 
 function isWin(ep: ProfileLearningEpisode): boolean {
-  return Number(ep.pnlPct) > 0 || Number(ep.pnlSol) > 0;
+  return isWinPnlSol(ep.pnlSol);
+}
+
+function isLoss(ep: ProfileLearningEpisode): boolean {
+  return isLossPnlSol(ep.pnlSol);
+}
+
+/** WR from SOL W/L only (scratches excluded). */
+function wrOf(eps: ProfileLearningEpisode[]): number | null {
+  const w = eps.filter(isWin).length;
+  const l = eps.filter(isLoss).length;
+  if (w + l <= 0) return null;
+  return w / (w + l);
 }
 
 function captureRatio(ep: ProfileLearningEpisode): number | null {
@@ -269,7 +286,7 @@ function scoreHold(eps: ProfileLearningEpisode[]): {
   if (!eps.length) return { score: null, kpis: {} };
   const holds = eps.map((e) => Number(e.holdSec) || 0);
   const winH = eps.filter(isWin).map((e) => Number(e.holdSec) || 0);
-  const loseH = eps.filter((e) => !isWin(e)).map((e) => Number(e.holdSec) || 0);
+  const loseH = eps.filter(isLoss).map((e) => Number(e.holdSec) || 0);
   const premature = eps.filter((e) => {
     const mfe = Math.max(0, Number(e.maxRunupPct) || 0);
     const cap = captureRatio(e);
@@ -354,7 +371,7 @@ function scoreProfitImprove(eps: ProfileLearningEpisode[]): {
   const timings = eps
     .map((e) => Number(e.timingReward))
     .filter((n) => Number.isFinite(n));
-  const wr = eps.filter(isWin).length / eps.length;
+  const wr = wrOf(eps) ?? 0;
   const avgPnl = avg(pnls) ?? 0;
   const avgT = avg(timings);
   let score = 50 + clamp(avgPnl * 2.5, -30, 30) + (wr - 0.45) * 40;
@@ -363,7 +380,10 @@ function scoreProfitImprove(eps: ProfileLearningEpisode[]): {
     score: clamp(Math.round(score * 10) / 10, 0, 100),
     kpis: {
       avgPnlPct: Math.round(avgPnl * 100) / 100,
-      winRatePct: Math.round(wr * 1000) / 10,
+      winRatePct: Math.round(winRatePctFromWl(
+        eps.filter(isWin).length,
+        eps.filter(isLoss).length
+      ) * 10) / 10,
       avgTimingReward: avgT != null ? Math.round(avgT * 100) / 100 : null,
       sumPnlPct: Math.round(pnls.reduce((s, n) => s + n, 0) * 100) / 100,
     },
@@ -448,17 +468,14 @@ function scoreTa(eps: ProfileLearningEpisode[]): {
   const passRate = toolN ? toolPass / toolN : null;
   const nearSup = withTa.filter((e) => e.nearSupportAtEntry === true);
   const nearRes = withTa.filter((e) => e.nearResistanceAtEntry === true);
-  const supWin =
-    nearSup.length > 0
-      ? nearSup.filter(isWin).length / nearSup.length
-      : null;
+  const supWin = nearSup.length > 0 ? wrOf(nearSup) : null;
   const heldProfit =
     withTa.filter((e) => e.taConditionsHeldIntoProfit === true).length /
     withTa.length;
   const exitBeat =
     withTa.filter((e) => e.taExitBeatHold === true).length / withTa.length;
   const volRegret =
-    withTa.filter((e) => e.volumeDecayedAfterEntry === true && !isWin(e))
+    withTa.filter((e) => e.volumeDecayedAfterEntry === true && isLoss(e))
       .length / withTa.length;
   let score = 50;
   if (conf != null) score += (conf - 50) * 0.35;
@@ -508,8 +525,7 @@ function scoreDecisions(eps: ProfileLearningEpisode[]): {
       .filter((n) => Number.isFinite(n))
   );
   const highQ = eps.filter((e) => e.qualityTier === 'high');
-  const highQWr =
-    highQ.length >= 3 ? highQ.filter(isWin).length / highQ.length : null;
+  const highQWr = highQ.length >= 3 ? wrOf(highQ) : null;
   const cfGap = avg(
     eps
       .map((e) => Number(e.cfActualVsPeakGapPct))
@@ -541,7 +557,8 @@ function scoreDecisions(eps: ProfileLearningEpisode[]): {
   let bestStyle: string | null = null;
   for (const [s, list] of byStyle) {
     if (list.length < 3) continue;
-    const wr = list.filter(isWin).length / list.length;
+    const wr = wrOf(list);
+    if (wr == null) continue;
     if (bestStyleWr == null || wr > bestStyleWr) {
       bestStyleWr = wr;
       bestStyle = s;

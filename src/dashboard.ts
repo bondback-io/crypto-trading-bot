@@ -7228,7 +7228,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <p class="mint text-xs mt-1 mb-0 hidden" id="ov-import-meta"></p>
       <div class="ov-meta-strip mt-2.5 sm:mt-3">
         <div class="card">
-          <div class="stat-label">Win Rate <span class="tip tip-below" tabindex="0" data-tip="Closed trades that finished green in the selected window. Now = current session on screen (no historical import). Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
+          <div class="stat-label">Win Rate <span class="tip tip-below" id="win-rate-tip" tabindex="0" data-tip="Closed trades that finished green in the selected window (SOL PnL &gt; 0). Scratches (flat) excluded from WR. Now = current session on screen (no historical import). Subtitle is wins W / losses L. All uses lifetime counters when available."></span></div>
           <div class="stat" id="win-rate">—</div>
           <div class="mint mt-1 text-xs" id="stat-wl">—</div>
         </div>
@@ -16474,6 +16474,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (v == null || !Number.isFinite(Number(v))) return '—';
       return Number(v).toFixed(digits != null ? digits : 2);
     }
+    function elFmtProfitFactor(v) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      const n = Number(v);
+      if (n <= 0) return '—';
+      if (n >= 900) return '∞';
+      return n.toFixed(n >= 10 ? 1 : 2);
+    }
     function elChipClass(ok, warn) {
       if (ok) return 'lsd-chip lsd-chip-active';
       if (warn) return 'lsd-chip';
@@ -17035,7 +17042,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     elFmtNum(m.expectancyPct, 2) +
                     '</td>' +
                     '<td>' +
-                    elFmtNum(m.profitFactor, 2) +
+                    elFmtProfitFactor(m.profitFactor) +
                     '</td>' +
                     '<td>' +
                     (m.mfeCapturePct != null
@@ -17415,18 +17422,44 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const wrEl = document.getElementById('win-rate');
       if (wrEl) {
         wrEl.textContent =
-          ov.closedTrades > 0 ? Number(ov.winRatePct).toFixed(0) + '%' : '—';
+          ov.closedTrades > 0 || (ov.wins || 0) + (ov.losses || 0) > 0
+            ? Number(ov.winRatePct).toFixed(0) + '%'
+            : '—';
         wrEl.style.color =
-          ov.closedTrades > 0 && Number(ov.winRatePct) >= 50
+          (ov.wins || 0) + (ov.losses || 0) > 0 && Number(ov.winRatePct) >= 50
             ? 'var(--green)'
-            : ov.closedTrades > 0 && Number(ov.winRatePct) < 40
+            : (ov.wins || 0) + (ov.losses || 0) > 0 && Number(ov.winRatePct) < 40
               ? 'var(--red)'
               : '';
+      }
+      const wrTip = document.getElementById('win-rate-tip');
+      if (wrTip) {
+        if (ov.lifetimeOverlay) {
+          wrTip.setAttribute(
+            'data-tip',
+            'WR/W/L = lifetime; PF/avgs from sample n=' +
+              (ov.sampleSize ?? 0) +
+              '. Win = SOL PnL &gt; 0; scratches excluded from WR.'
+          );
+        } else {
+          wrTip.setAttribute(
+            'data-tip',
+            'Closed trades that finished green in the selected window (SOL PnL &gt; 0). Scratches (flat) excluded from WR. Now = current session on screen (no historical import). Subtitle is wins W / losses L.'
+          );
+        }
+        if (ov.diagnostics && ov.diagnostics.wrConsistent === false) {
+          wrTip.setAttribute(
+            'data-tip',
+            (wrTip.getAttribute('data-tip') || '') +
+              ' · Note: ' +
+              (ov.diagnostics.note || 'WR inconsistent with W/L')
+          );
+        }
       }
       const wlEl = document.getElementById('stat-wl');
       if (wlEl) {
         wlEl.textContent =
-          ov.closedTrades > 0
+          (ov.wins || 0) + (ov.losses || 0) > 0 || ov.closedTrades > 0
             ? (ov.wins ?? 0) + 'W / ' + (ov.losses ?? 0) + 'L'
             : '0W / 0L';
       }

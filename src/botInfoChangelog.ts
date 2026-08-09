@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.251',
+    title: 'Steady/HWR top10 soft-allow · WR classifier unify',
+    sections: ['microbots', 'tradecraft', 'overview', 'learning', 'knobs'],
+    items: [
+      'Dip governor: audit only — stays restricted on negative expectancy; armed/native soft-pass unchanged (no unlock).',
+      'Steady/HWR lane top10 soft-allow: aged (≥90d) liquid tokens between hard max and soft ceiling (42%/40%) with vol/holders floors; size ×0.90; tagged top10_soft_allow. Fast bots unchanged; unknown top10 fail-closed intact.',
+      'WR unify: shared SOL classifier (win>0 / loss<0 / scratch excluded); microBot, Expectancy Lift, Trade Craft, paper lifetime seed aligned; Overview All tip when lifetime W/L overlays sample PF; PF ∞ label aligned.',
+    ],
+  },
+  {
     version: '1.2.250',
     title: 'Watchlist inventory · Profile RL anti-thrash · status lights',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

@@ -33,6 +33,11 @@ import {
 import { recordScannerOutcome } from './scannerOutcomes';
 import { loadPaperBalance, savePaperBalance, CLOSED_POSITIONS_RING_MAX } from './paperStateStore';
 import {
+  isLossPnlSol,
+  isWinPnlSol,
+  winRatePctFromWl,
+} from './tradeOutcome';
+import {
   effectiveDeadVolumeConsecutiveHours,
   effectiveDeadVolumeMinHoldMinutes,
   effectiveDeadVolumeUsdPerHour,
@@ -1534,8 +1539,8 @@ export class PaperTrader {
         0,
         Math.round(Number(saved.lifetimeLosses) || 0)
       );
-      // Heal inconsistent W+L vs closed
-      if (this.lifetimeWins + this.lifetimeLosses !== this.lifetimeClosed) {
+      // Heal only when W+L exceeds closed (impossible); scratches may make W+L < closed
+      if (this.lifetimeWins + this.lifetimeLosses > this.lifetimeClosed) {
         const reps = representativeClosedTrades(this.closedPositions);
         if (reps.length >= this.lifetimeClosed) {
           this.seedLifetimeFromClosed();
@@ -1562,15 +1567,15 @@ export class PaperTrader {
   private seedLifetimeFromClosed(): void {
     const reps = representativeClosedTrades(this.closedPositions);
     this.lifetimeClosed = reps.length;
-    this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
-    this.lifetimeLosses = reps.filter((p) => (p.pnlSol ?? 0) <= 0).length;
+    this.lifetimeWins = reps.filter((p) => isWinPnlSol(p.pnlSol)).length;
+    this.lifetimeLosses = reps.filter((p) => isLossPnlSol(p.pnlSol)).length;
   }
 
   /** Increment lifetime counters on a representative final close (not partials). */
   private noteLifetimeFinalClose(pnlSol: number): void {
     this.lifetimeClosed += 1;
-    if (pnlSol > 0) this.lifetimeWins += 1;
-    else this.lifetimeLosses += 1;
+    if (isWinPnlSol(pnlSol)) this.lifetimeWins += 1;
+    else if (isLossPnlSol(pnlSol)) this.lifetimeLosses += 1;
   }
 
   getStartingBalance(): number {
@@ -2421,8 +2426,8 @@ export class PaperTrader {
     // Align lifetime counters to imported sample for Overview strip consistency
     const reps = representativeClosedTrades(capped);
     this.lifetimeClosed = reps.length;
-    this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
-    this.lifetimeLosses = Math.max(0, this.lifetimeClosed - this.lifetimeWins);
+    this.lifetimeWins = reps.filter((p) => isWinPnlSol(p.pnlSol)).length;
+    this.lifetimeLosses = reps.filter((p) => isLossPnlSol(p.pnlSol)).length;
     const openN = this.sessionImportedOpen?.length ?? 0;
     this.log(
       'info',
@@ -2519,11 +2524,8 @@ export class PaperTrader {
         .slice(0, 1000);
       const reps = representativeClosedTrades(this.sessionImportedClosed);
       this.lifetimeClosed = reps.length;
-      this.lifetimeWins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
-      this.lifetimeLosses = Math.max(
-        0,
-        this.lifetimeClosed - this.lifetimeWins
-      );
+      this.lifetimeWins = reps.filter((p) => isWinPnlSol(p.pnlSol)).length;
+      this.lifetimeLosses = reps.filter((p) => isLossPnlSol(p.pnlSol)).length;
     }
   }
 
@@ -5694,26 +5696,27 @@ export class PaperTrader {
     const reps = representativeClosedTrades(this.closedForSessionStats()).filter(
       (p) => (p.closedAt ?? 0) >= startMs
     );
-    const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
-    const losses = reps.filter((p) => (p.pnlSol ?? 0) <= 0).length;
+    const wins = reps.filter((p) => isWinPnlSol(p.pnlSol)).length;
+    const losses = reps.filter((p) => isLossPnlSol(p.pnlSol)).length;
     const pnlSol = reps.reduce((s, p) => s + (p.pnlSol ?? 0), 0);
     return {
       wins,
       losses,
-      winRatePct: reps.length > 0 ? (wins / reps.length) * 100 : 0,
+      winRatePct: winRatePctFromWl(wins, losses),
       pnlSol,
     };
   }
 
   /** Simple win-rate % — lifetime Overview counter (monotonic). */
   getWinRatePct(): number {
-    if (this.lifetimeClosed > 0) {
-      return (this.lifetimeWins / this.lifetimeClosed) * 100;
+    if (this.lifetimeWins + this.lifetimeLosses > 0) {
+      return winRatePctFromWl(this.lifetimeWins, this.lifetimeLosses);
     }
     const reps = representativeClosedTrades(this.closedPositions);
     if (reps.length === 0) return 0;
-    const wins = reps.filter((p) => (p.pnlSol ?? 0) > 0).length;
-    return (wins / reps.length) * 100;
+    const wins = reps.filter((p) => isWinPnlSol(p.pnlSol)).length;
+    const losses = reps.filter((p) => isLossPnlSol(p.pnlSol)).length;
+    return winRatePctFromWl(wins, losses);
   }
 
   /** Session closed count for a trade profile (current closed ring). */
@@ -5785,8 +5788,8 @@ export class PaperTrader {
   getStats() {
     const closedRaw = this.closedPositions;
     const closed = representativeClosedTrades(closedRaw);
-    const sessionWins = closed.filter((p) => (p.pnlSol ?? 0) > 0);
-    const sessionLosses = closed.filter((p) => (p.pnlSol ?? 0) <= 0);
+    const sessionWins = closed.filter((p) => isWinPnlSol(p.pnlSol));
+    const sessionLosses = closed.filter((p) => isLossPnlSol(p.pnlSol));
     const useLife = this.lifetimeClosed > 0;
     const winCount = useLife ? this.lifetimeWins : sessionWins.length;
     const lossCount = useLife ? this.lifetimeLosses : sessionLosses.length;
@@ -6085,7 +6088,11 @@ export class PaperTrader {
           ? p.sourceNames
           : ['Unknown'];
       const share = (p.pnlSol ?? 0) / names.length;
-      const won = (p.pnlSol ?? 0) > 0;
+      const outcome = isWinPnlSol(p.pnlSol)
+        ? 'win'
+        : isLossPnlSol(p.pnlSol)
+          ? 'loss'
+          : 'scratch';
 
       for (const name of names) {
         const cur = walletMap.get(name) ?? {
@@ -6097,8 +6104,8 @@ export class PaperTrader {
         };
         cur.pnlSol += share;
         cur.trades += 1;
-        if (won) cur.wins += 1;
-        else cur.losses += 1;
+        if (outcome === 'win') cur.wins += 1;
+        else if (outcome === 'loss') cur.losses += 1;
         walletMap.set(name, cur);
       }
     }
@@ -6115,8 +6122,8 @@ export class PaperTrader {
       losses: perWalletSorted.map((w) => w.losses),
     };
 
-    const wins = closed.filter((p) => (p.pnlSol ?? 0) > 0);
-    const losses = closed.filter((p) => (p.pnlSol ?? 0) <= 0);
+    const wins = closed.filter((p) => isWinPnlSol(p.pnlSol));
+    const losses = closed.filter((p) => isLossPnlSol(p.pnlSol));
 
     const winLoss = {
       labels: ['Wins', 'Losses'],

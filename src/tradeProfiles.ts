@@ -859,6 +859,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'KOL / specialty feed preferred for scanner entries',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Selective · smaller size — accuracy over volume',
+      'Lane floors: holders ≥150 · top10 ≤32% (soft ≤40% if age≥90d + liq≥$20k) · 1h vol ≥$15k',
     ],
     priority: 72,
     defaultEnabled: true,
@@ -1027,7 +1028,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
+      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k · top10 ≤35% (soft ≤42% if age≥90d + liq≥$10k)',
       'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
       'Medium $50–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
@@ -2635,10 +2636,149 @@ export function hasMigrationLaneSignals(
  * Cannot undercut global Risk On Min MC — only raise it via minMarketCapUsd.
  * Anti-rug / honeypot stay global outside this helper.
  */
+/** Soft top10 ceiling for aged liquid Steady / HWR only (below global ~70%). */
+const TOP10_SOFT_CEILING_PCT: Partial<Record<string, number>> = {
+  steady_compounder: 42,
+  high_win_rate: 40,
+};
+const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
+  steady_compounder: 10_000,
+  high_win_rate: 20_000,
+};
+const TOP10_SOFT_MIN_AGE_HOURS = 90 * 24;
+/** Size haircut when Steady/HWR top10 soft-allow grants. */
+export const TOP10_SOFT_ALLOW_SIZE_MULT = 0.9;
+
+export type LaneEntryFloorsResult = {
+  ok: boolean;
+  reason?: string;
+  /** Steady/HWR aged-liquid soft pass between hard max and soft ceiling. */
+  top10SoftAllow?: boolean;
+  sizeMult?: number;
+};
+
+/**
+ * When known top10 exceeds the lane hard max, Steady/HWR may soft-allow if
+ * age/volume/liquidity/holders/soft-ceiling all pass. Fast bots never enter.
+ */
+export function resolveTop10SoftAllow(
+  def: TradeProfileDefinition,
+  ctx: TradeProfileMatchContext,
+  top10: number,
+  maxTop10: number
+): {
+  allow: boolean;
+  rejectKey?: 'age' | 'volume' | 'liquidity' | 'holders' | 'ceiling';
+  detail: string;
+} {
+  const softCeil = TOP10_SOFT_CEILING_PCT[def.id];
+  if (softCeil == null) {
+    return {
+      allow: false,
+      detail: `${def.name} top10 ${top10.toFixed(1)}% > max ${maxTop10}%`,
+    };
+  }
+  const ageH = resolveTokenAgeHoursForGate(ctx);
+  if (ageH == null || ageH < TOP10_SOFT_MIN_AGE_HOURS) {
+    return {
+      allow: false,
+      rejectKey: 'age',
+      detail:
+        ageH == null
+          ? `${def.name} top10 soft-allow deny: age unknown (need ≥${TOP10_SOFT_MIN_AGE_HOURS}h)`
+          : `${def.name} top10 soft-allow deny: age ${ageH.toFixed(1)}h < ${TOP10_SOFT_MIN_AGE_HOURS}h`,
+    };
+  }
+  const minVol =
+    def.match.minVolumeH1Usd != null &&
+    Number.isFinite(def.match.minVolumeH1Usd) &&
+    def.match.minVolumeH1Usd > 0
+      ? Number(def.match.minVolumeH1Usd)
+      : 0;
+  const volH1 =
+    ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
+      ? Number(ctx.volumeH1Usd)
+      : null;
+  if (minVol > 0 && (volH1 == null || volH1 < minVol)) {
+    return {
+      allow: false,
+      rejectKey: 'volume',
+      detail:
+        volH1 == null
+          ? `${def.name} top10 soft-allow deny: volumeH1 unknown (need ≥$${Math.round(minVol)})`
+          : `${def.name} top10 soft-allow deny: volumeH1 $${Math.round(volH1)} < $${Math.round(minVol)}`,
+    };
+  }
+  const minLiq = TOP10_SOFT_MIN_LIQ_USD[def.id] ?? 10_000;
+  const liq =
+    ctx.liquidityUsd != null && Number.isFinite(ctx.liquidityUsd)
+      ? Number(ctx.liquidityUsd)
+      : null;
+  if (liq == null || liq < minLiq) {
+    return {
+      allow: false,
+      rejectKey: 'liquidity',
+      detail:
+        liq == null
+          ? `${def.name} top10 soft-allow deny: liquidity unknown (need ≥$${Math.round(minLiq)})`
+          : `${def.name} top10 soft-allow deny: liquidity $${Math.round(liq)} < $${Math.round(minLiq)}`,
+    };
+  }
+  const minHolders =
+    def.match.minHolders != null &&
+    Number.isFinite(def.match.minHolders) &&
+    def.match.minHolders > 0
+      ? Number(def.match.minHolders)
+      : 0;
+  const holders =
+    ctx.holderCount != null && Number.isFinite(ctx.holderCount)
+      ? Number(ctx.holderCount)
+      : null;
+  if (minHolders > 0 && (holders == null || holders < minHolders)) {
+    return {
+      allow: false,
+      rejectKey: 'holders',
+      detail:
+        holders == null
+          ? `${def.name} top10 soft-allow deny: holders unknown (need ≥${minHolders})`
+          : `${def.name} top10 soft-allow deny: holders ${holders} < ${minHolders}`,
+    };
+  }
+  if (top10 > softCeil) {
+    return {
+      allow: false,
+      rejectKey: 'ceiling',
+      detail: `${def.name} top10 soft-allow deny: ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`,
+    };
+  }
+  return {
+    allow: true,
+    detail: `${def.name} top10_soft_allow ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}%)`,
+  };
+}
+
+/** Apply Steady/HWR top10 soft-allow size haircut on exit rules when granted. */
+export function applyTop10SoftAllowSizeHaircut(
+  exitRules: TradeProfileExitRules,
+  granted: boolean
+): TradeProfileExitRules {
+  if (!granted) return exitRules;
+  const base =
+    exitRules.sizeMultiplier != null &&
+    Number.isFinite(exitRules.sizeMultiplier) &&
+    exitRules.sizeMultiplier > 0
+      ? Number(exitRules.sizeMultiplier)
+      : 1;
+  return {
+    ...exitRules,
+    sizeMultiplier: Number((base * TOP10_SOFT_ALLOW_SIZE_MULT).toFixed(4)),
+  };
+}
+
 export function evaluateLaneEntryFloors(
   def: TradeProfileDefinition,
   ctx: TradeProfileMatchContext
-): { ok: boolean; reason?: string } {
+): LaneEntryFloorsResult {
   const m = def.match;
   const mc =
     ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
@@ -2726,9 +2866,32 @@ export function evaluateLaneEntryFloors(
         : null;
     // Known-only: unknown top-10 does not fail the lane
     if (top10 != null && top10 > maxTop10) {
+      const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
+      if (soft.allow) {
+        console.log(
+          `[trade-profiles] top10_soft_allow GRANT ${ctx.symbol || 'token'} · ${soft.detail}` +
+            ` · size ×${TOP10_SOFT_ALLOW_SIZE_MULT}`
+        );
+        return {
+          ok: true,
+          reason: 'top10_soft_allow',
+          top10SoftAllow: true,
+          sizeMult: TOP10_SOFT_ALLOW_SIZE_MULT,
+        };
+      }
+      if (TOP10_SOFT_CEILING_PCT[def.id] != null) {
+        console.log(
+          `[trade-profiles] top10_soft_allow REJECT ${ctx.symbol || 'token'} · ${soft.detail}` +
+            (soft.rejectKey ? ` · key=${soft.rejectKey}` : '')
+        );
+      } else {
+        console.log(
+          `[trade-profiles] top10 hard-block ${ctx.symbol || 'token'} · ${soft.detail}`
+        );
+      }
       return {
         ok: false,
-        reason: `${def.name} top10 ${top10.toFixed(1)}% > max ${maxTop10}%`,
+        reason: soft.detail,
       };
     }
   }
@@ -2955,6 +3118,9 @@ export function evaluateTradeProfileLanes(
     }
     let laneScore = Math.round(scored.score * 10) / 10;
     let laneReason = scored.reason;
+    if (floors.top10SoftAllow === true && !/top10_soft_allow/i.test(laneReason)) {
+      laneReason = `${laneReason} · top10_soft_allow`;
+    }
     try {
       const { isLearningModeActive, learningModeFairnessBump } =
         require('./learningMode') as typeof import('./learningMode');
@@ -2989,6 +3155,7 @@ export function evaluateTradeProfileLanes(
       score: laneScore,
       reason: laneReason,
       autoScored: false,
+      top10SoftAllow: floors.top10SoftAllow === true,
     });
     results.push({
       profileId: def.id,
@@ -4602,13 +4769,24 @@ function buildAssignmentFromDef(
     autoScored?: boolean;
     forced?: boolean;
     topScores?: TradeProfileAssignment['topScores'];
+    top10SoftAllow?: boolean;
   }
 ): TradeProfileAssignment {
-  const exitRules = finalizeExitRulesForWinner(def, ctx);
-  const reason =
+  let exitRules = finalizeExitRulesForWinner(def, ctx);
+  let reason =
     exitRules.turboMode === true && !/\bturbo\b/i.test(opts.reason)
       ? `${opts.reason} · turbo`
       : opts.reason;
+  const floorsHint =
+    opts.top10SoftAllow === true
+      ? { top10SoftAllow: true as const }
+      : evaluateLaneEntryFloors(def, ctx);
+  if (floorsHint.top10SoftAllow === true) {
+    exitRules = applyTop10SoftAllowSizeHaircut(exitRules, true);
+    if (!/top10_soft_allow/i.test(reason)) {
+      reason = `${reason} · top10_soft_allow`;
+    }
+  }
   return {
     profileId: def.id,
     name: def.name,

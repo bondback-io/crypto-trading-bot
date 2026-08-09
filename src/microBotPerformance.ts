@@ -5,6 +5,13 @@
 
 import type { ProfileLearningEpisode } from './profileLearningEpisodes';
 import { getProfileLearningEpisodes } from './profileLearningEpisodes';
+import {
+  classifyTradeOutcomePnlSol,
+  isLossPnlSol,
+  isWinPnlSol,
+  winRatePctFromWl,
+  wrDisplayConsistent,
+} from './tradeOutcome';
 
 export type PerformanceWindow = '1h' | 'today' | '24h' | '7d' | '30d' | 'all';
 
@@ -99,6 +106,8 @@ export interface MicroBotPerformanceRow {
   learningModeOptIn: boolean;
   learningModeTrades: number;
   learningModeActive: boolean;
+  /** Present when WR/W-L classifier check was computed. */
+  diagnostics?: { wrConsistent: boolean; decidedTrades: number };
   /** 1-based rank among profiles with trades; null if unranked */
   rank: number | null;
   band: PerformanceBand;
@@ -362,7 +371,9 @@ function computeStreaks(sortedAsc: InternalTrade[]): {
   let runKind: 'win' | 'loss' | null = null;
   let runLen = 0;
   for (const t of sortedAsc) {
-    const kind: 'win' | 'loss' = t.pnlSol > 0 ? 'win' : 'loss';
+    const outcome = classifyTradeOutcomePnlSol(t.pnlSol);
+    if (outcome === 'scratch') continue;
+    const kind: 'win' | 'loss' = outcome;
     if (kind === runKind) runLen += 1;
     else {
       runKind = kind;
@@ -371,17 +382,25 @@ function computeStreaks(sortedAsc: InternalTrade[]): {
     if (kind === 'win') longestWin = Math.max(longestWin, runLen);
     else longestLoss = Math.max(longestLoss, runLen);
   }
-  // Current streak = from most recent backward
-  const last = sortedAsc[sortedAsc.length - 1];
-  const curKind: 'win' | 'loss' = last.pnlSol > 0 ? 'win' : 'loss';
+  // Current streak = from most recent backward (skip scratches)
+  let curKind: 'win' | 'loss' | null = null;
   let curLen = 0;
   for (let i = sortedAsc.length - 1; i >= 0; i--) {
-    const k = sortedAsc[i].pnlSol > 0 ? 'win' : 'loss';
-    if (k !== curKind) break;
+    const outcome = classifyTradeOutcomePnlSol(sortedAsc[i].pnlSol);
+    if (outcome === 'scratch') continue;
+    if (curKind == null) {
+      curKind = outcome;
+      curLen = 1;
+      continue;
+    }
+    if (outcome !== curKind) break;
     curLen += 1;
   }
   return {
-    current: { kind: curKind, length: curLen },
+    current: {
+      kind: curKind ?? 'flat',
+      length: curLen,
+    },
     longestWin,
     longestLoss,
   };
@@ -420,8 +439,8 @@ function metricsForTrades(
     globalLearningMode: boolean;
   }
 ): Omit<MicroBotPerformanceRow, 'rank' | 'band'> {
-  const wins = trades.filter((t) => t.pnlSol > 0);
-  const losses = trades.filter((t) => t.pnlSol <= 0);
+  const wins = trades.filter((t) => isWinPnlSol(t.pnlSol));
+  const losses = trades.filter((t) => isLossPnlSol(t.pnlSol));
   const winPcts = wins.map((t) => t.pnlPct);
   const lossPcts = losses.map((t) => t.pnlPct);
   const netPnlSol = trades.reduce((s, t) => s + t.pnlSol, 0);
@@ -473,6 +492,7 @@ function metricsForTrades(
   const streaks = computeStreaks(trades);
   const dd = computeMaxDrawdown(trades);
   const lmTrades = trades.filter((t) => t.learningMode).length;
+  const decided = wins.length + losses.length;
 
   return {
     profileId,
@@ -483,7 +503,7 @@ function metricsForTrades(
     trades: trades.length,
     wins: wins.length,
     losses: losses.length,
-    winRatePct: trades.length > 0 ? (wins.length / trades.length) * 100 : 0,
+    winRatePct: winRatePctFromWl(wins.length, losses.length),
     avgPnlPct,
     avgPnlPctWinners,
     avgPnlPctLosers,
@@ -501,6 +521,14 @@ function metricsForTrades(
     learningModeOptIn: opts.learningModeOptIn,
     learningModeTrades: lmTrades,
     learningModeActive: opts.globalLearningMode && opts.learningModeOptIn,
+    diagnostics: {
+      wrConsistent: wrDisplayConsistent({
+        wins: wins.length,
+        losses: losses.length,
+        winRatePct: winRatePctFromWl(wins.length, losses.length),
+      }),
+      decidedTrades: decided,
+    },
   };
 }
 
@@ -668,6 +696,12 @@ export interface OverviewWindowStats {
   netPnlSol: number;
   sampleSize: number;
   rankedAt: number;
+  /** True when All window W/L/WR use lifetime counters over the sample ring. */
+  lifetimeOverlay?: boolean;
+  diagnostics?: {
+    wrConsistent: boolean;
+    note?: string;
+  };
 }
 
 /**
@@ -737,11 +771,13 @@ export function buildOverviewWindowStats(opts: {
     ).sort((a, b) => a.closedAt - b.closedAt);
   }
 
-  const wins = filtered.filter((t) => t.pnlSol > 0);
-  const losses = filtered.filter((t) => t.pnlSol <= 0);
+  const wins = filtered.filter((t) => isWinPnlSol(t.pnlSol));
+  const losses = filtered.filter((t) => isLossPnlSol(t.pnlSol));
   let winCount = wins.length;
   let lossCount = losses.length;
   let closedTrades = filtered.length;
+  let lifetimeOverlay = false;
+  const sampleSize = filtered.length;
 
   if (
     window === 'all' &&
@@ -751,10 +787,10 @@ export function buildOverviewWindowStats(opts: {
     closedTrades = Math.max(0, Math.round(opts.lifetime.closed));
     winCount = Math.max(0, Math.round(opts.lifetime.wins));
     lossCount = Math.max(0, Math.round(opts.lifetime.losses));
+    lifetimeOverlay = true;
   }
 
-  const winRatePct =
-    closedTrades > 0 ? (winCount / closedTrades) * 100 : 0;
+  const winRatePct = winRatePctFromWl(winCount, lossCount);
   const netPnlSol = filtered.reduce((s, t) => s + t.pnlSol, 0);
   const grossWins = wins.reduce((s, t) => s + t.pnlSol, 0);
   const grossLossesAbs = Math.abs(
@@ -777,6 +813,11 @@ export function buildOverviewWindowStats(opts: {
       : 0;
   const { maxDrawdownPct } = computeMaxDrawdown(filtered);
   const includeOpen = window === 'all' || window === 'now';
+  const wrOk = wrDisplayConsistent({
+    wins: winCount,
+    losses: lossCount,
+    winRatePct,
+  });
 
   return {
     window,
@@ -792,7 +833,14 @@ export function buildOverviewWindowStats(opts: {
     avgWinPct,
     avgLossPct,
     netPnlSol,
-    sampleSize: filtered.length,
+    sampleSize,
     rankedAt: nowMs,
+    lifetimeOverlay,
+    diagnostics: {
+      wrConsistent: wrOk,
+      note: wrOk
+        ? undefined
+        : `WR ${Math.round(winRatePct)}% ≠ ${winCount}W/(${winCount}+${lossCount})L`,
+    },
   };
 }

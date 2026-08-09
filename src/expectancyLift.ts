@@ -13,6 +13,11 @@ import {
   type ProfileLearningEpisode,
 } from './profileLearningEpisodes';
 import { TRADE_PROFILE_CATALOG } from './tradeProfiles';
+import {
+  isLossPnlSol,
+  isScratchPnlSol,
+  isWinPnlSol,
+} from './tradeOutcome';
 
 export const EXPECTANCY_LIFT_VERSION = 1;
 
@@ -689,7 +694,7 @@ function fromEpisode(e: ProfileLearningEpisode): ExpectancyTradeRow | null {
     holdMs: Math.max(0, (Number(e.holdSec) || 0) * 1000),
     pnlPct,
     pnlSol,
-    win: pnlPct > 0 || pnlSol > 0,
+    win: isWinPnlSol(pnlSol),
     armed,
     lateChase:
       e.lateChaseAtEntry === true ||
@@ -753,7 +758,7 @@ function fromClosed(t: Record<string, unknown>): ExpectancyTradeRow | null {
     ),
     pnlPct,
     pnlSol,
-    win: pnlPct > 0 || pnlSol > 0,
+    win: isWinPnlSol(pnlSol),
     armed,
     lateChase:
       t.lateChaseAtEntry === true || /late.?chase/i.test(style),
@@ -819,10 +824,12 @@ export function collectExpectancyTrades(): ExpectancyTradeRow[] {
 export function computeExpectancyMetrics(
   trades: ExpectancyTradeRow[]
 ): ExpectancyMetrics {
-  const n = trades.length;
+  // Display WR / expectancy: exclude scratch (≈0 SOL) from denominator
+  const decided = trades.filter((t) => !isScratchPnlSol(t.pnlSol));
+  const n = decided.length;
   if (!n) return emptyMetrics();
-  const wins = trades.filter((t) => t.win);
-  const losses = trades.filter((t) => !t.win);
+  const wins = decided.filter((t) => isWinPnlSol(t.pnlSol));
+  const losses = decided.filter((t) => isLossPnlSol(t.pnlSol));
   const wr = wins.length / n;
   const avgWin = avg(wins.map((t) => t.pnlPct)) ?? 0;
   const avgLossAbs =
@@ -837,7 +844,7 @@ export function computeExpectancyMetrics(
   const avgLossSolAbs =
     avg(losses.map((t) => Math.abs(t.pnlSol))) ?? 0;
   const expectancySol = wr * avgWinSol - (1 - wr) * avgLossSolAbs;
-  const caps = trades
+  const caps = decided
     .map((t) => t.mfeCapturePct)
     .filter((x): x is number => x != null && Number.isFinite(x));
   return {
@@ -848,14 +855,15 @@ export function computeExpectancyMetrics(
       avgLossAbs > 1e-9 && wins.length ? avgWin / avgLossAbs : null,
     expectancyPct,
     expectancySol,
+    // Align with microBot: capped ∞ label (999) when wins and no losses
     profitFactor:
       sumLossSolAbs > 1e-9
         ? sumWinSol / sumLossSolAbs
         : wins.length
-          ? null
+          ? 999
           : 0,
     mfeCapturePct: avg(caps),
-    avgHoldMs: avg(trades.map((t) => t.holdMs)),
+    avgHoldMs: avg(decided.map((t) => t.holdMs)),
     tradeCount: n,
   };
 }
