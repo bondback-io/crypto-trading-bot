@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.244',
+    title: 'Power Cell on Micro Bots (mobile)',
+    sections: ['microbots', 'tradecraft', 'overview', 'learning', 'knobs'],
+    items: [
+      'Performance Power Cell moved to top of Micro Bots tab (first card); removed from Bot Performance between Expectancy Lift and Trade Craft.',
+      'Mobile: 2-column mini-cell grid (≤640px), stacked hero meta above full-width bar, wrapping header Window/Refresh, touch-friendly targets; window select syncs with Expectancy Lift Last 20/50/100.',
+      'Visual-only; Entry Skill / Baseline v235 unchanged. Opening Micro Bots refreshes Power Cell via loadExpectancyLift.',
+    ],
+  },
+  {
     version: '1.2.243',
     title: 'Performance Power Cell (visual)',
     sections: ['tradecraft', 'overview', 'learning', 'microbots', 'knobs'],

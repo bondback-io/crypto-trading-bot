@@ -3666,12 +3666,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .tc-score-label { font-size: 0.68rem; color: #94a3b8; margin-top: 0.2rem; text-transform: uppercase; letter-spacing: 0.04em; }
     /* Performance Power Cell */
+    .ppc-header {
+      display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+      gap: 0.55rem 0.75rem; margin-bottom: 0.5rem;
+    }
+    .ppc-header-controls {
+      display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: flex-end;
+    }
+    .ppc-header-controls .btn,
+    .ppc-header-controls select {
+      min-height: 2.5rem;
+      min-width: 2.75rem;
+    }
     .ppc-hero {
-      display: flex; flex-wrap: wrap; gap: 1rem; align-items: stretch;
+      display: flex; flex-direction: column; gap: 0.75rem;
       margin: 0.35rem 0 0.75rem;
     }
     .ppc-hero-main {
-      flex: 1 1 16rem; min-width: 0;
+      width: 100%; min-width: 0;
       display: flex; flex-direction: column; gap: 0.55rem;
       padding: 0.85rem 0.95rem; border-radius: 12px;
       background: linear-gradient(145deg, #0b1224 0%, #0f172a 55%, #111827 100%);
@@ -3687,14 +3699,17 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       letter-spacing: 0.05em; color: #cbd5e1;
     }
     .ppc-delta {
-      font-size: 0.65rem; font-weight: 700; padding: 0.12rem 0.4rem;
+      font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.45rem;
       border-radius: 999px; border: 1px solid #334155; color: #94a3b8;
       font-variant-numeric: tabular-nums;
     }
     .ppc-delta.up { color: #4ade80; border-color: #065f46; background: #064e3b33; }
     .ppc-delta.down { color: #f87171; border-color: #7f1d1d; background: #450a0a33; }
     .ppc-delta.flat { color: #94a3b8; }
-    .ppc-blurb { font-size: 0.72rem; color: #94a3b8; line-height: 1.4; margin: 0; }
+    .ppc-blurb {
+      font-size: 0.72rem; color: #94a3b8; line-height: 1.4; margin: 0;
+      overflow-wrap: anywhere; word-break: break-word; white-space: normal;
+    }
     .ppc-cell {
       --ppc-neon: #34d399;
       --ppc-fill: 0%;
@@ -3771,11 +3786,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       100% { transform: translateY(-2.6rem); opacity: 0; }
     }
     .ppc-minis {
-      display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.15rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+      gap: 0.45rem;
+      margin-top: 0.15rem;
     }
     .ppc-mini {
-      flex: 1 1 7.5rem; min-width: 7rem; max-width: 11rem;
-      padding: 0.45rem 0.5rem; border-radius: 10px;
+      min-width: 0;
+      padding: 0.5rem 0.55rem; border-radius: 10px;
       background: #0f172a; border: 1px solid #1e293b;
       cursor: default;
     }
@@ -3785,7 +3803,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     .ppc-mini-row {
       display: flex; align-items: center; justify-content: space-between;
-      gap: 0.35rem; margin-top: 0.2rem;
+      gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;
     }
     .ppc-mini-pct {
       font-size: 0.78rem; font-weight: 800; font-variant-numeric: tabular-nums;
@@ -3794,6 +3812,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .ppc-mini-status {
       font-size: 0.58rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.03em; color: #64748b;
+      overflow-wrap: anywhere; word-break: break-word;
     }
     .ppc-mini .ppc-cell {
       height: 0.85rem; margin-top: 0.3rem; border-radius: 0.35rem;
@@ -3809,6 +3828,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .ppc-mini.band-strong { --ppc-neon: #34d399; }
     .ppc-mini.band-max { --ppc-neon: #22d3ee; }
     .ppc-empty { font-size: 0.72rem; color: #64748b; }
+    @media (max-width: 640px) {
+      .ppc-header { gap: 0.65rem; }
+      .ppc-header-controls { width: 100%; }
+      .ppc-header-controls .ctl { flex: 1 1 auto; min-width: 6.5rem; }
+      .ppc-header-controls .btn { flex: 0 0 auto; }
+      .ppc-hero-main { padding: 0.75rem 0.8rem; }
+      .ppc-hero-meta { width: 100%; }
+      .ppc-pct { font-size: 1.65rem; }
+      .ppc-status { font-size: 0.68rem; }
+      .ppc-blurb { font-size: 0.65rem; }
+      .ppc-cell { height: 3rem; }
+      .ppc-minis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+      .ppc-mini { padding: 0.55rem 0.5rem; }
+      .ppc-mini-name { font-size: 0.6rem; }
+      .ppc-mini-pct { font-size: 0.74rem; }
+      .ppc-mini-status { font-size: 0.55rem; }
+    }
     @media (prefers-reduced-motion: reduce) {
       .ppc-cell.shimmer .ppc-fill { animation: none !important; filter: none !important; }
       .ppc-particles i { animation: none !important; opacity: 0 !important; }
@@ -8742,6 +8781,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div id="global-microbot-tp-banner" class="hidden text-xs rounded-md px-3 py-2 border border-amber-600/60 bg-amber-950/40 text-amber-200" role="status"></div>
       <div id="learning-mode-microbots-banner" class="hidden text-xs rounded-md px-3 py-2 border border-sky-700/60 bg-sky-950/40 text-sky-200" role="status"></div>
 
+      <div class="card" id="performance-power-cell-card">
+        <div class="ppc-header">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Performance Power Cell <span class="tip" tabindex="0" data-tip="Visual charge from Expectancy Lift: WR vs 45% (35%), expectancy (20%), armed share vs 70% (20%), MFE capture (15%), late-chase penalty (10%). Craft score fallback when thin. Window Last 20/50/100 syncs with Expectancy Lift on Bot Performance. Visual only — does not change admits."></span></div>
+            <p class="text-xs text-slate-400 mb-0" id="ppc-summary">Loading…</p>
+          </div>
+          <div class="ppc-header-controls">
+            <label class="ctl ctl-fit" title="Shares window with Expectancy Lift">
+              <span>Window</span>
+              <select id="ppc-window" onchange="syncExpectancyLiftWindow('ppc-window');loadExpectancyLift()">
+                <option value="20">Last 20</option>
+                <option value="50" selected>Last 50</option>
+                <option value="100">Last 100</option>
+              </select>
+            </label>
+            <button type="button" class="btn btn-sm" onclick="loadExpectancyLift()">Refresh</button>
+          </div>
+        </div>
+        <div class="ppc-hero" id="ppc-hero">
+          <div class="ppc-empty" id="ppc-empty">—</div>
+        </div>
+        <div class="ppc-minis" id="ppc-minis" aria-label="Per-profile power cells"></div>
+      </div>
+
       <div class="card" id="mb-profile-routing-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
@@ -9951,7 +10014,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             </label>
             <label class="ctl ctl-fit">
               <span>Window</span>
-              <select id="el-window" onchange="loadExpectancyLift()">
+              <select id="el-window" onchange="syncExpectancyLiftWindow('el-window');loadExpectancyLift()">
                 <option value="20">Last 20</option>
                 <option value="50" selected>Last 50</option>
                 <option value="100">Last 100</option>
@@ -10020,23 +10083,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="mint">Funnel —</span>
         </div>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-expectancy-lift"></canvas></div>
-      </div>
-
-      <div class="card" id="performance-power-cell-card">
-        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
-          <div style="min-width:0;flex:1">
-            <div class="section-title">Performance Power Cell <span class="tip" tabindex="0" data-tip="Visual charge from Expectancy Lift: WR vs 45% (35%), expectancy (20%), armed share vs 70% (20%), MFE capture (15%), late-chase penalty (10%). Craft score fallback when thin. Same Last 20/50/100 window as Expectancy Lift. Visual only — does not change admits."></span></div>
-            <p class="text-xs text-slate-400 mb-0" id="ppc-summary">Loading…</p>
-          </div>
-          <div class="flex flex-wrap gap-2 items-end">
-            <span class="mint text-xs" id="ppc-window-label" title="Shares Expectancy Lift window">Window —</span>
-            <button type="button" class="btn btn-sm" onclick="loadExpectancyLift()">Refresh</button>
-          </div>
-        </div>
-        <div class="ppc-hero" id="ppc-hero">
-          <div class="ppc-empty" id="ppc-empty">—</div>
-        </div>
-        <div class="ppc-minis" id="ppc-minis" aria-label="Per-profile power cells"></div>
       </div>
 
       <div class="card" id="trade-craft-card">
@@ -16411,16 +16457,31 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       );
     }
 
+    function syncExpectancyLiftWindow(fromId) {
+      const el = document.getElementById('el-window');
+      const ppc = document.getElementById('ppc-window');
+      const src =
+        (fromId && document.getElementById(fromId)) || ppc || el;
+      const raw = src && src.value != null ? String(src.value) : '50';
+      const val = raw === '20' || raw === '100' ? raw : '50';
+      if (el) el.value = val;
+      if (ppc) ppc.value = val;
+      return Number(val) || 50;
+    }
+    window.syncExpectancyLiftWindow = syncExpectancyLiftWindow;
+
     function renderPerformancePowerCell(data) {
       const hero = document.getElementById('ppc-hero');
       const minis = document.getElementById('ppc-minis');
       const sum = document.getElementById('ppc-summary');
-      const winLbl = document.getElementById('ppc-window-label');
       const win =
-        (data && data.window) ||
-        Number((document.getElementById('el-window') || {}).value) ||
-        50;
-      if (winLbl) winLbl.textContent = 'Window Last ' + win;
+        (data && data.window) || syncExpectancyLiftWindow() || 50;
+      const ppcWin = document.getElementById('ppc-window');
+      if (ppcWin && data && data.window != null) {
+        const w = String(data.window);
+        if (w === '20' || w === '50' || w === '100') ppcWin.value = w;
+        syncExpectancyLiftWindow('ppc-window');
+      }
       const bundle = data && data.performanceCharge;
       const combined = bundle && bundle.combined;
       if (!hero) return;
@@ -16531,8 +16592,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     async function loadExpectancyLift() {
       try {
-        const win =
-          Number((document.getElementById('el-window') || {}).value) || 50;
+        const win = syncExpectancyLiftWindow();
         const data = await fetchJSON(
           '/api/expectancy-lift?window=' + encodeURIComponent(String(win))
         );
@@ -18992,6 +19052,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'microbots') {
         loadLaneDecisions().catch(function () {});
+        try { loadExpectancyLift(); } catch (_) {}
       }
       if (name === 'zion') {
         loadZion();
