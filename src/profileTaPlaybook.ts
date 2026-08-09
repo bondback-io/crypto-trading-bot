@@ -422,7 +422,7 @@ export const DEFAULT_PROFILE_TA_PLAYBOOKS: Record<string, ProfileTaPlaybook> = {
       volumeDivergence: true,
     }),
     timeframes: ['15m', '1h', '4h'],
-    minConfluenceScore: 55,
+    minConfluenceScore: 52,
     heikinAshi: { minConsecutive: 2, preferStrengthening: true },
     supportResistance: {
       preferNearSupport: false,

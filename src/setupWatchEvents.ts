@@ -18,7 +18,7 @@ export type SetupWatchEventKind =
 export interface SetupWatchEvent {
   at: number;
   kind: SetupWatchEventKind;
-  family: 'scalper' | 'dip' | 'grad';
+  family: 'scalper' | 'dip' | 'grad' | 'trend';
   mint: string;
   symbol: string;
   profileId?: string | null;
@@ -66,7 +66,7 @@ export function listSetupWatchEvents(limit = 40): SetupWatchEvent[] {
 
 export function setupWatchEventStats(
   windowMs = 6 * 60 * 60_000,
-  family?: 'scalper' | 'dip' | 'grad'
+  family?: 'scalper' | 'dip' | 'grad' | 'trend'
 ): {
   armed: number;
   triggered: number;

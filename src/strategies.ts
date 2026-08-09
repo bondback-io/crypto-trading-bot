@@ -2778,30 +2778,30 @@ function applyStrategyProfileKnobs(knobs: StrategyProfileKnobs): void {
   }
   // Never undercut absolute floors (Risk OFF may zero floors intentionally)
   if (config.riskLevel !== 'off') {
-    config.filters.minLiquidity = Math.max(
-      config.filters.minLiquidity ?? 0,
-      HARD_FILTER_FLOORS.minLiquidityUsd
-    );
-    config.filters.minMarketCapUsd = Math.max(
-      config.filters.minMarketCapUsd ?? 0,
-      HARD_FILTER_FLOORS.minMarketCapUsd
-    );
-    config.filters.minVolume24hUsd = Math.max(
-      config.filters.minVolume24hUsd ?? 0,
-      HARD_FILTER_FLOORS.minVolume24hUsd
-    );
-    config.filters.minRecentVolumeUsd = Math.max(
-      config.filters.minRecentVolumeUsd ?? 0,
-      HARD_FILTER_FLOORS.minRecentVolumeUsd
-    );
-    config.filters.minHolders = Math.max(
-      config.filters.minHolders ?? 0,
-      HARD_FILTER_FLOORS.minHolders
-    );
-    config.filters.minHolderCount = Math.max(
-      config.filters.minHolderCount ?? 0,
-      HARD_FILTER_FLOORS.minHolders
-    );
+  config.filters.minLiquidity = Math.max(
+    config.filters.minLiquidity ?? 0,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minMarketCapUsd = Math.max(
+    config.filters.minMarketCapUsd ?? 0,
+    HARD_FILTER_FLOORS.minMarketCapUsd
+  );
+  config.filters.minVolume24hUsd = Math.max(
+    config.filters.minVolume24hUsd ?? 0,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.filters.minRecentVolumeUsd = Math.max(
+    config.filters.minRecentVolumeUsd ?? 0,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+  config.filters.minHolders = Math.max(
+    config.filters.minHolders ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  config.filters.minHolderCount = Math.max(
+    config.filters.minHolderCount ?? 0,
+    HARD_FILTER_FLOORS.minHolders
+  );
   }
 }
 
@@ -3062,8 +3062,8 @@ function applyStrategyPresetThresholds(t: StrategyPresetThresholds): void {
   config.selective.allowSingleWalletMigration = t.allowSingleWalletMigration;
   // Custom recipe: do not overwrite operator Trade Caps from bake/preset thresholds.
   if (ensureStrategyRecipeMode() !== 'custom') {
-    config.selective.maxTradesPerHour = t.maxTradesPerHour;
-    config.selective.minMsBetweenTrades = t.minMsBetweenTrades;
+  config.selective.maxTradesPerHour = t.maxTradesPerHour;
+  config.selective.minMsBetweenTrades = t.minMsBetweenTrades;
   }
   config.filters.convergenceRequired = t.convergenceRequired;
   config.filters.clusterMinWallets = t.clusterMinWallets;
@@ -3080,34 +3080,34 @@ function applyStrategyPresetThresholds(t: StrategyPresetThresholds): void {
     config.filters.minHolderCount = Math.max(0, t.minHolderCount);
     config.filters.minRecentActivity = Math.max(0, t.minRecentActivity);
   } else {
-    config.filters.minLiquidity = Math.max(
-      t.minLiquidity,
-      HARD_FILTER_FLOORS.minLiquidityUsd
-    );
-    config.filters.minMarketCapUsd = Math.max(
-      t.minMarketCapUsd,
-      HARD_FILTER_FLOORS.minMarketCapUsd
-    );
-    config.filters.minVolume24hUsd = Math.max(
-      t.minVolume24hUsd,
-      HARD_FILTER_FLOORS.minVolume24hUsd
-    );
-    config.filters.minRecentVolumeUsd = Math.max(
-      t.minRecentVolumeUsd,
-      HARD_FILTER_FLOORS.minRecentVolumeUsd
-    );
-    config.filters.minHolders = Math.max(
-      t.minHolders,
-      HARD_FILTER_FLOORS.minHolders
-    );
-    config.filters.minHolderCount = Math.max(
-      t.minHolderCount,
-      HARD_FILTER_FLOORS.minHolders
-    );
-    config.filters.minRecentActivity = Math.max(
-      t.minRecentActivity,
-      HARD_FILTER_FLOORS.minRecentActivityTxns
-    );
+  config.filters.minLiquidity = Math.max(
+    t.minLiquidity,
+    HARD_FILTER_FLOORS.minLiquidityUsd
+  );
+  config.filters.minMarketCapUsd = Math.max(
+    t.minMarketCapUsd,
+    HARD_FILTER_FLOORS.minMarketCapUsd
+  );
+  config.filters.minVolume24hUsd = Math.max(
+    t.minVolume24hUsd,
+    HARD_FILTER_FLOORS.minVolume24hUsd
+  );
+  config.filters.minRecentVolumeUsd = Math.max(
+    t.minRecentVolumeUsd,
+    HARD_FILTER_FLOORS.minRecentVolumeUsd
+  );
+  config.filters.minHolders = Math.max(
+    t.minHolders,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  config.filters.minHolderCount = Math.max(
+    t.minHolderCount,
+    HARD_FILTER_FLOORS.minHolders
+  );
+  config.filters.minRecentActivity = Math.max(
+    t.minRecentActivity,
+    HARD_FILTER_FLOORS.minRecentActivityTxns
+  );
   }
   config.filters.maxRiskScore = t.maxRiskScore;
   config.filters.maxDevHoldPct = t.maxDevHoldPct;
@@ -3763,9 +3763,9 @@ export function getStrategiesStatus() {
         badge = 'risk';
       }
       return {
-        ...s,
+      ...s,
         enabled,
-        frequencyLabel: frequencyImpactLabel(s.frequencyWhenOn),
+      frequencyLabel: frequencyImpactLabel(s.frequencyWhenOn),
         status: enabled ? 'ON' : 'OFF',
         badge,
         recipeExpected,

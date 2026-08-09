@@ -407,6 +407,15 @@ export function computeEpisodeTimingQuality(input: {
     /* fail soft */
   }
 
+  // Habit 1.2.248: down-weight 0-MFE stall spam so it does not dominate craft/RL
+  const exitBlob = `${input.exitReason || ''} ${input.exitKey || ''}`.toLowerCase();
+  const zeroMfeStall =
+    mfe < 1.5 &&
+    /stall|underwater|scalp_signal_fail|never.?pop/i.test(exitBlob);
+  if (zeroMfeStall) {
+    timingReward *= 0.55;
+  }
+
   return {
     entryQualityScore: entryQ,
     exitQualityScore: exitQ,

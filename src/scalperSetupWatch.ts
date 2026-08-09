@@ -545,9 +545,22 @@ export function considerScalperWatchSetup(input: {
     noteModeBFunnel('rejected_dip');
     return null;
   }
+  try {
+    const { isMintOnActiveTrendWatch } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    if (isMintOnActiveTrendWatch(input.mint)) {
+      noteModeBFunnel('rejected_dip');
+      return null;
+    }
+  } catch {
+    /* optional */
+  }
 
   // Never route high-MC majors into Scalper Mode B
-  if (String(input.source || '').toLowerCase() === 'majors') {
+  if (
+    String(input.source || '').toLowerCase() === 'majors' ||
+    String(input.source || '').toLowerCase() === 'medium'
+  ) {
     noteModeBFunnel('rejected_majors');
     return null;
   }
@@ -894,7 +907,9 @@ export async function tickScalperSetupWatches(opts?: {
       continue;
     }
 
+    // Arm parity with admit: nearSupport || nearMultiTfSupport || hits≥2
     const nearConfluence =
+      w.nearSupport === true ||
       w.nearMultiTfSupport === true ||
       (Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2);
 
@@ -902,7 +917,11 @@ export async function tickScalperSetupWatches(opts?: {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
-      w.lastReason = 'armed multi-TF support';
+      w.lastReason = w.nearMultiTfSupport
+        ? 'armed multi-TF support'
+        : Array.isArray(w.supportTfHits) && w.supportTfHits.length >= 2
+          ? 'armed multi-TF hits'
+          : 'armed near support';
       // Armed at support → soft-prefer Scalper unless reversal wick / MB expansion dominate
       w.preferredProfileId = pickPreferredProfile({
         marketCapUsd: w.marketCapUsd,

@@ -78,7 +78,7 @@ const DISC_MIX_SIZE_PENALTY = 0.85;
 
 /**
  * Entry Skill hard-skip late_chase primary even below the n≥20 share floor.
- * Includes quality swing lanes + Scalper / Migration Sniper (habit patch 1.2.247).
+ * 1.2.248: all profiles under Entry Skill (not only quality/fast set).
  * Armed reclaim relief still bypasses via isArmedReclaimRelief.
  */
 const QUALITY_LATE_CHASE_PROFILES = new Set([
@@ -88,7 +88,13 @@ const QUALITY_LATE_CHASE_PROFILES = new Set([
   'smart_money_mirror',
   'scalper',
   'migration_sniper',
+  'momentum_burst',
+  'reversal_scalper',
+  'high_win_rate',
 ]);
+
+/** When true, Entry Skill hard-skips late_chase for any profile id. */
+const LATE_CHASE_HARD_SKIP_ALL_PROFILES = true;
 
 const FILE = () => dataFile('expectancy-lift.json');
 
@@ -1298,11 +1304,12 @@ export function shouldLimitLateChaseShare(input: {
   // Entry Skill: hard-skip late_chase primary even below sample floor
   if (
     !isAdmissionBaselineV235() &&
-    QUALITY_LATE_CHASE_PROFILES.has(String(input.profileId || ''))
+    (LATE_CHASE_HARD_SKIP_ALL_PROFILES ||
+      QUALITY_LATE_CHASE_PROFILES.has(String(input.profileId || '')))
   ) {
     return {
       limit: true,
-      reason: `Entry Skill: hard-skip late_chase primary (${input.profileId})`,
+      reason: `Entry Skill: hard-skip late_chase primary (${input.profileId || 'any'})`,
     };
   }
   const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
@@ -1621,10 +1628,11 @@ export function expectancySizeMultiplier(input: {
 
 function oneSetupFamilyFromProfile(
   profileId: string
-): 'scalper' | 'dip' | 'grad' {
+): 'scalper' | 'dip' | 'grad' | 'trend' {
   const p = String(profileId || '');
   if (p === 'scalper') return 'scalper';
   if (p === 'migration_sniper') return 'grad';
+  if (p === 'trend_rider') return 'trend';
   return 'dip';
 }
 
@@ -1766,8 +1774,8 @@ function profileEnabledForOneSetup(profileId: string): boolean {
 }
 
 /**
- * Sync locks from live watching/armed watches; prune inactive mints;
- * clear when preferred profile is OFF.
+ * Sync locks from live *armed* watches only (1.2.248); watching no longer remints.
+ * Prune inactive mints; clear when preferred profile is OFF.
  */
 export function syncOneSetupLocksFromWatches(): void {
   const active = new Map<string, string>();
@@ -1776,7 +1784,7 @@ export function syncOneSetupLocksFromWatches(): void {
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
     const sw = getScalperSetupWatchStatus(40);
     for (const e of sw.entries || []) {
-      if (e.status !== 'armed' && e.status !== 'watching') continue;
+      if (e.status !== 'armed') continue;
       const pref = String(e.preferredProfileId || 'scalper');
       if (!profileEnabledForOneSetup(pref)) {
         clearOneSetupProfileLock(e.mint, `profile off (${pref})`);
@@ -1792,12 +1800,15 @@ export function syncOneSetupLocksFromWatches(): void {
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     const dw = getDipSetupWatchStatus(40);
     for (const e of dw.entries || []) {
-      if (e.status !== 'armed' && e.status !== 'watching') continue;
-      if (!profileEnabledForOneSetup('dip_buyer')) {
-        clearOneSetupProfileLock(e.mint, 'profile off (dip_buyer)');
+      if (e.status !== 'armed') continue;
+      const pref = String(
+        (e as { preferredProfileId?: string }).preferredProfileId || 'dip_buyer'
+      );
+      if (!profileEnabledForOneSetup(pref)) {
+        clearOneSetupProfileLock(e.mint, `profile off (${pref})`);
         continue;
       }
-      active.set(e.mint, 'dip_buyer');
+      active.set(e.mint, pref);
     }
   } catch {
     /* soft */
@@ -1807,12 +1818,27 @@ export function syncOneSetupLocksFromWatches(): void {
       require('./migrationGradWatch') as typeof import('./migrationGradWatch');
     const gw = getMigrationGradWatchStatus(40);
     for (const e of gw.entries || []) {
-      if (e.status !== 'armed' && e.status !== 'watching') continue;
+      if (e.status !== 'armed') continue;
       if (!profileEnabledForOneSetup('migration_sniper')) {
         clearOneSetupProfileLock(e.mint, 'profile off (migration_sniper)');
         continue;
       }
       active.set(e.mint, 'migration_sniper');
+    }
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getTrendSetupWatchStatus } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    const tw = getTrendSetupWatchStatus(40);
+    for (const e of tw.entries || []) {
+      if (e.status !== 'armed') continue;
+      if (!profileEnabledForOneSetup('trend_rider')) {
+        clearOneSetupProfileLock(e.mint, 'profile off (trend_rider)');
+        continue;
+      }
+      active.set(e.mint, 'trend_rider');
     }
   } catch {
     /* soft */
@@ -1913,6 +1939,15 @@ export function buildEntrySkillByProfile(): Record<
     const gw = getMigrationGradWatchStatus(40);
     const n = (gw.entries || []).filter((e) => e.status === 'armed').length;
     if (n) ensure('migration_sniper').armed = n;
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getTrendSetupWatchStatus } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    const tw = getTrendSetupWatchStatus(40);
+    const n = (tw.entries || []).filter((e) => e.status === 'armed').length;
+    if (n) ensure('trend_rider').armed = n;
   } catch {
     /* soft */
   }
@@ -2094,6 +2129,21 @@ export function evaluateEntrySelectivity(
   else chips.push('entry_skill');
   if (armedWatch) chips.push('armed');
   if (ctx.triggerConfirm === true) chips.push('trigger_confirm');
+  // Habit diagnostic chips (1.2.248)
+  try {
+    const pid = String(ctx.profileId || '');
+    if (
+      pid === 'scalper' ||
+      pid === 'momentum_burst' ||
+      pid === 'reversal_scalper'
+    ) {
+      chips.push('habit_fast');
+    }
+    if (pid === 'migration_sniper') chips.push('habit_ms');
+    if (passerLate) chips.push('habit_late_chase');
+  } catch {
+    /* soft */
+  }
 
   return {
     admit: true,
@@ -2627,14 +2677,37 @@ export function formatExpectancyLiftZionLines(
 /** Lead-block synergy when profile expectancy is poor. */
 export function shouldBlockLeadForPoorExpectancy(profileId: string): boolean {
   try {
+    const pid = String(profileId || '');
     const trades = collectExpectancyTrades()
-      .filter((t) => t.profileId === String(profileId || ''))
+      .filter((t) => t.profileId === pid)
       .slice(-40);
     const m = computeExpectancyMetrics(trades);
     if (m.tradeCount < MIN_SAMPLES || m.expectancyPct == null) return false;
     if (m.expectancyPct <= -0.75 && (m.winRate ?? 1) < 0.35) return true;
-    const fam = classifyTradeFamily({ profileId });
-    return getFamilyGovernorState(fam) === 'restricted' && m.expectancyPct < 0;
+    const fam = classifyTradeFamily({ profileId: pid });
+    if (getFamilyGovernorState(fam) === 'restricted' && m.expectancyPct < 0) {
+      return true;
+    }
+    // Habit 1.2.248: block Lead for weak fast bots (stall spam / WR collapse)
+    const isFast =
+      pid === 'scalper' ||
+      pid === 'momentum_burst' ||
+      pid === 'reversal_scalper' ||
+      pid === 'migration_sniper';
+    if (isFast && m.tradeCount >= 12) {
+      const stallish = trades.filter((t) => {
+        const r = String(
+          (t as { exitReason?: string; exitKey?: string }).exitReason ||
+            (t as { exitKey?: string }).exitKey ||
+            t.family ||
+            ''
+        ).toLowerCase();
+        return /stall|underwater|0.?mfe|never.?pop/i.test(r);
+      }).length;
+      const stallShare = stallish / trades.length;
+      if ((m.winRate ?? 1) < 0.28 || stallShare >= 0.45) return true;
+    }
+    return false;
   } catch {
     return false;
   }

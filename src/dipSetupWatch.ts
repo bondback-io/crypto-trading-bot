@@ -52,9 +52,9 @@ export interface DipWatchEntry {
   lastReason?: string;
   kolCount?: number;
   source?: string;
-  /** Soft MC band when source is majors ($100M / $250M / $500M / $1B+) */
+  /** Soft MC band when source is medium/majors ($50M / $100M / $200M / $250M / $500M / $1B+) */
   majorsBand?: string;
-  /** Soft prefer on handoff — dip_buyer default; majors ≥250m may prefer steady_compounder */
+  /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder */
   preferredProfileId?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
@@ -67,15 +67,18 @@ export interface DipWatchEntry {
 }
 
 /**
- * Separate caps so majors (liberal admit + 10h TTL + frequent refresh)
- * cannot starve memecoin / scanner minors. Shared pool previously was 24
- * with majors CYCLE_CAP 18 + API slice-by-updatedAt → UI showed majors only.
+ * Separate caps so majors/medium (liberal admit + 10h TTL + frequent refresh)
+ * cannot starve memecoin / scanner minors. Medium ≤12 is its own bucket so
+ * majors do not starve $50–200M Steady parks.
  */
 const MAX_MAJORS_WATCHES = 12;
+const MAX_MEDIUM_WATCHES = 12;
 const MAX_MINORS_WATCHES = 16;
 const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
-/** High-MC majors wait longer for Fib/S setups (8–12h band → 10h) */
+/** High-MC majors/medium wait longer for Fib/S setups (8–12h band → 10h) */
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
+
+type DipWatchBucket = 'majors' | 'medium' | 'minors';
 const ARM_NEAR_DROP_MIN = 6;
 /** Mode B parity — reclaim % off level / bounce */
 const TRIGGER_RECLAIM_PCT = 0.9;
@@ -120,22 +123,42 @@ function isMajorsSource(source: string | undefined): boolean {
   return String(source || '').toLowerCase() === 'majors';
 }
 
+function isMediumSource(source: string | undefined): boolean {
+  return String(source || '').toLowerCase() === 'medium';
+}
+
+/** Medium or majors quality band (Steady/Dip parks — not memecoin minors). */
+function isQualityBandSource(source: string | undefined): boolean {
+  return isMajorsSource(source) || isMediumSource(source);
+}
+
+function watchBucket(source: string | undefined): DipWatchBucket {
+  if (isMajorsSource(source)) return 'majors';
+  if (isMediumSource(source)) return 'medium';
+  return 'minors';
+}
+
+function bucketCap(bucket: DipWatchBucket): number {
+  if (bucket === 'majors') return MAX_MAJORS_WATCHES;
+  if (bucket === 'medium') return MAX_MEDIUM_WATCHES;
+  return MAX_MINORS_WATCHES;
+}
+
 function isActiveWatch(w: DipWatchEntry): boolean {
   return w.status === 'watching' || w.status === 'armed';
 }
 
-function activeWatches(bucket: 'majors' | 'minors'): DipWatchEntry[] {
+function activeWatches(bucket: DipWatchBucket): DipWatchEntry[] {
   return [...watches.values()]
     .filter((w) => {
       if (!isActiveWatch(w)) return false;
-      const maj = isMajorsSource(w.source);
-      return bucket === 'majors' ? maj : !maj;
+      return watchBucket(w.source) === bucket;
     })
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** Evict oldest within a bucket until at/under cap. */
-function enforceBucketCap(bucket: 'majors' | 'minors', max: number): void {
+function enforceBucketCap(bucket: DipWatchBucket, max: number): void {
   const active = activeWatches(bucket);
   while (active.length > max) {
     const oldest = active.shift();
@@ -149,9 +172,8 @@ function enforceBucketCap(bucket: 'majors' | 'minors', max: number): void {
  * True if a new admit for this bucket is allowed. When at cap, drop the
  * oldest same-bucket watch so fresh candidates can rotate in.
  */
-function reserveAdmitSlot(isMajors: boolean): boolean {
-  const bucket = isMajors ? 'majors' : 'minors';
-  const max = isMajors ? MAX_MAJORS_WATCHES : MAX_MINORS_WATCHES;
+function reserveAdmitSlot(bucket: DipWatchBucket): boolean {
+  const max = bucketCap(bucket);
   const active = activeWatches(bucket);
   if (active.length < max) return true;
   const oldest = active[0];
@@ -186,7 +208,12 @@ function stampWatchPlan(w: DipWatchEntry): void {
             ? 55
             : 45;
   w.qualityScore = q;
-  w.entryStyle = 'support_dip_reclaim';
+  const preferSteady =
+    w.preferredProfileId === 'steady_compounder' ||
+    isQualityBandSource(w.source);
+  w.entryStyle = preferSteady
+    ? 'quality_structure_reclaim'
+    : 'support_dip_reclaim';
   try {
     const { calculateDynamicPositionSize } =
       require('./risk') as typeof import('./risk');
@@ -196,7 +223,7 @@ function stampWatchPlan(w: DipWatchEntry): void {
       equitySol: paperTrader.getEquitySol(),
       kind: 'normal',
       openCount: paperTrader.getOpenPositions().length,
-      sizeMultiplier: 1,
+      sizeMultiplier: preferSteady ? 0.85 : 1,
     });
     w.sizePlanSol = sizing.sizeSol;
   } catch {
@@ -266,7 +293,13 @@ function isDipProfileEnabled(): boolean {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return false;
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
-  if (config.tradeProfiles?.profiles?.dip_buyer === false) return false;
+  // Minors need Dip; medium/majors may run on Steady alone
+  if (
+    config.tradeProfiles?.profiles?.dip_buyer === false &&
+    config.tradeProfiles?.profiles?.steady_compounder === false
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -284,8 +317,9 @@ function pruneTerminal(): void {
       }
     }
   }
-  // Cap per bucket — never let majors eviction steal minor slots (or vice versa)
+  // Cap per bucket — never let majors/medium eviction steal minor slots
   enforceBucketCap('majors', MAX_MAJORS_WATCHES);
+  enforceBucketCap('medium', MAX_MEDIUM_WATCHES);
   enforceBucketCap('minors', MAX_MINORS_WATCHES);
 }
 
@@ -470,6 +504,39 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
     w.nearKeyFib === true ||
     w.nearSupport === true;
   if (!hasLevels) noteDipFunnel('no_levels');
+
+  // Medium/Majors: rotate !hasLevels after N refreshes so CYCLE_CAP isn't stuck
+  if (isQualityBandSource(w.source)) {
+    try {
+      const {
+        noteMajorsLevelsPresence,
+        clearMajorsNoLevelsStreak,
+      } = require('./majorsUniverse') as typeof import('./majorsUniverse');
+      if (hasLevels) {
+        clearMajorsNoLevelsStreak(w.mint);
+      } else {
+        const { rotate, streak } = noteMajorsLevelsPresence(w.mint, false);
+        if (rotate) {
+          w.status = 'expired';
+          w.updatedAt = now;
+          w.lastReason = `no levels ×${streak} — rotate`;
+          console.log(
+            `[dip-watch] ROTATE ${w.symbol} [${w.source}] — no Fib/S after ${streak} refreshes`
+          );
+          try {
+            const { clearOneSetupProfileLock } =
+              require('./expectancyLift') as typeof import('./expectancyLift');
+            clearOneSetupProfileLock(w.mint, 'expired');
+          } catch {
+            /* optional */
+          }
+          clearMajorsNoLevelsStreak(w.mint);
+        }
+      }
+    } catch {
+      /* optional */
+    }
+  }
 }
 
 /**
@@ -504,6 +571,13 @@ export function considerDipWatchSetup(input: {
   } catch {
     /* optional */
   }
+  try {
+    const { isMintOnActiveTrendWatch } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    if (isMintOnActiveTrendWatch(input.mint)) return null;
+  } catch {
+    /* optional */
+  }
 
   const m = dipMatch();
   const minMc = m.minMarketCapUsd ?? 500_000;
@@ -512,12 +586,15 @@ export function considerDipWatchSetup(input: {
   const minDrop = m.minDropFromPeakPct ?? 8;
   const maxDrop = m.maxDropFromPeakPct ?? 45;
   const isMajors = isMajorsSource(input.source);
+  const isMedium = isMediumSource(input.source);
+  const isQuality = isMajors || isMedium;
+  const bucket = watchBucket(input.source);
 
   pruneTerminal();
   const existing = watches.get(input.mint);
   if (existing && isActiveWatch(existing)) {
     // Already admitted — refresh metrics even if MC dipped under admit floor.
-    // Do NOT bump updatedAt on bare majors re-offer — that starved the status
+    // Do NOT bump updatedAt on bare quality re-offer — that starved the status
     // slice (sorted by updatedAt) of minors. Bump only when TA/metrics move.
     const dropChanged =
       input.dropFromPeakPct != null &&
@@ -544,19 +621,19 @@ export function considerDipWatchSetup(input: {
     existing.volumeH1Usd = input.volumeH1Usd ?? existing.volumeH1Usd;
     existing.holderCount = input.holderCount ?? existing.holderCount;
     existing.kolCount = input.kolCount ?? existing.kolCount;
-    if (isMajors) {
-      existing.source = 'majors';
+    if (isQuality) {
+      existing.source = isMedium ? 'medium' : 'majors';
       existing.majorsBand = input.majorsBand ?? existing.majorsBand;
       if (input.preferredProfileId) {
         existing.preferredProfileId = input.preferredProfileId;
       }
-      // Keep majors TTL from sliding under 4h memecoin default on refresh
+      // Keep quality TTL from sliding under 4h memecoin default on refresh
       const remain = existing.expiresAt - Date.now();
       if (remain < MAJORS_TTL_MS / 2) {
         existing.expiresAt = Date.now() + MAJORS_TTL_MS;
       }
     }
-    if (dropChanged || taChanged || !isMajors) {
+    if (dropChanged || taChanged || !isQuality) {
       existing.updatedAt = Date.now();
     }
     recomputeProximityFromLevels(existing);
@@ -565,9 +642,9 @@ export function considerDipWatchSetup(input: {
   }
 
   const mc = input.marketCapUsd;
-  if (mc != null && mc > 0 && mc < minMc) return null;
+  if (mc != null && mc > 0 && mc < minMc && !isQuality) return null;
   if (
-    !isMajors &&
+    !isQuality &&
     input.holderCount != null &&
     input.holderCount > 0 &&
     input.holderCount < minHolders
@@ -575,7 +652,7 @@ export function considerDipWatchSetup(input: {
     return null;
   }
   if (
-    !isMajors &&
+    !isQuality &&
     input.volumeH1Usd != null &&
     input.volumeH1Usd > 0 &&
     input.volumeH1Usd < minVol
@@ -586,16 +663,19 @@ export function considerDipWatchSetup(input: {
   const drop = input.dropFromPeakPct;
   const nearTa = input.nearKeyFib === true || input.nearSupport === true;
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
-  // Majors: admit to watching without force-buy when S/R thin (arm later).
+  // Medium/Majors: admit to watching without force-buy when S/R thin (arm later).
   // Memecoins: need early dip signal OR Fib/S proximity.
-  if (!isMajors && !dropStarted && !nearTa) return null;
+  if (!isQuality && !dropStarted && !nearTa) return null;
   if (drop != null && drop > maxDrop) return null;
 
-  reserveAdmitSlot(isMajors);
+  reserveAdmitSlot(bucket);
 
   const now = Date.now();
   // Arm on Fib/S proximity; drop is soft preference (not forever AND-gated)
   const armed = nearTa;
+  const prefer =
+    input.preferredProfileId ||
+    (isQuality ? 'steady_compounder' : 'dip_buyer');
   const entry: DipWatchEntry = {
     mint: input.mint,
     symbol: input.symbol || input.mint.slice(0, 6),
@@ -604,7 +684,7 @@ export function considerDipWatchSetup(input: {
     createdAt: now,
     updatedAt: now,
     armedAt: armed ? now : null,
-    expiresAt: now + (isMajors ? MAJORS_TTL_MS : DEFAULT_TTL_MS),
+    expiresAt: now + (isQuality ? MAJORS_TTL_MS : DEFAULT_TTL_MS),
     marketCapUsd: mc,
     volumeH1Usd: input.volumeH1Usd,
     holderCount: input.holderCount,
@@ -617,16 +697,22 @@ export function considerDipWatchSetup(input: {
     fib05PriceSol: input.fib05PriceSol ?? null,
     fib618PriceSol: input.fib618PriceSol ?? null,
     kolCount: input.kolCount,
-    source: isMajors ? 'majors' : input.source || 'scanner',
-    majorsBand: isMajors ? input.majorsBand : undefined,
-    preferredProfileId: input.preferredProfileId || 'dip_buyer',
+    source: isMajors
+      ? 'majors'
+      : isMedium
+        ? 'medium'
+        : input.source || 'scanner',
+    majorsBand: isQuality ? input.majorsBand : undefined,
+    preferredProfileId: prefer,
     lastReason: armed
       ? dropStarted
         ? 'near Fib/S + dip'
         : 'near Fib/S'
       : isMajors
         ? 'majors watch'
-        : 'watching for setup',
+        : isMedium
+          ? 'medium watch'
+          : 'watching for setup',
   };
   entry.targetDipEntries = buildTargetDipEntries(entry);
   if (armed) stampWatchPlan(entry);
@@ -636,7 +722,9 @@ export function considerDipWatchSetup(input: {
   else noteDipFunnel('watching');
   console.log(
     `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol}` +
-      (isMajors ? ` [majors${entry.majorsBand ? `:${entry.majorsBand}` : ''}]` : '') +
+      (isQuality
+        ? ` [${entry.source}${entry.majorsBand ? `:${entry.majorsBand}` : ''}]`
+        : '') +
       ` MC=${mc != null ? `$${Math.round(mc)}` : '?'} drop=${drop != null ? `${drop.toFixed(0)}%` : '?'}`
   );
   if (armed) {
@@ -648,7 +736,7 @@ export function considerDipWatchSetup(input: {
         family: 'dip',
         mint: entry.mint,
         symbol: entry.symbol,
-        profileId: 'dip_buyer',
+        profileId: prefer,
         reason: entry.lastReason,
         qualityScore: entry.qualityScore,
         entryStyle: entry.entryStyle,
@@ -662,14 +750,15 @@ export function considerDipWatchSetup(input: {
 
 function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
-  const isMajors = String(w.source || '').toLowerCase() === 'majors';
-  // Soft prefer: majors ≥250m may stamp steady_compounder; Dip still competes.
-  // Never stamp Scalper — majors stay on quality lanes only.
+  const isMajors = isMajorsSource(w.source);
+  const isMedium = isMediumSource(w.source);
+  // Soft prefer: medium/majors stamp steady_compounder; Dip still competes on minors.
+  // Never stamp Scalper — quality bands stay on Steady/Dip lanes only.
   const prefer =
     w.preferredProfileId === 'steady_compounder'
       ? 'steady_compounder'
       : 'dip_buyer';
-  const feed = isMajors ? 'majors' : 'kolscan';
+  const feed = isMajors ? 'majors' : isMedium ? 'medium' : 'kolscan';
   const launch: LaunchEvent = {
     mint: w.mint,
     symbol: w.symbol,
@@ -684,10 +773,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     volumeUsd: w.volumeH1Usd,
     holderCount: w.holderCount,
     candles: [],
-    source: isMajors ? 'jupiter' : 'kolscan',
+    source: isMajors || isMedium ? 'jupiter' : 'kolscan',
     candleSource: 'synthetic',
     preferredProfileId: prefer,
-    specialtyFeed: feed,
+    specialtyFeed: feed as 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium',
   };
   return {
     id: `dip-watch-${w.mint.slice(0, 8)}-${now}`,
@@ -696,27 +785,32 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     name: w.name,
     timestamp: now,
     status: 'seen',
-    rankScore: isMajors ? 90 : 88,
+    rankScore: isMajors || isMedium ? 90 : 88,
     reasons: [
       'dip-watch:triggered',
       'armedWatch',
       ...(isMajors
         ? [`majors${w.majorsBand ? `:${w.majorsBand}` : ''}`]
-        : []),
+        : isMedium
+          ? [`medium${w.majorsBand ? `:${w.majorsBand}` : ''}`]
+          : []),
       prefer === 'steady_compounder' ? 'prefer:steady_compounder' : 'prefer:dip_buyer',
       w.nearKeyFib ? 'near Fib' : w.nearSupport ? 'near support' : 'reclaim',
-      w.entryStyle || 'support_dip_reclaim',
+      w.entryStyle ||
+        (prefer === 'steady_compounder'
+          ? 'quality_structure_reclaim'
+          : 'support_dip_reclaim'),
       w.dropFromPeakPct != null
         ? `drop ${w.dropFromPeakPct.toFixed(0)}%`
         : 'setup',
     ],
-    source: isMajors ? 'jupiter' : 'kolscan',
+    source: isMajors || isMedium ? 'jupiter' : 'kolscan',
     migrated: true,
     marketCapUsd: w.marketCapUsd,
     volumeH1Usd: w.volumeH1Usd,
     holderCount: w.holderCount,
     preferredProfileId: prefer,
-    specialtyFeed: feed,
+    specialtyFeed: feed as 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium',
     kolCount: w.kolCount,
     nearKeyFib: w.nearKeyFib,
     nearSupport: w.nearSupport,
@@ -725,7 +819,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     dipWatchTriggered: true,
     entryStyleHint:
       prefer === 'steady_compounder'
-        ? 'trend_pullback_continuation'
+        ? w.entryStyle || 'quality_structure_reclaim'
         : w.entryStyle || 'support_dip_reclaim',
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
@@ -1062,6 +1156,7 @@ export function unwatchDipSetup(mint: string): {
 export function getDipSetupWatchStatus(limit = 32): {
   active: number;
   activeMajors: number;
+  activeMedium: number;
   activeMinors: number;
   entries: DipWatchEntry[];
   recentTerminal: DipWatchEntry[];
@@ -1071,17 +1166,27 @@ export function getDipSetupWatchStatus(limit = 32): {
   const majorsActive = activeWatches('majors').sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
+  const mediumActive = activeWatches('medium').sort(
+    (a, b) => b.updatedAt - a.updatedAt
+  );
   const minorsActive = activeWatches('minors').sort(
     (a, b) => b.updatedAt - a.updatedAt
   );
-  // Interleave so a single limit never returns majors-only when minors exist
+  // Interleave so a single limit never returns one band only
   const interleaved: DipWatchEntry[] = [];
   const maxMaj = Math.min(majorsActive.length, MAX_MAJORS_WATCHES);
+  const maxMed = Math.min(mediumActive.length, MAX_MEDIUM_WATCHES);
   const maxMin = Math.min(minorsActive.length, MAX_MINORS_WATCHES);
   let i = 0;
   let j = 0;
-  while (interleaved.length < limit && (i < maxMaj || j < maxMin)) {
-    if (j < maxMin) interleaved.push(minorsActive[j++]);
+  let k = 0;
+  while (
+    interleaved.length < limit &&
+    (i < maxMaj || j < maxMed || k < maxMin)
+  ) {
+    if (k < maxMin) interleaved.push(minorsActive[k++]);
+    if (interleaved.length >= limit) break;
+    if (j < maxMed) interleaved.push(mediumActive[j++]);
     if (interleaved.length >= limit) break;
     if (i < maxMaj) interleaved.push(majorsActive[i++]);
   }
@@ -1101,8 +1206,10 @@ export function getDipSetupWatchStatus(limit = 32): {
     e.targetDipEntries = buildTargetDipEntries(e);
   }
   return {
-    active: majorsActive.length + minorsActive.length,
+    active:
+      majorsActive.length + mediumActive.length + minorsActive.length,
     activeMajors: majorsActive.length,
+    activeMedium: mediumActive.length,
     activeMinors: minorsActive.length,
     entries: interleaved,
     recentTerminal: terminalPool.slice(0, 4),
@@ -1141,7 +1248,8 @@ export function offerDipWatchFromCandidate(c: {
     c.preferredProfileId !== 'steady_compounder' &&
     c.specialtyFeed !== 'kolscan' &&
     c.specialtyFeed !== 'jupiter' &&
-    c.specialtyFeed !== 'majors'
+    c.specialtyFeed !== 'majors' &&
+    c.specialtyFeed !== 'medium'
   ) {
     // Still allow organic mature tokens from any specialty feed
   }
@@ -1152,7 +1260,9 @@ export function offerDipWatchFromCandidate(c: {
   const src =
     c.specialtyFeed === 'majors'
       ? 'majors'
-      : c.specialtyFeed || 'scanner';
+      : c.specialtyFeed === 'medium'
+        ? 'medium'
+        : c.specialtyFeed || 'scanner';
   considerDipWatchSetup({
     mint: c.mint,
     symbol: c.symbol,

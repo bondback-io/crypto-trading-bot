@@ -691,14 +691,15 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'Low / Medium',
     style: 'Trend Hold',
     rulesSummary: [
-      'Quality continuation: age ≥1.5h · MC ≥$75k (prefer $500k)',
-      'Holders + KOL presence · 1h vol floor + soft tiers toward $50k/$100k/$500k',
+      'Quality continuation: age ≥1.5h · MC ≥$1M priority for Trend watch (≥$75k catalog floor)',
+      'Holders + KOL presence · 1h vol floor + soft tiers; multi-TF vol preferred over 5m spike',
       'Targets 8–18% · tighter risk (~7–10% SL)',
       'Patterns: pullback / bull flag / trend continuation',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥1.5h · holders ≥50 · top10 ≤40% · 1h vol ≥$4k',
       'Specialty Jupiter/KOL/majors can bypass Pump.fun-only + Require TA (global scanner still gated)',
       'Live tape: soft-skip collapsed/decaying discretionary unless M5 uptick or KOL/Jupiter specialty',
+      'Trend setup watch (≥$1M): watch → arm → fire; late-chase forbidden',
     ],
     priority: 76,
     defaultEnabled: true,
@@ -720,7 +721,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minTokenAgeHours: 1.5,
       minMarketCapUsd: 75_000,
-      preferMarketCapUsd: 50_000_000,
+      preferMarketCapUsd: 1_000_000,
       minHolders: 50,
       maxTop10HoldPct: 40,
       minVolumeH1Usd: 4_000,
@@ -1028,8 +1029,9 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
       'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
-      'Specialty Jupiter/KOL/majors can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
-      'Majors ≥$250M dips soft-prefer Steady pullback; Dip Buyer remains for true reclaim DNA',
+      'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
+      'Medium $50–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
+      'Armed-only / near-zero discretionary · maxConcurrent 1 · PCL ~25%/50% · RL Shadow until proven',
     ],
     priority: 70,
     defaultEnabled: true,
@@ -1402,7 +1404,7 @@ export interface TradeProfileMatchContext {
    */
   preferProfileId?: string | null;
   /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | null;
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium' | null;
   /**
    * Volume Intelligence decay when known at lane fight — Trend uses for live-tape gates.
    */
@@ -3260,7 +3262,8 @@ function scoreProfile(
     ctx.preferProfileId === def.id &&
     (m.kolscanFeedEnabled === true ||
       def.id === 'migration_sniper' ||
-      ctx.specialtyFeed === 'majors');
+      ctx.specialtyFeed === 'majors' ||
+      ctx.specialtyFeed === 'medium');
 
   const isDip =
     ctx.shortTermStrategyId === 'post_run_dip' ||
@@ -3898,6 +3901,20 @@ function scoreProfile(
   }
 
   if (m.preferSteadyCompounder) {
+    // Armed-only doctrine (1.2.248): near-zero discretionary Steady
+    const steadyArmed =
+      ctx.armedWatch === true ||
+      String(ctx.setupWatchFamily || '').toLowerCase() === 'dip' ||
+      /dip-watch:triggered|quality_structure_reclaim/i.test(
+        String(ctx.detectedEntryStyle || '')
+      ) ||
+      feedPrefer;
+    if (!steadyArmed && !feedPrefer) {
+      return {
+        score: 0,
+        reason: 'steady habit: armed quality reclaim only (near-zero disc)',
+      };
+    }
     if (hostileArmed && !feedPrefer) {
       return { score: 0, reason: 'not a compounder setup' };
     }

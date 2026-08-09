@@ -43,6 +43,18 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.248',
+    title: 'Quiet watches · Steady Medium/Majors · Trend watchlist',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'Quiet-watch repair: Mode B arms on nearSupport||multi-TF||hits≥2; Dip-wins early offer so Mode B park cannot starve Fib dips; majors/medium deny stables, rotate !hasLevels, one-setup remint armed-only.',
+      'Dip/Steady rename + Medium tab: Minors (Dip) · Medium $50–200M Steady · Majors ≥$200M Steady; separate caps ≤16/≤12/≤12.',
+      'Steady doctrine: armed-only / near-zero disc, maxConcurrent 1, PCL ~25%/50%, RL Shadow until proven, PumpFun bypass for medium/majors specialty; stables denied.',
+      'Trend Rider setup watch (≥$1M DNA): watch→arm→fire, cap ≤12, mutual exclusion vs Mode B + Steady parks; dashboard funnel; late-chase forbidden.',
+      'Habit extend: Entry Skill late-chase hard-skip all profiles; Scalper tighter 0-MFE stall; MS concurrent≤1 when down_ranked; armed fast PCL earlier; learning down-weights stall spam; Lead block weak fast.',
+    ],
+  },
+  {
     version: '1.2.247',
     title: 'Scalper + Migration habit filters (additive)',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

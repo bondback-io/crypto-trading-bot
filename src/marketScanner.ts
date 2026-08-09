@@ -78,7 +78,7 @@ export interface ScannerCandidate {
   jupiterCategory?: string;
   /** Soft prefer this Smart Bot profile when specialty feed tagged the mint */
   preferredProfileId?: string;
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors';
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium';
   /** Distinct KOL wallets when from Kolscan specialty feed */
   kolCount?: number;
   /** Graduation watch / near-mig */
@@ -99,7 +99,7 @@ export interface ScannerCandidate {
   qualityScoreHint?: number;
   sizePlanSol?: number;
   /** Which setup-watch family triggered this handoff */
-  setupWatchFamily?: 'scalper' | 'dip' | 'grad';
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad' | 'trend';
   /** Dip watch trigger stamp (badge fallback when family lost) */
   dipWatchTriggered?: boolean;
   /** Nearest support / Fib price (SOL) when known — for dip reclaim */
@@ -1134,8 +1134,51 @@ export async function selectScannerCandidates(
     const scalperConfluentNow =
       scalperMcEligible && ranked.nearMultiTfSupport === true;
 
+    // Dip-wins overlap (1.2.248): MC ≥ Dip floor + Fib/S or dip DNA → offer Dip
+    // early so Mode B park cannot starve the Dip expectancy path. Fib-dip → Dip;
+    // Mode B keeps reclaim-without-Fib / lower band.
+    const dipFloorUsd = 500_000;
+    const h1Ch =
+      event.priceChangeH1Pct != null && Number.isFinite(event.priceChangeH1Pct)
+        ? Number(event.priceChangeH1Pct)
+        : null;
+    const dipDropOk = h1Ch != null && h1Ch <= -5;
+    const dipWins =
+      event.marketCapUsd != null &&
+      event.marketCapUsd >= dipFloorUsd &&
+      (ranked.nearKeyFib === true ||
+        ((ranked.nearSupport === true || hasSrHint) && dipDropOk));
+    let dipOfferedEarly = false;
+    if (dipWins) {
+      try {
+        const { offerDipWatchFromCandidate } =
+          require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+        offerDipWatchFromCandidate({
+          mint: event.mint,
+          symbol: event.symbol,
+          name: event.name,
+          marketCapUsd: event.marketCapUsd,
+          volumeH1Usd: event.volumeH1Usd,
+          holderCount: event.holderCount,
+          priceChangeH1Pct: event.priceChangeH1Pct,
+          nearKeyFib: ranked.nearKeyFib,
+          nearSupport: ranked.nearSupport || hasSrHint,
+          lastPriceSol: ranked.lastPriceSol ?? null,
+          supportPriceSol: ranked.supportPriceSol ?? null,
+          fib05PriceSol: ranked.fib05PriceSol ?? null,
+          fib618PriceSol: ranked.fib618PriceSol ?? null,
+          kolCount: (event as { kolCount?: number }).kolCount,
+          preferredProfileId: 'dip_buyer',
+        });
+        dipOfferedEarly = true;
+      } catch {
+        /* optional */
+      }
+    }
+
     let modeBParked = false;
-    if (scalperMcEligible) {
+    // Skip Mode B when Dip-wins (mutual exclusion by DNA, not only active watch)
+    if (scalperMcEligible && !dipWins) {
       try {
         const { offerScalperWatchFromCandidate } =
           require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
@@ -1169,7 +1212,7 @@ export async function selectScannerCandidates(
 
     if (ranked.veto?.startsWith('bearish:')) return null;
     if (score < minRank) {
-      if (scalperMcEligible) {
+      if (scalperMcEligible && !dipWins) {
         try {
           const { noteModeBFunnelReject } =
             require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
@@ -1178,10 +1221,18 @@ export async function selectScannerCandidates(
           /* optional */
         }
       }
-      return null;
+      // Still allow Dip-wins through enrich when Mode B would have starved them
+      if (!dipOfferedEarly) return null;
     }
     // Mode B: mid-band without confluence → watch-only only when parked
-    if (scalperMcEligible && !scalperConfluentNow && modeBParked) {
+    // Do not starve Dip after Mode B park when Dip DNA already won / was offered
+    if (
+      scalperMcEligible &&
+      !scalperConfluentNow &&
+      modeBParked &&
+      !dipOfferedEarly &&
+      !dipWins
+    ) {
       return null;
     }
     // (legacy offer block removed — offer runs before minRank above)
@@ -1553,6 +1604,41 @@ export async function runScannerPollOnce(): Promise<number> {
       }
     } catch (err) {
       logger.warn('MarketScanner', 'Dip watch tick failed', errorToMeta(err));
+    }
+    try {
+      const {
+        offerTrendWatchFromCandidate,
+        tickTrendSetupWatches,
+      } = require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+      for (const c of picked) {
+        offerTrendWatchFromCandidate({
+          mint: c.mint,
+          symbol: c.symbol,
+          name: c.name,
+          marketCapUsd: c.marketCapUsd,
+          volumeH1Usd: c.volumeH1Usd,
+          volumeM5Usd: c.volumeM5Usd,
+          volumeH6Usd: c.volumeH6Usd,
+          holderCount: c.holderCount,
+          priceChangeH1Pct: c.priceChangeH1Pct,
+          priceChangePct: c.priceChangePct,
+          nearKeyFib: c.nearKeyFib,
+          nearSupport: c.nearSupport,
+          lastPriceSol: c.lastPriceSol ?? null,
+          supportPriceSol: c.supportPriceSol ?? null,
+          kolCount: c.kolCount,
+          specialtyFeed: c.specialtyFeed,
+          chartPatternIds: c.chartPatternIds,
+        });
+      }
+      const trendTriggered = await tickTrendSetupWatches();
+      if (trendTriggered > 0) {
+        console.log(
+          `[marketScanner] trend-watch triggered ${trendTriggered} candidate(s)`
+        );
+      }
+    } catch (err) {
+      logger.warn('MarketScanner', 'Trend watch tick failed', errorToMeta(err));
     }
     try {
       const {

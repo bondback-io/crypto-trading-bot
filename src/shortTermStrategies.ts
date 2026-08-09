@@ -889,12 +889,12 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     }
   }
 
-  // Early stall: no meaningful pop by ~40% of the timer → cut only when stuck
-  // slightly red (never force-exit a green mark into fee+slip losses).
+  // Early stall: no meaningful pop by ~35% of the timer (1.2.248 tighter 0-MFE)
+  // → cut only when stuck slightly red (never force-exit a green mark into fee+slip losses).
   // Skip for Post-Run Dip — those holds are designed to wait through quiet periods.
   // Round-trip paper cost (fee×2 + slip×2) raises the "pop" bar so a peak that
   // still couldn't cover costs does not count as momentum.
-  const stallAfterMs = Math.max(45_000, Math.round(windowMs * 0.4));
+  const stallAfterMs = Math.max(40_000, Math.round(windowMs * 0.35));
   if (
     view.strategyId !== 'post_run_dip' &&
     ageMs >= stallAfterMs &&
@@ -903,13 +903,15 @@ export function evaluateShortTermExit(view: ShortTermExitView): ShortTermAction 
     const feeBps = Number(config.paper?.feeBps) || 30;
     const slipBps = Number(config.paper?.slippageBps) || 150;
     const roundTripCostPct = (feeBps * 2 + slipBps * 2) / 100;
-    const peakPopPct = Math.max(4, roundTripCostPct + 1);
+    // Slightly higher pop bar so true 0-MFE stalls exit sooner
+    const peakPopPct = Math.max(4.5, roundTripCostPct + 1.25);
     // Cost-aware: also refuse stall when mark already covers ~¼ of RT costs
     // (redundant with pnlPct >= 0 at default ~3.6% RT, but keeps the floor
     // if fees/slip are dialed down).
     const nearBreakevenAfterCosts = pnlPct >= roundTripCostPct * 0.25;
     const neverPopped = peakPnlPct < peakPopPct;
-    const stuckSlightlyRed = pnlPct < 0 && pnlPct > -2.5;
+    // Allow slightly deeper red stall cut (−3.0% vs −2.5%) for 0-MFE spam
+    const stuckSlightlyRed = pnlPct < 0 && pnlPct > -3.0;
     if (neverPopped && stuckSlightlyRed && !nearBreakevenAfterCosts) {
       const heldSec = Math.max(0, Math.round(ageMs / 1000));
       return {

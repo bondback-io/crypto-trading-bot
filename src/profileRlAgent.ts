@@ -50,7 +50,7 @@ export const PROFILE_RL_DIFFICULTY: Record<string, ProfileRlDifficulty> = {
   dip_buyer: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 65 },
   trend_rider: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 65 },
   high_win_rate: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 70 },
-  steady_compounder: { thresholdAdd: 0, hybridFloor: 25, leadFloor: 70 },
+  steady_compounder: { thresholdAdd: 12, hybridFloor: 55, leadFloor: 95 },
 };
 
 export const DEFAULT_PROFILE_RL_DIFFICULTY: ProfileRlDifficulty = {
@@ -489,6 +489,15 @@ function resolveRlModeMax(profileId: string): 'shadow' | 'hybrid' | 'lead' | 'an
     }
   } catch {
     /* optional */
+  }
+  // Steady 1.2.248: Shadow until proven (≥40 trades + positive EMA)
+  if (profileId === 'steady_compounder') {
+    try {
+      const agent = getOrCreateProfileRlAgent(profileId, { defaultMode: 'shadow' });
+      if (agent.trades < 40 || (agent.rewardEma ?? 0) <= 0) return 'shadow';
+    } catch {
+      return 'shadow';
+    }
   }
   return 'any';
 }

@@ -146,8 +146,8 @@ function plainLearnedSummary(input: {
   if (/conviction|min.?score|wallet/.test(blob)) {
     return `${name} is getting pickier about weak entries.`;
   }
-  if (/timer|hold|dead.?volume|dead.?market/.test(blob)) {
-    return `${name} is learning to leave quiet or stalled trades sooner.`;
+  if (/timer|hold|dead.?volume|dead.?market|stall|underwater|0.?mfe/.test(blob)) {
+    return `${name} is learning to leave quiet or stalled trades sooner (habit: 0-MFE stall down-weighted).`;
   }
   if (/ta playbook|macd|zigzag|divergence|hist slope|tool weight|minconf/i.test(blob)) {
     return `${name} is fine-tuning TA tool weights and confluence from closed trades.`;

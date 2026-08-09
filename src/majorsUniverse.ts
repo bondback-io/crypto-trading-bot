@@ -1,10 +1,11 @@
 /**
- * High-MC majors discovery — Jupiter toptraded / toporganicscore without pump filter.
- * Circulating MC only (≥$100M). Feeds Dip support-dip watch; soft-prefer Steady on ≥$250M.
+ * Mid-MC + high-MC discovery — Jupiter toptraded / toporganicscore without pump filter.
+ * Medium $50M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
  * Never Scalper Mode B. Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
 
 import { config } from './config';
+import { isDeniedCopyMint } from './deniedMints';
 import { readJupiterMarketCapUsd } from './marketData';
 import {
   fetchJupiterTopTokens,
@@ -15,7 +16,11 @@ import {
 import { isStrategyEnabledGlobal } from './strategies';
 import { isSmartBotProfilesEnabled } from './tradeProfiles';
 
-export type MajorsMcBand = '100m' | '250m' | '500m' | '1b+';
+/** UI / watch source band */
+export type UniverseWatchBand = 'medium' | 'majors';
+
+/** Soft MC sub-band for badges / prefer logic */
+export type MajorsMcBand = '50m' | '100m' | '200m' | '250m' | '500m' | '1b+';
 
 export interface MajorsCandidate {
   mint: string;
@@ -28,28 +33,50 @@ export interface MajorsCandidate {
   priceChangeH1Pct?: number;
   lastPriceSol?: number;
   band: MajorsMcBand;
+  /** medium = $50–200M; majors = ≥$200M */
+  watchBand: UniverseWatchBand;
   reasons: string[];
 }
 
-/** Circulating MC floor for majors admit */
-export const MAJORS_MIN_MC_USD = 100_000_000;
+/** Medium floor (Steady quality band) */
+export const MEDIUM_MIN_MC_USD = 50_000_000;
+/** Majors floor — Steady prefer threshold (raised from prior soft $250M prefer) */
+export const MAJORS_MIN_MC_USD = 200_000_000;
+/** Legacy alias: circulating MC floor for any mid/majors admit */
+export const UNIVERSE_MIN_MC_USD = MEDIUM_MIN_MC_USD;
 /** Min liquidity — mid of ~$50k–$100k band */
 export const MAJORS_MIN_LIQ_USD = 75_000;
-const FETCH_LIMIT = 80;
-/** Align with dipSetupWatch MAX_MAJORS_WATCHES so we do not churn 18→12 every pass */
-const CYCLE_CAP = 12;
+/** Soft H1 volume floor for Medium/Majors Steady quality */
+export const MEDIUM_MAJORS_MIN_VOL_H1_USD = 25_000;
+const FETCH_LIMIT = 100;
+/** Separate caps so majors do not starve medium */
+const CYCLE_CAP_MEDIUM = 12;
+const CYCLE_CAP_MAJORS = 12;
 const REFRESH_MS = 5 * 60_000;
+/** Evict after this many refresh cycles still without Fib/S levels */
+export const NO_LEVELS_ROTATE_AFTER = 3;
 
 let cache: { at: number; list: MajorsCandidate[] } | null = null;
 let lastPassAt = 0;
 let lastPassOffered = 0;
 let lastError: string | null = null;
+/** mint → consecutive refreshes without levels (for rotate) */
+const noLevelsStreak = new Map<string, number>();
 
 export function majorsMcBand(mc: number): MajorsMcBand {
   if (mc >= 1_000_000_000) return '1b+';
   if (mc >= 500_000_000) return '500m';
   if (mc >= 250_000_000) return '250m';
-  return '100m';
+  if (mc >= 200_000_000) return '200m';
+  if (mc >= 100_000_000) return '100m';
+  return '50m';
+}
+
+export function universeWatchBand(mc: number): UniverseWatchBand | null {
+  if (!(mc > 0) || !Number.isFinite(mc)) return null;
+  if (mc >= MAJORS_MIN_MC_USD) return 'majors';
+  if (mc >= MEDIUM_MIN_MC_USD) return 'medium';
+  return null;
 }
 
 function solUsd(): number {
@@ -59,9 +86,18 @@ function solUsd(): number {
 function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   const mint = String(token.id || '').trim();
   if (!mint) return null;
+  // Stables / quote assets never enter Medium/Majors CYCLE_CAP
+  try {
+    const solMint = String(config.solMint || '').trim() || undefined;
+    if (isDeniedCopyMint(mint, solMint)) return null;
+  } catch {
+    if (isDeniedCopyMint(mint)) return null;
+  }
   // Circulating MC only — never FDV
   const mc = readJupiterMarketCapUsd(token);
-  if (mc == null || mc < MAJORS_MIN_MC_USD) return null;
+  if (mc == null || mc < MEDIUM_MIN_MC_USD) return null;
+  const watchBand = universeWatchBand(mc);
+  if (!watchBand) return null;
   const liq = Number(token.liquidity ?? 0);
   if (!Number.isFinite(liq) || liq < MAJORS_MIN_LIQ_USD) return null;
 
@@ -70,7 +106,18 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   });
   // Guard: launch event must also carry circulating mcap (no FDV fallback)
   const circ = Number(ev.marketCapUsd ?? 0);
-  if (!Number.isFinite(circ) || circ < MAJORS_MIN_MC_USD) return null;
+  if (!Number.isFinite(circ) || circ < MEDIUM_MIN_MC_USD) return null;
+  const wb = universeWatchBand(circ);
+  if (!wb) return null;
+
+  const volH1 = Number(ev.volumeH1Usd ?? 0);
+  if (
+    Number.isFinite(volH1) &&
+    volH1 > 0 &&
+    volH1 < MEDIUM_MAJORS_MIN_VOL_H1_USD
+  ) {
+    return null;
+  }
 
   const band = majorsMcBand(circ);
   return {
@@ -84,15 +131,22 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     priceChangeH1Pct: ev.priceChangeH1Pct,
     lastPriceSol: ev.lastPriceSol > 0 ? ev.lastPriceSol : undefined,
     band,
-    reasons: [`majors:${band}`, `circMC:$${Math.round(circ)}`, `liq:$${Math.round(liq)}`],
+    watchBand: wb,
+    reasons: [
+      `${wb}:${band}`,
+      `circMC:$${Math.round(circ)}`,
+      `liq:$${Math.round(liq)}`,
+    ],
   };
 }
 
 /**
- * Refresh majors universe from Jupiter (cached ~5m).
+ * Refresh medium+majors universe from Jupiter (cached ~5m).
  * No pump-only filter — large-cap Solana names included.
  */
-export async function refreshMajorsUniverse(force = false): Promise<MajorsCandidate[]> {
+export async function refreshMajorsUniverse(
+  force = false
+): Promise<MajorsCandidate[]> {
   if (!force && cache && Date.now() - cache.at < REFRESH_MS) {
     return cache.list;
   }
@@ -134,7 +188,15 @@ export async function refreshMajorsUniverse(force = false): Promise<MajorsCandid
       if (c) list.push(c);
     }
     list.sort((a, b) => b.marketCapUsd - a.marketCapUsd);
-    const capped = list.slice(0, CYCLE_CAP);
+    const medium = list
+      .filter((c) => c.watchBand === 'medium')
+      .slice(0, CYCLE_CAP_MEDIUM);
+    const majors = list
+      .filter((c) => c.watchBand === 'majors')
+      .slice(0, CYCLE_CAP_MAJORS);
+    const capped = [...medium, ...majors].sort(
+      (a, b) => b.marketCapUsd - a.marketCapUsd
+    );
     cache = { at: Date.now(), list: capped };
     lastError = null;
     return capped;
@@ -147,23 +209,40 @@ export async function refreshMajorsUniverse(force = false): Promise<MajorsCandid
 
 export function getMajorsUniverseStatus(): {
   count: number;
+  mediumCount: number;
+  majorsCount: number;
   lastRefreshAt: number | null;
   lastPassAt: number | null;
   lastPassOffered: number;
   lastError: string | null;
   bands: Record<MajorsMcBand, number>;
-  sample: Array<{ symbol: string; mc: number; band: MajorsMcBand }>;
+  sample: Array<{
+    symbol: string;
+    mc: number;
+    band: MajorsMcBand;
+    watchBand: UniverseWatchBand;
+  }>;
 } {
   const list = cache?.list ?? [];
   const bands: Record<MajorsMcBand, number> = {
+    '50m': 0,
     '100m': 0,
+    '200m': 0,
     '250m': 0,
     '500m': 0,
     '1b+': 0,
   };
-  for (const c of list) bands[c.band] += 1;
+  let mediumCount = 0;
+  let majorsCount = 0;
+  for (const c of list) {
+    bands[c.band] += 1;
+    if (c.watchBand === 'medium') mediumCount += 1;
+    else majorsCount += 1;
+  }
   return {
     count: list.length,
+    mediumCount,
+    majorsCount,
     lastRefreshAt: cache?.at ?? null,
     lastPassAt: lastPassAt || null,
     lastPassOffered,
@@ -173,16 +252,18 @@ export function getMajorsUniverseStatus(): {
       symbol: c.symbol,
       mc: c.marketCapUsd,
       band: c.band,
+      watchBand: c.watchBand,
     })),
   };
 }
 
 /**
- * Soft prefer on majors dips: ≥250m → Steady Compounder when enabled;
- * 100m band (and Steady-off) → Dip Buyer. Never Scalper.
+ * Soft prefer: Medium + Majors → Steady Compounder when enabled;
+ * Steady-off → Dip Buyer. Never Scalper.
  */
-export function majorsPreferredProfileId(band: MajorsMcBand): string {
-  if (band === '100m') return 'dip_buyer';
+export function majorsPreferredProfileId(
+  band: MajorsMcBand | UniverseWatchBand
+): string {
   try {
     if (config.tradeProfiles?.profiles?.steady_compounder !== false) {
       return 'steady_compounder';
@@ -193,15 +274,40 @@ export function majorsPreferredProfileId(band: MajorsMcBand): string {
   return 'dip_buyer';
 }
 
+/** Track / rotate mints that keep refreshing without Fib/S levels. */
+export function noteMajorsLevelsPresence(
+  mint: string,
+  hasLevels: boolean
+): { rotate: boolean; streak: number } {
+  const key = String(mint || '').trim();
+  if (!key) return { rotate: false, streak: 0 };
+  if (hasLevels) {
+    noLevelsStreak.delete(key);
+    return { rotate: false, streak: 0 };
+  }
+  const next = (noLevelsStreak.get(key) || 0) + 1;
+  noLevelsStreak.set(key, next);
+  return { rotate: next >= NO_LEVELS_ROTATE_AFTER, streak: next };
+}
+
+export function clearMajorsNoLevelsStreak(mint: string): void {
+  noLevelsStreak.delete(String(mint || '').trim());
+}
+
 /**
- * Specialty-pass hook: offer majors into Dip setup watch (source: majors).
+ * Specialty-pass hook: offer medium + majors into Dip/Steady setup watch.
  * Does not hand to Scalper Mode B. Returns number offered this cycle.
  */
 export async function runMajorsUniversePass(): Promise<number> {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return 0;
   if (!isSmartBotProfilesEnabled()) return 0;
   if (config.tradeProfiles?.enabled === false) return 0;
-  if (config.tradeProfiles?.profiles?.dip_buyer === false) return 0;
+  if (
+    config.tradeProfiles?.profiles?.dip_buyer === false &&
+    config.tradeProfiles?.profiles?.steady_compounder === false
+  ) {
+    return 0;
+  }
 
   const list = await refreshMajorsUniverse();
   if (!list.length) {
@@ -215,7 +321,7 @@ export async function runMajorsUniversePass(): Promise<number> {
     const { offerDipWatchFromCandidate } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     for (const c of list) {
-      const prefer = majorsPreferredProfileId(c.band);
+      const prefer = majorsPreferredProfileId(c.watchBand);
       offerDipWatchFromCandidate({
         mint: c.mint,
         symbol: c.symbol,
@@ -226,7 +332,7 @@ export async function runMajorsUniversePass(): Promise<number> {
         priceChangeH1Pct: c.priceChangeH1Pct,
         lastPriceSol: c.lastPriceSol ?? null,
         preferredProfileId: prefer,
-        specialtyFeed: 'majors',
+        specialtyFeed: c.watchBand === 'medium' ? 'medium' : 'majors',
         majorsBand: c.band,
       });
       offered += 1;
@@ -239,11 +345,13 @@ export async function runMajorsUniversePass(): Promise<number> {
   lastPassAt = Date.now();
   lastPassOffered = offered;
   if (offered > 0) {
-    const bands = getMajorsUniverseStatus().bands;
+    const st = getMajorsUniverseStatus();
     console.log(
-      `[majors] offered ${offered} → dip-watch ` +
-        `(100m:${bands['100m']} 250m:${bands['250m']} ` +
-        `500m:${bands['500m']} 1b+:${bands['1b+']})`
+      `[majors] offered ${offered} → dip/steady-watch ` +
+        `(medium:${st.mediumCount} majors:${st.majorsCount} ` +
+        `50m:${st.bands['50m']} 100m:${st.bands['100m']} ` +
+        `200m:${st.bands['200m']} 250m:${st.bands['250m']} ` +
+        `500m:${st.bands['500m']} 1b+:${st.bands['1b+']})`
     );
   }
   return offered;

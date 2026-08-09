@@ -380,7 +380,8 @@ export function resolvePclPartialDefaults(
   } else if (id === 'high_win_rate') {
     base = { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 };
   } else if (id === 'steady_compounder') {
-    base = { earlyPartialTpPct: 22, earlyPartialFraction: 0.35 };
+    // Steady doctrine 1.2.248: PCL ~25% TP / ~50% fraction
+    base = { earlyPartialTpPct: 25, earlyPartialFraction: 0.5 };
   } else if (id === 'smart_money_mirror') {
     base = { earlyPartialTpPct: 20, earlyPartialFraction: 0.4 };
   }
@@ -392,14 +393,28 @@ export function resolvePclPartialDefaults(
       : null;
   const armed =
     opts?.armedWatch === true ||
-    /scalp_reclaim|support_dip_reclaim/i.test(style);
+    /scalp_reclaim|support_dip_reclaim|quality_structure_reclaim/i.test(style);
   const mediumHigh =
     opts?.qualityTier === 'medium' ||
     opts?.qualityTier === 'high' ||
     (q != null && q >= 55) ||
     /scalp_reclaim|support_dip_reclaim|reclaim/i.test(style);
-  // Armed / medium-high reclaim: earlier bank, keep more runner
-  if (armed || mediumHigh) {
+  // Fast family: earlier PCL partial ONLY when armed (1.2.248) — not disc mediumHigh
+  const isFastFamily =
+    id === 'scalper' ||
+    id === 'reversal_scalper' ||
+    id === 'momentum_burst' ||
+    id === 'migration_sniper' ||
+    family === 'fast';
+  if (isFastFamily) {
+    if (armed) {
+      base = { earlyPartialTpPct: 8, earlyPartialFraction: 0.45 };
+    }
+    // else keep base (15–18%) — do not pull forward on discretionary mediumHigh
+  } else if (id === 'steady_compounder') {
+    // Keep Steady doctrine 25%/50% — do not pull to early bank
+  } else if (armed || mediumHigh) {
+    // Quality / dip-trend: earlier bank, keep more runner
     base = {
       earlyPartialTpPct: clamp(base.earlyPartialTpPct, 8, 10),
       earlyPartialFraction: clamp(base.earlyPartialFraction, 0.4, 0.5),

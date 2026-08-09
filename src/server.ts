@@ -4638,6 +4638,8 @@ export function createServer(): express.Application {
         require('./migrationGradWatch') as typeof import('./migrationGradWatch');
       const { getScalperSetupWatchStatus } =
         require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+      const { getTrendSetupWatchStatus, getTrendFunnelCounters } =
+        require('./trendSetupWatch') as typeof import('./trendSetupWatch');
       let diagnostics: unknown = null;
       try {
         const { getSetupWatchDiagnostics } =
@@ -4650,6 +4652,8 @@ export function createServer(): express.Application {
         dipWatch: getDipSetupWatchStatus(28),
         gradWatch: getMigrationGradWatchStatus(16),
         scalperWatch: getScalperSetupWatchStatus(16),
+        trendWatch: getTrendSetupWatchStatus(16),
+        trendFunnel: getTrendFunnelCounters(),
         migSniperFunnel: getMigrationSniperFunnel(),
         diagnostics,
       });
@@ -4660,6 +4664,8 @@ export function createServer(): express.Application {
         dipWatch: { active: 0, entries: [] },
         gradWatch: { active: 0, entries: [] },
         scalperWatch: { active: 0, entries: [] },
+        trendWatch: { active: 0, entries: [] },
+        trendFunnel: null,
         migSniperFunnel: null,
         diagnostics: null,
       });
@@ -4718,9 +4724,15 @@ export function createServer(): express.Application {
         res.json(unwatchScalperSetup(mint));
         return;
       }
+      if (kind === 'trend' || kind === 'trend_rider') {
+        const { unwatchTrendSetup } =
+          require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+        res.json(unwatchTrendSetup(mint));
+        return;
+      }
       res
         .status(400)
-        .json({ ok: false, error: 'kind must be dip, grad, or scalper' });
+        .json({ ok: false, error: 'kind must be dip, grad, scalper, or trend' });
     } catch (err) {
       res.status(500).json({
         ok: false,

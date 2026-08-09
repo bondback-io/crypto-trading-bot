@@ -1027,7 +1027,7 @@ export interface TradeSignal {
   /** Jupiter organicScore when known (scanner / pro-quality proxy) */
   organicScore?: number | null;
   /** Specialty feed tag when from per-profile Kolscan/Jupiter pass */
-  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | null;
+  specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium' | null;
   /** Scanner / setup-watch reason tags (e.g. grad-watch:triggered) */
   scannerReasons?: string[];
   /** Armed setup-watch handoff (Mode B / Dip / Grad) */
@@ -1036,7 +1036,7 @@ export interface TradeSignal {
   qualityScoreHint?: number;
   sizePlanSol?: number;
   /** scalper | dip | grad when opened from a setup watch */
-  setupWatchFamily?: 'scalper' | 'dip' | 'grad';
+  setupWatchFamily?: 'scalper' | 'dip' | 'grad' | 'trend';
   /** Dip watch trigger stamp (badge fallback) */
   dipWatchTriggered?: boolean;
   /** HMC stamps for Profit Capture Layer (set in passesFilters) */
@@ -3368,7 +3368,8 @@ async function handleScannerCandidate(
     !isPumpFunMintSuffix(candidate.mint) &&
     (candidate.specialtyFeed === 'jupiter' ||
       candidate.specialtyFeed === 'kolscan' ||
-      candidate.specialtyFeed === 'majors') &&
+      candidate.specialtyFeed === 'majors' ||
+      candidate.specialtyFeed === 'medium') &&
     (candidate.preferredProfileId === 'trend_rider' ||
       candidate.preferredProfileId === 'steady_compounder' ||
       candidate.launch?.preferredProfileId === 'trend_rider' ||
@@ -3664,7 +3665,7 @@ async function handleScannerCandidate(
         candidate.armedWatch === true ||
         (Array.isArray(candidate.reasons) &&
           candidate.reasons.some((r) =>
-            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
               String(r)
             )
           )) ||
@@ -6801,7 +6802,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     !isPumpFunMintSuffix(signal.mint) &&
     (signal.specialtyFeed === 'jupiter' ||
       signal.specialtyFeed === 'kolscan' ||
-      signal.specialtyFeed === 'majors') &&
+      signal.specialtyFeed === 'majors' ||
+      signal.specialtyFeed === 'medium') &&
     (signal.candidateTradeProfileId === 'trend_rider' ||
       signal.candidateTradeProfileId === 'steady_compounder')
   ) {
@@ -7315,6 +7317,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       const {
         shouldThrottleScalperAdmit,
         shouldLimitScalperConcurrent,
+        shouldLimitMigrationConcurrent,
+        shouldLimitSteadyConcurrent,
         shouldSoftSkipUnarmedScalperHabit,
         getProfileAttentionShare,
       } = require('./profileAttention') as typeof import('./profileAttention');
@@ -7343,6 +7347,28 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         if (conc.limit) {
           attFails.push(
             `${passer.name}: ${conc.reason || 'Scalper concurrent cap'}`
+          );
+          continue;
+        }
+        const migConc = shouldLimitMigrationConcurrent({
+          profileId: passer.profileId,
+          armedWatch: armedForAttention,
+          scannerReasons: signal.scannerReasons,
+        });
+        if (migConc.limit) {
+          attFails.push(
+            `${passer.name}: ${migConc.reason || 'MS concurrent cap'}`
+          );
+          continue;
+        }
+        const steadyConc = shouldLimitSteadyConcurrent({
+          profileId: passer.profileId,
+          armedWatch: armedForAttention,
+          scannerReasons: signal.scannerReasons,
+        });
+        if (steadyConc.limit) {
+          attFails.push(
+            `${passer.name}: ${steadyConc.reason || 'Steady concurrent cap'}`
           );
           continue;
         }

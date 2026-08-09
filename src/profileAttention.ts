@@ -201,6 +201,85 @@ export function shouldLimitScalperConcurrent(input: {
 }
 
 /**
+ * Habit (1.2.248): Steady maxConcurrent 1 — skip when already open.
+ * Armed Medium/Majors quality reclaim bypasses.
+ */
+export function shouldLimitSteadyConcurrent(input: {
+  profileId?: string | null;
+  armedWatch?: boolean;
+  scannerReasons?: string[] | null;
+}): { limit: boolean; reason?: string } {
+  if (isV235Baseline()) return { limit: false };
+  const id = String(input.profileId || '');
+  if (id !== 'steady_compounder') return { limit: false };
+  const reasons = (input.scannerReasons || []).join(' ');
+  const armed =
+    input.armedWatch === true ||
+    /dip-watch:triggered|armedWatch|quality_structure/i.test(reasons);
+  // Still enforce concurrent 1 even when armed — doctrine maxConcurrent 1
+  void armed;
+  try {
+    const open = paperTrader.getOpenPositions();
+    const steadyOpen = open.filter(
+      (p) => String(p.tradeProfileId || '') === 'steady_compounder'
+    ).length;
+    if (steadyOpen >= 1) {
+      return {
+        limit: true,
+        reason: `Steady concurrent ≥1 — maxConcurrent 1`,
+      };
+    }
+  } catch {
+    /* fail soft */
+  }
+  return { limit: false };
+}
+
+/**
+ * Habit (1.2.248): MS concurrent ≤1 while migration_hold_reclaim is
+ * down_ranked/restricted — Grad-armed bypasses. Also hard size cut already
+ * in expectancy size path.
+ */
+export function shouldLimitMigrationConcurrent(input: {
+  profileId?: string | null;
+  armedWatch?: boolean;
+  scannerReasons?: string[] | null;
+}): { limit: boolean; reason?: string } {
+  if (isV235Baseline()) return { limit: false };
+  const id = String(input.profileId || '');
+  if (id !== 'migration_sniper') return { limit: false };
+  const reasons = (input.scannerReasons || []).join(' ');
+  const armed =
+    input.armedWatch === true ||
+    /grad-watch:triggered|armedWatch/i.test(reasons);
+  if (armed) return { limit: false };
+  let gov: string | null = null;
+  try {
+    const { getFamilyGovernorState } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    gov = getFamilyGovernorState('migration_hold_reclaim');
+  } catch {
+    return { limit: false };
+  }
+  if (gov !== 'down_ranked' && gov !== 'restricted') return { limit: false };
+  try {
+    const open = paperTrader.getOpenPositions();
+    const migOpen = open.filter(
+      (p) => String(p.tradeProfileId || '') === 'migration_sniper'
+    ).length;
+    if (migOpen >= 1) {
+      return {
+        limit: true,
+        reason: `MS concurrent ≥1 while ${gov} — skip discretionary admit`,
+      };
+    }
+  } catch {
+    /* fail soft */
+  }
+  return { limit: false };
+}
+
+/**
  * True when a discretionary (non-armed) Scalper-family admit should be skipped
  * to leave room for Dip/Trend/Migration.
  */
