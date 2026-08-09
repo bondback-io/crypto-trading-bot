@@ -923,7 +923,7 @@ function localAnalystReply(
       return formatZionReply({
         greeting: greet,
         answer:
-          lines.find((l) => /Entry Skill mix|fallbackDisc/i.test(l)) ||
+          lines.find((l) => /Armed mix target|Entry Skill mix|fallbackDisc/i.test(l)) ||
           lines[0] ||
           'Entry Skill mix diagnostics loading.',
         summary:

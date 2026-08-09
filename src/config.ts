@@ -2108,6 +2108,12 @@ export interface BotConfig {
    */
   admissionBaseline: 'v235' | 'governed';
 
+  /**
+   * Entry Skill armed-mix target pct (60–90, default 80).
+   * Drives DISC_SHARE_CAP = 1 − pct/100. Observe-only under Baseline v235.
+   */
+  entrySkillArmedTargetPct: number;
+
   /** Soft Peak Profit Protection — TP-relative arm + proportional giveback. */
   peakProfitProtection: import('./peakProfitProtection').PeakProfitProtectionConfig;
 
@@ -2395,6 +2401,8 @@ export const config: BotConfig = {
   },
 
   admissionBaseline: 'governed',
+
+  entrySkillArmedTargetPct: 80,
 
   peakProfitProtection: {
     enabled: true,
@@ -3173,6 +3181,11 @@ export function buildPersistedSettingsSnapshot(): PersistedBotSettings {
     },
     admissionBaseline:
       config.admissionBaseline === 'governed' ? 'governed' : 'v235',
+    entrySkillArmedTargetPct: (() => {
+      const n = Number(config.entrySkillArmedTargetPct);
+      if (!Number.isFinite(n)) return 80;
+      return Math.min(90, Math.max(60, Math.round(n)));
+    })(),
     peakProfitProtection: cloneJson(
       config.peakProfitProtection || {
         enabled: true,
@@ -4132,6 +4145,14 @@ function applySettingsSnapshot(
   } else if (saved.admissionBaseline == null) {
     // Ship default: Entry Skill On (governed)
     config.admissionBaseline = 'governed';
+  }
+  if (saved.entrySkillArmedTargetPct != null) {
+    const n = Number(saved.entrySkillArmedTargetPct);
+    if (Number.isFinite(n)) {
+      config.entrySkillArmedTargetPct = Math.min(90, Math.max(60, Math.round(n)));
+    }
+  } else if (config.entrySkillArmedTargetPct == null) {
+    config.entrySkillArmedTargetPct = 80;
   }
   if (saved.peakProfitProtection && typeof saved.peakProfitProtection === 'object') {
     const s = saved.peakProfitProtection;
@@ -6641,5 +6662,10 @@ export function getConfigSnapshot() {
     },
     admissionBaseline:
       config.admissionBaseline === 'governed' ? 'governed' : 'v235',
+    entrySkillArmedTargetPct: (() => {
+      const n = Number(config.entrySkillArmedTargetPct);
+      if (!Number.isFinite(n)) return 80;
+      return Math.min(90, Math.max(60, Math.round(n)));
+    })(),
   };
 }

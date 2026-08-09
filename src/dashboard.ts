@@ -10027,6 +10027,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 <option value="v235">Baseline v235</option>
               </select>
             </label>
+            <label class="ctl ctl-fit" title="Armed mix target (60–90%). Disc cap = 100 − target. Ignored under Baseline v235 (observe-only).">
+              <span>Armed target <span id="el-armed-target-val">80</span>%</span>
+              <input type="range" id="el-armed-target" min="60" max="90" step="5" value="80" onchange="saveEntrySkillArmedTarget()" oninput="syncArmedTargetLabel()" style="width:7.5rem;vertical-align:middle" />
+            </label>
             <label class="ctl ctl-fit">
               <span>Window</span>
               <select id="el-window" onchange="syncExpectancyLiftWindow('el-window');loadExpectancyLift()">
@@ -10050,6 +10054,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="lsd-chip" id="el-chip-baseline" title="Entry Skill / Baseline mode">Entry Skill —</span>
         </div>
         <div class="flex flex-wrap gap-2 mb-2 text-xs" id="el-mix-chips" aria-label="Expectancy mix chips">
+          <span class="lsd-chip" id="el-chip-armed-target">Target —</span>
           <span class="lsd-chip" id="el-chip-armed">Armed —</span>
           <span class="lsd-chip" id="el-chip-disc">Disc —</span>
           <span class="lsd-chip" id="el-chip-mix-throttle">Mix throttle —</span>
@@ -10058,6 +10063,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="lsd-chip" id="el-chip-scalper">Scalper —</span>
           <span class="lsd-chip" id="el-chip-partial">1st partial —</span>
           <span class="lsd-chip" id="el-chip-mfe">MFE cap —</span>
+          <span class="lsd-chip" id="el-chip-second-pass">2nd-pass —</span>
         </div>
         <div id="el-quiet-chips" class="flex flex-wrap gap-2 mb-2 text-xs"></div>
         <div class="tc-table-wrap" style="overflow-x:auto;margin-bottom:0.75rem">
@@ -16506,6 +16512,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     }
     window.saveAdmissionBaseline = saveAdmissionBaseline;
 
+    function syncArmedTargetLabel() {
+      const el = document.getElementById('el-armed-target');
+      const lab = document.getElementById('el-armed-target-val');
+      if (lab && el) lab.textContent = String(el.value || 80);
+    }
+    window.syncArmedTargetLabel = syncArmedTargetLabel;
+
+    async function saveEntrySkillArmedTarget() {
+      try {
+        const el = document.getElementById('el-armed-target');
+        const pct = el ? Number(el.value) : 80;
+        syncArmedTargetLabel();
+        await fetchJSON('/api/config/entry-skill-armed-target', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entrySkillArmedTargetPct: pct }),
+        });
+        await loadExpectancyLift();
+      } catch (err) {
+        try {
+          alert(
+            'Failed to save armed target: ' +
+              ((err && err.message) || String(err))
+          );
+        } catch (_) {}
+      }
+    }
+    window.saveEntrySkillArmedTarget = saveEntrySkillArmedTarget;
+
     const PPC_PROFILE_ORDER = [
       'scalper',
       'reversal_scalper',
@@ -16754,6 +16789,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const baseMode =
           data && data.admissionBaseline === 'governed' ? 'governed' : 'v235';
         if (baseSel) baseSel.value = baseMode;
+        const armedPct =
+          data && data.entrySkillArmedTargetPct != null
+            ? Number(data.entrySkillArmedTargetPct)
+            : data && data.targets && data.targets.armedTargetPct != null
+              ? Number(data.targets.armedTargetPct)
+              : 80;
+        const armedSlider = document.getElementById('el-armed-target');
+        if (armedSlider) {
+          armedSlider.value = String(Math.min(90, Math.max(60, armedPct)));
+          armedSlider.disabled = data && data.baselineActive === true;
+        }
+        syncArmedTargetLabel();
         const baseChip = document.getElementById('el-chip-baseline');
         if (baseChip) {
           const entryOn =
@@ -16769,6 +16816,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         const mix = (data && data.mix) || {};
         const targets = (data && data.targets) || {};
+        const armedTargetEl = document.getElementById('el-chip-armed-target');
+        const tgtPct =
+          targets.armedTargetPct != null
+            ? Math.round(Number(targets.armedTargetPct))
+            : Math.round(Number(targets.armedShare || 0.8) * 100);
+        if (armedTargetEl) {
+          const observe = data && data.baselineActive === true;
+          armedTargetEl.textContent =
+            'Target ' + tgtPct + '%' + (observe ? ' (observe)' : '');
+          armedTargetEl.className = elChipClass(!observe, observe);
+          armedTargetEl.title = observe
+            ? 'Slider observe-only under Baseline v235'
+            : 'Armed mix target; disc cap ' + (100 - tgtPct) + '%';
+        }
         const armedEl = document.getElementById('el-chip-armed');
         const discEl = document.getElementById('el-chip-disc');
         const mixThEl = document.getElementById('el-chip-mix-throttle');
@@ -16776,21 +16837,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         const scalEl = document.getElementById('el-chip-scalper');
         const partEl = document.getElementById('el-chip-partial');
         const mfeEl = document.getElementById('el-chip-mfe');
-        const armedOk = mix.armedShare != null && mix.armedShare >= (targets.armedShare || 0.7);
+        const armedOk = mix.armedShare != null && mix.armedShare >= (targets.armedShare || 0.8);
         const armedWarn = mix.armedShare != null && mix.armedShare >= 0.5;
         if (armedEl) {
           armedEl.textContent = 'Armed ' + elFmtPct(mix.armedShare);
           armedEl.className = elChipClass(armedOk, armedWarn);
-          armedEl.title = 'Target ≥70% armed';
+          armedEl.title = 'Target ≥' + tgtPct + '% armed';
         }
         const discShare = mix.discretionaryShare;
+        const discCap = targets.discShareMax != null ? targets.discShareMax : 0.2;
         const discOk =
-          discShare != null && discShare <= (targets.discShareMax || 0.3);
-        const discWarn = discShare != null && discShare <= 0.4;
+          discShare != null && discShare <= discCap;
+        const discWarn = discShare != null && discShare <= discCap + 0.15;
         if (discEl) {
           discEl.textContent = 'Disc ' + elFmtPct(discShare);
           discEl.className = elChipClass(discOk, discWarn && !discOk);
-          discEl.title = 'Target ≤30% discretionary (fast profiles throttled above cap)';
+          discEl.title =
+            'Target ≤' +
+            Math.round(discCap * 100) +
+            '% discretionary (fast+quality throttled above cap when arms live)';
         }
         const thr = (data && data.discMixThrottle) || {};
         if (mixThEl) {
@@ -16802,7 +16867,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             'Disc ' +
             elFmtPct(thr.discShare != null ? thr.discShare : discShare) +
             ' · cap ' +
-            elFmtPct(thr.effectiveCap != null ? thr.effectiveCap : targets.discShareMax || 0.3) +
+            elFmtPct(thr.effectiveCap != null ? thr.effectiveCap : discCap) +
             ' · live armed ' +
             (thr.liveArmed != null ? thr.liveArmed : '—') +
             ' · triggerable ' +
@@ -16813,9 +16878,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const fbOn = thr.fallbackDiscAllowed === true;
           fbEl.textContent = 'Fallback disc ' + (fbOn ? 'on' : 'off');
           fbEl.className = elChipClass(fbOn, !fbOn);
+          const reliefPct = Math.round((discCap + 0.15) * 100);
           fbEl.title = fbOn
-            ? 'No triggerable arms — discretionary fallback allowed (≤30%, fast relief 45%)'
-            : 'Triggerable arms present — fast disc hard-skip above 30%';
+            ? 'No triggerable arms — discretionary fallback allowed (≤' +
+              Math.round(discCap * 100) +
+              '%, fast relief ' +
+              reliefPct +
+              '%)'
+            : 'Triggerable arms present — fast+quality disc hard-skip above ' +
+              Math.round(discCap * 100) +
+              '%';
         }
         const lateOk =
           mix.lateChaseShare != null &&
@@ -16855,6 +16927,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               ? elFmtNum(mix.avgMfeCapture, 0) + '%'
               : '—');
           mfeEl.className = 'lsd-chip';
+        }
+        const spEl = document.getElementById('el-chip-second-pass');
+        if (spEl) {
+          const bsp =
+            data && data.blockedSecondPass != null
+              ? Number(data.blockedSecondPass) || 0
+              : 0;
+          spEl.textContent = '2nd-pass ' + (bsp > 0 ? '×' + bsp : 'ok');
+          spEl.className = elChipClass(bsp === 0, bsp > 0);
+          spEl.title =
+            bsp > 0
+              ? 'Armed hard-lock floor fails (blocked_second_pass)=' + bsp
+              : 'Armed preferred hard-lock floor fails (chip only; no policy change)';
         }
         const quietHost = document.getElementById('el-quiet-chips');
         if (quietHost) {

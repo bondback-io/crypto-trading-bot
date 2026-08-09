@@ -198,6 +198,8 @@ export interface PersistedBotSettings {
   };
   /** Admission Baseline / Entry Skill — governed On; v235 = kill-switch */
   admissionBaseline?: 'v235' | 'governed';
+  /** Entry Skill armed-mix target pct (60–90, default 80). */
+  entrySkillArmedTargetPct?: number;
   /** Soft Peak Profit Protection (TP-relative arm + proportional giveback) */
   peakProfitProtection?: {
     enabled?: boolean;

@@ -287,7 +287,7 @@ function buildTradeProfileMatchContext(
       signal.dipWatchTriggered === true ||
       (Array.isArray(signal.scannerReasons) &&
         signal.scannerReasons.some((r) =>
-          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
             String(r)
           )
         )),
@@ -300,9 +300,11 @@ function buildTradeProfileMatchContext(
             ? 'scalper'
             : /grad-watch/i.test(signal.scannerReasons.join(' '))
               ? 'grad'
-              : /dip-watch/i.test(signal.scannerReasons.join(' '))
-                ? 'dip'
-                : null
+              : /trend-watch/i.test(signal.scannerReasons.join(' '))
+                ? 'trend'
+                : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                  ? 'dip'
+                  : null
           : null),
     dipWatchTriggered: signal.dipWatchTriggered === true,
     entryStyleHint: signal.entryStyleHint ?? null,
@@ -404,7 +406,7 @@ function stampEntryStyleOnBuyOpts(
       signal.armedWatch === true ||
       (Array.isArray(signal.scannerReasons) &&
         signal.scannerReasons.some((r) =>
-          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
             String(r)
           )
         ));
@@ -458,9 +460,11 @@ function stampEntryStyleOnBuyOpts(
               ? 'scalper'
               : /grad-watch/i.test(signal.scannerReasons.join(' '))
                 ? 'grad'
-                : /dip-watch/i.test(signal.scannerReasons.join(' '))
-                  ? 'dip'
-                  : undefined
+                : /trend-watch/i.test(signal.scannerReasons.join(' '))
+                  ? 'trend'
+                  : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                    ? 'dip'
+                    : undefined
             : undefined);
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
@@ -1129,7 +1133,7 @@ function applyProfileTaPlaybookGate(
       signal.armedWatch === true ||
       (Array.isArray(signal.scannerReasons) &&
         signal.scannerReasons.some((r) =>
-          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered|armedWatch/i.test(
             String(r)
           )
         ))
@@ -1145,9 +1149,11 @@ function applyProfileTaPlaybookGate(
               ? 'scalper'
               : /grad-watch/i.test(signal.scannerReasons.join(' '))
                 ? 'grad'
-                : /dip-watch/i.test(signal.scannerReasons.join(' '))
-                  ? 'dip'
-                  : undefined
+                : /trend-watch/i.test(signal.scannerReasons.join(' '))
+                  ? 'trend'
+                  : /dip-watch/i.test(signal.scannerReasons.join(' '))
+                    ? 'dip'
+                    : undefined
             : undefined);
       if (fam) {
         (buyOpts as { setupWatchFamily?: string }).setupWatchFamily = fam;
@@ -3679,9 +3685,11 @@ async function handleScannerCandidate(
               ? 'scalper'
               : candidate.reasons.some((r) => /grad-watch/i.test(String(r)))
                 ? 'grad'
-                : candidate.reasons.some((r) => /dip-watch/i.test(String(r)))
-                  ? 'dip'
-                  : undefined
+                : candidate.reasons.some((r) => /trend-watch/i.test(String(r)))
+                  ? 'trend'
+                  : candidate.reasons.some((r) => /dip-watch/i.test(String(r)))
+                    ? 'dip'
+                    : undefined
             : undefined),
       dipWatchTriggered:
         candidate.dipWatchTriggered === true ||
@@ -4313,7 +4321,7 @@ async function executeSignalBuy(
         signal.armedWatch === true ||
         (Array.isArray(signal.scannerReasons) &&
           signal.scannerReasons.some((r) =>
-            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+            /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
               String(r)
             )
           ));
@@ -4325,7 +4333,9 @@ async function executeSignalBuy(
           ? 'scalper'
           : /grad-watch/i.test(bits)
             ? 'grad'
-            : 'dip';
+            : /trend-watch/i.test(bits)
+              ? 'trend'
+              : 'dip';
         const { noteSetupWatchOpenedFromArm } =
           require('./setupWatchEvents') as typeof import('./setupWatchEvents');
         noteSetupWatchOpenedFromArm(signal.mint);
@@ -6886,7 +6896,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             /dip-watch/i.test(gkReasonBits));
         const majorsDipWatch = majorsStamp && dipWatchHandoff;
         const setupWatchSoftPass =
-          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+          /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
             gkReasonBits
           );
         const gk = evaluateGatekeeper({
@@ -7037,7 +7047,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
               ? signal.scannerReasons.join(' ')
               : '';
             const setupWatchHandoffClf =
-              /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+              /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
                 reasonBitsClf
               );
             // Pre-vetted armed watches: classifier hard-block becomes soft advisory
@@ -7083,7 +7093,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
     }
     const reasonBitsLane = (signal.scannerReasons || []).join(' ');
     const setupWatchPrefer =
-      (/scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+      (/scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
         reasonBitsLane
       ) ||
         signal.armedWatch === true) &&
@@ -7229,7 +7239,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       syncOneSetupLocksFromWatches();
       const armedWatch =
         signal.armedWatch === true ||
-        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
           reasonBitsLane
         );
       const entryStyle = String(
@@ -7241,7 +7251,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         (ctx as { extensionFromLevelPct?: number }).extensionFromLevelPct ??
         null;
       const triggerConfirm =
-        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
           reasonBitsLane
         );
       const govFails: string[] = [];
@@ -7333,7 +7343,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       );
       const armedForAttention =
         signal.armedWatch === true ||
-        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered/i.test(
+        /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|trend-watch:triggered/i.test(
           reasonBitsLane
         );
       const attFails: string[] = [];
@@ -7421,13 +7431,15 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const runModuleFilters = async (): Promise<boolean> => {
   const reasonBitsEarly = (signal.scannerReasons || []).join(' ');
   const setupWatchHandoff =
-    /grad-watch:triggered|dip-watch:triggered|scalper-watch:triggered/i.test(
+    /grad-watch:triggered|dip-watch:triggered|scalper-watch:triggered|trend-watch:triggered/i.test(
       reasonBitsEarly
     ) ||
     (signal.candidateTradeProfileId === 'migration_sniper' &&
       /grad-watch/i.test(reasonBitsEarly)) ||
     (signal.candidateTradeProfileId === 'dip_buyer' &&
       /dip-watch/i.test(reasonBitsEarly)) ||
+    (signal.candidateTradeProfileId === 'trend_rider' &&
+      /trend-watch/i.test(reasonBitsEarly)) ||
     ((signal.candidateTradeProfileId === 'scalper' ||
       signal.candidateTradeProfileId === 'momentum_burst' ||
       signal.candidateTradeProfileId === 'reversal_scalper') &&

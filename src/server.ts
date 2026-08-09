@@ -3920,6 +3920,74 @@ export function createServer(): express.Application {
     }
   });
 
+  /** Entry Skill armed-mix target pct (60–90). Observe-only under Baseline v235. */
+  app.get('/api/config/entry-skill-armed-target', (_req: Request, res: Response) => {
+    try {
+      const {
+        getEntrySkillArmedTargetPct,
+        isAdmissionBaselineV235,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      const pct = getEntrySkillArmedTargetPct();
+      const baselineActive = isAdmissionBaselineV235();
+      res.json({
+        ok: true,
+        entrySkillArmedTargetPct: pct,
+        armedShareTarget: pct / 100,
+        discShareCap: 1 - pct / 100,
+        baselineActive,
+        entrySkillActive: !baselineActive,
+        observeOnly: baselineActive,
+      });
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.post('/api/config/entry-skill-armed-target', (req: Request, res: Response) => {
+    try {
+      const {
+        setEntrySkillArmedTargetPct,
+        getEntrySkillArmedTargetPct,
+        isAdmissionBaselineV235,
+      } = require('./expectancyLift') as typeof import('./expectancyLift');
+      const body = (req.body ?? {}) as {
+        entrySkillArmedTargetPct?: unknown;
+        armedTargetPct?: unknown;
+      };
+      const raw =
+        body.entrySkillArmedTargetPct != null
+          ? body.entrySkillArmedTargetPct
+          : body.armedTargetPct;
+      if (raw == null || !Number.isFinite(Number(raw))) {
+        res.status(400).json({
+          ok: false,
+          error: 'entrySkillArmedTargetPct must be a number (60–90)',
+        });
+        return;
+      }
+      const pct = setEntrySkillArmedTargetPct(raw);
+      const baselineActive = isAdmissionBaselineV235();
+      res.json({
+        ok: true,
+        entrySkillArmedTargetPct: pct,
+        armedShareTarget: pct / 100,
+        discShareCap: 1 - pct / 100,
+        baselineActive,
+        entrySkillActive: !baselineActive,
+        observeOnly: baselineActive,
+        config: getConfigSnapshot(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post('/api/config/peak-profit-protection', (req: Request, res: Response) => {
     try {
       const { setPeakProfitProtectionConfig, getPeakProfitProtectionConfig } =

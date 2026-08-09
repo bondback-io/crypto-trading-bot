@@ -3348,6 +3348,34 @@ function scoreProfile(
   }
 
   if (m.preferDip) {
+    // Armed-prefer (1.2.249): near-zero discretionary when quality arms live;
+    // structural disc only under fallback. Fib/S arm path + watch handoffs stay.
+    const dipArmed =
+      ctx.armedWatch === true ||
+      ctx.dipWatchTriggered === true ||
+      String(ctx.setupWatchFamily || '').toLowerCase() === 'dip' ||
+      /dip-watch:triggered|quality_structure_reclaim|support_dip_reclaim/i.test(
+        String(ctx.detectedEntryStyle || '') +
+          ' ' +
+          String(ctx.entryStyleHint || '')
+      ) ||
+      feedPrefer;
+    let fallbackDisc = true;
+    try {
+      const { isFallbackDiscAllowed, isAdmissionBaselineV235 } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      if (!isAdmissionBaselineV235()) {
+        fallbackDisc = isFallbackDiscAllowed();
+      }
+    } catch {
+      fallbackDisc = true;
+    }
+    if (!dipArmed && !fallbackDisc && !feedPrefer) {
+      return {
+        score: 0,
+        reason: 'dip habit: armed Fib/S reclaim only (near-zero disc)',
+      };
+    }
     const minDrop = m.minDropFromPeakPct ?? 8;
     const maxDrop = m.maxDropFromPeakPct;
     const dropOk =
@@ -3745,6 +3773,32 @@ function scoreProfile(
       return {
         score: 0,
         reason: 'trend_rider: defer migration to Migration Sniper',
+      };
+    }
+    // Armed-prefer (1.2.249): near-zero discretionary when quality arms live
+    const trendArmed =
+      ctx.armedWatch === true ||
+      String(ctx.setupWatchFamily || '').toLowerCase() === 'trend' ||
+      /trend-watch:triggered|trend_pullback_continuation/i.test(
+        String(ctx.detectedEntryStyle || '') +
+          ' ' +
+          String(ctx.entryStyleHint || '')
+      ) ||
+      feedPrefer;
+    let fallbackDisc = true;
+    try {
+      const { isFallbackDiscAllowed, isAdmissionBaselineV235 } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      if (!isAdmissionBaselineV235()) {
+        fallbackDisc = isFallbackDiscAllowed();
+      }
+    } catch {
+      fallbackDisc = true;
+    }
+    if (!trendArmed && !fallbackDisc && !feedPrefer) {
+      return {
+        score: 0,
+        reason: 'trend habit: armed watch only (near-zero disc)',
       };
     }
     if (hostileArmed && !feedPrefer) {

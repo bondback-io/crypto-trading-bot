@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.249',
+    title: 'Armed-first alignment · mix slider',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'Mix accounting: Trend armed watches count in liveTriggerableArmed; quality disc (Dip/Trend/Steady/HWR) hard soft-skipped with fast when disc > slider cap and arms live; stuck relief needs openRate evidence (openCount alone no longer zeros arms).',
+      'Dip/Trend near-zero discretionary when quality arms live (structural disc only under fallback); Fib/S + trend-watch arm paths kept; Mode B confluence-now unchanged.',
+      'monitor: trend-watch:triggered on armed/trigger regexes + setupWatchFamily trend on handoffs.',
+      'Armed-mix slider entrySkillArmedTargetPct default 80 (clamp 60–90) → disc cap = 100−pct; persist + GET/POST; Expectancy Lift slider beside Entry Skill; chips + Zion one-liner. Observe-only under Baseline v235.',
+    ],
+  },
+  {
     version: '1.2.248',
     title: 'Quiet watches · Steady Medium/Majors · Trend watchlist',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

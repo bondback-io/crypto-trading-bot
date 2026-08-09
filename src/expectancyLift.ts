@@ -57,15 +57,18 @@ export type FamilyGovernorState =
 
 const MIN_SAMPLES = 18;
 const LATE_CHASE_MAX_SHARE = 0.05;
-const ARMED_SHARE_TARGET = 0.7;
-const DISC_SHARE_CAP = 0.3;
-const DISC_SHARE_CAP_RELIEF = 0.45;
+/** Default armed mix target (80%) — overridable via entrySkillArmedTargetPct. */
+const DEFAULT_ARMED_TARGET_PCT = 80;
+const ARMED_TARGET_PCT_LO = 60;
+const ARMED_TARGET_PCT_HI = 90;
+const DISC_RELIEF_EXTRA = 0.15;
 /** Governed Entry Skill Scalper attention share target (~32%). */
 const SCALPER_SHARE_TARGET = 0.32;
 const ONE_SETUP_TTL_MS = 8 * 60_000;
 const TOUCH_FAIL_ELEVATED = 0.35;
 const STUCK_OPEN_RATE = 0.2;
-const STUCK_OPEN_COUNT = 15;
+/** Very-thin open book alone (without openRate evidence) — raised vs prior 15. */
+const STUCK_VERY_THIN_OPEN_COUNT = 8;
 const LOSS_STREAK_N = 8;
 const LOSS_STREAK_K = 5;
 const PERM_FLOOR_DISC = 35;
@@ -75,6 +78,59 @@ const SIZE_MULT_HI = 1.15;
 const SCRATCH_PNL_PCT = 0.25;
 const SCRATCH_PNL_SOL = 0.001;
 const DISC_MIX_SIZE_PENALTY = 0.85;
+
+/** Clamp operator armed-mix target pct (60–90). */
+export function clampEntrySkillArmedTargetPct(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_ARMED_TARGET_PCT;
+  return Math.min(
+    ARMED_TARGET_PCT_HI,
+    Math.max(ARMED_TARGET_PCT_LO, Math.round(n))
+  );
+}
+
+export function getEntrySkillArmedTargetPct(): number {
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    const raw = (config as { entrySkillArmedTargetPct?: unknown })
+      .entrySkillArmedTargetPct;
+    if (raw == null) return DEFAULT_ARMED_TARGET_PCT;
+    return clampEntrySkillArmedTargetPct(raw);
+  } catch {
+    return DEFAULT_ARMED_TARGET_PCT;
+  }
+}
+
+export function setEntrySkillArmedTargetPct(raw: unknown): number {
+  const pct = clampEntrySkillArmedTargetPct(raw);
+  try {
+    const {
+      config,
+      persistUserSettings,
+    } = require('./config') as typeof import('./config');
+    (config as { entrySkillArmedTargetPct: number }).entrySkillArmedTargetPct =
+      pct;
+    persistUserSettings();
+  } catch {
+    /* soft */
+  }
+  return pct;
+}
+
+/** Armed share target 0–1 from operator slider (ignored under Baseline v235 admit). */
+function armedShareTarget(): number {
+  return getEntrySkillArmedTargetPct() / 100;
+}
+
+/** Disc share hard cap = 1 − armed target (e.g. 80% → 20%). */
+function discShareCap(): number {
+  return 1 - armedShareTarget();
+}
+
+/** Fallback relief when arms empty/stuck = cap + 0.15. */
+function discShareCapRelief(): number {
+  return Math.min(0.95, discShareCap() + DISC_RELIEF_EXTRA);
+}
 
 /**
  * Entry Skill hard-skip late_chase primary even below the n≥20 share floor.
@@ -124,6 +180,18 @@ const FAST_DISC_PROFILES = new Set([
   'momentum_burst',
   'reversal_scalper',
 ]);
+
+/** Quality profiles — hard soft-skip discretionary when arms live + over disc cap. */
+const QUALITY_DISC_PROFILES = new Set([
+  'dip_buyer',
+  'trend_rider',
+  'steady_compounder',
+  'high_win_rate',
+]);
+
+function isMixThrottledDiscProfile(pid: string): boolean {
+  return FAST_DISC_PROFILES.has(pid) || QUALITY_DISC_PROFILES.has(pid);
+}
 
 let persistCache: ExpectancyLiftPersist | null = null;
 const oneSetupLocks = new Map<string, { profileId: string; untilMs: number }>();
@@ -218,6 +286,7 @@ export interface ExpectancyLiftStatus {
   mix: ExpectancyMix;
   targets: {
     armedShare: number;
+    armedTargetPct: number;
     lateChaseShareMax: number;
     scalperShareMax: number;
     discShareMax: number;
@@ -242,6 +311,8 @@ export interface ExpectancyLiftStatus {
     effectiveCap: number;
     /** True when disc fallback is allowed (no effective triggerable arms). */
     fallbackDiscAllowed: boolean;
+    armedTargetPct?: number;
+    liveArmedShare?: number | null;
   };
   /** Per-profile Entry Skill funnel + lock diagnostics. */
   entrySkillByProfile?: Record<
@@ -261,6 +332,10 @@ export interface ExpectancyLiftStatus {
   baselineActive: boolean;
   /** True when Entry Skill (governed) admit path is active. */
   entrySkillActive: boolean;
+  /** Operator armed-mix target pct (60–90); observe-only under Baseline v235. */
+  entrySkillArmedTargetPct?: number;
+  /** Armed hard-lock preferred-lane floor fails (diagnostics chip only). */
+  blockedSecondPass?: number;
   /** Per-family skill memory (WR / E / avg W/L / MFE / n + governor). */
   familySkillMemory: FamilySkillMemoryRow[];
   /** Performance Power Cell charge (visual-only). */
@@ -1348,6 +1423,14 @@ function countLiveArmedWatches(): number {
   } catch {
     /* soft */
   }
+  try {
+    const { getTrendSetupWatchStatus } =
+      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    const tw = getTrendSetupWatchStatus(40);
+    n += (tw.entries || []).filter((e) => e.status === 'armed').length;
+  } catch {
+    /* soft */
+  }
   return n;
 }
 
@@ -1365,7 +1448,8 @@ function touchFailRateElevated(): boolean {
 
 /**
  * Armed funnel stuck → treat as no effective arms for hard-skip-all.
- * openRate < 20% OR open book thin OR touch-fail elevated.
+ * Require openRate evidence (known rate < 20%) or very-thin book without
+ * rate samples — openCount&lt;15 alone no longer zeros arms.
  */
 export function stuckArmedReliefActive(): boolean {
   let openCount = 0;
@@ -1386,9 +1470,10 @@ export function stuckArmedReliefActive(): boolean {
     armedOpenRate = null;
   }
   const poorOpenRate =
-    armedOpenRate == null || armedOpenRate < STUCK_OPEN_RATE;
-  const thinBook = openCount < STUCK_OPEN_COUNT;
-  return poorOpenRate || thinBook || touchFailRateElevated();
+    armedOpenRate != null && armedOpenRate < STUCK_OPEN_RATE;
+  const veryThinNoRateEvidence =
+    openCount < STUCK_VERY_THIN_OPEN_COUNT && armedOpenRate == null;
+  return poorOpenRate || veryThinNoRateEvidence || touchFailRateElevated();
 }
 
 /** Live armed watches that are still convertible (not stuck). */
@@ -1406,9 +1491,9 @@ export function isFallbackDiscAllowed(): boolean {
 
 /**
  * Armed-or-fallback disc mix:
- * - Triggerable arms: hard-skip ONLY fast disc when disc > 30% (non-fast = size penalty).
- * - No triggerable arms: fallback disc up to 30%; fast relief 45% only if still overtrading.
- * Never hard-skip all discretionary.
+ * - Triggerable arms: hard-skip fast + quality disc when disc > cap (size penalty otherwise).
+ * - No triggerable arms: limited cowboy fallback up to cap; fast relief (cap+15%) if still overtrading.
+ * Never hard-skip all discretionary. Slider ignored under Baseline v235 (caller gates).
  */
 export function shouldLimitDiscretionaryMix(input: {
   armedWatch?: boolean;
@@ -1419,27 +1504,31 @@ export function shouldLimitDiscretionaryMix(input: {
   if (mix.total < 10) return { limit: false };
   const triggerable = countLiveTriggerableArmed();
   const pid = String(input.profileId || '');
+  const cap = discShareCap();
+  const relief = discShareCapRelief();
+  const armedPct = Math.round(armedShareTarget() * 100);
 
   if (triggerable > 0) {
-    // Armed path: fast-only hard-skip above 30%; never freeze all disc
-    if (mix.discShare <= DISC_SHARE_CAP) return { limit: false };
-    if (!FAST_DISC_PROFILES.has(pid)) return { limit: false };
+    // Armed path: fast + quality hard-skip above cap; never freeze all disc
+    if (mix.discShare <= cap) return { limit: false };
+    if (!isMixThrottledDiscProfile(pid)) return { limit: false };
+    const kind = FAST_DISC_PROFILES.has(pid) ? 'fast' : 'quality';
     return {
       limit: true,
-      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(DISC_SHARE_CAP * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip fast disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
+      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(cap * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip ${kind} disc (armed target ${armedPct}%)`,
     };
   }
 
-  // Fallback: allow disc up to 30%; 45% relief only if still overtrading fast
-  if (mix.discShare < DISC_SHARE_CAP) return { limit: false };
+  // Fallback: allow disc up to cap; relief only if still overtrading fast
+  if (mix.discShare < cap) return { limit: false };
   if (!FAST_DISC_PROFILES.has(pid)) return { limit: false };
-  if (mix.discShare < DISC_SHARE_CAP_RELIEF) {
-    // Between 30–45%: allow (fallback room); size penalty handles non-fast
+  if (mix.discShare < relief) {
+    // Between cap–relief: allow (fallback room); size penalty handles quality
     return { limit: false };
   }
   return {
     limit: true,
-    reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(DISC_SHARE_CAP_RELIEF * 100).toFixed(0)}% fallback relief — skip fast disc (no triggerable arms)`,
+    reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(relief * 100).toFixed(0)}% fallback relief — skip fast disc (no triggerable arms)`,
   };
 }
 
@@ -1454,9 +1543,8 @@ export function expectancyLiftSizePenaltyForDiscMix(input: {
   try {
     const mix = getRecentMixShares(50);
     const triggerable = countLiveTriggerableArmed();
-    const cap =
-      triggerable === 0 ? DISC_SHARE_CAP : DISC_SHARE_CAP;
-    if (mix.total >= 10 && mix.discShare >= DISC_SHARE_CAP) {
+    const cap = discShareCap();
+    if (mix.total >= 10 && mix.discShare >= cap) {
       return {
         mult: DISC_MIX_SIZE_PENALTY,
         note: `disc-mix×${DISC_MIX_SIZE_PENALTY.toFixed(2)} (disc ${(mix.discShare * 100).toFixed(0)}%≥${(cap * 100).toFixed(0)}%${triggerable === 0 ? ' · fallback' : ''})`,
@@ -1902,7 +1990,9 @@ export function buildEntrySkillByProfile(): Record<
             ? 'dip_buyer'
             : e.family === 'grad'
               ? 'migration_sniper'
-              : 'scalper')
+              : e.family === 'trend'
+                ? 'trend_rider'
+                : 'scalper')
       );
       const row = ensure(pid);
       if (e.kind === 'triggered') row.triggered += 1;
@@ -2045,7 +2135,7 @@ export function evaluateEntrySelectivity(
       profileId: ctx.profileId,
     });
     if (discMix.limit) {
-      reasons.push(discMix.reason || 'Armed mix 70/30');
+      reasons.push(discMix.reason || 'Armed mix disc cap');
       chips.push('disc_mix');
       return {
         admit: false,
@@ -2407,22 +2497,21 @@ export function getExpectancyLiftStatus(
     mix.lateChaseShare != null
       ? `${(mix.lateChaseShare * 100).toFixed(0)}%`
       : '—';
-  const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target 70%) · late-chase ${lateStr} (≤5%).`;
+  const armedTargetPct = getEntrySkillArmedTargetPct();
+  const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target ${armedTargetPct}%) · late-chase ${lateStr} (≤5%).`;
 
   const liveArmed = countLiveArmedWatches();
   const liveTriggerableArmed = countLiveTriggerableArmed();
   const fallbackDiscAllowed = liveTriggerableArmed === 0;
-  // Cap for chip: triggerable → 30%; fallback room → 45% only when overtrading
-  const effectiveCap = fallbackDiscAllowed
-    ? DISC_SHARE_CAP_RELIEF
-    : DISC_SHARE_CAP;
+  const cap = discShareCap();
+  const relief = discShareCapRelief();
+  // Cap for chip: triggerable → slider cap; fallback room → relief when overtrading
+  const effectiveCap = fallbackDiscAllowed ? relief : cap;
   const discShare = mix.discretionaryShare;
   const discMixActive =
     discShare != null &&
     mixTrades.length >= 10 &&
-    (fallbackDiscAllowed
-      ? discShare >= DISC_SHARE_CAP_RELIEF
-      : discShare > DISC_SHARE_CAP);
+    (fallbackDiscAllowed ? discShare >= relief : discShare > cap);
   const admissionBaseline = getAdmissionBaseline();
   const baselineActive = admissionBaseline === 'v235';
   const entrySkillActive = !baselineActive;
@@ -2569,10 +2658,11 @@ export function getExpectancyLiftStatus(
     window,
     mix,
     targets: {
-      armedShare: ARMED_SHARE_TARGET,
+      armedShare: armedShareTarget(),
+      armedTargetPct,
       lateChaseShareMax: LATE_CHASE_MAX_SHARE,
       scalperShareMax,
-      discShareMax: DISC_SHARE_CAP,
+      discShareMax: discShareCap(),
     },
     profiles,
     families,
@@ -2587,10 +2677,14 @@ export function getExpectancyLiftStatus(
       liveTriggerableArmed,
       effectiveCap,
       fallbackDiscAllowed: baselineActive ? true : fallbackDiscAllowed,
+      armedTargetPct,
+      liveArmedShare: mix.armedShare,
     },
     admissionBaseline,
     baselineActive,
     entrySkillActive,
+    entrySkillArmedTargetPct: armedTargetPct,
+    blockedSecondPass: getBlockedSecondPassCount(),
     familySkillMemory,
     performanceCharge,
     entrySkillByProfile: buildEntrySkillByProfile(),
@@ -2646,8 +2740,16 @@ export function formatExpectancyLiftZionLines(
     }
     const thr = st.discMixThrottle;
     if (thr) {
+      const tgt =
+        thr.armedTargetPct != null
+          ? thr.armedTargetPct
+          : getEntrySkillArmedTargetPct();
+      const livePct =
+        thr.liveArmedShare != null
+          ? `${(thr.liveArmedShare * 100).toFixed(0)}%`
+          : '—';
       lines.push(
-        `Entry Skill mix: liveArmed=${thr.liveArmed} triggerable=${thr.liveTriggerableArmed} fallbackDisc=${thr.fallbackDiscAllowed ? 'on' : 'off'} disc=${thr.discShare != null ? (thr.discShare * 100).toFixed(0) + '%' : '—'} cap=${(thr.effectiveCap * 100).toFixed(0)}%.`
+        `Armed mix target ${tgt}%; live ${livePct}; fallback ${thr.fallbackDiscAllowed ? 'on' : 'off'} · triggerable=${thr.liveTriggerableArmed} disc=${thr.discShare != null ? (thr.discShare * 100).toFixed(0) + '%' : '—'} cap=${(thr.effectiveCap * 100).toFixed(0)}%.`
       );
     }
     try {
