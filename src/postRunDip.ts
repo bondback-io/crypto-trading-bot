@@ -109,6 +109,11 @@ export interface PostRunDipSignalInput {
   nowMs?: number;
   /** Optional prior mint buys for buyback detection */
   priorBuys?: DipPriorBuy[];
+  /**
+   * Armed dip-watch / Steady specialty path: Post-Run max age may extend to 36h
+   * when this is the only age block (discretionary stays at config max).
+   */
+  armedWatch?: boolean;
 }
 
 function sensitivity(): PostRunDipSensitivity {
@@ -348,16 +353,24 @@ export function evaluatePostRunDip(
     rejectReasons.push(`run ${runPct.toFixed(0)}% < ${minRun.toFixed(0)}%`);
   }
 
-  // Age window — Standard: 12–24h after launch
+  // Age window — Standard: 12–24h after launch; armed specialty may use ≤36h max
   const ageH = resolveTokenAgeHours(signal, nowMs);
+  const armedAgeMaxH =
+    signal.armedWatch === true
+      ? Math.max(c.maxTokenAgeHours, 36)
+      : c.maxTokenAgeHours;
   let ageOk = true;
   let ageKnown = Number.isFinite(ageH as number);
   if (ageKnown && ageH != null) {
-    ageOk = ageH >= c.minTokenAgeHours && ageH <= c.maxTokenAgeHours;
-    if (ageOk) reasons.push(`token age ${ageH.toFixed(1)}h in ${c.minTokenAgeHours}–${c.maxTokenAgeHours}h`);
-    else
+    ageOk = ageH >= c.minTokenAgeHours && ageH <= armedAgeMaxH;
+    if (ageOk) {
+      reasons.push(
+        `token age ${ageH.toFixed(1)}h in ${c.minTokenAgeHours}–${armedAgeMaxH}h` +
+          (armedAgeMaxH > c.maxTokenAgeHours ? ' (armed≤36h)' : '')
+      );
+    } else
       rejectReasons.push(
-        `token age ${ageH.toFixed(1)}h outside ${c.minTokenAgeHours}–${c.maxTokenAgeHours}h`
+        `token age ${ageH.toFixed(1)}h outside ${c.minTokenAgeHours}–${armedAgeMaxH}h`
       );
   } else {
     ageOk =

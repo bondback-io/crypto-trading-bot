@@ -598,6 +598,12 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
   // --- Post-Run Dip / Rotation ---
   let postRunDipSkip = false;
   let postRunDipSkipReason: string | undefined;
+  const postRunArmed =
+    (signal as { armedWatch?: boolean }).armedWatch === true ||
+    (Array.isArray(signal.scannerReasons) &&
+      signal.scannerReasons.some((r) =>
+        /dip-watch:triggered|trend-watch:triggered|armedWatch/i.test(String(r))
+      ));
   const postRunDipVerdict = resolvePostRunDipForSignal({
     symbol: signal.symbol,
     mint: signal.mint,
@@ -613,6 +619,7 @@ export function evaluateSignalConviction(signal: TradeSignal): ConvictionVerdict
     birdeye: signal.birdeye ?? null,
     candles: signal.candles,
     nowMs: signal.timestamp,
+    armedWatch: postRunArmed,
   });
   if (postRunDipVerdict) {
     if (postRunDipVerdict.convictionDelta > 0) {

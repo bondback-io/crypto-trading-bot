@@ -705,6 +705,36 @@ export function isMintOnActiveTrendWatch(mint: string): boolean {
   return w != null && isActiveWatch(w);
 }
 
+/**
+ * Expire an active Trend watch so Dip/Steady can park the mint.
+ * No unwatch cooldown (bots may re-admit Trend later if DNA wins).
+ */
+export function expireTrendWatchForDipAdmit(
+  mint: string,
+  reason = 'Yielded to Dip/Steady park'
+): boolean {
+  const key = String(mint || '').trim();
+  if (!key) return false;
+  const w = watches.get(key);
+  if (!w || !isActiveWatch(w)) return false;
+  const now = Date.now();
+  w.status = 'expired';
+  w.updatedAt = now;
+  w.lastReason = reason;
+  noteTrendFunnel('expired');
+  try {
+    const { clearOneSetupProfileLock } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    clearOneSetupProfileLock(key, 'expired');
+  } catch {
+    /* optional */
+  }
+  console.log(
+    `[trend-watch] EXPIRE→Dip ${w.symbol || key.slice(0, 8)}… · ${reason}`
+  );
+  return true;
+}
+
 export function unwatchTrendSetup(mint: string): {
   ok: boolean;
   cooldownMs?: number;

@@ -821,9 +821,17 @@ function resolveScalpBuyFlag(signal: {
   dropFromPeakPct?: number | null;
   signalAgeMinutes?: number | null;
   tokenAgeHours?: number | null;
+  armedWatch?: boolean;
+  scannerReasons?: string[];
 }): { scalpMode?: true; shortTermStrategyId?: ShortTermStrategyId } {
   // Prefer Post-Run Dip when it fully qualifies (higher-timeframe path)
   if (isStrategyEnabled('post_run_dip')) {
+    const armedWatch =
+      signal.armedWatch === true ||
+      (Array.isArray(signal.scannerReasons) &&
+        signal.scannerReasons.some((r) =>
+          /dip-watch:triggered|trend-watch:triggered|armedWatch/i.test(String(r))
+        ));
     const dip = resolvePostRunDipForSignal({
       symbol: signal.symbol,
       mint: signal.mint,
@@ -837,6 +845,7 @@ function resolveScalpBuyFlag(signal: {
       tokenAgeHours: signal.tokenAgeHours,
       metrics: signal.metrics,
       birdeye: signal.birdeye,
+      armedWatch,
     });
     if (dip?.seedExitMode && dip.report.qualifies) {
       logPostRunDipDecision(signal.symbol || 'token', dip, 'take');
@@ -7514,6 +7523,14 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       // Post-run dip setups intentionally target older runs — allow past early age gate
       let dipBypass = false;
       if (isStrategyEnabled('post_run_dip')) {
+        const armedWatch =
+          signal.armedWatch === true ||
+          (Array.isArray(signal.scannerReasons) &&
+            signal.scannerReasons.some((r) =>
+              /dip-watch:triggered|trend-watch:triggered|armedWatch/i.test(
+                String(r)
+              )
+            ));
         const dip = resolvePostRunDipForSignal({
           symbol: signal.symbol,
           mint: signal.mint,
@@ -7529,6 +7546,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           birdeye: signal.birdeye,
           candles: signal.candles,
           nowMs: signal.timestamp,
+          armedWatch,
         });
         dipBypass = dip?.report.qualifies === true;
         if (dipBypass) {

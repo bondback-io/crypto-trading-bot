@@ -2691,6 +2691,10 @@ const TOP10_SOFT_CEILING_PCT: Partial<Record<string, number>> = {
   steady_compounder: 42,
   high_win_rate: 40,
 };
+/** Age-unknown HWR soft ceiling only (aged path stays at TOP10_SOFT_CEILING_PCT). */
+const TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT: Partial<Record<string, number>> = {
+  high_win_rate: 48,
+};
 const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
   steady_compounder: 10_000,
   high_win_rate: 20_000,
@@ -2776,8 +2780,8 @@ export function resolveTop10SoftAllow(
   grantTag?: Top10SoftAllowGrantTag;
   sizeMult?: number;
 } {
-  const softCeil = TOP10_SOFT_CEILING_PCT[def.id];
-  if (softCeil == null) {
+  const softCeilAged = TOP10_SOFT_CEILING_PCT[def.id];
+  if (softCeilAged == null) {
     return {
       allow: false,
       detail: `${def.name} top10 ${top10.toFixed(1)}% > max ${maxTop10}%`,
@@ -2793,6 +2797,10 @@ export function resolveTop10SoftAllow(
   }
   const ageUnknown = ageH == null;
   const viaAge = ageH != null && ageH >= TOP10_SOFT_MIN_AGE_HOURS;
+  const softCeil =
+    ageUnknown && TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT[def.id] != null
+      ? Number(TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT[def.id])
+      : softCeilAged;
 
   if (top10 > softCeil) {
     return {

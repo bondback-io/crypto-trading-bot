@@ -102,8 +102,18 @@ const dipFunnel = {
   no_levels: 0,
   /** Admit / rotate deny reasons (Dip/Steady inventory diagnostics) */
   mutual_exclude: 0,
+  /** mutual_exclude tagged by blocker */
+  mx_scalper: 0,
+  mx_trend: 0,
   unwatch_cd: 0,
   no_levels_rotate: 0,
+  /** Split former vol_liq_mc bucket */
+  vol: 0,
+  liq: 0,
+  mc: 0,
+  no_setup: 0,
+  max_drop: 0,
+  /** Legacy sum of vol+liq+mc+no_setup+max_drop (compat) */
   vol_liq_mc: 0,
   at_cap: 0,
 };
@@ -578,27 +588,6 @@ export function considerDipWatchSetup(input: {
     noteDipFunnel('unwatch_cd');
     return null;
   }
-  try {
-    const { isMintOnActiveScalperWatch } =
-      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
-    if (isMintOnActiveScalperWatch(input.mint)) {
-      noteDipFunnel('mutual_exclude');
-      return null;
-    }
-  } catch {
-    /* optional */
-  }
-  try {
-    const { isMintOnActiveTrendWatch } =
-      require('./trendSetupWatch') as typeof import('./trendSetupWatch');
-    if (isMintOnActiveTrendWatch(input.mint)) {
-      noteDipFunnel('mutual_exclude');
-      return null;
-    }
-  } catch {
-    /* optional */
-  }
-
   const m = dipMatch();
   const minMc = m.minMarketCapUsd ?? 500_000;
   const minHolders = m.minHolders ?? 80;
@@ -609,6 +598,47 @@ export function considerDipWatchSetup(input: {
   const isMedium = isMediumSource(input.source);
   const isQuality = isMajors || isMedium;
   const bucket = watchBucket(input.source);
+  const nearTaEarly =
+    input.nearKeyFib === true || input.nearSupport === true;
+
+  // Scalper / Mode B: always mutual-exclude (protect mid-band spam).
+  try {
+    const { isMintOnActiveScalperWatch } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    if (isMintOnActiveScalperWatch(input.mint)) {
+      noteDipFunnel('mutual_exclude');
+      noteDipFunnel('mx_scalper');
+      return null;
+    }
+  } catch {
+    /* optional */
+  }
+  // Trend: quality parks prefer Dip/Steady; minors may yield only with Fib/S edge.
+  try {
+    const {
+      isMintOnActiveTrendWatch,
+      expireTrendWatchForDipAdmit,
+    } = require('./trendSetupWatch') as typeof import('./trendSetupWatch');
+    if (isMintOnActiveTrendWatch(input.mint)) {
+      if (isQuality) {
+        expireTrendWatchForDipAdmit(
+          input.mint,
+          'Yielded to Dip/Steady quality park'
+        );
+      } else if (nearTaEarly) {
+        expireTrendWatchForDipAdmit(
+          input.mint,
+          'Yielded to Dip minor near Fib/S'
+        );
+      } else {
+        noteDipFunnel('mutual_exclude');
+        noteDipFunnel('mx_trend');
+        return null;
+      }
+    }
+  } catch {
+    /* optional */
+  }
 
   pruneTerminal();
   const existing = watches.get(input.mint);
@@ -663,6 +693,7 @@ export function considerDipWatchSetup(input: {
 
   const mc = input.marketCapUsd;
   if (mc != null && mc > 0 && mc < minMc && !isQuality) {
+    noteDipFunnel('mc');
     noteDipFunnel('vol_liq_mc');
     return null;
   }
@@ -672,6 +703,7 @@ export function considerDipWatchSetup(input: {
     input.holderCount > 0 &&
     input.holderCount < minHolders
   ) {
+    noteDipFunnel('liq');
     noteDipFunnel('vol_liq_mc');
     return null;
   }
@@ -681,20 +713,23 @@ export function considerDipWatchSetup(input: {
     input.volumeH1Usd > 0 &&
     input.volumeH1Usd < minVol
   ) {
+    noteDipFunnel('vol');
     noteDipFunnel('vol_liq_mc');
     return null;
   }
 
   const drop = input.dropFromPeakPct;
-  const nearTa = input.nearKeyFib === true || input.nearSupport === true;
+  const nearTa = nearTaEarly;
   const dropStarted = drop != null && drop >= Math.min(5, minDrop);
   // Medium/Majors: admit to watching without force-buy when S/R thin (arm later).
   // Memecoins: need early dip signal OR Fib/S proximity.
   if (!isQuality && !dropStarted && !nearTa) {
+    noteDipFunnel('no_setup');
     noteDipFunnel('vol_liq_mc');
     return null;
   }
   if (drop != null && drop > maxDrop) {
+    noteDipFunnel('max_drop');
     noteDipFunnel('vol_liq_mc');
     return null;
   }

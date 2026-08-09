@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.254',
+    title: 'Watchlist readiness · Dip/Steady inventory fill',
+    sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],
+    items: [
+      'Watchlist readiness: refresh on Watchlist open; 2s poll while Watchlist visible; window.refreshSetupWatches bound before bucket tabs; trade-profiles paint keeps last watchReadiness strip.',
+      'Dip/Steady inventory: no Trend mutual-exclude for medium/majors (expire Trend → Dip park); minors may yield Trend when near Fib/S; Scalper/Mode B mutual-exclude unchanged; medium H1 floor $15k (majors $25k); funnel splits mxS/mxT + vol/liq/mc/noSet/maxD.',
+      'Skips: HWR age-unknown top10 soft ceil 48% (aged stays 40%, size ×0.85); quality disc hard-skip floor max(cap,20%) while arms live (fast stays strict); armed Post-Run/specialty max age ≤36h only — late-chase + Steady maxConcurrent untouched.',
+    ],
+  },
+  {
     version: '1.2.253',
     title: 'Steady non-pump quality opens · Dip/Steady funnel',
     sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],

@@ -46,8 +46,12 @@ export const MAJORS_MIN_MC_USD = 200_000_000;
 export const UNIVERSE_MIN_MC_USD = MEDIUM_MIN_MC_USD;
 /** Min liquidity — mid of ~$50k–$100k band */
 export const MAJORS_MIN_LIQ_USD = 75_000;
-/** Soft H1 volume floor for Medium/Majors Steady quality */
-export const MEDIUM_MAJORS_MIN_VOL_H1_USD = 25_000;
+/** Soft H1 volume floor for Medium Steady quality */
+export const MEDIUM_MIN_VOL_H1_USD = 15_000;
+/** Soft H1 volume floor for Majors Steady quality */
+export const MAJORS_MIN_VOL_H1_USD = 25_000;
+/** @deprecated Use MEDIUM_MIN_VOL_H1_USD / MAJORS_MIN_VOL_H1_USD */
+export const MEDIUM_MAJORS_MIN_VOL_H1_USD = MAJORS_MIN_VOL_H1_USD;
 const FETCH_LIMIT = 100;
 /** Separate caps so majors do not starve medium */
 const CYCLE_CAP_MEDIUM = 25;
@@ -119,11 +123,9 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   if (!wb) return null;
 
   const volH1 = Number(ev.volumeH1Usd ?? 0);
-  if (
-    Number.isFinite(volH1) &&
-    volH1 > 0 &&
-    volH1 < MEDIUM_MAJORS_MIN_VOL_H1_USD
-  ) {
+  const minVolH1 =
+    wb === 'medium' ? MEDIUM_MIN_VOL_H1_USD : MAJORS_MIN_VOL_H1_USD;
+  if (Number.isFinite(volH1) && volH1 > 0 && volH1 < minVolH1) {
     return null;
   }
 

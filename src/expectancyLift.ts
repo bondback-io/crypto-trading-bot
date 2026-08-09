@@ -1527,13 +1527,15 @@ export function shouldLimitDiscretionaryMix(input: {
   const armedPct = Math.round(armedShareTarget() * 100);
 
   if (triggerable > 0) {
-    // Armed path: fast + quality hard-skip above cap; never freeze all disc
-    if (mix.discShare <= cap) return { limit: false };
+    // Armed path: fast keeps strict DISC_SHARE_CAP; quality gets 20% floor.
     if (!isMixThrottledDiscProfile(pid)) return { limit: false };
     const kind = FAST_DISC_PROFILES.has(pid) ? 'fast' : 'quality';
+    const effectiveCap =
+      kind === 'quality' ? Math.max(cap, 0.2) : cap;
+    if (mix.discShare <= effectiveCap) return { limit: false };
     return {
       limit: true,
-      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(cap * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip ${kind} disc (armed target ${armedPct}%)`,
+      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(effectiveCap * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip ${kind} disc (armed target ${armedPct}%)`,
     };
   }
 

@@ -13039,6 +13039,14 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function renderSetupWatchLists(tp) {
       const data = tp || {};
+      // Trade-profiles payloads often omit watchReadiness — keep last strip state.
+      if (
+        !data.watchReadiness &&
+        window._lastSetupWatches &&
+        window._lastSetupWatches.watchReadiness
+      ) {
+        data.watchReadiness = window._lastSetupWatches.watchReadiness;
+      }
       renderWatchReadinessStrip(data);
       const dipCount = document.getElementById('dip-watch-count');
       const dipList = document.getElementById('dip-watch-list');
@@ -13371,10 +13379,28 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const dipF = diag.dipFunnel || null;
           const dipDenyBits = dipF
             ? [
-                dipF.mutual_exclude ? 'mx×' + dipF.mutual_exclude : '',
+                dipF.mx_scalper
+                  ? 'mxS×' + dipF.mx_scalper
+                  : '',
+                dipF.mx_trend ? 'mxT×' + dipF.mx_trend : '',
+                !dipF.mx_scalper && !dipF.mx_trend && dipF.mutual_exclude
+                  ? 'mx×' + dipF.mutual_exclude
+                  : '',
                 dipF.unwatch_cd ? 'uw×' + dipF.unwatch_cd : '',
                 dipF.no_levels_rotate ? 'nlRot×' + dipF.no_levels_rotate : '',
-                dipF.vol_liq_mc ? 'vlm×' + dipF.vol_liq_mc : '',
+                dipF.vol ? 'vol×' + dipF.vol : '',
+                dipF.liq ? 'liq×' + dipF.liq : '',
+                dipF.mc ? 'mc×' + dipF.mc : '',
+                dipF.no_setup ? 'noSet×' + dipF.no_setup : '',
+                dipF.max_drop ? 'maxD×' + dipF.max_drop : '',
+                !dipF.vol &&
+                !dipF.liq &&
+                !dipF.mc &&
+                !dipF.no_setup &&
+                !dipF.max_drop &&
+                dipF.vol_liq_mc
+                  ? 'vlm×' + dipF.vol_liq_mc
+                  : '',
                 dipF.at_cap ? 'cap×' + dipF.at_cap : '',
               ]
                 .filter(Boolean)
@@ -13409,7 +13435,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 (dipDenyBits
                   ? ' · deny ' + dipDenyBits
                   : '') +
-                ' (mx=mutual · uw=unwatch_cd · nlRot=no_levels_rotate · vlm=vol/liq/MC · cap=at_cap)';
+                ' (mxS/mxT=mutual scalper/trend · uw=unwatch_cd · nlRot=no_levels_rotate · vol/liq/mc/noSet/maxD · cap=at_cap)';
             } else {
               dipFunnelEl.textContent = 'Funnel: —';
             }
@@ -13600,6 +13626,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
     }
     window.renderSetupWatchLists = renderSetupWatchLists;
+
+    async function refreshSetupWatches() {
+      try {
+        const data = await fetchJSON('/api/setup-watches');
+        if (data) {
+          window._lastSetupWatches = data;
+          renderSetupWatchLists(data);
+        }
+      } catch (_) {}
+      if (typeof refreshEntrySkipDiag === 'function') {
+        refreshEntrySkipDiag().catch(function () {});
+      }
+      if (typeof refreshSmartMirrorWatchlist === 'function') {
+        refreshSmartMirrorWatchlist().catch(function () {});
+      }
+    }
+    // Must be on window before bindDipWatchSourceTabs / first applyTab.
+    window.refreshSetupWatches = refreshSetupWatches;
+
     (function bindDipWatchSourceTabs() {
       const KEY_TAB = 'dipWatchTab';
       const minorsBtn = document.getElementById('dip-watch-tab-minors');
@@ -13669,23 +13714,6 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         applyTab('majors');
       });
     })();
-
-    async function refreshSetupWatches() {
-      try {
-        const data = await fetchJSON('/api/setup-watches');
-        if (data) {
-          window._lastSetupWatches = data;
-          renderSetupWatchLists(data);
-        }
-      } catch (_) {}
-      if (typeof refreshEntrySkipDiag === 'function') {
-        refreshEntrySkipDiag().catch(function () {});
-      }
-      if (typeof refreshSmartMirrorWatchlist === 'function') {
-        refreshSmartMirrorWatchlist().catch(function () {});
-      }
-    }
-    window.refreshSetupWatches = refreshSetupWatches;
 
     async function refreshEntrySkipDiag() {
       const el = document.getElementById('entry-skip-diag');
@@ -19412,6 +19440,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
         if (typeof refreshSmartMirrorWatchlist === 'function') {
           refreshSmartMirrorWatchlist(true).catch(function () {});
+        }
+        if (typeof refreshSetupWatches === 'function') {
+          void refreshSetupWatches();
+        } else if (typeof window.refreshSetupWatches === 'function') {
+          void window.refreshSetupWatches();
         }
       }
       if (name === 'microbots') {
@@ -34884,11 +34917,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         void refreshOpenPositionsFast({ fromFill: false });
       } catch (_) {}
     }, 2000);
-    // Live % updates for Dip / Graduation watchlists while Micro Bots is open
+    // Live % / readiness updates for Dip / Graduation watchlists while Watchlist is open
     setInterval(function () {
       try {
         if (document.hidden) return;
-        const panel = document.querySelector('[data-tab-panel="microbots"]');
+        const panel = document.querySelector('[data-tab-panel="scanner"]');
         if (!panel || panel.classList.contains('hidden')) return;
         void refreshSetupWatches();
       } catch (_) {}
