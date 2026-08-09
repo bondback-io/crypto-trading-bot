@@ -11,7 +11,9 @@ export type SetupWatchEventKind =
   | 'watch_expired'
   | 'trigger_blocked_cooldown'
   | 'handoff_failed'
-  | 'touch_fail';
+  | 'touch_fail'
+  | 'lock_acquired'
+  | 'lock_released';
 
 export interface SetupWatchEvent {
   at: number;

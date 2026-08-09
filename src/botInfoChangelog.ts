@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.246',
+    title: 'Lock hygiene · Profile RL · Trend live tape · Steady majors',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'One-setup lock hygiene: Dip support-breach + unwatch clears; acquire log only on new mint; TTL deletes route through release log; lock_acquired/lock_released events. No TTL/remint/Entry Skill policy change.',
+      'Profile RL: Shadow→Hybrid needs EMA≥0; Hybrid→Lead sustained; demote needs 2 confirming closes; ≥6 trades or ≥2h dwell (recovery Lead→Hybrid waived); rlModeMax enforced. Manual mode auto-locks; save chip + plain-language blockers; Profile RL ≠ ML label.',
+      'Trend Rider: discretionary soft-skips collapsed/decaying tape unless M5/H1 uptick; KOL/Jupiter specialty may enter quieter tape; profile-only flat+collapsed soft exit after ~25m. Skip reasons stamped for self-learn.',
+      'Steady Compounder: majors specialty PumpFun + Require-TA bypass (with Trend); majors ≥$250M dips soft-prefer Steady; anti-rug/stables/holder gates kept; rulesSummary updated. Learning/craft/RL unchanged.',
+    ],
+  },
+  {
     version: '1.2.245',
     title: 'Entry Skill armed-or-fallback (trade starvation fix)',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

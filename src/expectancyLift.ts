@@ -1580,6 +1580,37 @@ export function expectancySizeMultiplier(input: {
   }
 }
 
+function oneSetupFamilyFromProfile(
+  profileId: string
+): 'scalper' | 'dip' | 'grad' {
+  const p = String(profileId || '');
+  if (p === 'scalper') return 'scalper';
+  if (p === 'migration_sniper') return 'grad';
+  return 'dip';
+}
+
+function recordOneSetupLockEvent(
+  kind: 'lock_acquired' | 'lock_released',
+  mint: string,
+  profileId: string | undefined,
+  reason?: string
+): void {
+  try {
+    const { recordSetupWatchEvent } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    recordSetupWatchEvent({
+      kind,
+      family: oneSetupFamilyFromProfile(profileId || 'dip_buyer'),
+      mint,
+      symbol: mint.slice(0, 8),
+      profileId: profileId || null,
+      reason: reason ? String(reason).slice(0, 120) : undefined,
+    });
+  } catch {
+    /* optional */
+  }
+}
+
 /** One-setup-one-profile: mint lock while preferred watch is active (TTL 8m). */
 export function mintOneSetupProfileLock(
   mint: string,
@@ -1589,7 +1620,16 @@ export function mintOneSetupProfileLock(
   const m = String(mint || '').trim();
   const p = String(profileId || '').trim();
   if (!m || !p) return;
+  const prev = oneSetupLocks.get(m);
+  const isNewMint = !prev;
   oneSetupLocks.set(m, { profileId: p, untilMs: Date.now() + ttlMs });
+  // Log acquire only on NEW mint — remint-while-active must not spam.
+  if (isNewMint) {
+    console.log(
+      `[one-setup] acquired mint=${m.slice(0, 8)}… profile=${p}`
+    );
+    recordOneSetupLockEvent('lock_acquired', m, p, 'acquired');
+  }
 }
 
 export function clearOneSetupProfileLock(
@@ -1598,13 +1638,14 @@ export function clearOneSetupProfileLock(
 ): void {
   const m = String(mint || '').trim();
   if (!m) return;
-  if (!oneSetupLocks.has(m)) return;
+  const prev = oneSetupLocks.get(m);
+  if (!prev) return;
   oneSetupLocks.delete(m);
-  if (reason) {
-    console.log(
-      `[one-setup] released ${m.slice(0, 8)}… · ${String(reason).slice(0, 120)}`
-    );
+  const why = reason ? String(reason).slice(0, 120) : undefined;
+  if (why) {
+    console.log(`[one-setup] released ${m.slice(0, 8)}… · ${why}`);
   }
+  recordOneSetupLockEvent('lock_released', m, prev.profileId, why);
 }
 
 export function getOneSetupPreferredProfile(
@@ -1622,9 +1663,9 @@ export function getOneSetupPreferredProfile(
 export function countOneSetupLocksHeld(): number {
   const now = Date.now();
   let n = 0;
-  for (const [mint, row] of oneSetupLocks) {
+  for (const [mint, row] of [...oneSetupLocks.entries()]) {
     if (row.untilMs < now) {
-      oneSetupLocks.delete(mint);
+      clearOneSetupProfileLock(mint, 'ttl expired');
       continue;
     }
     n += 1;
@@ -1636,9 +1677,9 @@ export function countOneSetupLocksForProfile(profileId: string): number {
   const pid = String(profileId || '');
   const now = Date.now();
   let n = 0;
-  for (const [mint, row] of oneSetupLocks) {
+  for (const [mint, row] of [...oneSetupLocks.entries()]) {
     if (row.untilMs < now) {
-      oneSetupLocks.delete(mint);
+      clearOneSetupProfileLock(mint, 'ttl expired');
       continue;
     }
     if (row.profileId === pid) n += 1;

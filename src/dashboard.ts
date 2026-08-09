@@ -9031,8 +9031,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <details class="strat-adv-pack" id="profile-rl-details" style="margin-top:0;border:none;background:transparent">
           <summary>
             <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
-              <span class="text-sm font-semibold text-slate-200">Profile RL Agents <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Per-profile soft policy: setup-worth lane bump, confidence/size, TA sensitivity, exit-hint aggressiveness. Shadow/hybrid/lead modes. Never TP/SL, Peak Protect, or self-learn overrides. Default OFF."></span></span>
+              <span class="text-sm font-semibold text-slate-200">Profile RL Agents <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Profile RL mode (Shadow/Hybrid/Lead) is per-lane soft policy — not Micro Bot ML shadow/hybrid/lead. Manual mode changes auto-lock. Never TP/SL, Peak Protect, or self-learn overrides. Default OFF."></span></span>
               <span id="profile-rl-status-badge" class="badge status-badge" style="font-size:11px">Profile RL OFF</span>
+              <span id="profile-rl-save-chip" class="mint" style="font-size:10px;margin-left:0.35rem">—</span>
             </span>
             <label class="ctl-check" title="Enable Profile RL" onclick="event.stopPropagation()">
               <input type="checkbox" id="profile-rl-enabled" onchange="saveProfileRlConfig()" onclick="event.stopPropagation()" />
@@ -9041,7 +9042,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </summary>
           <div class="strat-adv-body">
             <div class="mb-2">
-              <div class="text-xs text-slate-400 mb-1">Strength <span id="profile-rl-strength-label" class="text-slate-200">Medium</span></div>
+              <div class="text-xs text-slate-400 mb-1">Profile RL strength <span id="profile-rl-strength-label" class="text-slate-200">Medium</span> <span class="mint" style="font-size:10px">(not ML mode)</span></div>
               <div class="closed-filter" role="group" aria-label="Profile RL strength">
                 <button type="button" class="closed-filter-btn" data-profile-rl-strength="low" onclick="setProfileRlStrength('low')">Low</button>
                 <button type="button" class="closed-filter-btn is-active" data-profile-rl-strength="medium" onclick="setProfileRlStrength('medium')">Medium</button>
@@ -30165,6 +30166,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         if (lab) lab.textContent = _profileRlStrength.charAt(0).toUpperCase() + _profileRlStrength.slice(1);
         const badge = document.getElementById('profile-rl-status-badge');
         if (badge) badge.textContent = r.label || (r.enabled ? 'Profile RL ON' : 'Profile RL OFF');
+        const saveChip = document.getElementById('profile-rl-save-chip');
+        if (saveChip) {
+          if (r.lastSaveOk === true) {
+            saveChip.textContent = 'saved ✓';
+            saveChip.style.color = '#86efac';
+          } else if (r.lastSaveOk === false) {
+            saveChip.textContent = 'save failed';
+            saveChip.style.color = '#fca5a5';
+          } else {
+            saveChip.textContent = 'Profile RL ≠ ML';
+            saveChip.style.color = '';
+          }
+        }
         const modesEl = document.getElementById('profile-rl-modes');
         if (modesEl) {
           const agents = r.agents || [];
@@ -30176,14 +30190,16 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   const mode = a.mode === 'hybrid' || a.mode === 'lead' ? a.mode : 'shadow';
                   const readiness = a.readinessScore != null ? Number(a.readinessScore) : 0;
                   const locked = !!a.modeLocked;
+                  const blocker = a.modeBlocker ? String(a.modeBlocker) : '';
                   return (
-                    '<div class="mb-1" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">' +
+                    '<div class="mb-1" style="display:flex;flex-direction:column;gap:2px">' +
+                    '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">' +
                     '<span style="color:#94a3b8;min-width:6rem">' +
                     escHtml(pid) +
                     '</span>' +
                     '<select class="profile-rl-mode-select" data-profile-id="' +
                     escHtml(pid) +
-                    '" onchange="saveProfileRlMode(this)" style="font-size:11px;padding:2px 4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px">' +
+                    '" onchange="saveProfileRlMode(this)" title="Profile RL mode (not ML)" style="font-size:11px;padding:2px 4px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px">' +
                     ['shadow', 'hybrid', 'lead']
                       .map(
                         (m) =>
@@ -30197,7 +30213,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                       )
                       .join('') +
                     '</select>' +
-                    '<label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:#64748b" title="Lock mode — skip auto promote/demote">' +
+                    '<label style="display:inline-flex;align-items:center;gap:2px;font-size:10px;color:#64748b" title="Lock Profile RL mode — skip auto promote/demote">' +
                     '<input type="checkbox" class="profile-rl-lock" data-profile-id="' +
                     escHtml(pid) +
                     '"' +
@@ -30210,6 +30226,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     ' · EMA ' +
                     (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
                     '</span>' +
+                    '</div>' +
+                    (blocker
+                      ? '<div class="mint" style="font-size:10px;padding-left:0.15rem">' +
+                        escHtml(blocker) +
+                        '</div>'
+                      : '') +
                     '</div>'
                   );
                 })
@@ -30221,12 +30243,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           const agents = r.agents || [];
           agentsEl.innerHTML = agents.length
             ? agents.slice(0, 8).map((a) =>
-                '<div class="mb-1"><span style="color:#94a3b8">' + escHtml(a.profileId) + '</span> · ' +
+                '<div class="mb-1"><span style="color:#94a3b8">' + escHtml(a.profileId) + '</span> · Profile RL ' +
                 escHtml(a.mode || 'shadow') +
                 (a.modeLocked ? ' 🔒' : '') +
                 ' · ready ' + (a.readinessScore != null ? Number(a.readinessScore) : '—') + '/100' +
                 ' · EMA ' + (a.rewardEma != null ? Number(a.rewardEma).toFixed(2) : '0') +
                 ' · n=' + (a.trades || 0) +
+                (a.modeBlocker ? '<div class="mint" style="margin-top:2px">' + escHtml(a.modeBlocker) + '</div>' : '') +
                 (a.plainLanguage ? '<div class="mint" style="margin-top:2px">' + escHtml(a.plainLanguage) + '</div>' : '') +
                 '</div>'
               ).join('')
@@ -30256,14 +30279,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       const profileId = sel.getAttribute('data-profile-id');
       const mode = sel.value;
       if (!profileId || !mode) return;
-      const lockEl = document.querySelector('.profile-rl-lock[data-profile-id="' + profileId + '"]');
+      // Manual mode change: omit modeLocked so server auto-locks (unless unlock checkbox cleared intentionally via lock handler)
       await fetchJSON('/api/config/profile-rl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profileId,
           mode,
-          modeLocked: lockEl ? lockEl.checked : undefined,
         }),
       });
       await loadProfileRlStatus();

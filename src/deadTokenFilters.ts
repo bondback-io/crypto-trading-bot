@@ -134,14 +134,14 @@ export function pumpFunMintSkipReason(mint: string): string {
   return `Skipped — not a pump.fun mint (${short})`;
 }
 
-/** Mature specialty feeds intentionally include non-pump Jupiter/KOL names. */
+/** Mature specialty feeds intentionally include non-pump Jupiter/KOL/majors names. */
 export function isMatureSpecialtyPumpFunBypass(opts?: {
   specialtyFeed?: string | null;
   preferredProfileId?: string | null;
   candidateTradeProfileId?: string | null;
 }): boolean {
   const feed = String(opts?.specialtyFeed || '').toLowerCase();
-  if (feed !== 'jupiter' && feed !== 'kolscan') return false;
+  if (feed !== 'jupiter' && feed !== 'kolscan' && feed !== 'majors') return false;
   const pid = String(
     opts?.candidateTradeProfileId || opts?.preferredProfileId || ''
   );
@@ -151,7 +151,7 @@ export function isMatureSpecialtyPumpFunBypass(opts?: {
 /**
  * Hard floor when filters.buyPumpFunOnly is ON — rejects non-`pump` suffix mints.
  * Non-bypassable by soft-pass / early path / Degen, except Trend Rider /
- * Steady Compounder Jupiter|KOL specialty handoffs (organic/trending universe).
+ * Steady Compounder Jupiter|KOL|majors specialty handoffs (organic/trending/majors universe).
  * Returns skip reason or null.
  */
 export function evaluateBuyPumpFunOnlyGate(

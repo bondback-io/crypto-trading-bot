@@ -440,25 +440,95 @@ function hasRecentPerformanceDrop(agent: ProfileRlAgentState): boolean {
   return countRecentRollbacks(agent.profileId) >= 2;
 }
 
+const MODE_DWELL_MIN_TRADES = 6;
+const MODE_DWELL_MIN_MS = 2 * 60 * 60_000;
+const DEMOTE_CONFIRM_NEEDED = 2;
+
+function modeDwellSatisfied(agent: ProfileRlAgentState): boolean {
+  const tradesInMode = Math.max(0, Number(agent.tradesInMode) || 0);
+  if (tradesInMode >= MODE_DWELL_MIN_TRADES) return true;
+  const since = Number(agent.lastModeChangeAt) || 0;
+  if (since > 0 && Date.now() - since >= MODE_DWELL_MIN_MS) return true;
+  // First mode ever (never changed) — allow promote/demote after sample floors alone
+  if (!since && tradesInMode === 0 && agent.trades > 0) {
+    // Treat accumulated trades as time-in-mode when lastModeChangeAt unset
+    return agent.trades >= MODE_DWELL_MIN_TRADES;
+  }
+  return false;
+}
+
+function applyAutoModeChange(
+  agent: ProfileRlAgentState,
+  to: ProfileRlMode,
+  kind: 'auto_promote' | 'auto_demote',
+  reason: string,
+  readiness: ProfileRlReadinessResult
+): void {
+  const from = agent.mode;
+  if (from === to) return;
+  agent.mode = to;
+  agent.lastModeChangeAt = Date.now();
+  agent.tradesInMode = 0;
+  agent.demoteConfirmStreak = 0;
+  const b = readiness.breakdown;
+  pushProfileRlDecision({
+    kind,
+    profileId: agent.profileId,
+    detail:
+      `${from}→${to} · readiness ${readiness.score} · sample ${b.sample} · trend ${b.rewardTrend} · ` +
+      `stability ${b.stability} · n=${agent.trades} EMA ${agent.rewardEma.toFixed(2)} · ${reason} · source:auto`,
+  });
+}
+
+function resolveRlModeMax(profileId: string): 'shadow' | 'hybrid' | 'lead' | 'any' {
+  try {
+    const { getDipBuyerRecoveryConstraints, isDipBuyerRecovering } =
+      require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+    if (isDipBuyerRecovering(profileId)) {
+      return getDipBuyerRecoveryConstraints(profileId).rlModeMax;
+    }
+  } catch {
+    /* optional */
+  }
+  return 'any';
+}
+
+function modeRank(m: ProfileRlMode): number {
+  if (m === 'lead') return 2;
+  if (m === 'hybrid') return 1;
+  return 0;
+}
+
+function clampModeToMax(
+  mode: ProfileRlMode,
+  max: 'shadow' | 'hybrid' | 'lead' | 'any'
+): ProfileRlMode {
+  if (max === 'any') return mode;
+  if (modeRank(mode) <= modeRank(max === 'lead' ? 'lead' : max === 'hybrid' ? 'hybrid' : 'shadow')) {
+    return mode;
+  }
+  return max === 'lead' ? 'lead' : max === 'hybrid' ? 'hybrid' : 'shadow';
+}
+
 function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
   if (agent.modeLocked) return;
 
+  let recoveryForcedDemote = false;
   try {
     const { shouldBlockProfileLead, isFastProfileRecovering } =
       require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
     if (isFastProfileRecovering(agent.profileId)) {
       if (agent.mode === 'lead') {
-        agent.mode = 'hybrid';
-        pushProfileRlDecision({
-          kind: 'auto_demote',
-          profileId: agent.profileId,
-          detail: 'lead→hybrid · Fast Recovery blocks Lead',
-        });
+        applyAutoModeChange(
+          agent,
+          'hybrid',
+          'auto_demote',
+          'lead→hybrid · Fast Recovery blocks Lead (dwell waived)',
+          computeProfileRlReadiness(agent)
+        );
+        recoveryForcedDemote = true;
       }
-      // Allow shadow↔hybrid but never promote to lead while recovering
-      if (shouldBlockProfileLead(agent.profileId) && agent.mode === 'hybrid') {
-        // fall through for demote checks only; skip lead promote below
-      }
+      void shouldBlockProfileLead(agent.profileId);
     }
   } catch {
     /* optional */
@@ -469,18 +539,38 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
       require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
     if (isDipBuyerRecovering(agent.profileId)) {
       if (agent.mode === 'lead') {
-        agent.mode = 'hybrid';
-        pushProfileRlDecision({
-          kind: 'auto_demote',
-          profileId: agent.profileId,
-          detail: 'lead→hybrid · Dip Buyer Recovery blocks Lead',
-        });
+        applyAutoModeChange(
+          agent,
+          'hybrid',
+          'auto_demote',
+          'lead→hybrid · Dip Buyer Recovery blocks Lead (dwell waived)',
+          computeProfileRlReadiness(agent)
+        );
+        recoveryForcedDemote = true;
       }
       void shouldBlockDipBuyerLead(agent.profileId);
     }
   } catch {
     /* optional */
   }
+
+  // Enforce rlModeMax during dip recovery (Lead cannot sit above max)
+  const rlMax = resolveRlModeMax(agent.profileId);
+  if (rlMax !== 'any') {
+    const clamped = clampModeToMax(agent.mode, rlMax);
+    if (clamped !== agent.mode) {
+      applyAutoModeChange(
+        agent,
+        clamped,
+        'auto_demote',
+        `rlModeMax=${rlMax} recovery clamp (dwell waived)`,
+        computeProfileRlReadiness(agent)
+      );
+      recoveryForcedDemote = true;
+    }
+  }
+
+  if (recoveryForcedDemote) return;
 
   const diff = getProfileRlDifficulty(agent.profileId);
   const readiness = computeProfileRlReadiness(agent);
@@ -492,31 +582,24 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
   const stableEnough = readiness.breakdown.stability >= MIN_STABILITY_FOR_PROMOTE;
   const perfDrop = hasRecentPerformanceDrop(agent);
   const unstable = readiness.breakdown.stability < MIN_STABILITY_FOR_PROMOTE;
-
-  const fmtDetail = (
-    from: ProfileRlMode,
-    to: ProfileRlMode,
-    kind: 'auto_promote' | 'auto_demote',
-    reason: string
-  ): void => {
-    const b = readiness.breakdown;
-    pushProfileRlDecision({
-      kind,
-      profileId: agent.profileId,
-      detail: `${from}→${to} · readiness ${readiness.score} · sample ${b.sample} · trend ${b.rewardTrend} · stability ${b.stability} · ${reason}`,
-    });
-  };
+  const dwellOk = modeDwellSatisfied(agent);
 
   if (agent.mode === 'shadow') {
-    if (
+    const canPromote =
       readiness.score >= promoteHybridThreshold &&
       agent.trades >= diff.hybridFloor &&
       stableEnough &&
       !perfDrop &&
-      agent.rewardEma >= -0.1
-    ) {
-      agent.mode = 'hybrid';
-      fmtDetail('shadow', 'hybrid', 'auto_promote', `n=${agent.trades} EMA ${agent.rewardEma.toFixed(2)}`);
+      agent.rewardEma >= 0 &&
+      dwellOk;
+    if (canPromote && clampModeToMax('hybrid', rlMax) === 'hybrid') {
+      applyAutoModeChange(
+        agent,
+        'hybrid',
+        'auto_promote',
+        `EMA≥0 · dwell ok (tradesInMode=${agent.tradesInMode ?? 0})`,
+        readiness
+      );
     }
     return;
   }
@@ -539,46 +622,80 @@ function maybeAutoAdjustMode(agent: ProfileRlAgentState): void {
         /* optional */
       }
     }
+    const emaSustained =
+      agent.rewardEma >= 0.05 &&
+      (agent.prevRewardEma == null || agent.prevRewardEma >= 0);
     if (
       !blockLead &&
       readiness.score >= promoteLeadThreshold &&
       agent.trades >= diff.leadFloor &&
       stableEnough &&
       !perfDrop &&
-      agent.rewardEma >= 0.05
+      emaSustained &&
+      dwellOk &&
+      clampModeToMax('lead', rlMax) === 'lead'
     ) {
-      agent.mode = 'lead';
-      fmtDetail('hybrid', 'lead', 'auto_promote', `n=${agent.trades} EMA ${agent.rewardEma.toFixed(2)}`);
+      applyAutoModeChange(
+        agent,
+        'lead',
+        'auto_promote',
+        `EMA≥0.05 sustained · dwell ok (tradesInMode=${agent.tradesInMode ?? 0})`,
+        readiness
+      );
       return;
     }
-    if (
+    const demoteEligible =
       readiness.score < HYBRID_DEMOTE_READINESS ||
       unstable ||
-      (perfDrop && agent.rewardEma < 0)
+      (perfDrop && agent.rewardEma < 0);
+    if (demoteEligible) {
+      agent.demoteConfirmStreak = (agent.demoteConfirmStreak || 0) + 1;
+    } else {
+      agent.demoteConfirmStreak = 0;
+    }
+    if (
+      demoteEligible &&
+      (agent.demoteConfirmStreak || 0) >= DEMOTE_CONFIRM_NEEDED &&
+      dwellOk
     ) {
-      agent.mode = 'shadow';
-      fmtDetail(
-        'hybrid',
+      applyAutoModeChange(
+        agent,
         'shadow',
         'auto_demote',
-        perfDrop ? 'performance drop' : unstable ? 'instability' : 'readiness low'
+        perfDrop
+          ? `performance drop · confirm×${agent.demoteConfirmStreak}`
+          : unstable
+            ? `instability · confirm×${agent.demoteConfirmStreak}`
+            : `readiness low · confirm×${agent.demoteConfirmStreak}`,
+        readiness
       );
     }
     return;
   }
 
   if (agent.mode === 'lead') {
-    if (
+    const demoteEligible =
       readiness.score < LEAD_DEMOTE_READINESS ||
       perfDrop ||
-      agent.rewardEma < -0.05
+      agent.rewardEma < -0.05;
+    if (demoteEligible) {
+      agent.demoteConfirmStreak = (agent.demoteConfirmStreak || 0) + 1;
+    } else {
+      agent.demoteConfirmStreak = 0;
+    }
+    if (
+      demoteEligible &&
+      (agent.demoteConfirmStreak || 0) >= DEMOTE_CONFIRM_NEEDED &&
+      dwellOk
     ) {
-      agent.mode = 'hybrid';
-      fmtDetail(
-        'lead',
+      applyAutoModeChange(
+        agent,
         'hybrid',
         'auto_demote',
-        perfDrop ? 'EMA drop / rollback' : 'readiness below lead floor'
+        perfDrop
+          ? `EMA drop / rollback · confirm×${agent.demoteConfirmStreak}`
+          : `readiness below lead floor · confirm×${agent.demoteConfirmStreak}`,
+        readiness
       );
     }
   }
@@ -683,6 +800,8 @@ export function notifyProfileRlTradeClosed(input: {
     agent.baselineRewardEma = agent.rewardEma;
   }
   agent.tradesSinceUpdate += 1;
+  agent.tradesInMode = (agent.tradesInMode || 0) + 1;
+  if (!agent.lastModeChangeAt) agent.lastModeChangeAt = agent.updatedAt || Date.now();
   agent.updatedAt = Date.now();
 
   const dims = activePolicyDims(input.episode);
@@ -891,6 +1010,100 @@ export function formatProfileRlPlainLanguage(profileId: string): string {
   return `${modeNote}: ${bits.join('; ')} (readiness ${readiness.score}/100, EMA ${agent.rewardEma.toFixed(2)}${locked}).`;
 }
 
+/**
+ * Plain-language next promotion / demotion blocker for dashboard Profile RL cards.
+ */
+export function describeProfileRlModeBlocker(
+  agent: ProfileRlAgentState
+): string {
+  const name = profileDisplayName(agent.profileId);
+  if (agent.modeLocked) {
+    return `${name} mode locked — auto promote/demote paused (manual override).`;
+  }
+  const diff = getProfileRlDifficulty(agent.profileId);
+  const readiness = computeProfileRlReadiness(agent);
+  const promoteHybridThreshold = SHADOW_TO_HYBRID_READINESS + diff.thresholdAdd;
+  const promoteLeadThreshold = HYBRID_TO_LEAD_READINESS + diff.thresholdAdd;
+  const dwellOk = modeDwellSatisfied(agent);
+  const tradesInMode = Math.max(0, Number(agent.tradesInMode) || 0);
+  const dwellHint = dwellOk
+    ? ''
+    : ` Need ≥${MODE_DWELL_MIN_TRADES} trades in mode or ≥2h dwell (now ${tradesInMode} trades).`;
+
+  const rlMax = resolveRlModeMax(agent.profileId);
+  if (rlMax !== 'any' && agent.mode !== 'shadow') {
+    if (modeRank(agent.mode) >= modeRank(rlMax === 'hybrid' ? 'hybrid' : 'shadow')) {
+      // recovering with cap
+    }
+  }
+
+  if (agent.mode === 'shadow') {
+    const bits: string[] = [];
+    if (agent.rewardEma < 0) {
+      bits.push('EMA negative');
+    }
+    if (readiness.score < promoteHybridThreshold) {
+      bits.push(`readiness ${readiness.score}/${promoteHybridThreshold}`);
+    }
+    if (agent.trades < diff.hybridFloor) {
+      bits.push(`n=${agent.trades}/${diff.hybridFloor}`);
+    }
+    if (readiness.breakdown.stability < MIN_STABILITY_FOR_PROMOTE) {
+      bits.push('stability weak');
+    }
+    if (!dwellOk) bits.push('dwell not met');
+    if (rlMax === 'shadow') {
+      return `${name} remains Shadow: recovery rlModeMax=shadow.`;
+    }
+    if (!bits.length) {
+      return `${name} near Hybrid — waiting next close to promote.`;
+    }
+    return `${name} remains Shadow: ${bits.join(' and ')}.${dwellHint}`;
+  }
+
+  if (agent.mode === 'hybrid') {
+    let blockLead = false;
+    try {
+      const { shouldBlockProfileLead } =
+        require('./fastProfileRecovery') as typeof import('./fastProfileRecovery');
+      blockLead = shouldBlockProfileLead(agent.profileId);
+    } catch {
+      /* soft */
+    }
+    if (!blockLead) {
+      try {
+        const { shouldBlockDipBuyerLead } =
+          require('./dipBuyerRecovery') as typeof import('./dipBuyerRecovery');
+        blockLead = shouldBlockDipBuyerLead(agent.profileId);
+      } catch {
+        /* soft */
+      }
+    }
+    if (blockLead || rlMax === 'hybrid' || rlMax === 'shadow') {
+      return `${name} Hybrid — Lead blocked by recovery / rlModeMax=${rlMax}.`;
+    }
+    const bits: string[] = [];
+    if (agent.rewardEma < 0.05) bits.push(`EMA ${agent.rewardEma.toFixed(2)} < 0.05`);
+    if (readiness.score < promoteLeadThreshold) {
+      bits.push(`readiness ${readiness.score}/${promoteLeadThreshold}`);
+    }
+    if (agent.trades < diff.leadFloor) {
+      bits.push(`n=${agent.trades}/${diff.leadFloor}`);
+    }
+    if (!dwellOk) bits.push('dwell not met');
+    if (!bits.length) {
+      return `${name} Hybrid — nearing Lead promotion.`;
+    }
+    return `${name} Hybrid — next Lead blocked: ${bits.join('; ')}.${dwellHint}`;
+  }
+
+  // lead
+  if ((agent.demoteConfirmStreak || 0) > 0) {
+    return `${name} Lead — demote watch (confirm ${agent.demoteConfirmStreak}/${DEMOTE_CONFIRM_NEEDED}).`;
+  }
+  return `${name} Lead — holding; demote needs confirming weak closes + dwell.`;
+}
+
 export function getProfileRlStatus(opts?: {
   /** Persist readiness refresh (default true). Chat paths should pass false. */
   persist?: boolean;
@@ -900,12 +1113,17 @@ export function getProfileRlStatus(opts?: {
   enabled: boolean;
   strength: ProfileRlStrength;
   label: string;
+  lastSaveOk?: boolean;
+  lastSaveAt?: number;
+  lastSaveDetail?: string;
+  persistedPath?: string;
   agents: Array<
     ProfileRlAgentState & {
       winRatePct: number;
       avgReward: number;
       readinessBreakdown: ProfileRlReadinessBreakdown;
       plainLanguage: string;
+      modeBlocker: string;
     }
   >;
   decisions: ReturnType<typeof getProfileRlDecisions>;
@@ -933,6 +1151,7 @@ export function getProfileRlStatus(opts?: {
             : 0,
         readinessBreakdown: readiness.breakdown,
         plainLanguage: formatProfileRlPlainLanguage(a.profileId),
+        modeBlocker: describeProfileRlModeBlocker(a),
       };
     })
     .sort((a, b) => b.rewardEma - a.rewardEma || b.trades - a.trades);
@@ -950,6 +1169,7 @@ export function getProfileRlStatus(opts?: {
           avgReward: 0,
           readinessBreakdown: readiness.breakdown,
           plainLanguage: formatProfileRlPlainLanguage(id),
+          modeBlocker: describeProfileRlModeBlocker(agent),
         });
       }
     }
@@ -960,9 +1180,22 @@ export function getProfileRlStatus(opts?: {
   return {
     ...cfg,
     label: cfg.enabled ? `Profile RL · ${cfg.strength}` : 'Profile RL OFF',
+    lastSaveOk: st.lastSaveOk,
+    lastSaveAt: st.lastSaveAt,
+    lastSaveDetail: st.lastSaveDetail,
+    persistedPath: st.persistedPath ?? dataFileHint(),
     agents,
     decisions: getProfileRlDecisions(40),
   };
+}
+
+function dataFileHint(): string {
+  try {
+    const { dataFile } = require('./dataDir') as typeof import('./dataDir');
+    return dataFile('profile-rl-state.json');
+  } catch {
+    return 'profile-rl-state.json';
+  }
 }
 
 export {

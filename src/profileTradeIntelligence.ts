@@ -940,6 +940,22 @@ export function evaluateAdaptiveProfileExit(input: {
     }
   }
 
+  // 5c) Trend Rider only: flat + collapsed dead-market soft exit (no global exitUrgencyOnDecay).
+  if (
+    input.tradeProfileId === 'trend_rider' &&
+    input.volumeDecayState === 'collapsed' &&
+    Math.abs(pnl) <= 2.5
+  ) {
+    const holdMs = Math.max(0, now - (Number(input.openedAt) || now));
+    const TREND_FLAT_COLLAPSED_DWELL_MS = 25 * 60_000;
+    if (holdMs >= TREND_FLAT_COLLAPSED_DWELL_MS) {
+      return {
+        type: 'full',
+        reason: `Trend Rider flat+collapsed dead tape after ${(holdMs / 60_000).toFixed(0)}m (pnl ${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%)`,
+      };
+    }
+  }
+
   // 6) Quality breakdown: green but conviction collapsed + held a bit
   if (
     pol.qualityBreakdownExit &&

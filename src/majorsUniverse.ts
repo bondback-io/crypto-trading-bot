@@ -1,7 +1,7 @@
 /**
  * High-MC majors discovery — Jupiter toptraded / toporganicscore without pump filter.
- * Circulating MC only (≥$100M). Feeds Dip support-dip watch; never Scalper Mode B.
- * Additive: launch/pump scanner for Scalper-family stays unchanged.
+ * Circulating MC only (≥$100M). Feeds Dip support-dip watch; soft-prefer Steady on ≥$250M.
+ * Never Scalper Mode B. Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
 
 import { config } from './config';
@@ -178,6 +178,22 @@ export function getMajorsUniverseStatus(): {
 }
 
 /**
+ * Soft prefer on majors dips: ≥250m → Steady Compounder when enabled;
+ * 100m band (and Steady-off) → Dip Buyer. Never Scalper.
+ */
+export function majorsPreferredProfileId(band: MajorsMcBand): string {
+  if (band === '100m') return 'dip_buyer';
+  try {
+    if (config.tradeProfiles?.profiles?.steady_compounder !== false) {
+      return 'steady_compounder';
+    }
+  } catch {
+    /* soft */
+  }
+  return 'dip_buyer';
+}
+
+/**
  * Specialty-pass hook: offer majors into Dip setup watch (source: majors).
  * Does not hand to Scalper Mode B. Returns number offered this cycle.
  */
@@ -199,6 +215,7 @@ export async function runMajorsUniversePass(): Promise<number> {
     const { offerDipWatchFromCandidate } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     for (const c of list) {
+      const prefer = majorsPreferredProfileId(c.band);
       offerDipWatchFromCandidate({
         mint: c.mint,
         symbol: c.symbol,
@@ -208,7 +225,7 @@ export async function runMajorsUniversePass(): Promise<number> {
         holderCount: c.holderCount,
         priceChangeH1Pct: c.priceChangeH1Pct,
         lastPriceSol: c.lastPriceSol ?? null,
-        preferredProfileId: 'dip_buyer',
+        preferredProfileId: prefer,
         specialtyFeed: 'majors',
         majorsBand: c.band,
       });

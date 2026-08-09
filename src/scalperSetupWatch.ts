@@ -1109,6 +1109,13 @@ export function unwatchScalperSetup(mint: string): {
   }
   lastMcRefreshAt.delete(key);
   unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
+  try {
+    const { clearOneSetupProfileLock } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    clearOneSetupProfileLock(key, 'unwatch');
+  } catch {
+    /* optional */
+  }
   console.log(
     `[scalper-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
   );

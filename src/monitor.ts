@@ -3367,7 +3367,8 @@ async function handleScannerCandidate(
   if (
     !isPumpFunMintSuffix(candidate.mint) &&
     (candidate.specialtyFeed === 'jupiter' ||
-      candidate.specialtyFeed === 'kolscan') &&
+      candidate.specialtyFeed === 'kolscan' ||
+      candidate.specialtyFeed === 'majors') &&
     (candidate.preferredProfileId === 'trend_rider' ||
       candidate.preferredProfileId === 'steady_compounder' ||
       candidate.launch?.preferredProfileId === 'trend_rider' ||
@@ -6798,7 +6799,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   }
   if (
     !isPumpFunMintSuffix(signal.mint) &&
-    (signal.specialtyFeed === 'jupiter' || signal.specialtyFeed === 'kolscan') &&
+    (signal.specialtyFeed === 'jupiter' ||
+      signal.specialtyFeed === 'kolscan' ||
+      signal.specialtyFeed === 'majors') &&
     (signal.candidateTradeProfileId === 'trend_rider' ||
       signal.candidateTradeProfileId === 'steady_compounder')
   ) {
@@ -7955,7 +7958,9 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
   const matureSpecialtyTaExempt =
     (signal.candidateTradeProfileId === 'trend_rider' ||
       signal.candidateTradeProfileId === 'steady_compounder') &&
-    (signal.specialtyFeed === 'jupiter' || signal.specialtyFeed === 'kolscan');
+    (signal.specialtyFeed === 'jupiter' ||
+      signal.specialtyFeed === 'kolscan' ||
+      signal.specialtyFeed === 'majors');
   if (
     scannerSignal &&
     signal.entrySource !== 'hybrid' &&

@@ -3471,22 +3471,37 @@ export function createServer(): express.Application {
         typeof body.profileId === 'string' &&
         (body.mode === 'shadow' || body.mode === 'hybrid' || body.mode === 'lead')
       ) {
+        // Manual mode: auto-lock unless client explicitly sends modeLocked:false
         setProfileRlAgentMode(body.profileId, body.mode, {
+          source: 'manual',
           modeLocked:
             typeof body.modeLocked === 'boolean' ? body.modeLocked : undefined,
+          autoLockOnManual: true,
         });
       } else if (
         typeof body.profileId === 'string' &&
         typeof body.modeLocked === 'boolean'
       ) {
-        const { loadProfileRlState, saveProfileRlState, getOrCreateProfileRlAgent } =
-          require('./profileRlStore') as typeof import('./profileRlStore');
+        const {
+          loadProfileRlState,
+          saveProfileRlState,
+          getOrCreateProfileRlAgent,
+          pushProfileRlDecision,
+        } = require('./profileRlStore') as typeof import('./profileRlStore');
         const st = loadProfileRlState();
         const agent = getOrCreateProfileRlAgent(body.profileId);
+        const oldMode = agent.mode;
         agent.modeLocked = body.modeLocked;
         agent.updatedAt = Date.now();
         st.agents[body.profileId] = agent;
         saveProfileRlState(st);
+        const detail = `{profile:${body.profileId}, old:${oldMode}, new:${oldMode}, persisted:${st.lastSaveOk !== false}, source:manual, modeLocked:${body.modeLocked}}`;
+        pushProfileRlDecision({
+          kind: 'manual_lock',
+          profileId: body.profileId,
+          detail,
+        });
+        st.lastSaveDetail = detail;
       }
       res.json({ ok: true, profileRl: getProfileRlStatus() });
     } catch (err) {

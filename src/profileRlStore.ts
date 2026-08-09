@@ -50,6 +50,12 @@ export interface ProfileRlAgentState {
   tradesSinceUpdate: number;
   /** EMA before last update baseline */
   preUpdateRewardEma: number;
+  /** Anti-thrash: wall-clock of last mode change */
+  lastModeChangeAt?: number;
+  /** Anti-thrash: closes since entering current mode */
+  tradesInMode?: number;
+  /** Consecutive demote-eligible closes before Hybrid↔Shadow / Lead→Hybrid */
+  demoteConfirmStreak?: number;
   policyHistory: ProfileRlPolicyHistoryEntry[];
   updatedAt: number;
 }
@@ -68,6 +74,11 @@ export interface ProfileRlPersistedState {
   updatedAt: number;
   agents: Record<string, ProfileRlAgentState>;
   decisions: ProfileRlDecision[];
+  /** Last manual/auto mode persist outcome for dashboard chip */
+  lastSaveOk?: boolean;
+  lastSaveAt?: number;
+  lastSaveDetail?: string;
+  persistedPath?: string;
 }
 
 const FILE = 'profile-rl-state.json';
@@ -133,7 +144,14 @@ export function saveProfileRlState(
   cache = state;
   try {
     fs.writeFileSync(path(), JSON.stringify(state, null, 2), 'utf8');
+    state.lastSaveOk = true;
+    state.lastSaveAt = Date.now();
+    state.persistedPath = path();
   } catch (err) {
+    state.lastSaveOk = false;
+    state.lastSaveAt = Date.now();
+    state.lastSaveDetail =
+      err instanceof Error ? err.message : String(err);
     console.warn(
       '[profile-rl] persist failed:',
       err instanceof Error ? err.message : err
@@ -168,6 +186,10 @@ function normalizeAgent(raw: ProfileRlAgentState): ProfileRlAgentState {
     readinessUpdatedAt:
       raw.readinessUpdatedAt != null ? Number(raw.readinessUpdatedAt) : undefined,
     unstableCount: Math.max(0, Number(raw.unstableCount) || 0),
+    lastModeChangeAt:
+      raw.lastModeChangeAt != null ? Number(raw.lastModeChangeAt) : undefined,
+    tradesInMode: Math.max(0, Number(raw.tradesInMode) || 0),
+    demoteConfirmStreak: Math.max(0, Number(raw.demoteConfirmStreak) || 0),
   };
 }
 
@@ -258,17 +280,42 @@ export function pushProfileRlPolicyHistory(
 export function setProfileRlAgentMode(
   profileId: string,
   mode: ProfileRlMode,
-  opts?: { modeLocked?: boolean }
+  opts?: {
+    modeLocked?: boolean;
+    /** manual | auto — logged for persist confirmation */
+    source?: 'manual' | 'auto';
+    /** When true (default for manual), skip auto promote/demote */
+    autoLockOnManual?: boolean;
+  }
 ): ProfileRlAgentState {
   const st = loadProfileRlState();
   const agent = getOrCreateProfileRlAgent(profileId);
+  const oldMode = agent.mode;
+  const source = opts?.source ?? 'manual';
   agent.mode = mode;
   if (typeof opts?.modeLocked === 'boolean') {
     agent.modeLocked = opts.modeLocked;
+  } else if (source === 'manual' && opts?.autoLockOnManual !== false) {
+    // Manual mode set auto-locks unless client explicitly sends modeLocked:false
+    agent.modeLocked = true;
+  }
+  if (oldMode !== mode) {
+    agent.lastModeChangeAt = Date.now();
+    agent.tradesInMode = 0;
+    agent.demoteConfirmStreak = 0;
   }
   agent.updatedAt = Date.now();
   st.agents[profileId] = agent;
   saveProfileRlState(st);
+  const detail =
+    `{profile:${profileId}, old:${oldMode}, new:${mode}, persisted:${st.lastSaveOk !== false}, source:${source}}`;
+  pushProfileRlDecision({
+    kind: source === 'manual' ? 'manual_mode' : 'auto_mode',
+    profileId,
+    detail,
+  });
+  console.log(`[profile-rl] mode ${detail}`);
+  st.lastSaveDetail = detail;
   return agent;
 }
 

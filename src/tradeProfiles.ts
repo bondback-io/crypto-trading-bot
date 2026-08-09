@@ -697,7 +697,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Patterns: pullback / bull flag / trend continuation',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥1.5h · holders ≥50 · top10 ≤40% · 1h vol ≥$4k',
-      'Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA (global scanner still gated)',
+      'Specialty Jupiter/KOL/majors can bypass Pump.fun-only + Require TA (global scanner still gated)',
+      'Live tape: soft-skip collapsed/decaying discretionary unless M5 uptick or KOL/Jupiter specialty',
     ],
     priority: 76,
     defaultEnabled: true,
@@ -1027,6 +1028,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k',
       'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
+      'Specialty Jupiter/KOL/majors can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
+      'Majors ≥$250M dips soft-prefer Steady pullback; Dip Buyer remains for true reclaim DNA',
     ],
     priority: 70,
     defaultEnabled: true,
@@ -1400,6 +1403,15 @@ export interface TradeProfileMatchContext {
   preferProfileId?: string | null;
   /** Specialty feed tag when candidate came from per-profile Kolscan/Jupiter pass */
   specialtyFeed?: 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | null;
+  /**
+   * Volume Intelligence decay when known at lane fight — Trend uses for live-tape gates.
+   */
+  volumeDecayState?:
+    | 'expanding'
+    | 'stable'
+    | 'decaying'
+    | 'collapsed'
+    | null;
   /**
    * HMC Setup Classifier class when available (e.g. 'dip') — used to ease
    * dip_buyer conversion floors on classified dip paths.
@@ -3246,7 +3258,9 @@ function scoreProfile(
   const feedPrefer =
     Boolean(ctx.preferProfileId) &&
     ctx.preferProfileId === def.id &&
-    (m.kolscanFeedEnabled === true || def.id === 'migration_sniper');
+    (m.kolscanFeedEnabled === true ||
+      def.id === 'migration_sniper' ||
+      ctx.specialtyFeed === 'majors');
 
   const isDip =
     ctx.shortTermStrategyId === 'post_run_dip' ||
@@ -3669,6 +3683,73 @@ function scoreProfile(
     if (conv != null && conv < (minConviction ?? 50)) {
       return { score: 0, reason: 'trend_rider: conviction too low' };
     }
+
+    // Social / KOL specialty may hold quieter tape; discretionary needs live volume.
+    const specialtyQuietOk =
+      ctx.specialtyFeed === 'kolscan' ||
+      ctx.specialtyFeed === 'jupiter' ||
+      (kolN != null && kolN >= (m.minKolWallets ?? 3));
+    const volUptick =
+      volM5 != null &&
+      volH1 != null &&
+      volH1 > 0 &&
+      volM5 >= volH1 * 0.1;
+    let decay =
+      ctx.volumeDecayState === 'expanding' ||
+      ctx.volumeDecayState === 'stable' ||
+      ctx.volumeDecayState === 'decaying' ||
+      ctx.volumeDecayState === 'collapsed'
+        ? ctx.volumeDecayState
+        : null;
+    if (!decay && (volM5 != null || volH1 != null)) {
+      try {
+        const { evaluateVolumeIntelligence } =
+          require('./volumeIntelligence') as typeof import('./volumeIntelligence');
+        const snap = evaluateVolumeIntelligence({
+          volumeM5Usd: volM5,
+          volumeH1Usd: volH1,
+          profileId: 'trend_rider',
+        });
+        decay = snap.decayState;
+      } catch {
+        /* optional */
+      }
+    }
+    if (!specialtyQuietOk) {
+      if (decay === 'collapsed' && !volUptick) {
+        return {
+          score: 0,
+          reason: 'trend_rider: volume collapsed (stale tape)',
+        };
+      }
+      if (decay === 'decaying' && !volUptick) {
+        return {
+          score: 0,
+          reason: 'trend_rider: volume decaying (soft-skip stale tape)',
+        };
+      }
+      // Soft continuation / momentum: flat extension without pattern affinity
+      const patterns = ctx.chartPatternIds || [];
+      const hasContinuation = patterns.some((id) =>
+        ['structured_pullback', 'bull_flag', 'trend_continuation'].includes(id)
+      );
+      const flatExt =
+        (pullback != null && pullback < 2) ||
+        (chg24 != null && Math.abs(chg24) < 2.5 && (pullback == null || pullback < 4));
+      if (flatExt && !hasContinuation && !volUptick) {
+        return {
+          score: 0,
+          reason: 'trend_rider: flat momentum without continuation pattern',
+        };
+      }
+    } else if (decay === 'collapsed' || decay === 'decaying') {
+      bits.push(
+        specialtyQuietOk
+          ? `quiet tape ok (${ctx.specialtyFeed || `${kolN} KOLs`})`
+          : 'quiet tape'
+      );
+    }
+
     let quality = 0;
     // Established MC tokens can qualify earlier than pure age floors
     // Soft quality bonus (hard Min token age is in evaluateLaneEntryFloors)
@@ -3719,6 +3800,7 @@ function scoreProfile(
       bits.push(`prefer MC $${Math.round(mc)}`);
     }
     // Soft H1 volume quality tiers (aspirational $50k / $100k / $500k)
+    // Non-specialty: tighten mid tiers so dead mid-MC names score worse
     if (volH1 != null) {
       if (volH1 >= 500_000) {
         score += 22;
@@ -3727,9 +3809,16 @@ function scoreProfile(
         score += 14;
         bits.push('strong 1h vol');
       } else if (volH1 >= 50_000) {
-        score += 8;
+        score += specialtyQuietOk ? 8 : 6;
         bits.push('good 1h vol');
+      } else if (!specialtyQuietOk && volH1 < 50_000) {
+        score -= 8;
+        bits.push('soft 1h vol below $50k');
       }
+    }
+    if (volUptick) {
+      score += 6;
+      bits.push('M5/H1 volume uptick');
     }
     if (kolN != null && kolN >= (m.minKolWallets ?? 3)) {
       score += 12 + Math.min(10, (kolN - 2) * 2);
@@ -4255,7 +4344,9 @@ function scoreProfile(
   if (
     ctx.preferProfileId &&
     ctx.preferProfileId === def.id &&
-    (m.kolscanFeedEnabled === true || def.id === 'migration_sniper')
+    (m.kolscanFeedEnabled === true ||
+      def.id === 'migration_sniper' ||
+      ctx.specialtyFeed === 'majors')
   ) {
     score += 38;
     bits.push(

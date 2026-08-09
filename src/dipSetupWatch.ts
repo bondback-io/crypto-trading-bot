@@ -54,6 +54,8 @@ export interface DipWatchEntry {
   source?: string;
   /** Soft MC band when source is majors ($100M / $250M / $500M / $1B+) */
   majorsBand?: string;
+  /** Soft prefer on handoff — dip_buyer default; majors ≥250m may prefer steady_compounder */
+  preferredProfileId?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
   /** Phase A stamps — pass through trigger without rediscovery */
@@ -490,6 +492,7 @@ export function considerDipWatchSetup(input: {
   kolCount?: number;
   source?: string;
   majorsBand?: string;
+  preferredProfileId?: string;
 }): DipWatchEntry | null {
   if (!isDipProfileEnabled()) return null;
   if (!input.mint) return null;
@@ -544,6 +547,9 @@ export function considerDipWatchSetup(input: {
     if (isMajors) {
       existing.source = 'majors';
       existing.majorsBand = input.majorsBand ?? existing.majorsBand;
+      if (input.preferredProfileId) {
+        existing.preferredProfileId = input.preferredProfileId;
+      }
       // Keep majors TTL from sliding under 4h memecoin default on refresh
       const remain = existing.expiresAt - Date.now();
       if (remain < MAJORS_TTL_MS / 2) {
@@ -613,6 +619,7 @@ export function considerDipWatchSetup(input: {
     kolCount: input.kolCount,
     source: isMajors ? 'majors' : input.source || 'scanner',
     majorsBand: isMajors ? input.majorsBand : undefined,
+    preferredProfileId: input.preferredProfileId || 'dip_buyer',
     lastReason: armed
       ? dropStarted
         ? 'near Fib/S + dip'
@@ -656,8 +663,12 @@ export function considerDipWatchSetup(input: {
 function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEvent } {
   const now = Date.now();
   const isMajors = String(w.source || '').toLowerCase() === 'majors';
-  // Soft prefer Dip Buyer; Steady/Trend/HWR still compete via lane fight.
+  // Soft prefer: majors ≥250m may stamp steady_compounder; Dip still competes.
   // Never stamp Scalper — majors stay on quality lanes only.
+  const prefer =
+    w.preferredProfileId === 'steady_compounder'
+      ? 'steady_compounder'
+      : 'dip_buyer';
   const feed = isMajors ? 'majors' : 'kolscan';
   const launch: LaunchEvent = {
     mint: w.mint,
@@ -675,7 +686,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     candles: [],
     source: isMajors ? 'jupiter' : 'kolscan',
     candleSource: 'synthetic',
-    preferredProfileId: 'dip_buyer',
+    preferredProfileId: prefer,
     specialtyFeed: feed,
   };
   return {
@@ -692,6 +703,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
       ...(isMajors
         ? [`majors${w.majorsBand ? `:${w.majorsBand}` : ''}`]
         : []),
+      prefer === 'steady_compounder' ? 'prefer:steady_compounder' : 'prefer:dip_buyer',
       w.nearKeyFib ? 'near Fib' : w.nearSupport ? 'near support' : 'reclaim',
       w.entryStyle || 'support_dip_reclaim',
       w.dropFromPeakPct != null
@@ -703,7 +715,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     marketCapUsd: w.marketCapUsd,
     volumeH1Usd: w.volumeH1Usd,
     holderCount: w.holderCount,
-    preferredProfileId: 'dip_buyer',
+    preferredProfileId: prefer,
     specialtyFeed: feed,
     kolCount: w.kolCount,
     nearKeyFib: w.nearKeyFib,
@@ -711,7 +723,10 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     candleSource: 'synthetic',
     armedWatch: true,
     dipWatchTriggered: true,
-    entryStyleHint: w.entryStyle || 'support_dip_reclaim',
+    entryStyleHint:
+      prefer === 'steady_compounder'
+        ? 'trend_pullback_continuation'
+        : w.entryStyle || 'support_dip_reclaim',
     qualityScoreHint: w.qualityScore ?? undefined,
     sizePlanSol: w.sizePlanSol ?? undefined,
     setupWatchFamily: 'dip',
@@ -817,6 +832,13 @@ export async function tickDipSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'support breach';
       console.log(`[dip-watch] INVALIDATED ${w.symbol} — support breach`);
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -1024,6 +1046,13 @@ export function unwatchDipSetup(mint: string): {
   }
   lastMcRefreshAt.delete(key);
   unwatchCooldownUntil.set(key, Date.now() + UNWATCH_COOLDOWN_MS);
+  try {
+    const { clearOneSetupProfileLock } =
+      require('./expectancyLift') as typeof import('./expectancyLift');
+    clearOneSetupProfileLock(key, 'unwatch');
+  } catch {
+    /* optional */
+  }
   console.log(
     `[dip-watch] UNWATCH ${existing?.symbol || key.slice(0, 8)}… · cooldown 15m`
   );
@@ -1109,6 +1138,7 @@ export function offerDipWatchFromCandidate(c: {
   if (
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&
+    c.preferredProfileId !== 'steady_compounder' &&
     c.specialtyFeed !== 'kolscan' &&
     c.specialtyFeed !== 'jupiter' &&
     c.specialtyFeed !== 'majors'
@@ -1140,5 +1170,6 @@ export function offerDipWatchFromCandidate(c: {
     kolCount: c.kolCount,
     source: src,
     majorsBand: c.majorsBand,
+    preferredProfileId: c.preferredProfileId,
   });
 }
