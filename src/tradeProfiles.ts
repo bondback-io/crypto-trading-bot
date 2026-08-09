@@ -762,11 +762,11 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
     recommendedRisk: 'High / Medium',
     style: 'Event / Momentum',
     rulesSummary: [
-      'Watch ~80% curve · fire / enter from ~90% when armed (no TA setup)',
+      'Watch ~80% curve · fire / enter from ~88% when armed (no TA setup)',
       'Hold through migration · exit on first spike + volume step-up',
       'SL ~15% · post-mig max hold ~4 min · total safety ~12 min',
       'Soft quality: holders / buy pressure / volume (not chart patterns)',
-      'Fallback: ultra-fresh post-grad ≤120s if curve window missed',
+      'Fallback: ultra-fresh post-grad ≤180s if curve window missed',
       'MC cap ~$150k — microcap event lane (not mid-band Scalper)',
       'Turbo Mode ON — Jito-prefer / elevated prio (live); stamped in live sim',
     ],
@@ -785,10 +785,10 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       minWalletQuality: 25,
       minWalletCount: 1,
       requireCluster: false,
-      minCurveProgressPct: 90,
+      minCurveProgressPct: 88,
       maxCurveProgressPct: 99,
       gradWatchPct: 80,
-      maxMigrationAgeSec: 120,
+      maxMigrationAgeSec: 180,
       maxTokenAgeHours: 0.05, // ~3 min for any post-grad age gate
       maxMarketCapUsd: 150_000,
       minHolders: 20,
@@ -2482,7 +2482,7 @@ export const FRESH_MIGRATION_MAX_MC_USD = 600_000;
 
 /**
  * Migration Sniper eligibility — primary: pre-grad curve fire (≥ minCurve, still
- * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 120s).
+ * on curve); fallback: ultra-fresh post-grad (≤ maxMigrationAgeSec, default 180s).
  *
  * Near-curve below fire band stays on the graduation watchlist (not a buy).
  * Mature PumpSwap / stale migrations are rejected.
@@ -2502,12 +2502,12 @@ export function evaluateFreshMigrationEligibility(
     rules?.minCurveProgressPct != null &&
     Number.isFinite(rules.minCurveProgressPct)
       ? Number(rules.minCurveProgressPct)
-      : 95;
+      : 88;
   const maxPostGradSec =
     rules?.maxMigrationAgeSec != null &&
     Number.isFinite(rules.maxMigrationAgeSec)
       ? Number(rules.maxMigrationAgeSec)
-      : 120;
+      : 180;
   const maxMc =
     rules?.maxMarketCapUsd != null && Number.isFinite(rules.maxMarketCapUsd)
       ? Number(rules.maxMarketCapUsd)
@@ -2595,6 +2595,25 @@ export function isFreshMigrationContext(
   ctx: TradeProfileMatchContext
 ): boolean {
   return evaluateFreshMigrationEligibility(ctx).ok;
+}
+
+/** True when fight has mig/curve signals so Migration Sniper floors apply. */
+export function hasMigrationLaneSignals(
+  ctx: TradeProfileMatchContext
+): boolean {
+  if (ctx.preferProfileId === 'migration_sniper') return true;
+  if (ctx.isMigration === true || ctx.nearMigration === true) return true;
+  if (ctx.migrationFresh === true) return true;
+  if (String(ctx.setupWatchFamily || '').toLowerCase() === 'grad') return true;
+  if (ctx.armedWatch === true && /grad|mig/i.test(String(ctx.setupWatchFamily || ''))) {
+    return true;
+  }
+  const progress =
+    ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
+      ? Number(ctx.curveProgressPct)
+      : null;
+  if (progress != null && progress >= 70) return true;
+  return false;
 }
 
 /**
@@ -2872,6 +2891,24 @@ export function evaluateTradeProfileLanes(
       continue;
     }
     const def = resolveTradeProfileDefinition(catalog.id);
+    // MS not_applicable in multi-lane fights without mig/curve signals (no cascade noise)
+    if (
+      def.id === 'migration_sniper' &&
+      !hasMigrationLaneSignals(ctx)
+    ) {
+      results.push({
+        profileId: def.id,
+        name: def.name,
+        icon: def.icon,
+        color: def.color,
+        priority: def.priority,
+        score: 0,
+        reason: 'not_applicable',
+        passed: false,
+        failReason: 'not_applicable',
+      });
+      continue;
+    }
     const floors = evaluateLaneEntryFloors(def, ctx);
     if (!floors.ok) {
       results.push({
@@ -3011,14 +3048,17 @@ export function evaluateTradeProfileLanes(
 
   if (!opts?.silent && results.length) {
     const bits = results
+      .filter((r) => r.failReason !== 'not_applicable')
       .slice(0, 8)
       .map(
         (r) =>
           `${r.passed ? '✓' : '✗'}${r.name}=${r.passed ? r.score.toFixed(1) : r.failReason || 'fail'}`
       );
-    console.log(
-      `[trade-profiles] Lane fight ${ctx.symbol || 'token'}: ${bits.join(' · ')}`
-    );
+    if (bits.length) {
+      console.log(
+        `[trade-profiles] Lane fight ${ctx.symbol || 'token'}: ${bits.join(' · ')}`
+      );
+    }
   }
   return results;
 }
@@ -3519,7 +3559,7 @@ function scoreProfile(
       ctx.curveProgressPct != null && Number.isFinite(ctx.curveProgressPct)
         ? Number(ctx.curveProgressPct)
         : null;
-    if (curvePct != null && curvePct >= 90 && curvePct < 100) {
+    if (curvePct != null && curvePct >= 88 && curvePct < 100) {
       score += 14;
       bits.push(`fire-band ${curvePct.toFixed(1)}%`);
     }

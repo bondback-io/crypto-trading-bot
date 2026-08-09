@@ -64,7 +64,7 @@ const DEFAULT_TTL_MS = 60 * 60_000; // 60 min
 const FAST_POLL_MS = 1_500;
 const REGRESS_INVALIDATE_PCT = 8; // hard dump from peak watched progress
 /** Curve % points below fireMin after touch = touch-and-fail (Mode B parity) */
-const FIRE_TOUCH_FAIL_PCT = 1.2;
+const FIRE_TOUCH_FAIL_PCT = 2.0;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 /** Soft MC death — only after continuous time under this floor */
@@ -149,7 +149,7 @@ function fireMin(): number {
   const m = migMatch();
   return m.minCurveProgressPct != null && Number.isFinite(m.minCurveProgressPct)
     ? Number(m.minCurveProgressPct)
-    : 90;
+    : 88;
 }
 
 function fireMax(): number {
@@ -509,7 +509,37 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.lastReason = 'TTL expired';
       funnel.expired += 1;
       console.log(`[grad-watch] EXPIRED ${w.symbol}`);
+      try {
+        const { noteSetupWatchExpiredUnused, recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        noteSetupWatchExpiredUnused(w.mint);
+        recordSetupWatchEvent({
+          kind: 'watch_expired',
+          family: 'grad',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: 'migration_sniper',
+          reason: 'TTL expired',
+        });
+      } catch {
+        /* optional */
+      }
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'expired');
+      } catch {
+        /* optional */
+      }
       continue;
+    }
+    try {
+      const { maybeLoosenExpireUnusedTtl } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      const loosened = maybeLoosenExpireUnusedTtl(w.mint, w.expiresAt, now);
+      if (loosened != null) w.expiresAt = loosened;
+    } catch {
+      /* optional */
     }
 
     await refreshWatchMarket(w, now);
@@ -547,6 +577,13 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.updatedAt = now;
       w.lastReason = `curve dump ${peak.toFixed(0)}→${progress.toFixed(0)}%`;
       funnel.invalidated += 1;
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
       continue;
     }
@@ -557,6 +594,13 @@ export async function tickMigrationGradWatches(): Promise<number> {
       w.updatedAt = now;
       w.lastReason = `fell below watch (${progress.toFixed(0)}%)`;
       funnel.invalidated += 1;
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       console.log(`[grad-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
       continue;
     }
@@ -579,7 +623,9 @@ export async function tickMigrationGradWatches(): Promise<number> {
 
     // Touch-and-fail: was in fire band, now dumped below without reclaim/hold
     // Admission Baseline v235: skip reject (keep fire-band confirm)
+    // Disable when armed openRate < 0.20 (starvation relief)
     let skipTouchFail = false;
+    let failPct = FIRE_TOUCH_FAIL_PCT;
     try {
       const { isAdmissionBaselineV235 } =
         require('./expectancyLift') as typeof import('./expectancyLift');
@@ -587,14 +633,36 @@ export async function tickMigrationGradWatches(): Promise<number> {
     } catch {
       skipTouchFail = false;
     }
+    try {
+      const { setupWatchEventStats } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      const st = setupWatchEventStats();
+      if (st.openRate != null && st.openRate < 0.2) skipTouchFail = true;
+    } catch {
+      /* soft */
+    }
     if (
       !skipTouchFail &&
       w.touchedFireBand === true &&
       !inFire &&
-      progress < fMin - FIRE_TOUCH_FAIL_PCT
+      progress < fMin - failPct
     ) {
       w.lastReason = 'touch-and-fail reject';
       w.updatedAt = now;
+      try {
+        const { recordSetupWatchEvent } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        recordSetupWatchEvent({
+          kind: 'touch_fail',
+          family: 'grad',
+          mint: w.mint,
+          symbol: w.symbol,
+          profileId: 'migration_sniper',
+          reason: 'touch-and-fail reject',
+        });
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -633,6 +701,13 @@ export async function tickMigrationGradWatches(): Promise<number> {
       console.log(
         `[grad-watch] TRIGGERED ${w.symbol} → migration_sniper @ ${progress.toFixed(1)}%`
       );
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'triggered');
+      } catch {
+        /* optional */
+      }
     } else {
       funnel.handoffFail += 1;
       w.status = 'armed';

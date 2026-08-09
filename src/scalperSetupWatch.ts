@@ -75,7 +75,7 @@ export interface ScalperWatchEntry {
 
 const MAX_WATCHES = 24;
 const DEFAULT_TTL_MS = 3 * 60 * 60_000; // 3h
-const TRIGGER_RECLAIM_PCT = 1.2;
+const TRIGGER_RECLAIM_PCT = 0.9;
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
 const TERMINAL_UI_MS = 60_000;
@@ -798,6 +798,13 @@ export async function tickScalperSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'dip watch took mint';
       console.log(`[scalper-watch] INVALIDATED ${w.symbol} — dip watch`);
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -807,8 +814,11 @@ export async function tickScalperSetupWatches(opts?: {
       w.lastReason = 'TTL expired';
       console.log(`[scalper-watch] EXPIRED ${w.symbol}`);
       try {
-        const { recordSetupWatchEvent } =
-          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        const {
+          recordSetupWatchEvent,
+          noteSetupWatchExpiredUnused,
+        } = require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        noteSetupWatchExpiredUnused(w.mint);
         recordSetupWatchEvent({
           kind: 'watch_expired',
           family: 'scalper',
@@ -822,7 +832,22 @@ export async function tickScalperSetupWatches(opts?: {
       } catch {
         /* optional */
       }
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'expired');
+      } catch {
+        /* optional */
+      }
       continue;
+    }
+    try {
+      const { maybeLoosenExpireUnusedTtl } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      const loosened = maybeLoosenExpireUnusedTtl(w.mint, w.expiresAt, now);
+      if (loosened != null) w.expiresAt = loosened;
+    } catch {
+      /* optional */
     }
 
     await refreshWatchMarket(w, now);
@@ -837,6 +862,13 @@ export async function tickScalperSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'MC > Scalper mid-band';
       console.log(`[scalper-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -852,6 +884,13 @@ export async function tickScalperSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = 'support breach';
       console.log(`[scalper-watch] INVALIDATED ${w.symbol} — support breach`);
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -925,9 +964,10 @@ export async function tickScalperSetupWatches(opts?: {
         if (undercut || nearLevel) {
           (w as { touchedLevel?: boolean }).touchedLevel = true;
         }
-        // Touch-and-fail: was near/undercut, now extended away without reclaim
+        // Touch-and-fail: deeper 1.8% undercut; disabled when openRate < 0.20
         // Admission Baseline v235: skip reject (keep reclaim % confirm)
         let skipTouchFail = false;
+        let undercutFailPct = 1.8;
         try {
           const { isAdmissionBaselineV235 } =
             require('./expectancyLift') as typeof import('./expectancyLift');
@@ -935,14 +975,36 @@ export async function tickScalperSetupWatches(opts?: {
         } catch {
           skipTouchFail = false;
         }
+        try {
+          const { touchFailUndercutPct } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          undercutFailPct = touchFailUndercutPct();
+        } catch {
+          undercutFailPct = 1.8;
+        }
         if (
           !skipTouchFail &&
+          Number.isFinite(undercutFailPct) &&
           (w as { touchedLevel?: boolean }).touchedLevel &&
           !reclaim &&
           extensionFromLevelPct != null &&
-          extensionFromLevelPct < -TRIGGER_RECLAIM_PCT
+          extensionFromLevelPct < -undercutFailPct
         ) {
           w.lastReason = 'touch-and-fail reject';
+          try {
+            const { recordSetupWatchEvent } =
+              require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+            recordSetupWatchEvent({
+              kind: 'touch_fail',
+              family: 'scalper',
+              mint: w.mint,
+              symbol: w.symbol,
+              profileId: w.preferredProfileId,
+              reason: 'touch-and-fail reject',
+            });
+          } catch {
+            /* optional */
+          }
           continue;
         }
       } catch {
@@ -998,6 +1060,13 @@ export async function tickScalperSetupWatches(opts?: {
             qualityScore: w.qualityScore,
             entryStyle: w.entryStyle,
           });
+        } catch {
+          /* optional */
+        }
+        try {
+          const { clearOneSetupProfileLock } =
+            require('./expectancyLift') as typeof import('./expectancyLift');
+          clearOneSetupProfileLock(w.mint, 'triggered');
         } catch {
           /* optional */
         }

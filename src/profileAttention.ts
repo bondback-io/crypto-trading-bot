@@ -1,16 +1,16 @@
 /**
  * Profile attention share — throttle Scalper monopoly when underperforming.
  * Armed setup-watch triggers bypass the share cap.
- * Admission Baseline v235 uses 1.2.235-era 35%/window 40; governed Entry Skill 28%/20.
+ * Admission Baseline v235 uses 1.2.235-era 35%/window 40; governed Entry Skill 32%/30.
  */
 
 import { paperTrader } from './paperTrader';
 
-const ATTENTION_WINDOW_GOVERNED = 20;
+const ATTENTION_WINDOW_GOVERNED = 30;
 const ATTENTION_WINDOW_V235 = 40;
 const SCALPER_WR_LOOKBACK = 20;
 const WEAK_WR_PCT = 45;
-const SCALPER_SHARE_CAP_GOVERNED = 0.28;
+const SCALPER_SHARE_CAP_GOVERNED = 0.32;
 const SCALPER_SHARE_CAP_V235 = 0.35;
 
 function isV235Baseline(): boolean {
@@ -151,9 +151,22 @@ function scalperRecoveringStrict(): boolean {
   }
 }
 
+function countModeBLiveArmed(): number {
+  try {
+    const { getScalperSetupWatchStatus } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    const sw = getScalperSetupWatchStatus(40);
+    return (sw.entries || []).filter((e) => e.status === 'armed').length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Concurrent Scalper open-position cap — skip discretionary scalper admits
  * when ≥1 open position already stamped tradeProfileId==='scalper'.
+ * When Mode B liveArmed === 0: do NOT apply (starvation relief).
+ * When Mode B arms exist: keep concurrent ≥1 for disc.
  */
 export function shouldLimitScalperConcurrent(input: {
   profileId?: string | null;
@@ -168,6 +181,8 @@ export function shouldLimitScalperConcurrent(input: {
     input.armedWatch === true ||
     /scalper-watch:triggered|dip-watch:triggered|armedWatch/i.test(reasons);
   if (armed) return { limit: false };
+  // Zero Mode B arms → allow discretionary Scalper (no concurrent freeze)
+  if (countModeBLiveArmed() === 0) return { limit: false };
   try {
     const open = paperTrader.getOpenPositions();
     const scalperOpen = open.filter(
@@ -446,6 +461,20 @@ export function getSetupWatchDiagnostics(): {
     | 'profile_off';
   stats: ReturnType<typeof import('./setupWatchEvents').setupWatchEventStats>;
   lastBlockReason: string | null;
+  fallbackDiscAllowed: boolean;
+  locksHeld: number;
+  blockedSecondPass: number;
+  entrySkillByProfile: Record<
+    string,
+    {
+      armed: number;
+      triggered: number;
+      opened: number;
+      expired: number;
+      locksHeld: number;
+      fallbackDiscAllowed: boolean;
+    }
+  >;
 } {
   const { listSetupWatchEvents, setupWatchEventStats } =
     require('./setupWatchEvents') as typeof import('./setupWatchEvents');
@@ -544,6 +573,34 @@ export function getSetupWatchDiagnostics(): {
   } catch {
     /* optional */
   }
+  let fallbackDiscAllowed = true;
+  let locksHeld = 0;
+  let blockedSecondPass = 0;
+  let entrySkillByProfile: Record<
+    string,
+    {
+      armed: number;
+      triggered: number;
+      opened: number;
+      expired: number;
+      locksHeld: number;
+      fallbackDiscAllowed: boolean;
+    }
+  > = {};
+  try {
+    const {
+      isFallbackDiscAllowed,
+      countOneSetupLocksHeld,
+      getBlockedSecondPassCount,
+      buildEntrySkillByProfile,
+    } = require('./expectancyLift') as typeof import('./expectancyLift');
+    fallbackDiscAllowed = isFallbackDiscAllowed();
+    locksHeld = countOneSetupLocksHeld();
+    blockedSecondPass = getBlockedSecondPassCount();
+    entrySkillByProfile = buildEntrySkillByProfile();
+  } catch {
+    /* optional */
+  }
   return {
     armedByProfile,
     armToTriggerLatencyMs,
@@ -557,5 +614,9 @@ export function getSetupWatchDiagnostics(): {
     dipInactiveReason: describeDipInactiveReason(),
     stats,
     lastBlockReason: lastBlock?.reason || null,
+    fallbackDiscAllowed,
+    locksHeld,
+    blockedSecondPass,
+    entrySkillByProfile,
   };
 }

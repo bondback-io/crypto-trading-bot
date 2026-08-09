@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.245',
+    title: 'Entry Skill armed-or-fallback (trade starvation fix)',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'Armed-or-fallback disc mix: never freeze all discretionary — hard-skip only fast disc when triggerable arms exist + disc>30%; fallback ≤30% when arms empty/stuck (openRate<20% / thin book / elevated touch-fail); fast relief 45% only if still overtrading.',
+      'Softer armed convert: reclaim 0.9%, touch-fail 1.8% (or off when openRate<20%); Grad fire 88% + touch-fail 2.0%; expire-loosen −25% TTL once after ≥3 unused expires; one-setup TTL 8m with release on expired/triggered/invalidated/profile-off + inactive prune.',
+      'Scalper: concurrent≥1 only when Mode B arms live; attention 32%/window 30 (armed bypass). MS not_applicable (no cascade noise) without mig/curve signals; maxMigrationAgeSec 180s. Dashboard/Zion Entry Skill chips + blocked_second_pass counter. Late-chase + hard safety kept; Baseline v235 kill-switch unchanged.',
+    ],
+  },
+  {
     version: '1.2.244',
     title: 'Power Cell on Micro Bots (mobile)',
     sections: ['microbots', 'tradecraft', 'overview', 'learning', 'knobs'],

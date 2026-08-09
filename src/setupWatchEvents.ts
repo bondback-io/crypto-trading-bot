@@ -10,7 +10,8 @@ export type SetupWatchEventKind =
   | 'trigger_opened'
   | 'watch_expired'
   | 'trigger_blocked_cooldown'
-  | 'handoff_failed';
+  | 'handoff_failed'
+  | 'touch_fail';
 
 export interface SetupWatchEvent {
   at: number;
@@ -72,7 +73,10 @@ export function setupWatchEventStats(
   blockedCooldown: number;
   expired: number;
   handoffFailed: number;
+  touchFail: number;
   openRate: number | null;
+  /** touch_fail / (armed || 1) in window — elevated when conversion rejects dominate. */
+  touchFailRate: number | null;
 } {
   const since = Date.now() - windowMs;
   const slice = events.filter(
@@ -89,6 +93,7 @@ export function setupWatchEventStats(
   ).length;
   const expired = slice.filter((e) => e.kind === 'watch_expired').length;
   const handoffFailed = slice.filter((e) => e.kind === 'handoff_failed').length;
+  const touchFail = slice.filter((e) => e.kind === 'touch_fail').length;
   const denom = triggered + opened + blockedSafety + handoffFailed;
   return {
     armed,
@@ -98,6 +103,73 @@ export function setupWatchEventStats(
     blockedCooldown,
     expired,
     handoffFailed,
+    touchFail,
     openRate: denom > 0 ? opened / denom : null,
+    touchFailRate: armed > 0 || touchFail > 0 ? touchFail / Math.max(armed, 1) : null,
   };
+}
+
+/** Per-mint expire-unused loosen: ≥3 expires + 0 opens → shorten remaining TTL 25% once. */
+const expireUnusedByMint = new Map<
+  string,
+  { expires: number; opens: number; loosened: boolean }
+>();
+
+export function noteSetupWatchExpiredUnused(mint: string): void {
+  const m = String(mint || '').trim();
+  if (!m) return;
+  const row = expireUnusedByMint.get(m) || {
+    expires: 0,
+    opens: 0,
+    loosened: false,
+  };
+  row.expires += 1;
+  expireUnusedByMint.set(m, row);
+}
+
+export function noteSetupWatchOpenedFromArm(mint: string): void {
+  const m = String(mint || '').trim();
+  if (!m) return;
+  const row = expireUnusedByMint.get(m) || {
+    expires: 0,
+    opens: 0,
+    loosened: false,
+  };
+  row.opens += 1;
+  expireUnusedByMint.set(m, row);
+}
+
+/**
+ * If mint has ≥3 unused expires and 0 opens, shorten remaining TTL by 25% once.
+ * Returns new expiresAt when applied, else null.
+ */
+export function maybeLoosenExpireUnusedTtl(
+  mint: string,
+  expiresAt: number,
+  now = Date.now()
+): number | null {
+  const m = String(mint || '').trim();
+  if (!m) return null;
+  const row = expireUnusedByMint.get(m);
+  if (!row || row.loosened || row.opens > 0 || row.expires < 3) return null;
+  const remain = Math.max(0, expiresAt - now);
+  if (remain < 30_000) return null;
+  const next = now + Math.floor(remain * 0.75);
+  row.loosened = true;
+  expireUnusedByMint.set(m, row);
+  console.log(
+    `[setup-watch] expire-loosen ${m.slice(0, 8)}… · ${row.expires} unused expires → TTL −25% (once)`
+  );
+  return next;
+}
+
+/** Touch-and-fail undercut depth (1.8%); disabled when openRate < 0.20. */
+export function touchFailUndercutPct(): number {
+  try {
+    const stats = setupWatchEventStats();
+    if (stats.openRate != null && stats.openRate < 0.2) return Number.POSITIVE_INFINITY;
+  } catch {
+    /* soft */
+  }
+  return 1.8;
 }

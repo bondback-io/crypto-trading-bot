@@ -4324,6 +4324,9 @@ async function executeSignalBuy(
           : /grad-watch/i.test(bits)
             ? 'grad'
             : 'dip';
+        const { noteSetupWatchOpenedFromArm } =
+          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        noteSetupWatchOpenedFromArm(signal.mint);
         recordSetupWatchEvent({
           kind: 'trigger_opened',
           family,
@@ -7147,6 +7150,13 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             return false;
           }
         } else {
+          try {
+            const { noteBlockedSecondPass } =
+              require('./expectancyLift') as typeof import('./expectancyLift');
+            noteBlockedSecondPass();
+          } catch {
+            /* soft */
+          }
           const intended =
             lanes.find((l) => l.profileId === prefId) ||
             lanes.find((l) => !l.passed);
@@ -7157,7 +7167,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
           recordRejectedSignal(signal, reason);
           console.log(
             `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-              `reason=smart-bot lane fight: ${reason}`
+              `reason=blocked_second_pass: ${reason}`
           );
           return false;
         }

@@ -76,7 +76,7 @@ const DEFAULT_TTL_MS = 4 * 60 * 60_000; // 4h
 const MAJORS_TTL_MS = 10 * 60 * 60_000;
 const ARM_NEAR_DROP_MIN = 6;
 /** Mode B parity — reclaim % off level / bounce */
-const TRIGGER_RECLAIM_PCT = 1.2;
+const TRIGGER_RECLAIM_PCT = 0.9;
 /** Manual unwatch — bots may re-add only after this cooldown */
 const UNWATCH_COOLDOWN_MS = 15 * 60_000;
 const MC_REFRESH_MIN_MS = 15_000;
@@ -747,8 +747,11 @@ export async function tickDipSetupWatches(opts?: {
       w.lastReason = 'TTL expired';
       console.log(`[dip-watch] EXPIRED ${w.symbol}`);
       try {
-        const { recordSetupWatchEvent } =
-          require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        const {
+          recordSetupWatchEvent,
+          noteSetupWatchExpiredUnused,
+        } = require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+        noteSetupWatchExpiredUnused(w.mint);
         recordSetupWatchEvent({
           kind: 'watch_expired',
           family: 'dip',
@@ -762,7 +765,22 @@ export async function tickDipSetupWatches(opts?: {
       } catch {
         /* optional */
       }
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'expired');
+      } catch {
+        /* optional */
+      }
       continue;
+    }
+    try {
+      const { maybeLoosenExpireUnusedTtl } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      const loosened = maybeLoosenExpireUnusedTtl(w.mint, w.expiresAt, now);
+      if (loosened != null) w.expiresAt = loosened;
+    } catch {
+      /* optional */
     }
 
     await refreshWatchMarket(w, now);
@@ -777,6 +795,13 @@ export async function tickDipSetupWatches(opts?: {
       w.updatedAt = now;
       w.lastReason = `flush −${w.dropFromPeakPct.toFixed(0)}%`;
       console.log(`[dip-watch] INVALIDATED ${w.symbol} — ${w.lastReason}`);
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'invalidated');
+      } catch {
+        /* optional */
+      }
       continue;
     }
 
@@ -860,8 +885,10 @@ export async function tickDipSetupWatches(opts?: {
         if (undercut || nearLevel) {
           (w as { touchedLevel?: boolean }).touchedLevel = true;
         }
+        // Touch-and-fail: deeper 1.8% undercut; disabled when openRate < 0.20
         // Admission Baseline v235: skip touch-and-fail reject (keep reclaim %)
         let skipTouchFail = false;
+        let undercutFailPct = 1.8;
         try {
           const { isAdmissionBaselineV235 } =
             require('./expectancyLift') as typeof import('./expectancyLift');
@@ -869,14 +896,36 @@ export async function tickDipSetupWatches(opts?: {
         } catch {
           skipTouchFail = false;
         }
+        try {
+          const { touchFailUndercutPct } =
+            require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+          undercutFailPct = touchFailUndercutPct();
+        } catch {
+          undercutFailPct = 1.8;
+        }
         if (
           !skipTouchFail &&
+          Number.isFinite(undercutFailPct) &&
           (w as { touchedLevel?: boolean }).touchedLevel &&
           !reclaim &&
           extensionFromLevelPct != null &&
-          extensionFromLevelPct < -TRIGGER_RECLAIM_PCT
+          extensionFromLevelPct < -undercutFailPct
         ) {
           w.lastReason = 'touch-and-fail reject';
+          try {
+            const { recordSetupWatchEvent } =
+              require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+            recordSetupWatchEvent({
+              kind: 'touch_fail',
+              family: 'dip',
+              mint: w.mint,
+              symbol: w.symbol,
+              profileId: 'dip_buyer',
+              reason: 'touch-and-fail reject',
+            });
+          } catch {
+            /* optional */
+          }
           continue;
         }
       } catch {
@@ -909,6 +958,13 @@ export async function tickDipSetupWatches(opts?: {
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → dip_buyer (${w.lastReason})`
         );
+        try {
+          const { clearOneSetupProfileLock } =
+            require('./expectancyLift') as typeof import('./expectancyLift');
+          clearOneSetupProfileLock(w.mint, 'triggered');
+        } catch {
+          /* optional */
+        }
         try {
           const { recordSetupWatchEvent } =
             require('./setupWatchEvents') as typeof import('./setupWatchEvents');

@@ -60,8 +60,12 @@ const LATE_CHASE_MAX_SHARE = 0.05;
 const ARMED_SHARE_TARGET = 0.7;
 const DISC_SHARE_CAP = 0.3;
 const DISC_SHARE_CAP_RELIEF = 0.45;
-/** Governed Entry Skill Scalper attention share target (~25–30%). */
-const SCALPER_SHARE_TARGET = 0.28;
+/** Governed Entry Skill Scalper attention share target (~32%). */
+const SCALPER_SHARE_TARGET = 0.32;
+const ONE_SETUP_TTL_MS = 8 * 60_000;
+const TOUCH_FAIL_ELEVATED = 0.35;
+const STUCK_OPEN_RATE = 0.2;
+const STUCK_OPEN_COUNT = 15;
 const LOSS_STREAK_N = 8;
 const LOSS_STREAK_K = 5;
 const PERM_FLOOR_DISC = 35;
@@ -111,6 +115,16 @@ const FAST_DISC_PROFILES = new Set([
 
 let persistCache: ExpectancyLiftPersist | null = null;
 const oneSetupLocks = new Map<string, { profileId: string; untilMs: number }>();
+/** Armed hard-lock preferred lane failed floors (governed second-pass block). */
+let blockedSecondPassCount = 0;
+
+export function noteBlockedSecondPass(): void {
+  blockedSecondPassCount += 1;
+}
+
+export function getBlockedSecondPassCount(): number {
+  return blockedSecondPassCount;
+}
 
 export interface ExpectancyTradeRow {
   profileId: string;
@@ -212,8 +226,23 @@ export interface ExpectancyLiftStatus {
     active: boolean;
     discShare: number | null;
     liveArmed: number;
+    liveTriggerableArmed: number;
     effectiveCap: number;
+    /** True when disc fallback is allowed (no effective triggerable arms). */
+    fallbackDiscAllowed: boolean;
   };
+  /** Per-profile Entry Skill funnel + lock diagnostics. */
+  entrySkillByProfile?: Record<
+    string,
+    {
+      armed: number;
+      triggered: number;
+      opened: number;
+      expired: number;
+      locksHeld: number;
+      fallbackDiscAllowed: boolean;
+    }
+  >;
   /** Operator Admission Baseline (`v235` | `governed`). */
   admissionBaseline: AdmissionBaseline;
   /** True when v235 observe-only throughput mode is active. */
@@ -1309,13 +1338,28 @@ function countLiveArmedWatches(): number {
   return n;
 }
 
-/** True when armed funnel is stuck (poor open-rate) or book is thin. */
-function stuckArmedReliefActive(): boolean {
+function touchFailRateElevated(): boolean {
+  try {
+    const { setupWatchEventStats } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    const stats = setupWatchEventStats();
+    const rate = stats.touchFailRate;
+    return rate != null && rate >= TOUCH_FAIL_ELEVATED;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Armed funnel stuck → treat as no effective arms for hard-skip-all.
+ * openRate < 20% OR open book thin OR touch-fail elevated.
+ */
+export function stuckArmedReliefActive(): boolean {
   let openCount = 0;
   try {
-    const { paperTrader } =
+    const { paperTrader: pt } =
       require('./paperTrader') as typeof import('./paperTrader');
-    openCount = paperTrader.getOpenPositions().length;
+    openCount = pt.getOpenPositions().length;
   } catch {
     openCount = 0;
   }
@@ -1328,13 +1372,31 @@ function stuckArmedReliefActive(): boolean {
   } catch {
     armedOpenRate = null;
   }
-  // Thin book + poor armed conversion → relieve disc cap so flow isn't starved
-  const poorArmed =
-    armedOpenRate != null && armedOpenRate < 0.12;
-  return openCount < 15 && (poorArmed || armedOpenRate == null);
+  const poorOpenRate =
+    armedOpenRate == null || armedOpenRate < STUCK_OPEN_RATE;
+  const thinBook = openCount < STUCK_OPEN_COUNT;
+  return poorOpenRate || thinBook || touchFailRateElevated();
 }
 
-/** Armed dominance ~70/30 — Entry Skill hard-skips all disc when live arms + disc >30%. */
+/** Live armed watches that are still convertible (not stuck). */
+export function countLiveTriggerableArmed(): number {
+  const live = countLiveArmedWatches();
+  if (live <= 0) return 0;
+  if (stuckArmedReliefActive()) return 0;
+  return live;
+}
+
+/** Disc fallback allowed when no effective triggerable arms (never absolute freeze). */
+export function isFallbackDiscAllowed(): boolean {
+  return countLiveTriggerableArmed() === 0;
+}
+
+/**
+ * Armed-or-fallback disc mix:
+ * - Triggerable arms: hard-skip ONLY fast disc when disc > 30% (non-fast = size penalty).
+ * - No triggerable arms: fallback disc up to 30%; fast relief 45% only if still overtrading.
+ * Never hard-skip all discretionary.
+ */
 export function shouldLimitDiscretionaryMix(input: {
   armedWatch?: boolean;
   profileId?: string | null;
@@ -1342,29 +1404,29 @@ export function shouldLimitDiscretionaryMix(input: {
   if (input.armedWatch === true) return { limit: false };
   const mix = getRecentMixShares(50);
   if (mix.total < 10) return { limit: false };
-  const liveArmed = countLiveArmedWatches();
-  const stuck = stuckArmedReliefActive();
+  const triggerable = countLiveTriggerableArmed();
   const pid = String(input.profileId || '');
 
-  // True 70/30: live armed + disc over cap → hard-skip ALL discretionary
-  if (liveArmed > 0 && !stuck && mix.discShare > DISC_SHARE_CAP) {
+  if (triggerable > 0) {
+    // Armed path: fast-only hard-skip above 30%; never freeze all disc
+    if (mix.discShare <= DISC_SHARE_CAP) return { limit: false };
+    if (!FAST_DISC_PROFILES.has(pid)) return { limit: false };
     return {
       limit: true,
-      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(DISC_SHARE_CAP * 100).toFixed(0)}% with ${liveArmed} live armed — skip all disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
+      reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% > ${(DISC_SHARE_CAP * 100).toFixed(0)}% with ${triggerable} triggerable armed — skip fast disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
     };
   }
 
-  // Stuck-armed relief or no live arms: 45% cap, fast profiles only
-  const relief = liveArmed === 0 || stuck;
-  const cap = relief ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
-  if (mix.discShare < cap) return { limit: false };
-  if (!FAST_DISC_PROFILES.has(pid)) {
-    // Non-fast: size penalty only (see expectancyLiftSizePenaltyForDiscMix)
+  // Fallback: allow disc up to 30%; 45% relief only if still overtrading fast
+  if (mix.discShare < DISC_SHARE_CAP) return { limit: false };
+  if (!FAST_DISC_PROFILES.has(pid)) return { limit: false };
+  if (mix.discShare < DISC_SHARE_CAP_RELIEF) {
+    // Between 30–45%: allow (fallback room); size penalty handles non-fast
     return { limit: false };
   }
   return {
     limit: true,
-    reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(cap * 100).toFixed(0)}% — skip fast disc (armed target ${(ARMED_SHARE_TARGET * 100).toFixed(0)}%)`,
+    reason: `Discretionary mix ${(mix.discShare * 100).toFixed(0)}% ≥ ${(DISC_SHARE_CAP_RELIEF * 100).toFixed(0)}% fallback relief — skip fast disc (no triggerable arms)`,
   };
 }
 
@@ -1378,13 +1440,13 @@ export function expectancyLiftSizePenaltyForDiscMix(input: {
   if (FAST_DISC_PROFILES.has(pid)) return { mult: 1, note: '' };
   try {
     const mix = getRecentMixShares(50);
-    const liveArmed = countLiveArmedWatches();
-    const relief = liveArmed === 0 || stuckArmedReliefActive();
-    const cap = relief ? DISC_SHARE_CAP_RELIEF : DISC_SHARE_CAP;
+    const triggerable = countLiveTriggerableArmed();
+    const cap =
+      triggerable === 0 ? DISC_SHARE_CAP : DISC_SHARE_CAP;
     if (mix.total >= 10 && mix.discShare >= DISC_SHARE_CAP) {
       return {
         mult: DISC_MIX_SIZE_PENALTY,
-        note: `disc-mix×${DISC_MIX_SIZE_PENALTY.toFixed(2)} (disc ${(mix.discShare * 100).toFixed(0)}%≥${(cap * 100).toFixed(0)}%)`,
+        note: `disc-mix×${DISC_MIX_SIZE_PENALTY.toFixed(2)} (disc ${(mix.discShare * 100).toFixed(0)}%≥${(cap * 100).toFixed(0)}%${triggerable === 0 ? ' · fallback' : ''})`,
       };
     }
   } catch {
@@ -1518,11 +1580,11 @@ export function expectancySizeMultiplier(input: {
   }
 }
 
-/** One-setup-one-profile: mint lock while preferred watch is active. */
+/** One-setup-one-profile: mint lock while preferred watch is active (TTL 8m). */
 export function mintOneSetupProfileLock(
   mint: string,
   profileId: string,
-  ttlMs = 12 * 60_000
+  ttlMs = ONE_SETUP_TTL_MS
 ): void {
   const m = String(mint || '').trim();
   const p = String(profileId || '').trim();
@@ -1530,8 +1592,19 @@ export function mintOneSetupProfileLock(
   oneSetupLocks.set(m, { profileId: p, untilMs: Date.now() + ttlMs });
 }
 
-export function clearOneSetupProfileLock(mint: string): void {
-  oneSetupLocks.delete(String(mint || '').trim());
+export function clearOneSetupProfileLock(
+  mint: string,
+  reason?: string
+): void {
+  const m = String(mint || '').trim();
+  if (!m) return;
+  if (!oneSetupLocks.has(m)) return;
+  oneSetupLocks.delete(m);
+  if (reason) {
+    console.log(
+      `[one-setup] released ${m.slice(0, 8)}… · ${String(reason).slice(0, 120)}`
+    );
+  }
 }
 
 export function getOneSetupPreferredProfile(
@@ -1540,10 +1613,37 @@ export function getOneSetupPreferredProfile(
   const row = oneSetupLocks.get(String(mint || '').trim());
   if (!row) return null;
   if (row.untilMs < Date.now()) {
-    oneSetupLocks.delete(String(mint || '').trim());
+    clearOneSetupProfileLock(mint, 'ttl expired');
     return null;
   }
   return row.profileId;
+}
+
+export function countOneSetupLocksHeld(): number {
+  const now = Date.now();
+  let n = 0;
+  for (const [mint, row] of oneSetupLocks) {
+    if (row.untilMs < now) {
+      oneSetupLocks.delete(mint);
+      continue;
+    }
+    n += 1;
+  }
+  return n;
+}
+
+export function countOneSetupLocksForProfile(profileId: string): number {
+  const pid = String(profileId || '');
+  const now = Date.now();
+  let n = 0;
+  for (const [mint, row] of oneSetupLocks) {
+    if (row.untilMs < now) {
+      oneSetupLocks.delete(mint);
+      continue;
+    }
+    if (row.profileId === pid) n += 1;
+  }
+  return n;
 }
 
 /** Block other-profile discretionary when mint is locked to preferred P. */
@@ -1575,7 +1675,22 @@ export function shouldBlockOtherProfileDiscretionary(input: {
   };
 }
 
+function profileEnabledForOneSetup(profileId: string): boolean {
+  try {
+    const { config } = require('./config') as typeof import('./config');
+    if (config.tradeProfiles?.profiles?.[profileId] === false) return false;
+  } catch {
+    /* soft */
+  }
+  return true;
+}
+
+/**
+ * Sync locks from live watching/armed watches; prune inactive mints;
+ * clear when preferred profile is OFF.
+ */
 export function syncOneSetupLocksFromWatches(): void {
+  const active = new Map<string, string>();
   try {
     const { getScalperSetupWatchStatus } =
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
@@ -1583,7 +1698,11 @@ export function syncOneSetupLocksFromWatches(): void {
     for (const e of sw.entries || []) {
       if (e.status !== 'armed' && e.status !== 'watching') continue;
       const pref = String(e.preferredProfileId || 'scalper');
-      mintOneSetupProfileLock(e.mint, pref);
+      if (!profileEnabledForOneSetup(pref)) {
+        clearOneSetupProfileLock(e.mint, `profile off (${pref})`);
+        continue;
+      }
+      active.set(e.mint, pref);
     }
   } catch {
     /* soft */
@@ -1594,7 +1713,11 @@ export function syncOneSetupLocksFromWatches(): void {
     const dw = getDipSetupWatchStatus(40);
     for (const e of dw.entries || []) {
       if (e.status !== 'armed' && e.status !== 'watching') continue;
-      mintOneSetupProfileLock(e.mint, 'dip_buyer');
+      if (!profileEnabledForOneSetup('dip_buyer')) {
+        clearOneSetupProfileLock(e.mint, 'profile off (dip_buyer)');
+        continue;
+      }
+      active.set(e.mint, 'dip_buyer');
     }
   } catch {
     /* soft */
@@ -1605,11 +1728,119 @@ export function syncOneSetupLocksFromWatches(): void {
     const gw = getMigrationGradWatchStatus(40);
     for (const e of gw.entries || []) {
       if (e.status !== 'armed' && e.status !== 'watching') continue;
-      mintOneSetupProfileLock(e.mint, 'migration_sniper');
+      if (!profileEnabledForOneSetup('migration_sniper')) {
+        clearOneSetupProfileLock(e.mint, 'profile off (migration_sniper)');
+        continue;
+      }
+      active.set(e.mint, 'migration_sniper');
     }
   } catch {
     /* soft */
   }
+  for (const mint of [...oneSetupLocks.keys()]) {
+    if (!active.has(mint)) {
+      clearOneSetupProfileLock(mint, 'inactive mint prune');
+    }
+  }
+  for (const [mint, pref] of active) {
+    mintOneSetupProfileLock(mint, pref);
+  }
+}
+
+/** Build per-profile Entry Skill funnel counters for status / Zion. */
+export function buildEntrySkillByProfile(): Record<
+  string,
+  {
+    armed: number;
+    triggered: number;
+    opened: number;
+    expired: number;
+    locksHeld: number;
+    fallbackDiscAllowed: boolean;
+  }
+> {
+  const fallback = isFallbackDiscAllowed();
+  const out: Record<
+    string,
+    {
+      armed: number;
+      triggered: number;
+      opened: number;
+      expired: number;
+      locksHeld: number;
+      fallbackDiscAllowed: boolean;
+    }
+  > = {};
+  const ensure = (id: string) => {
+    if (!out[id]) {
+      out[id] = {
+        armed: 0,
+        triggered: 0,
+        opened: 0,
+        expired: 0,
+        locksHeld: 0,
+        fallbackDiscAllowed: fallback,
+      };
+    }
+    return out[id]!;
+  };
+  try {
+    const { listSetupWatchEvents } =
+      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+    const since = Date.now() - 6 * 60 * 60_000;
+    for (const e of listSetupWatchEvents(100)) {
+      if (e.at < since) continue;
+      const pid = String(
+        e.profileId ||
+          (e.family === 'dip'
+            ? 'dip_buyer'
+            : e.family === 'grad'
+              ? 'migration_sniper'
+              : 'scalper')
+      );
+      const row = ensure(pid);
+      if (e.kind === 'triggered') row.triggered += 1;
+      if (e.kind === 'trigger_opened') row.opened += 1;
+      if (e.kind === 'watch_expired') row.expired += 1;
+    }
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getScalperSetupWatchStatus } =
+      require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
+    const sw = getScalperSetupWatchStatus(40);
+    for (const e of sw.entries || []) {
+      if (e.status !== 'armed') continue;
+      const id = String(e.preferredProfileId || 'scalper');
+      ensure(id).armed += 1;
+    }
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getDipSetupWatchStatus } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const dw = getDipSetupWatchStatus(40);
+    const n = (dw.entries || []).filter((e) => e.status === 'armed').length;
+    if (n) ensure('dip_buyer').armed = n;
+  } catch {
+    /* soft */
+  }
+  try {
+    const { getMigrationGradWatchStatus } =
+      require('./migrationGradWatch') as typeof import('./migrationGradWatch');
+    const gw = getMigrationGradWatchStatus(40);
+    const n = (gw.entries || []).filter((e) => e.status === 'armed').length;
+    if (n) ensure('migration_sniper').armed = n;
+  } catch {
+    /* soft */
+  }
+  for (const id of Object.keys(out)) {
+    out[id]!.locksHeld = countOneSetupLocksForProfile(id);
+    out[id]!.fallbackDiscAllowed = fallback;
+  }
+  return out;
 }
 
 /**
@@ -2049,15 +2280,19 @@ export function getExpectancyLiftStatus(
   const plainLanguage = `Expectancy ${eStr} over last ${window} · armed ${armedStr} (target 70%) · late-chase ${lateStr} (≤5%).`;
 
   const liveArmed = countLiveArmedWatches();
-  const effectiveCap =
-    liveArmed === 0 || stuckArmedReliefActive()
-      ? DISC_SHARE_CAP_RELIEF
-      : DISC_SHARE_CAP;
+  const liveTriggerableArmed = countLiveTriggerableArmed();
+  const fallbackDiscAllowed = liveTriggerableArmed === 0;
+  // Cap for chip: triggerable → 30%; fallback room → 45% only when overtrading
+  const effectiveCap = fallbackDiscAllowed
+    ? DISC_SHARE_CAP_RELIEF
+    : DISC_SHARE_CAP;
   const discShare = mix.discretionaryShare;
   const discMixActive =
     discShare != null &&
     mixTrades.length >= 10 &&
-    discShare >= effectiveCap;
+    (fallbackDiscAllowed
+      ? discShare >= DISC_SHARE_CAP_RELIEF
+      : discShare > DISC_SHARE_CAP);
   const admissionBaseline = getAdmissionBaseline();
   const baselineActive = admissionBaseline === 'v235';
   const entrySkillActive = !baselineActive;
@@ -2219,13 +2454,16 @@ export function getExpectancyLiftStatus(
       active: baselineActive ? false : discMixActive,
       discShare,
       liveArmed,
+      liveTriggerableArmed,
       effectiveCap,
+      fallbackDiscAllowed: baselineActive ? true : fallbackDiscAllowed,
     },
     admissionBaseline,
     baselineActive,
     entrySkillActive,
     familySkillMemory,
     performanceCharge,
+    entrySkillByProfile: buildEntrySkillByProfile(),
   };
 }
 
@@ -2275,6 +2513,30 @@ export function formatExpectancyLiftZionLines(
     }
     if (st.funnel.openRatePct != null) {
       lines.push(`Armed open rate ~${st.funnel.openRatePct}%.`);
+    }
+    const thr = st.discMixThrottle;
+    if (thr) {
+      lines.push(
+        `Entry Skill mix: liveArmed=${thr.liveArmed} triggerable=${thr.liveTriggerableArmed} fallbackDisc=${thr.fallbackDiscAllowed ? 'on' : 'off'} disc=${thr.discShare != null ? (thr.discShare * 100).toFixed(0) + '%' : '—'} cap=${(thr.effectiveCap * 100).toFixed(0)}%.`
+      );
+    }
+    try {
+      const by = st.entrySkillByProfile || {};
+      const chips = Object.entries(by)
+        .slice(0, 6)
+        .map(
+          ([id, r]) =>
+            `${id}:a${r.armed}/t${r.triggered}/o${r.opened}/x${r.expired}/L${r.locksHeld}`
+        );
+      if (chips.length) {
+        lines.push(`Entry Skill chips: ${chips.join(' · ')}.`);
+      }
+      const bsp = getBlockedSecondPassCount();
+      if (bsp > 0) {
+        lines.push(`Armed hard-lock floor fails (blocked_second_pass)=${bsp}.`);
+      }
+    } catch {
+      /* soft */
     }
     return lines;
   } catch {

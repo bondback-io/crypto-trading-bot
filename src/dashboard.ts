@@ -10038,6 +10038,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <span class="lsd-chip" id="el-chip-armed">Armed —</span>
           <span class="lsd-chip" id="el-chip-disc">Disc —</span>
           <span class="lsd-chip" id="el-chip-mix-throttle">Mix throttle —</span>
+          <span class="lsd-chip" id="el-chip-fallback-disc">Fallback disc —</span>
           <span class="lsd-chip" id="el-chip-late">Late-chase —</span>
           <span class="lsd-chip" id="el-chip-scalper">Scalper —</span>
           <span class="lsd-chip" id="el-chip-partial">1st partial —</span>
@@ -13276,6 +13277,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             (data.dipWatch && data.dipWatch.active === 0)
               ? ' · Dip: ' + (diag.dipInactiveReason || 'no_watches')
               : '';
+          const fb =
+            ' · fallbackDisc ' +
+            (diag.fallbackDiscAllowed === true ? 'on' : 'off') +
+            (diag.locksHeld != null ? ' · locks ' + diag.locksHeld : '') +
+            (diag.blockedSecondPass
+              ? ' · 2ndPass×' + diag.blockedSecondPass
+              : '');
+          const es = diag.entrySkillByProfile || {};
+          const esBits = Object.keys(es)
+            .slice(0, 4)
+            .map(function (id) {
+              const r = es[id] || {};
+              return (
+                id.slice(0, 6) +
+                ':a' +
+                (r.armed || 0) +
+                '/t' +
+                (r.triggered || 0) +
+                '/o' +
+                (r.opened || 0)
+              );
+            })
+            .join(' ');
+          const esStrip = esBits ? ' · Entry Skill ' + esBits : '';
           diagEl.textContent =
             'Armed ' +
             armedN +
@@ -13284,6 +13309,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             att +
             funnelBits +
             dipFunnelBits +
+            fb +
+            esStrip +
             block +
             dipQuiet;
         }
@@ -16658,7 +16685,18 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             ' · cap ' +
             elFmtPct(thr.effectiveCap != null ? thr.effectiveCap : targets.discShareMax || 0.3) +
             ' · live armed ' +
-            (thr.liveArmed != null ? thr.liveArmed : '—');
+            (thr.liveArmed != null ? thr.liveArmed : '—') +
+            ' · triggerable ' +
+            (thr.liveTriggerableArmed != null ? thr.liveTriggerableArmed : '—');
+        }
+        const fbEl = document.getElementById('el-chip-fallback-disc');
+        if (fbEl) {
+          const fbOn = thr.fallbackDiscAllowed === true;
+          fbEl.textContent = 'Fallback disc ' + (fbOn ? 'on' : 'off');
+          fbEl.className = elChipClass(fbOn, !fbOn);
+          fbEl.title = fbOn
+            ? 'No triggerable arms — discretionary fallback allowed (≤30%, fast relief 45%)'
+            : 'Triggerable arms present — fast disc hard-skip above 30%';
         }
         const lateOk =
           mix.lateChaseShare != null &&

@@ -906,19 +906,55 @@ function localAnalystReply(
   }
 
   if (/quiet|why.*(no|few)\s*trades/.test(q)) {
-    const p = findProfile(facts, 'trend_rider');
-    const state = p
-      ? p.enabled
-        ? 'Trend Rider is ON.'
-        : 'Trend Rider is OFF.'
-      : 'Trend Rider isn’t clear in the profile list.';
-    return formatZionReply({
-      greeting: greet,
-      answer: state,
-      summary:
-        'Quiet spells were often Pump.fun-only blocking Jupiter specialty. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA; lane MC/age/volume floors still apply. Entry Skill prefers armed confirms over discretionary chase.',
-      followUp: 'Check Pump.fun-only / Require TA, or Trend closes?',
-    });
+    try {
+      const { formatExpectancyLiftZionLines } =
+        require('./expectancyLift') as typeof import('./expectancyLift');
+      const { getSetupWatchDiagnostics } =
+        require('./profileAttention') as typeof import('./profileAttention');
+      const lines = formatExpectancyLiftZionLines(50);
+      const d = getSetupWatchDiagnostics();
+      const chipBits = Object.entries(d.entrySkillByProfile || {})
+        .slice(0, 5)
+        .map(
+          ([id, r]) =>
+            `${id}:a${r.armed}/t${r.triggered}/o${r.opened}/L${r.locksHeld}`
+        )
+        .join(' · ');
+      return formatZionReply({
+        greeting: greet,
+        answer:
+          lines.find((l) => /Entry Skill mix|fallbackDisc/i.test(l)) ||
+          lines[0] ||
+          'Entry Skill mix diagnostics loading.',
+        summary:
+          [
+            chipBits ? `Entry Skill chips: ${chipBits}.` : null,
+            `fallbackDisc=${d.fallbackDiscAllowed ? 'on' : 'off'} · locksHeld=${d.locksHeld}` +
+              (d.blockedSecondPass
+                ? ` · blocked_second_pass=${d.blockedSecondPass}`
+                : ''),
+            lines.slice(1, 4).join(' '),
+            'Late-chase ceiling + hard safety stay on. Specialty Jupiter/KOL can bypass Pump.fun-only + Require TA.',
+          ]
+            .filter(Boolean)
+            .join(' '),
+        followUp: 'How many Scalper watches are armed?',
+      });
+    } catch {
+      const p = findProfile(facts, 'trend_rider');
+      const state = p
+        ? p.enabled
+          ? 'Trend Rider is ON.'
+          : 'Trend Rider is OFF.'
+        : 'Trend Rider isn’t clear in the profile list.';
+      return formatZionReply({
+        greeting: greet,
+        answer: state,
+        summary:
+          'Quiet spells were often Pump.fun-only blocking Jupiter specialty. Entry Skill prefers armed confirms; discretionary fallback when arms are empty/stuck.',
+        followUp: 'Check Pump.fun-only / Require TA, or Trend closes?',
+      });
+    }
   }
 
   if (
