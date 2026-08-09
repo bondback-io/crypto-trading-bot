@@ -43,6 +43,17 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.247',
+    title: 'Scalper + Migration habit filters (additive)',
+    sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],
+    items: [
+      'Scalper habit: when WR weak or Fast Recovery stage≤1, soft-skip discretionary admits unless Mode B armed/triggered or expanding volume + near support; armed handoffs unchanged. Concurrent/attention caps not raised.',
+      'Scalper size: discretionary only — further expectancy size cut (×0.5–0.7) when recent WR <25% or PF low; armed Mode B keeps prior size path.',
+      'Migration Sniper: Entry Skill hard-skips late_chase primary (with Scalper); discretionary dump/extension + missing hold-reclaim soft-zeros when not Grad-armed; fire-band/ultra-fresh + Grad armed preserved.',
+      'MS size: migration_hold_reclaim down_ranked/restricted forces smaller size via expectancy soft-pass path. Dip/Steady/Trend admit doctrine + DISC_SHARE_CAP / armed-or-fallback unchanged; Baseline v235 kill-switch unchanged.',
+    ],
+  },
+  {
     version: '1.2.246',
     title: 'Lock hygiene · Profile RL · Trend live tape · Steady majors',
     sections: ['microbots', 'tradecraft', 'learning', 'scanners', 'overview', 'knobs', 'zion'],

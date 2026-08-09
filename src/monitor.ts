@@ -7315,6 +7315,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
       const {
         shouldThrottleScalperAdmit,
         shouldLimitScalperConcurrent,
+        shouldSoftSkipUnarmedScalperHabit,
         getProfileAttentionShare,
       } = require('./profileAttention') as typeof import('./profileAttention');
       const att = getProfileAttentionShare();
@@ -7353,6 +7354,23 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         if (th.throttle) {
           attFails.push(
             `${passer.name}: ${th.reason || 'Scalper attention throttle'}`
+          );
+          continue;
+        }
+        const habit = shouldSoftSkipUnarmedScalperHabit({
+          profileId: passer.profileId,
+          armedWatch: armedForAttention,
+          scannerReasons: signal.scannerReasons,
+          volumeDecayState:
+            (signal as { volumeDecayState?: string }).volumeDecayState ??
+            (ctx as { volumeDecayState?: string }).volumeDecayState ??
+            null,
+          nearSupport: ctx.nearSupport === true,
+          nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+        });
+        if (habit.skip) {
+          attFails.push(
+            `${passer.name}: ${habit.reason || 'Scalper habit armed-prefer'}`
           );
           continue;
         }

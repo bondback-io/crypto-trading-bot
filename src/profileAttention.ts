@@ -241,6 +241,52 @@ export function shouldThrottleScalperAdmit(input: {
   return { throttle: false };
 }
 
+/**
+ * Habit (1.2.247): when Scalper WR is weak or Fast Recovery stage ≤1,
+ * soft-skip discretionary Scalper unless Mode B armed / watch-triggered,
+ * or volume expanding + near support. Does not raise attention caps.
+ */
+export function shouldSoftSkipUnarmedScalperHabit(input: {
+  profileId?: string | null;
+  armedWatch?: boolean;
+  scannerReasons?: string[] | null;
+  volumeDecayState?: string | null;
+  nearSupport?: boolean | null;
+  nearMultiTfSupport?: boolean | null;
+}): { skip: boolean; reason?: string } {
+  if (isV235Baseline()) return { skip: false };
+  if (String(input.profileId || '') !== 'scalper') return { skip: false };
+
+  const reasons = (input.scannerReasons || []).join(' ');
+  const armed =
+    input.armedWatch === true ||
+    /scalper-watch:triggered|dip-watch:triggered|grad-watch:triggered|armedWatch/i.test(
+      reasons
+    );
+  if (armed) return { skip: false };
+
+  const wr = scalperRecentWinRate();
+  const recovering = scalperRecoveringStrict();
+  const weak = wr != null && wr < WEAK_WR_PCT;
+  if (!weak && !recovering) return { skip: false };
+
+  const volExpanding = String(input.volumeDecayState || '') === 'expanding';
+  const nearS =
+    input.nearSupport === true || input.nearMultiTfSupport === true;
+  if (volExpanding && nearS) return { skip: false };
+
+  return {
+    skip: true,
+    reason:
+      `Scalper habit: prefer armed Mode B reclaim` +
+      (wr != null ? ` · WR ${wr.toFixed(0)}%` : '') +
+      (recovering ? ' · recovery stage≤1' : '') +
+      (!(volExpanding && nearS)
+        ? ' · need expanding vol + near support'
+        : ''),
+  };
+}
+
 /** Extra MARL downrank when Scalper expectancy is weak (beyond recovery). */
 export function scalperExpectancyMarlDelta(profileId: string): number {
   const id = String(profileId || '');

@@ -76,12 +76,18 @@ const SCRATCH_PNL_PCT = 0.25;
 const SCRATCH_PNL_SOL = 0.001;
 const DISC_MIX_SIZE_PENALTY = 0.85;
 
-/** Quality profiles: hard-skip late_chase primary under Entry Skill. */
+/**
+ * Entry Skill hard-skip late_chase primary even below the n≥20 share floor.
+ * Includes quality swing lanes + Scalper / Migration Sniper (habit patch 1.2.247).
+ * Armed reclaim relief still bypasses via isArmedReclaimRelief.
+ */
 const QUALITY_LATE_CHASE_PROFILES = new Set([
   'dip_buyer',
   'trend_rider',
   'steady_compounder',
   'smart_money_mirror',
+  'scalper',
+  'migration_sniper',
 ]);
 
 const FILE = () => dataFile('expectancy-lift.json');
@@ -1289,14 +1295,14 @@ export function shouldLimitLateChaseShare(input: {
     normalizeExpectancyFamily(input.family || input.entryStyle) ===
       'late_chase';
   if (!isLate) return { limit: false };
-  // Entry Skill: quality profiles hard-skip late_chase primary even below sample floor
+  // Entry Skill: hard-skip late_chase primary even below sample floor
   if (
     !isAdmissionBaselineV235() &&
     QUALITY_LATE_CHASE_PROFILES.has(String(input.profileId || ''))
   ) {
     return {
       limit: true,
-      reason: `Entry Skill: quality profile hard-skip late_chase (${input.profileId})`,
+      reason: `Entry Skill: hard-skip late_chase primary (${input.profileId})`,
     };
   }
   const mix = getRecentMixShares(20, { lateChaseCeilingWindow: true });
@@ -1520,7 +1526,10 @@ export function shouldSoftSkipPermissionScore(score: number, armed: boolean): {
   return { skip: false };
 }
 
-/** Expectancy-weighted size multiplier 0.7–1.15. */
+/** Habit floor when Scalper WR/PF weak or MS family gov down (discretionary). */
+const HABIT_SIZE_LO = 0.5;
+
+/** Expectancy-weighted size multiplier 0.7–1.15 (habit cuts may go to 0.5). */
 export function expectancySizeMultiplier(input: {
   profileId?: string | null;
   family?: string | null;
@@ -1539,41 +1548,71 @@ export function expectancySizeMultiplier(input: {
       )
       .slice(-DEFAULT_EXPECTANCY_WINDOW);
     const m = computeExpectancyMetrics(slice);
+    const notes: string[] = [];
+    let mult = 1;
     if (m.tradeCount < 8 || m.expectancyPct == null) {
       const discPen = expectancyLiftSizePenaltyForDiscMix({
         armedWatch: input.armedWatch,
         profileId: input.profileId,
       });
       if (discPen.mult !== 1) {
-        return {
-          mult: discPen.mult,
-          note: discPen.note || 'disc mix size penalty',
-        };
+        mult = discPen.mult;
+        if (discPen.note) notes.push(discPen.note);
+      } else {
+        notes.push('expectancy size n/a');
       }
-      return { mult: 1, note: 'expectancy size n/a' };
+    } else {
+      if (m.expectancyPct >= 1.0) mult = 1.12;
+      else if (m.expectancyPct >= 0.4) mult = 1.05;
+      else if (m.expectancyPct >= 0) mult = 1.0;
+      else if (m.expectancyPct >= -0.5) mult = 0.9;
+      else mult = 0.75;
+      const gov = getFamilyGovernorState(family);
+      if (gov === 'promoted') mult = Math.min(SIZE_MULT_HI, mult + 0.03);
+      if (gov === 'down_ranked') mult = Math.max(SIZE_MULT_LO, mult - 0.08);
+      if (gov === 'restricted') mult = Math.max(SIZE_MULT_LO, mult * 0.85);
+      if (input.armedWatch === true) mult = Math.min(SIZE_MULT_HI, mult + 0.02);
+      const discPen = expectancyLiftSizePenaltyForDiscMix({
+        armedWatch: input.armedWatch,
+        profileId: input.profileId,
+      });
+      if (discPen.mult !== 1) mult *= discPen.mult;
+      mult = clamp(mult, SIZE_MULT_LO, SIZE_MULT_HI);
+      notes.push(
+        `expectancy×${mult.toFixed(2)} (E=${m.expectancyPct.toFixed(2)}%)`
+      );
+      if (discPen.note) notes.push(discPen.note);
     }
-    let mult = 1;
-    if (m.expectancyPct >= 1.0) mult = 1.12;
-    else if (m.expectancyPct >= 0.4) mult = 1.05;
-    else if (m.expectancyPct >= 0) mult = 1.0;
-    else if (m.expectancyPct >= -0.5) mult = 0.9;
-    else mult = 0.75;
-    const gov = getFamilyGovernorState(family);
-    if (gov === 'promoted') mult = Math.min(SIZE_MULT_HI, mult + 0.03);
-    if (gov === 'down_ranked') mult = Math.max(SIZE_MULT_LO, mult - 0.08);
-    if (gov === 'restricted') mult = Math.max(SIZE_MULT_LO, mult * 0.85);
-    if (input.armedWatch === true) mult = Math.min(SIZE_MULT_HI, mult + 0.02);
-    const discPen = expectancyLiftSizePenaltyForDiscMix({
-      armedWatch: input.armedWatch,
-      profileId: input.profileId,
-    });
-    if (discPen.mult !== 1) mult *= discPen.mult;
-    mult = clamp(mult, SIZE_MULT_LO, SIZE_MULT_HI);
-    const notes = [`expectancy×${mult.toFixed(2)} (E=${m.expectancyPct.toFixed(2)}%)`];
-    if (discPen.note) notes.push(discPen.note);
+
+    // Scalper habit: discretionary only — cut size further when WR <25% or PF low
+    if (pid === 'scalper' && input.armedWatch !== true) {
+      const wr =
+        m.tradeCount >= 6 && m.winRate != null ? m.winRate : null;
+      const pf = m.profitFactor;
+      const weakWr = wr != null && wr < 0.25;
+      const weakPf = pf != null && Number.isFinite(pf) && pf < 0.85;
+      if (weakWr || weakPf) {
+        mult = clamp(mult * 0.65, HABIT_SIZE_LO, 0.7);
+        notes.push(
+          `scalper habit size↓ (WR ${
+            wr != null ? `${(wr * 100).toFixed(0)}%` : 'n/a'
+          }${weakPf && pf != null ? ` · PF ${pf.toFixed(2)}` : ''})`
+        );
+      }
+    }
+
+    // MS habit: smaller size when migration_hold_reclaim is down_ranked/restricted
+    if (pid === 'migration_sniper') {
+      const migGov = getFamilyGovernorState('migration_hold_reclaim');
+      if (migGov === 'down_ranked' || migGov === 'restricted') {
+        mult = clamp(mult * (migGov === 'restricted' ? 0.7 : 0.8), HABIT_SIZE_LO, SIZE_MULT_HI);
+        notes.push(`MS habit size↓ (${migGov} migration_hold_reclaim)`);
+      }
+    }
+
     return {
       mult: Math.round(mult * 100) / 100,
-      note: notes.join(' · '),
+      note: notes.join(' · ') || 'expectancy size',
     };
   } catch {
     return { mult: 1, note: 'expectancy size fail-soft' };

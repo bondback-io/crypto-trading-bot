@@ -3561,11 +3561,78 @@ function scoreProfile(
       score += 14;
       bits.push('watch prefer scalper@S');
     }
+    // Habit 1.2.247: soft-require Mode B when WR weak / recovery ≤1
+    // (armed / watch-triggered bypass; expanding vol + near support exception)
+    try {
+      const armedModeB =
+        ctx.armedWatch === true ||
+        String(ctx.setupWatchFamily || '').toLowerCase() === 'scalper';
+      if (!armedModeB) {
+        const { shouldSoftSkipUnarmedScalperHabit } =
+          require('./profileAttention') as typeof import('./profileAttention');
+        const habit = shouldSoftSkipUnarmedScalperHabit({
+          profileId: 'scalper',
+          armedWatch: false,
+          scannerReasons: null,
+          volumeDecayState: ctx.volumeDecayState ?? null,
+          nearSupport: atSupportReclaim || ctx.nearSupport === true,
+          nearMultiTfSupport: ctx.nearMultiTfSupport === true,
+        });
+        if (habit.skip) {
+          return {
+            score: 0,
+            reason: habit.reason || 'scalper habit: prefer armed Mode B',
+          };
+        }
+      }
+    } catch {
+      /* optional */
+    }
   }
 
   if (m.preferMigration) {
     if (!freshMig.ok) {
       return { score: 0, reason: freshMig.reason };
+    }
+    // Habit 1.2.247: dump / late-chase filters for discretionary MS (Grad-armed bypass)
+    const gradArmed =
+      ctx.armedWatch === true &&
+      /grad|mig/i.test(String(ctx.setupWatchFamily || ''));
+    if (!gradArmed) {
+      const migStyle = String(ctx.detectedEntryStyle || '');
+      // late_chase primary only — lateChase flag alone must not kill fire-band
+      if (migStyle === 'late_chase') {
+        return {
+          score: 0,
+          reason: 'migration habit: late_chase primary rejected (not Grad-armed)',
+        };
+      }
+      const h1Pump =
+        ctx.priceChangeH1Pct != null && Number.isFinite(ctx.priceChangeH1Pct)
+          ? Number(ctx.priceChangeH1Pct)
+          : null;
+      // Already extended hard → post-entry dump pattern risk
+      if (h1Pump != null && h1Pump >= 40) {
+        return {
+          score: 0,
+          reason: `migration habit: already extended hard (+${h1Pump.toFixed(0)}% H1 dump risk)`,
+        };
+      }
+      const holdReclaim =
+        migStyle === 'migration_hold_reclaim' ||
+        migStyle === 'scalp_reclaim_burst' ||
+        ctx.nearSupport === true ||
+        ctx.nearMultiTfSupport === true;
+      const fireOrFresh =
+        /pre-grad curve|ultra-fresh post-grad/i.test(freshMig.reason);
+      // Discretionary MS without hold/reclaim confirm outside fire/fresh path
+      if (!holdReclaim && !fireOrFresh) {
+        return {
+          score: 0,
+          reason:
+            'migration habit: missing hold/reclaim confirm (not Grad-armed)',
+        };
+      }
     }
     score += 92;
     bits.push(freshMig.reason);
