@@ -369,3 +369,135 @@ export function formatDipMinorLanePlainLanguage(): string {
     return '';
   }
 }
+
+/** Steady / HWR medium-major lane boards (1.2.263). */
+export function getQualityParkLaneHealth(): {
+  steady: {
+    armedNow: number;
+    watchingNow: number;
+    funnel: ReturnType<
+      typeof import('./qualityParkPlaybook').getQualityParkFunnelCounters
+    >['steady_compounder'];
+    topDeny: string | null;
+  };
+  hwr: {
+    armedNow: number;
+    watchingNow: number;
+    funnel: ReturnType<
+      typeof import('./qualityParkPlaybook').getQualityParkFunnelCounters
+    >['high_win_rate'];
+    topDeny: string | null;
+  };
+  rotatedStaleSession: number;
+  plainLanguage: string[];
+} {
+  let steadyArmed = 0;
+  let steadyWatch = 0;
+  let hwrArmed = 0;
+  let hwrWatch = 0;
+  try {
+    const { getActiveDipWatchesSnapshot } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const snap = getActiveDipWatchesSnapshot();
+    for (const e of snap.allActive || []) {
+      const src = String(e.source || '');
+      if (src !== 'medium' && src !== 'majors') continue;
+      const pid = String(e.preferredProfileId || 'steady_compounder');
+      if (pid === 'high_win_rate') {
+        if (e.status === 'armed') hwrArmed += 1;
+        else hwrWatch += 1;
+      } else {
+        if (e.status === 'armed') steadyArmed += 1;
+        else steadyWatch += 1;
+      }
+    }
+  } catch {
+    /* soft */
+  }
+  const {
+    getQualityParkFunnelCounters,
+    topQualityParkDeny,
+  } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+  const funnel = getQualityParkFunnelCounters();
+  const dipF = (() => {
+    try {
+      const { getDipFunnelCounters } =
+        require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      return getDipFunnelCounters();
+    } catch {
+      return null;
+    }
+  })();
+  const rotated =
+    (funnel.steady_compounder.rotated_stale || 0) +
+    (funnel.high_win_rate.rotated_stale || 0) +
+    (Number(dipF?.steady_rotated_stale) || 0) +
+    (Number(dipF?.hwr_rotated_stale) || 0);
+  const plain: string[] = [];
+  if (steadyArmed === 0 && (funnel.steady_compounder.low_movement || 0) > 0) {
+    plain.push(
+      `Steady majors full of low-movement names — rotated ${funnel.steady_compounder.rotated_stale || rotated} stale`
+    );
+  } else if (steadyArmed === 0) {
+    const deny = topQualityParkDeny('steady_compounder');
+    plain.push(
+      deny
+        ? `Steady has 0 medium arms: ${deny}`
+        : `Steady has 0 medium arms`
+    );
+  } else {
+    plain.push(`Steady armed ${steadyArmed} active structure setups`);
+  }
+  if (hwrArmed > 0) {
+    plain.push(`HWR armed ${hwrArmed} majors, waiting trigger`);
+  } else {
+    const deny = topQualityParkDeny('high_win_rate');
+    if (deny) plain.push(`HWR blocked: ${deny}`);
+  }
+  try {
+    const minors = getDipMinorLaneHealth();
+    if (!minors.starved && minors.minorsFilled > 0) {
+      plain.push(
+        `Dip minors healthy at ${minors.minorsFilled}/${minors.minorsCap}`
+      );
+    } else if (minors.starved && rotated > 0) {
+      plain.push(
+        'Dip minors starved; Steady blocked by dead tape, not strategy'
+      );
+    } else if (minors.starved) {
+      plain.push(minors.plainLanguage[0] || 'Dip minors starved');
+    }
+  } catch {
+    /* soft */
+  }
+  if (
+    rotated > 0 &&
+    !plain.some((p) => /rotated|dead tape/i.test(p))
+  ) {
+    plain.push(`Quality parks rotated ${rotated} stale`);
+  }
+  return {
+    steady: {
+      armedNow: steadyArmed,
+      watchingNow: steadyWatch,
+      funnel: funnel.steady_compounder,
+      topDeny: topQualityParkDeny('steady_compounder'),
+    },
+    hwr: {
+      armedNow: hwrArmed,
+      watchingNow: hwrWatch,
+      funnel: funnel.high_win_rate,
+      topDeny: topQualityParkDeny('high_win_rate'),
+    },
+    rotatedStaleSession: rotated,
+    plainLanguage: plain,
+  };
+}
+
+export function formatQualityParkLanePlainLanguage(): string {
+  try {
+    return getQualityParkLaneHealth().plainLanguage.join(' · ');
+  } catch {
+    return '';
+  }
+}

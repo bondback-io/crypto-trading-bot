@@ -576,6 +576,9 @@ export function getSetupWatchDiagnostics(): {
   dipMinorLane: {
     health: import('./dipMinorLaneHealth').DipMinorLaneHealth;
     laneCompare: import('./dipMinorLaneHealth').DipLaneCompareDiagnostics;
+    qualityParks: ReturnType<
+      typeof import('./dipMinorLaneHealth').getQualityParkLaneHealth
+    >;
   } | null;
   blockReasons: Array<{ reason: string; count: number }>;
   scalperAttentionShare: number | null;
@@ -751,10 +754,12 @@ export function getSetupWatchDiagnostics(): {
         const {
           getDipMinorLaneHealth,
           getDipLaneCompareDiagnostics,
+          getQualityParkLaneHealth,
         } = require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
         return {
           health: getDipMinorLaneHealth(),
           laneCompare: getDipLaneCompareDiagnostics(),
+          qualityParks: getQualityParkLaneHealth(),
         };
       } catch {
         return null;

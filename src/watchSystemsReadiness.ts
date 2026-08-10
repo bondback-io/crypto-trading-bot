@@ -298,25 +298,41 @@ export function getWatchSystemsReadiness(): WatchSystemsReadiness {
     ticking: mirrorEnabled && mirrorPrereqOk && mirrorWallets > 0,
   });
 
-  // --- High Win-Rate (Zion Platinum offers) ---
+  // --- High Win-Rate (organic quality parks + Zion Platinum) ---
   const hwrEnabled = smartOn && flags.high_win_rate !== false;
   let hwrColor: WatchReadinessColor = 'green';
-  let hwrDetail = 'Ready for Zion Platinum';
+  let hwrDetail = 'Ready · organic parks + Zion Platinum';
+  let hwrActive = 0;
   if (!hwrEnabled) {
     hwrColor = 'red';
     hwrDetail = 'High Win-Rate off';
   } else if (!smartOn) {
     hwrColor = 'red';
     hwrDetail = 'Smart Bot Profiles off';
-  }
-  // Soft amber if Zion auto-send not configured — still ready to receive
-  try {
-    const zion = (config as { zion?: { autoSendPlatinumToHwr?: boolean } }).zion;
-    if (hwrEnabled && zion && zion.autoSendPlatinumToHwr === false) {
-      hwrDetail = 'Ready (Platinum auto-send off)';
+  } else {
+    try {
+      const { getActiveDipWatchesSnapshot } =
+        require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+      const snap = getActiveDipWatchesSnapshot();
+      hwrActive = (snap.allActive || []).filter(
+        (e) =>
+          e.preferredProfileId === 'high_win_rate' &&
+          (e.status === 'watching' || e.status === 'armed')
+      ).length;
+      if (hwrActive > 0) {
+        hwrDetail = `Organic parks ${hwrActive} · Zion Platinum`;
+      }
+    } catch {
+      /* soft */
     }
-  } catch {
-    /* soft */
+    try {
+      const zion = (config as { zion?: { autoSendPlatinumToHwr?: boolean } }).zion;
+      if (hwrEnabled && zion && zion.autoSendPlatinumToHwr === false && hwrActive === 0) {
+        hwrDetail = 'Organic parks ready (Platinum auto-send off)';
+      }
+    } catch {
+      /* soft */
+    }
   }
   systems.push({
     id: 'hwr',
@@ -324,7 +340,7 @@ export function getWatchSystemsReadiness(): WatchSystemsReadiness {
     color: hwrColor,
     detail: hwrDetail,
     enabled: hwrEnabled,
-    active: hwrEnabled ? 1 : 0,
+    active: hwrEnabled ? Math.max(1, hwrActive) : 0,
     ticking: hwrEnabled,
   });
 

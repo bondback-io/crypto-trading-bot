@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.263',
+    title: 'Steady/HWR medium-major arm playbooks · live tape',
+    sections: ['scanners', 'microbots', 'overview', 'tradecraft'],
+    items: [
+      'Steady + HWR unique medium/major playbooks on shared quality parks (tags steady_structure_arm / hwr_quality_arm). HWR stamp when stronger confluence/quality floors pass; Dip minors unchanged.',
+      'Active-movement gate + dead-tape rotation so low-movement high-MC names leave inventory; Steady/HWR funnel boards + Zion plain language. Scalper/late-chase untouched.',
+    ],
+  },
+  {
     version: '1.2.262',
     title: 'Dip Buyer minor-lane recovery · filter-leak fences',
     sections: ['scanners', 'microbots', 'overview', 'tradecraft'],

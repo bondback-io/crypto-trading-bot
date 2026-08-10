@@ -35,6 +35,8 @@ export interface MajorsCandidate {
   volumeH1Usd?: number;
   holderCount?: number;
   priceChangeH1Pct?: number;
+  priceChangeH6Pct?: number;
+  priceChange24hPct?: number;
   lastPriceSol?: number;
   band: MajorsMcBand;
   /** medium = $50–200M; majors = ≥$200M */
@@ -43,6 +45,9 @@ export interface MajorsCandidate {
   /** Jupiter firstPool / createdAt ms — real token age (never watch birth) */
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  /** Movement rank score (1.2.263) */
+  movementScore?: number;
+  movementActive?: boolean;
 }
 
 /** Medium floor (Steady quality band) */
@@ -97,6 +102,7 @@ type RejectKey =
   | 'age'
   | 'liq'
   | 'vol'
+  | 'low_movement'
   | 'other';
 
 const rejectCounters: Record<RejectKey, number> = {
@@ -107,6 +113,7 @@ const rejectCounters: Record<RejectKey, number> = {
   age: 0,
   liq: 0,
   vol: 0,
+  low_movement: 0,
   other: 0,
 };
 
@@ -284,6 +291,45 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
   const band = majorsMcBand(circ);
   const preferAged =
     age != null && age.ageHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS;
+  const pc1 = Number(token.stats1h?.priceChange);
+  const pc6 = Number(token.stats6h?.priceChange);
+  const pc24 = Number(token.stats24h?.priceChange);
+  let movementScore = 0;
+  let movementActive = true;
+  try {
+    const {
+      movementFromJupiterToken,
+      evaluateQualityMovement,
+    } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    const mov = movementFromJupiterToken({
+      stats1h: token.stats1h,
+      stats6h: token.stats6h,
+      stats24h: token.stats24h,
+      volumeH1Usd: volH1,
+    });
+    const evMov = evaluateQualityMovement(mov, {
+      watchBand: wb,
+      volumeFloorUsd: minVolH1,
+    });
+    movementScore = evMov.score;
+    movementActive = evMov.active;
+    // Hard-dead known tiny range + weak vol → skip CYCLE seat (keep inventory actionable)
+    if (
+      !evMov.active &&
+      mov.range24hPct != null &&
+      Math.abs(mov.range24hPct) < 1.5 &&
+      volH1 < minVolH1 * 0.75
+    ) {
+      noteReject('low_movement');
+      console.log(
+        `${watchlistLogPrefix(wb)} reject low_movement ${sym} ` +
+          `range24≈${Math.abs(Number(mov.range24hPct)).toFixed(1)}% volH1=$${Math.round(volH1)}`
+      );
+      return null;
+    }
+  } catch {
+    /* optional playbook */
+  }
   return {
     mint,
     symbol: ev.symbol,
@@ -292,12 +338,16 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     liquidityUsd: ev.liquidityUsd,
     volumeH1Usd: ev.volumeH1Usd,
     holderCount: ev.holderCount,
-    priceChangeH1Pct: ev.priceChangeH1Pct,
+    priceChangeH1Pct: Number.isFinite(pc1) ? pc1 : ev.priceChangeH1Pct,
+    priceChangeH6Pct: Number.isFinite(pc6) ? pc6 : undefined,
+    priceChange24hPct: Number.isFinite(pc24) ? pc24 : undefined,
     lastPriceSol: ev.lastPriceSol > 0 ? ev.lastPriceSol : undefined,
     band,
     watchBand: wb,
     pairCreatedAtMs: age?.pairCreatedAtMs,
     tokenAgeHours: age?.ageHours,
+    movementScore,
+    movementActive,
     reasons: [
       `${wb}:${band}`,
       `circMC:$${Math.round(circ)}`,
@@ -306,6 +356,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
         ? `ageDays:${(age.ageHours / 24).toFixed(0)}`
         : 'age:unknown',
       ...(preferAged ? ['age≥90d'] : []),
+      ...(movementActive ? ['active'] : ['low_movement']),
     ],
   };
 }
@@ -370,7 +421,7 @@ export async function refreshMajorsUniverse(
         `cycle=${capped.length} (med=${medium.length} maj=${majors.length}) ` +
         `reject pump=${rejectCounters.pump} age=${rejectCounters.age} ` +
         `ageUnk=${rejectCounters.age_unknown} liq=${rejectCounters.liq} ` +
-        `vol=${rejectCounters.vol} mc=${rejectCounters.mc}`
+        `vol=${rejectCounters.vol} lowMov=${rejectCounters.low_movement} mc=${rejectCounters.mc}`
     );
     return capped;
   } catch (err) {
@@ -471,6 +522,8 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
   const scored = list.map((c) => ({
     c,
     near: candidateNearKnownLevels(c) ? 1 : 0,
+    mov: Number(c.movementScore) || 0,
+    active: c.movementActive === false ? 0 : 1,
     aged:
       c.tokenAgeHours != null &&
       c.tokenAgeHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS
@@ -479,7 +532,9 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     knownAge: c.tokenAgeHours != null ? 1 : 0,
   }));
   scored.sort((a, b) => {
+    if (b.active !== a.active) return b.active - a.active;
     if (b.near !== a.near) return b.near - a.near;
+    if (b.mov !== a.mov) return b.mov - a.mov;
     if (b.aged !== a.aged) return b.aged - a.aged;
     if (b.knownAge !== a.knownAge) return b.knownAge - a.knownAge;
     return b.c.marketCapUsd - a.c.marketCapUsd;
@@ -569,7 +624,8 @@ export async function runMajorsUniversePass(): Promise<number> {
   if (config.tradeProfiles?.enabled === false) return 0;
   if (
     config.tradeProfiles?.profiles?.dip_buyer === false &&
-    config.tradeProfiles?.profiles?.steady_compounder === false
+    config.tradeProfiles?.profiles?.steady_compounder === false &&
+    config.tradeProfiles?.profiles?.high_win_rate === false
   ) {
     return 0;
   }
@@ -595,6 +651,8 @@ export async function runMajorsUniversePass(): Promise<number> {
         volumeH1Usd: c.volumeH1Usd,
         holderCount: c.holderCount,
         priceChangeH1Pct: c.priceChangeH1Pct,
+        priceChangeH6Pct: c.priceChangeH6Pct,
+        priceChange24hPct: c.priceChange24hPct,
         lastPriceSol: c.lastPriceSol ?? null,
         preferredProfileId: prefer,
         specialtyFeed: c.watchBand === 'medium' ? 'medium' : 'majors',

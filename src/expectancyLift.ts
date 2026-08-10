@@ -2610,6 +2610,33 @@ function quietReasonForProfile(profileId: string): string | null {
       profileId === 'steady_compounder' ||
       profileId === 'high_win_rate'
     ) {
+      if (
+        profileId === 'steady_compounder' ||
+        profileId === 'high_win_rate'
+      ) {
+        try {
+          const { getQualityParkLaneHealth } =
+            require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+          const q = getQualityParkLaneHealth();
+          const lane =
+            profileId === 'high_win_rate' ? q.hwr : q.steady;
+          if (lane.armedNow === 0 && lane.topDeny) {
+            return profileId === 'high_win_rate'
+              ? `HWR 0 arms: ${lane.topDeny}`
+              : `Steady 0 arms: ${lane.topDeny}`;
+          }
+          if (lane.armedNow > 0) {
+            return profileId === 'high_win_rate'
+              ? `HWR armed ${lane.armedNow} — waiting trigger`
+              : `Steady armed ${lane.armedNow} — waiting trigger`;
+          }
+          if (q.rotatedStaleSession > 0 && lane.armedNow === 0) {
+            return `Low-movement rotate ×${q.rotatedStaleSession}`;
+          }
+        } catch {
+          /* soft */
+        }
+      }
       const r = describeTrendInactiveReason(profileId);
       if (r === 'profile_off') return 'Profile off';
       if (r === 'recovery') return 'Recovery throttle';

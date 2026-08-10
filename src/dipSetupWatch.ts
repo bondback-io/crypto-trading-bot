@@ -41,6 +41,7 @@ export interface DipWatchEntry {
   expiresAt: number;
   marketCapUsd?: number;
   volumeH1Usd?: number;
+  liquidityUsd?: number;
   holderCount?: number;
   dropFromPeakPct?: number | null;
   nearKeyFib?: boolean;
@@ -54,7 +55,7 @@ export interface DipWatchEntry {
   source?: string;
   /** Soft MC band when source is medium/majors ($50M / $100M / $200M / $250M / $500M / $1B+) */
   majorsBand?: string;
-  /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder */
+  /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder / high_win_rate */
   preferredProfileId?: string;
   /** Fib / Support → approx MC at reclaim entry */
   targetDipEntries?: DipTargetEntry[];
@@ -67,6 +68,14 @@ export interface DipWatchEntry {
   /** Real token/pool birth (Jupiter firstPool) — never watch createdAt */
   pairCreatedAtMs?: number;
   tokenAgeHours?: number;
+  /** 1.2.263 quality park movement / arm tags */
+  priceChangeH1Pct?: number | null;
+  priceChangeH6Pct?: number | null;
+  priceChange24hPct?: number | null;
+  movementActive?: boolean;
+  qualityChip?: string;
+  armTag?: string;
+  multiTfSupportHits?: number;
 }
 
 /**
@@ -143,6 +152,18 @@ const dipFunnel = {
   minors_expired: 0,
   minors_leak_prefer_remapped: 0,
   minors_leak_soft_allow_skipped: 0,
+  /** Steady / HWR quality park funnel (1.2.263) */
+  steady_candidates_seen: 0,
+  steady_armed: 0,
+  steady_triggered: 0,
+  steady_opened: 0,
+  steady_rotated_stale: 0,
+  hwr_candidates_seen: 0,
+  hwr_armed: 0,
+  hwr_triggered: 0,
+  hwr_opened: 0,
+  hwr_rotated_stale: 0,
+  quality_low_movement: 0,
 };
 
 function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
@@ -349,8 +370,13 @@ function qualityWatchScore(w: DipWatchEntry): number {
     w.marketCapUsd != null && Number.isFinite(w.marketCapUsd)
       ? Math.min(Number(w.marketCapUsd) / 1_000_000, 50)
       : 0;
-  // Primary: H1 vol; soft age + MC proxy
-  return vol + ageDays * 50 + liqProxy * 20;
+  const movBoost =
+    w.movementActive === false
+      ? -5000
+      : Math.abs(Number(w.priceChangeH1Pct) || 0) * 80 +
+        Math.abs(Number(w.priceChange24hPct) || 0) * 40;
+  // Primary: H1 vol + movement; soft age + MC proxy
+  return vol + ageDays * 50 + liqProxy * 20 + movBoost;
 }
 
 /**
@@ -431,7 +457,9 @@ function stampWatchPlan(w: DipWatchEntry): void {
             ? 55
             : 45;
   w.qualityScore = q;
+  const preferHwr = w.preferredProfileId === 'high_win_rate';
   const preferSteady =
+    preferHwr ||
     w.preferredProfileId === 'steady_compounder' ||
     isQualityBandSource(w.source);
   w.entryStyle = preferSteady
@@ -516,10 +544,11 @@ function isDipProfileEnabled(): boolean {
   if (!isStrategyEnabledGlobal('ta_market_scanner')) return false;
   const { config } = require('./config') as typeof import('./config');
   if (config.tradeProfiles?.enabled === false) return false;
-  // Minors need Dip; medium/majors may run on Steady alone
+  // Minors need Dip; medium/majors may run on Steady or HWR alone
   if (
     config.tradeProfiles?.profiles?.dip_buyer === false &&
-    config.tradeProfiles?.profiles?.steady_compounder === false
+    config.tradeProfiles?.profiles?.steady_compounder === false &&
+    config.tradeProfiles?.profiles?.high_win_rate === false
   ) {
     return false;
   }
@@ -626,56 +655,123 @@ function recomputeProximityFromLevels(w: DipWatchEntry): void {
   }
 }
 
+function buildQualityParkEvalInput(w: DipWatchEntry) {
+  return {
+    source: w.source,
+    marketCapUsd: w.marketCapUsd,
+    liquidityUsd: w.liquidityUsd,
+    volumeH1Usd: w.volumeH1Usd,
+    holderCount: w.holderCount,
+    supportPriceSol: w.supportPriceSol,
+    fib05PriceSol: w.fib05PriceSol,
+    fib618PriceSol: w.fib618PriceSol,
+    nearKeyFib: w.nearKeyFib,
+    nearSupport: w.nearSupport,
+    multiTfSupportHits: w.multiTfSupportHits,
+    movement: {
+      priceChangeH1Pct: w.priceChangeH1Pct,
+      priceChangeH6Pct: w.priceChangeH6Pct,
+      priceChange24hPct: w.priceChange24hPct,
+      range24hPct:
+        w.priceChange24hPct != null
+          ? Math.abs(Number(w.priceChange24hPct))
+          : null,
+      volumeH1Usd: w.volumeH1Usd,
+    },
+    softAllowDenied: null as boolean | null,
+    lateChase: false,
+  };
+}
+
 /**
- * Soft-arm Steady parks once Fib/S prices exist (even if not yet near).
- * Reclaim trigger still required to fire — soft-arm alone does not open.
+ * Arm quality parks via Steady/HWR playbooks (1.2.263).
+ * Steady may soft-arm on structure+movement; HWR needs near/confluence.
  */
-function maybeSoftArmSteadyLevelsReady(
+function maybeArmQualityPark(
   w: DipWatchEntry,
   now: number,
   dropOk: boolean
 ): boolean {
   if (w.status !== 'watching') return false;
   if (!isQualityBandSource(w.source)) return false;
-  if (w.preferredProfileId !== 'steady_compounder') return false;
-  if (!watchHasFibOrSupportLevels(w)) return false;
-  const nearTa = w.nearKeyFib === true || w.nearSupport === true;
-  w.status = 'armed';
-  w.armedAt = now;
-  w.updatedAt = now;
-  w.lastReason = nearTa
-    ? dropOk
-      ? 'armed near Fib/S + dip'
-      : 'armed near Fib/S'
-    : 'levels ready · waiting reclaim';
-  stampWatchPlan(w);
-  noteDipFunnel('armed');
-  noteQualityBandFunnel(w.source, 'armed');
-  console.log(
-    `[dip-watch] ARMED ${w.symbol}` +
-      (nearTa ? '' : ' (soft · levels ready)')
-  );
-  console.log(`[STEADY-COMPOUNDER] arm ${w.symbol} [${w.source}]`);
   try {
-    const { recordSetupWatchEvent } =
-      require('./setupWatchEvents') as typeof import('./setupWatchEvents');
-    recordSetupWatchEvent({
-      kind: 'armed',
-      family: 'dip',
-      mint: w.mint,
-      symbol: w.symbol,
-      profileId: 'steady_compounder',
-      reason: w.lastReason,
-      qualityScore: w.qualityScore,
-      entryStyle: w.entryStyle,
-    });
+    const {
+      evaluateQualityParkArm,
+      noteQualityParkFunnel,
+      clearDeadTapeStreak,
+    } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    const verdict = evaluateQualityParkArm(buildQualityParkEvalInput(w));
+    w.movementActive = verdict.movementActive;
+    w.qualityChip = verdict.chip;
+    if (!verdict.ok || !verdict.profileId) {
+      if (verdict.denyKey === 'low_movement') {
+        noteDipFunnel('quality_low_movement');
+      }
+      w.lastReason = verdict.reason;
+      return false;
+    }
+    // HWR only arms when playbook ok (near/confluence); Steady softArmOk allows levels-ready
+    if (verdict.profileId === 'high_win_rate' && !verdict.ok) return false;
+    if (
+      verdict.profileId === 'steady_compounder' &&
+      !verdict.softArmOk &&
+      !(w.nearKeyFib || w.nearSupport)
+    ) {
+      return false;
+    }
+    w.preferredProfileId = verdict.profileId;
+    w.armTag = verdict.armTag || undefined;
+    w.status = 'armed';
+    w.armedAt = now;
+    w.updatedAt = now;
+    const nearTa = w.nearKeyFib === true || w.nearSupport === true;
+    w.lastReason = nearTa
+      ? dropOk
+        ? `${verdict.armTag} · near + dip`
+        : `${verdict.armTag} · near`
+      : `${verdict.armTag} · waiting reclaim`;
+    stampWatchPlan(w);
+    noteDipFunnel('armed');
+    noteQualityBandFunnel(w.source, 'armed');
+    noteQualityParkFunnel(verdict.profileId, 'armed');
+    if (verdict.profileId === 'steady_compounder') {
+      noteDipFunnel('steady_armed');
+    } else {
+      noteDipFunnel('hwr_armed');
+    }
+    clearDeadTapeStreak(w.mint);
+    console.log(
+      `[dip-watch] ARMED ${w.symbol} [${verdict.profileId}] ${verdict.armTag}` +
+        (nearTa ? '' : ' (soft · structure)')
+    );
+    if (verdict.profileId === 'steady_compounder') {
+      console.log(`[STEADY-COMPOUNDER] arm ${w.symbol} [${w.source}]`);
+    } else {
+      console.log(`[HWR] arm ${w.symbol} [${w.source}]`);
+    }
+    try {
+      const { recordSetupWatchEvent } =
+        require('./setupWatchEvents') as typeof import('./setupWatchEvents');
+      recordSetupWatchEvent({
+        kind: 'armed',
+        family: 'dip',
+        mint: w.mint,
+        symbol: w.symbol,
+        profileId: verdict.profileId,
+        reason: w.lastReason,
+        qualityScore: w.qualityScore,
+        entryStyle: w.entryStyle,
+      });
+    } catch {
+      /* optional */
+    }
+    return true;
   } catch {
-    /* optional */
+    return false;
   }
-  return true;
 }
 
-/** Eager Fib/S seed after parking so near-arm (minors) / soft-arm (Steady) can happen ASAP. */
+/** Eager Fib/S seed after parking so near-arm (minors) / quality playbook arm can happen ASAP. */
 function scheduleEagerLevelSeed(w: DipWatchEntry): void {
   void (async () => {
     try {
@@ -686,7 +782,7 @@ function scheduleEagerLevelSeed(w: DipWatchEntry): void {
         w.dropFromPeakPct >= ARM_NEAR_DROP_MIN &&
         w.dropFromPeakPct <= 45;
       if (isQualityBandSource(w.source)) {
-        maybeSoftArmSteadyLevelsReady(w, Date.now(), dropOk);
+        maybeArmQualityPark(w, Date.now(), dropOk);
         return;
       }
       // Minors: arm only when near Fib/S after seed (no Steady soft-arm).
@@ -762,6 +858,33 @@ async function refreshWatchMarket(
         Number.isFinite(snap.priceChangeH1Pct)
       ) {
         h1Change = Number(snap.priceChangeH1Pct);
+        w.priceChangeH1Pct = h1Change;
+      }
+      if (
+        (snap as { priceChangeH6Pct?: number }).priceChangeH6Pct != null &&
+        Number.isFinite((snap as { priceChangeH6Pct?: number }).priceChangeH6Pct)
+      ) {
+        w.priceChangeH6Pct = Number(
+          (snap as { priceChangeH6Pct?: number }).priceChangeH6Pct
+        );
+      }
+      if (
+        (snap as { priceChange24hPct?: number }).priceChange24hPct != null &&
+        Number.isFinite(
+          (snap as { priceChange24hPct?: number }).priceChange24hPct
+        )
+      ) {
+        w.priceChange24hPct = Number(
+          (snap as { priceChange24hPct?: number }).priceChange24hPct
+        );
+      }
+      if (
+        (snap as { liquidityUsd?: number }).liquidityUsd != null &&
+        Number.isFinite((snap as { liquidityUsd?: number }).liquidityUsd)
+      ) {
+        w.liquidityUsd = Number(
+          (snap as { liquidityUsd?: number }).liquidityUsd
+        );
       }
     }
   } catch {
@@ -778,7 +901,9 @@ async function refreshWatchMarket(
       if (conf.primarySupport != null && conf.primarySupport > 0) {
         w.supportPriceSol = conf.primarySupport;
       }
-      if (conf.nearMultiTfSupport || (conf.supportTfHits?.length ?? 0) > 0) {
+      const hits = conf.supportTfHits?.length ?? 0;
+      w.multiTfSupportHits = hits;
+      if (conf.nearMultiTfSupport || hits > 0) {
         w.nearSupport = true;
       }
     }
@@ -841,9 +966,71 @@ async function refreshWatchMarket(
   const hasLevels = watchHasFibOrSupportLevels(w);
   if (!hasLevels) noteDipFunnel('no_levels');
 
-  // Medium/Majors: time-gated no-levels rotate (~20m ticks ×4 ≈80m);
-  // skip MC≥$500M and Steady parks (wait for TTL / levels).
+  // Medium/Majors: dead-tape rotate + no-levels rotate
   if (isQualityBandSource(w.source)) {
+    try {
+      const {
+        evaluateQualityMovement,
+        noteDeadTapeObservation,
+        clearDeadTapeStreak,
+        noteQualityParkFunnel,
+      } = require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+      const mov = evaluateQualityMovement(
+        {
+          priceChangeH1Pct: w.priceChangeH1Pct ?? h1Change,
+          priceChangeH6Pct: w.priceChangeH6Pct,
+          priceChange24hPct: w.priceChange24hPct,
+          range24hPct:
+            w.priceChange24hPct != null
+              ? Math.abs(Number(w.priceChange24hPct))
+              : null,
+          volumeH1Usd: w.volumeH1Usd,
+        },
+        {
+          watchBand: isMajorsSource(w.source) ? 'majors' : 'medium',
+        }
+      );
+      w.movementActive = mov.active;
+      if (!mov.active) {
+        w.qualityChip = 'low_movement';
+        const { rotate } = noteDeadTapeObservation(w.mint, true, now);
+        if (rotate && w.status !== 'armed') {
+          const pid =
+            w.preferredProfileId === 'high_win_rate'
+              ? 'high_win_rate'
+              : 'steady_compounder';
+          noteQualityParkFunnel(pid, 'rotated_stale');
+          noteDipFunnel(
+            pid === 'high_win_rate' ? 'hwr_rotated_stale' : 'steady_rotated_stale'
+          );
+          noteDipFunnel('quality_low_movement');
+          noteQualityBandFunnel(w.source, 'expired');
+          w.status = 'expired';
+          w.updatedAt = now;
+          w.lastReason = 'rotated stale · dead tape';
+          w.qualityChip = 'rotated_stale';
+          console.log(
+            `[dip-watch] ROTATE ${w.symbol} [${w.source}] — dead tape / low movement`
+          );
+          clearDeadTapeStreak(w.mint);
+          try {
+            const { clearOneSetupProfileLock } =
+              require('./expectancyLift') as typeof import('./expectancyLift');
+            clearOneSetupProfileLock(w.mint, 'expired');
+          } catch {
+            /* optional */
+          }
+          return;
+        }
+      } else {
+        clearDeadTapeStreak(w.mint);
+        if (w.qualityChip === 'low_movement' || w.qualityChip === 'rotated_stale') {
+          w.qualityChip = 'active';
+        }
+      }
+    } catch {
+      /* optional */
+    }
     try {
       const {
         noteMajorsLevelsPresence,
@@ -851,7 +1038,10 @@ async function refreshWatchMarket(
       } = require('./majorsUniverse') as typeof import('./majorsUniverse');
       if (hasLevels) {
         clearMajorsNoLevelsStreak(w.mint);
-      } else if (w.preferredProfileId === 'steady_compounder') {
+      } else if (
+        w.preferredProfileId === 'steady_compounder' ||
+        w.preferredProfileId === 'high_win_rate'
+      ) {
         clearMajorsNoLevelsStreak(w.mint);
       } else {
         const { rotate, streak } = noteMajorsLevelsPresence(
@@ -1108,8 +1298,8 @@ export function considerDipWatchSetup(input: {
   const now = Date.now();
   // Arm on Fib/S proximity; drop is soft preference (not forever AND-gated)
   const armed = nearTa;
-  // Soft-gate: Medium/Majors → Dip/Steady; minors always dip_buyer (1.2.262).
-  let preferSafe: 'steady_compounder' | 'dip_buyer';
+  // Soft-gate: Medium/Majors → Steady/HWR/Dip; minors always dip_buyer (1.2.262/263).
+  let preferSafe: 'steady_compounder' | 'high_win_rate' | 'dip_buyer';
   if (!isQuality) {
     if (
       input.preferredProfileId &&
@@ -1119,12 +1309,20 @@ export function considerDipWatchSetup(input: {
     }
     preferSafe = 'dip_buyer';
   } else {
-    const prefer =
-      input.preferredProfileId || 'steady_compounder';
-    preferSafe =
-      prefer === 'steady_compounder' || prefer === 'dip_buyer'
-        ? prefer
-        : 'steady_compounder';
+    const prefer = input.preferredProfileId || 'steady_compounder';
+    if (
+      prefer === 'high_win_rate' ||
+      prefer === 'steady_compounder' ||
+      prefer === 'dip_buyer'
+    ) {
+      preferSafe = prefer;
+    } else {
+      preferSafe = 'steady_compounder';
+    }
+    if (preferSafe === 'high_win_rate') noteDipFunnel('hwr_candidates_seen');
+    else if (preferSafe === 'steady_compounder') {
+      noteDipFunnel('steady_candidates_seen');
+    }
   }
   const ageHours =
     input.tokenAgeHours != null && Number.isFinite(input.tokenAgeHours)
@@ -1205,11 +1403,21 @@ export function considerDipWatchSetup(input: {
         `MC=${mc != null ? `$${Math.round(mc)}` : '?'} ` +
         `volH1=$${Math.round(input.volumeH1Usd || 0)} ` +
         `reason=admit_${entry.status}` +
-        (preferSafe === 'steady_compounder' ? ' prefer:steady' : ' prefer:dip')
+        (preferSafe === 'steady_compounder'
+          ? ' prefer:steady'
+          : preferSafe === 'high_win_rate'
+            ? ' prefer:hwr'
+            : ' prefer:dip')
     );
     if (preferSafe === 'steady_compounder') {
       console.log(
         `[STEADY-COMPOUNDER] watch ${entry.symbol}` +
+          (armed ? ' · arm' : '') +
+          ` [${entry.source}]`
+      );
+    } else if (preferSafe === 'high_win_rate') {
+      console.log(
+        `[HWR] watch ${entry.symbol}` +
           (armed ? ' · arm' : '') +
           ` [${entry.source}]`
       );
@@ -1234,14 +1442,7 @@ export function considerDipWatchSetup(input: {
     }
   }
   if (isQuality) {
-    // Soft-arm immediately if Fib/S already known; else eager-seed on tick cadence.
-    if (!armed && preferSafe === 'steady_compounder') {
-      const dropOkAdmit =
-        drop != null &&
-        drop >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
-        drop <= maxDrop;
-      maybeSoftArmSteadyLevelsReady(entry, now, dropOkAdmit);
-    }
+    // Playbook arm after levels seed (Steady soft / HWR near).
     scheduleEagerLevelSeed(entry);
   } else {
     scheduleEagerLevelSeed(entry);
@@ -1253,18 +1454,27 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
   const now = Date.now();
   const isMajors = isMajorsSource(w.source);
   const isMedium = isMediumSource(w.source);
-  // Soft prefer: medium/majors may stamp steady_compounder; minors always Dip.
+  // Soft prefer: medium/majors stamp Steady or HWR; minors always Dip.
   const prefer =
     isMajors || isMedium
-      ? w.preferredProfileId === 'steady_compounder'
-        ? 'steady_compounder'
-        : 'dip_buyer'
+      ? w.preferredProfileId === 'high_win_rate'
+        ? 'high_win_rate'
+        : w.preferredProfileId === 'dip_buyer'
+          ? 'dip_buyer'
+          : 'steady_compounder'
       : 'dip_buyer';
   const feedRaw = specialtyFeedFromDipSource(w.source);
   const feed =
     feedRaw === 'scanner'
       ? 'jupiter'
       : (feedRaw as 'jupiter' | 'kolscan' | 'alphascan' | 'majors' | 'medium');
+  try {
+    const { triggerTagForProfile } =
+      require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+    w.armTag = triggerTagForProfile(prefer);
+  } catch {
+    /* optional */
+  }
   // Real token/pool birth — never watch createdAt (watch age contaminated Steady floors)
   const tokenBirthMs =
     w.pairCreatedAtMs != null &&
@@ -1311,10 +1521,20 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
         : isMedium
           ? [`medium${w.majorsBand ? `:${w.majorsBand}` : ''}`]
           : ['minor']),
-      prefer === 'steady_compounder' ? 'prefer:steady_compounder' : 'prefer:dip_buyer',
+      prefer === 'high_win_rate'
+        ? 'prefer:high_win_rate'
+        : prefer === 'steady_compounder'
+          ? 'prefer:steady_compounder'
+          : 'prefer:dip_buyer',
+      w.armTag ||
+        (prefer === 'high_win_rate'
+          ? 'hwr_reclaim_trigger'
+          : prefer === 'steady_compounder'
+            ? 'steady_reclaim_trigger'
+            : 'reclaim'),
       w.nearKeyFib ? 'near Fib' : w.nearSupport ? 'near support' : 'reclaim',
       w.entryStyle ||
-        (prefer === 'steady_compounder'
+        (prefer === 'steady_compounder' || prefer === 'high_win_rate'
           ? 'quality_structure_reclaim'
           : 'support_dip_reclaim'),
       w.dropFromPeakPct != null
@@ -1335,7 +1555,7 @@ function buildHandoff(w: DipWatchEntry): ScannerCandidate & { launch: LaunchEven
     armedWatch: true,
     dipWatchTriggered: true,
     entryStyleHint:
-      prefer === 'steady_compounder'
+      prefer === 'steady_compounder' || prefer === 'high_win_rate'
         ? w.entryStyle || 'quality_structure_reclaim'
         : w.entryStyle || 'support_dip_reclaim',
     qualityScoreHint: w.qualityScore ?? undefined,
@@ -1461,26 +1681,18 @@ export async function tickDipSetupWatches(opts?: {
       w.dropFromPeakPct >= Math.min(ARM_NEAR_DROP_MIN, minDrop) &&
       w.dropFromPeakPct <= maxDrop;
 
-    // Arm on Fib/S proximity (near target band); drop is soft preference.
-    // Steady soft-arm when Fib/S levels exist even if not yet near.
-    if (w.status === 'watching' && nearTa) {
+    // Arm: quality parks via Steady/HWR playbook; minors near Fib/S.
+    if (w.status === 'watching' && isQualityBandSource(w.source)) {
+      maybeArmQualityPark(w, now, dropOk);
+    } else if (w.status === 'watching' && nearTa) {
       w.status = 'armed';
       w.armedAt = now;
       w.updatedAt = now;
       w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
       stampWatchPlan(w);
       noteDipFunnel('armed');
-      noteQualityBandFunnel(w.source, 'armed');
-      if (!isQualityBandSource(w.source)) noteMinorsFunnel('armed');
+      noteMinorsFunnel('armed');
       console.log(`[dip-watch] ARMED ${w.symbol}`);
-      if (
-        isQualityBandSource(w.source) &&
-        w.preferredProfileId === 'steady_compounder'
-      ) {
-        console.log(
-          `[STEADY-COMPOUNDER] arm ${w.symbol} [${w.source}]`
-        );
-      }
       try {
         const { recordSetupWatchEvent } =
           require('./setupWatchEvents') as typeof import('./setupWatchEvents');
@@ -1497,8 +1709,6 @@ export async function tickDipSetupWatches(opts?: {
       } catch {
         /* optional */
       }
-    } else if (w.status === 'watching') {
-      maybeSoftArmSteadyLevelsReady(w, now, dropOk);
     }
 
     if (w.status === 'armed') {
@@ -1614,11 +1824,34 @@ export async function tickDipSetupWatches(opts?: {
         if (!isQualityBandSource(w.source)) {
           noteMinorsFunnel('triggered');
           noteMinorsFunnel('opened');
+        } else {
+          try {
+            const { noteQualityParkFunnel, triggerTagForProfile } =
+              require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+            const pid =
+              w.preferredProfileId === 'high_win_rate'
+                ? 'high_win_rate'
+                : 'steady_compounder';
+            noteQualityParkFunnel(pid, 'triggered');
+            noteQualityParkFunnel(pid, 'opened');
+            noteDipFunnel(
+              pid === 'high_win_rate' ? 'hwr_triggered' : 'steady_triggered'
+            );
+            noteDipFunnel(
+              pid === 'high_win_rate' ? 'hwr_opened' : 'steady_opened'
+            );
+            w.lastReason = `${triggerTagForProfile(pid)} · ${w.lastReason}`;
+          } catch {
+            /* optional */
+          }
         }
         const prefer =
-          isQualityBandSource(w.source) &&
-          w.preferredProfileId === 'steady_compounder'
-            ? 'steady_compounder'
+          isQualityBandSource(w.source)
+            ? w.preferredProfileId === 'high_win_rate'
+              ? 'high_win_rate'
+              : w.preferredProfileId === 'dip_buyer'
+                ? 'dip_buyer'
+                : 'steady_compounder'
             : 'dip_buyer';
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → ${prefer} (${w.lastReason})`
@@ -1627,6 +1860,8 @@ export async function tickDipSetupWatches(opts?: {
           console.log(
             `[STEADY-COMPOUNDER] trigger ${w.symbol} [${w.source}] → open`
           );
+        } else if (prefer === 'high_win_rate' && isQualityBandSource(w.source)) {
+          console.log(`[HWR] trigger ${w.symbol} [${w.source}] → open`);
         }
         try {
           const { clearOneSetupProfileLock } =
@@ -1791,6 +2026,8 @@ export function offerDipWatchFromCandidate(c: {
   volumeH1Usd?: number;
   holderCount?: number;
   priceChangeH1Pct?: number;
+  priceChangeH6Pct?: number;
+  priceChange24hPct?: number;
   nearKeyFib?: boolean;
   nearSupport?: boolean;
   lastPriceSol?: number | null;
@@ -1808,6 +2045,7 @@ export function offerDipWatchFromCandidate(c: {
     c.preferredProfileId &&
     c.preferredProfileId !== 'dip_buyer' &&
     c.preferredProfileId !== 'steady_compounder' &&
+    c.preferredProfileId !== 'high_win_rate' &&
     c.specialtyFeed !== 'kolscan' &&
     c.specialtyFeed !== 'jupiter' &&
     c.specialtyFeed !== 'majors' &&
@@ -1825,7 +2063,7 @@ export function offerDipWatchFromCandidate(c: {
       : c.specialtyFeed === 'medium'
         ? 'medium'
         : c.specialtyFeed || 'scanner';
-  considerDipWatchSetup({
+  const entry = considerDipWatchSetup({
     mint: c.mint,
     symbol: c.symbol,
     name: c.name,
@@ -1846,4 +2084,11 @@ export function offerDipWatchFromCandidate(c: {
     pairCreatedAtMs: c.pairCreatedAtMs,
     tokenAgeHours: c.tokenAgeHours,
   });
+  if (entry && (src === 'medium' || src === 'majors')) {
+    if (c.priceChangeH1Pct != null) entry.priceChangeH1Pct = c.priceChangeH1Pct;
+    if (c.priceChangeH6Pct != null) entry.priceChangeH6Pct = c.priceChangeH6Pct;
+    if (c.priceChange24hPct != null) {
+      entry.priceChange24hPct = c.priceChange24hPct;
+    }
+  }
 }

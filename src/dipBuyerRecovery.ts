@@ -1284,15 +1284,17 @@ export function formatDipBuyerRecoveryPlainLanguage(): string {
   try {
     const base = getDipBuyerRecoveryStatus().plainLanguage || '';
     let minor = '';
+    let quality = '';
     try {
-      const { formatDipMinorLanePlainLanguage } =
+      const { formatDipMinorLanePlainLanguage, formatQualityParkLanePlainLanguage } =
         require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
       minor = formatDipMinorLanePlainLanguage();
+      quality = formatQualityParkLanePlainLanguage();
     } catch {
       minor = '';
+      quality = '';
     }
-    if (base && minor) return `${base} · ${minor}`;
-    return base || minor || '';
+    return [base, minor, quality].filter(Boolean).join(' · ');
   } catch {
     return '';
   }

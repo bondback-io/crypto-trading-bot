@@ -13302,6 +13302,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               if (tab === 'medium') return src === 'medium';
               return src !== 'majors' && src !== 'medium';
             })
+            .sort(function (a, b) {
+              function rank(e) {
+                if (e.status === 'armed') return 0;
+                var near =
+                  e.nearKeyFib === true || e.nearSupport === true ? 1 : 2;
+                if (e.movementActive === false || e.qualityChip === 'low_movement')
+                  return 4;
+                if (near === 1) return 1;
+                if (e.movementActive === true || e.qualityChip === 'active')
+                  return 2;
+                return 3;
+              }
+              return rank(a) - rank(b);
+            })
             .slice(0, tab === 'majors' || tab === 'medium' ? 80 : 16);
           const terminal = (dw.recentTerminal || []).filter(function (e) {
             const src = String(e.source || '');
@@ -13481,6 +13495,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                       ? ' leak×' +
                         ((dipF.minors_leak_prefer_remapped || 0) +
                           (dipF.minors_leak_soft_allow_skipped || 0))
+                      : '')
+                  : '') +
+                (dipF.steady_armed != null || dipF.hwr_armed != null
+                  ? ' · Steady arm ' +
+                    (dipF.steady_armed || 0) +
+                    ' · HWR arm ' +
+                    (dipF.hwr_armed || 0) +
+                    (dipF.quality_low_movement
+                      ? ' · lowMov×' + dipF.quality_low_movement
+                      : '') +
+                    (dipF.steady_rotated_stale || dipF.hwr_rotated_stale
+                      ? ' · rotated ' +
+                        ((dipF.steady_rotated_stale || 0) +
+                          (dipF.hwr_rotated_stale || 0))
                       : '')
                   : '') +
                 (dipF.handoff_failed ? ' · hf×' + dipF.handoff_failed : '') +
