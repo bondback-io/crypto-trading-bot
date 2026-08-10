@@ -920,8 +920,8 @@ export interface HolderConcentrationSnapshot {
   /** Extreme dev hold treated as insider-cluster when ≥ hard max */
   devHoldPct?: number | null;
   /**
-   * Quality profiles (Steady Compounder / High Win-Rate): unknown top10 or
-   * insider after fetch attempts hard-skip instead of soft-pass.
+   * When true: unknown top10 or insider after fetch attempts hard-skip.
+   * Steady/HWR use false (soft-pass unknown; known-high still hard).
    */
   failClosedUnknown?: boolean;
   /** Known GMGN pro-trader / bluechip hold % (quality profiles). */

@@ -1502,6 +1502,37 @@ export function countLiveTriggerableArmed(): number {
   return live;
 }
 
+/**
+ * Steady/HWR-relevant triggerable arms (Dip medium/majors parks preferring Steady,
+ * or preferredProfileId steady/hwr). Used so Scalper/MS arms alone do not silence
+ * Steady/HWR discretionary fallback.
+ */
+function countSteadyHwrTriggerableArmed(): number {
+  if (stuckArmedReliefActive()) return 0;
+  let n = 0;
+  try {
+    const { getDipSetupWatchStatus } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    const dw = getDipSetupWatchStatus(40);
+    for (const e of dw.entries || []) {
+      if (e.status !== 'armed') continue;
+      const src = String(e.source || '').toLowerCase();
+      const prefer = String(e.preferredProfileId || '').toLowerCase();
+      if (
+        src === 'medium' ||
+        src === 'majors' ||
+        prefer === 'steady_compounder' ||
+        prefer === 'high_win_rate'
+      ) {
+        n += 1;
+      }
+    }
+  } catch {
+    /* soft */
+  }
+  return n;
+}
+
 /** Disc fallback allowed when no effective triggerable arms (never absolute freeze). */
 export function isFallbackDiscAllowed(): boolean {
   return countLiveTriggerableArmed() === 0;
@@ -1510,6 +1541,7 @@ export function isFallbackDiscAllowed(): boolean {
 /**
  * Armed-or-fallback disc mix:
  * - Triggerable arms: hard-skip fast + quality disc when disc > cap (size penalty otherwise).
+ * - Steady/HWR: only hard-skip disc when Steady/HWR arms themselves are live (Scalper/MS arms alone do not silence).
  * - No triggerable arms: limited cowboy fallback up to cap; fast relief (cap+15%) if still overtrading.
  * Never hard-skip all discretionary. Slider ignored under Baseline v235 (caller gates).
  */
@@ -1525,10 +1557,17 @@ export function shouldLimitDiscretionaryMix(input: {
   const cap = discShareCap();
   const relief = discShareCapRelief();
   const armedPct = Math.round(armedShareTarget() * 100);
+  const isSteadyHwr =
+    pid === 'steady_compounder' || pid === 'high_win_rate';
 
   if (triggerable > 0) {
     // Armed path: fast keeps strict DISC_SHARE_CAP; quality gets 20% floor.
     if (!isMixThrottledDiscProfile(pid)) return { limit: false };
+    // Steady/HWR: if their own arms are empty, allow limited quality disc fallback
+    // rather than total silence while Scalper/MS arms occupy the book.
+    if (isSteadyHwr && countSteadyHwrTriggerableArmed() === 0) {
+      return { limit: false };
+    }
     const kind = FAST_DISC_PROFILES.has(pid) ? 'fast' : 'quality';
     const effectiveCap =
       kind === 'quality' ? Math.max(cap, 0.2) : cap;

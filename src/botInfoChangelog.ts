@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.256',
+    title: 'HWR/Steady soft-allow · insider soft-pass · Steady med/maj arms',
+    sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs'],
+    items: [
+      'Steady/HWR top10 soft-allow ceilings raised: aged Steady 68% / HWR 65%; age-unknown Steady 72% / HWR 70% (Steady unknown ceil was missing). Grant tag top10_soft_allow_age_known; keep vol×1.5 / liq / holders / MC checks + size ×0.90/×0.85. Late-chase + Scalper untouched.',
+      'Quality holder gate: unknown insider/top10 soft-pass for Steady/HWR (failClosedUnknown false); log insider_unknown_soft_pass vs insider_known_block. Known ≥50% insider still hard-skip.',
+      'HWR/Steady silent not_applicable when known MC <$5M (armed reclaim exempt); Steady prefer MC $50M. Dip funnel Steady med/maj diagnostics (seen/arm/trig/opened/expired + armNow). Steady/HWR disc not silenced by Scalper/MS arms alone when their own arms are empty.',
+    ],
+  },
+  {
     version: '1.2.255',
     title: 'Bot Info tab compact nav · lifecycle layout',
     sections: ['lifecycle', 'overview', 'microbots', 'scanners', 'knobs', 'tradecraft'],

@@ -859,7 +859,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'KOL / specialty feed preferred for scanner entries',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
       'Selective · smaller size — accuracy over volume',
-      'Lane floors: holders ≥150 · top10 ≤32% (soft ≤40% if age≥90d + liq≥$20k) · 1h vol ≥$15k',
+      'Lane floors: holders ≥150 · top10 ≤32% (soft ≤65% if age≥90d + liq≥$20k; ≤70% age-unknown fallback) · 1h vol ≥$15k',
     ],
     priority: 72,
     defaultEnabled: true,
@@ -1028,8 +1028,8 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       'Small pullbacks 2–20% or volume uptick — deep knives leave to Dip',
       'Patient but disciplined · no hard timer',
       'HA exit: ride green Heikin-Ashi, sell on red flip',
-      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k · top10 ≤35% (soft ≤42% if age≥90d + liq≥$10k)',
-      'Quality holder gate: known top-10 + insider; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
+      'Lane floors: age ≥3h · holders ≥80 · 1h vol ≥$4k · MC ≥$450k (prefer ≥$50M medium) · top10 ≤35% (soft ≤68% if age≥90d + liq≥$10k; ≤72% age-unknown fallback)',
+      'Quality holder gate: known high insider still hard-skip; unknown insider soft-pass; RugCheck single-holder / correlation hard-skip; min pro-trader when known',
       'Specialty Jupiter/KOL/majors/medium can bypass Pump.fun-only + Require TA (anti-rug + stables denied remain)',
       'Medium $50–200M + Majors ≥$200M dips soft-prefer Steady quality reclaim; Dip Buyer remains for true reclaim DNA on minors',
       'Armed-only / near-zero discretionary · maxConcurrent 1 · PCL ~25%/50% · RL Shadow until proven',
@@ -1050,7 +1050,7 @@ export const TRADE_PROFILE_CATALOG: readonly TradeProfileDefinition[] = [
       requireCluster: false,
       minTokenAgeHours: 3,
       minMarketCapUsd: 450_000,
-      preferMarketCapUsd: 1_000_000,
+      preferMarketCapUsd: 50_000_000,
       minHolders: 80,
       maxTop10HoldPct: 35,
       minVolumeH1Usd: 4_000,
@@ -2686,15 +2686,18 @@ export function hasMomentumLaneSignals(
  * Cannot undercut global Risk On Min MC — only raise it via minMarketCapUsd.
  * Anti-rug / honeypot stay global outside this helper.
  */
-/** Soft top10 ceiling for aged liquid Steady / HWR only (below global ~70%). */
+/** Soft top10 ceiling for aged liquid Steady / HWR (quality checks still required). */
 const TOP10_SOFT_CEILING_PCT: Partial<Record<string, number>> = {
-  steady_compounder: 42,
-  high_win_rate: 40,
+  steady_compounder: 68,
+  high_win_rate: 65,
 };
-/** Age-unknown HWR soft ceiling only (aged path stays at TOP10_SOFT_CEILING_PCT). */
+/** Age-unknown Steady/HWR soft ceiling (stricter vol/liq/MC fallback still applies). */
 const TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT: Partial<Record<string, number>> = {
-  high_win_rate: 48,
+  steady_compounder: 72,
+  high_win_rate: 70,
 };
+/** Silent not_applicable floor — stop HWR/Steady cascade skip spam on microcaps. */
+const QUALITY_LANE_NOT_APPLICABLE_MC_USD = 5_000_000;
 const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
   steady_compounder: 10_000,
   high_win_rate: 20_000,
@@ -2711,6 +2714,8 @@ export const TOP10_SOFT_ALLOW_SIZE_MULT = 0.9;
 export const TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT = 0.85;
 
 export type Top10SoftAllowGrantTag =
+  | 'top10_soft_allow_age_known'
+  /** @deprecated alias — prefer top10_soft_allow_age_known */
   | 'top10_soft_allow'
   | 'top10_soft_allow_age_unknown_fallback';
 
@@ -2913,9 +2918,9 @@ export function resolveTop10SoftAllow(
   if (viaAge) {
     return {
       allow: true,
-      grantTag: 'top10_soft_allow',
+      grantTag: 'top10_soft_allow_age_known',
       sizeMult: TOP10_SOFT_ALLOW_SIZE_MULT,
-      detail: `${def.name} top10_soft_allow ${top10.toFixed(1)}% via age ${ageH!.toFixed(1)}h (hard max ${maxTop10}% · soft ≤${softCeil}%)`,
+      detail: `${def.name} top10_soft_allow_age_known ${top10.toFixed(1)}% via age ${ageH!.toFixed(1)}h (hard max ${maxTop10}% · soft ≤${softCeil}%)`,
     };
   }
   // ageUnknown
@@ -3043,7 +3048,7 @@ export function evaluateLaneEntryFloors(
     if (top10 != null && top10 > maxTop10) {
       const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
       if (soft.allow) {
-        const tag = soft.grantTag ?? 'top10_soft_allow';
+        const tag = soft.grantTag ?? 'top10_soft_allow_age_known';
         const mult =
           soft.sizeMult ??
           (tag === 'top10_soft_allow_age_unknown_fallback'
@@ -3052,7 +3057,7 @@ export function evaluateLaneEntryFloors(
         const via =
           tag === 'top10_soft_allow_age_unknown_fallback'
             ? 'via age-unknown fallback'
-            : 'via age';
+            : 'via age known';
         console.log(
           `[trade-profiles] top10_soft_allow GRANT ${ctx.symbol || 'token'} · ${via} · ${soft.detail}` +
             ` · size ×${mult}`
@@ -3287,6 +3292,34 @@ export function evaluateTradeProfileLanes(
       });
       continue;
     }
+    // HWR/Steady: silent not_applicable on microcaps (stop MC-too-low cascade spam)
+    if (
+      (def.id === 'high_win_rate' || def.id === 'steady_compounder') &&
+      ctx.armedWatch !== true
+    ) {
+      const mcNap =
+        ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
+          ? Number(ctx.marketCapUsd)
+          : null;
+      if (
+        mcNap != null &&
+        mcNap > 0 &&
+        mcNap < QUALITY_LANE_NOT_APPLICABLE_MC_USD
+      ) {
+        results.push({
+          profileId: def.id,
+          name: def.name,
+          icon: def.icon,
+          color: def.color,
+          priority: def.priority,
+          score: 0,
+          reason: 'not_applicable',
+          passed: false,
+          failReason: 'not_applicable',
+        });
+        continue;
+      }
+    }
     const floors = evaluateLaneEntryFloors(def, ctx);
     if (!floors.ok) {
       results.push({
@@ -3320,7 +3353,7 @@ export function evaluateTradeProfileLanes(
     let laneScore = Math.round(scored.score * 10) / 10;
     let laneReason = scored.reason;
     if (floors.top10SoftAllow === true) {
-      const softTag = floors.top10SoftAllowTag ?? 'top10_soft_allow';
+      const softTag = floors.top10SoftAllowTag ?? 'top10_soft_allow_age_known';
       if (!/top10_soft_allow/i.test(laneReason)) {
         laneReason = `${laneReason} · ${softTag}`;
       }
@@ -4995,7 +5028,7 @@ function buildAssignmentFromDef(
       : evaluateLaneEntryFloors(def, ctx);
   if (floorsHint.top10SoftAllow === true) {
     const softTag =
-      floorsHint.top10SoftAllowTag ?? 'top10_soft_allow';
+      floorsHint.top10SoftAllowTag ?? 'top10_soft_allow_age_known';
     const softMult =
       floorsHint.sizeMult ??
       (softTag === 'top10_soft_allow_age_unknown_fallback'

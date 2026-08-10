@@ -13416,6 +13416,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
               '/watch ' +
               (dipF.watchingNow != null ? dipF.watchingNow : dipF.watching || 0) +
               (dipF.triggered ? '/trig ' + dipF.triggered : '') +
+              (dipF.medium_candidates_seen || dipF.majors_candidates_seen
+                ? ' · med/maj seen ' +
+                  (dipF.medium_candidates_seen || 0) +
+                  '/' +
+                  (dipF.majors_candidates_seen || 0) +
+                  ' armNow ' +
+                  (dipF.mediumArmedNow || 0) +
+                  '/' +
+                  (dipF.majorsArmedNow || 0) +
+                  ' trig ' +
+                  (dipF.medium_triggered || 0) +
+                  '/' +
+                  (dipF.majors_triggered || 0)
+                : '') +
               (dipF.handoff_failed ? '/hf×' + dipF.handoff_failed : '') +
               (dipF.no_levels ? '/noLvl×' + dipF.no_levels : '') +
               (dipDenyBits ? ' · deny ' + dipDenyBits : '')
@@ -13433,6 +13447,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                   ? dipF.watchingNow
                   : dipF.watching || 0) +
                 (dipF.triggered ? ' · trig ' + dipF.triggered : '') +
+                (dipF.medium_candidates_seen || dipF.majors_candidates_seen
+                  ? ' · Steady med/maj seen ' +
+                    (dipF.medium_candidates_seen || 0) +
+                    '/' +
+                    (dipF.majors_candidates_seen || 0) +
+                    ' · armNow ' +
+                    (dipF.mediumArmedNow || 0) +
+                    '/' +
+                    (dipF.majorsArmedNow || 0) +
+                    ' · trig ' +
+                    (dipF.medium_triggered || 0) +
+                    '/' +
+                    (dipF.majors_triggered || 0) +
+                    ' · exp ' +
+                    (dipF.medium_expired || 0) +
+                    '/' +
+                    (dipF.majors_expired || 0)
+                  : '') +
                 (dipF.handoff_failed ? ' · hf×' + dipF.handoff_failed : '') +
                 (dipDenyBits
                   ? ' · deny ' + dipDenyBits

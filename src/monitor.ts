@@ -7844,8 +7844,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             `sources=${report.sources.join('+')}`
         );
 
-        // Steady Compounder / High Win-Rate: fail-closed on unknown insider/top10
-        // and reject near-zero pro-trader hold when GMGN reports it.
+        // Steady Compounder / High Win-Rate: unknown insider/top10 soft-pass
+        // (score penalty only). Known-high insider / known top10 band still hard.
         const qualityLaneId =
           lanePassers && lanePassers[0] ? lanePassers[0].profileId : null;
         if (
@@ -7856,19 +7856,31 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
             top10HoldPct: report.checks.top10HoldPct,
             insiderPct: report.checks.insiderPct,
             devHoldPct: report.checks.devHoldPct,
-            failClosedUnknown: true,
+            failClosedUnknown: false,
             proTraderPct: report.sniper?.proTraderPct ?? null,
             minProTraderPct: 0.05,
           });
+          const insiderUnknown =
+            report.checks.insiderPct == null ||
+            !Number.isFinite(report.checks.insiderPct);
+          if (insiderUnknown) {
+            console.log(
+              `[monitor] insider_unknown_soft_pass kind=${signalKind} symbol=${signal.symbol} ` +
+                `quality=${qualityLaneId}`
+            );
+          }
           if (qualityGate.skipReasons.length > 0) {
             const reason = qualityGate.skipReasons[0]!;
+            const knownBlock = /insider % too high|top 10 holders too/i.test(
+              reason
+            );
             console.log(
               `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ` +
-                `quality=${qualityLaneId} ${reason}`
+                `quality=${qualityLaneId} ${knownBlock ? 'insider_known_block ' : ''}${reason}`
             );
             paperTrader.addLog(
               'info',
-              `Quality holder gate ${signal.symbol} (${qualityLaneId}): ${reason}`,
+              `Quality holder gate ${signal.symbol} (${qualityLaneId}): ${knownBlock ? 'insider_known_block · ' : ''}${reason}`,
               { mint: signal.mint, symbol: signal.symbol }
             );
             recordRejectedSignal(signal, reason);

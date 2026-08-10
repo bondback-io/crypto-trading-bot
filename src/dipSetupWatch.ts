@@ -116,23 +116,82 @@ const dipFunnel = {
   /** Legacy sum of vol+liq+mc+no_setup+max_drop (compat) */
   vol_liq_mc: 0,
   at_cap: 0,
+  /** Medium/majors Steady park diagnostics */
+  medium_candidates_seen: 0,
+  majors_candidates_seen: 0,
+  medium_armed: 0,
+  majors_armed: 0,
+  medium_triggered: 0,
+  majors_triggered: 0,
+  medium_opened: 0,
+  majors_opened: 0,
+  medium_expired: 0,
+  majors_expired: 0,
 };
 
 function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
   dipFunnel[key] = (dipFunnel[key] || 0) + n;
 }
 
+function noteQualityBandFunnel(
+  source: string | undefined,
+  key:
+    | 'candidates_seen'
+    | 'armed'
+    | 'triggered'
+    | 'opened'
+    | 'expired'
+): void {
+  if (isMediumSource(source)) {
+    noteDipFunnel(
+      key === 'candidates_seen'
+        ? 'medium_candidates_seen'
+        : (`medium_${key}` as keyof typeof dipFunnel)
+    );
+  } else if (isMajorsSource(source)) {
+    noteDipFunnel(
+      key === 'candidates_seen'
+        ? 'majors_candidates_seen'
+        : (`majors_${key}` as keyof typeof dipFunnel)
+    );
+  }
+}
+
 export function getDipFunnelCounters(): typeof dipFunnel & {
   watchingNow: number;
   armedNow: number;
+  mediumWatchingNow: number;
+  mediumArmedNow: number;
+  majorsWatchingNow: number;
+  majorsArmedNow: number;
 } {
   let watchingNow = 0;
   let armedNow = 0;
+  let mediumWatchingNow = 0;
+  let mediumArmedNow = 0;
+  let majorsWatchingNow = 0;
+  let majorsArmedNow = 0;
   for (const w of watches.values()) {
-    if (w.status === 'watching') watchingNow += 1;
-    if (w.status === 'armed') armedNow += 1;
+    if (w.status === 'watching') {
+      watchingNow += 1;
+      if (isMediumSource(w.source)) mediumWatchingNow += 1;
+      if (isMajorsSource(w.source)) majorsWatchingNow += 1;
+    }
+    if (w.status === 'armed') {
+      armedNow += 1;
+      if (isMediumSource(w.source)) mediumArmedNow += 1;
+      if (isMajorsSource(w.source)) majorsArmedNow += 1;
+    }
   }
-  return { ...dipFunnel, watchingNow, armedNow };
+  return {
+    ...dipFunnel,
+    watchingNow,
+    armedNow,
+    mediumWatchingNow,
+    mediumArmedNow,
+    majorsWatchingNow,
+    majorsArmedNow,
+  };
 }
 
 function isMajorsSource(source: string | undefined): boolean {
@@ -538,6 +597,7 @@ async function refreshWatchMarket(w: DipWatchEntry, now: number): Promise<void> 
         );
         if (rotate) {
           noteDipFunnel('no_levels_rotate');
+          noteQualityBandFunnel(w.source, 'expired');
           w.status = 'expired';
           w.updatedAt = now;
           w.lastReason = `no levels ×${streak} (~20m) — rotate`;
@@ -600,6 +660,9 @@ export function considerDipWatchSetup(input: {
   const bucket = watchBucket(input.source);
   const nearTaEarly =
     input.nearKeyFib === true || input.nearSupport === true;
+  if (isQuality) {
+    noteQualityBandFunnel(input.source, 'candidates_seen');
+  }
 
   // Scalper / Mode B: always mutual-exclude (protect mid-band spam).
   try {
@@ -788,8 +851,10 @@ export function considerDipWatchSetup(input: {
   if (armed) stampWatchPlan(entry);
   watches.set(input.mint, entry);
   noteDipFunnel('offered');
-  if (armed) noteDipFunnel('armed');
-  else noteDipFunnel('watching');
+  if (armed) {
+    noteDipFunnel('armed');
+    if (isQuality) noteQualityBandFunnel(entry.source, 'armed');
+  } else noteDipFunnel('watching');
   console.log(
     `[dip-watch] ${entry.status.toUpperCase()} ${entry.symbol}` +
       (isQuality
@@ -924,6 +989,7 @@ export async function tickDipSetupWatches(opts?: {
       w.status = 'expired';
       w.updatedAt = now;
       w.lastReason = 'TTL expired';
+      noteQualityBandFunnel(w.source, 'expired');
       console.log(`[dip-watch] EXPIRED ${w.symbol}`);
       try {
         const {
@@ -1020,6 +1086,7 @@ export async function tickDipSetupWatches(opts?: {
       w.lastReason = dropOk ? 'armed near Fib/S + dip' : 'armed near Fib/S';
       stampWatchPlan(w);
       noteDipFunnel('armed');
+      noteQualityBandFunnel(w.source, 'armed');
       console.log(`[dip-watch] ARMED ${w.symbol}`);
       try {
         const { recordSetupWatchEvent } =
@@ -1141,6 +1208,8 @@ export async function tickDipSetupWatches(opts?: {
         w.updatedAt = now;
         handed += 1;
         noteDipFunnel('triggered');
+        noteQualityBandFunnel(w.source, 'triggered');
+        noteQualityBandFunnel(w.source, 'opened');
         console.log(
           `[dip-watch] TRIGGERED ${w.symbol} → dip_buyer (${w.lastReason})`
         );
