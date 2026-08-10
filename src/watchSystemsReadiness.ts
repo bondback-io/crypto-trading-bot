@@ -76,12 +76,12 @@ export function getWatchSystemsReadiness(): WatchSystemsReadiness {
   let dipMedMaj = 0;
   let dipTickAt = 0;
   try {
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const dw = getDipSetupWatchStatus(40);
+    const dw = getActiveDipWatchesSnapshot();
     dipActive = Number(dw.active) || 0;
-    dipTickAt = maxUpdatedAt(dw.entries as Array<{ updatedAt?: number; status?: string }>);
-    for (const e of dw.entries || []) {
+    dipTickAt = maxUpdatedAt(dw.allActive as Array<{ updatedAt?: number; status?: string }>);
+    for (const e of dw.allActive || []) {
       const src = String((e as { source?: string }).source || '').toLowerCase();
       if (
         (src === 'medium' || src === 'majors') &&

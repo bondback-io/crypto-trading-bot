@@ -459,6 +459,7 @@ function resolveQualityConcentrationSkip(opts: {
   tokenAgeHours?: number | null;
   pairCreatedAtMs?: number | null;
   symbol?: string | null;
+  specialtyFeed?: string | null;
   hardReason: string;
 }): { action: 'grant' | 'deny' | 'hard'; reason?: string; detail?: string } {
   const def = getTradeProfileDefinition(opts.profileId as TradeProfileId);
@@ -487,6 +488,7 @@ function resolveQualityConcentrationSkip(opts: {
     tokenAgeHours: opts.tokenAgeHours,
     pairCreatedAtMs: opts.pairCreatedAtMs,
     symbol: opts.symbol,
+    specialtyFeed: opts.specialtyFeed,
   });
 
   if (soft.granted) {
@@ -756,6 +758,7 @@ async function runAntiRugChecks(
             return null;
           })(),
           symbol: ctx.symbol,
+          specialtyFeed: ctx.specialtyFeed,
           hardReason,
         });
         if (q.action === 'grant') {
@@ -1423,7 +1426,9 @@ async function runAntiRugChecks(
   let qualityMcNap = false;
   if (
     qualityProfileId &&
-    isQualityLaneMicrocap(qualityProfileId, checks.marketCapUsd)
+    isQualityLaneMicrocap(qualityProfileId, checks.marketCapUsd, {
+      specialtyFeed: ctx.specialtyFeed,
+    })
   ) {
     qualityMcNap = true;
     const nap = qualityLaneMicrocapNapReason(

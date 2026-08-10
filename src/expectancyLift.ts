@@ -1609,10 +1609,10 @@ function countLiveArmedWatches(): number {
     /* soft */
   }
   try {
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const dw = getDipSetupWatchStatus(40);
-    n += (dw.entries || []).filter((e) => e.status === 'armed').length;
+    const dw = getActiveDipWatchesSnapshot();
+    n += (dw.allActive || []).filter((e) => e.status === 'armed').length;
   } catch {
     /* soft */
   }
@@ -1694,10 +1694,10 @@ function countSteadyHwrTriggerableArmed(): number {
   if (stuckArmedReliefActive()) return 0;
   let n = 0;
   try {
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const dw = getDipSetupWatchStatus(40);
-    for (const e of dw.entries || []) {
+    const dw = getActiveDipWatchesSnapshot();
+    for (const e of dw.allActive || []) {
       if (e.status !== 'armed') continue;
       const src = String(e.source || '').toLowerCase();
       const prefer = String(e.preferredProfileId || '').toLowerCase();
@@ -2163,10 +2163,10 @@ export function syncOneSetupLocksFromWatches(): void {
     /* soft */
   }
   try {
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const dw = getDipSetupWatchStatus(40);
-    for (const e of dw.entries || []) {
+    const dw = getActiveDipWatchesSnapshot();
+    for (const e of dw.allActive || []) {
       if (e.status !== 'armed') continue;
       const pref = String(
         (e as { preferredProfileId?: string }).preferredProfileId || 'dip_buyer'
@@ -2294,10 +2294,10 @@ export function buildEntrySkillByProfile(): Record<
     /* soft */
   }
   try {
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const dw = getDipSetupWatchStatus(40);
-    const n = (dw.entries || []).filter((e) => e.status === 'armed').length;
+    const dw = getActiveDipWatchesSnapshot();
+    const n = (dw.allActive || []).filter((e) => e.status === 'armed').length;
     if (n) ensure('dip_buyer').armed = n;
   } catch {
     /* soft */
@@ -2584,6 +2584,16 @@ function quietReasonForProfile(profileId: string): string | null {
       describeTrendInactiveReason,
     } = require('./profileAttention') as typeof import('./profileAttention');
     if (profileId === 'dip_buyer') {
+      try {
+        const { getDipMinorLaneHealth } =
+          require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+        const h = getDipMinorLaneHealth();
+        if (h.starved) {
+          return `Dip minors starved ${h.minorsArmedNow}/${h.minorsCap} armed`;
+        }
+      } catch {
+        /* soft */
+      }
       const r = describeDipInactiveReason();
       if (r === 'no_watches') return 'No dip watches';
       if (r === 'armed_no_trigger') return 'Armed — waiting reclaim';

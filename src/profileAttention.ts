@@ -414,11 +414,11 @@ export function describeDipInactiveReason():
     const { config } = require('./config') as typeof import('./config');
     if (!isStrategyEnabledGlobal('ta_market_scanner')) return 'profile_off';
     if (config.tradeProfiles?.profiles?.dip_buyer === false) return 'profile_off';
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-    const st = getDipSetupWatchStatus(30);
-    const armed = (st.entries || []).filter((e) => e.status === 'armed');
-    const watching = (st.entries || []).filter((e) => e.status === 'watching');
+    const st = getActiveDipWatchesSnapshot();
+    const armed = (st.allActive || []).filter((e) => e.status === 'armed');
+    const watching = (st.allActive || []).filter((e) => e.status === 'watching');
     if (!st.active) return 'no_watches';
     try {
       const { isDipBuyerRecovering } =
@@ -573,6 +573,10 @@ export function getSetupWatchDiagnostics(): {
     string,
     { granted: number; denied: number; lastDenyKey: string | null }
   > | null;
+  dipMinorLane: {
+    health: import('./dipMinorLaneHealth').DipMinorLaneHealth;
+    laneCompare: import('./dipMinorLaneHealth').DipLaneCompareDiagnostics;
+  } | null;
   blockReasons: Array<{ reason: string; count: number }>;
   scalperAttentionShare: number | null;
   dipInactiveReason:
@@ -608,17 +612,17 @@ export function getSetupWatchDiagnostics(): {
   try {
     const { getScalperSetupWatchStatus } =
       require('./scalperSetupWatch') as typeof import('./scalperSetupWatch');
-    const { getDipSetupWatchStatus } =
+    const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     const sw = getScalperSetupWatchStatus(24);
-    const dw = getDipSetupWatchStatus(28);
+    const dw = getActiveDipWatchesSnapshot();
     for (const e of sw.entries || []) {
       if (e.status !== 'armed' && e.status !== 'watching') continue;
       const id = String(e.preferredProfileId || 'scalper');
       armedByProfile[id] =
         (armedByProfile[id] || 0) + (e.status === 'armed' ? 1 : 0);
     }
-    const dipArmed = (dw.entries || []).filter((e) => e.status === 'armed')
+    const dipArmed = (dw.allActive || []).filter((e) => e.status === 'armed')
       .length;
     if (dipArmed) armedByProfile.dip_buyer = dipArmed;
   } catch {
@@ -738,6 +742,20 @@ export function getSetupWatchDiagnostics(): {
         const { getQualitySoftAllowCounters } =
           require('./tradeProfiles') as typeof import('./tradeProfiles');
         return getQualitySoftAllowCounters();
+      } catch {
+        return null;
+      }
+    })(),
+    dipMinorLane: (() => {
+      try {
+        const {
+          getDipMinorLaneHealth,
+          getDipLaneCompareDiagnostics,
+        } = require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+        return {
+          health: getDipMinorLaneHealth(),
+          laneCompare: getDipLaneCompareDiagnostics(),
+        };
       } catch {
         return null;
       }

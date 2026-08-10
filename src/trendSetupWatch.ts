@@ -259,11 +259,11 @@ function mutualExclusionBlocked(mint: string): string | null {
     /* optional */
   }
   try {
-    const { isMintOnActiveDipWatch, getDipSetupWatchStatus } =
+    const { isMintOnActiveDipWatch, getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     if (isMintOnActiveDipWatch(mint)) {
-      const dw = getDipSetupWatchStatus(40);
-      const row = (dw.entries || []).find(
+      const dw = getActiveDipWatchesSnapshot();
+      const row = (dw.allActive || []).find(
         (e) =>
           e.mint === mint &&
           (e.status === 'watching' || e.status === 'armed')

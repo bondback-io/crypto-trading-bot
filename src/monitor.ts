@@ -7840,7 +7840,11 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 Number.isFinite(signal.sourceEntryMcUsd)
               ? Number(signal.sourceEntryMcUsd)
               : null;
-        if (isQualityLaneMicrocap(qualityCand, signalMc)) {
+        if (
+        isQualityLaneMicrocap(qualityCand, signalMc, {
+          specialtyFeed: signal.specialtyFeed,
+        })
+      ) {
           const nap = qualityLaneMicrocapNapReason(qualityCand, Number(signalMc));
           console.log(
             `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ${nap}`
@@ -7992,6 +7996,7 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 launchedAt:
                   (signal as { launchedAt?: number | null }).launchedAt ?? null,
                 symbol: signal.symbol,
+                specialtyFeed: signal.specialtyFeed ?? null,
               });
               if (soft.granted) {
                 console.log(

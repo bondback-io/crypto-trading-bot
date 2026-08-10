@@ -13465,6 +13465,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     '/' +
                     (dipF.majors_expired || 0)
                   : '') +
+                (dipF.minors_candidates_seen != null ||
+                dipF.minorsArmedNow != null
+                  ? ' · minors ' +
+                    ((dipF.minorsWatchingNow || 0) +
+                      (dipF.minorsArmedNow || 0)) +
+                    '/' +
+                    (dipF.minorsCap || 16) +
+                    ' arm ' +
+                    (dipF.minorsArmedNow || 0) +
+                    ' seen ' +
+                    (dipF.minors_candidates_seen || 0) +
+                    (dipF.minors_leak_prefer_remapped ||
+                    dipF.minors_leak_soft_allow_skipped
+                      ? ' leak×' +
+                        ((dipF.minors_leak_prefer_remapped || 0) +
+                          (dipF.minors_leak_soft_allow_skipped || 0))
+                      : '')
+                  : '') +
                 (dipF.handoff_failed ? ' · hf×' + dipF.handoff_failed : '') +
                 (dipDenyBits
                   ? ' · deny ' + dipDenyBits

@@ -43,6 +43,15 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.262',
+    title: 'Dip Buyer minor-lane recovery · filter-leak fences',
+    sections: ['scanners', 'microbots', 'overview', 'tradecraft'],
+    items: [
+      'Dip minors: force dip_buyer identity, Trend yields on drop|near Fib/S, honest specialtyFeed, eager Fib seed, reserved status slots + full snapshot for one-setup sync. Jupiter specialty also offers Dip minor watches. Caps/floors unchanged; no Steady soft-arm on minors.',
+      'Steady/HWR soft-allow + microcap NAP band-fenced to majors|medium; leak counters; Dip minor funnel + lane-compare + WR/E chips; starved/perf-collapse logs + Zion/DBR plain language. Scalper/late-chase untouched.',
+    ],
+  },
+  {
     version: '1.2.261',
     title: 'Medium/Majors park inventory · Steady soft-arm',
     sections: ['scanners', 'microbots', 'tradecraft', 'overview', 'knobs'],

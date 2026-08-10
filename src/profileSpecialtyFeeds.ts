@@ -247,6 +247,30 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           profileHanded += 1;
           profileHandedMints.add(ev.mint);
           if (!softPrefer) handedMints.add(ev.mint);
+          // Dip minor supply from Jupiter specialty (non-quality MC only).
+          // Medium/majors parks stay on majorsUniverse Steady pass.
+          try {
+            const mc = Number(c.marketCapUsd) || 0;
+            const isQualityMc = mc >= 50_000_000;
+            if (!isQualityMc && (p.id === 'dip_buyer' || !softPrefer)) {
+              const { offerDipWatchFromCandidate } =
+                require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+              offerDipWatchFromCandidate({
+                mint: c.mint,
+                symbol: c.symbol,
+                name: c.name,
+                marketCapUsd: c.marketCapUsd,
+                volumeH1Usd: c.volumeH1Usd,
+                holderCount: c.holderCount,
+                priceChangeH1Pct: c.priceChangeH1Pct,
+                lastPriceSol: c.lastPriceSol ?? null,
+                specialtyFeed: 'jupiter',
+                preferredProfileId: 'dip_buyer',
+              });
+            }
+          } catch {
+            /* optional */
+          }
         }
       }
       console.log(
@@ -305,7 +329,7 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
             priceChangeH1Pct: c.priceChangeH1Pct,
             kolCount: c.kolCount,
             specialtyFeed: 'kolscan',
-            preferredProfileId: p.id,
+            preferredProfileId: 'dip_buyer',
           });
         } catch {
           /* optional */

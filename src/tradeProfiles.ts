@@ -2140,7 +2140,7 @@ export function getTradeProfilesStatus(): {
       try {
         const { getDipSetupWatchStatus } =
           require('./dipSetupWatch') as typeof import('./dipSetupWatch');
-        return getDipSetupWatchStatus(28);
+        return getDipSetupWatchStatus(200);
       } catch {
         return {
           active: 0,
@@ -2725,12 +2725,54 @@ export function isQualityLaneProfileId(
   return id === 'high_win_rate' || id === 'steady_compounder';
 }
 
+/** Majors|medium band fence — Steady/HWR exceptions never apply to Dip minors. */
+export function isQualityBandSpecialtyFeed(
+  specialtyFeed?: string | null,
+  source?: string | null
+): boolean {
+  const f = String(specialtyFeed || '').toLowerCase();
+  if (f === 'majors' || f === 'medium') return true;
+  const s = String(source || '').toLowerCase();
+  return s === 'majors' || s === 'medium';
+}
+
+let qualityExceptionSkippedNonBand = 0;
+
+export function noteQualityExceptionSkippedNonBand(n = 1): void {
+  qualityExceptionSkippedNonBand += Math.max(1, Math.floor(n));
+  try {
+    const { noteMinorsLeakSoftAllowSkipped } =
+      require('./dipSetupWatch') as typeof import('./dipSetupWatch');
+    noteMinorsLeakSoftAllowSkipped(n);
+  } catch {
+    /* optional */
+  }
+}
+
+export function getQualityExceptionSkippedNonBandCount(): number {
+  return qualityExceptionSkippedNonBand;
+}
+
 /** True when known MC is below the HWR/Steady quality band ($5M). */
 export function isQualityLaneMicrocap(
   profileId: string | null | undefined,
-  marketCapUsd: number | null | undefined
+  marketCapUsd: number | null | undefined,
+  opts?: { specialtyFeed?: string | null; source?: string | null }
 ): boolean {
   if (!isQualityLaneProfileId(profileId)) return false;
+  if (
+    !isQualityBandSpecialtyFeed(opts?.specialtyFeed, opts?.source)
+  ) {
+    // Non-band Steady stamp: do not apply majors NAP to Dip minors.
+    if (opts && (opts.specialtyFeed != null || opts.source != null)) {
+      noteQualityExceptionSkippedNonBand();
+    }
+    // Without feed/source context keep legacy profile-only behavior for
+    // callers that have not been plumbed yet — but prefer band when known.
+    if (opts && (opts.specialtyFeed != null || opts.source != null)) {
+      return false;
+    }
+  }
   if (marketCapUsd == null || !Number.isFinite(marketCapUsd)) return false;
   const mc = Number(marketCapUsd);
   return mc > 0 && mc < QUALITY_LANE_NOT_APPLICABLE_MC_USD;
@@ -2818,9 +2860,23 @@ export function evaluateQualityTop10SoftAllowForGates(opts: {
   pairCreatedAtMs?: number | null;
   launchedAt?: number | null;
   symbol?: string | null;
+  /** Band fence — majors|medium only (1.2.262). */
+  specialtyFeed?: string | null;
+  source?: string | null;
 }): QualityTop10SoftAllowGateResult {
   if (!isQualityLaneProfileId(opts.profileId)) {
     return { applicable: false, granted: false, detail: 'not a quality lane' };
+  }
+  if (!isQualityBandSpecialtyFeed(opts.specialtyFeed, opts.source)) {
+    // When feed/source provided and not quality band: skip Steady/HWR exception.
+    if (opts.specialtyFeed != null || opts.source != null) {
+      noteQualityExceptionSkippedNonBand();
+      return {
+        applicable: false,
+        granted: false,
+        detail: 'quality soft-allow N/A outside majors|medium',
+      };
+    }
   }
   const top10 =
     opts.top10HoldPct != null && Number.isFinite(opts.top10HoldPct)

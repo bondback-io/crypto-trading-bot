@@ -879,7 +879,9 @@ export async function executeBuy(
       );
       // Soft-pass — do not block; known-below-min still hard below
     } else if (
-      isQualityLaneMicrocap(meta?.tradeProfileId, entryMarketCapUsd)
+      isQualityLaneMicrocap(meta?.tradeProfileId, entryMarketCapUsd, {
+        specialtyFeed: meta?.specialtyFeed,
+      })
     ) {
       const nap = qualityLaneMicrocapNapReason(
         meta?.tradeProfileId,
@@ -1006,6 +1008,7 @@ export async function executeBuy(
             return null;
           })(),
           symbol,
+          specialtyFeed: meta?.specialtyFeed ?? null,
         });
         if (soft.granted) {
           console.log(

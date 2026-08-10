@@ -1282,7 +1282,17 @@ export function getDipBuyerRecoveryUiHints(): {
 
 export function formatDipBuyerRecoveryPlainLanguage(): string {
   try {
-    return getDipBuyerRecoveryStatus().plainLanguage || '';
+    const base = getDipBuyerRecoveryStatus().plainLanguage || '';
+    let minor = '';
+    try {
+      const { formatDipMinorLanePlainLanguage } =
+        require('./dipMinorLaneHealth') as typeof import('./dipMinorLaneHealth');
+      minor = formatDipMinorLanePlainLanguage();
+    } catch {
+      minor = '';
+    }
+    if (base && minor) return `${base} · ${minor}`;
+    return base || minor || '';
   } catch {
     return '';
   }
