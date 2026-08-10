@@ -44,6 +44,14 @@ import {
 import { getCachedSolUsdPrice } from './marketData';
 import { lookupCachedJupiterToken } from './jupiterTokens';
 import { logger, errorToMeta, loggedFetch } from './logger';
+import {
+  evaluateQualityTop10SoftAllowForGates,
+  getTradeProfileDefinition,
+  isQualityLaneMicrocap,
+  isQualityLaneProfileId,
+  qualityLaneMicrocapNapReason,
+  type TradeProfileId,
+} from './tradeProfiles';
 
 export { isNonBypassableSkipReason };
 
@@ -421,6 +429,81 @@ export async function evaluateAntiRug(
   return job;
 }
 
+function resolveAntiRugQualityProfileId(ctx: {
+  preferredProfileId?: string | null;
+  candidateTradeProfileId?: string | null;
+  tradeProfileId?: string | null;
+}): string | null {
+  const id =
+    ctx.candidateTradeProfileId ||
+    ctx.preferredProfileId ||
+    ctx.tradeProfileId ||
+    null;
+  return isQualityLaneProfileId(id) ? String(id) : null;
+}
+
+/**
+ * HWR/Steady: soft-allow before hard concentration kill.
+ * - grant → suppress hard skip
+ * - deny (applicable) → soft-allow deny reason
+ * - within lane hard max but over global maxConc → suppress (lane already OK)
+ * - else → keep generic hard reason
+ */
+function resolveQualityConcentrationSkip(opts: {
+  profileId: string;
+  top10HoldPct: number;
+  marketCapUsd?: number | null;
+  volumeH1Usd?: number | null;
+  liquidityUsd?: number | null;
+  holderCount?: number | null;
+  tokenAgeHours?: number | null;
+  pairCreatedAtMs?: number | null;
+  symbol?: string | null;
+  hardReason: string;
+}): { action: 'grant' | 'deny' | 'hard'; reason?: string; detail?: string } {
+  const def = getTradeProfileDefinition(opts.profileId as TradeProfileId);
+  const catalogMax =
+    def.match.maxTop10HoldPct != null &&
+    Number.isFinite(def.match.maxTop10HoldPct) &&
+    def.match.maxTop10HoldPct > 0
+      ? Number(def.match.maxTop10HoldPct)
+      : 0;
+
+  if (catalogMax > 0 && opts.top10HoldPct <= catalogMax) {
+    return {
+      action: 'grant',
+      detail: `${def.name} top10 ${opts.top10HoldPct.toFixed(1)}% within lane hard max ${catalogMax}% — suppress global concentration hard-kill`,
+    };
+  }
+
+  const soft = evaluateQualityTop10SoftAllowForGates({
+    profileId: opts.profileId,
+    top10HoldPct: opts.top10HoldPct,
+    maxTop10HoldPct: catalogMax > 0 ? catalogMax : undefined,
+    marketCapUsd: opts.marketCapUsd,
+    volumeH1Usd: opts.volumeH1Usd,
+    liquidityUsd: opts.liquidityUsd,
+    holderCount: opts.holderCount,
+    tokenAgeHours: opts.tokenAgeHours,
+    pairCreatedAtMs: opts.pairCreatedAtMs,
+    symbol: opts.symbol,
+  });
+
+  if (soft.granted) {
+    return { action: 'grant', detail: soft.detail };
+  }
+  if (soft.applicable && soft.denyDetail) {
+    return {
+      action: 'deny',
+      reason: soft.denyDetail,
+      detail: soft.rejectKey
+        ? `${soft.denyDetail} · key=${soft.rejectKey}`
+        : soft.denyDetail,
+    };
+  }
+  return { action: 'hard', reason: opts.hardReason };
+}
+
 async function runAntiRugChecks(
   mint: string,
   ctx: {
@@ -647,19 +730,65 @@ async function runAntiRugChecks(
     }
   }
 
-  // Top-10 concentration (max — min floor is a non-bypassable hard gate)
+  // Top-10 concentration (max — min floor is a non-bypassable hard gate).
+  // HWR/Steady: soft-allow / within-lane-max before hard kill.
+  const qualityProfileId = resolveAntiRugQualityProfileId(ctx);
   if (maxConc > 0 && metrics.top10HoldPct != null) {
     if (metrics.top10HoldPct > maxConc) {
-      score += 25;
-      flags.push({
-        id: 'holder_concentration',
-        severity: 'high',
-        label: 'High holder concentration',
-        detail: `top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%`,
-      });
-      skipReasons.push(
-        `Skipped - high holder concentration (top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%)`
-      );
+      const hardReason = `Skipped - high holder concentration (top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%)`;
+      if (qualityProfileId) {
+        const q = resolveQualityConcentrationSkip({
+          profileId: qualityProfileId,
+          top10HoldPct: metrics.top10HoldPct,
+          marketCapUsd: metrics.marketCapUsd ?? checks.marketCapUsd,
+          volumeH1Usd: metrics.volumeH1Usd ?? checks.volumeH1Usd,
+          liquidityUsd: metrics.liquidityUsd ?? checks.liquidityUsd,
+          holderCount: metrics.holderCountEstimate ?? checks.holderCount,
+          symbol: ctx.symbol,
+          hardReason,
+        });
+        if (q.action === 'grant') {
+          flags.push({
+            id: 'holder_concentration_soft_allow',
+            severity: 'info',
+            label: 'Top10 soft-allow grant',
+            detail: q.detail,
+          });
+          console.log(
+            `[anti-rug] top10_soft_allow GRANT ${ctx.symbol || mint.slice(0, 8)}… · ${q.detail}`
+          );
+        } else if (q.action === 'deny' && q.reason) {
+          score += 25;
+          flags.push({
+            id: 'holder_concentration_soft_deny',
+            severity: 'high',
+            label: 'Top10 soft-allow deny',
+            detail: q.detail || q.reason,
+          });
+          skipReasons.push(q.reason);
+          console.log(
+            `[anti-rug] top10_soft_allow REJECT ${ctx.symbol || mint.slice(0, 8)}… · ${q.detail || q.reason}`
+          );
+        } else {
+          score += 25;
+          flags.push({
+            id: 'holder_concentration',
+            severity: 'high',
+            label: 'High holder concentration',
+            detail: `top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%`,
+          });
+          skipReasons.push(hardReason);
+        }
+      } else {
+        score += 25;
+        flags.push({
+          id: 'holder_concentration',
+          severity: 'high',
+          label: 'High holder concentration',
+          detail: `top10 ${metrics.top10HoldPct.toFixed(1)}% > ${maxConc}%`,
+        });
+        skipReasons.push(hardReason);
+      }
     }
   } else if (maxConc > 0 && metrics.topHolderPct != null && maxTopHolder <= 0) {
     // Fallback: single top holder vs concentration limit (only if dedicated top-holder max off)
@@ -996,6 +1125,7 @@ async function runAntiRugChecks(
   // Enforce known Top-10% min/max; unknown is soft-only after Jupiter + on-chain attempts.
   // checks.top10HoldPct prefers Jupiter audit.topHoldersPercentage when available.
   // Soak (Risk Off) zeros min+max → inactive; configured >0 still enforces known bounds.
+  // HWR/Steady: soft-allow before "top 10 holders too high" hard kill (insider stays hard).
   const holderHard = evaluateHolderConcentrationHardFloors({
     top10HoldPct: checks.top10HoldPct,
     insiderPct: checks.insiderPct,
@@ -1010,8 +1140,50 @@ async function runAntiRugChecks(
       detail: f.detail,
     });
   }
-  hardSkipReasons.push(...holderHard.skipReasons);
-  skipReasons.push(...holderHard.skipReasons);
+  for (const reason of holderHard.skipReasons) {
+    const isTop10TooHigh = /top 10 holders too high|top10 holders too high/i.test(
+      reason
+    );
+    if (
+      isTop10TooHigh &&
+      qualityProfileId &&
+      checks.top10HoldPct != null &&
+      Number.isFinite(checks.top10HoldPct)
+    ) {
+      const q = resolveQualityConcentrationSkip({
+        profileId: qualityProfileId,
+        top10HoldPct: Number(checks.top10HoldPct),
+        marketCapUsd: checks.marketCapUsd,
+        volumeH1Usd: checks.volumeH1Usd,
+        liquidityUsd: checks.liquidityUsd,
+        holderCount: checks.holderCount,
+        symbol: ctx.symbol,
+        hardReason: reason,
+      });
+      if (q.action === 'grant') {
+        flags.push({
+          id: 'holder_hard_top10_soft_allow',
+          severity: 'info',
+          label: 'Top10 hard-floor soft-allow grant',
+          detail: q.detail,
+        });
+        console.log(
+          `[anti-rug] top10_soft_allow GRANT (hard floors) ${ctx.symbol || mint.slice(0, 8)}… · ${q.detail}`
+        );
+        continue;
+      }
+      if (q.action === 'deny' && q.reason) {
+        hardSkipReasons.push(q.reason);
+        skipReasons.push(q.reason);
+        console.log(
+          `[anti-rug] top10_soft_allow REJECT (hard floors) ${ctx.symbol || mint.slice(0, 8)}… · ${q.detail || q.reason}`
+        );
+        continue;
+      }
+    }
+    hardSkipReasons.push(reason);
+    skipReasons.push(reason);
+  }
 
   // --- Birdeye token overview + smart-money signal (soft enrichment) ---
   let birdeyeSummary: ReturnType<typeof summarizeBirdeye> | undefined;
@@ -1225,6 +1397,28 @@ async function runAntiRugChecks(
     metrics.sellsH1 != null && Number.isFinite(metrics.sellsH1)
       ? metrics.sellsH1
       : jupSells;
+  // HWR/Steady quality band: known MC under $5M → explicit NAP (not generic anti-rug MC).
+  let qualityMcNap = false;
+  if (
+    qualityProfileId &&
+    isQualityLaneMicrocap(qualityProfileId, checks.marketCapUsd)
+  ) {
+    qualityMcNap = true;
+    const nap = qualityLaneMicrocapNapReason(
+      qualityProfileId,
+      Number(checks.marketCapUsd)
+    );
+    hardSkipReasons.push(nap);
+    skipReasons.push(nap);
+    flags.push({
+      id: 'quality_lane_mc_nap',
+      severity: 'high',
+      label: 'Quality lane MC NAP',
+      detail: nap,
+    });
+    console.log(`[anti-rug] ${nap}`);
+  }
+
   const hard = evaluateDeadTokenHardFloors(
     {
       liquidityUsd: checks.liquidityUsd,
@@ -1252,6 +1446,7 @@ async function runAntiRugChecks(
   );
   score += hard.scorePenalty;
   for (const f of hard.flags) {
+    if (qualityMcNap && f.id === 'hard_low_market_cap') continue;
     flags.push({
       id: f.id,
       severity: f.severity,
@@ -1259,8 +1454,11 @@ async function runAntiRugChecks(
       detail: f.detail,
     });
   }
-  hardSkipReasons.push(...hard.skipReasons);
-  skipReasons.push(...hard.skipReasons);
+  for (const reason of hard.skipReasons) {
+    if (qualityMcNap && /market cap too low/i.test(reason)) continue;
+    hardSkipReasons.push(reason);
+    skipReasons.push(reason);
+  }
 
   score = Math.min(100, Math.max(0, Math.round(score)));
 

@@ -42,8 +42,13 @@ import {
   applyTradeProfileSizing,
   evaluateTradeProfileLanes,
   pickWinningTradeProfileLane,
+  isQualityLaneMicrocap,
+  qualityLaneMicrocapNapReason,
+  evaluateQualityTop10SoftAllowForGates,
+  getTradeProfileDefinition,
   type TradeProfileMatchContext,
   type TradeProfileLaneResult,
+  type TradeProfileId,
 } from './tradeProfiles';
 import { evaluateAffordability } from './fundGate';
 import { refreshOpenMarketActivity } from './marketData';
@@ -7800,6 +7805,28 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 String(r)
               )
             ));
+        // HWR/Steady: known microcaps never reach anti-rug (explicit NAP).
+        const qualityCand = signal.candidateTradeProfileId || null;
+        const signalMc =
+          signal.metrics?.marketCapUsd != null &&
+          Number.isFinite(signal.metrics.marketCapUsd)
+            ? Number(signal.metrics.marketCapUsd)
+            : signal.sourceEntryMcUsd != null &&
+                Number.isFinite(signal.sourceEntryMcUsd)
+              ? Number(signal.sourceEntryMcUsd)
+              : null;
+        if (isQualityLaneMicrocap(qualityCand, signalMc)) {
+          const nap = qualityLaneMicrocapNapReason(qualityCand, Number(signalMc));
+          console.log(
+            `[monitor] FILTER_SKIP kind=${signalKind} symbol=${signal.symbol} ${nap}`
+          );
+          paperTrader.addLog('info', nap, {
+            mint: signal.mint,
+            symbol: signal.symbol,
+          });
+          recordRejectedSignal(signal, nap);
+          return false;
+        }
         const report: AntiRugReport = await evaluateAntiRug(signal.mint, {
           earlyEntry,
           isMigrated: Boolean(signal.isMigration),
@@ -7872,7 +7899,8 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
         );
 
         // Steady Compounder / High Win-Rate: unknown insider/top10 soft-pass
-        // (score penalty only). Known-high insider / known top10 band still hard.
+        // (score penalty only). Known-high insider / known top10 band still hard
+        // unless quality top10 soft-allow grants.
         const qualityLaneId =
           lanePassers && lanePassers[0] ? lanePassers[0].profileId : null;
         if (
@@ -7896,9 +7924,63 @@ async function passesFilters(signal: TradeSignal): Promise<boolean> {
                 `quality=${qualityLaneId}`
             );
           }
-          if (qualityGate.skipReasons.length > 0) {
-            const reason = qualityGate.skipReasons[0]!;
-            const knownBlock = /insider % too high|top 10 holders too/i.test(
+          const filteredSkipReasons: string[] = [];
+          for (const reason of qualityGate.skipReasons) {
+            const isTop10TooHigh =
+              /top 10 holders too high|top10 holders too high/i.test(reason);
+            if (
+              isTop10TooHigh &&
+              report.checks.top10HoldPct != null &&
+              Number.isFinite(report.checks.top10HoldPct)
+            ) {
+              const def = getTradeProfileDefinition(
+                qualityLaneId as TradeProfileId
+              );
+              const catalogMax =
+                def.match.maxTop10HoldPct != null &&
+                Number.isFinite(def.match.maxTop10HoldPct)
+                  ? Number(def.match.maxTop10HoldPct)
+                  : 0;
+              const top10 = Number(report.checks.top10HoldPct);
+              if (catalogMax > 0 && top10 <= catalogMax) {
+                console.log(
+                  `[monitor] top10_soft_allow GRANT kind=${signalKind} symbol=${signal.symbol} ` +
+                    `quality=${qualityLaneId} · within lane hard max ${catalogMax}%`
+                );
+                continue;
+              }
+              const soft = evaluateQualityTop10SoftAllowForGates({
+                profileId: qualityLaneId,
+                top10HoldPct: top10,
+                maxTop10HoldPct: catalogMax > 0 ? catalogMax : undefined,
+                marketCapUsd: report.checks.marketCapUsd,
+                volumeH1Usd: report.checks.volumeH1Usd,
+                liquidityUsd: report.checks.liquidityUsd,
+                holderCount: report.checks.holderCount,
+                symbol: signal.symbol,
+              });
+              if (soft.granted) {
+                console.log(
+                  `[monitor] top10_soft_allow GRANT kind=${signalKind} symbol=${signal.symbol} ` +
+                    `quality=${qualityLaneId} · ${soft.detail}`
+                );
+                continue;
+              }
+              if (soft.applicable && soft.denyDetail) {
+                filteredSkipReasons.push(soft.denyDetail);
+                console.log(
+                  `[monitor] top10_soft_allow REJECT kind=${signalKind} symbol=${signal.symbol} ` +
+                    `quality=${qualityLaneId} · ${soft.denyDetail}` +
+                    (soft.rejectKey ? ` · key=${soft.rejectKey}` : '')
+                );
+                continue;
+              }
+            }
+            filteredSkipReasons.push(reason);
+          }
+          if (filteredSkipReasons.length > 0) {
+            const reason = filteredSkipReasons[0]!;
+            const knownBlock = /insider % too high|top 10 holders too|soft-allow deny/i.test(
               reason
             );
             console.log(

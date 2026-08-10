@@ -49,6 +49,12 @@ import { logger, errorToMeta } from './logger';
 import {
   resolveTurboSlippageBps,
   TURBO_DEFAULT_PRIORITY_FEE_MULT,
+  isQualityLaneMicrocap,
+  isQualityLaneProfileId,
+  qualityLaneMicrocapNapReason,
+  evaluateQualityTop10SoftAllowForGates,
+  getTradeProfileDefinition,
+  type TradeProfileId,
 } from './tradeProfiles';
 import {
   fetchLiveTokenSnapshot,
@@ -872,6 +878,21 @@ export async function executeBuy(
           `(min $${minEntryMc}) — allowing fill`
       );
       // Soft-pass — do not block; known-below-min still hard below
+    } else if (
+      isQualityLaneMicrocap(meta?.tradeProfileId, entryMarketCapUsd)
+    ) {
+      const nap = qualityLaneMicrocapNapReason(
+        meta?.tradeProfileId,
+        entryMarketCapUsd
+      );
+      logger.info('Trade', 'FILTER_SKIP quality MC NAP', {
+        mint: mint.slice(0, 12),
+        symbol,
+        reason: nap,
+        entryMarketCapUsd,
+      });
+      console.log(`[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${nap}`);
+      return { success: false, mode: config.mode, error: nap };
     } else if (entryMarketCapUsd < minEntryMc) {
       const reason =
         `Skipped — market cap too low ($${Math.round(entryMarketCapUsd)} < $${minEntryMc})`;
@@ -943,20 +964,70 @@ export async function executeBuy(
     insiderPct,
   });
   if (holderGate.skipReasons.length > 0) {
-    const reason = holderGate.skipReasons[0]!;
-    logger.info('Trade', 'FILTER_SKIP holder concentration', {
-      mint: mint.slice(0, 12),
-      symbol,
-      reason,
-      top10HoldPct: top10HoldPct ?? null,
-      insiderPct: insiderPct ?? null,
-    });
-    console.log(
-      `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
-        `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'} · ` +
-        `insider=${insiderPct != null ? insiderPct.toFixed(0) + '%' : '?'})`
-    );
-    return { success: false, mode: config.mode, error: reason };
+    const filtered: string[] = [];
+    for (const reason of holderGate.skipReasons) {
+      const isTop10TooHigh =
+        /top 10 holders too high|top10 holders too high/i.test(reason);
+      if (
+        isTop10TooHigh &&
+        isQualityLaneProfileId(meta?.tradeProfileId) &&
+        top10HoldPct != null &&
+        Number.isFinite(top10HoldPct)
+      ) {
+        const def = getTradeProfileDefinition(
+          meta!.tradeProfileId as TradeProfileId
+        );
+        const catalogMax =
+          def.match.maxTop10HoldPct != null &&
+          Number.isFinite(def.match.maxTop10HoldPct)
+            ? Number(def.match.maxTop10HoldPct)
+            : 0;
+        if (catalogMax > 0 && top10HoldPct <= catalogMax) {
+          console.log(
+            `[trade] top10_soft_allow GRANT ${symbol}: within lane hard max ${catalogMax}%`
+          );
+          continue;
+        }
+        const soft = evaluateQualityTop10SoftAllowForGates({
+          profileId: meta?.tradeProfileId,
+          top10HoldPct,
+          maxTop10HoldPct: catalogMax > 0 ? catalogMax : undefined,
+          marketCapUsd: entryMarketCapUsd ?? null,
+          symbol,
+        });
+        if (soft.granted) {
+          console.log(
+            `[trade] top10_soft_allow GRANT ${symbol}: ${soft.detail}`
+          );
+          continue;
+        }
+        if (soft.applicable && soft.denyDetail) {
+          filtered.push(soft.denyDetail);
+          console.log(
+            `[trade] top10_soft_allow REJECT ${symbol}: ${soft.denyDetail}` +
+              (soft.rejectKey ? ` · key=${soft.rejectKey}` : '')
+          );
+          continue;
+        }
+      }
+      filtered.push(reason);
+    }
+    if (filtered.length > 0) {
+      const reason = filtered[0]!;
+      logger.info('Trade', 'FILTER_SKIP holder concentration', {
+        mint: mint.slice(0, 12),
+        symbol,
+        reason,
+        top10HoldPct: top10HoldPct ?? null,
+        insiderPct: insiderPct ?? null,
+      });
+      console.log(
+        `[trade] FILTER_SKIP mint=${mint.slice(0, 8)}… ${reason} ` +
+          `(top10=${top10HoldPct != null ? top10HoldPct.toFixed(1) + '%' : '?'} · ` +
+          `insider=${insiderPct != null ? insiderPct.toFixed(0) + '%' : '?'})`
+      );
+      return { success: false, mode: config.mode, error: reason };
+    }
   }
   if (top10HoldPct != null) {
     logger.info('Trade', 'Entry top10 OK', {

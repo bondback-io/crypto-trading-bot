@@ -2692,13 +2692,16 @@ const TOP10_SOFT_CEILING_PCT: Partial<Record<string, number>> = {
   steady_compounder: 68,
   high_win_rate: 65,
 };
-/** Age-unknown Steady/HWR soft ceiling (stricter vol/liq/MC fallback still applies). */
+/** Age-unknown Steady/HWR soft ceiling (practical mid/high books; liq/safety still apply). */
 const TOP10_SOFT_CEILING_AGE_UNKNOWN_PCT: Partial<Record<string, number>> = {
-  steady_compounder: 72,
-  high_win_rate: 70,
+  steady_compounder: 75,
+  high_win_rate: 75,
 };
-/** Silent not_applicable floor — stop HWR/Steady cascade skip spam on microcaps. */
-const QUALITY_LANE_NOT_APPLICABLE_MC_USD = 5_000_000;
+/**
+ * Silent not_applicable floor — stop HWR/Steady cascade skip spam on microcaps.
+ * Known MC below this never evaluates HWR/Steady (armed watches included).
+ */
+export const QUALITY_LANE_NOT_APPLICABLE_MC_USD = 5_000_000;
 const TOP10_SOFT_MIN_LIQ_USD: Partial<Record<string, number>> = {
   steady_compounder: 10_000,
   high_win_rate: 20_000,
@@ -2713,6 +2716,136 @@ const TOP10_SOFT_MIN_AGE_HOURS = 90 * 24;
 export const TOP10_SOFT_ALLOW_SIZE_MULT = 0.9;
 /** Size haircut when Steady/HWR grants via age-unknown quality fallback. */
 export const TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT = 0.85;
+
+/** Steady Compounder + High Win-Rate quality lanes (soft-allow / MC NAP). */
+export function isQualityLaneProfileId(
+  profileId: string | null | undefined
+): boolean {
+  const id = String(profileId || '').trim();
+  return id === 'high_win_rate' || id === 'steady_compounder';
+}
+
+/** True when known MC is below the HWR/Steady quality band ($5M). */
+export function isQualityLaneMicrocap(
+  profileId: string | null | undefined,
+  marketCapUsd: number | null | undefined
+): boolean {
+  if (!isQualityLaneProfileId(profileId)) return false;
+  if (marketCapUsd == null || !Number.isFinite(marketCapUsd)) return false;
+  const mc = Number(marketCapUsd);
+  return mc > 0 && mc < QUALITY_LANE_NOT_APPLICABLE_MC_USD;
+}
+
+/** Operator-facing NAP reason (not generic anti-rug MC too low). */
+export function qualityLaneMicrocapNapReason(
+  profileId: string | null | undefined,
+  marketCapUsd: number
+): string {
+  const def = isQualityLaneProfileId(profileId)
+    ? getTradeProfileDefinition(profileId as TradeProfileId)
+    : null;
+  const name = def?.name || String(profileId || 'quality');
+  return `${name} quality MC NAP — MC $${Math.round(marketCapUsd)} < $${QUALITY_LANE_NOT_APPLICABLE_MC_USD} (medium/major band only)`;
+}
+
+export type QualityTop10SoftAllowGateResult = {
+  applicable: boolean;
+  granted: boolean;
+  tag?: Top10SoftAllowGrantTag;
+  sizeMult?: number;
+  denyDetail?: string;
+  rejectKey?:
+    | 'age'
+    | 'volume'
+    | 'liquidity'
+    | 'holders'
+    | 'ceiling'
+    | 'market_cap'
+    | 'age_unknown_fallback';
+  detail: string;
+};
+
+/**
+ * Soft-allow evaluation for anti-rug / monitor / executeBuy gates.
+ * Only Steady/HWR; fast bots return applicable=false.
+ */
+export function evaluateQualityTop10SoftAllowForGates(opts: {
+  profileId: string | null | undefined;
+  top10HoldPct: number | null | undefined;
+  /** Lane hard max; defaults to profile match.maxTop10HoldPct. */
+  maxTop10HoldPct?: number | null;
+  marketCapUsd?: number | null;
+  volumeH1Usd?: number | null;
+  liquidityUsd?: number | null;
+  holderCount?: number | null;
+  tokenAgeHours?: number | null;
+  pairCreatedAtMs?: number | null;
+  launchedAt?: number | null;
+  symbol?: string | null;
+}): QualityTop10SoftAllowGateResult {
+  if (!isQualityLaneProfileId(opts.profileId)) {
+    return { applicable: false, granted: false, detail: 'not a quality lane' };
+  }
+  const top10 =
+    opts.top10HoldPct != null && Number.isFinite(opts.top10HoldPct)
+      ? Number(opts.top10HoldPct)
+      : null;
+  if (top10 == null) {
+    return {
+      applicable: false,
+      granted: false,
+      detail: 'top10 unknown — soft-allow N/A',
+    };
+  }
+  const def = getTradeProfileDefinition(opts.profileId as TradeProfileId);
+  const catalogMax =
+    def.match.maxTop10HoldPct != null &&
+    Number.isFinite(def.match.maxTop10HoldPct) &&
+    def.match.maxTop10HoldPct > 0
+      ? Number(def.match.maxTop10HoldPct)
+      : 0;
+  const maxTop10 =
+    opts.maxTop10HoldPct != null &&
+    Number.isFinite(opts.maxTop10HoldPct) &&
+    opts.maxTop10HoldPct > 0
+      ? Number(opts.maxTop10HoldPct)
+      : catalogMax;
+  if (maxTop10 <= 0 || top10 <= maxTop10) {
+    return {
+      applicable: false,
+      granted: false,
+      detail: 'within hard max — soft-allow N/A',
+    };
+  }
+  const ctx: TradeProfileMatchContext = {
+    marketCapUsd: opts.marketCapUsd ?? null,
+    volumeH1Usd: opts.volumeH1Usd ?? null,
+    liquidityUsd: opts.liquidityUsd ?? null,
+    holderCount: opts.holderCount ?? null,
+    tokenAgeHours: opts.tokenAgeHours ?? null,
+    pairCreatedAtMs: opts.pairCreatedAtMs ?? null,
+    launchedAt: opts.launchedAt ?? null,
+    top10HoldPct: top10,
+    symbol: opts.symbol ?? undefined,
+  };
+  const soft = resolveTop10SoftAllow(def, ctx, top10, maxTop10);
+  if (soft.allow) {
+    return {
+      applicable: true,
+      granted: true,
+      tag: soft.grantTag,
+      sizeMult: soft.sizeMult,
+      detail: soft.detail,
+    };
+  }
+  return {
+    applicable: true,
+    granted: false,
+    denyDetail: soft.detail,
+    rejectKey: soft.rejectKey,
+    detail: soft.detail,
+  };
+}
 
 export type Top10SoftAllowGrantTag =
   | 'top10_soft_allow_age_known'
@@ -2765,7 +2898,7 @@ export function resolveTokenAgeHoursForSoftAllow(
 /**
  * When known top10 exceeds the lane hard max, Steady/HWR may soft-allow if
  * age/volume/liquidity/holders/soft-ceiling all pass. Fast bots never enter.
- * Age unknown → stricter vol/liq fallback (not a hard age deny).
+ * Age unknown → practical lane-min vol + higher soft ceiling (not a hard age deny).
  */
 export function resolveTop10SoftAllow(
   def: TradeProfileDefinition,
@@ -2811,7 +2944,7 @@ export function resolveTop10SoftAllow(
   if (top10 > softCeil) {
     return {
       allow: false,
-      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'ceiling',
+      rejectKey: 'ceiling',
       detail: ageUnknown
         ? `${def.name} top10 soft-allow deny: age_unknown_fallback ceiling — ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`
         : `${def.name} top10 soft-allow deny: ${top10.toFixed(1)}% > soft ceiling ${softCeil}%`,
@@ -2824,7 +2957,8 @@ export function resolveTop10SoftAllow(
     def.match.minVolumeH1Usd > 0
       ? Number(def.match.minVolumeH1Usd)
       : 0;
-  const minVol = ageUnknown && minVolBase > 0 ? minVolBase * 1.5 : minVolBase;
+  // Age-unknown uses 1.0× lane min (practical mid/high books; was 1.5×).
+  const minVol = minVolBase;
   const volH1 =
     ctx.volumeH1Usd != null && Number.isFinite(ctx.volumeH1Usd)
       ? Number(ctx.volumeH1Usd)
@@ -2832,7 +2966,7 @@ export function resolveTop10SoftAllow(
   if (minVol > 0 && (volH1 == null || volH1 < minVol)) {
     return {
       allow: false,
-      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'volume',
+      rejectKey: 'volume',
       detail:
         volH1 == null
           ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback volume —' : ''} volumeH1 unknown (need ≥$${Math.round(minVol)})`
@@ -2850,7 +2984,7 @@ export function resolveTop10SoftAllow(
   if (liq == null || liq < minLiq) {
     return {
       allow: false,
-      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'liquidity',
+      rejectKey: 'liquidity',
       detail:
         liq == null
           ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback liquidity —' : ''} liquidity unknown (need ≥$${Math.round(minLiq)})`
@@ -2871,7 +3005,7 @@ export function resolveTop10SoftAllow(
   if (minHolders > 0 && (holders == null || holders < minHolders)) {
     return {
       allow: false,
-      rejectKey: ageUnknown ? 'age_unknown_fallback' : 'holders',
+      rejectKey: 'holders',
       detail:
         holders == null
           ? `${def.name} top10 soft-allow deny:${ageUnknown ? ' age_unknown_fallback holders —' : ''} holders unknown (need ≥${minHolders})`
@@ -2900,7 +3034,7 @@ export function resolveTop10SoftAllow(
     if (minMc > 0 && (mc == null || mc < minMc)) {
       return {
         allow: false,
-        rejectKey: 'age_unknown_fallback',
+        rejectKey: 'market_cap',
         detail:
           mc == null
             ? `${def.name} top10 soft-allow deny: age_unknown_fallback market_cap — MC unknown (need ≥$${Math.round(minMc)})`
@@ -2910,7 +3044,7 @@ export function resolveTop10SoftAllow(
     if (maxMc > 0 && mc != null && mc > maxMc) {
       return {
         allow: false,
-        rejectKey: 'age_unknown_fallback',
+        rejectKey: 'market_cap',
         detail: `${def.name} top10 soft-allow deny: age_unknown_fallback market_cap — MC $${Math.round(mc)} > $${Math.round(maxMc)}`,
       };
     }
@@ -2929,7 +3063,7 @@ export function resolveTop10SoftAllow(
     allow: true,
     grantTag: 'top10_soft_allow_age_unknown_fallback',
     sizeMult: TOP10_SOFT_ALLOW_AGE_UNKNOWN_SIZE_MULT,
-    detail: `${def.name} top10_soft_allow_age_unknown_fallback ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}% · vol≥1.5× · liq≥$${Math.round(minLiq)})`,
+    detail: `${def.name} top10_soft_allow_age_unknown_fallback ${top10.toFixed(1)}% (hard max ${maxTop10}% · soft ≤${softCeil}% · vol≥lane · liq≥$${Math.round(minLiq)})`,
   };
 }
 
@@ -3293,11 +3427,9 @@ export function evaluateTradeProfileLanes(
       });
       continue;
     }
-    // HWR/Steady: silent not_applicable on microcaps (stop MC-too-low cascade spam)
-    if (
-      (def.id === 'high_win_rate' || def.id === 'steady_compounder') &&
-      ctx.armedWatch !== true
-    ) {
+    // HWR/Steady: silent not_applicable on microcaps (stop MC-too-low cascade spam).
+    // Always apply — armed watches must not evaluate junk under $5M either.
+    if (def.id === 'high_win_rate' || def.id === 'steady_compounder') {
       const mcNap =
         ctx.marketCapUsd != null && Number.isFinite(ctx.marketCapUsd)
           ? Number(ctx.marketCapUsd)

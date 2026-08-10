@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.259',
+    title: 'HWR/Steady soft-allow before anti-rug · microcap NAP',
+    sections: ['microbots', 'tradecraft', 'risk', 'overview', 'knobs'],
+    items: [
+      'HWR/Steady top10 soft-allow now runs before anti-rug / quality holder / executeBuy concentration hard-kills; grant suppresses high-holder skip; deny keeps explicit soft-allow reason + leaf key (volume/ceiling/liquidity/holders/market_cap). RugCheck SAOF + insider hard caps unchanged.',
+      'Microcap: HWR/Steady always silent NAP when known MC <$5M (armed watches included); cascade/anti-rug/executeBuy emit quality MC NAP instead of generic anti-rug MC-too-low on junk.',
+      'Age-unknown soft-allow recalibrated: vol 1.0× lane min (HWR $15k / Steady $4k); soft ceiling 75%; keep liq $30k/$15k + size ×0.85. Late-chase + Scalper untouched.',
+    ],
+  },
+  {
     version: '1.2.258',
     title: 'Harvest runners · Medium/Major Steady unlock',
     sections: ['microbots', 'tradecraft', 'scanners', 'overview', 'knobs', 'risk'],
