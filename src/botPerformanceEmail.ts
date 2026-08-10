@@ -535,7 +535,7 @@ export function buildBotPerformanceReport(opts?: {
 
   const ver = getAppVersion();
   const lines: string[] = [];
-  lines.push('BondBack · Micro-bot performance digest');
+  lines.push('BondBack · Stats digest');
   lines.push(`App ${ver.label || ver.version}`);
   lines.push(`Period: ${periodLabel}`);
   lines.push('');
@@ -600,7 +600,7 @@ export function buildBotPerformanceReport(opts?: {
       })
       .join('');
     html = renderDarkEmail({
-      eyebrow: 'Bot Performance Digest',
+      eyebrow: 'Stats Digest',
       title: `${bots.length} micro-bots`,
       subtitle: periodLabel,
       bodyHtml:

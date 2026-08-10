@@ -1,6 +1,6 @@
 /**
  * Dashboard HTML — served at /dashboard
- * Tabbed Tailwind UI (Overview / Trades / Watchlist / Zion / Micro Bots; Smart Wallets / Settings / Config / Backtester / Bot Performance / Logs / Back Up / Bot Info via settings menu)
+ * Tabbed Tailwind UI (Overview / Zion / Micro Bots / Stats / Watchlist; Smart Wallets / Settings / Config / Logs / Back Up / Bot Info via settings menu; Trades + Backtester tabs retained but nav/cog entries hidden)
  */
 
 import {
@@ -3347,6 +3347,52 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
       gap: 0.65rem;
     }
+    .recovery-stages-compact .fpr-grid {
+      grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
+      gap: 0.5rem;
+    }
+    .recovery-stages-compact .recovery-stages-block {
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      background: #0b1220;
+      padding: 0.55rem 0.65rem;
+      margin-bottom: 0.55rem;
+    }
+    .recovery-stages-compact .recovery-stages-block:last-child {
+      margin-bottom: 0;
+    }
+    .recovery-stages-compact .recovery-stages-block > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.4rem 0.75rem;
+      font-size: 0.8125rem;
+      font-weight: 650;
+      color: #e2e8f0;
+    }
+    .recovery-stages-compact .recovery-stages-block > summary::-webkit-details-marker { display: none; }
+    .recovery-stages-compact .recovery-stages-block > summary::after {
+      content: 'Show';
+      font-size: 0.68rem;
+      font-weight: 650;
+      color: #94a3b8;
+    }
+    .recovery-stages-compact .recovery-stages-block[open] > summary::after { content: 'Hide'; }
+    .recovery-stages-compact .filters-row {
+      gap: 0.4rem 0.55rem;
+      margin-bottom: 0.45rem !important;
+    }
+    .recovery-stages-compact .fpr-card {
+      padding: 0.45rem 0.55rem;
+    }
+    .recovery-stages-compact .section-blurb {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin: 0 0 0.45rem;
+    }
     .fpr-card {
       border: 1px solid #1e293b;
       border-radius: 0.5rem;
@@ -3510,6 +3556,80 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     /* Hide learning-scoped cards unless Learning tab is active */
     [data-tab-panel="microbots"]:not([data-mb-active="learning"]) [data-mb-tab-scope="learning"] {
       display: none !important;
+    }
+    /* Stats (botperf) main-nav sub-panels */
+    .botperf-subtabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.35rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.15rem;
+    }
+    .botperf-subtabs .closed-filter-btn {
+      flex: 0 0 auto;
+      min-height: 2.25rem;
+      padding: 0.4rem 0.75rem;
+      white-space: nowrap;
+    }
+    .botperf-panel {
+      display: none;
+      min-width: 0;
+    }
+    .botperf-panel.is-active {
+      display: block;
+    }
+    .botperf-panel.is-active > .card + .card {
+      margin-top: 0.85rem;
+    }
+    @media (max-width: 479px) {
+      .botperf-subtabs .closed-filter-btn {
+        min-height: 2.5rem;
+        padding: 0.45rem 0.7rem;
+        font-size: 0.78rem;
+      }
+    }
+    /* Watchlist main + setup sub-panels */
+    .watchlist-subtabs,
+    .watch-setup-subtabs {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 0.35rem;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.15rem;
+    }
+    .watchlist-subtabs .closed-filter-btn,
+    .watch-setup-subtabs .closed-filter-btn {
+      flex: 0 0 auto;
+      min-height: 2.25rem;
+      padding: 0.4rem 0.75rem;
+      white-space: nowrap;
+    }
+    .watchlist-panel,
+    .watch-setup-panel {
+      display: none;
+      min-width: 0;
+    }
+    .watchlist-panel.is-active,
+    .watch-setup-panel.is-active {
+      display: block;
+    }
+    .watchlist-panel.is-active.space-y-4 > .card + .card,
+    .watchlist-panel.is-active.space-y-3 > .card + .card {
+      margin-top: 0.85rem;
+    }
+    @media (max-width: 479px) {
+      .watchlist-subtabs .closed-filter-btn,
+      .watch-setup-subtabs .closed-filter-btn {
+        min-height: 2.5rem;
+        padding: 0.45rem 0.7rem;
+        font-size: 0.78rem;
+      }
     }
     @media (max-width: 479px) {
       .mb-routing-row {
@@ -6195,12 +6315,21 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     .zion-mic-btn {
       position: relative;
       flex: 0 0 auto;
-      width: 2.2rem; height: 2.2rem;
+      width: 2.75rem; height: 2.75rem;
+      min-width: 44px; min-height: 44px;
       border: 1px solid #334155; border-radius: 0.55rem;
       background: transparent; color: #64748b;
       display: inline-flex; align-items: center; justify-content: center;
       cursor: pointer; padding: 0; line-height: 1;
       opacity: 0.7; transition: color 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .zion-mic-btn svg,
+    .zion-mic-btn .zion-mic-dot {
+      pointer-events: none;
     }
     .zion-mic-btn svg { width: 1.05rem; height: 1.05rem; display: block; }
     .zion-mic-btn:hover, .zion-mic-btn:focus-visible {
@@ -7063,7 +7192,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
       <div class="settings-menu-wrap" id="settings-menu-wrap">
-        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Backtester, Bot Performance, Logs, Back Up, and Bot Info" onclick="toggleSettingsMenu(event)">
+        <button type="button" id="settings-btn" class="settings-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-dropdown" title="Settings — Smart Wallets, Settings, Config, Logs, Back Up, and Bot Info" onclick="toggleSettingsMenu(event)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/>
             <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
@@ -7075,7 +7204,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
             Smart Wallets
           </button>
-          <button type="button" role="menuitem" data-settings-tab="backtester" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
+          <!-- Backtester hidden from cog menu — tab + Bot Info remain; revisit later (Live Sim preferred for now) -->
+          <button type="button" role="menuitem" data-settings-tab="backtester" class="hidden" hidden aria-hidden="true" tabindex="-1" onclick="showTab('backtester')" title="Simulate strategies on historical launches with filters and charts">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/></svg></span>
             Backtester
           </button>
@@ -7087,9 +7217,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.9 1.01 1.51 1H19a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></span>
             Config
           </button>
-          <button type="button" role="menuitem" data-settings-tab="botperf" onclick="showTab('botperf')" title="Per-micro-bot rankings, learning progress, and system health diagnostics">
+          <!-- Stats lives on the main nav (right of Micro Bots); cog entry hidden -->
+          <button type="button" role="menuitem" data-settings-tab="botperf" class="hidden" hidden aria-hidden="true" tabindex="-1" onclick="showTab('botperf')" title="Per-micro-bot rankings, learning progress, and system health diagnostics">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/><circle cx="18" cy="6" r="2"/></svg></span>
-            Bot Performance
+            Stats
           </button>
           <button type="button" role="menuitem" data-settings-tab="backup" onclick="showTab('backup')" title="Site backup, persistence health, and micro-bot self-learning data">
             <span class="settings-item-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
@@ -7143,7 +7274,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <button data-tab="overview" onclick="showTab('overview', this)" class="btn bg-emerald-600 text-white text-xs sm:text-sm" title="Live ops: balance, risk, positions, signals, migrations">Overview</button>
       <button data-tab="zion" onclick="showTab('zion', this)" class="btn nav-tab-zion text-xs sm:text-sm" title="Zion micro-bot — KOL Token Scanner and manual trade offers"><span class="btn-label-short">Zion</span><span class="btn-label-full">Zion</span></button>
       <button data-tab="microbots" onclick="showTab('microbots', this)" class="btn nav-tab-microbots text-xs sm:text-sm" title="Trade Profiles, smart-bot lanes, lane fight log, and micro-bot tuning"><span class="btn-label-short">Bots</span><span class="btn-label-full">Micro Bots</span></button>
-      <button data-tab="trades" onclick="showTab('trades', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
+      <button data-tab="botperf" onclick="showTab('botperf', this)" class="btn bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Stats — rankings, expectancy, trade craft, learning diagnostics, and decision log">Stats</button>
+      <!-- Trades tab hidden — Overview covers open/closed; panel kept for deep links -->
+      <button type="button" data-tab="trades" class="hidden" hidden aria-hidden="true" tabindex="-1" onclick="showTab('trades', this)" title="Open and closed trades, recent signals, and migrations — mobile-friendly list view">Trades</button>
       <button data-tab="scanner" onclick="showTab('scanner', this)" class="btn nav-tab-watchlist bg-slate-800 text-slate-300 text-xs sm:text-sm" title="Watchlist — dip/scalper/grad watches, market scanner, Pump.fun activity, signals, sizing, and re-entry watches"><span class="btn-label-short">Watch</span><span class="btn-label-full">Watchlist</span></button>
     </nav>
 
@@ -8145,7 +8278,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     </section>
 
     <!-- ========== TAB: Watchlist (scanner) ========== -->
-    <section data-tab-panel="scanner" class="hidden space-y-4">
+    <section data-tab-panel="scanner" data-watchlist-active="setups" data-watch-setup-active="dip" class="hidden space-y-4">
       <div id="watch-readiness-strip" class="card text-xs text-slate-300" style="padding:0.65rem 0.85rem">
         <div class="flex flex-wrap items-center gap-2 mb-1.5">
           <span class="text-sm font-semibold text-slate-200">Watch readiness</span>
@@ -8157,17 +8290,41 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div id="watch-readiness-systems" class="flex flex-wrap gap-2" style="gap:0.4rem">—</div>
       </div>
-      <div class="setup-watches-stack space-y-3">
-        <div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+
+      <div class="card" style="padding-bottom:0.55rem">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title !text-sm mb-0">Watchlist <span class="tip" tabindex="0" data-tip="Setup watches, market scanner / AlphaScan, and activity feeds — split into tabs so the page stays scannable. Readiness strip above stays observe-only."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Setups are the armed watch inventory. Scanner configures the live universe. Activity shows Pump / signals / re-entry.</p>
+          </div>
+        </div>
+        <div class="watchlist-subtabs closed-filter" role="tablist" aria-label="Watchlist sections">
+          <button type="button" role="tab" class="closed-filter-btn is-active" id="watchlist-tab-setups" data-watchlist-tab="setups" aria-selected="true" aria-controls="watchlist-panel-setups" onclick="setWatchlistTab('setups')">Setups</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="watchlist-tab-scanner" data-watchlist-tab="scanner" aria-selected="false" aria-controls="watchlist-panel-scanner" onclick="setWatchlistTab('scanner')">Scanner</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="watchlist-tab-activity" data-watchlist-tab="activity" aria-selected="false" aria-controls="watchlist-panel-activity" onclick="setWatchlistTab('activity')">Activity</button>
+        </div>
+      </div>
+
+      <div class="watchlist-panel is-active space-y-3" id="watchlist-panel-setups" data-watchlist-panel="setups" role="tabpanel" aria-labelledby="watchlist-tab-setups">
+        <div class="watch-setup-subtabs closed-filter" role="tablist" aria-label="Setup watch type">
+          <button type="button" role="tab" class="closed-filter-btn is-active" data-watch-setup-tab="dip" aria-selected="true" onclick="setWatchlistSetupTab('dip')">Dip / Steady</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="modeb" aria-selected="false" onclick="setWatchlistSetupTab('modeb')">Mode B</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="trend" aria-selected="false" onclick="setWatchlistSetupTab('trend')">Trend</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="grad" aria-selected="false" onclick="setWatchlistSetupTab('grad')">Grad</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="mirror" aria-selected="false" onclick="setWatchlistSetupTab('mirror')">Mirror</button>
+          <button type="button" role="tab" class="closed-filter-btn" data-watch-setup-tab="skips" aria-selected="false" onclick="setWatchlistSetupTab('skips')">Skips</button>
+        </div>
+        <div class="watch-setup-panel is-active" data-watch-setup-panel="dip" role="tabpanel">
+<div id="dip-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Dip Buyer · Steady Compounder</span>
               <span class="setup-watch-title">Dip/Steady setup watchlist</span>
-              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $50–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~80m (4×20m; skip MC≥$500M). Unwatch cools 15m.</p>
+              <p class="setup-watch-sub mb-0">Watch → arm near Fib/S · trigger on reclaim. Minors = Dip; Medium $20–200M + Majors ≥$200M prefer Steady quality reclaim. Caps: minors ≤16 · medium ≤25 · majors ≤25. No-levels rotate ~80m (4×20m; skip MC≥$500M). Unwatch cools 15m.</p>
               <p id="dip-watch-funnel" class="setup-watch-sub mb-0 mint" style="opacity:0.9">Funnel: —</p>
               <div class="setup-watch-tabs" role="tablist" aria-label="Dip/Steady watch source">
                 <button type="button" role="tab" class="closed-filter-btn is-active" id="dip-watch-tab-minors" data-dip-watch-tab="minors" aria-selected="true" title="Memecoin / scanner dip watches">Minors <span class="setup-watch-tab-count" id="dip-watch-tab-minors-count">0</span></button>
-                <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-medium" data-dip-watch-tab="medium" aria-selected="false" title="Medium MC $50M–$200M Steady parks">Medium <span class="setup-watch-tab-count" id="dip-watch-tab-medium-count">0</span></button>
+                <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-medium" data-dip-watch-tab="medium" aria-selected="false" title="Medium MC $20M–$200M Steady parks">Medium <span class="setup-watch-tab-count" id="dip-watch-tab-medium-count">0</span></button>
                 <button type="button" role="tab" class="closed-filter-btn" id="dip-watch-tab-majors" data-dip-watch-tab="majors" aria-selected="false" title="High-MC majors ≥$200M Steady/Dip watches">Majors <span class="setup-watch-tab-count" id="dip-watch-tab-majors-count">0</span></button>
               </div>
             </div>
@@ -8175,8 +8332,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="dip-watch-list" class="setup-watch-list text-slate-400">No active dip setups</div>
         </div>
-
-        <div id="scalper-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="modeb" role="tabpanel">
+<div id="scalper-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Scalper · MB · Reversal</span>
@@ -8188,8 +8346,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="scalper-watch-list" class="setup-watch-list text-slate-400">No active scalper-family setups</div>
         </div>
-
-        <div id="trend-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="trend" role="tabpanel">
+<div id="trend-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Trend Rider</span>
@@ -8201,8 +8360,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="trend-watch-list" class="setup-watch-list text-slate-400">No active Trend Rider setups</div>
         </div>
-
-        <div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="grad" role="tabpanel">
+<div id="grad-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Migration Sniper</span>
@@ -8214,8 +8374,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <div id="mig-sniper-funnel" class="mint text-[11px] text-slate-400 mb-1">MS funnel: —</div>
           <div id="grad-watch-list" class="setup-watch-list text-slate-400">No active graduation watches</div>
         </div>
-
-        <div id="smart-mirror-watch-strip" class="card setup-watch-card text-xs text-slate-300">
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="mirror" role="tabpanel">
+<div id="smart-mirror-watch-strip" class="card setup-watch-card text-xs text-slate-300">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Influencer Mirror</span>
@@ -8228,8 +8389,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="smart-mirror-watch-list" class="setup-watch-list text-slate-400">Load Watchlist — enable Influencer Mirror + import wallets</div>
         </div>
-
-        <div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
+        </div>
+        <div class="watch-setup-panel" data-watch-setup-panel="skips" role="tabpanel">
+<div class="card setup-watch-card text-xs text-slate-300 mt-2" id="entry-skip-diag-card">
           <div class="setup-watch-head">
             <div class="setup-watch-title-block">
               <span class="setup-watch-kicker">Diagnostics</span>
@@ -8240,10 +8402,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
           <div id="entry-skip-diag" class="mint text-xs mt-1">—</div>
         </div>
+        </div>
       </div>
 
-      <div class="config-section-label">Market scanner <span>Live candidates + settings</span></div>
-      <div class="card">
+      <div class="watchlist-panel space-y-4" id="watchlist-panel-scanner" data-watchlist-panel="scanner" role="tabpanel" aria-labelledby="watchlist-tab-scanner">
+<div class="card">
         <div class="section-title">Market Scanner <span class="tip" tabindex="0" data-tip="Autonomous TA / Pump.fun / Dex candidates — no wallet buy required. Same live feed as Overview."></span></div>
         <p class="text-sm text-slate-400 mb-2">
           <strong style="color:#5eead4">Hybrid</strong> = smart wallets + scanner both ON (shared mint).
@@ -8484,9 +8647,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </table>
         </div>
       </div>
+      </div>
 
-      <div class="config-section-label">Activity <span>Pump.fun, dip confirms, signal decisions</span></div>
-      <div class="card">
+      <div class="watchlist-panel space-y-4" id="watchlist-panel-activity" data-watchlist-panel="activity" role="tabpanel" aria-labelledby="watchlist-tab-activity">
+<div class="card">
         <div class="section-title">Pump.fun Smart Activity <span class="tip" tabindex="0" data-tip="Live early-curve buys, near-migration plays, and smart-money scores on Pump.fun launches."></span></div>
         <div class="filters-row mb-2">
           <label class="ctl ctl-md">
@@ -8588,6 +8752,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </div>
         </div>
       </div>
+      </div>
     </section>
 
     <!-- ========== TAB: Zion ========== -->
@@ -8651,7 +8816,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <input type="text" id="zion-agent-input" aria-label="Ask Zion" placeholder="Ask about Learning Mode, MARL, or performance…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat();}" oninput="onZionComposerInput('main')" />
           </div>
           <div class="zion-chat-actions">
-            <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('main')">
+            <button type="button" class="zion-mic-btn" id="zion-agent-mic" data-zion-mic="main" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg><span class="zion-mic-dot" aria-hidden="true"></span>
             </button>
             <button type="button" class="zion-chat-send" onclick="sendZionAgentChat()">Send</button>
@@ -8786,7 +8951,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
             <input type="text" id="zion-agent-widget-input" aria-label="Ask Zion" placeholder="Message Zion…" onkeydown="if(event.key==='Enter'){event.preventDefault();sendZionAgentChat('widget');}" oninput="onZionComposerInput('widget')" />
           </div>
           <div class="zion-chat-actions">
-            <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)" onclick="toggleZionVoice('widget')">
+            <button type="button" class="zion-mic-btn" id="zion-agent-widget-mic" data-zion-mic="widget" aria-pressed="false" aria-label="Voice input off" title="Voice input (off)">
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg><span class="zion-mic-dot" aria-hidden="true"></span>
             </button>
             <button type="button" class="zion-chat-send" onclick="sendZionAgentChat('widget')">Send</button>
@@ -8810,7 +8975,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card" id="performance-power-cell-card">
         <div class="ppc-header">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Performance Power Cell <span class="tip" tabindex="0" data-tip="Visual charge from Expectancy Lift: WR vs 45% (35%), expectancy (20%), armed share vs 70% (20%), MFE capture (15%), late-chase penalty (10%). Craft score fallback when thin. Window Last 20/50/100 syncs with Expectancy Lift on Bot Performance. Visual only — does not change admits."></span></div>
+            <div class="section-title">Performance Power Cell <span class="tip" tabindex="0" data-tip="Visual charge from Expectancy Lift: WR vs 45% (35%), expectancy (20%), armed share vs 70% (20%), MFE capture (15%), late-chase penalty (10%). Craft score fallback when thin. Window Last 20/50/100 syncs with Expectancy Lift on Stats. Visual only — does not change admits."></span></div>
             <p class="text-xs text-slate-400 mb-0" id="ppc-summary">Loading…</p>
           </div>
           <div class="ppc-header-controls">
@@ -9142,6 +9307,97 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </details>
       </div>
 
+      <div class="card" id="recovery-stages-learning-card" data-mb-tab-scope="learning">
+        <details class="strat-adv-pack" id="recovery-stages-details" style="margin-top:0;border:none;background:transparent">
+          <summary>
+            <span style="display:inline-flex;align-items:center;gap:0.5rem;flex-wrap:wrap;min-width:0">
+              <span class="text-sm font-semibold text-slate-200">Recovery Stages <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Fast Profiles (Scalper / Reversal / Momentum Burst / Migration Sniper) and Dip Buyer recovery ladders. Stage 0 = full recovery; Stage 4 = normal. Hard safety always wins. Moved here from Stats — Live Sim is the preferred test path."></span></span>
+              <span id="recovery-stages-summary-badge" class="badge status-badge" style="font-size:11px">Recovery</span>
+            </span>
+          </summary>
+          <div class="strat-adv-body recovery-stages-compact">
+            <p class="text-xs text-slate-400 mb-2">Compact recovery controls for Learning. Expand a lane to promote/demote stages or tweak taper.</p>
+
+            <details class="recovery-stages-block" id="fast-profile-recovery-card">
+              <summary>
+                <span>Fast Profiles Recovery <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Stages 0–4 for Scalper, Reversal Scalper, Momentum Burst, Migration Sniper. Auto taper: frequency → size → concurrency → exit strictness. Hard safety filters always win. Slower profiles untouched."></span></span>
+                <label class="ctl-check" title="Enable Fast Profiles Recovery group" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="fpr-enabled" onchange="saveFastProfileRecovery()" onclick="event.stopPropagation()" />
+                  <span>Group ON</span>
+                </label>
+              </summary>
+              <p class="section-blurb">Self-adjusting recovery for short-term profiles. Stage 0 = full recovery (red); Stage 4 = normal (green).</p>
+              <div class="filters-row" id="fpr-controls-row">
+                <label class="ctl-check" title="Auto taper frequency → size → concurrency → exits">
+                  <input type="checkbox" id="fpr-autotaper" checked onchange="saveFastProfileRecovery()" />
+                  <span>Auto taper</span>
+                </label>
+                <label class="ctl ctl-fit">
+                  <span>Size ×</span>
+                  <input type="number" id="fpr-size" min="0.3" max="1" step="0.05" value="0.65" onchange="saveFastProfileRecovery()" />
+                </label>
+                <label class="ctl ctl-fit">
+                  <span>Cooldown ms</span>
+                  <input type="number" id="fpr-cooldown" min="15000" step="5000" value="120000" onchange="saveFastProfileRecovery()" />
+                </label>
+                <label class="ctl ctl-fit">
+                  <span>PPP arm %</span>
+                  <input type="number" id="fpr-arm" min="25" max="70" step="1" value="45" onchange="saveFastProfileRecovery()" />
+                </label>
+                <label class="ctl ctl-fit">
+                  <span>Giveback %</span>
+                  <input type="number" id="fpr-giveback" min="15" max="50" step="1" value="30" onchange="saveFastProfileRecovery()" />
+                </label>
+                <button type="button" class="btn btn-sm" onclick="loadFastProfileRecovery()">Refresh</button>
+              </div>
+              <div id="fpr-profile-grid" class="fpr-grid">
+                <p class="mint text-xs">Loading…</p>
+              </div>
+            </details>
+
+            <details class="recovery-stages-block" id="dip-buyer-recovery-card">
+              <summary>
+                <span>Dip Buyer Recovery <span class="tip" tabindex="0" onclick="event.stopPropagation()" data-tip="Stages 0–4 for Dip Buyer only. Auto taper: frequency → size → concurrency → Peak Protect. Bounce follow-through in readiness. Hard safety filters always win. Not part of Fast Profiles Recovery."></span></span>
+                <label class="ctl-check" title="Enable Dip Buyer Recovery" onclick="event.stopPropagation()">
+                  <input type="checkbox" id="dbr-enabled" checked onchange="saveDipBuyerRecovery()" onclick="event.stopPropagation()" />
+                  <span>Enabled</span>
+                </label>
+              </summary>
+              <p class="section-blurb">Dip-swing recovery with minute gaps and volume floors. Stage 0 = full recovery; Stage 4 = normal.</p>
+              <div class="filters-row" id="dbr-controls-row">
+                <label class="ctl-check" title="Auto promote/demote one stage at a time">
+                  <input type="checkbox" id="dbr-autotaper" checked onchange="saveDipBuyerRecovery()" />
+                  <span>Auto taper</span>
+                </label>
+                <label class="ctl-check" title="Lock stage — ignore auto taper">
+                  <input type="checkbox" id="dbr-locked" onchange="saveDipBuyerRecovery()" />
+                  <span>Lock stage</span>
+                </label>
+                <label class="ctl-check" title="Allow Learning Mode fairness while recovering">
+                  <input type="checkbox" id="dbr-lm-override" onchange="saveDipBuyerRecovery()" />
+                  <span>LM override</span>
+                </label>
+                <label class="ctl ctl-fit">
+                  <span>Force stage</span>
+                  <select id="dbr-force-stage" onchange="forceDipBuyerRecoveryFromSelect()">
+                    <option value="">None (auto)</option>
+                    <option value="0">0 Full</option>
+                    <option value="1">1 Freq</option>
+                    <option value="2">2 Size</option>
+                    <option value="3">3 Ctrl</option>
+                    <option value="4">4 Normal</option>
+                  </select>
+                </label>
+                <button type="button" class="btn btn-sm" onclick="loadDipBuyerRecovery()">Refresh</button>
+              </div>
+              <div id="dbr-card-body" class="fpr-grid">
+                <p class="mint text-xs">Loading…</p>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+
       <div class="card" id="ppp-card">
         <details class="strat-adv-pack" id="ppp-details" style="margin-top:0;border:none;background:transparent">
           <summary>
@@ -9274,11 +9530,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       <div class="card mt-4" id="microbot-performance-teaser">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title !text-sm mb-1">Micro Bot Performance</div>
-            <p class="text-xs text-slate-400 mb-0">Rankings, streaks, profit factor, and Learning Mode participate — full table lives under the cog menu.</p>
+            <div class="section-title !text-sm mb-1">Stats rankings</div>
+            <p class="text-xs text-slate-400 mb-0">Rankings, streaks, profit factor, and Learning Mode participate — full table lives under Stats.</p>
             <p class="text-xs mint mb-0 mt-1" id="el-teaser-line">Expectancy Lift: —</p>
           </div>
-          <button type="button" class="btn btn-secondary text-xs" onclick="showTab('botperf')" title="Open Micro Bot Performance (cog menu)">Open Performance</button>
+          <button type="button" class="btn btn-secondary text-xs" onclick="showTab('botperf')" title="Open Stats">Open Stats</button>
         </div>
       </div>
 
@@ -9865,13 +10121,30 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- ========== TAB: Micro Bot Performance (cog menu) ========== -->
-    <section data-tab-panel="botperf" class="strategies-panel hidden space-y-4">
-      <div class="card" id="microbot-performance-card">
+    <!-- ========== TAB: Stats (main nav; was Bot Performance) ========== -->
+    <section data-tab-panel="botperf" data-botperf-active="performance" class="strategies-panel hidden space-y-4">
+      <div class="card" style="padding-bottom:0.55rem">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Micro Bot Performance <span class="tip" tabindex="0" data-tip="Per-profile win rate, PnL, profit factor, max drawdown, streaks, and Learning Mode participate. Ranked by Profit Factor → Win Rate → Net PnL → Max DD (lower better). Merges closed trades with durable learning episodes."></span></div>
-            <p class="text-xs text-slate-400 mb-0">Use rankings + streaks to decide which bots should Participate in Learning Mode. Does not change Overview totals. Tune bots on the <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button> tab.</p>
+            <div class="section-title !text-sm mb-0">Stats <span class="tip" tabindex="0" data-tip="Rankings, expectancy, trade craft, learning diagnostics, and the agent decision log — split into tabs for easier scanning. Visualisation and soft governors only; hard safety unchanged."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Tune bots on <button type="button" class="text-sky-400 underline underline-offset-2" onclick="showTab('microbots')">Micro Bots</button>. Recovery stages live under Micro Bots → Learning.</p>
+          </div>
+        </div>
+        <div class="botperf-subtabs closed-filter" role="tablist" aria-label="Stats sections">
+          <button type="button" role="tab" class="closed-filter-btn is-active" id="botperf-tab-performance" data-botperf-tab="performance" aria-selected="true" aria-controls="botperf-panel-performance" onclick="setBotPerfTab('performance')">Performance</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-expectancy" data-botperf-tab="expectancy" aria-selected="false" aria-controls="botperf-panel-expectancy" onclick="setBotPerfTab('expectancy')">Expectancy Lift</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-tradecraft" data-botperf-tab="tradecraft" aria-selected="false" aria-controls="botperf-panel-tradecraft" onclick="setBotPerfTab('tradecraft')">Trade Craft</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-learning" data-botperf-tab="learning" aria-selected="false" aria-controls="botperf-panel-learning" onclick="setBotPerfTab('learning')">Learning</button>
+          <button type="button" role="tab" class="closed-filter-btn" id="botperf-tab-decisions" data-botperf-tab="decisions" aria-selected="false" aria-controls="botperf-panel-decisions" onclick="setBotPerfTab('decisions')">Decision Log</button>
+        </div>
+      </div>
+
+      <div class="botperf-panel is-active space-y-4" id="botperf-panel-performance" data-botperf-panel="performance" role="tabpanel" aria-labelledby="botperf-tab-performance">
+<div class="card" id="microbot-performance-card">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div style="min-width:0;flex:1">
+            <div class="section-title">Rankings <span class="tip" tabindex="0" data-tip="Per-profile win rate, PnL, profit factor, max drawdown, streaks, and Learning Mode participate. Ranked by Profit Factor → Win Rate → Net PnL → Max DD (lower better). Merges closed trades with durable learning episodes."></span></div>
+            <p class="text-xs text-slate-400 mb-0">Use rankings + streaks to decide which bots should Participate in Learning Mode. Does not change Overview totals.</p>
           </div>
         </div>
         <div class="mbp-window-row" role="group" aria-label="Performance time window">
@@ -9905,91 +10178,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
       </div>
 
-      <div class="card" id="fast-profile-recovery-card">
+<div class="card" id="scalper-trend-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
-            <div class="section-title">Fast Profiles Recovery Stages <span class="tip" tabindex="0" data-tip="Stages 0–4 for Scalper, Reversal Scalper, Momentum Burst, Migration Sniper. Auto taper: frequency → size → concurrency → exit strictness. Hard safety filters always win. Slower profiles untouched."></span></div>
-            <p class="text-xs text-slate-400 mb-0">Self-adjusting recovery for short-term profiles. Stage 0 = full recovery (red); Stage 4 = normal (green).</p>
-          </div>
-          <label class="ctl-check" title="Enable Fast Profiles Recovery group">
-            <input type="checkbox" id="fpr-enabled" onchange="saveFastProfileRecovery()" />
-            <span>Group ON</span>
-          </label>
-        </div>
-        <div class="filters-row mb-2" id="fpr-controls-row">
-          <label class="ctl-check" title="Auto taper frequency → size → concurrency → exits">
-            <input type="checkbox" id="fpr-autotaper" checked onchange="saveFastProfileRecovery()" />
-            <span>Auto taper</span>
-          </label>
-          <label class="ctl ctl-fit">
-            <span>Size ×</span>
-            <input type="number" id="fpr-size" min="0.3" max="1" step="0.05" value="0.65" onchange="saveFastProfileRecovery()" />
-          </label>
-          <label class="ctl ctl-fit">
-            <span>Cooldown ms</span>
-            <input type="number" id="fpr-cooldown" min="15000" step="5000" value="120000" onchange="saveFastProfileRecovery()" />
-          </label>
-          <label class="ctl ctl-fit">
-            <span>PPP arm %</span>
-            <input type="number" id="fpr-arm" min="25" max="70" step="1" value="45" onchange="saveFastProfileRecovery()" />
-          </label>
-          <label class="ctl ctl-fit">
-            <span>Giveback %</span>
-            <input type="number" id="fpr-giveback" min="15" max="50" step="1" value="30" onchange="saveFastProfileRecovery()" />
-          </label>
-          <button type="button" class="btn btn-sm" onclick="loadFastProfileRecovery()">Refresh</button>
-        </div>
-        <div id="fpr-profile-grid" class="fpr-grid">
-          <p class="mint text-xs">Loading…</p>
-        </div>
-      </div>
-
-      <div class="card" id="dip-buyer-recovery-card">
-        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
-          <div style="min-width:0;flex:1">
-            <div class="section-title">Dip Buyer Recovery Stages <span class="tip" tabindex="0" data-tip="Stages 0–4 for Dip Buyer only. Auto taper: frequency → size → concurrency → Peak Protect. Bounce follow-through in readiness. Hard safety filters always win. Not part of Fast Profiles Recovery."></span></div>
-            <p class="text-xs text-slate-400 mb-0">Dip-swing recovery with minute gaps and volume floors. Stage 0 = full recovery; Stage 4 = normal.</p>
-          </div>
-          <label class="ctl-check" title="Enable Dip Buyer Recovery">
-            <input type="checkbox" id="dbr-enabled" checked onchange="saveDipBuyerRecovery()" />
-            <span>Enabled</span>
-          </label>
-        </div>
-        <div class="filters-row mb-2" id="dbr-controls-row">
-          <label class="ctl-check" title="Auto promote/demote one stage at a time">
-            <input type="checkbox" id="dbr-autotaper" checked onchange="saveDipBuyerRecovery()" />
-            <span>Auto taper</span>
-          </label>
-          <label class="ctl-check" title="Lock stage — ignore auto taper">
-            <input type="checkbox" id="dbr-locked" onchange="saveDipBuyerRecovery()" />
-            <span>Lock stage</span>
-          </label>
-          <label class="ctl-check" title="Allow Learning Mode fairness while recovering">
-            <input type="checkbox" id="dbr-lm-override" onchange="saveDipBuyerRecovery()" />
-            <span>LM override</span>
-          </label>
-          <label class="ctl ctl-fit">
-            <span>Force stage</span>
-            <select id="dbr-force-stage" onchange="forceDipBuyerRecoveryFromSelect()">
-              <option value="">None (auto)</option>
-              <option value="0">0 Full</option>
-              <option value="1">1 Freq</option>
-              <option value="2">2 Size</option>
-              <option value="3">3 Ctrl</option>
-              <option value="4">4 Normal</option>
-            </select>
-          </label>
-          <button type="button" class="btn btn-sm" onclick="loadDipBuyerRecovery()">Refresh</button>
-        </div>
-        <div id="dbr-card-body" class="fpr-grid">
-          <p class="mint text-xs">Loading…</p>
-        </div>
-      </div>
-
-      <div class="card" id="scalper-trend-card">
-        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
-          <div style="min-width:0;flex:1">
-            <div class="section-title" id="spt-title">Bot Performance Trend <span class="tip" tabindex="0" data-tip="Rolling win rate and PnL from that bot’s learning episodes. Visualisation only — does not change strategy. Declining/Critical recommends Recovery Mode for fast profiles."></span></div>
+            <div class="section-title" id="spt-title">Performance Trend <span class="tip" tabindex="0" data-tip="Rolling win rate and PnL from that bot’s learning episodes. Visualisation only — does not change strategy. Declining/Critical recommends Recovery Mode for fast profiles."></span></div>
             <p class="text-xs text-slate-400 mb-0" id="spt-summary">Loading…</p>
           </div>
           <div class="flex flex-wrap gap-2 items-end">
@@ -10024,8 +10216,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-scalper-trend"></canvas></div>
         <div id="spt-breakdown" class="text-xs text-slate-400 mt-2"></div>
       </div>
+      </div>
 
-      <div class="card" id="expectancy-lift-card">
+      <div class="botperf-panel space-y-4" id="botperf-panel-expectancy" data-botperf-panel="expectancy" role="tabpanel" aria-labelledby="botperf-tab-expectancy">
+<div class="card" id="expectancy-lift-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
             <div class="section-title">Expectancy Lift <span class="tip" tabindex="0" data-tip="Entry Skill + Selectivity: armed-first mix, family skill memory, late-chase ceiling (≤5%). Soft/reversible governors except late-chase. Does not override hard safety. On = governed Entry Skill; Baseline v235 = kill-switch (1.2.235 throughput)."></span></div>
@@ -10118,8 +10312,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         </div>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-expectancy-lift"></canvas></div>
       </div>
+      </div>
 
-      <div class="card" id="trade-craft-card">
+      <div class="botperf-panel space-y-4" id="botperf-panel-tradecraft" data-botperf-panel="tradecraft" role="tabpanel" aria-labelledby="botperf-tab-tradecraft">
+<div class="card" id="trade-craft-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
             <div class="section-title">Trade Craft Progress <span class="tip" tabindex="0" data-tip="Harvest/PCL, hold time, profit-taking, exit efficiency, TA craft, and decision-stack scores from durable learning episodes. Early→late half shows if skills are improving. Visualisation only — does not change strategy."></span></div>
@@ -10181,8 +10377,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           </details>
         </div>
       </div>
+      </div>
 
-      <div class="card" id="learning-system-diagnostics-card">
+      <div class="botperf-panel space-y-4" id="botperf-panel-learning" data-botperf-panel="learning" role="tabpanel" aria-labelledby="botperf-tab-learning">
+<div class="card" id="learning-system-diagnostics-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
             <div class="section-title">Learning Progress &amp; System Diagnostics <span class="tip" tabindex="0" data-tip="Read-only view of how each micro-bot is learning, what it has learned in plain English, ML + MARL + Learning Mode setup, and an overall System Health Score. Does not change any knobs."></span></div>
@@ -10205,8 +10403,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           <p class="mint text-xs">Loading…</p>
         </div>
       </div>
+      </div>
 
-      <div class="card" id="agent-decision-log-card">
+      <div class="botperf-panel space-y-4" id="botperf-panel-decisions" data-botperf-panel="decisions" role="tabpanel" aria-labelledby="botperf-tab-decisions">
+<div class="card" id="agent-decision-log-card">
         <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
           <div style="min-width:0;flex:1">
             <div class="section-title">Agent Decision Log <span class="tip" tabindex="0" data-tip="Reasoning and advice feed from MARL, Profile RL, accelerators, TA, ML, and occasional Zion comments. Separate from the lane fight execution log on Overview / Micro Bots. Logging only — no trading side effects."></span></div>
@@ -10273,6 +10473,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         <div class="tp-decisions adl-decisions" id="agent-decision-log" style="max-height:18rem">
           <p class="mint text-xs">Loading…</p>
         </div>
+      </div>
       </div>
     </section>
 
@@ -13240,7 +13441,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 : 'majors') +
               '</span>'
             : kind === 'dip' && String(e.source || '') === 'medium'
-              ? '<span class="setup-watch-badge is-majors" title="Medium MC $50–200M Steady band">' +
+              ? '<span class="setup-watch-badge is-majors" title="Medium MC $20–200M Steady band">' +
                 (e.majorsBand
                   ? 'medium · ' + escHtml(String(e.majorsBand))
                   : 'medium') +
@@ -13307,14 +13508,26 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                 if (e.status === 'armed') return 0;
                 var near =
                   e.nearKeyFib === true || e.nearSupport === true ? 1 : 2;
-                if (e.movementActive === false || e.qualityChip === 'low_movement')
+                if (
+                  e.movementActive === false ||
+                  e.qualityChip === 'low_movement' ||
+                  e.qualityChip === 'rotated_stale'
+                )
                   return 4;
                 if (near === 1) return 1;
                 if (e.movementActive === true || e.qualityChip === 'active')
                   return 2;
                 return 3;
               }
-              return rank(a) - rank(b);
+              var ra = rank(a);
+              var rb = rank(b);
+              if (ra !== rb) return ra - rb;
+              var va = Number(a.volumeH1Usd) || 0;
+              var vb = Number(b.volumeH1Usd) || 0;
+              if (vb !== va) return vb - va;
+              var ma = Math.abs(Number(a.priceChangeH1Pct) || 0);
+              var mb = Math.abs(Number(b.priceChangeH1Pct) || 0);
+              return mb - ma;
             })
             .slice(0, tab === 'majors' || tab === 'medium' ? 80 : 16);
           const terminal = (dw.recentTerminal || []).filter(function (e) {
@@ -13504,6 +13717,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
                     (dipF.hwr_armed || 0) +
                     (dipF.quality_low_movement
                       ? ' · lowMov×' + dipF.quality_low_movement
+                      : '') +
+                    (dipF.quality_excluded_proxy || dipF.quality_excluded_stock
+                      ? ' · excl×' +
+                        ((dipF.quality_excluded_proxy || 0) +
+                          (dipF.quality_excluded_stock || 0))
                       : '') +
                     (dipF.steady_rotated_stale || dipF.hwr_rotated_stale
                       ? ' · rotated ' +
@@ -15007,17 +15225,35 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         loadTradeProfileIntelligence();
         loadLaneDecisions();
       }
-      // Performance is heavy (episode merge) — only refresh when Bot Performance tab is open
+      // Performance is heavy (episode merge) — only refresh active Stats sub-tab
       try {
         const botperf = document.querySelector('[data-tab-panel="botperf"]');
         if (botperf && !botperf.classList.contains('hidden')) {
-          loadMicroBotPerformance();
-          try { loadLearningDiagnostics(); } catch (_) {}
-          try { loadAgentDecisionLog(); } catch (_) {}
+          const sub = botperf.getAttribute('data-botperf-active') || 'performance';
+          if (sub === 'performance') {
+            loadMicroBotPerformance();
+            try { loadScalperPerformanceTrend(); } catch (_) {}
+          } else if (sub === 'expectancy') {
+            try { loadExpectancyLift(); } catch (_) {}
+          } else if (sub === 'tradecraft') {
+            try { loadTradeCraftPerformance(); } catch (_) {}
+          } else if (sub === 'learning') {
+            try { loadLearningDiagnostics(); } catch (_) {}
+          } else if (sub === 'decisions') {
+            try { loadAgentDecisionLog(); } catch (_) {}
+          }
+        }
+      } catch (_) {}
+      // Recovery stages live under Micro Bots → Learning
+      try {
+        const micro = document.querySelector('[data-tab-panel="microbots"]');
+        if (
+          micro &&
+          !micro.classList.contains('hidden') &&
+          micro.getAttribute('data-mb-active') === 'learning'
+        ) {
           try { loadFastProfileRecovery(); } catch (_) {}
           try { loadDipBuyerRecovery(); } catch (_) {}
-          try { loadScalperPerformanceTrend(); } catch (_) {}
-          try { loadTradeCraftPerformance(); } catch (_) {}
         }
       } catch (_) {}
       renderAutoScoringUi(tp);
@@ -15093,7 +15329,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ? '<span class="mbp-rank">#' + escHtml(String(row.rank)) + '</span>'
           : '<span class="mint">—</span>';
       return (
-        '<div class="tp-perf-chip" title="Micro Bot Performance (active time window)">' +
+        '<div class="tp-perf-chip" title="Stats rankings (active time window)">' +
           rank +
           ' · ' +
           fmtMicroBotStreak(row.currentStreak) +
@@ -15733,6 +15969,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           ')">Promote</button>' +
           '<button type="button" class="btn btn-sm" onclick="forceDipBuyerRecoveryStage(0,true)">Lock 0</button>' +
           '</div></div>';
+        try { syncRecoveryStagesSummaryBadge(); } catch (_) {}
       } catch (err) {
         const body = document.getElementById('dbr-card-body');
         if (body) {
@@ -15789,6 +16026,19 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     window.forceDipBuyerRecoveryFromSelect = forceDipBuyerRecoveryFromSelect;
 
     let __fprHydrated = false;
+
+    function syncRecoveryStagesSummaryBadge() {
+      const badge = document.getElementById('recovery-stages-summary-badge');
+      if (!badge) return;
+      const fprOn = !!(document.getElementById('fpr-enabled') || {}).checked;
+      const dbrOn = !!(document.getElementById('dbr-enabled') || {}).checked;
+      if (fprOn || dbrOn) {
+        badge.textContent =
+          (fprOn ? 'Fast ON' : 'Fast off') + ' · ' + (dbrOn ? 'Dip ON' : 'Dip off');
+      } else {
+        badge.textContent = 'Recovery off';
+      }
+    }
 
     async function loadFastProfileRecovery() {
       try {
@@ -15930,6 +16180,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           })
           .join('');
         __fprHydrated = true;
+        try { syncRecoveryStagesSummaryBadge(); } catch (_) {}
       } catch (err) {
         const grid = document.getElementById('fpr-profile-grid');
         if (grid) {
@@ -18388,8 +18639,142 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const micro = document.querySelector('[data-tab-panel="microbots"]');
       if (micro) micro.setAttribute('data-mb-active', next);
+      if (next === 'learning') {
+        try { loadFastProfileRecovery(); } catch (_) {}
+        try { loadDipBuyerRecovery(); } catch (_) {}
+      }
     }
     window.setMbRoutingTab = setMbRoutingTab;
+
+    function setBotPerfTab(tab, opts) {
+      const allowed = [
+        'performance',
+        'expectancy',
+        'tradecraft',
+        'learning',
+        'decisions',
+      ];
+      const next = allowed.indexOf(tab) >= 0 ? tab : 'performance';
+      const shouldLoad = !opts || opts.load !== false;
+      try {
+        localStorage.setItem('botPerfTab', next);
+      } catch (_) {}
+      document.querySelectorAll('[data-botperf-tab]').forEach(function (btn) {
+        const on = btn.getAttribute('data-botperf-tab') === next;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-botperf-panel]').forEach(function (panel) {
+        const on = panel.getAttribute('data-botperf-panel') === next;
+        panel.classList.toggle('is-active', on);
+      });
+      const root = document.querySelector('[data-tab-panel="botperf"]');
+      if (root) root.setAttribute('data-botperf-active', next);
+      if (shouldLoad) {
+        if (next === 'performance') {
+          try { loadMicroBotPerformance(); } catch (_) {}
+          try { loadScalperPerformanceTrend(); } catch (_) {}
+        } else if (next === 'expectancy') {
+          try { loadExpectancyLift(); } catch (_) {}
+        } else if (next === 'tradecraft') {
+          try { loadTradeCraftPerformance(); } catch (_) {}
+        } else if (next === 'learning') {
+          try { loadLearningDiagnostics(); } catch (_) {}
+        } else if (next === 'decisions') {
+          try { loadAgentDecisionLog(); } catch (_) {}
+        }
+      }
+      // Charts in newly shown panels need a resize pass
+      try {
+        window._chartsNeedResize = true;
+        setTimeout(function () {
+          window.dispatchEvent(new Event('resize'));
+        }, 60);
+      } catch (_) {}
+    }
+    window.setBotPerfTab = setBotPerfTab;
+
+    function setWatchlistSetupTab(tab, opts) {
+      const allowed = ['dip', 'modeb', 'trend', 'grad', 'mirror', 'skips'];
+      const next = allowed.indexOf(tab) >= 0 ? tab : 'dip';
+      const shouldLoad = !opts || opts.load !== false;
+      try {
+        localStorage.setItem('watchlistSetupTab', next);
+      } catch (_) {}
+      document.querySelectorAll('[data-watch-setup-tab]').forEach(function (btn) {
+        const on = btn.getAttribute('data-watch-setup-tab') === next;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-watch-setup-panel]').forEach(function (panel) {
+        const on = panel.getAttribute('data-watch-setup-panel') === next;
+        panel.classList.toggle('is-active', on);
+      });
+      const root = document.querySelector('[data-tab-panel="scanner"]');
+      if (root) root.setAttribute('data-watch-setup-active', next);
+      if (!shouldLoad) return;
+      try {
+        if (typeof refreshSetupWatches === 'function') void refreshSetupWatches();
+        else if (typeof window.refreshSetupWatches === 'function') void window.refreshSetupWatches();
+        if (next === 'mirror' && typeof refreshSmartMirrorWatchlist === 'function') {
+          refreshSmartMirrorWatchlist(true).catch(function () {});
+        }
+        if (next === 'skips' && typeof refreshEntrySkipDiag === 'function') {
+          refreshEntrySkipDiag().catch(function () {});
+        }
+      } catch (_) {}
+    }
+    window.setWatchlistSetupTab = setWatchlistSetupTab;
+
+    function setWatchlistTab(tab, opts) {
+      const allowed = ['setups', 'scanner', 'activity'];
+      const next = allowed.indexOf(tab) >= 0 ? tab : 'setups';
+      const shouldLoad = !opts || opts.load !== false;
+      try {
+        localStorage.setItem('watchlistTab', next);
+      } catch (_) {}
+      document.querySelectorAll('[data-watchlist-tab]').forEach(function (btn) {
+        const on = btn.getAttribute('data-watchlist-tab') === next;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-watchlist-panel]').forEach(function (panel) {
+        const on = panel.getAttribute('data-watchlist-panel') === next;
+        panel.classList.toggle('is-active', on);
+      });
+      const root = document.querySelector('[data-tab-panel="scanner"]');
+      if (root) root.setAttribute('data-watchlist-active', next);
+      if (!shouldLoad) return;
+      try {
+        if (next === 'setups') {
+          let setup = 'dip';
+          try {
+            const stored = localStorage.getItem('watchlistSetupTab');
+            if (stored) setup = stored;
+          } catch (_) {}
+          setWatchlistSetupTab(setup);
+        } else if (next === 'scanner') {
+          if (typeof loadMarketScannerConfig === 'function') loadMarketScannerConfig();
+          if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
+          if (typeof refreshAlphaScanFeed === 'function') {
+            try { refreshAlphaScanFeed({ hydrateForm: false }); } catch (_) {}
+          }
+        } else if (next === 'activity') {
+          if (typeof refreshPumpActivity === 'function') refreshPumpActivity().catch(function () {});
+          if (typeof refreshEntrySkipDiag === 'function') refreshEntrySkipDiag().catch(function () {});
+        }
+      } catch (_) {}
+    }
+    window.setWatchlistTab = setWatchlistTab;
+
+    (function initWatchlistTabs() {
+      try {
+        const stored = localStorage.getItem('watchlistTab');
+        const setupStored = localStorage.getItem('watchlistSetupTab');
+        if (setupStored) setWatchlistSetupTab(setupStored, { load: false });
+        if (stored) setWatchlistTab(stored, { load: false });
+      } catch (_) {}
+    })();
 
     function setWalletsSubTab(tab, opts) {
       const allowed = ['discover', 'nansen', 'tracked', 'live', 'influencer'];
@@ -19462,6 +19847,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     function showTab(name, btn) {
       const scrollToConfigLogs = name === 'logs';
       if (name === 'logs') name = 'config';
+      if (name === 'trades') name = 'overview';
       document.querySelectorAll('[data-tab-panel]').forEach(el => {
         el.classList.toggle('hidden', el.getAttribute('data-tab-panel') !== name);
       });
@@ -19484,7 +19870,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       });
       const settingsBtn = document.getElementById('settings-btn');
       if (settingsBtn) {
-        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'backtester' || name === 'botperf' || name === 'backup' || name === 'botinfo');
+        settingsBtn.classList.toggle('settings-active', name === 'wallets' || name === 'settings' || name === 'config' || name === 'backtester' || name === 'backup' || name === 'botinfo');
       }
       closeSettingsMenu();
       try { localStorage.setItem('botDashboardTab', name); } catch (_) {}
@@ -19504,7 +19890,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           try { setWalletsSubTab('discover'); } catch (__) {}
         }
       }
-      if ((name === 'overview' || name === 'backtester') && window._chartsNeedResize) {
+      if ((name === 'overview' || name === 'backtester' || name === 'botperf') && window._chartsNeedResize) {
         window._chartsNeedResize = false;
         setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
       }
@@ -19526,31 +19912,70 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       if (name === 'settings' || name === 'microbots') loadStrategies();
       if (name === 'botperf') {
-        try { loadMicroBotPerformance(); } catch (_) {}
-        try { loadLearningDiagnostics(); } catch (_) {}
-        try { loadAgentDecisionLog(); } catch (_) {}
-        try { loadFastProfileRecovery(); } catch (_) {}
-        try { loadDipBuyerRecovery(); } catch (_) {}
-        try { loadScalperPerformanceTrend(); } catch (_) {}
-        try { loadExpectancyLift(); } catch (_) {}
-        try { loadTradeCraftPerformance(); } catch (_) {}
+        let sub = 'performance';
+        try {
+          const stored = localStorage.getItem('botPerfTab');
+          if (
+            stored === 'performance' ||
+            stored === 'expectancy' ||
+            stored === 'tradecraft' ||
+            stored === 'learning' ||
+            stored === 'decisions'
+          ) {
+            sub = stored;
+          }
+        } catch (_) {}
+        try {
+          setBotPerfTab(sub);
+        } catch (_) {
+          try { loadMicroBotPerformance(); } catch (__) {}
+          try { loadScalperPerformanceTrend(); } catch (__) {}
+          try { loadExpectancyLift(); } catch (__) {}
+          try { loadTradeCraftPerformance(); } catch (__) {}
+          try { loadLearningDiagnostics(); } catch (__) {}
+          try { loadAgentDecisionLog(); } catch (__) {}
+        }
       }
       if (name === 'overview') loadLaneDecisions().catch(function () {});
       if (name === 'scanner') {
-        loadMarketScannerConfig();
-        if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
-        if (typeof refreshSmartMirrorWatchlist === 'function') {
-          refreshSmartMirrorWatchlist(true).catch(function () {});
-        }
-        if (typeof refreshSetupWatches === 'function') {
-          void refreshSetupWatches();
-        } else if (typeof window.refreshSetupWatches === 'function') {
-          void window.refreshSetupWatches();
+        let wl = 'setups';
+        let setup = 'dip';
+        try {
+          const stored = localStorage.getItem('watchlistTab');
+          if (stored === 'setups' || stored === 'scanner' || stored === 'activity') wl = stored;
+          const setupStored = localStorage.getItem('watchlistSetupTab');
+          if (
+            setupStored === 'dip' ||
+            setupStored === 'modeb' ||
+            setupStored === 'trend' ||
+            setupStored === 'grad' ||
+            setupStored === 'mirror' ||
+            setupStored === 'skips'
+          ) {
+            setup = setupStored;
+          }
+        } catch (_) {}
+        try {
+          setWatchlistSetupTab(setup, { load: false });
+          setWatchlistTab(wl);
+        } catch (_) {
+          loadMarketScannerConfig();
+          if (typeof loadAlphaScanConfig === 'function') loadAlphaScanConfig();
+          if (typeof refreshSmartMirrorWatchlist === 'function') {
+            refreshSmartMirrorWatchlist(true).catch(function () {});
+          }
+          if (typeof refreshSetupWatches === 'function') {
+            void refreshSetupWatches();
+          } else if (typeof window.refreshSetupWatches === 'function') {
+            void window.refreshSetupWatches();
+          }
         }
       }
       if (name === 'microbots') {
         loadLaneDecisions().catch(function () {});
         try { loadExpectancyLift(); } catch (_) {}
+        try { loadFastProfileRecovery(); } catch (_) {}
+        try { loadDipBuyerRecovery(); } catch (_) {}
       }
       if (name === 'zion') {
         loadZion();
@@ -31883,12 +32308,25 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
     let _zionVoiceFailCount = 0;
     let _zionVoiceLastError = '';
     let _zionVoiceGen = 0;
+    let _zionVoiceToggleLockUntil = 0;
+    let _zionMicButtonsBound = false;
     const ZION_VOICE_SILENCE_MS = 3000;
     const ZION_VOICE_ACTIVE_FLOOR_MS = 5000;
     const ZION_VOICE_KEEPALIVE_MS = 10000;
     const ZION_VOICE_START_TIMEOUT_MS = 8000;
     const ZION_VOICE_MAX_FAILS = 3;
     const ZION_VOICE_RESTART_BASE_MS = 450;
+    const ZION_VOICE_TOGGLE_DEBOUNCE_MS = 450;
+
+    function isZionVoiceMobileClient() {
+      try {
+        if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+          return true;
+        }
+      } catch (_) {}
+      const ua = String(navigator.userAgent || '');
+      return /Android|iPhone|iPad|iPod|Mobile|webOS|IEMobile/i.test(ua);
+    }
 
     const ZION_VOICE_LEXICON = {
       'take profit': ['take profits', 'take prof it', 'teak profit', 'take profit'],
@@ -32231,12 +32669,12 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           btn.title = 'Voice input (off)';
         } else if (_zionVoiceMode === 'wake-idle') {
           btn.classList.remove('is-error');
-          btn.setAttribute('aria-label', 'Wake idle — say Zion');
-          btn.title = 'Listening for “Zion”…';
+          btn.setAttribute('aria-label', 'Wake idle — say Zion or tap mic');
+          btn.title = 'Listening for “Zion”… (tap mic to speak now)';
         } else {
           btn.classList.remove('is-error');
-          btn.setAttribute('aria-label', 'Listening — click to stop');
-          btn.title = 'Listening… (say “Zion” first · 3s silence sends · 10s keep-alive)';
+          btn.setAttribute('aria-label', 'Listening — tap to stop');
+          btn.title = 'Listening… (tap mic to stop · 3s silence sends)';
         }
         btn.disabled = false;
       });
@@ -32387,8 +32825,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (corrected) scheduleZionVoiceSilenceSend();
     }
 
-    function startZionVoiceRecognition() {
-      if (_zionVoiceStarting) return;
+    function startZionVoiceRecognition(opts) {
+      const force = !!(opts && opts.force);
+      const fromUserGesture = !!(opts && opts.fromUserGesture);
+      if (_zionVoiceStarting && !force) return;
       const Ctor = getZionSpeechRecognitionCtor();
       if (!Ctor) {
         failZionVoiceSoft('Voice not supported in this browser');
@@ -32401,16 +32841,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       _zionVoiceStarting = true;
       clearZionVoiceRestartTimer();
       clearZionVoiceStartWatchdog();
-      const startGen = _zionVoiceGen;
-      try {
-        stopZionVoiceRecognition({ keepOnFlag: true, skipPersist: true });
-      } catch (_) {}
-      // stop bumps gen — keep this start's generation current
+
+      // Tear down prior instance only — avoid full stop() so we keep flags +
+      // stay inside the mobile user-gesture window for rec.start().
+      const prev = _zionVoiceRec;
+      _zionVoiceGen += 1;
       const myGen = _zionVoiceGen;
-      if (startGen !== myGen && !_zionVoiceOn) {
-        _zionVoiceStarting = false;
-        return;
+      if (prev) {
+        try {
+          prev.onresult = null;
+          prev.onerror = null;
+          prev.onend = null;
+          prev.onstart = null;
+          prev.onaudiostart = null;
+          try { prev.abort(); } catch (_) {}
+        } catch (_) {}
+        _zionVoiceRec = null;
       }
+
       const inp = zionVoiceInputEl();
       if (_zionVoiceMode === 'active') {
         _zionVoiceBaseText = inp ? String(inp.value || '').trim() : '';
@@ -32427,7 +32875,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }
       _zionVoiceRec = rec;
       _zionVoiceStarting = true;
-      rec.continuous = true;
+      // Mobile Web Speech is unreliable with continuous=true (starts then dies).
+      const mobile = isZionVoiceMobileClient();
+      rec.continuous = !mobile;
       rec.interimResults = true;
       rec.lang = (navigator.language || 'en-US');
       rec.maxAlternatives = 1;
@@ -32525,7 +32975,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         clearZionVoiceStartWatchdog();
         _zionVoiceStarting = false;
         if (_zionVoiceOn && !_zionChatBusy && !_zionVoicePausedBusy) {
-          scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
+          // Mobile one-shot: restart promptly so tap-to-talk stays live
+          scheduleZionVoiceRestart(
+            mobile ? Math.max(180, ZION_VOICE_RESTART_BASE_MS / 2) : ZION_VOICE_RESTART_BASE_MS
+          );
         } else {
           try { syncZionMicUi(); } catch (_) {}
         }
@@ -32556,11 +33009,20 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       }, ZION_VOICE_START_TIMEOUT_MS);
 
       try {
+        // Must stay sync on the user-gesture stack (iOS / Android Chrome).
         rec.start();
       } catch (err) {
         clearZionVoiceStartWatchdog();
         _zionVoiceStarting = false;
         _zionVoiceRec = null;
+        const msg = String((err && err.message) || err || '');
+        // "already started" — force abort then retry once (async ok after gesture used)
+        if (/already started|invalid state/i.test(msg) && fromUserGesture) {
+          _zionVoiceFailCount += 1;
+          scheduleZionVoiceRestart(ZION_VOICE_RESTART_BASE_MS);
+          syncZionMicUi();
+          return;
+        }
         _zionVoiceFailCount += 1;
         if (_zionVoiceFailCount >= ZION_VOICE_MAX_FAILS) {
           failZionVoiceSoft('Voice input failed to start');
@@ -32575,6 +33037,9 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     function toggleZionVoice(source) {
       const src = source === 'widget' ? 'widget' : 'main';
+      const now = Date.now();
+      if (now < _zionVoiceToggleLockUntil) return;
+      _zionVoiceToggleLockUntil = now + ZION_VOICE_TOGGLE_DEBOUNCE_MS;
       try {
         if (!getZionSpeechRecognitionCtor()) {
           failZionVoiceSoft('Voice not supported in this browser');
@@ -32586,6 +33051,24 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         }
         // Always allow turning OFF even if chat is busy / recognition stuck
         if (_zionVoiceOn && _zionVoiceSource === src) {
+          // Stuck start with no live recognition → retry instead of silent no-op off/on
+          if (_zionVoiceStarting && !_zionVoiceRec) {
+            _zionVoiceLastError = '';
+            _zionVoiceFailCount = 0;
+            _zionVoiceStarting = false;
+            enterZionVoiceActive({ silent: true });
+            startZionVoiceRecognition({ fromUserGesture: true, force: true });
+            return;
+          }
+          // Wake-idle (after keep-alive): tap re-arms active listen — don't force off
+          if (_zionVoiceMode === 'wake-idle') {
+            _zionVoiceLastError = '';
+            _zionVoiceFailCount = 0;
+            enterZionVoiceActive({ silent: false });
+            startZionVoiceRecognition({ fromUserGesture: true, force: true });
+            focusZionComposer(src);
+            return;
+          }
           _zionVoiceLastError = '';
           stopZionVoiceRecognition();
           writeZionVoiceMicPref(false);
@@ -32593,9 +33076,10 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
           return;
         }
         if (_zionVoiceOn && _zionVoiceSource !== src) {
-          // Switch source while on
+          // Switch source while on — jump to active listen for this composer
           _zionVoiceSource = src;
-          try { syncZionMicUi(); } catch (_) {}
+          enterZionVoiceActive({ silent: true });
+          startZionVoiceRecognition({ fromUserGesture: true, force: true });
           focusZionComposer(src);
           return;
         }
@@ -32608,12 +33092,73 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
         _zionVoicePausedBusy = false;
         _zionVoiceFailCount = 0;
         _zionVoiceLastError = '';
+        _zionVoiceStarting = false;
         writeZionVoiceMicPref(true);
-        enterZionVoiceWakeIdle();
-        startZionVoiceRecognition();
+        // Tap-to-talk: go straight to active listen (wake-word idle is for background only)
+        enterZionVoiceActive({ silent: false });
+        startZionVoiceRecognition({ fromUserGesture: true, force: true });
       } catch (err) {
         failZionVoiceSoft('Voice input failed: ' + ((err && err.message) || 'unknown'));
       }
+    }
+
+    function bindZionMicButtons() {
+      if (_zionMicButtonsBound) return;
+      _zionMicButtonsBound = true;
+      ['zion-agent-mic', 'zion-agent-widget-mic'].forEach(function (id) {
+        const btn = document.getElementById(id);
+        if (!btn || btn.getAttribute('data-zion-mic-bound') === '1') return;
+        btn.setAttribute('data-zion-mic-bound', '1');
+        let ptrDownX = 0;
+        let ptrDownY = 0;
+        let ptrActive = false;
+        btn.addEventListener(
+          'pointerdown',
+          function (ev) {
+            if (btn.disabled || btn.classList.contains('is-unsupported')) return;
+            if (ev.pointerType === 'mouse' && typeof ev.button === 'number' && ev.button !== 0) {
+              return;
+            }
+            ptrActive = true;
+            ptrDownX = Number(ev.clientX) || 0;
+            ptrDownY = Number(ev.clientY) || 0;
+          },
+          { passive: true }
+        );
+        // pointerup beats click on mobile; ignore scroll-drags over the button.
+        btn.addEventListener(
+          'pointerup',
+          function (ev) {
+            if (!ptrActive) return;
+            ptrActive = false;
+            if (btn.disabled || btn.classList.contains('is-unsupported')) return;
+            if (ev.pointerType === 'mouse' && typeof ev.button === 'number' && ev.button !== 0) {
+              return;
+            }
+            const dx = Math.abs((Number(ev.clientX) || 0) - ptrDownX);
+            const dy = Math.abs((Number(ev.clientY) || 0) - ptrDownY);
+            if (dx > 14 || dy > 14) return;
+            try { ev.preventDefault(); } catch (_) {}
+            const src = btn.getAttribute('data-zion-mic') || 'widget';
+            toggleZionVoice(src);
+          },
+          { passive: false }
+        );
+        btn.addEventListener(
+          'pointercancel',
+          function () {
+            ptrActive = false;
+          },
+          { passive: true }
+        );
+        // Keyboard / accessibility fallback
+        btn.addEventListener('keydown', function (ev) {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          const src = btn.getAttribute('data-zion-mic') || 'widget';
+          toggleZionVoice(src);
+        });
+      });
     }
 
     function restoreZionVoiceIfPreferred(source) {
@@ -32683,11 +33228,13 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
 
     // Init mic UI once DOM ready
     try { syncZionMicUi(); } catch (_) {}
+    try { bindZionMicButtons(); } catch (_) {}
     window.toggleZionVoice = toggleZionVoice;
     window.onZionComposerInput = onZionComposerInput;
     window.refreshZionAgentChat = refreshZionAgentChat;
     window.restoreZionVoiceIfPreferred = restoreZionVoiceIfPreferred;
     window.failZionVoiceSoft = failZionVoiceSoft;
+    window.bindZionMicButtons = bindZionMicButtons;
     function fmtZionIrWhen(ts) {
       if (!ts) return '—';
       try {
@@ -32883,6 +33430,7 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (zionAgentWidgetState.open) {
         zionAgentWidgetState.unread = 0;
         syncZionChatSurfaces();
+        try { bindZionMicButtons(); } catch (_) {}
         try { ensureZionDeviceLocation('widget-open'); } catch (_) {}
         try { restoreZionVoiceIfPreferred('widget'); } catch (_) {}
         if (typeof loadZionAgent === 'function') loadZionAgent();
@@ -35036,6 +35584,8 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       if (name === 'strategies') return 'settings';
       if (name === 'signals') return 'scanner';
       if (name === 'logs') return 'config';
+      // Trades nav hidden — land on Overview (open/closed still there)
+      if (name === 'trades') return 'overview';
       return name;
     };
     const tabNames = ['overview', 'zion', 'microbots', 'trades', 'wallets', 'scanner', 'settings', 'backtester', 'config', 'botperf', 'backup', 'botinfo'];

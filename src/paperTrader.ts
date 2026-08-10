@@ -5926,7 +5926,7 @@ export class PaperTrader {
   /** Per-profile scoreboard + learning suggestions for Trade Profiles UI */
   getTradeProfileIntelligence(opts?: {
     performanceWindow?: import('./microBotPerformance').PerformanceWindow;
-    /** Heavy — only when explicitly requested (Bot Performance tab). */
+    /** Heavy — only when explicitly requested (Stats / botperf tab). */
     includePerformance?: boolean;
   }) {
     const {

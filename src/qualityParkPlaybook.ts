@@ -6,7 +6,7 @@
 import { DEFAULT_HWR_QUALITY_FILTER } from './hwrQualityFilter';
 
 /** Mirror majorsUniverse floors — avoid circular import. */
-const MEDIUM_MIN_MC_USD = 50_000_000;
+const MEDIUM_MIN_MC_USD = 20_000_000;
 const MAJORS_MIN_MC_USD = 200_000_000;
 const MEDIUM_MIN_VOL_H1_USD = 12_000;
 const MAJORS_MIN_VOL_H1_USD = 20_000;

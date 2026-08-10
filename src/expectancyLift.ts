@@ -2630,6 +2630,14 @@ function quietReasonForProfile(profileId: string): string | null {
               ? `HWR armed ${lane.armedNow} — waiting trigger`
               : `Steady armed ${lane.armedNow} — waiting trigger`;
           }
+          const exclLine = (q.plainLanguage || []).find((p) =>
+            /Excluded \d+ stable\/major-asset/i.test(p)
+          );
+          if (exclLine) return exclLine;
+          const medLine = (q.plainLanguage || []).find((p) =>
+            /Steady medium now \$20M/i.test(p)
+          );
+          if (medLine && lane.armedNow === 0) return medLine;
           if (q.rotatedStaleSession > 0 && lane.armedNow === 0) {
             return `Low-movement rotate ×${q.rotatedStaleSession}`;
           }

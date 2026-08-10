@@ -43,6 +43,16 @@ export interface BotInfoChangelogEntry {
  */
 export const BOT_INFO_CHANGELOG: readonly BotInfoChangelogEntry[] = [
   {
+    version: '1.2.264',
+    title: 'Watchlist tabs · Stats nav · quality name gates',
+    sections: ['scanners', 'overview', 'microbots'],
+    items: [
+      'Watchlist split into Setups / Scanner / Activity tabs; Setups further pills Dip/Steady · Mode B · Trend · Grad · Mirror · Skips so the page stays scannable.',
+      'Bot Performance moved to main nav as Stats (right of Micro Bots); Trades tab hidden. Bot Info / Zion / digest copy updated.',
+      'Steady medium parks: $20M–$200M floor; name exclusions for stables / major proxies / stock-like tickers; rotate excluded and out-of-band watches. Dip minors unchanged.',
+    ],
+  },
+  {
     version: '1.2.263',
     title: 'Steady/HWR medium-major arm playbooks · live tape',
     sections: ['scanners', 'microbots', 'overview', 'tradecraft'],

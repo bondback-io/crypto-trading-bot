@@ -1,6 +1,6 @@
 /**
  * Mid-MC + high-MC discovery — Jupiter multi-category merge without pump filter.
- * Medium $50M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
+ * Medium $20M–$200M + Majors ≥$200M → Dip/Steady watch (prefer Steady quality reclaim).
  * Never Scalper Mode B. Additive: launch/pump scanner for Scalper-family stays unchanged.
  */
 
@@ -17,6 +17,9 @@ import {
   type JupiterInterval,
   type JupiterTokenInfo,
 } from './jupiterTokens';
+import {
+  classifyQualityParkNameExclusion,
+} from './qualityParkNameExclusions';
 import { isStrategyEnabledGlobal } from './strategies';
 import { isSmartBotProfilesEnabled } from './tradeProfiles';
 
@@ -24,7 +27,14 @@ import { isSmartBotProfilesEnabled } from './tradeProfiles';
 export type UniverseWatchBand = 'medium' | 'majors';
 
 /** Soft MC sub-band for badges / prefer logic */
-export type MajorsMcBand = '50m' | '100m' | '200m' | '250m' | '500m' | '1b+';
+export type MajorsMcBand =
+  | '20m'
+  | '50m'
+  | '100m'
+  | '200m'
+  | '250m'
+  | '500m'
+  | '1b+';
 
 export interface MajorsCandidate {
   mint: string;
@@ -39,7 +49,7 @@ export interface MajorsCandidate {
   priceChange24hPct?: number;
   lastPriceSol?: number;
   band: MajorsMcBand;
-  /** medium = $50–200M; majors = ≥$200M */
+  /** medium = $20–200M; majors = ≥$200M */
   watchBand: UniverseWatchBand;
   reasons: string[];
   /** Jupiter firstPool / createdAt ms — real token age (never watch birth) */
@@ -51,7 +61,7 @@ export interface MajorsCandidate {
 }
 
 /** Medium floor (Steady quality band) */
-export const MEDIUM_MIN_MC_USD = 50_000_000;
+export const MEDIUM_MIN_MC_USD = 20_000_000;
 /** Majors floor — Steady prefer threshold (raised from prior soft $250M prefer) */
 export const MAJORS_MIN_MC_USD = 200_000_000;
 /** Legacy alias: circulating MC floor for any mid/majors admit */
@@ -78,7 +88,7 @@ export const NO_LEVELS_ROTATE_AFTER = 4;
 const NO_LEVELS_STREAK_TICK_MS = 20 * 60_000;
 /** Park mega-caps without Fib/S until watch TTL — do not rotate on no-levels */
 export const NO_LEVELS_SKIP_ROTATE_MC_USD = 500_000_000;
-/** Reserve ~40% of CYCLE seats for mid-MC bands (50m/100m) */
+/** Reserve ~40% of CYCLE seats for mid-MC bands (20m/50m/100m) */
 const MID_BAND_SEAT_FRAC = 0.4;
 
 /** Jupiter feeds to merge (each ≤100). Wider discovery than single toptraded/organic. */
@@ -103,6 +113,8 @@ type RejectKey =
   | 'liq'
   | 'vol'
   | 'low_movement'
+  | 'excluded_stable_or_major_asset_proxy'
+  | 'excluded_stock_name_token'
   | 'other';
 
 const rejectCounters: Record<RejectKey, number> = {
@@ -114,6 +126,8 @@ const rejectCounters: Record<RejectKey, number> = {
   liq: 0,
   vol: 0,
   low_movement: 0,
+  excluded_stable_or_major_asset_proxy: 0,
+  excluded_stock_name_token: 0,
   other: 0,
 };
 
@@ -162,7 +176,8 @@ export function majorsMcBand(mc: number): MajorsMcBand {
   if (mc >= 250_000_000) return '250m';
   if (mc >= 200_000_000) return '200m';
   if (mc >= 100_000_000) return '100m';
-  return '50m';
+  if (mc >= 50_000_000) return '50m';
+  return '20m';
 }
 
 export function universeWatchBand(mc: number): UniverseWatchBand | null {
@@ -204,6 +219,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     return null;
   }
   const sym = String(token.symbol || mint.slice(0, 6)).slice(0, 24);
+  const tokenName = String(token.name || '').slice(0, 64);
   // Stables / quote assets never enter Medium/Majors CYCLE_CAP
   try {
     const solMint = String(config.solMint || '').trim() || undefined;
@@ -229,6 +245,18 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
     return null;
   }
   const logPfx = watchlistLogPrefix(watchBand);
+
+  // Name/symbol class exclusions (stables, major-asset proxies, stock tickers)
+  const nameExcl = classifyQualityParkNameExclusion(sym, tokenName);
+  if (nameExcl) {
+    noteReject(nameExcl);
+    console.log(
+      `${logPfx} reject ${nameExcl} ${sym}` +
+        (tokenName ? ` name=${tokenName.slice(0, 32)}` : '') +
+        ` MC=$${Math.round(mc)}`
+    );
+    return null;
+  }
 
   // Hard reject pump.fun / launchpad for quality parks (Steady is organic majors)
   if (isPumpFunMintSuffix(mint) || isJupiterPumpFunToken(token)) {
@@ -363,7 +391,7 @@ function tokenToCandidate(token: JupiterTokenInfo): MajorsCandidate | null {
 
 /**
  * Refresh medium+majors universe from Jupiter (cached ~5m).
- * Multi-category merge for wider ≥$50M / ≥$200M coverage.
+ * Multi-category merge for wider ≥$20M / ≥$200M coverage.
  */
 export async function refreshMajorsUniverse(
   force = false
@@ -421,7 +449,9 @@ export async function refreshMajorsUniverse(
         `cycle=${capped.length} (med=${medium.length} maj=${majors.length}) ` +
         `reject pump=${rejectCounters.pump} age=${rejectCounters.age} ` +
         `ageUnk=${rejectCounters.age_unknown} liq=${rejectCounters.liq} ` +
-        `vol=${rejectCounters.vol} lowMov=${rejectCounters.low_movement} mc=${rejectCounters.mc}`
+        `vol=${rejectCounters.vol} lowMov=${rejectCounters.low_movement} ` +
+        `exclProxy=${rejectCounters.excluded_stable_or_major_asset_proxy} ` +
+        `exclStock=${rejectCounters.excluded_stock_name_token} mc=${rejectCounters.mc}`
     );
     return capped;
   } catch (err) {
@@ -451,6 +481,7 @@ export function getMajorsUniverseStatus(): {
 } {
   const list = cache?.list ?? [];
   const bands: Record<MajorsMcBand, number> = {
+    '20m': 0,
     '50m': 0,
     '100m': 0,
     '200m': 0,
@@ -524,6 +555,7 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     near: candidateNearKnownLevels(c) ? 1 : 0,
     mov: Number(c.movementScore) || 0,
     active: c.movementActive === false ? 0 : 1,
+    vol: Number(c.volumeH1Usd) || 0,
     aged:
       c.tokenAgeHours != null &&
       c.tokenAgeHours >= MEDIUM_MAJORS_PREFER_AGE_HOURS
@@ -535,6 +567,7 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
     if (b.active !== a.active) return b.active - a.active;
     if (b.near !== a.near) return b.near - a.near;
     if (b.mov !== a.mov) return b.mov - a.mov;
+    if (b.vol !== a.vol) return b.vol - a.vol;
     if (b.aged !== a.aged) return b.aged - a.aged;
     if (b.knownAge !== a.knownAge) return b.knownAge - a.knownAge;
     return b.c.marketCapUsd - a.c.marketCapUsd;
@@ -543,7 +576,7 @@ function sortPreferNearLevels(list: MajorsCandidate[]): MajorsCandidate[] {
 }
 
 /**
- * Fill CYCLE seats with ~40% reserved for mid-MC bands (50m/100m), rest by top MC.
+ * Fill CYCLE seats with ~40% reserved for mid-MC bands (20m/50m/100m), rest by top MC.
  * Prefer candidates already near Fib/S when levels are known; still allow level-less park.
  */
 function pickCycleWithMidSeats(
@@ -553,10 +586,14 @@ function pickCycleWithMidSeats(
   if (cap <= 0 || !candidates.length) return [];
   const midReserve = Math.max(1, Math.floor(cap * MID_BAND_SEAT_FRAC));
   const mid = sortPreferNearLevels(
-    candidates.filter((c) => c.band === '50m' || c.band === '100m')
+    candidates.filter(
+      (c) => c.band === '20m' || c.band === '50m' || c.band === '100m'
+    )
   );
   const rest = sortPreferNearLevels(
-    candidates.filter((c) => c.band !== '50m' && c.band !== '100m')
+    candidates.filter(
+      (c) => c.band !== '20m' && c.band !== '50m' && c.band !== '100m'
+    )
   );
   const picked: MajorsCandidate[] = [];
   const used = new Set<string>();
@@ -674,7 +711,7 @@ export async function runMajorsUniversePass(): Promise<number> {
     console.log(
       `[majors] offered ${offered} → dip/steady-watch ` +
         `(medium:${st.mediumCount} majors:${st.majorsCount} ` +
-        `50m:${st.bands['50m']} 100m:${st.bands['100m']} ` +
+        `20m:${st.bands['20m']} 50m:${st.bands['50m']} 100m:${st.bands['100m']} ` +
         `200m:${st.bands['200m']} 250m:${st.bands['250m']} ` +
         `500m:${st.bands['500m']} 1b+:${st.bands['1b+']})`
     );

@@ -325,7 +325,7 @@ export function buildZionAnalystBrief(opts?: {
         );
       } else if (latePct >= 12) {
         explain.push(
-          `Entry-style mix shows some late-chase (~${latePct.toFixed(0)}%) — watch Helping/Hurting style buckets on Bot Performance.`
+          `Entry-style mix shows some late-chase (~${latePct.toFixed(0)}%) — watch Helping/Hurting style buckets on Stats.`
         );
       }
     }

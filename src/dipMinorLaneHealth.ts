@@ -395,10 +395,12 @@ export function getQualityParkLaneHealth(): {
   let steadyWatch = 0;
   let hwrArmed = 0;
   let hwrWatch = 0;
+  let mediumActive = 0;
   try {
     const { getActiveDipWatchesSnapshot } =
       require('./dipSetupWatch') as typeof import('./dipSetupWatch');
     const snap = getActiveDipWatchesSnapshot();
+    mediumActive = (snap.medium || []).length;
     for (const e of snap.allActive || []) {
       const src = String(e.source || '');
       if (src !== 'medium' && src !== 'majors') continue;
@@ -434,6 +436,44 @@ export function getQualityParkLaneHealth(): {
     (Number(dipF?.steady_rotated_stale) || 0) +
     (Number(dipF?.hwr_rotated_stale) || 0);
   const plain: string[] = [];
+  const exclProxy = Number(dipF?.quality_excluded_proxy) || 0;
+  const exclStock = Number(dipF?.quality_excluded_stock) || 0;
+  let univExclProxy = 0;
+  let univExclStock = 0;
+  let univLowMov = 0;
+  let univVol = 0;
+  try {
+    const { getMajorsUniverseStatus } =
+      require('./majorsUniverse') as typeof import('./majorsUniverse');
+    const st = getMajorsUniverseStatus();
+    univExclProxy = Number(st.rejects?.excluded_stable_or_major_asset_proxy) || 0;
+    univExclStock = Number(st.rejects?.excluded_stock_name_token) || 0;
+    univLowMov = Number(st.rejects?.low_movement) || 0;
+    univVol = Number(st.rejects?.vol) || 0;
+  } catch {
+    /* soft */
+  }
+  const exclProxyTotal = exclProxy + univExclProxy;
+  const exclStockTotal = exclStock + univExclStock;
+
+  plain.push(
+    `Steady medium now $20M–$200M, ${mediumActive} active watched`
+  );
+  if (exclProxyTotal > 0) {
+    plain.push(
+      `Excluded ${exclProxyTotal} stable/major-asset proxies from medium watch`
+    );
+  }
+  if (exclStockTotal > 0) {
+    plain.push(`Excluded ${exclStockTotal} stock-name tokens from medium watch`);
+  }
+  if (univLowMov > 0) {
+    plain.push(`Rejected ${univLowMov} low-movement medium/majors`);
+  }
+  if (univVol > 0) {
+    plain.push(`Rejected ${univVol} low-volume medium/majors`);
+  }
+
   if (steadyArmed === 0 && (funnel.steady_compounder.low_movement || 0) > 0) {
     plain.push(
       `Steady majors full of low-movement names — rotated ${funnel.steady_compounder.rotated_stale || rotated} stale`

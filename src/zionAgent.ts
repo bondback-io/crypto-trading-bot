@@ -1151,7 +1151,7 @@ function localAnalystReply(
       ]
         .filter(Boolean)
         .join(' '),
-      followUp: 'Ask what a specific bot has learned, or open Bot Performance.',
+      followUp: 'Ask what a specific bot has learned, or open Stats.',
     });
   }
 

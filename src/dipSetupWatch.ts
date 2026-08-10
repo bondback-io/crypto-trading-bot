@@ -53,7 +53,7 @@ export interface DipWatchEntry {
   lastReason?: string;
   kolCount?: number;
   source?: string;
-  /** Soft MC band when source is medium/majors ($50M / $100M / $200M / $250M / $500M / $1B+) */
+  /** Soft MC band when source is medium/majors ($20M / $50M / $100M / $200M / $250M / $500M / $1B+) */
   majorsBand?: string;
   /** Soft prefer on handoff — dip_buyer default; medium/majors prefer steady_compounder / high_win_rate */
   preferredProfileId?: string;
@@ -164,6 +164,11 @@ const dipFunnel = {
   hwr_opened: 0,
   hwr_rotated_stale: 0,
   quality_low_movement: 0,
+  /** Name/class exclusions rotated from medium/majors */
+  quality_excluded_proxy: 0,
+  quality_excluded_stock: 0,
+  /** Known MC fell outside medium/majors bands */
+  quality_out_of_band_mc: 0,
 };
 
 function noteDipFunnel(key: keyof typeof dipFunnel, n = 1): void {
@@ -370,13 +375,126 @@ function qualityWatchScore(w: DipWatchEntry): number {
     w.marketCapUsd != null && Number.isFinite(w.marketCapUsd)
       ? Math.min(Number(w.marketCapUsd) / 1_000_000, 50)
       : 0;
+  const armedBoost = w.status === 'armed' ? 50_000 : 0;
+  const nearBoost =
+    w.nearKeyFib === true || w.nearSupport === true ? 15_000 : 0;
   const movBoost =
-    w.movementActive === false
-      ? -5000
+    w.movementActive === false || w.qualityChip === 'low_movement'
+      ? -50_000
       : Math.abs(Number(w.priceChangeH1Pct) || 0) * 80 +
         Math.abs(Number(w.priceChange24hPct) || 0) * 40;
-  // Primary: H1 vol + movement; soft age + MC proxy
-  return vol + ageDays * 50 + liqProxy * 20 + movBoost;
+  // Primary: armed/near → H1 vol + movement; soft age + MC proxy; dead tape last
+  return armedBoost + nearBoost + vol + ageDays * 50 + liqProxy * 20 + movBoost;
+}
+
+/**
+ * Rotate medium/majors watches that are name-excluded or outside MC bands.
+ * Returns true when the watch was expired/rotated (caller should stop).
+ */
+function maybeRotateExcludedOrOutOfBandQualityWatch(
+  w: DipWatchEntry,
+  now: number
+): boolean {
+  if (!isQualityBandSource(w.source)) return false;
+  if (w.status !== 'watching' && w.status !== 'armed') return false;
+
+  try {
+    const { classifyQualityParkNameExclusion } =
+      require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
+    const excl = classifyQualityParkNameExclusion(w.symbol, w.name);
+    if (excl) {
+      const pid =
+        w.preferredProfileId === 'high_win_rate'
+          ? 'high_win_rate'
+          : 'steady_compounder';
+      try {
+        const { noteQualityParkFunnel } =
+          require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+        noteQualityParkFunnel(pid, 'rotated_stale');
+      } catch {
+        /* optional */
+      }
+      noteDipFunnel(
+        pid === 'high_win_rate' ? 'hwr_rotated_stale' : 'steady_rotated_stale'
+      );
+      noteDipFunnel(
+        excl === 'excluded_stock_name_token'
+          ? 'quality_excluded_stock'
+          : 'quality_excluded_proxy'
+      );
+      noteQualityBandFunnel(w.source, 'expired');
+      w.status = 'expired';
+      w.updatedAt = now;
+      w.lastReason = excl;
+      w.qualityChip = 'rotated_stale';
+      console.log(
+        `[dip-watch] ROTATE ${w.symbol} [${w.source}] — ${excl}`
+      );
+      try {
+        const { clearOneSetupProfileLock } =
+          require('./expectancyLift') as typeof import('./expectancyLift');
+        clearOneSetupProfileLock(w.mint, 'expired');
+      } catch {
+        /* optional */
+      }
+      return true;
+    }
+  } catch {
+    /* optional */
+  }
+
+  const mc = Number(w.marketCapUsd);
+  if (Number.isFinite(mc) && mc > 0) {
+    try {
+      const {
+        MEDIUM_MIN_MC_USD,
+        universeWatchBand,
+        majorsMcBand,
+      } = require('./majorsUniverse') as typeof import('./majorsUniverse');
+      if (mc < MEDIUM_MIN_MC_USD) {
+        const pid =
+          w.preferredProfileId === 'high_win_rate'
+            ? 'high_win_rate'
+            : 'steady_compounder';
+        try {
+          const { noteQualityParkFunnel } =
+            require('./qualityParkPlaybook') as typeof import('./qualityParkPlaybook');
+          noteQualityParkFunnel(pid, 'rotated_stale');
+        } catch {
+          /* optional */
+        }
+        noteDipFunnel(
+          pid === 'high_win_rate' ? 'hwr_rotated_stale' : 'steady_rotated_stale'
+        );
+        noteDipFunnel('quality_out_of_band_mc');
+        noteQualityBandFunnel(w.source, 'expired');
+        w.status = 'expired';
+        w.updatedAt = now;
+        w.lastReason = `out_of_band_mc MC=$${Math.round(mc)}`;
+        w.qualityChip = 'rotated_stale';
+        console.log(
+          `[dip-watch] ROTATE ${w.symbol} [${w.source}] — MC below medium floor ` +
+            `MC=$${Math.round(mc)}`
+        );
+        try {
+          const { clearOneSetupProfileLock } =
+            require('./expectancyLift') as typeof import('./expectancyLift');
+          clearOneSetupProfileLock(w.mint, 'expired');
+        } catch {
+          /* optional */
+        }
+        return true;
+      }
+      const band = universeWatchBand(mc);
+      if (band) {
+        w.source = band;
+        w.majorsBand = majorsMcBand(mc);
+      }
+    } catch {
+      /* optional */
+    }
+  }
+  return false;
 }
 
 /**
@@ -695,6 +813,15 @@ function maybeArmQualityPark(
   if (w.status !== 'watching') return false;
   if (!isQualityBandSource(w.source)) return false;
   try {
+    const { classifyQualityParkNameExclusion } =
+      require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
+    if (classifyQualityParkNameExclusion(w.symbol, w.name)) {
+      return false;
+    }
+  } catch {
+    /* optional */
+  }
+  try {
     const {
       evaluateQualityParkArm,
       noteQualityParkFunnel,
@@ -966,8 +1093,11 @@ async function refreshWatchMarket(
   const hasLevels = watchHasFibOrSupportLevels(w);
   if (!hasLevels) noteDipFunnel('no_levels');
 
-  // Medium/Majors: dead-tape rotate + no-levels rotate
+  // Medium/Majors: name/class + MC-band rotate, then dead-tape / no-levels
   if (isQualityBandSource(w.source)) {
+    if (maybeRotateExcludedOrOutOfBandQualityWatch(w, now)) {
+      return;
+    }
     try {
       const {
         evaluateQualityMovement,
@@ -1121,6 +1251,27 @@ export function considerDipWatchSetup(input: {
     dropEarly != null && dropEarly >= Math.min(5, minDrop);
   if (isQuality) {
     noteQualityBandFunnel(input.source, 'candidates_seen');
+    try {
+      const { classifyQualityParkNameExclusion } =
+        require('./qualityParkNameExclusions') as typeof import('./qualityParkNameExclusions');
+      const excl = classifyQualityParkNameExclusion(
+        input.symbol,
+        input.name
+      );
+      if (excl) {
+        noteDipFunnel(
+          excl === 'excluded_stock_name_token'
+            ? 'quality_excluded_stock'
+            : 'quality_excluded_proxy'
+        );
+        console.log(
+          `[WATCHLIST-${isMajors ? 'MAJOR' : 'MEDIUM'}] reject ${excl} ${input.symbol}`
+        );
+        return null;
+      }
+    } catch {
+      /* optional */
+    }
   } else {
     noteMinorsFunnel('candidates_seen');
   }

@@ -26,6 +26,7 @@ import {
   type TradeProfileId,
 } from './tradeProfiles';
 import { getZionScannerFeed } from './zionKolScanner';
+import { MEDIUM_MIN_MC_USD } from './majorsUniverse';
 
 const PER_PROFILE_CAP = 6;
 const JUPITER_FETCH_LIMIT = 40;
@@ -251,7 +252,7 @@ export async function runProfileSpecialtyFeedPass(): Promise<number> {
           // Medium/majors parks stay on majorsUniverse Steady pass.
           try {
             const mc = Number(c.marketCapUsd) || 0;
-            const isQualityMc = mc >= 50_000_000;
+            const isQualityMc = mc >= MEDIUM_MIN_MC_USD;
             if (!isQualityMc && (p.id === 'dip_buyer' || !softPrefer)) {
               const { offerDipWatchFromCandidate } =
                 require('./dipSetupWatch') as typeof import('./dipSetupWatch');
