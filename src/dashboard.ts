@@ -6006,6 +6006,11 @@ const _DASHBOARD_HTML_RAW = `<!DOCTYPE html>
       z-index: 50;
     }
     .settings-dropdown.open { display: block; }
+    .settings-dropdown button.hidden,
+    .settings-dropdown button[hidden],
+    .settings-dropdown button[aria-hidden="true"] {
+      display: none !important;
+    }
     .settings-dropdown button,
     .settings-dropdown button[data-settings-tab] {
       display: flex;
